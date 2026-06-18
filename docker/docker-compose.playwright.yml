@@ -1,0 +1,59 @@
+# ═══════════════════════════════════════════════════════════════════
+# Playwright 独立服务 + CoApis 源码构建
+# 用法: cd docker && docker compose -f docker-compose.playwright.yml up -d --build
+# 浏览器用已缓存的 chromedp/headless-shell，通过 socat 暴露 CDP
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+  # ── 浏览器服务（headless-shell 内部 9223 → socat → 9222）──
+  playwright:
+    image: chromedp/headless-shell:latest
+    container_name: coapis-playwright
+    expose:
+      - "9222"
+    ports:
+      - "9222:9222"
+    shm_size: "2g"
+    # headless-shell 自带 socat 把 9223 转发到 9222，无需额外 command
+    # 健康检查：通过 socat 转发端口检测（9222→9223→Chrome CDP）
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/9223' 2>/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── CoApis 应用（通过 CDP 连接浏览器服务）──
+  server:
+    build:
+      context: ..
+      dockerfile: server/deploy/Dockerfile
+    image: coapis-server:latest
+    container_name: coapis-server
+    ports:
+      - "${COAPIS_SERVER_PORT:-4200}:8000"
+    volumes:
+      - coapis-data:/data
+    env_file:
+      - .env
+    environment:
+      - COAPIS_WORKING_DIR=/data
+      - COAPIS_WORKSPACES_DIR=${COAPIS_WORKSPACES_DIR:-${COAPIS_WORKING_DIR}/workspaces}
+      - COAPIS_AUTH_ENABLED=true
+      - COAPIS_USER_SYSTEM_ENABLED=true
+      - BROWSER_CDP_URL=http://playwright:9222
+    depends_on:
+      playwright:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  coapis-data:
+    driver: local

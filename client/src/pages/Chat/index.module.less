@@ -1,0 +1,342 @@
+/* Disabled input overlay */
+.chatDisabledOverlay {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+.chatDisabledOverlay :global([class*="chat-anywhere-input"]),
+.chatDisabledOverlay :global([class*="chat-input"]),
+.chatDisabledOverlay :global(textarea),
+.chatDisabledOverlay :global(input[type="text"]) {
+  pointer-events: none !important;
+  opacity: 0.5 !important;
+  background-color: #f5f5f5 !important;
+  cursor: not-allowed !important;
+}
+
+.chatDisabledOverlay :global(button[class*="send"]),
+.chatDisabledOverlay :global(button[class*="submit"]) {
+  pointer-events: none !important;
+  opacity: 0.3 !important;
+  cursor: not-allowed !important;
+}
+
+/* Chat messages scrollable area */
+.chatMessagesArea {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  :global {
+    [class*="chat-anywhere-default-header-right"] {
+      flex: 1;
+      display: flex;
+      align-items: center;
+    }
+  }
+
+  /* Custom scrollbar */
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.3);
+    }
+  }
+
+  /* Dark mode scrollbar */
+  :global(.dark-mode) & {
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+    }
+  }
+
+  /* Firefox scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+
+  :global(.dark-mode) & {
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  }
+}
+
+.suggestionLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+  line-height: 1.4;
+}
+
+.suggestionCommand {
+  flex: 0 0 88px;
+  color: #ff7f16;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.suggestionDescription {
+  flex: 1;
+  min-width: 0;
+  color: rgba(0, 0, 0, 0.45);
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:global(.dark-mode) {
+  .suggestionCommand {
+    color: #ff7f16;
+  }
+
+  .suggestionDescription {
+    color: rgba(255, 255, 255, 0.65);
+  }
+}
+
+/* Prompt star icon - use theme color */
+:global {
+  .chat-anywhere-prompt-icon,
+  [class*="prompt-icon"],
+  [class*="PromptIcon"] {
+    color: #ff7f16 !important;
+  }
+}
+
+/* Dark mode scrollbar for disabled overlay */
+:global(.dark-mode) {
+  .chatDisabledOverlay :global([class*="chat-anywhere-input"]),
+  .chatDisabledOverlay :global([class*="chat-input"]),
+  .chatDisabledOverlay :global(textarea),
+  .chatDisabledOverlay :global(input[type="text"]) {
+    background-color: #2a2a2a !important;
+  }
+}
+
+/* =========================================================================
+   Chat Display Settings — 聊天显示设置面板样式
+   ========================================================================= */
+
+.chatSettingsModal {
+  /* Hide tool call cards completely in simple mode */
+  :global {
+    [class*="operate-card-tool-call"],
+    [class*="ToolCall"] {
+      display: none !important;
+    }
+
+    /* Thinking content: hidden in simple mode only */
+
+    [class*="bubble-footer"],
+    [class*="Footer"],
+    [class*="FooterCount"],
+    [class*="FooterActions"] {
+      display: none !important;
+    }
+  }
+}
+
+.chatSettingsContent {
+  .settingsSection {
+    margin-bottom: 8px;
+
+    .settingsSectionTitle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      font-size: 14px;
+      color: rgba(0, 0, 0, 0.85);
+      margin-bottom: 12px;
+
+      :global(.dark-mode) & {
+        color: rgba(255, 255, 255, 0.85);
+      }
+    }
+  }
+
+  .settingsRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.025);
+
+      :global(.dark-mode) & {
+        background-color: rgba(255, 255, 255, 0.05);
+      }
+    }
+
+    .settingsRowLeft {
+      display: flex;
+      align-items: center;
+      font-size: 14px;
+      color: rgba(0, 0, 0, 0.65);
+
+      :global(.dark-mode) & {
+        color: rgba(255, 255, 255, 0.65);
+      }
+    }
+  }
+
+  .settingsDescription {
+    margin-top: 8px;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.45);
+    line-height: 1.5;
+
+    :global(.dark-mode) & {
+      color: rgba(255, 255, 255, 0.45);
+    }
+  }
+}
+
+/* Simplified response card styles */
+.simplifiedResponse {
+  /* Ensure clean rendering without extra spacing */
+  :global {
+    [class*="operate-card-tool-call"],
+    [class*="ToolCall"] {
+      display: none !important;
+    }
+
+    [class*="operate-card-thinking"],
+    [class*="DeepThinking"],
+    [class*="DeepThink"] {
+      display: none !important;
+    }
+  }
+}
+
+.simplifiedResponseEmpty {
+  padding: 8px 0;
+  text-align: center;
+}
+
+.detailedResponse {
+  /* Full rendering in detailed mode */
+}
+
+/* =========================================================================
+   Thinking / Reasoning Content — 思考内容样式
+   ========================================================================= */
+
+/* 
+ * Common practice (ChatGPT, Claude, etc.):
+ * - Collapsible section with header icon + title
+ * - Content in smaller font, muted gray color
+ * - Auto-collapse when thinking is done
+ * - Border-left accent line
+ */
+
+/* Global thinking card overrides for all modes */
+:global {
+  /* OperateCard Thinking preset */
+  [class*="operate-card-thinking"] {
+    font-size: 12px !important;
+    line-height: 1.6 !important;
+    color: rgba(0, 0, 0, 0.55) !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    padding: 4px 0 4px 12px !important;
+    border-left: 2px solid rgba(0, 0, 0, 0.12) !important;
+    margin: 0 !important;
+
+    :global(.dark-mode) & {
+      color: rgba(255, 255, 255, 0.5) !important;
+      border-left-color: rgba(255, 255, 255, 0.15) !important;
+    }
+  }
+
+  /* Accordion DeepThinking component */
+  [class*="Accordion-DeepThinking"],
+  [class*="accordion-deep-thinking"] {
+    font-size: 12px !important;
+    line-height: 20px !important;
+    color: rgba(0, 0, 0, 0.5) !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+
+    :global(.dark-mode) & {
+      color: rgba(255, 255, 255, 0.45) !important;
+    }
+  }
+
+  /* OperateCard header for thinking — smaller, muted */
+  [class*="operate-card"][class*="header"] {
+    font-size: 12px !important;
+  }
+
+  /* Accordion header styling */
+  [class*="accordion-group-header"] {
+    font-size: 12px !important;
+    color: rgba(0, 0, 0, 0.45) !important;
+
+    :global(.dark-mode) & {
+      color: rgba(255, 255, 255, 0.4) !important;
+    }
+  }
+
+  /* Accordion open state body */
+  [class*="accordion-group-body"] {
+    font-size: 12px !important;
+  }
+
+  /* Thinking loading animation */
+  [class*="operate-card-thinking"] + [class*="loading"],
+  [class*="Accordion-DeepThinking"][class*="generating"] {
+    opacity: 0.8;
+  }
+}
+
+/* Red stop button during streaming */
+:global {
+  .ant-sender-actions-btn-loading-button {
+    color: #ff4d4f !important;
+  }
+}
+
+/* Settings button in header */
+.chatSettingsButton {
+  padding: 4px 8px;
+  font-size: 16px;
+  color: rgba(0, 0, 0, 0.45);
+  transition: color 0.2s;
+  display: flex;
+  align-items: center;
+
+  &:hover {
+    color: rgba(0, 0, 0, 0.85);
+  }
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.45);
+
+    &:hover {
+      color: rgba(255, 255, 255, 0.85);
+    }
+  }
+}

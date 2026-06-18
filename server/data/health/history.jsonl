@@ -1,0 +1,2 @@
+{"ts": 1781194010.2494035, "ts_human": "2026-06-12 00:06:50", "results": [{"type": "http", "url": "https://httpbin.org/status/200", "status_code": 200, "healthy": true, "expected_status": 200, "latency_ms": 3516.0}], "all_healthy": true}
+{"ts": 1781194010.253118, "ts_human": "2026-06-12 00:06:50", "results": [{"type": "tcp", "host": "127.0.0.1", "port": 22, "healthy": true, "latency_ms": 3.2}], "all_healthy": true}

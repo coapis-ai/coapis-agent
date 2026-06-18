@@ -1,0 +1,12 @@
+{
+  "keys": {
+    "proj_status": {
+      "value": "{\"phase\":17,\"progress\":\"testing\"}",
+      "owner": "agent",
+      "version": 1,
+      "updated_at": "2026-06-12 00:02:18",
+      "expires_at": null
+    }
+  },
+  "locks": {}
+}

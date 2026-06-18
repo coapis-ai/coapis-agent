@@ -1,0 +1,89 @@
+# ============================================================
+# EaterClaw .gitignore
+# ============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Node.js / Frontend ---
+node_modules/
+*.local
+.DS_Store
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Environment / Secrets ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# --- Docker ---
+docker/.env
+*.log
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Backup / Temp ---
+*.bak
+*.tmp
+~$*
+
+# --- Local config (use *.example as template) ---
+docker/config/config.json
+docker/config/providers.json
+
+# --- Tokenizer files (large, fetched by pip) ---
+server/eaterclaw/tokenizer/merges.txt
+server/eaterclaw/tokenizer/tokenizer.json
+server/eaterclaw/tokenizer/vocab.json
+
+# --- Runtime data (bind mounted from host) ---
+workspaces/
+memory/
+MEMORY.md
+PROFILE.md
+SOUL.md
+AGENTS.md
+
+# --- Reports (generated / internal) ---
+docs/*.docx
+docs/*.js
+docs/package*.json
+
+# --- PageIndex local copy ---
+PageIndex/
+
+# --- Scripts (local dev only) ---
+scripts/
+
+# --- Client build artifacts ---
+client/node_modules/.tmp
+client/dist/
+
+# --- Enterprise build ---
+enterprise/eaterclaw_enterprise.egg-info/
+
+# --- Playwright browser binaries (too large for git) ---
+docker/volume/
+server/deploy/chromium-cache/

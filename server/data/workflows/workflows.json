@@ -1,0 +1,109 @@
+{
+  "workflows": {
+    "test_wf": {
+      "steps": [
+        {
+          "id": "s1",
+          "type": "shell",
+          "command": "echo step1",
+          "depends_on": []
+        },
+        {
+          "id": "s2",
+          "type": "shell",
+          "command": "echo step2",
+          "depends_on": [
+            "s1"
+          ]
+        }
+      ],
+      "created_at": "2026-06-12 00:13:23"
+    }
+  },
+  "runs": {
+    "c3ad95f8-3f0": {
+      "workflow": "test_wf",
+      "run_id": "c3ad95f8-3f0",
+      "status": "cancelled",
+      "steps": [
+        {
+          "id": "s1",
+          "type": "shell",
+          "command": "echo step1",
+          "depends_on": []
+        },
+        {
+          "id": "s2",
+          "type": "shell",
+          "command": "echo step2",
+          "depends_on": [
+            "s1"
+          ]
+        }
+      ],
+      "results": [
+        {
+          "step_id": "s1",
+          "name": "",
+          "status": "ok",
+          "stdout": "step1\n",
+          "stderr": "",
+          "returncode": 0,
+          "duration_ms": 1.9
+        },
+        {
+          "step_id": "s2",
+          "name": "",
+          "status": "ok",
+          "stdout": "step2\n",
+          "stderr": "",
+          "returncode": 0,
+          "duration_ms": 1.6
+        }
+      ],
+      "start_time": 1781194403.5334904,
+      "total_ms": 1435.8
+    },
+    "1ca7d56e-a00": {
+      "workflow": "inline_wf",
+      "run_id": "1ca7d56e-a00",
+      "status": "completed",
+      "steps": [
+        {
+          "id": "a1",
+          "type": "shell",
+          "command": "echo parallel1",
+          "depends_on": []
+        },
+        {
+          "id": "a2",
+          "type": "shell",
+          "command": "echo parallel2",
+          "depends_on": []
+        }
+      ],
+      "results": [
+        {
+          "step_id": "a1",
+          "name": "",
+          "status": "ok",
+          "stdout": "parallel1\n",
+          "stderr": "",
+          "returncode": 0,
+          "duration_ms": 1.8
+        },
+        {
+          "step_id": "a2",
+          "name": "",
+          "status": "ok",
+          "stdout": "parallel2\n",
+          "stderr": "",
+          "returncode": 0,
+          "duration_ms": 1.6
+        }
+      ],
+      "start_time": 1781194404.9699957,
+      "total_ms": 3.8
+    }
+  }
+}

@@ -1,0 +1,2 @@
+{"trace_id": "86ec882b-d63a-42", "span_id": "6d1d86a0", "parent": null, "name": "test_trace", "start": 1781194006.7326255, "end": 1781194006.732934, "duration_ms": 120.5, "status": "ok", "tags": {}}
+{"trace_id": "86ec882b-d63a-42", "span_id": "735e20b2", "parent": "6d1d86a0", "name": "db_query", "start": 1781194006.7327619, "end": 1781194006.7779624, "duration_ms": 45.2, "status": "ok", "tags": {}}

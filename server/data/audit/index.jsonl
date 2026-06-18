@@ -1,0 +1,4 @@
+{"ts": 1781193176, "actor": "agent", "action": "file_write", "resource": "test.py", "result": "success", "hash": "4694664d641fb20d190a0de325a5d70b76a038cebace28da810d27032784c734"}
+{"ts": 1781193176, "actor": "agent", "action": "tool_call", "resource": "secret_scan", "result": "success", "hash": "c5775559a5cfbffa8dfceafb53bf2394f91188af9bfdaf51ca0c579c12a2146a"}
+{"ts": 1781193176, "actor": "admin", "action": "deploy", "resource": "prod", "result": "denied", "hash": "5729d7e1d894bff27605fc49afb4477af7098bb4ba15ed151ea74b767bf44790"}
+{"ts": 1781193738, "actor": "notify", "action": "send", "resource": "console", "result": "success", "hash": "ac594976999e688baa70a925cd661ee6a880e1c72b871082ba3601b2428f680a"}

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 80" width="280" height="80">
+  <defs>
+    <!-- 蜜蜂主体渐变 -->
+    <linearGradient id="beeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#F59E0B;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#D97706;stop-opacity:1" />
+    </linearGradient>
+    <!-- 翅膀渐变 -->
+    <linearGradient id="wingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#93C5FD;stop-opacity:0.7" />
+      <stop offset="100%" style="stop-color:#60A5FA;stop-opacity:0.5" />
+    </linearGradient>
+  </defs>
+  
+  <!-- === 蜜蜂图标 (16px 时约 50x50 的安全区) === -->
+  <!-- 左翅膀 -->
+  <ellipse cx="28" cy="22" rx="14" ry="18" fill="url(#wingGrad)" transform="rotate(-25 28 22)"/>
+  <!-- 右翅膀 -->
+  <ellipse cx="52" cy="22" rx="14" ry="18" fill="url(#wingGrad)" transform="rotate(25 52 22)"/>
+  <!-- 身体 -->
+  <ellipse cx="40" cy="42" rx="12" ry="14" fill="url(#beeGrad)"/>
+  <!-- 条纹 -->
+  <rect x="28" y="36" width="24" height="3" rx="1.5" fill="#1F2937" opacity="0.6"/>
+  <rect x="28" y="44" width="24" height="3" rx="1.5" fill="#1F2937" opacity="0.6"/>
+  <!-- 头部 -->
+  <circle cx="40" cy="26" r="6" fill="#1F2937"/>
+  <!-- 触角 -->
+  <line x1="36" y1="20" x2="32" y2="12" stroke="#1F2937" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="44" y1="20" x2="48" y2="12" stroke="#1F2937" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="32" cy="11" r="2" fill="#F59E0B"/>
+  <circle cx="48" cy="11" r="2" fill="#F59E0B"/>
+  
+  <!-- === 文字 === -->
+  <text x="90" y="50" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="36" font-weight="700" fill="#1F2937" letter-spacing="-0.5">CoApis</text>
+  
+  <!-- 右侧点缀：三个小圆点，像飞舞的小蜜蜂 -->
+  <circle cx="232" cy="20" r="2.5" fill="#F59E0B"/>
+  <circle cx="244" cy="15" r="2" fill="#D97706" opacity="0.7"/>
+  <circle cx="253" cy="22" r="1.5" fill="#F59E0B" opacity="0.5"/>
+</svg>

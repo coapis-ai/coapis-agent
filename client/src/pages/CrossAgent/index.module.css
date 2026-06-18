@@ -1,0 +1,13 @@
+:global(.pageContainer) {
+  padding: 24px;
+  min-height: 100%;
+}
+
+.headerBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}

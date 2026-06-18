@@ -1,0 +1,91 @@
+.evolutionContainer {
+  padding: 24px;
+  background: #f0f2f5;
+  min-height: 100%;
+}
+
+.evolutionTitle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  font-size: 28px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.statCard {
+  text-align: center;
+  padding: 16px;
+}
+
+.statCard :global(.ant-statistic-title) {
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #666;
+}
+
+.statCard :global(.ant-statistic-content) {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.statusBadge {
+  margin-top: 8px;
+}
+
+.experienceTable {
+  margin-top: 16px;
+}
+
+.tableFilter {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.experienceContent {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flowTable {
+  margin-top: 16px;
+}
+
+.flowContent {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewTable {
+  margin-top: 16px;
+}
+
+.reviewActions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.statusOverview {
+  margin-bottom: 24px;
+}
+
+.knowledgeFlowCard {
+  margin-bottom: 16px;
+}
+
+.reviewCard {
+  margin-bottom: 16px;
+}
+
+.scheduleCard {
+  margin-top: 16px;
+}

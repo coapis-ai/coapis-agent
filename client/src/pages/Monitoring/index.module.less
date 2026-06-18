@@ -1,0 +1,49 @@
+.container {
+  padding: 24px;
+  min-height: 100%;
+}
+
+.metricCard {
+  :global(.ant-card-body) {
+    padding: 20px;
+  }
+}
+
+.metricIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  font-size: 24px;
+}
+
+.metricTitle {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 8px;
+}
+
+.metricValue {
+  :global(.ant-statistic-content) {
+    font-size: 24px;
+    font-weight: 600;
+  }
+}
+
+.metricProgress {
+  margin-top: 12px;
+  :global(.ant-progress-bg) {
+    border-radius: 4px;
+  }
+}
+
+.apiCard,
+.healthCard {
+  :global(.ant-card-head) {
+    border-bottom: 1px solid #f0f0f0;
+  }
+}

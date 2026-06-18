@@ -1,0 +1,17 @@
+{
+  "tasks": {
+    "T-0001": {
+      "title": "实现 Phase 18 db_ops",
+      "description": "SQLite CRUD",
+      "assignee": "ops-agent",
+      "priority": "normal",
+      "deadline": "",
+      "depends_on": [],
+      "status": "running",
+      "result": "",
+      "created_at": "2026-06-12 00:02:18",
+      "updated_at": "2026-06-12 00:02:18"
+    }
+  },
+  "counter": 1
+}

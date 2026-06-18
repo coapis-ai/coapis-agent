@@ -1,0 +1,459 @@
+/* ─── Tools Page ─────────────────────────────────────────────────────────── */
+.toolsPage {
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.toolsContainer {
+  padding: 0 4px 24px;
+}
+
+.toolsTabs {
+  margin-bottom: 0;
+
+  :global(.ant-tabs-nav) {
+    margin: 0 0 8px;
+  }
+}
+
+/* ─── Toolbar ─────────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 0 24px;
+  flex-wrap: wrap;
+}
+
+.searchBox {
+  flex: 1;
+  min-width: 200px;
+  max-width: 360px;
+}
+
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.headerAction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ─── Tag Filter Bar ──────────────────────────────────────────────────────── */
+.tagBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.tagBarSearch {
+  margin-left: auto;
+  width: 220px;
+  flex-shrink: 0;
+}
+
+.tagBarIcon {
+  color: #1890ff;
+  font-size: 14px;
+}
+
+.tagBarLabel {
+  font-size: 13px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.tagItem {
+  cursor: pointer;
+  transition: all 0.2s;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  border: 1px solid #d9d9d9;
+  background: #fafafa;
+  color: #555;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  &:hover {
+    border-color: #1890ff;
+    color: #1890ff;
+  }
+}
+
+.tagItemSelected {
+  background: #e6f7ff;
+  border-color: #1890ff;
+  color: #1890ff;
+  font-weight: 600;
+}
+
+.tagCount {
+  font-size: 11px;
+  color: #999;
+  margin-left: 2px;
+}
+
+.tagClearBtn {
+  font-size: 12px;
+  color: #999;
+  cursor: pointer;
+  margin-left: 4px;
+  transition: color 0.2s;
+
+  &:hover {
+    color: #ff4d4f;
+  }
+}
+
+/* ─── Stats Row ───────────────────────────────────────────────────────────── */
+.statsRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #888;
+}
+
+.statItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.statDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.statDotEnabled {
+  background: #52c41a;
+}
+
+.statDotDisabled {
+  background: #d9d9d9;
+}
+
+.statDotAll {
+  background: #1890ff;
+}
+
+/* ─── Card Grid ───────────────────────────────────────────────────────────── */
+.cardGrid {
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  align-content: start;
+  gap: 16px;
+  padding: 0 4px 24px;
+}
+
+/* ─── Tool Card ───────────────────────────────────────────────────────────── */
+.toolCard {
+  border-radius: 12px;
+  transition: all 0.25s ease;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  padding: 18px 20px 14px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+
+  &:hover {
+    border-color: #1890ff;
+    box-shadow: 0 4px 16px rgba(24, 144, 255, 0.12);
+    transform: translateY(-2px);
+  }
+
+  :global(.dark-mode) & {
+    background: #1a1a1a;
+    border-color: #333;
+    &:hover {
+      border-color: #1890ff;
+      box-shadow: 0 4px 16px rgba(24, 144, 255, 0.2);
+    }
+  }
+}
+
+.toolCardDisabled {
+  opacity: 0.55;
+
+  &:hover {
+    opacity: 0.75;
+    transform: none;
+  }
+}
+
+.disabledOverlay {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 8px,
+    rgba(0, 0, 0, 0.015) 8px,
+    rgba(0, 0, 0, 0.015) 16px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.toolCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.toolCardIcon {
+  flex-shrink: 0;
+}
+
+.toolEmoji {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.toolIconFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  color: white;
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.toolCardTitleBlock {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toolCardName {
+  font-weight: 600;
+  font-size: 14px;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  :global(.dark-mode) & {
+    color: #e0e0e0;
+  }
+}
+
+.toolCardCategory {
+  font-size: 11px !important;
+  line-height: 1 !important;
+  width: fit-content;
+}
+
+.toolCardToggle {
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+.toolCardDesc {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+  margin: 0 0 10px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1;
+
+  :global(.dark-mode) & {
+    color: #aaa;
+  }
+}
+
+.toolCardTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.toolCardTag {
+  font-size: 11px !important;
+  border-radius: 3px;
+  padding: 1px 6px;
+  background: #f5f5f5;
+  color: #888;
+  border: 1px solid #eee;
+
+  :global(.dark-mode) & {
+    background: #2a2a2a;
+    color: #aaa;
+    border-color: #444;
+  }
+}
+
+.toolCardTagMore {
+  font-size: 11px;
+  color: #999;
+  padding: 1px 4px;
+}
+
+.toolCardFooter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+
+  :global(.dark-mode) & {
+    border-top-color: #333;
+  }
+}
+
+.toolCardBuiltinBadge {
+  margin-left: auto !important;
+  font-size: 11px !important;
+}
+
+/* ─── Loading / Empty ─────────────────────────────────────────────────────── */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 0;
+  color: #999;
+  font-size: 14px;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 0;
+  color: #bbb;
+}
+
+.emptyIcon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.4;
+}
+
+.emptyText {
+  font-size: 14px;
+  color: #999;
+}
+
+/* ─── Audit Log ───────────────────────────────────────────────────────────── */
+.auditContainer {
+  padding: 16px 24px 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.auditList {
+  display: flex;
+  flex-direction: column;
+}
+
+.auditEntry {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f5f5f5;
+  font-size: 13px;
+  transition: background 0.15s;
+
+  &:hover {
+    background: #fafafa;
+  }
+
+  :global(.dark-mode) & {
+    border-bottom-color: #333;
+    &:hover {
+      background: #1a1a1a;
+    }
+  }
+}
+
+.auditEntryHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auditToolName {
+  font-weight: 600;
+  color: #333;
+  min-width: 120px;
+
+  :global(.dark-mode) & {
+    color: #e0e0e0;
+  }
+}
+
+.auditDetail {
+  margin-top: 4px;
+  padding-left: 4px;
+  color: #888;
+  font-size: 12px;
+}
+
+.auditTime {
+  color: #bbb;
+  font-size: 12px;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+/* ─── Detail Drawer ───────────────────────────────────────────────────────── */
+.detailSection {
+  margin-bottom: 20px;
+}
+
+.detailLabel {
+  font-size: 12px;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.detailValue {
+  font-size: 14px;
+  color: #333;
+  line-height: 1.6;
+
+  :global(.dark-mode) & {
+    color: #e0e0e0;
+  }
+}
+
+.detailTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

@@ -1,0 +1,53 @@
+.sessionHeader {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  min-height: 48px;
+  background: #fff;
+
+  :global(.dark-mode) & {
+    border-bottom-color: #303030;
+    background: #1a1a1a;
+  }
+}
+
+.headerLeft {
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+}
+
+.sessionTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a1a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  :global(.dark-mode) & {
+    color: #e0e0e0;
+  }
+}
+
+.loadingDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff7f16;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.headerRight {
+  flex-shrink: 0;
+  gap: 4px;
+  align-items: center;
+}

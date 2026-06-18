@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "updated_at": "2026-06-13T01:24:44.163618+00:00",
+  "skills_count": 1,
+  "skills": {
+    "himalaya": {
+      "skill_name": "himalaya",
+      "keywords": {
+        "邮件": {
+          "keyword": "邮件",
+          "hits": 11,
+          "successes": 11,
+          "satisfied": 11,
+          "total": 11,
+          "weight": 1.1,
+          "hit_rate": 1.0,
+          "success_rate": 1.0,
+          "satisfaction_rate": 1.0,
+          "last_hit_at": "2026-06-13T01:24:44.163373+00:00",
+          "created_at": "2026-06-13T01:24:07.822771+00:00"
+        },
+        "email": {
+          "keyword": "email",
+          "hits": 11,
+          "successes": 11,
+          "satisfied": 11,
+          "total": 11,
+          "weight": 1.1,
+          "hit_rate": 1.0,
+          "success_rate": 1.0,
+          "satisfaction_rate": 1.0,
+          "last_hit_at": "2026-06-13T01:24:44.163373+00:00",
+          "created_at": "2026-06-13T01:24:07.822771+00:00"
+        },
+        "发信": {
+          "keyword": "发信",
+          "hits": 5,
+          "successes": 0,
+          "satisfied": 0,
+          "total": 5,
+          "weight": 0.85,
+          "hit_rate": 1.0,
+          "success_rate": 0.0,
+          "satisfaction_rate": 0.0,
+          "last_hit_at": "2026-06-13T01:24:07.822876+00:00",
+          "created_at": "2026-06-13T01:24:07.822856+00:00"
+        },
+        "信件": {
+          "keyword": "信件",
+          "hits": 5,
+          "successes": 0,
+          "satisfied": 0,
+          "total": 5,
+          "weight": 0.85,
+          "hit_rate": 1.0,
+          "success_rate": 0.0,
+          "satisfaction_rate": 0.0,
+          "last_hit_at": "2026-06-13T01:24:07.822876+00:00",
+          "created_at": "2026-06-13T01:24:07.822856+00:00"
+        }
+      }
+    }
+  }
+}

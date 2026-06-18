@@ -1,0 +1,36 @@
+# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+# Copyright 2026 以太吃虾 & CoApis Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""
+Agent tools schema: type definitions for agent tool responses.
+"""
+from typing import Literal, Optional
+from typing_extensions import TypedDict, Required
+
+from agentscope.message import Base64Source, URLSource
+
+
+class FileBlock(TypedDict, total=False):
+    """File block for sending files to users."""
+
+    type: Required[Literal["file"]]
+    """The type of the block"""
+
+    source: Required[Base64Source | URLSource]
+    """The source of the file"""
+
+    filename: Optional[str]
+    """The filename of the file"""

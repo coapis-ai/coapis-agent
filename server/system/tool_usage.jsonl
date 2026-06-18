@@ -1,0 +1,2 @@
+{"ts": "2026-06-08T17:50:19.258032+00:00", "event": "tool_call", "tool": "test_tool", "params_hash": "42b7b4f29217", "duration_ms": 42.5, "success": true, "user": "admin", "agent": "default", "output_len": 0}
+{"ts": "2026-06-08T17:50:19.258356+00:00", "event": "skill_trigger", "skill": "browser_use", "keywords": ["浏览器", "browser"], "user": "admin", "agent": "default"}

@@ -1,0 +1,1579 @@
+import {
+  AgentScopeRuntimeWebUI,
+  IAgentScopeRuntimeWebUIOptions,
+  type IAgentScopeRuntimeWebUIRef,
+} from "@agentscope-ai/chat";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button, Modal, Result, Tooltip } from "antd";
+import { useAppMessage } from "../../hooks/useAppMessage";
+import {
+  ExclamationCircleOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
+import { SparkCopyLine, SparkAttachmentLine } from "@agentscope-ai/icons";
+import { usePlugins } from "../../plugins/PluginContext";
+import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router-dom";
+import sessionApi, { convertMessages } from "./sessionApi";
+import defaultConfig, { getDefaultConfig } from "./OptionsPanel/defaultConfig";
+import { chatApi } from "../../api/modules/chat";
+import { getApiUrl } from "../../api/config";
+import { buildAuthHeaders } from "../../api/authHeaders";
+import { providerApi } from "../../api/modules/provider";
+import type { ProviderInfo, ModelInfo } from "../../api/types";
+import { useTheme } from "../../contexts/ThemeContext";
+import { useUser } from "../../contexts/UserContext";
+import { useAgentStore } from "../../stores/agentStore";
+import { useChatAnywhereInput, useChatAnywhereSessionsState } from "@agentscope-ai/chat";
+import styles from "./index.module.less";
+import { IconButton } from "@agentscope-ai/design";
+import ChatSessionInitializer from "./components/ChatSessionInitializer";
+import ChatSessionHeader from "./components/ChatSessionHeader";
+import { ApprovalCard } from "../../components/ApprovalCard/ApprovalCard";
+import { commandsApi } from "../../api/modules/commands";
+import { useApprovalContext } from "../../contexts/ApprovalContext";
+import { planApi } from "../../api/modules/plan";
+import {
+  ChatDisplayConfigContext,
+} from "./components/SimplifiedResponseCard";
+import ChatDisplaySettings from "./components/ChatDisplaySettings";
+import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
+import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
+
+interface ApprovalMessageData {
+  requestId: string;
+  sessionId: string;
+  rootSessionId?: string;
+  agentId: string;
+  toolName: string;
+  severity: string;
+  findingsCount: number;
+  findingsSummary: string;
+  toolParams: Record<string, unknown>;
+  createdAt: number;
+  timeoutSeconds: number;
+}
+
+import {
+  toDisplayUrl,
+  copyText,
+  extractCopyableText,
+  buildModelError,
+  normalizeContentUrls,
+  extractUserMessageText,
+  extractTextFromMessage,
+  setTextareaValue,
+  type CopyableResponse,
+  type RuntimeLoadingBridgeApi,
+} from "./utils";
+
+const CHAT_ATTACHMENT_MAX_MB = 10;
+
+interface SessionInfo {
+  session_id?: string;
+  user_id?: string;
+  channel?: string;
+}
+
+interface CustomWindow extends Window {
+  currentSessionId?: string;
+  currentUserId?: string;
+  currentChannel?: string;
+}
+
+declare const window: CustomWindow;
+
+interface CommandSuggestion {
+  command: string;
+  value: string;
+  description: string;
+}
+
+// ---------------------------------------------------------------------------
+// Enhanced tool render config — 注册 EnhancedToolCallCard 到所有已知工具
+// ---------------------------------------------------------------------------
+const _ENHANCED_TOOL_NAMES = [
+  'execute_shell_command',
+  'read_file', 'write_file', 'edit_file',
+  'grep_search', 'glob_search',
+  'web_search', 'browser_use',
+  'memory_search',
+  'send_file_to_user',
+  'get_current_time', 'set_user_timezone',
+  'chat_with_agent', 'submit_to_agent', 'check_agent_task', 'spawn_subagent',
+  'create_plan', 'revise_current_plan', 'finish_plan', 'view_historical_plans', 'recover_historical_plan',
+  'get_token_usage',
+  'view_image', 'view_video', 'desktop_screenshot',
+  'list_agents',
+];
+const _enhancedToolRenderConfig: Record<string, React.FC<any>> = {};
+for (const name of _ENHANCED_TOOL_NAMES) {
+  _enhancedToolRenderConfig[name] = EnhancedToolCallCard;
+}
+
+function messageRequestsHistoryClear(message: unknown): boolean {
+  if (!message || typeof message !== "object") return false;
+  const metadata = (message as Record<string, unknown>).metadata;
+  if (!metadata || typeof metadata !== "object") return false;
+
+  const meta = metadata as Record<string, unknown>;
+  if (meta.clear_history === true) return true;
+
+  const nested = meta.metadata;
+  return (
+    !!nested &&
+    typeof nested === "object" &&
+    (nested as Record<string, unknown>).clear_history === true
+  );
+}
+
+function payloadRequestsHistoryClear(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+
+  const record = payload as Record<string, unknown>;
+  const candidates: unknown[] = [];
+
+  if (record.object === "message") {
+    candidates.push(record);
+  }
+
+  if (record.object === "response" && Array.isArray(record.output)) {
+    candidates.push(...record.output);
+  }
+
+  return candidates.some(messageRequestsHistoryClear);
+}
+
+function payloadCompletesResponse(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+
+  const record = payload as Record<string, unknown>;
+  if (record.object !== "response") return false;
+  
+  // Recognize ALL terminal statuses, not just "completed".
+  // The backend may send "failed" for normal completions in some configurations.
+  const status = record.status as string;
+  return status === "completed" || status === "failed" || status === "canceled";
+}
+
+// ---------------------------------------------------------------------------
+// Response output accumulator — prevents Builder clobbering on completion
+// ---------------------------------------------------------------------------
+// When the SSE stream ends, the Builder's handleResponse() does:
+//   data.output = [];  (because completion event has no output)
+//   Object.assign(draft, data);  → wipes all accumulated content
+// We track the accumulated output here and inject it into the completion event.
+const _responseOutputAccumulator: {
+  messages: Map<string, any>;
+  reset: () => void;
+  getOutput: () => any[];
+} = {
+  messages: new Map(),
+  reset() {
+    this.messages.clear();
+  },
+  getOutput() {
+    return Array.from(this.messages.values()).map((m) => ({
+      ...m,
+      content: (m.content || []).map((c: any) => ({ ...c, delta: false })),
+    }));
+  },
+};
+
+function renderSuggestionLabel(command: string, description: string) {
+  return (
+    <div className={styles.suggestionLabel}>
+      <span className={styles.suggestionCommand}>{command}</span>
+      <span className={styles.suggestionDescription}>{description}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const DEFAULT_USER_ID = "default";
+const DEFAULT_CHANNEL = "console";
+
+// ---------------------------------------------------------------------------
+// Active model cache (avoid redundant getActiveModels calls per chat request)
+// ---------------------------------------------------------------------------
+const _activeModelCache: {
+  key: string;
+  data: Awaited<ReturnType<typeof providerApi.getActiveModels>> | null;
+  ts: number;
+} = { key: "", data: null, ts: 0 };
+const ACTIVE_MODEL_CACHE_TTL_MS = 30_000; // 30 seconds
+
+async function getActiveModelCached(
+  agentId: string | undefined,
+): Promise<Awaited<ReturnType<typeof providerApi.getActiveModels>> | null> {
+  const key = agentId || "__global__";
+  const now = Date.now();
+  if (_activeModelCache.key === key && _activeModelCache.data && now - _activeModelCache.ts < ACTIVE_MODEL_CACHE_TTL_MS) {
+    return _activeModelCache.data;
+  }
+  const data = await providerApi.getActiveModels({
+    scope: "effective",
+    agent_id: agentId,
+  });
+  _activeModelCache.key = key;
+  _activeModelCache.data = data;
+  _activeModelCache.ts = now;
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Custom hooks
+// ---------------------------------------------------------------------------
+
+/** Handle IME composition events to prevent premature Enter key submission. */
+function useIMEComposition(isChatActive: () => boolean) {
+  const isComposingRef = useRef(false);
+
+  useEffect(() => {
+    const handleCompositionStart = () => {
+      if (!isChatActive()) return;
+      isComposingRef.current = true;
+    };
+
+    const handleCompositionEnd = () => {
+      if (!isChatActive()) return;
+      // Small delay for Safari on macOS, which fires keydown after
+      // compositionend within the same event loop tick.  Keep this as
+      // short as possible so fast typists who hit Space+Enter in quick
+      // succession are not blocked.
+      setTimeout(() => {
+        isComposingRef.current = false;
+      }, 50);
+    };
+
+    const suppressImeEnter = (e: KeyboardEvent) => {
+      if (!isChatActive()) return;
+      const target = e.target as HTMLElement;
+      if (target?.tagName === "TEXTAREA" && e.key === "Enter" && !e.shiftKey) {
+        // e.isComposing is the standard flag; isComposingRef covers the
+        // post-compositionend grace period needed by Safari.
+        if (isComposingRef.current || (e as any).isComposing) {
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          return false;
+        }
+      }
+    };
+
+    document.addEventListener("compositionstart", handleCompositionStart, true);
+    document.addEventListener("compositionend", handleCompositionEnd, true);
+    // Listen on both keydown (Safari) and keypress (legacy) in capture phase.
+    document.addEventListener("keydown", suppressImeEnter, true);
+    document.addEventListener("keypress", suppressImeEnter, true);
+
+    return () => {
+      document.removeEventListener(
+        "compositionstart",
+        handleCompositionStart,
+        true,
+      );
+      document.removeEventListener(
+        "compositionend",
+        handleCompositionEnd,
+        true,
+      );
+      document.removeEventListener("keydown", suppressImeEnter, true);
+      document.removeEventListener("keypress", suppressImeEnter, true);
+    };
+  }, [isChatActive]);
+
+  return isComposingRef;
+}
+
+/** Fetch and track multimodal capabilities for the active model. */
+function useMultimodalCapabilities(
+  refreshKey: number,
+  locationPathname: string,
+  isChatActive: () => boolean,
+  selectedAgent: string,
+) {
+  const [multimodalCaps, setMultimodalCaps] = useState<{
+    supportsMultimodal: boolean;
+    supportsImage: boolean;
+    supportsVideo: boolean;
+  }>({ supportsMultimodal: false, supportsImage: false, supportsVideo: false });
+
+  const fetchMultimodalCaps = useCallback(async () => {
+    try {
+      const [providers, activeModels] = await Promise.all([
+        providerApi.listProviders(),
+        getActiveModelCached(selectedAgent),
+      ]);
+      const activeProviderId = activeModels?.active_llm?.provider_id;
+      const activeModelId = activeModels?.active_llm?.model;
+      if (!activeProviderId || !activeModelId) {
+        setMultimodalCaps({
+          supportsMultimodal: false,
+          supportsImage: false,
+          supportsVideo: false,
+        });
+        return;
+      }
+      const provider = (providers as ProviderInfo[]).find(
+        (p) => p.id === activeProviderId,
+      );
+      if (!provider) {
+        setMultimodalCaps({
+          supportsMultimodal: false,
+          supportsImage: false,
+          supportsVideo: false,
+        });
+        return;
+      }
+      const allModels: ModelInfo[] = [
+        ...(provider.models ?? []),
+        ...(provider.extra_models ?? []),
+      ];
+      const model = allModels.find((m) => m.id === activeModelId);
+      setMultimodalCaps({
+        supportsMultimodal: model?.supports_multimodal ?? false,
+        supportsImage: model?.supports_image ?? false,
+        supportsVideo: model?.supports_video ?? false,
+      });
+    } catch {
+      setMultimodalCaps({
+        supportsMultimodal: false,
+        supportsImage: false,
+        supportsVideo: false,
+      });
+    }
+  }, [selectedAgent]);
+
+  // Fetch caps on mount and whenever refreshKey changes
+  useEffect(() => {
+    fetchMultimodalCaps();
+  }, [fetchMultimodalCaps, refreshKey]);
+
+  // Also poll caps when navigating back to chat
+  useEffect(() => {
+    if (isChatActive()) {
+      fetchMultimodalCaps();
+    }
+  }, [locationPathname, fetchMultimodalCaps, isChatActive]);
+
+  // Listen for model-switched event from ModelSelector
+  useEffect(() => {
+    const handler = () => {
+      fetchMultimodalCaps();
+    };
+    window.addEventListener("model-switched", handler);
+    return () => window.removeEventListener("model-switched", handler);
+  }, [fetchMultimodalCaps]);
+
+  return multimodalCaps;
+}
+
+function useMessageHistoryNavigation(
+  chatRef: React.RefObject<IAgentScopeRuntimeWebUIRef | null>,
+  isChatActive: () => boolean,
+  isComposingRef: React.RefObject<boolean>,
+) {
+  const historyIndexRef = useRef<number>(-1);
+  const draftRef = useRef<string>("");
+
+  /** Cached user messages to avoid re-computing on every keydown */
+  const userMessagesCacheRef = useRef<string[]>([]);
+  const cachedMessageCountRef = useRef<number>(0);
+
+  const getUserMessagesWithText = useCallback((): string[] => {
+    if (!chatRef.current?.messages?.getMessages) return [];
+
+    const allMessages = chatRef.current.messages.getMessages();
+    if (!Array.isArray(allMessages)) return [];
+
+    const currentCount = allMessages.length;
+    if (
+      userMessagesCacheRef.current.length > 0 &&
+      cachedMessageCountRef.current === currentCount
+    ) {
+      return userMessagesCacheRef.current;
+    }
+
+    const userMessages = allMessages
+      .filter((msg) => msg.role === "user")
+      .map((msg) => extractTextFromMessage(msg))
+      .filter((text) => text.trim().length > 0);
+
+    userMessagesCacheRef.current = userMessages;
+    cachedMessageCountRef.current = currentCount;
+
+    return userMessages;
+  }, [chatRef]);
+
+  interface MessageResult {
+    index: number;
+    text: string;
+  }
+
+  const findMessageInDirection = (
+    messages: string[],
+    startIndex: number,
+    direction: 1 | -1,
+  ): MessageResult | null => {
+    const MAX_LOOKUP = 100;
+    let lookupIndex = startIndex;
+    let steps = 0;
+
+    while (
+      lookupIndex >= 0 &&
+      lookupIndex < messages.length &&
+      steps < MAX_LOOKUP
+    ) {
+      const messageText = messages[messages.length - 1 - lookupIndex];
+      if (messageText) {
+        return { index: lookupIndex, text: messageText };
+      }
+      lookupIndex += direction;
+      steps += 1;
+    }
+
+    return null;
+  };
+
+  const isSuggestionPopupOpen = (textarea: HTMLTextAreaElement): boolean =>
+    textarea.value.startsWith("/");
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isChatActive()) return;
+
+      const target = e.target as HTMLElement;
+      const isChatSender =
+        target?.tagName === "TEXTAREA" &&
+        target?.closest('[class*="sender"]') !== null;
+
+      if (!isChatSender) return;
+      if (isComposingRef.current || (e as any).isComposing) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const textarea = target as HTMLTextAreaElement;
+      const hasSelection = textarea.selectionStart !== textarea.selectionEnd;
+      if (hasSelection) return;
+
+      const userMessages = getUserMessagesWithText();
+
+      if (e.key === "ArrowUp") {
+        if (isSuggestionPopupOpen(textarea)) return;
+
+        const cursorPosition = textarea.selectionStart || 0;
+        const textBeforeCursor = textarea.value.substring(0, cursorPosition);
+        const lineBreaks = textBeforeCursor.split("\n").length - 1;
+        if (lineBreaks > 0) return;
+
+        if (userMessages.length === 0) return;
+
+        if (historyIndexRef.current === -1) {
+          draftRef.current = textarea.value;
+        }
+
+        const startIndex = historyIndexRef.current + 1;
+        const messageText = findMessageInDirection(userMessages, startIndex, 1);
+
+        if (messageText) {
+          e.preventDefault();
+          historyIndexRef.current = messageText.index;
+          setTextareaValue(textarea, messageText.text);
+        }
+      } else if (e.key === "ArrowDown") {
+        if (historyIndexRef.current < 0) return;
+
+        const cursorPosition = textarea.selectionStart || 0;
+        const textAfterCursor = textarea.value.substring(cursorPosition);
+        if (textAfterCursor.includes("\n")) return;
+
+        const startIndex = historyIndexRef.current - 1;
+        const messageText = findMessageInDirection(
+          userMessages,
+          startIndex,
+          -1,
+        );
+
+        if (messageText) {
+          e.preventDefault();
+          historyIndexRef.current = messageText.index;
+          setTextareaValue(textarea, messageText.text);
+        } else {
+          e.preventDefault();
+          historyIndexRef.current = -1;
+          setTextareaValue(textarea, draftRef.current);
+        }
+      }
+    };
+
+    const handleFocus = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      const isChatSender =
+        target?.tagName === "TEXTAREA" &&
+        target?.closest('[class*="sender"]') !== null;
+
+      if (isChatSender) {
+        historyIndexRef.current = -1;
+        draftRef.current = "";
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("focusin", handleFocus, true);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("focusin", handleFocus, true);
+    };
+  }, [isChatActive, isComposingRef, getUserMessagesWithText]);
+}
+
+function RuntimeLoadingBridge({
+  bridgeRef,
+}: {
+  bridgeRef: { current: RuntimeLoadingBridgeApi | null };
+}) {
+  const { setLoading, getLoading } = useChatAnywhereInput(
+    (value) =>
+      ({
+        setLoading: value.setLoading,
+        getLoading: value.getLoading,
+      }) as RuntimeLoadingBridgeApi,
+  );
+
+  useEffect(() => {
+    if (!setLoading || !getLoading) {
+      bridgeRef.current = null;
+      return;
+    }
+
+    bridgeRef.current = {
+      setLoading,
+      getLoading,
+    };
+
+    return () => {
+      if (bridgeRef.current?.setLoading === setLoading) {
+        bridgeRef.current = null;
+      }
+    };
+  }, [getLoading, setLoading, bridgeRef]);
+
+  return null;
+}
+
+export default function ChatPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isDark } = useTheme();
+  const { user } = useUser();
+  const chatId = useMemo(() => {
+    const match = location.pathname.match(/^\/chat\/(.+)$/);
+    return match?.[1];
+  }, [location.pathname]);
+  const [showModelPrompt, setShowModelPrompt] = useState(false);
+  const { selectedAgent } = useAgentStore();
+  const { toolRenderConfig } = usePlugins();
+  const [refreshKey, setRefreshKey] = useState(0);
+  const runtimeLoadingBridgeRef = useRef<RuntimeLoadingBridgeApi | null>(null);
+  const { message } = useAppMessage();
+  const { approvals } = useApprovalContext();
+  const [approvalRequests, setApprovalRequests] = useState<
+    Map<string, ApprovalMessageData>
+  >(new Map());
+  const [planEnabled, setPlanEnabled] = useState(false);
+
+  // Chat display configuration — synced with UserContext (backend preferences)
+  const {
+    displayConfig,
+    setDisplayConfig,
+  } = useChatDisplayFromUser();
+  const [showDisplaySettings, setShowDisplaySettings] = useState(false);
+
+  // Sync authenticated username to window for AgentScope Runtime session API
+  useEffect(() => {
+    if (user?.username) {
+      window.currentUserId = user.username;
+    }
+  }, [user?.username]);
+
+  useEffect(() => {
+    let cancelled = false;
+    planApi
+      .getPlanConfig()
+      .then((cfg) => {
+        if (!cancelled) setPlanEnabled(cfg.enabled);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAgent]);
+
+  const isChatActiveRef = useRef(false);
+  isChatActiveRef.current =
+    location.pathname === "/" || location.pathname.startsWith("/chat");
+
+  const isChatActive = useCallback(() => isChatActiveRef.current, []);
+
+  // Consume approvals from Context and filter by current session
+  useEffect(() => {
+    // Get current session ID from multiple sources
+    // During new session creation, chatId may be empty but window.currentSessionId gets set
+    const currentSessionId = window.currentSessionId || chatId || "";
+
+    // Filter approvals by root_session_id (includes children sessions)
+    console.debug(
+      "[Approval] Filtering approvals:",
+      "currentSessionId=",
+      currentSessionId,
+      "chatId=",
+      chatId,
+      "window.currentSessionId=",
+      window.currentSessionId,
+      "approvals=",
+      approvals.map((a) => ({
+        tool: a.tool_name,
+        session: a.session_id.slice(0, 8),
+        root: a.root_session_id.slice(0, 8),
+      })),
+    );
+
+    // If no session ID yet, check if we have approvals that could tell us the session
+    // (e.g., first message sent, approval arrives before session ID is set in window)
+    let effectiveSessionId = currentSessionId;
+    if (!effectiveSessionId && approvals.length > 0) {
+      // Use the root_session_id from the first approval as a hint
+      // This handles the race condition where approval arrives before session ID is propagated
+      effectiveSessionId = approvals[0].root_session_id;
+      console.log(
+        "[Approval] No session ID yet, using first approval's root_session_id:",
+        effectiveSessionId,
+      );
+    }
+
+    const sessionApprovals = effectiveSessionId
+      ? approvals.filter(
+          (approval) => approval.root_session_id === effectiveSessionId,
+        )
+      : approvals; // Show all if no session ID (fallback)
+
+    console.debug(
+      "[Approval] After filtering:",
+      sessionApprovals.length,
+      "approval(s)",
+    );
+
+    // Convert to map for display
+    const newMap = new Map<string, ApprovalMessageData>();
+    for (const approval of sessionApprovals) {
+      newMap.set(approval.request_id, {
+        requestId: approval.request_id,
+        sessionId: approval.session_id,
+        rootSessionId: approval.root_session_id,
+        agentId: approval.agent_id,
+        toolName: approval.tool_name,
+        severity: approval.severity,
+        findingsCount: approval.findings_count,
+        findingsSummary: approval.findings_summary,
+        toolParams: approval.tool_params,
+        createdAt: approval.created_at,
+        timeoutSeconds: approval.timeout_seconds,
+      });
+    }
+
+    setApprovalRequests(newMap);
+  }, [approvals, chatId]);
+
+  const handleApprove = useCallback(
+    async (requestId: string) => {
+      console.log("[Approval] handleApprove called:", requestId);
+      console.log(
+        "[Approval] Current requests map size:",
+        approvalRequests.size,
+      );
+      const request = approvalRequests.get(requestId);
+      if (!request) {
+        console.error("[Approval] Request not found:", requestId);
+        return;
+      }
+
+      // Use currentSessionId (root session) instead of request.sessionId (sub-agent session)
+      const rootSessionId = window.currentSessionId || chatId || "";
+      console.log("[Approval] Sending approve command:", {
+        requestId,
+        rootSessionId,
+        subAgentSessionId: request.sessionId,
+      });
+
+      try {
+        // Add exit animation class
+        const cardElement = document.querySelector(
+          `[data-approval-id="${requestId}"]`,
+        );
+        if (cardElement) {
+          cardElement.classList.add("approvalCardExit");
+        }
+
+        await commandsApi.sendApprovalCommand(
+          "approve",
+          requestId,
+          rootSessionId,
+        );
+        console.log("[Approval] Approve command sent successfully");
+        message.success(t("approval.approved"));
+
+        // Delay removal to let animation complete
+        // Backend will remove from pending list, next poll will update UI
+        setTimeout(() => {
+          setApprovalRequests((prev) => {
+            const next = new Map(prev);
+            next.delete(requestId);
+            return next;
+          });
+        }, 300); // Match animation duration
+      } catch (error) {
+        message.error(t("approval.approveFailed"));
+        console.error("[Approval] Failed to approve:", error);
+      }
+    },
+    [approvalRequests, chatId, t, message],
+  );
+
+  const handleDeny = useCallback(
+    async (requestId: string) => {
+      const request = approvalRequests.get(requestId);
+      if (!request) return;
+
+      // Use currentSessionId (root session) instead of request.sessionId (sub-agent session)
+      const rootSessionId = window.currentSessionId || chatId || "";
+
+      try {
+        // Add exit animation class
+        const cardElement = document.querySelector(
+          `[data-approval-id="${requestId}"]`,
+        );
+        if (cardElement) {
+          cardElement.classList.add("approvalCardExit");
+        }
+
+        await commandsApi.sendApprovalCommand("deny", requestId, rootSessionId);
+        message.success(t("approval.denied"));
+
+        // Delay removal to let animation complete
+        // Backend will remove from pending list, next poll will update UI
+        setTimeout(() => {
+          setApprovalRequests((prev) => {
+            const next = new Map(prev);
+            next.delete(requestId);
+            return next;
+          });
+        }, 300); // Match animation duration
+      } catch (error) {
+        message.error(t("approval.denyFailed"));
+        console.error("Failed to deny:", error);
+      }
+    },
+    [approvalRequests, chatId, t, message],
+  );
+
+  // Use custom hooks for better separation of concerns
+  const isComposingRef = useIMEComposition(isChatActive);
+  const multimodalCaps = useMultimodalCapabilities(
+    refreshKey,
+    location.pathname,
+    isChatActive,
+    selectedAgent,
+  );
+
+  const lastSessionIdRef = useRef<string | null>(null);
+  /** Tracks the stale auto-selected session ID that was skipped on init, so we can suppress its late-arriving onSessionSelected callback. */
+  const staleAutoSelectedIdRef = useRef<string | null>(null);
+  const chatIdRef = useRef(chatId);
+  const navigateRef = useRef(navigate);
+  const chatRef = useRef<IAgentScopeRuntimeWebUIRef>(null);
+  const pendingClearHistoryRef = useRef(false);
+  // "Load more" archived messages state
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
+  // Keep a mutable ref so the load-more callback always sees the latest value
+  const hasMoreRef = useRef(hasMore);
+  hasMoreRef.current = hasMore;
+
+  useMessageHistoryNavigation(chatRef, isChatActive, isComposingRef);
+  chatIdRef.current = chatId;
+  navigateRef.current = navigate;
+
+  const scheduleHistoryClear = useCallback(() => {
+    queueMicrotask(() => {
+      if (!pendingClearHistoryRef.current) return;
+      pendingClearHistoryRef.current = false;
+      chatRef.current?.messages.removeAllMessages();
+    });
+  }, []);
+
+  // Sync sessionApi internal state with the library's React context so that
+  // components reading useChatAnywhereSessionsState() (e.g. ChatSessionHeader)
+  // get updated session names after backend auto-rename.
+  const { setSessions } = useChatAnywhereSessionsState();
+
+  // Tell sessionApi which session to put first in getSessionList, so the library's
+  // useMount auto-selects the correct session without an extra getSession round-trip.
+  if (chatId && sessionApi.preferredChatId !== chatId) {
+    sessionApi.preferredChatId = chatId;
+  }
+
+  // Register session API event callbacks for URL synchronization
+
+  useEffect(() => {
+    sessionApi.onSessionIdResolved = (realId) => {
+      if (!isChatActiveRef.current) return;
+      // Update URL when realId is resolved, regardless of current chatId
+      // (chatId may be undefined if URL was cleared in onSessionCreated)
+      lastSessionIdRef.current = realId;
+      navigateRef.current(`/chat/${realId}`, { replace: true });
+    };
+
+    sessionApi.onSessionRemoved = (removedId) => {
+      if (!isChatActiveRef.current) return;
+      // Clear URL when current session is removed
+      // Check if removed session matches current session (by realId or sessionId)
+      const currentRealId = sessionApi.getRealIdForSession(
+        chatIdRef.current || "",
+      );
+      if (chatIdRef.current === removedId || currentRealId === removedId) {
+        lastSessionIdRef.current = null;
+        navigateRef.current("/chat", { replace: true });
+      }
+    };
+
+    sessionApi.onSessionSelected = (
+      sessionId: string | null | undefined,
+      realId: string | null,
+    ) => {
+      if (!isChatActiveRef.current) return;
+      // Update URL when session is selected and different from current
+      const targetId = realId || sessionId;
+      if (!targetId) return;
+
+      // If a preferred chatId from the URL exists and no navigation has happened yet,
+      // skip the library's initial auto-selection (always first session).
+      // ChatSessionInitializer will apply the correct selection afterward.
+      if (
+        chatIdRef.current &&
+        lastSessionIdRef.current === null &&
+        targetId !== chatIdRef.current
+      ) {
+        lastSessionIdRef.current = targetId;
+        // Record the stale ID so its delayed getSession callback is also suppressed.
+        staleAutoSelectedIdRef.current = targetId;
+        return;
+      }
+
+      // Suppress the stale getSession callback that arrives after the correct session loads.
+      if (
+        staleAutoSelectedIdRef.current &&
+        staleAutoSelectedIdRef.current === targetId
+      ) {
+        staleAutoSelectedIdRef.current = null;
+        return;
+      }
+
+      if (targetId !== lastSessionIdRef.current) {
+        lastSessionIdRef.current = targetId;
+        navigateRef.current(`/chat/${targetId}`, { replace: true });
+        // Sync hasMore/totalCount from loaded session
+        try {
+          const ext = sessionApi.sessionList.find(
+            (s: any) => (s.realId || s.id) === targetId,
+          ) as any;
+          setHasMore(ext?.hasMore ?? false);
+          setTotalCount(ext?.totalCount);
+        } catch { /* ignore */ }
+      }
+    };
+
+    sessionApi.onSessionCreated = (localId: string) => {
+      if (!isChatActiveRef.current) return;
+      // createSession() already calls api.createChat() and sets realId.
+      // Navigate to the real backend UUID immediately so page refresh survives.
+      const realId = sessionApi.getRealIdForSession(localId);
+      const targetId = realId || localId;
+      lastSessionIdRef.current = targetId;
+      navigateRef.current(`/chat/${targetId}`, { replace: true });
+    };
+
+    // Sync sessionApi's internal session list with the library's React state,
+    // so ChatSessionHeader re-renders with updated session names (auto-rename).
+    sessionApi.onSessionListUpdated = (sessions) => {
+      setSessions(sessions);
+    };
+
+    return () => {
+      sessionApi.onSessionIdResolved = null;
+      sessionApi.onSessionRemoved = null;
+      sessionApi.onSessionSelected = null;
+      sessionApi.onSessionCreated = null;
+      sessionApi.onSessionListUpdated = null;
+    };
+  }, []);
+
+  // Setup multimodal capabilities tracking via custom hook
+
+  // Refresh chat when selectedAgent changes, preserving last active chat per agent
+  const { setLastChatId, getLastChatId } = useAgentStore();
+  const prevSelectedAgentRef = useRef(selectedAgent);
+  useEffect(() => {
+    const prevAgent = prevSelectedAgentRef.current;
+    if (prevAgent !== selectedAgent && prevAgent !== undefined) {
+      // Save current chat ID for the agent we're leaving
+      const currentChatId =
+        chatIdRef.current || lastSessionIdRef.current || undefined;
+      if (currentChatId && prevAgent) {
+        setLastChatId(prevAgent, currentChatId);
+      }
+
+      // Clear cached session list so it re-fetches for the new agent
+      sessionApi.invalidateSessionList();
+
+      // Restore last chat ID for the agent we're switching to
+      const restored = getLastChatId(selectedAgent);
+      if (restored) {
+        navigateRef.current(`/chat/${restored}`, { replace: true });
+        sessionApi.preferredChatId = restored;
+      } else {
+        navigateRef.current("/chat", { replace: true });
+      }
+      lastSessionIdRef.current = null;
+
+      setRefreshKey((prev) => prev + 1);
+    }
+    prevSelectedAgentRef.current = selectedAgent;
+  }, [selectedAgent, setLastChatId, getLastChatId]);
+
+  const copyResponse = useCallback(
+    async (response: CopyableResponse) => {
+      try {
+        await copyText(extractCopyableText(response));
+        message.success(t("common.copied"));
+      } catch {
+        message.error(t("common.copyFailed"));
+      }
+    },
+    [t],
+  );
+
+  const customFetch = useCallback(
+    async (data: {
+      input?: Array<Record<string, unknown>>;
+      biz_params?: Record<string, unknown>;
+      signal?: AbortSignal;
+    }): Promise<Response> => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...buildAuthHeaders(),
+      };
+
+      try {
+        const activeModels = await getActiveModelCached(selectedAgent);
+        if (
+          !activeModels?.active_llm?.provider_id ||
+          !activeModels?.active_llm?.model
+        ) {
+          setShowModelPrompt(true);
+          return buildModelError();
+        }
+      } catch {
+        setShowModelPrompt(true);
+        return buildModelError();
+      }
+
+      const { input = [], biz_params } = data;
+      const session: SessionInfo = input[input.length - 1]?.session || {};
+      const lastInput = input.slice(-1);
+      const lastMsg = lastInput[0];
+      const rewrittenInput =
+        lastMsg?.content && Array.isArray(lastMsg.content)
+          ? [
+              {
+                ...lastMsg,
+                content: lastMsg.content.map(normalizeContentUrls),
+              },
+            ]
+          : lastInput;
+
+      const requestBody = {
+        input: rewrittenInput,
+        session_id: window.currentSessionId || session?.session_id || "",
+        user_id: window.currentUserId || session?.user_id || DEFAULT_USER_ID,
+        channel: window.currentChannel || session?.channel || DEFAULT_CHANNEL,
+        stream: true,
+        biz_params: {
+          agent_id: selectedAgent,
+          ...biz_params,
+        },
+        // Pass chat_id (UUID) so backend can persist messages to the correct chat
+        // instead of matching by session_id (which is shared across all console chats).
+        chat_id: chatIdRef.current || undefined,
+      };
+
+      const backendChatId =
+        sessionApi.getRealIdForSession(requestBody.session_id) ??
+        chatIdRef.current ??
+        requestBody.session_id;
+      if (backendChatId) {
+        const userText = rewrittenInput
+          .filter((m: any) => m.role === "user")
+          .map(extractUserMessageText)
+          .join("\n")
+          .trim();
+        if (userText) {
+          sessionApi.setLastUserMessage(backendChatId, userText);
+        }
+      }
+
+      const response = await fetch(getApiUrl("/console/chat"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: data.signal,
+      });
+
+      // Schedule a delayed session list refresh after the SSE stream completes.
+      // The backend auto-renames chats from the first user message in the
+      // finally block (after the stream ends), so we need to refresh the
+      // session list to pick up the new name.
+      sessionApi.scheduleSessionListRefresh(2000);
+
+      return response;
+    },
+    [selectedAgent],
+  );
+
+  const handleFileUpload = useCallback(
+    async (options: {
+      file: File;
+      onSuccess: (body: { url?: string; thumbUrl?: string }) => void;
+      onError?: (e: Error) => void;
+      onProgress?: (e: { percent?: number }) => void;
+    }) => {
+      const { file, onSuccess, onError, onProgress } = options;
+      try {
+        // Warn when model has no multimodal support
+        if (!multimodalCaps.supportsMultimodal) {
+          message.warning(t("chat.attachments.multimodalWarning"));
+        } else if (
+          multimodalCaps.supportsImage &&
+          !multimodalCaps.supportsVideo &&
+          !file.type.startsWith("image/")
+        ) {
+          // Warn (not block) when only image is supported
+          message.warning(t("chat.attachments.imageOnlyWarning"));
+        }
+        const sizeMb = file.size / 1024 / 1024;
+        const isWithinLimit = sizeMb < CHAT_ATTACHMENT_MAX_MB;
+
+        if (!isWithinLimit) {
+          message.error(
+            t("chat.attachments.fileSizeExceeded", {
+              limit: CHAT_ATTACHMENT_MAX_MB,
+              size: sizeMb.toFixed(2),
+            }),
+          );
+          onError?.(new Error(`File size exceeds ${CHAT_ATTACHMENT_MAX_MB}MB`));
+          return;
+        }
+
+        const res = await chatApi.uploadFile(file);
+        onProgress?.({ percent: 100 });
+        onSuccess({ url: chatApi.filePreviewUrl(res.url) });
+      } catch (e) {
+        onError?.(e instanceof Error ? e : new Error(String(e)));
+      }
+    },
+    [multimodalCaps, t],
+  );
+
+  const options = useMemo(() => {
+    const i18nConfig = getDefaultConfig(t);
+    const commandSuggestions: CommandSuggestion[] = [
+      {
+        command: "/clear",
+        value: "clear",
+        description: t("chat.commands.clear.description"),
+      },
+      {
+        command: "/compact",
+        value: "compact",
+        description: t("chat.commands.compact.description"),
+      },
+      {
+        command: "/mission",
+        value: "mission",
+        description: t("chat.commands.mission.description"),
+      },
+    ];
+
+    // /skills: all users (read-only listing)
+    commandSuggestions.push({
+      command: "/skills",
+      value: "skills",
+      description: t("chat.commands.skills.description"),
+    });
+
+    // /model: only advanced+ (switch needs write access)
+    const role = user?.role || "user";
+    const isAdvanced = ["admin", "superadmin"].includes(role);
+    if (isAdvanced) {
+      commandSuggestions.push({
+        command: "/model",
+        value: "model ",
+        description: t("chat.commands.model.description", "Switch AI model"),
+      });
+    }
+
+    if (planEnabled) {
+      commandSuggestions.push({
+        command: "/plan",
+        value: "plan ",
+        description: t("chat.commands.plan.description"),
+      });
+    }
+
+    const handleBeforeSubmit = async () => {
+      if (isComposingRef.current) return false;
+      return true;
+    };
+
+    return {
+      ...i18nConfig,
+      theme: {
+        ...defaultConfig.theme,
+        darkMode: isDark,
+        leftHeader: {
+          logo: "",
+          title: "",
+        },
+        rightHeader: (
+          <>
+            <ChatSessionInitializer />
+            <RuntimeLoadingBridge bridgeRef={runtimeLoadingBridgeRef} />
+          </>
+        ),
+      },
+      welcome: {
+        ...i18nConfig.welcome,
+        nick: "CoApis",
+        avatar: "/coapis.png",
+      },
+      sender: {
+        ...(i18nConfig as any)?.sender,
+        beforeSubmit: handleBeforeSubmit,
+        allowSpeech: true,
+        attachments: {
+          trigger: function (props: any) {
+            const tooltipKey = multimodalCaps.supportsMultimodal
+              ? multimodalCaps.supportsImage && !multimodalCaps.supportsVideo
+                ? "chat.attachments.tooltipImageOnly"
+                : "chat.attachments.tooltip"
+              : "chat.attachments.tooltipNoMultimodal";
+            return (
+              <Tooltip title={t(tooltipKey, { limit: CHAT_ATTACHMENT_MAX_MB })}>
+                <IconButton
+                  disabled={props?.disabled}
+                  icon={<SparkAttachmentLine />}
+                  bordered={false}
+                />
+              </Tooltip>
+            );
+          },
+          customRequest: handleFileUpload,
+        },
+        placeholder: t("chat.inputPlaceholder"),
+        suggestions: commandSuggestions.map((item) => ({
+          label: renderSuggestionLabel(item.command, item.description),
+          value: item.value,
+        })),
+      },
+      session: {
+        multiple: true,
+        hideBuiltInSessionList: true,
+        api: sessionApi,
+      },
+      api: {
+        ...defaultConfig.api,
+        fetch: customFetch,
+        responseParser: (chunk: string) => {
+          const payload = JSON.parse(chunk) as Record<string, unknown>;
+          const completed = payloadCompletesResponse(payload);
+          
+          if (payloadRequestsHistoryClear(payload)) {
+            pendingClearHistoryRef.current = true;
+            if (completed) {
+              scheduleHistoryClear();
+            }
+          }
+
+          // ── Track accumulated response output ──
+          // Reset on new response
+          if (payload.object === "response" && payload.status === "created") {
+            _responseOutputAccumulator.reset();
+          }
+
+          // Accumulate content deltas
+          if (payload.object === "content" && payload.delta) {
+            const msgId = payload.msg_id as string;
+            if (msgId) {
+              let msg = _responseOutputAccumulator.messages.get(msgId);
+              if (!msg) {
+                msg = {
+                  id: msgId,
+                  role: "assistant",
+                  type: "message",
+                  status: "in_progress",
+                  content: [],
+                };
+                _responseOutputAccumulator.messages.set(msgId, msg);
+              }
+              const contentArr = msg.content as any[];
+              const last = contentArr[contentArr.length - 1];
+              if (last && last.delta && last.type === payload.type) {
+                if (payload.text !== undefined)
+                  last.text = (last.text || "") + payload.text;
+              } else {
+                contentArr.push({ ...payload });
+              }
+            }
+          }
+
+          // Track message events
+          if (payload.object === "message") {
+            const msgId = (payload.id || payload.msg_id) as string;
+            if (msgId) {
+              let msg = _responseOutputAccumulator.messages.get(msgId);
+              if (!msg) {
+                msg = {
+                  id: msgId,
+                  role: "assistant",
+                  type: "message",
+                  content: [],
+                };
+                _responseOutputAccumulator.messages.set(msgId, msg);
+              }
+              if (payload.status) msg.status = payload.status;
+            }
+          }
+
+          // On completion: inject accumulated output to prevent Builder
+          // handleResponse() from clobbering with empty output[]
+          if (completed) {
+            const output = _responseOutputAccumulator.getOutput();
+            console.log(`[responseParser] Completion(${payload.status}): ${output.length} message(s) with accumulated output`);
+            _responseOutputAccumulator.reset();
+            // Refresh session list so auto-renamed titles (backend) are picked up by the frontend
+            sessionApi.invalidateSessionList();
+            setTimeout(() => sessionApi.getSessionList(), 500);
+
+            // Reset loading state on completion — @agentscope-ai/chat only
+            // resets loading in onCancel, not on normal SSE completion
+            const bridge = runtimeLoadingBridgeRef.current;
+            if (bridge?.setLoading) {
+              bridge.setLoading(false);
+            }
+
+            return {
+              object: "response",
+              status: payload.status || "completed",
+              output,
+            } as any;
+          }
+
+          return payload as any;
+        },
+        replaceMediaURL: (url: string) => {
+          return toDisplayUrl(url);
+        },
+        cancel(data: { session_id: string }) {
+          console.log(
+            "[Cancel] Cancel button clicked, session_id:",
+            data.session_id,
+          );
+          const chatId =
+            sessionApi.getRealIdForSession(data.session_id) ?? data.session_id;
+          console.log("[Cancel] Resolved chat_id:", chatId);
+          if (chatId) {
+            console.log("[Cancel] Calling stopChat API...");
+            chatApi
+              .stopChat(chatId)
+              .then(() => {
+                console.log("[Cancel] stopChat API succeeded");
+              })
+              .catch((err) => {
+                console.error("[Cancel] Failed to stop chat:", err);
+              });
+          } else {
+            console.warn("[Cancel] No chat_id found, cannot stop");
+          }
+        },
+        async reconnect(data: { session_id: string; signal?: AbortSignal }) {
+          const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+            ...buildAuthHeaders(),
+          };
+
+          return fetch(getApiUrl("/console/chat"), {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              reconnect: true,
+              session_id: window.currentSessionId || data.session_id,
+              user_id: window.currentUserId || DEFAULT_USER_ID,
+              channel: window.currentChannel || DEFAULT_CHANNEL,
+            }),
+            signal: data.signal,
+          });
+        },
+      },
+      customToolRenderConfig: {
+        ..._enhancedToolRenderConfig,
+        ...toolRenderConfig,  // plugin overrides take priority
+      },
+      // Always use default AgentScopeRuntimeResponseCard — it has built-in
+      // collapsible Tool, Thinking, Message, Error rendering via OperateCard.
+      cards: undefined,
+      actions: {
+        list: [
+          {
+            icon: (
+              <span title={t("common.copy")}>
+                <SparkCopyLine />
+              </span>
+            ),
+            onClick: ({ data }: { data: CopyableResponse }) => {
+              void copyResponse(data);
+            },
+          },
+        ],
+        replace: true,
+      },
+    } as unknown as IAgentScopeRuntimeWebUIOptions;
+  }, [
+    customFetch,
+    copyResponse,
+    handleFileUpload,
+    t,
+    isDark,
+    multimodalCaps,
+    toolRenderConfig,
+    scheduleHistoryClear,
+    planEnabled,
+    displayConfig,
+    sessionApi,
+  ]);
+
+  return (
+    <ChatDisplayConfigContext.Provider value={displayConfig}>
+      <div
+        style={{
+          height: "100%",
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Chat session header: title + actions */}
+        <ChatSessionHeader onShowDisplaySettings={() => setShowDisplaySettings(true)} />
+        <div
+          className={styles.chatMessagesArea}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const files = Array.from(e.dataTransfer.files);
+            if (files.length > 0) {
+              // Trigger file upload through the @agentscope-ai/chat attachment system
+              const input = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+              if (input) {
+                const dt = new DataTransfer();
+                files.forEach(f => dt.items.add(f));
+                input.files = dt.files;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+              } else {
+                message.info(t("chat.inputPlaceholder"));
+              }
+            }
+          }}
+        >
+          {/* Load More button — shown when older messages exist in archive */}
+          {hasMore && (
+            <div style={{ textAlign: "center", padding: "8px 0" }}>
+              <Button
+                size="small"
+                type="link"
+                loading={loadingMore}
+                onClick={async () => {
+                  const realId = sessionApi.currentSession?.realId || chatId;
+                  if (!realId) return;
+                  setLoadingMore(true);
+                  try {
+                    const firstMsg = sessionApi.currentSession?.messages?.[0];
+                    const before = firstMsg?.id;
+                    // Try archived data from SQLite
+                    const res = await chatApi.getArchivedMessages(realId, { before, limit: 30 });
+                    if (res.messages?.length) {
+                      const converted = convertMessages(res.messages);
+                      const existing = sessionApi.currentSession?.messages || [];
+                      // @ts-ignore — mutate the live session object
+                      sessionApi.currentSession!.messages = [...converted, ...existing];
+                      setHasMore(res.has_more);
+                      setRefreshKey((k) => k + 1);
+                    } else {
+                      setHasMore(false);
+                    }
+                  } catch (e) {
+                    console.warn("Load more failed:", e);
+                  } finally {
+                    setLoadingMore(false);
+                  }
+                }}
+              >
+                加载更多历史消息 {totalCount ? `(共 ${totalCount} 条)` : ""}
+              </Button>
+            </div>
+          )}
+          <AgentScopeRuntimeWebUI
+            ref={chatRef}
+            key={refreshKey}
+            options={options}
+          />
+        </div>
+
+        {/* Chat display settings modal */}
+        <ChatDisplaySettings
+          visible={showDisplaySettings}
+          config={displayConfig}
+          onConfigChange={setDisplayConfig}
+          onClose={() => setShowDisplaySettings(false)}
+        />
+
+        {/* Render approval cards as overlays */}
+      {Array.from(approvalRequests.values()).map((request) => (
+        <div
+          key={request.requestId}
+          data-approval-id={request.requestId}
+          style={{
+            position: "fixed",
+            bottom: 80,
+            right: 24,
+            zIndex: 1000,
+            maxWidth: 480,
+            width: "calc(100vw - 48px)",
+          }}
+        >
+          <ApprovalCard
+            requestId={request.requestId}
+            toolName={request.toolName}
+            severity={request.severity}
+            findingsCount={request.findingsCount}
+            findingsSummary={request.findingsSummary}
+            toolParams={request.toolParams}
+            createdAt={request.createdAt}
+            timeoutSeconds={request.timeoutSeconds}
+            sessionId={request.sessionId}
+            rootSessionId={request.rootSessionId}
+            onApprove={handleApprove}
+            onDeny={handleDeny}
+            onCancel={() => {
+              console.log("[Chat] onCancel called for approval card");
+              const sessionId = window.currentSessionId || "";
+
+              // Use the same fallback chain as customFetch:
+              // 1. sessionApi.getRealIdForSession (UUID from backend)
+              // 2. chatIdRef.current (URL param)
+              // 3. sessionId (timestamp fallback)
+              const resolvedChatId =
+                sessionApi.getRealIdForSession(sessionId) ??
+                chatIdRef.current ??
+                sessionId;
+
+              console.log(
+                "[Chat] Resolved chat_id for stop:",
+                resolvedChatId,
+                "from session_id:",
+                sessionId,
+                "chatIdRef:",
+                chatIdRef.current,
+              );
+
+              if (resolvedChatId) {
+                console.log("[Chat] Calling stopChat with:", resolvedChatId);
+                chatApi
+                  .stopChat(resolvedChatId)
+                  .then(() => {
+                    console.log("[Chat] stopChat succeeded");
+                  })
+                  .catch((err) => {
+                    console.error("[Chat] stopChat failed:", err);
+                  });
+              } else {
+                console.warn("[Chat] No chat_id resolved, cannot cancel task");
+              }
+            }}
+          />
+        </div>
+      ))}
+
+      <Modal
+        open={showModelPrompt}
+        closable={false}
+        footer={null}
+        width={480}
+        styles={{
+          content: isDark
+            ? { background: "#1f1f1f", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }
+            : undefined,
+        }}
+      >
+        <Result
+          icon={<ExclamationCircleOutlined style={{ color: "#faad14" }} />}
+          title={
+            <span
+              style={{ color: isDark ? "rgba(255,255,255,0.88)" : undefined }}
+            >
+              {t("modelConfig.promptTitle")}
+            </span>
+          }
+          subTitle={
+            <span
+              style={{ color: isDark ? "rgba(255,255,255,0.55)" : undefined }}
+            >
+              {t("modelConfig.promptMessage")}
+            </span>
+          }
+          extra={[
+            <Button key="skip" onClick={() => setShowModelPrompt(false)}>
+              {t("modelConfig.skipButton")}
+            </Button>,
+            <Button
+              key="configure"
+              type="primary"
+              icon={<SettingOutlined />}
+              onClick={() => {
+                setShowModelPrompt(false);
+                navigate("/models");
+              }}
+            >
+              {t("modelConfig.configureButton")}
+            </Button>,
+          ]}
+        />
+      </Modal>
+    </div>
+    </ChatDisplayConfigContext.Provider>
+  );
+}

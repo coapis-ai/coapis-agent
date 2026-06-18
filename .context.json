@@ -1,0 +1,11 @@
+{
+  "current_task": "",
+  "task_description": "",
+  "open_files": [],
+  "pending_items": [],
+  "key_decisions": [],
+  "created_at": "2026-06-11T23:33:36.691716",
+  "updated_at": "2026-06-11T23:33:36.693214",
+  "resource_guard_state": "{\"tokens_used\": 0, \"calls_this_hour\": 0, \"hour_start\": 1781192016, \"throttled\": false, \"throttle_reason\": \"\", \"violations\": []}",
+  "resource_guard_budgets": "{\"token_limit\": 100000, \"tool_calls_per_hour\": 200, \"memory_limit_mb\": 1024, \"latency_budget_ms\": 3000}"
+}

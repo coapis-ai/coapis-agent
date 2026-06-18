@@ -1,0 +1,605 @@
+# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+# Copyright 2026 以太吃虾 & CoApis Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Evolution monitoring API endpoints.
+
+Provides REST endpoints for:
+- Evolution engine status and statistics
+- Trajectory query and export
+- Experience extraction triggers and results
+- Knowledge flow monitoring
+- Backend review status and history
+"""
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from ..permissions.decorators import require_permission
+from fastapi import APIRouter, HTTPException, Query, Request
+
+router = APIRouter(tags=["evolution"])
+logger = logging.getLogger(__name__)
+
+
+def _get_manager(request: Request) -> Any:
+    """Get MultiAgentManager from app state.
+    
+    The manager is stored in app.state.multi_agent_manager during create_app().
+    """
+    return request.app.state.multi_agent_manager
+
+
+# =========================================================================
+# Evolution Engine Status
+# =========================================================================
+
+@router.get("/evolution/status")
+@require_permission("admin:admin")
+async def get_evolution_status(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Get evolution engine status and statistics for an agent."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine:
+        return {"enabled": False, "message": "Evolution engine not configured for this agent"}
+
+    return {
+        "enabled": engine.enabled,
+        "agent_id": agent_id,
+        "current_session": engine._current_session_id,
+        "trajectory_count": len(engine._current_trajectory),
+        "pending_experiences": len(engine._pending_experiences),
+        "turns_since_memory_review": engine._turns_since_memory_review,
+        "tools_since_skill_review": engine._tools_since_skill_review,
+        "memory_nudge_interval": engine.memory_nudge_interval,
+        "skill_nudge_interval": engine.skill_nudge_interval,
+        "knowledge_flow": engine.knowledge_flow.get_stats() if engine.knowledge_flow else None,
+        "backend_review": engine.backend_review.get_stats() if engine.backend_review else None,
+    }
+
+
+@router.get("/evolution/stats")
+@require_permission("admin:admin")
+async def get_evolution_stats(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Get comprehensive evolution statistics for an agent."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine:
+        return {"enabled": False}
+
+    return engine.get_stats()
+
+
+# =========================================================================
+# Trajectory Management
+# =========================================================================
+
+@router.get("/evolution/trajectories")
+@require_permission("admin:admin")
+async def list_trajectories(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+    limit: int = Query(50, ge=1, le=200, description="Max trajectories to return"),
+):
+    """List trajectory files for an agent."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine:
+        return {"trajectories": []}
+
+    trajectory_dir = engine.data_dir / "evolution" / "trajectories"
+    if not trajectory_dir.exists():
+        return {"trajectories": []}
+
+    trajectories = []
+    for tf in sorted(trajectory_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)[:limit]:
+        trajectories.append({
+            "file": tf.name,
+            "session_id": tf.stem,
+            "size": tf.stat().st_size,
+            "modified": tf.stat().st_mtime,
+        })
+
+    return {"trajectories": trajectories}
+
+
+@router.get("/evolution/trajectories/{session_id}")
+@require_permission("admin:admin")
+async def get_trajectory(
+    request: Request,
+    session_id: str,
+    agent_id: str = Query("default", description="Agent ID"),
+    limit: int = Query(100, ge=1, le=500, description="Max entries to return"),
+):
+    """Get trajectory entries for a specific session."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine:
+        raise HTTPException(status_code=404, detail="Evolution engine not configured")
+
+    trajectory_file = engine.data_dir / "evolution" / "trajectories" / f"{session_id}.jsonl"
+    if not trajectory_file.exists():
+        raise HTTPException(status_code=404, detail=f"Trajectory {session_id} not found")
+
+    entries = []
+    with open(trajectory_file, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                entries.append(json.loads(line))
+            if len(entries) >= limit:
+                break
+
+    return {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "entries": entries,
+        "total": len(entries),
+    }
+
+
+# =========================================================================
+# Experience Management
+# =========================================================================
+
+@router.get("/evolution/experiences")
+@require_permission("admin:admin")
+async def list_experiences(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+    status: str = Query("all", description="Filter by status: all|pending|approved|rejected"),
+    limit: int = Query(50, ge=1, le=200, description="Max experiences to return"),
+):
+    """List extracted experiences for an agent."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine:
+        return {"experiences": []}
+
+    # Get pending experiences from engine
+    experiences = []
+
+    if status in ("all", "pending"):
+        for exp in engine._pending_experiences:
+            experiences.append({
+                **exp.to_dict(),
+                "status": "pending",
+            })
+
+    # Load stored experiences from disk
+    exp_dir = engine.data_dir / "evolution" / "experiences"
+    if exp_dir.exists():
+        for ef in sorted(exp_dir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+            try:
+                data = json.loads(ef.read_text(encoding="utf-8"))
+                if status == "all" or data.get("status") == status:
+                    experiences.append(data)
+            except Exception:
+                pass
+
+            if len(experiences) >= limit:
+                break
+
+    return {"experiences": experiences[:limit]}
+
+
+@router.post("/evolution/experiences/extract")
+@require_permission("admin:admin")
+async def trigger_extraction(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Trigger experience extraction for the current session."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine:
+        raise HTTPException(status_code=400, detail="Evolution engine not configured")
+
+    if not engine._current_trajectory:
+        raise HTTPException(status_code=400, detail="No trajectory data available")
+
+    # Trigger extraction
+    experiences = await engine._extract_experiences()
+
+    # Add to pending queue
+    engine._pending_experiences.extend(experiences)
+
+    return {
+        "extracted": len(experiences),
+        "pending_total": len(engine._pending_experiences),
+        "experiences": [exp.to_dict() for exp in experiences],
+    }
+
+
+@router.post("/evolution/experiences/{experience_id}/approve")
+@require_permission("admin:admin")
+async def approve_experience(
+    request: Request,
+    experience_id: str,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Approve an extracted experience for storage."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine:
+        raise HTTPException(status_code=404, detail="Evolution engine not configured")
+
+    # Find and approve the experience
+    for i, exp in enumerate(engine._pending_experiences):
+        if exp.experience_id == experience_id:
+            approved = engine._pending_experiences.pop(i)
+            approved_dict = approved.to_dict()
+            approved_dict["status"] = "approved"
+
+            # Save to disk
+            exp_file = (
+                engine.data_dir
+                / "evolution"
+                / "experiences"
+                / f"{approved.experience_id}.json"
+            )
+            exp_file.write_text(
+                json.dumps(approved_dict, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            # Add to foundation memory if applicable
+            if engine.foundation_manager and approved.memory_type == "long_term":
+                from ...foundation import MemoryEntry
+
+                memory = MemoryEntry(
+                    content=approved.content,
+                    memory_type=approved.memory_type,
+                    category=approved.category,
+                    tags=approved.tags,
+                    priority_score=approved.confidence,
+                    source_agent=approved.source_agent,
+                    source_user=approved.source_user,
+                    source_session=approved.source_session,
+                )
+                engine.foundation_manager.add_memory(memory)
+
+            return {"approved": True, "experience": approved_dict}
+
+    raise HTTPException(status_code=404, detail=f"Experience {experience_id} not found")
+
+
+@router.post("/evolution/experiences/{experience_id}/reject")
+@require_permission("admin:admin")
+async def reject_experience(
+    request: Request,
+    experience_id: str,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Reject an extracted experience."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine:
+        raise HTTPException(status_code=404, detail="Evolution engine not configured")
+
+    for i, exp in enumerate(engine._pending_experiences):
+        if exp.experience_id == experience_id:
+            engine._pending_experiences.pop(i)
+            return {"rejected": True, "experience_id": experience_id}
+
+    raise HTTPException(status_code=404, detail=f"Experience {experience_id} not found")
+
+
+# =========================================================================
+# Knowledge Flow
+# =========================================================================
+
+@router.get("/evolution/knowledge-flow/status")
+@require_permission("admin:admin")
+async def get_knowledge_flow_status(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Get knowledge flow status and statistics."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.knowledge_flow:
+        return {"enabled": False, "message": "Knowledge flow not configured"}
+
+    return engine.knowledge_flow.get_stats()
+
+
+@router.get("/evolution/knowledge-flow/pending")
+@require_permission("admin:admin")
+async def list_pending_flows(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """List pending knowledge flow reviews."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.knowledge_flow:
+        return {"pending": []}
+
+    return {"pending": engine.knowledge_flow.get_pending_reviews()}
+
+
+@router.post("/evolution/knowledge-flow/{record_id}/approve")
+@require_permission("admin:admin")
+async def approve_flow(
+    request: Request,
+    record_id: str,
+    agent_id: str = Query("default", description="Agent ID"),
+    comment: str = Query("", description="Review comment"),
+):
+    """Approve a knowledge flow request."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.knowledge_flow:
+        raise HTTPException(status_code=404, detail="Knowledge flow not configured")
+
+    success = await engine.knowledge_flow.review_flow_request(record_id, True, comment)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Flow record {record_id} not found")
+
+    return {"approved": True, "record_id": record_id}
+
+
+@router.post("/evolution/knowledge-flow/{record_id}/reject")
+@require_permission("admin:admin")
+async def reject_flow(
+    request: Request,
+    record_id: str,
+    agent_id: str = Query("default", description="Agent ID"),
+    comment: str = Query("", description="Review comment"),
+):
+    """Reject a knowledge flow request."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.knowledge_flow:
+        raise HTTPException(status_code=404, detail="Knowledge flow not configured")
+
+    success = await engine.knowledge_flow.review_flow_request(record_id, False, comment)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Flow record {record_id} not found")
+
+    return {"rejected": True, "record_id": record_id}
+
+
+# =========================================================================
+# Backend Review
+# =========================================================================
+
+@router.get("/evolution/review/status")
+@require_permission("admin:admin")
+async def get_review_status(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Get backend review status."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.backend_review:
+        return {"enabled": False, "message": "Backend review not configured"}
+
+    return engine.backend_review.get_stats()
+
+
+@router.get("/evolution/review/history")
+@require_permission("admin:admin")
+async def get_review_history(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+    limit: int = Query(50, ge=1, le=200, description="Max reviews to return"),
+):
+    """Get backend review history."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.backend_review:
+        return {"history": []}
+
+    return {"history": engine.backend_review.get_review_history(limit)}
+
+
+@router.get("/evolution/review/pending")
+@require_permission("admin:admin")
+async def get_pending_reviews(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Get reviews requiring human attention."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.backend_review:
+        return {"pending": []}
+
+    return {"pending": engine.backend_review.get_pending_reviews()}
+
+
+@router.post("/evolution/review/start")
+@require_permission("admin:admin")
+async def start_review(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Start backend review tasks."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.backend_review:
+        raise HTTPException(status_code=404, detail="Backend review not configured")
+
+    await engine.backend_review.start()
+    return {"started": True}
+
+
+@router.post("/evolution/review/stop")
+@require_permission("admin:admin")
+async def stop_review(
+    request: Request,
+    agent_id: str = Query("default", description="Agent ID"),
+):
+    """Stop backend review tasks."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.backend_review:
+        raise HTTPException(status_code=404, detail="Backend review not configured")
+
+    await engine.backend_review.stop()
+    return {"stopped": True}
+
+
+# =========================================================================
+# Knowledge Flow Approval/Rejection
+# =========================================================================
+
+@router.post("/evolution/knowledge-flow/approve")
+@require_permission("admin:admin")
+async def approve_flow(
+    request: Request,
+    record_id: str = Query(..., description="Flow record ID to approve"),
+    agent_id: str = Query("default", description="Agent ID"),
+    comment: str = Query("", description="Audit comment"),
+):
+    """Approve a knowledge flow record, executing the promotion."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.knowledge_flow:
+        raise HTTPException(status_code=404, detail="KnowledgeFlow not configured")
+
+    # Find the pending record
+    flow = engine.knowledge_flow
+    record = None
+    for r in flow._flow_queue:
+        if r.record_id == record_id:
+            record = r
+            break
+
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Flow record {record_id} not found")
+
+    record.audit_comment = comment
+    await flow._execute_flow(record)
+    return {"approved": True, "record_id": record_id, "status": record.status}
+
+
+@router.post("/evolution/knowledge-flow/reject")
+@require_permission("admin:admin")
+async def reject_flow(
+    request: Request,
+    record_id: str = Query(..., description="Flow record ID to reject"),
+    agent_id: str = Query("default", description="Agent ID"),
+    comment: str = Query("", description="Rejection reason"),
+):
+    """Reject a knowledge flow record."""
+    manager = _get_manager(request)
+    workspace = manager.get_workspace(agent_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+    engine = workspace.evolution_engine
+    if not engine or not engine.knowledge_flow:
+        raise HTTPException(status_code=404, detail="KnowledgeFlow not configured")
+
+    # Find and reject the record
+    flow = engine.knowledge_flow
+    record = None
+    for r in flow._flow_queue:
+        if r.record_id == record_id:
+            record = r
+            break
+
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Flow record {record_id} not found")
+
+    record.status = "rejected"
+    record.audit_comment = comment
+    flow._flow_queue.remove(record)
+    flow._completed_flows.append(record)
+    return {"rejected": True, "record_id": record_id, "status": record.status}

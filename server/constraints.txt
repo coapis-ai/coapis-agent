@@ -1,0 +1,17 @@
+﻿# Security constraints - force patched versions for transitive dependencies
+# Generated 2026-05-08 based on pip-audit scan results
+
+# CVE-2026-41425: Authlib OpenID Connect userinfo endpoint vulnerability
+authlib>=1.6.11
+
+# CVE-2026-41066: lxml XML external entity injection
+lxml>=6.1.0
+
+# CVE-2026-33079: mistune XSS vulnerability
+mistune>=3.2.1
+
+# CVE-2026-42561: python-multipart boundary parsing vulnerability
+python-multipart>=0.0.27
+
+# CVE-2025-61669, CVE-2026-40110, CVE-2026-35397, CVE-2026-40934: jupyter-server vulnerabilities
+jupyter-server>=2.18.0

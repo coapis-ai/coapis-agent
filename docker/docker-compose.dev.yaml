@@ -1,0 +1,81 @@
+# ═══════════════════════════════════════════════════════════════════
+# CoApis 开发测试环境 Docker Compose
+# ── 端口: nginx=4300, server=4308 ──
+# ── 数据: /apps/ai/coapis-dev (bind mount) ──
+# ── Playwright: 共享生产环境 (172.17.0.1:9222) ──
+# ── 源码热更新: 后端代码修改后自动重载 ──
+# 用法: cd docker && docker compose -f docker-compose.dev.yaml up -d
+# ═══════════════════════════════════════════════════════════════════
+
+name: coapis-dev
+
+services:
+  # ── 后端 API 服务 ──
+  server:
+    image: coapis-server:latest
+    container_name: coapis-server-dev
+    ports:
+      - "4308:8000"
+    volumes:
+      # 运行数据（开发环境独立目录）
+      - /apps/ai/coapis-dev:/apps/ai/coapis
+      # 源码热更新（开发模式）
+      - ../server/coapis:/app/coapis
+      # 前端构建产物
+      - ../client/dist:/app/coapis/console
+      # 开发环境版本覆盖（0.8.7-post1）
+      - ./dev-overrides/coapis/__version__.py:/app/coapis/__version__.py:ro
+      # Playwright 浏览器持久化
+      - ./volume/playwright:/app/volume/playwright:ro
+    environment:
+      - PYTHONPATH=/app
+      - COAPIS_AUTH_ENABLED=true
+      - COAPIS_USER_SYSTEM_ENABLED=true
+      # 共享生产 Playwright（Linux Docker bridge gateway）
+      - BROWSER_CDP_URL=http://172.17.0.1:9222
+      # 文件上传限制（与 .env.dev 同步）
+      - COAPIS_UPLOAD_MAX_FILES=${COAPIS_UPLOAD_MAX_FILES:-10}
+      - COAPIS_UPLOAD_MAX_FILE_SIZE_MB=${COAPIS_UPLOAD_MAX_FILE_SIZE_MB:-20}
+    restart: unless-stopped
+    networks:
+      - frontend-dev
+      - internal-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── 前端 Nginx ──
+  nginx:
+    image: nginx:alpine
+    container_name: coapis-nginx-dev
+    ports:
+      - "4300:80"
+    volumes:
+      - ./nginx/conf/default.conf.template:/etc/nginx/conf.d/default.conf.template:ro
+      - ./nginx/entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      - ../client/dist:/usr/share/nginx/html:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]
+    environment:
+      - COAPIS_UPLOAD_MAX_BODY_SIZE=${COAPIS_UPLOAD_MAX_FILE_SIZE_MB:-20}
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - frontend-dev
+      - internal-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  frontend-dev:
+    driver: bridge
+  internal-dev:
+    internal: true

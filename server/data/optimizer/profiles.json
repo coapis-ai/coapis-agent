@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    "test_p": {
+      "ranking": [],
+      "strategy": {
+        "prefer_fast": [],
+        "avoid": [],
+        "cache_candidates": [],
+        "fallback_pairs": []
+      },
+      "saved_at": "2026-06-12 00:13:24"
+    }
+  },
+  "suggestions": []
+}

@@ -1,0 +1,447 @@
+# Dangerous Shell Command Detection Rules
+# =========================================================================
+
+- id: TOOL_CMD_DANGEROUS_RM
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: command_injection
+  severity: HIGH
+  patterns:
+  - \brm\b
+  - \bdel\b
+  - \bRemove-Item\b
+  exclude_patterns:
+  - ^\s*#
+  description: Shell command contains 'rm' which may cause data loss
+  remediation: Confirm with the user before removing files or directories
+- id: TOOL_CMD_DANGEROUS_MV
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: command_injection
+  severity: HIGH
+  patterns:
+  - \bmv\b
+  description: Shell command contains 'mv' which may move or overwrite files unexpectedly
+  remediation: Confirm with the user before moving or renaming files
+- id: TOOL_CMD_FS_DESTRUCTION
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: command_injection
+  severity: CRITICAL
+  patterns:
+  - \bmkfs(\.[a-zA-Z0-9_]+)?\b
+  - \bmke2fs\b
+  - \bdd\s+.*of=\/dev\/
+  - '>\s*\/dev\/(sd[a-z][0-9]*|vd[a-z][0-9]*|nvme\d+n\d+(p\d+)?)'
+  description: Detects low-level disk formatting or wiping commands
+  remediation: Block operation. Agents should not format or overwrite raw block devices.
+- id: TOOL_CMD_DOS_FORK_BOMB
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: resource_abuse
+  severity: CRITICAL
+  patterns:
+  - ':\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:'
+  - \bkill\s+-9\s+(-1\b|1\b)
+  description: Detects classic Bash fork bombs and mass process termination
+  remediation: Block immediately. These commands will crash the host system.
+- id: TOOL_CMD_PIPE_TO_SHELL
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: code_execution
+  severity: CRITICAL
+  patterns:
+  - \b(curl|wget)\b\s+.*\|.*\b(bash|sh|zsh|ash|dash)\b
+  description: Detects 'curl | bash' patterns used to download and immediately execute
+    remote payloads
+  remediation: Confirm with user. Agents should inspect scripts before executing them.
+- id: TOOL_CMD_REVERSE_SHELL
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: network_abuse
+  severity: CRITICAL
+  patterns:
+  - \/dev\/(tcp|udp)\/
+  - \bnc\s+.*-e\s*\S+
+  - \bncat\s+.*-e\s*\S+
+  - '\bsocat\s+.*EXEC:'
+  description: Detects attempts to establish reverse shells or unauthorized network
+    tunnels
+  remediation: Block operation. Agents do not need to bind interactive shells to network
+    sockets.
+- id: TOOL_CMD_SYSTEM_TAMPERING
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: sensitive_file_access
+  severity: HIGH
+  patterns:
+  - \bcrontab\b
+  - \bauthorized_keys\b
+  - \/etc\/sudoers
+  - \/etc\/crontab
+  description: Detects access to cron jobs, SSH keys, or sudo permissions (including
+    reads and modifications)
+  remediation: Confirm with user. Treat any access to credential and scheduling files
+    as sensitive and restrict when possible.
+- id: TOOL_CMD_UNSAFE_PERMISSIONS
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: privilege_escalation
+  severity: HIGH
+  patterns:
+  - \bchmod\s+-[a-zA-Z]*R[a-zA-Z]*\s+(777|a\+rwx)\s+\/
+  - \bchattr\s+\+i
+  description: Detects global permission downgrades (chmod 777) or setting immutable
+    flags
+  remediation: Prompt for confirmation. Suggest least-privilege permission models.
+- id: TOOL_CMD_OBFUSCATED_EXEC
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: code_execution
+  severity: HIGH
+  patterns:
+  - \bbase64\s+(-d|--decode)\s*\|\s*\b(bash|sh|zsh)\b
+  description: Detects execution of base64 encoded strings passed directly to a shell
+    interpreter
+  remediation: Block execution. Agents should use plain text commands.
+- id: TOOL_CMD_SYSTEM_REBOOT
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: resource_abuse
+  severity: CRITICAL
+  patterns:
+  - \b(reboot|shutdown|halt|poweroff)\b
+  - \binit\s+(0|6)\b
+  - \btelinit\s+(0|6)\b
+  - \bShutdown-Computer\b
+  - \bRestart-Computer\b
+  description: Detects system reboot or shutdown commands that will terminate the
+    host system
+  remediation: Block operation. Agents should not restart or shutdown the system.
+- id: TOOL_CMD_SERVICE_RESTART
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: resource_abuse
+  severity: HIGH
+  patterns:
+  - \bsystemctl\s+(restart|stop|start|reload|kill)\b
+  - \bservice\s+\S+\s+(restart|stop|start|reload)\b
+  - \b(sc|net)\s+(start|stop|restart)\b
+  - \blaunchctl\s+(load|unload|stop|start|kickstart|kill)\b
+  - \brc-service\s+(restart|stop|start)\b
+  description: Detects service management commands that can disrupt system services
+  remediation: Confirm with user. Restarting services may cause downtime or data loss.
+- id: TOOL_CMD_PROCESS_KILL
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: resource_abuse
+  severity: HIGH
+  patterns:
+  - \b(pkill|killall)\b
+  - \bkill\s+(-(9|KILL|15|TERM|1|HUP|2|INT)\s+)?[^-\s]
+  - \btaskkill\s+\/F\b
+  - \bStop-Process\b.*-Force\b
+  exclude_patterns:
+  - kill\s+\$\$
+  description: Detects process termination commands that may kill critical processes
+  remediation: Confirm with user. Killing processes may cause data loss or system
+    instability.
+- id: TOOL_CMD_PRIVILEGE_ESCALATION
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: privilege_escalation
+  severity: CRITICAL
+  patterns:
+  - \bsudo\s+
+  - \bsu\b
+  - \bdoas\s+
+  - \bpkexec\b
+  - '\brunas\s+\/user:'
+  exclude_patterns:
+  - ^\s*#
+  description: Detects privilege escalation attempts using sudo, su, doas, pkexec,
+    or runas
+  remediation: Block operation. Agents should not execute commands with elevated privileges.
+- id: TOOL_CMD_IFS_INJECTION
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: code_execution
+  severity: HIGH
+  patterns:
+  - \$IFS(?![A-Za-z0-9_])
+  - \$\{[^}]*IFS
+  exclude_patterns:
+  - ^\s*#
+  description: Command uses $IFS variable which could bypass security validation
+  remediation: Reject commands containing IFS manipulation. Legitimate commands do
+    not need to reference $IFS directly.
+- id: TOOL_CMD_CONTROL_CHARS
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: code_execution
+  severity: CRITICAL
+  patterns:
+  - '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]'
+  description: Command contains non-printable control characters that could bypass
+    security checks
+  remediation: Block commands containing control characters. These are never needed
+    in legitimate shell commands.
+- id: TOOL_CMD_UNICODE_WHITESPACE
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: code_execution
+  severity: HIGH
+  patterns:
+  - '[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]'
+  description: Command contains Unicode whitespace characters that could cause parsing
+    inconsistencies
+  remediation: Block commands containing non-ASCII whitespace. Use standard spaces
+    instead.
+- id: TOOL_CMD_PROC_ENVIRON
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: sensitive_file_access
+  severity: HIGH
+  patterns:
+  - \/proc\/(?:self|\d+)\/environ(?:\b|$)
+  exclude_patterns:
+  - ^\s*#
+  description: Command accesses /proc/*/environ which could expose sensitive environment
+    variables
+  remediation: Block access to process environment files. API keys and secrets may
+    be exposed.
+- id: TOOL_CMD_JQ_SYSTEM
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: code_execution
+  severity: HIGH
+  patterns:
+  - \bjq\b.*\bsystem\s*\(
+  exclude_patterns:
+  - ^\s*#
+  description: jq command contains system() function which can execute arbitrary shell
+    commands
+  remediation: Block jq commands using system(). Use jq only for data processing,
+    not command execution.
+- id: TOOL_CMD_JQ_FILE_FLAGS
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: code_execution
+  severity: HIGH
+  patterns:
+  - \bjq\b.*(?:\s-f\b|\s--from-file\b|\s--rawfile\b|\s--slurpfile\b|\s-L\b|\s--library-path\b)
+  exclude_patterns:
+  - ^\s*#
+  description: jq command uses flags that could read arbitrary files or execute external
+    code
+  remediation: Confirm with user. These jq flags can access files outside the intended
+    scope.
+- id: TOOL_CMD_ZSH_DANGEROUS
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: code_execution
+  severity: HIGH
+  patterns:
+  - \bzmodload\b
+  - \bemulate\b(?:\s+-\S+)*\s+-c\b
+  - \b(sysopen|sysread|syswrite|sysseek)\b
+  - \b(zpty|ztcp|zsocket)\b
+  - \bzf_(rm|mv|ln|chmod|chown|mkdir|rmdir|chgrp)\b
+  - \bfc\b.*\s-\S*e
+  exclude_patterns:
+  - ^\s*#
+  description: Command uses Zsh-specific builtins that can bypass security checks
+  remediation: Block Zsh module/builtin commands. These provide raw file I/O, network,
+    and execution capabilities that bypass normal permission checks.
+- id: TOOL_CMD_SQL_INJECTION
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: command_injection
+  severity: HIGH
+  patterns:
+  - \bDROP\s+TABLE\b
+  - \bDROP\s+DATABASE\b
+  - \bTRUNCATE\s+TABLE\b
+  - \bDELETE\s+FROM\b.*\bWHERE\s+1\s*=\s*1
+  exclude_patterns:
+  - ^\s*#
+  description: Command contains SQL statements that could destroy or wipe entire tables/databases
+  remediation: Block destructive SQL. Confirm with user and use WHERE clauses to limit
+    scope.
+- id: TOOL_CMD_RF_FORCE
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: command_injection
+  severity: CRITICAL
+  patterns:
+  - \brm\s+.*-rf\b
+  - \brm\s+.*-fr\b
+  exclude_patterns:
+  - ^\s*#
+  description: Command uses rm -rf which recursively deletes without confirmation
+  remediation: Block rm -rf. Use trash or ask user to confirm specific files.
+- id: TOOL_CMD_ENV_DUMP
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: sensitive_file_access
+  severity: MEDIUM
+  patterns:
+  - \benv\b\s*$
+  - \bprintenv\b\s*$
+  exclude_patterns:
+  - ^\s*#
+  description: Command dumps all environment variables which may contain secrets
+  remediation: Avoid dumping full environment. Use specific variable names instead.
+- id: TOOL_CMD_CHMOD_RECURSIVE
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: privilege_escalation
+  severity: MEDIUM
+  patterns:
+  - \bchmod\s+.*-R\s+(777|a\+rwx)\b
+  exclude_patterns:
+  - ^\s*#
+  description: Command recursively sets dangerous permissions (777 or a+rwx)
+  remediation: Confirm with user. Use least-privilege permissions.
+# ── Newly added rules (Phase 1: docker/yum/apt/cp/git) ──
+- id: TOOL_CMD_DOCKER_DANGEROUS
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: container_management
+  severity: HIGH
+  patterns:
+  - \bdocker\s+(rm|rmi|kill|stop|pause|unpause|rename|update)\b
+  - \bdocker\s+container\s+(rm|kill|stop|pause|unpause)\b
+  - \bdocker\s+volume\s+(rm|prune)\b
+  - \bdocker\s+network\s+(rm|disconnect)\b
+  - \bdocker\s+system\s+prune\b
+  - \bdocker\s+compose\s+(down|rm)\b
+  exclude_patterns:
+  - ^\s*#
+  description: Docker command performs destructive operations (remove, kill, stop,
+    prune)
+  remediation: Confirm with user. Destructive Docker operations may cause data loss
+    or service disruption.
+- id: TOOL_CMD_PACKAGE_MANAGER
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: package_management
+  severity: HIGH
+  patterns:
+  - \bapt(-get)?\s+(install|remove|purge|autoremove|upgrade|dist-upgrade)\b
+  - \byum\s+(install|remove|erase|autoremove|update|upgrade)\b
+  - \bdnf\s+(install|remove|autoremove|update|upgrade)\b
+  - \bpip3?\s+install\b
+  - \bnpm\s+(install|i)\b
+  - \bgem\s+install\b
+  exclude_patterns:
+  - ^\s*#
+  description: Package manager command installs or removes software packages
+  remediation: Confirm with user. Installing packages may introduce vulnerabilities
+    or break dependencies.
+- id: TOOL_CMD_DANGEROUS_CP
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: command_injection
+  severity: HIGH
+  patterns:
+  - \bcp\s+.*(-r|--recursive)\b.*/etc/
+  - \bcp\s+.*/etc/\s+
+  - \bcp\s+.*/usr/
+  - \bcp\s+.*\s+/bin/
+  - \bcp\s+.*\s+/sbin/
+  exclude_patterns:
+  - ^\s*#
+  description: Command copies files to sensitive system directories (/etc, /usr, /bin,
+    /sbin)
+  remediation: Confirm with user. Copying files to system directories may alter system
+    behavior.
+- id: TOOL_CMD_GIT_DESTRUCTIVE
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: version_control
+  severity: HIGH
+  patterns:
+  - \bgit\s+push\b
+  - \bgit\s+reset\s+--hard\b
+  - \bgit\s+clean\s+-f\b
+  - \bgit\s+branch\s+-D\b
+  - \bgit\s+checkout\s+--force\b
+  exclude_patterns:
+  - ^\s*#
+  description: Git command performs destructive or remote-affecting operations
+  remediation: Confirm with user. Destructive git operations may cause data loss or
+    push unintended changes.
+- id: TOOL_CMD_WGET_CURL_DATA
+  tools:
+  - execute_shell_command
+  params:
+  - command
+  category: network_abuse
+  severity: HIGH
+  patterns:
+  - \bcurl\s+.*(-d|--data|--data-raw|--data-binary)\b
+  - \bwget\s+.*--post-file\b
+  - \bwget\s+.*--body-file\b
+  - \bwget\s+.*--post-data\b
+  exclude_patterns:
+  - ^\s*#
+  description: HTTP client uploads data to a remote server
+  remediation: Block or confirm. Agents should not upload data to external endpoints
+    without explicit user consent.

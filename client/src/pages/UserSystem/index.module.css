@@ -1,0 +1,18 @@
+.pageContainer {
+  padding: 20px;
+  height: 100%;
+  overflow: auto;
+}
+
+.pageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+
+  h2 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 600;
+  }
+}

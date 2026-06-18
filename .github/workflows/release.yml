@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v1.0)"
+        required: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # ── 构建并推送 Docker 镜像 ──────────────────────────────────────
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push Server (all-in-one)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.server
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # ── 创建 GitHub Release ─────────────────────────────────────────
+  release:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+
+          # 一键安装脚本
+          cp install.sh release-assets/install.sh
+          chmod +x release-assets/install.sh
+
+          # 生产 compose
+          cp docker-compose.yml release-assets/docker-compose.yml
+
+          # .env 示例
+          cp .env.example release-assets/.env.example
+
+          # 源码 compose
+          cp docker-compose.build.yml release-assets/docker-compose.build.yml
+
+          # 生成 checksums
+          cd release-assets
+          sha256sum * > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "CoApis v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## CoApis v${{ steps.version.outputs.VERSION }}
+
+            ### 快速安装
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+            ```
+
+            ### 手动安装
+            ```bash
+            # 下载配置
+            wget https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml
+            wget https://raw.githubusercontent.com/${{ github.repository }}/main/.env.example -O .env
+            # 编辑 .env 填写 API Key
+            # 启动
+            docker compose up -d
+            ```
+
+            ### Docker 镜像
+            ```
+            ghcr.io/${{ github.repository }}/server:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}/server:latest
+            ```
+
+            ### 更新日志
+            详见 [CHANGELOG.md](./CHANGELOG.md)
+          files: |
+            release-assets/install.sh
+            release-assets/docker-compose.yml
+            release-assets/docker-compose.build.yml
+            release-assets/.env.example
+            release-assets/checksums.txt
+          draft: false
+          prerelease: false
+
+      - name: Update Docker Hub description (optional)
+        if: false  # Enable if publishing to Docker Hub
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: coapis/server
+          readme-filepath: ./README.md
