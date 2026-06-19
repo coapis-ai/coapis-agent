@@ -254,14 +254,24 @@ class PermissionManager:
     def get_all_roles(self) -> List[str]:
         return list(self._config.get("roles", {}).keys())
 
-    def get_menu_config(self, role: str = "user") -> Dict[str, Any]:
-        """Menu-visible module configs with adminOnly markers."""
-        allowed = self.get_allowed_modules(role)
+    def get_menu_config(self, role: str = "user", username: str = "") -> Dict[str, Any]:
+        """Menu-visible module configs with adminOnly markers.
+        
+        When username is provided, user-level permission overrides are merged
+        with the role defaults so that per-user grants/revocations are reflected.
+        """
         all_modules = self._config.get("modules", {})
         if role == "admin":
             allowed_keys = list(all_modules.keys())
         else:
-            allowed_keys = allowed
+            if username:
+                matrix = self._get_user_matrix(username, role)
+                allowed_keys = [
+                    mod for mod, crud in matrix.items()
+                    if isinstance(crud, dict) and any(crud.values())
+                ]
+            else:
+                allowed_keys = self.get_allowed_modules(role)
         modules_detail: Dict[str, Any] = {}
         for key in allowed_keys:
             if key in all_modules:

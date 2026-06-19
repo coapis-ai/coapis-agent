@@ -49,19 +49,25 @@ router = APIRouter(prefix="/permissions", tags=["permissions"])
 
 @router.get("/modules")
 async def get_allowed_modules(request: Request) -> dict:
-    """Get allowed modules for current user."""
+    """Get allowed modules for current user (role + per-user overrides)."""
     role = getattr(request.state, "role", "user")
+    username = getattr(request.state, "username", "")
     pm = PermissionManager.get_instance()
-    modules = pm.get_allowed_modules(role)
-    return {"modules": modules, "role": role, "username": getattr(request.state, "username", "")}
+    if role == "admin":
+        modules = ["all"]
+    else:
+        matrix = pm._get_user_matrix(username, role)
+        modules = [mod for mod, crud in matrix.items() if isinstance(crud, dict) and any(crud.values())]
+    return {"modules": modules, "role": role, "username": username}
 
 
 @router.get("/menu")
 async def get_menu_config(request: Request) -> dict:
-    """Get menu configuration for current user."""
+    """Get menu configuration for current user (role + per-user overrides)."""
     role = getattr(request.state, "role", "user")
+    username = getattr(request.state, "username", "")
     pm = PermissionManager.get_instance()
-    return pm.get_menu_config(role)
+    return pm.get_menu_config(role, username)
 
 
 @router.post("/check")

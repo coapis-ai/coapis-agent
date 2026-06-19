@@ -306,7 +306,10 @@ function UsersTab() {
     try {
       const values = await editForm.validateFields();
       const overrides = computeOverrides(editRoleVal, editOverrides);
-      values.permission_overrides = overrides || {};
+      // Send null when no changes — backend skips update if None
+      // Send {} to explicitly clear all overrides
+      // Send non-empty dict to set specific overrides
+      values.permission_overrides = overrides;
       await updateUser(editUser.id, values);
       message.success(t('admin.userUpdated'));
       setEditModal(false);
