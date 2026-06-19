@@ -92,6 +92,7 @@ from .audit import router as audit_router
 from ..license_api import router as license_router
 from ..cleanup_api import router as cleanup_router
 from ..access_control_api import router as access_control_router
+from .init import router as init_router
 
 router = APIRouter()
 
@@ -156,6 +157,7 @@ router.include_router(user_model_prefs_router)
 router.include_router(monitoring_router)
 router.include_router(audit_router)
 router.include_router(sso_router)
+router.include_router(init_router)
 
 # ═══════════════════════════════════════════════════════════
 # Cleanup, access control, license, files
