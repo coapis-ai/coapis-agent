@@ -63,6 +63,9 @@ class TokenRecordingModelWrapper(ChatModelBase):
         # Fire-and-forget: synchronous put_nowait, ~100 ns, no await needed.
         get_token_usage_manager().enqueue(event)
 
+        # Save to SQLite for per-user, per-agent tracking
+        self._record_usage_to_db(pt, ct)
+
         usage_data = {
             "provider_id": self._provider_id,
             "model_name": self.model_name,
@@ -82,6 +85,39 @@ class TokenRecordingModelWrapper(ChatModelBase):
         session_id = get_current_session_id()
         if session_id and usage:
             TokenRecordingModelWrapper._usage_by_session[session_id] = usage
+
+    def _record_usage_to_db(self, input_tokens: int, output_tokens: int) -> None:
+        """Save token usage to SQLite database for per-user, per-agent tracking."""
+        try:
+            from ..app.agent_context import get_current_agent_id
+            from .db_writer import save_token_usage
+            
+            # Get agent_id from context (set by request handler)
+            agent_id = get_current_agent_id()
+            
+            # Extract username from agent_id (format: "user:{username}")
+            username = "anonymous"
+            user_id = None
+            
+            if agent_id and agent_id.startswith("user:"):
+                username = agent_id[5:]  # Remove "user:" prefix
+            
+            # Save to database
+            save_token_usage(
+                user_id=user_id,
+                username=username,
+                agent_id=agent_id,
+                model=self.model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                cost_cents=0.0,
+            )
+            
+        except Exception as e:
+            # Don't let database errors break the main flow
+            import logging
+            logging.getLogger(__name__).debug("Failed to record token usage to DB: %s", e)
 
     async def __call__(
         self,

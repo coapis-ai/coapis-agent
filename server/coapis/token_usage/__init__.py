@@ -25,6 +25,11 @@ from .manager import (
 )
 from .model_wrapper import TokenRecordingModelWrapper
 from .buffer import _UsageEvent
+from .db_writer import (
+    save_token_usage,
+    get_user_token_usage,
+    get_agent_token_usage,
+)
 
 __all__ = [
     "TokenUsageByModel",
@@ -34,4 +39,7 @@ __all__ = [
     "get_token_usage_manager",
     "TokenRecordingModelWrapper",
     "_UsageEvent",
+    "save_token_usage",
+    "get_user_token_usage",
+    "get_agent_token_usage",
 ]
