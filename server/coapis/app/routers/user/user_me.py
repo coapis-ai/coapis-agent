@@ -33,14 +33,12 @@ router = APIRouter(tags=["user/me"])
 
 
 class UserInfoResponse(BaseModel):
-    """当前用户信息（含角色、等级、积分）."""
+    """当前用户信息（含角色、配额）."""
     id: int
     username: str
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     role: str = "user"
-    level: int = 0
-    points: int = 0
     token_remaining: int = 0
     is_active: bool = True
 
@@ -133,8 +131,6 @@ async def get_current_user(request: Request) -> UserInfoResponse:
         display_name=user.display_name,
         avatar_url=user.avatar_url,
         role=user.role,
-        level=user.level,
-        points=user.points,
         token_remaining=token_remaining,
         is_active=user.is_active,
     )

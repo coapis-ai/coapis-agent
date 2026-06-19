@@ -1,7 +1,7 @@
 import { api } from '../index';
 
 /**
- * Get current user info (with role, level, points)
+ * Get current user info (with role, quota)
  * GET /user/me
  */
 export function getCurrentUser() {

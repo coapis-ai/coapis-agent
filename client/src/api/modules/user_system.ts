@@ -1,7 +1,7 @@
 import { api } from '../index';
 
 // Backend routes are directly under / (no prefix)
-// /users/*, /points/*, /tokens/*
+// /users/*, /tokens/*
 
 // ─── Users ───
 
@@ -35,34 +35,6 @@ export function deleteUser(username: string) {
 
 export function listUsers(page = 1, pageSize = 20) {
   return api.get(`/users?page=${page}&page_size=${pageSize}`);
-}
-
-export function recalculateLevel(username: string) {
-  return api.post(`/users/${username}/recalculate-level`);
-}
-
-// ─── Points ───
-
-export function getPointsConfig() {
-  return api.get('/points/config');
-}
-
-export function addPoints(data: { username: string; amount: number; source: string; description?: string }) {
-  return api.post('/points/add', data);
-}
-
-export function spendPoints(data: { username: string; amount: number; source: string; description?: string }) {
-  return api.post('/points/spend', data);
-}
-
-export function getPointTransactions(username: string, page = 1, pageSize = 50, source?: string) {
-  const params = [`username=${encodeURIComponent(username)}`, `page=${page}`, `page_size=${pageSize}`];
-  if (source) params.push(`source=${encodeURIComponent(source)}`);
-  return api.get(`/points/transactions?${params.join('&')}`);
-}
-
-export function getLevelInfo() {
-  return api.get('/points/levels');
 }
 
 // ─── Tokens ───

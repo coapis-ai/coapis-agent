@@ -282,8 +282,6 @@ function UsersTab() {
     editForm.setFieldsValue({
       display_name: u.display_name || '',
       role: u.role || 'user',
-      level: u.level ?? 0,
-      points: u.points ?? 0,
       token_remaining: u.token_remaining ?? 0,
       is_active: u.is_active ?? true,
     });

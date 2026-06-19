@@ -105,7 +105,7 @@ async def create_backup_stream(req: CreateBackupRequest):
 
 
 @router.get("", response_model=list[BackupMeta], summary="List backups")
-@require_permission("admin:admin")
+@require_permission("backups:read")
 async def list_backups_route(request: Request):
     return await list_backups()
 
@@ -240,7 +240,7 @@ async def import_backup_route(
     response_model=BackupDetail,
     summary="Backup detail",
 )
-@require_permission("admin:admin")
+@require_permission("backups:read")
 async def get_backup_route(backup_id: str):
     detail = await get_backup(backup_id)
     if detail is None:

@@ -53,7 +53,6 @@ class AdminUserCreate(BaseModel):
 
 class AdminUserUpdate(BaseModel):
     role: Optional[str] = None
-    level: Optional[int] = None
     token_quota_monthly: Optional[int] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
@@ -231,8 +230,6 @@ async def create_user_admin(
         "display_name": safe_user.get("display_name"),
         "email": safe_user.get("email"),
         "role": safe_user.get("role"),
-        "level": safe_user.get("level", 0),
-        "points": safe_user.get("points", 0),
         "is_active": safe_user.get("is_active", True),
     }
 
@@ -283,10 +280,6 @@ async def update_user(
     if payload.role is not None:
         updates.append("role = ?")
         params.append(payload.role)
-    
-    if payload.level is not None:
-        updates.append("level = ?")
-        params.append(payload.level)
     
     if payload.token_quota_monthly is not None:
         updates.append("token_quota_monthly = ?")

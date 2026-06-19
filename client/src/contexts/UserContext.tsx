@@ -10,8 +10,6 @@ interface User {
   display_name: string | null;
   avatar_url: string | null;
   role: 'user' | 'admin' | 'superadmin';
-  level: number;
-  points: number;
   token_remaining: number;
   is_active: boolean;
 }

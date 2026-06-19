@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,96 +13,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Points router - endpoints for point management."""
+"""Points router — STUB (removed in simplification).
+
+All points-related endpoints return 404 to indicate the feature has been removed.
+"""
 from __future__ import annotations
 
-import logging
-from typing import Optional
-
-from fastapi import APIRouter, HTTPException, Query
-
-from ..models import (
-    PointTransactionList, PointAddRequest,
-    PointsConfigResponse,
-    LEVEL_THRESHOLDS, LEVEL_NAMES, LEVEL_NAMES_ZH,
-)
-from ..points import (
-    add_points, spend_points, manual_add_points,
-    get_point_transactions,
-)
-from ..config import get_config
-
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(tags=["user-system/points"])
 
 
-@router.get("/points/config", response_model=PointsConfigResponse)
+@router.get("/points/config")
 async def get_points_config():
-    """Get current points configuration."""
-    cfg = get_config()
-    return PointsConfigResponse(point_rules=cfg.point_rules)
+    raise HTTPException(status_code=404, detail="Points system has been removed")
 
 
 @router.post("/points/add")
-async def add_points_endpoint(req: PointAddRequest):
-    """Manually add points to a user (admin action)."""
-    cfg = get_config()
-    if not cfg.enabled:
-        raise HTTPException(status_code=403, detail="User system is disabled")
-
-    try:
-        actual = manual_add_points(req)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-    return {
-        "success": True,
-        "requested": req.amount,
-        "actual_added": actual,
-        "username": req.username,
-    }
+async def add_points_endpoint():
+    raise HTTPException(status_code=404, detail="Points system has been removed")
 
 
 @router.post("/points/spend")
-async def spend_points_endpoint(req: PointAddRequest):
-    """Spend points from a user account."""
-    cfg = get_config()
-    if not cfg.enabled:
-        raise HTTPException(status_code=403, detail="User system is disabled")
-
-    try:
-        success = spend_points(req.username, req.amount, req.source, req.description)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-    if not success:
-        raise HTTPException(status_code=400, detail="Insufficient points")
-
-    return {
-        "success": True,
-        "amount": req.amount,
-        "username": req.username,
-    }
+async def spend_points_endpoint():
+    raise HTTPException(status_code=404, detail="Points system has been removed")
 
 
-@router.get("/points/transactions", response_model=PointTransactionList)
-async def get_transactions(
-    username: str,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
-    source: Optional[str] = Query(None),
-):
-    """Get point transaction history for a user."""
-    return get_point_transactions(username, page, page_size, source)
+@router.get("/points/transactions")
+async def get_transactions():
+    raise HTTPException(status_code=404, detail="Points system has been removed")
 
 
 @router.get("/points/levels")
-@router.get("/level-info")  # Alias for frontend compatibility
 async def get_level_info():
-    """Get level threshold information."""
-    return {
-        "thresholds": LEVEL_THRESHOLDS,
-        "names": LEVEL_NAMES,
-        "names_zh": LEVEL_NAMES_ZH,
-    }
+    raise HTTPException(status_code=404, detail="Points/level system has been removed")

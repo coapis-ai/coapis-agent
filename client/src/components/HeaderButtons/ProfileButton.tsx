@@ -102,9 +102,6 @@ export default function ProfileButton() {
             <Tag color={roleColors[user.role] || 'default'} style={{ padding: '0 4px', fontSize: 10 }}>
               {roleLabels[user.role] || user.role}
             </Tag>
-            <span style={{ fontSize: 10, color: '#999' }}>
-              <ThunderboltOutlined /> {user.points}
-            </span>
           </Space>
         </Space>
       </div>

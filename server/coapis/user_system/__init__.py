@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,29 +13,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""User system module - configurable user management with points, tokens, and quotas.
+"""User system module - configurable user management with tokens and quotas.
 
 This module is completely independent from existing CoApis functionality.
 It is disabled by default (USER_SYSTEM_ENABLED=False) and can be enabled via env var.
 
+Simplified: no user levels, no points system.
+
 Structure:
-- database.py: SQLite persistence layer
+- database.py: SQLite/JSON persistence layer
 - models.py: Pydantic data models
 - config.py: Configurable strategy parameters
-- service.py: Core business logic (users, points, tokens, quotas)
-- middleware.py: Optional middleware (auth, quota, rate limit)
+- service.py: Core business logic (users, tokens, quotas)
+- middleware.py: Optional middleware (quota, rate limit)
+- points.py: Stub (removed)
 - routers/: API endpoints
 """
 from .database import get_db, UserSystemDB
 from .models import (
     UserCreate, UserUpdate, UserResponse, UserListResponse,
-    PointTransaction, PointTransactionList, PointAddRequest,
     TokenUsageRecord, TokenUsageSummary, TokenUsageList, TokenRecordRequest,
     UserSetting, UserSettingsList,
     APIKeyCreate, APIKeyResponse, APIKeyList,
-    PointsConfigResponse,
-    LEVEL_THRESHOLDS, LEVEL_NAMES, LEVEL_NAMES_ZH,
-    get_level_for_points,
+    AuditLog, AuditLogCreate, AuditLogList, AuditLogFilter,
 )
 from .config import get_config, UserSystemConfig
 
@@ -46,11 +45,8 @@ __all__ = [
     "get_config",
     "UserSystemConfig",
     "UserCreate", "UserUpdate", "UserResponse", "UserListResponse",
-    "PointTransaction", "PointTransactionList", "PointAddRequest",
     "TokenUsageRecord", "TokenUsageSummary", "TokenUsageList", "TokenRecordRequest",
     "UserSetting", "UserSettingsList",
     "APIKeyCreate", "APIKeyResponse", "APIKeyList",
-    "PointsConfigResponse",
-    "LEVEL_THRESHOLDS", "LEVEL_NAMES", "LEVEL_NAMES_ZH",
-    "get_level_for_points",
+    "AuditLog", "AuditLogCreate", "AuditLogList", "AuditLogFilter",
 ]

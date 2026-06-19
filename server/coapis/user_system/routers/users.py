@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Users router - CRUD endpoints for user management."""
+"""Users router - CRUD endpoints for user management.
+
+Simplified: no level recalculation, no points auto-earning.
+"""
 from __future__ import annotations
 
 import logging
@@ -24,11 +26,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..models import (
     UserCreate, UserUpdate, UserResponse, UserListResponse,
-    PointsConfigResponse,
 )
 from ..service import (
     create_user, get_user_by_username, update_user, delete_user,
-    list_users, authenticate, recalculate_level,
+    list_users, authenticate,
 )
 from ..config import get_config
 
@@ -46,17 +47,7 @@ async def get_users_config():
 
 @router.post("/users/register", response_model=UserResponse)
 async def register_user(req: UserCreate):
-    """Register a new user with complete workspace initialization.
-
-    Creates:
-    1. User database record (SQLite)
-    2. Auth user_store entry (JSON)
-    3. User workspace directory (workspaces/{username}/)
-    4. Default agent with agent.json
-    5. Essential JSON files (chats.json, jobs.json, skill.json)
-    6. Agent registration in config.json agents.profiles
-    7. User data directories (data/{username}/agents, skills, workflows, chats)
-    """
+    """Register a new user with complete workspace initialization."""
     cfg = get_config()
     if not cfg.enabled:
         raise HTTPException(status_code=403, detail="User system is disabled")
@@ -80,67 +71,51 @@ async def register_user(req: UserCreate):
     except Exception as e:
         logger.warning(f"Failed to sync user {user.username} to auth store: {e}")
 
-    # Step 3: Initialize user workspace (agent, skills, workflows, etc.) — pass request for runtime registration
+    # Step 3: Initialize user workspace
     try:
         from ...app.user_provisioning import init_user_workspace
         agent_id = init_user_workspace(
             username=user.username,
             display_name=req.display_name or user.username,
-            request=request,
         )
-        logger.info(f"User {user.username} workspace initialized (agent: {agent_id})")
+        logger.info(f"User {user.username} workspace initialized, agent={agent_id}")
     except Exception as e:
-        logger.error(
-            f"Failed to initialize workspace for {user.username}: {e}. "
-            "User created but workspace may be incomplete.",
-            exc_info=True,
-        )
-        # Don't fail registration - workspace can be initialized later
-
-    # Step 4: Award first login bonus
-    from ..points import add_points
-    add_points(user.username, cfg.points_first_login, "first_login")
+        logger.warning(f"Failed to initialize workspace for {user.username}: {e}")
 
     return user
 
 
-@router.post("/users/login", response_model=UserResponse)
-async def login_user(req: UserCreate):
-    """Login and get user info."""
+@router.get("/users/me", response_model=UserResponse)
+async def get_current_user(request: Request):
+    """Get current authenticated user info."""
+    username = getattr(request.state, "username", None)
+    if not username:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    user = get_user_by_username(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@router.get("/users/list", response_model=UserListResponse)
+async def list_users_endpoint(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """List all users with pagination."""
     cfg = get_config()
     if not cfg.enabled:
         raise HTTPException(status_code=403, detail="User system is disabled")
-
-    user = authenticate(req.username, req.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    # Award daily login bonus
-    from ..points import add_points
-    add_points(user.username, cfg.points_login_daily, "daily_login")
-
-    return user
-
-
-@router.get("/users/me", response_model=Optional[UserResponse])
-async def get_current_user(request: Request):
-    """Get current user info from request context."""
-    user_info = getattr(request.state, "user_info", None)
-    if user_info is None:
-        return None
-    # Return user info from request state (set by auth middleware)
-    return {
-        "id": user_info.get("id", 0),
-        "username": user_info.get("username", ""),
-        "display_name": user_info.get("display_name", user_info.get("username", "")),
-        "role": user_info.get("role", "user"),
-        "email": user_info.get("email", ""),
-    }
+    return list_users(page, page_size)
 
 
 @router.get("/users/{username}", response_model=UserResponse)
 async def get_user(username: str):
     """Get user by username."""
+    cfg = get_config()
+    if not cfg.enabled:
+        raise HTTPException(status_code=403, detail="User system is disabled")
     user = get_user_by_username(username)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -148,38 +123,24 @@ async def get_user(username: str):
 
 
 @router.put("/users/{username}", response_model=UserResponse)
-async def update_user_profile(username: str, req: UserUpdate):
+async def update_user_endpoint(username: str, req: UserUpdate):
     """Update user profile."""
+    cfg = get_config()
+    if not cfg.enabled:
+        raise HTTPException(status_code=403, detail="User system is disabled")
     try:
-        user = update_user(username, req)
+        return update_user(username, req)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return user
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.delete("/users/{username}")
 async def delete_user_endpoint(username: str):
-    """Delete user."""
-    if not delete_user(username):
+    """Delete a user."""
+    cfg = get_config()
+    if not cfg.enabled:
+        raise HTTPException(status_code=403, detail="User system is disabled")
+    success = delete_user(username)
+    if not success:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"success": True}
-
-
-@router.get("/users", response_model=UserListResponse)
-async def list_users_endpoint(
-    request: Request,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-):
-    """List users with pagination. Requires admin role."""
-    # Require admin role for listing all users
-    from ...app.auth import require_admin
-    require_admin(request)
-    return list_users(page, page_size)
-
-
-@router.post("/users/{username}/recalculate-level")
-async def recalculate_user_level(username: str):
-    """Recalculate user level based on total points."""
-    level = recalculate_level(username)
-    return {"username": username, "level": level}
+    return {"success": True, "username": username}
