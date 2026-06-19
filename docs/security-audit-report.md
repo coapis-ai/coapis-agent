@@ -305,7 +305,7 @@ Chat/index.tsx 渲染 ApprovalCard
 | 拦截类型 | 匹配规则 | 严重度 | 全角色拦截 |
 |----------|---------|:---:|:---:|
 | 目录拦截 | `~/.ssh/`, `~/.aws/`, `~/.config/`, `~/.gnupg/` | HIGH | ✅ |
-| 目录拦截 | `.coapis.secret/`, `.copaw.secret/` | HIGH | ✅ |
+| 目录拦截 | `.coapis.secret/`, `.coapis.secret/` | HIGH | ✅ |
 | 文件名拦截 | `.env`, `.env.*`, `shadow`, `passwd` | HIGH | ✅ |
 | 文件名拦截 | `id_rsa`, `id_ed25519`, `*.pem`, `*.key` | HIGH | ✅ |
 | Glob拦截 | `.env*`, `*.db`, `*.sqlite`, `*.sqlite3` | HIGH | ✅ |

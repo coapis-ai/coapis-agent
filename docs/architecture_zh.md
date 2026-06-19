@@ -114,7 +114,7 @@ CoApis 采用**三层架构**设计：
 ### 代码目录结构
 
 ```
-eater-claw/
+coapis-agent/
 ├── client/                             # 前端源码
 │   ├── src/
 │   │   ├── api/                        # API 封装层

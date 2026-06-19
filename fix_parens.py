@@ -2,7 +2,7 @@
 """Fix double-parenthesis bug from assign_scenes.py: )) -> )"""
 import re, glob, os
 
-os.chdir('/apps/ai/tool-dev/devs/eater-claw')
+os.chdir('/apps/ai/tool-dev/dev-coapis/coapis-agent')
 
 fixed = 0
 for f in sorted(glob.glob('server/coapis/agents/tools/*.py')):

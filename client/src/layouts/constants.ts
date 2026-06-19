@@ -162,7 +162,7 @@ coapis update
 3. 如果你是从源码安装，进入项目目录并拉取最新代码后重新安装：
 
 \`\`\`
-cd eater-claw
+cd coapis-agent
 git pull origin main
 cd client && npm ci && npm run build
 cd .. && mkdir -p server/console
@@ -194,7 +194,7 @@ coapis update
 3. Если устанавливали из исходников, получите последние изменения и переустановите:
 
 \`\`\`
-cd eater-claw
+cd coapis-agent
 git pull origin main
 cd client && npm ci && npm run build
 cd .. && mkdir -p server/console
@@ -226,7 +226,7 @@ coapis update
 3. If installed from source, pull the latest code and reinstall:
 
 \`\`\`
-cd eater-claw
+cd coapis-agent
 git pull origin main
 cd client && npm ci && npm run build
 cd .. && mkdir -p server/console

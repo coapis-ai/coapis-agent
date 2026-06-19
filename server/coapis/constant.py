@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2026 以太吃虾 & CoApis Contributors
+# Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -211,7 +211,7 @@ BUILTIN_QA_AGENT_SKILL_NAMES: tuple[str, ...] = (
     "QA_source_index",
 )
 
-# CoPaw-era builtin QA; may remain in config.json — disabled when the current
+# CoApis-era builtin QA; may remain in config.json — disabled when the current
 # ``BUILTIN_QA_AGENT_ID`` profile is first created (see ``migration``), not
 # every startup, so users can re-enable this id if they want.
 LEGACY_QA_AGENT_ID = "CoPaw_QA_Agent_0.1beta1"

@@ -1883,7 +1883,7 @@
     "diagnoseComplete": "診断が完了しました",
     "diagnoseFailed": "診断に失敗しました",
     "externalAgents": "外部エージェント",
-    "externalAgentsDesc": "外部手段（例：CoPawマルチエージェント）を介して登録されたエージェントを管理します。ここで有効または無効にできます。",
+    "externalAgentsDesc": "外部手段（例：CoApisマルチエージェント）を介して登録されたエージェントを管理します。ここで有効または無効にできます。",
     "externalAgentsLoadFailed": "外部エージェントの読み込みに失敗しました",
     "externalAgentUpdated": "外部エージェントの状態が更新されました",
     "externalAgentUpdateFailed": "外部エージェントの更新に失敗しました",

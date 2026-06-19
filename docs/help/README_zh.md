@@ -79,7 +79,7 @@ CoApis 支持以下语言：
 
 - **查看文档**：浏览本帮助文档
 - **查看日志**：`docker logs coapis-server`
-- **提交 Issue**：[GitHub Issues](https://github.com/eater-claw/eater-claw/issues)
+- **提交 Issue**：[GitHub Issues](https://github.com/coapis/coapis/issues)
 - **社区交流**：加入我们的社区
 
 ---

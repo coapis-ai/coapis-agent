@@ -316,7 +316,7 @@ CoApis — Eater（吃货/探索者）+ Claw（爪子）。一只什么都想试
 
 ## 许可证
 
-Copyright 2026 以太吃虾 & CoApis Contributors
+Copyright 2026 蜜蜂 & CoApis Contributors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

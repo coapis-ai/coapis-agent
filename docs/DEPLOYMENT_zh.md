@@ -24,8 +24,8 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/eater-claw.git
-cd eater-claw
+git clone https://github.com/coapis/coapis.git
+cd coapis-agent
 
 # Start with docker-compose
 docker-compose up -d
@@ -517,7 +517,7 @@ curl http://localhost:8000/api/license/status \
 ### B. 目录结构
 
 ```
-eater-claw/
+coapis-agent/
 ├── client/                 # 前端代码
 ├── server/                 # 后端代码
 │   ├── coapis/         # 开源包
@@ -550,4 +550,4 @@ python3 /tmp/enterprise_test.py
 
 **文档版本**: 1.0.0
 **更新日期**: 2026-05-15
-**维护者**: 以太吃虾
+**维护者**: 蜜蜂

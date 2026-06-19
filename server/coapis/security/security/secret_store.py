@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -*- coding: utf-8 -*-
-# Copyright 2026 以太吃虾 & CoApis Contributors
+# Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -97,7 +97,7 @@ def _try_keyring_get() -> Optional[str]:
         if value:
             return value
 
-        # Backward compatibility: read legacy CoPaw keyring entry.
+        # Backward compatibility: read legacy CoPaw keyring entry (backward compat).
         return keyring.get_password(
             _KEYRING_SERVICE_LEGACY,
             _KEYRING_ACCOUNT,

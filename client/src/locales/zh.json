@@ -1745,7 +1745,7 @@
     "diagnoseComplete": "诊断完成",
     "diagnoseFailed": "诊断失败",
     "externalAgents": "外部智能体",
-    "externalAgentsDesc": "管理通过外部方式（如 CoPaw 多智能体）注册的智能体。可在此启用或禁用。",
+    "externalAgentsDesc": "管理通过外部方式（如 CoApis 多智能体）注册的智能体。可在此启用或禁用。",
     "externalAgentsLoadFailed": "加载外部智能体失败",
     "externalAgentUpdated": "外部智能体状态已更新",
     "externalAgentUpdateFailed": "更新外部智能体失败",

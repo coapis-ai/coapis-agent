@@ -1898,7 +1898,7 @@
     "diagnoseComplete": "Диагностика завершена",
     "diagnoseFailed": "Диагностика не удалась",
     "externalAgents": "Внешние агенты",
-    "externalAgentsDesc": "Управление агентами, зарегистрированными через внешние средства (например, CoPaw multi-agent). Включить или отключить здесь.",
+    "externalAgentsDesc": "Управление агентами, зарегистрированными через внешние средства (например, CoApis multi-agent). Включить или отключить здесь.",
     "externalAgentsLoadFailed": "Не удалось загрузить внешних агентов",
     "externalAgentUpdated": "Состояние внешнего агента обновлено",
     "externalAgentUpdateFailed": "Не удалось обновить внешнего агента",

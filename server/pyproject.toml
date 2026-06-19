@@ -80,12 +80,12 @@ build-backend = "setuptools.build_meta"
 
 [project.scripts]
 coapis = "coapis.cli.main:cli"
-copaw = "coapis.cli.main:cli"
+coapis = "coapis.cli.main:cli"
 
 # Optional doctor plugins: callable (DoctorRunContext) -> list[str]
 # [project.entry-points."coapis.doctor"]
 # my_pkg = "my_pkg.doctor:doctor_notes"
-# Legacy group "copaw.doctor" is still loaded when present.
+# Legacy group "copaw.doctor" is still loaded when present (backward compat).
 
 [project.optional-dependencies]
 dev = [

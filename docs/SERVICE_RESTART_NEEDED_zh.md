@@ -29,7 +29,7 @@
 
 ## 需要手动重启
 
-请以太吃虾手动重启 CoApis 服务。以下是可能的重启方式：
+请蜜蜂手动重启 CoApis 服务。以下是可能的重启方式：
 
 ### 方式 1: 如果服务由 systemd 管理
 ```bash
@@ -43,7 +43,7 @@ supervisorctl restart coapis
 
 ### 方式 3: 如果服务由 docker 管理
 ```bash
-cd /apps/ai/tool-dev/devs/eater-claw
+cd /apps/ai/tool-dev/dev-coapis/coapis-agent
 docker-compose restart
 ```
 
@@ -53,7 +53,7 @@ docker-compose restart
 kill 2636299
 
 # 重新启动
-cd /apps/ai/tool-dev/devs/eater-claw/server
+cd /apps/ai/tool-dev/dev-coapis/coapis-agent/server
 # 查看启动命令（可能在 run.sh 或 start.sh 中）
 bash run.sh  # 或 start.sh
 ```
@@ -64,7 +64,7 @@ bash run.sh  # 或 start.sh
 kill 2636299
 
 # 重新启动（根据实际启动命令，可能是类似）
-cd /apps/ai/tool-dev/devs/eater-claw/server
+cd /apps/ai/tool-dev/dev-coapis/coapis-agent/server
 uvicorn coapis.app._app:app --host 0.0.0.0 --port 8000
 ```
 

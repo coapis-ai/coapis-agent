@@ -2,7 +2,7 @@
 """Batch assign scene to all @register_tool decorators based on tool name mapping."""
 import re, os
 
-os.chdir('/apps/ai/tool-dev/devs/eater-claw')
+os.chdir('/apps/ai/tool-dev/dev-coapis/coapis-agent')
 
 # Scene assignment map: tool_name -> scene
 SCENE_MAP = {

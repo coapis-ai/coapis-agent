@@ -3,7 +3,7 @@
 import re, json, glob, os
 from collections import Counter, defaultdict
 
-os.chdir('/apps/ai/tool-dev/devs/eater-claw')
+os.chdir('/apps/ai/tool-dev/dev-coapis/coapis-agent')
 
 tools = []
 for f in sorted(glob.glob('server/coapis/agents/tools/*.py')):

@@ -13,8 +13,8 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/eater-claw/eater-claw.git
-cd eater-claw
+git clone https://github.com/coapis/coapis.git
+cd coapis-agent
 
 # 2. 配置环境变量
 cp docker/.env.example docker/.env

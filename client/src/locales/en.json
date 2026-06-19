@@ -1879,7 +1879,7 @@
     "diagnoseComplete": "Diagnose complete",
     "diagnoseFailed": "Diagnose failed",
     "externalAgents": "External Agents",
-    "externalAgentsDesc": "Manage agents registered via external means (e.g., CoPaw multi-agent). Enable or disable here.",
+    "externalAgentsDesc": "Manage agents registered via external means (e.g., CoApis multi-agent). Enable or disable here.",
     "externalAgentsLoadFailed": "Failed to load external agents",
     "externalAgentUpdated": "External agent status updated",
     "externalAgentUpdateFailed": "Failed to update external agent",

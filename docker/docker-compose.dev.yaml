@@ -10,6 +10,17 @@
 name: coapis-dev
 
 services:
+  # ── 前端构建（一次性，编译完即退出） ──
+  frontend-build:
+    image: node:22-slim
+    container_name: coapis-frontend-build-dev
+    working_dir: /app
+    volumes:
+      - ../client:/app
+    command: sh -c "npm ci && npm run build"
+    networks:
+      - frontend-dev
+
   # ── 后端 API 服务 ──
   server:
     image: coapis-server:latest
@@ -61,6 +72,8 @@ services:
     environment:
       - COAPIS_UPLOAD_MAX_BODY_SIZE=${COAPIS_UPLOAD_MAX_FILE_SIZE_MB:-20}
     depends_on:
+      frontend-build:
+        condition: service_completed_successfully
       server:
         condition: service_healthy
     restart: unless-stopped

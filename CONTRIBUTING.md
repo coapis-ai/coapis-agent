@@ -32,8 +32,8 @@
 
 ```bash
 # 1. Fork 项目并克隆
-git clone https://github.com/<your-username>/eater-claw.git
-cd eater-claw
+git clone https://github.com/<your-username>/coapis-agent.git
+cd coapis-agent
 
 # 2. 创建开发分支
 git checkout -b feature/your-feature-name

@@ -41,7 +41,7 @@ docker logs coapis-server 2>&1 | grep "resolved role from workspace owner"
 ```
 **预期**：应看到类似日志：
 ```
-Runner: resolved role from workspace owner '以太吃虾': admin
+Runner: resolved role from workspace owner '蜜蜂': admin
 ```
 
 ## 回归验证

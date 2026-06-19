@@ -7,7 +7,7 @@ import subprocess
 import shutil
 import sys
 
-BACKEND_DIR = "/apps/ai/tool-dev/devs/eater-claw"
+BACKEND_DIR = "/apps/ai/tool-dev/dev-coapis/coapis-agent"
 LOG_DIR = "/var/log/coapis"
 LOG_FILE = "/var/log/coapis/backend.log"
 BACKEND_PORT = 4103

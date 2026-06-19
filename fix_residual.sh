@@ -1,8 +1,8 @@
 #!/bin/bash
-# 修复残留的 eaterclaw 引用
-cd /apps/ai/tool-dev/devs/eater-claw
+# 修复残留的 coapis 引用
+cd /apps/ai/tool-dev/dev-coapis/coapis-agent
 
-grep -ri "eaterclaw\|EaterClaw\|EATERCLAW" \
+grep -ri "coapis\|CoApis\|COAPIS" \
   --include="*.py" --include="*.ts" --include="*.tsx" \
   --include="*.json" --include="*.yaml" --include="*.yml" \
   --include="*.env" --include="*.sh" --include="*.html" \
@@ -16,12 +16,12 @@ grep -ri "eaterclaw\|EaterClaw\|EATERCLAW" \
   | grep -v fix_residual \
   | grep -v package-lock.json \
   | while IFS= read -r f; do
-    sed -i 's/eaterclaw/coapis/g; s/EaterClaw/CoApis/g; s/EATERCLAW/COAPIS/g; s/Eaterclaw/Coapis/g' "$f"
+    sed -i 's/coapis/coapis/g; s/CoApis/CoApis/g; s/COAPIS/COAPIS/g; s/Coapis/Coapis/g' "$f"
     echo "fixed: $f"
 done
 
 echo "=== verification ==="
-remaining=$(grep -ri "eaterclaw\|EaterClaw\|EATERCLAW" \
+remaining=$(grep -ri "coapis\|CoApis\|COAPIS" \
   --include="*.py" --include="*.ts" --include="*.tsx" \
   --include="*.json" --include="*.yaml" --include="*.yml" \
   --include="*.env" --include="*.sh" --include="*.html" \

@@ -27,8 +27,8 @@ curl -fsSL https://get.docker.com | sh
 ### 2. 获取代码
 
 ```bash
-git clone https://github.com/eater-claw/eater-claw.git
-cd eater-claw
+git clone https://github.com/coapis/coapis.git
+cd coapis-agent
 ```
 
 ### 3. 配置环境变量

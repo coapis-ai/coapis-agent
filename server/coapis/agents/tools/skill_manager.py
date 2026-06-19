@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2026 以太吃虾 & CoApis Contributors
+# Copyright 2026 蜜蜂 & CoApis Contributors
 # Licensed under the Apache License, Version 2.0
 from __future__ import annotations
 import asyncio, json, logging, os, time, importlib, importlib.util

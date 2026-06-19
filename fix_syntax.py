@@ -2,7 +2,7 @@
 """Fix the broken @register_tool decorators: remove double commas and fix parens."""
 import re, glob, os
 
-os.chdir('/apps/ai/tool-dev/devs/eater-claw')
+os.chdir('/apps/ai/tool-dev/dev-coapis/coapis-agent')
 
 fixed = 0
 for f in sorted(glob.glob('server/coapis/agents/tools/*.py')):

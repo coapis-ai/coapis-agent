@@ -22,7 +22,7 @@
 
 ### 1.1 产品定位
 
-CoApis（以太吃虾）是一个**多智能体对话平台**，支持：
+CoApis（蜜蜂）是一个**多智能体对话平台**，支持：
 - 多用户隔离对话（Console Chat）
 - 多智能体管理（全局/用户级）
 - 多渠道接入（Console、钉钉、Discord、飞书、Matrix、MQTT、Telegram 等）
@@ -48,7 +48,7 @@ CoApis（以太吃虾）是一个**多智能体对话平台**，支持：
 ### 2.1 项目根目录
 
 ```
-eater-claw/
+coapis-agent/
 ├── client/                    # 前端 React 应用
 ├── server/                    # 后端 Python 应用
 ├── docker/                    # Docker 部署配置
