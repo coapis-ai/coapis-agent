@@ -1136,6 +1136,35 @@ class AgentRunner(Runner):
                     else root_session_id,
                 )
 
+            # ── Persist partial assistant response before cancelling ──
+            # When the task is cancelled (e.g. /stop), the stream may have
+            # produced partial output in _evolution_full_response.  We must
+            # write that into agent.memory so that save_session_state in
+            # the finally block captures the full conversation context.
+            if agent is not None and _evolution_full_response:
+                partial_text = "".join(_evolution_full_response).strip()
+                if partial_text:
+                    try:
+                        from agentscope.message import Msg, TextBlock
+                        await agent.memory.add(
+                            Msg(
+                                name="assistant",
+                                content=[TextBlock(text=partial_text)],
+                                role="assistant",
+                            ),
+                        )
+                        logger.info(
+                            "CancelledError: persisted %d chars of "
+                            "partial assistant response to memory",
+                            len(partial_text),
+                        )
+                    except Exception as mem_exc:
+                        logger.warning(
+                            "Failed to persist partial assistant "
+                            "response on cancel: %s",
+                            mem_exc,
+                        )
+
             if agent is not None:
                 await agent.interrupt()
             raise AgentException("Task has been cancelled!") from exc
