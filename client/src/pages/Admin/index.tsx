@@ -11,7 +11,7 @@ import { useModuleAccess } from '@/hooks/useModuleAccess';
 import PermissionMatrix from './components/PermissionMatrix';
 import { CRUD_OPS } from './components/PermissionMatrix';
 import {
-  getTokenSummary, getLevelInfo, getUsersConfig,
+  getTokenSummary, getUsersConfig,
 } from '@/api/modules/user_system';
 import {
   getSystemOverview, listUsers, createUser, deleteUser, disableUser, updateUser, getAuditLogs,
@@ -282,7 +282,6 @@ function UsersTab() {
     editForm.setFieldsValue({
       display_name: u.display_name || '',
       role: u.role || 'user',
-      token_remaining: u.token_remaining ?? 0,
       is_active: u.is_active ?? true,
     });
     setEditRoleVal(u.role || 'user');
@@ -576,15 +575,6 @@ function UsersTab() {
                 }}
               />
             </Form.Item>
-            <Form.Item name="level" label={t('usersystem.level')}>
-              <Input type="number" min={0} />
-            </Form.Item>
-            <Form.Item name="points" label={t('usersystem.points')}>
-              <Input type="number" min={0} />
-            </Form.Item>
-            <Form.Item name="token_remaining" label={t('usersystem.tokenRemaining')}>
-              <Input type="number" min={0} />
-            </Form.Item>
             <Form.Item name="is_active" valuePropName="checked" label={t('usersystem.status')}>
               <Switch />
             </Form.Item>
@@ -658,15 +648,12 @@ function ConfigTab() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<any>(null);
-  const [levelInfo, setLevelInfo] = useState<any>(null);
 
   useEffect(() => {
     Promise.all([
       getUsersConfig().catch(() => ({})),
-      getLevelInfo().catch(() => ({})),
-    ]).then(([cfg, levels]) => {
+    ]).then(([cfg]) => {
       setConfig(cfg);
-      setLevelInfo(levels);
       setLoading(false);
     });
   }, []);
@@ -690,20 +677,6 @@ function ConfigTab() {
               <Descriptions.Item label={t('admin.totalUsers')}>
                 {config?.total_users ?? '-'}
               </Descriptions.Item>
-            </Descriptions>
-          </Card>
-        </Col>
-        <Col span={12}>
-          <Card title={t('admin.levelConfig')} bordered={false}>
-            <Descriptions column={1} bordered size="small">
-              {levelInfo?.names_zh && Object.entries(levelInfo.names_zh).map(([level, name]) => (
-                <Descriptions.Item key={level} label={`L${level}`}>
-                  {String(name)}
-                </Descriptions.Item>
-              ))}
-              {!levelInfo?.names_zh && (
-                <Descriptions.Item label="-">No level config</Descriptions.Item>
-              )}
             </Descriptions>
           </Card>
         </Col>

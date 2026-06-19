@@ -131,15 +131,6 @@ export default function UserProfilePage() {
               <Descriptions.Item label={t('usersystem.username')}>
                 {userDetails?.username || user?.username}
               </Descriptions.Item>
-              <Descriptions.Item label={t('usersystem.level')}>
-                L{userDetails?.level || user?.level || 0}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('usersystem.points')}>
-                <Space>
-                  <ThunderboltOutlined style={{ color: '#faad14' }} />
-                  {userDetails?.points ?? user?.points ?? 0}
-                </Space>
-              </Descriptions.Item>
               <Descriptions.Item label={t('usersystem.tokenRemaining')}>
                 <Space>
                   <CloudServerOutlined style={{ color: '#1890ff' }} />

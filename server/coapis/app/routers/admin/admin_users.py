@@ -53,6 +53,7 @@ class AdminUserCreate(BaseModel):
 
 class AdminUserUpdate(BaseModel):
     role: Optional[str] = None
+    display_name: Optional[str] = None
     token_quota_monthly: Optional[int] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
@@ -280,6 +281,10 @@ async def update_user(
     if payload.role is not None:
         updates.append("role = ?")
         params.append(payload.role)
+    
+    if payload.display_name is not None:
+        updates.append("display_name = ?")
+        params.append(payload.display_name)
     
     if payload.token_quota_monthly is not None:
         updates.append("token_quota_monthly = ?")

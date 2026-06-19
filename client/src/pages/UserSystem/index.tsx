@@ -32,7 +32,6 @@ import {
   listUsers,
   registerUser,
   getTokenSummary,
-  getLevelInfo,
   getUsersConfig,
 } from '@/api/modules/user_system';
 import styles from './index.module.css';
@@ -48,7 +47,6 @@ const UserSystemPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(20);
   const [searchText, setSearchText] = useState('');
   const [config, setConfig] = useState<any>(null);
-  const [levelInfo, setLevelInfo] = useState<any>(null);
   const [summaryModal, setSummaryModal] = useState<{ visible: boolean; user: any }>({
     visible: false,
     user: null,
@@ -57,14 +55,10 @@ const UserSystemPage: React.FC = () => {
   const [registerForm] = Form.useForm();
   const [selectedTab, setSelectedTab] = useState('users');
 
-  // Load config and level info
+  // Load config
   useEffect(() => {
-    Promise.all([
-      getUsersConfig().catch(() => ({ enabled: false })),
-      getLevelInfo().catch(() => ({})),
-    ]).then(([cfg, levels]) => {
+    getUsersConfig().catch(() => ({ enabled: false })).then((cfg) => {
       setConfig(cfg);
-      setLevelInfo(levels);
     });
   }, []);
 
@@ -94,8 +88,7 @@ const UserSystemPage: React.FC = () => {
 
   // Get level name
   const getLevelName = (level: number) => {
-    if (!levelInfo?.names_zh) return `L${level}`;
-    return levelInfo.names_zh[level] || `L${level}`;
+    return `L${level}`;
   };
 
   // User table columns
@@ -391,35 +384,6 @@ const UserSystemPage: React.FC = () => {
                     },
                   }}
                 />
-              </Card>
-            ),
-          },
-          {
-            key: 'levels',
-            label: t('usersystem.levels'),
-            children: (
-              <Card>
-                <Row gutter={16}>
-                  {levelInfo?.thresholds && Object.entries(levelInfo.thresholds).map(([level, threshold]) => (
-                    <Col span={6} key={level}>
-                      <Card
-                        size="small"
-                        style={{ textAlign: 'center' }}
-                        styles={{ body: { padding: '16px' } }}
-                      >
-                        <Tag color={getLevelColor(Number(level))} style={{ fontSize: 14 }}>
-                          {levelInfo.names_zh[Number(level)] || `L${level}`}
-                        </Tag>
-                        <div style={{ margin: '8px 0', fontSize: 24, fontWeight: 'bold' }}>
-                          {(threshold as number) === -1 ? '∞' : (threshold as number).toLocaleString()}
-                        </div>
-                        <div style={{ color: '#888', fontSize: 12 }}>
-                          {t('usersystem.points_required')}
-                        </div>
-                      </Card>
-                    </Col>
-                  ))}
-                </Row>
               </Card>
             ),
           },

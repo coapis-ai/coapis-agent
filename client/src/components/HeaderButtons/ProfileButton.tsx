@@ -3,7 +3,6 @@ import { Dropdown, Button, Avatar, Tag, Space } from 'antd';
 import {
   UserOutlined,
   LogoutOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../../contexts/UserContext';
