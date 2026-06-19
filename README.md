@@ -3,81 +3,192 @@
 # CoApis
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/Docker-GHCR-green)](https://ghcr.io/coapis/server)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
-[![React](https://img.shields.io/badge/React-18-blue)](https://react.dev/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-Latest-green)](https://fastapi.tiangolo.com/)
-[![i18n](https://img.shields.io/badge/i18n-EN%20%7C%20ZH%20%7C%20JA%20%7C%20RU-orange)](./docs/help/)
+[![Version](https://img.shields.io/badge/Version-0.8.13-green.svg)](CHANGELOG.md)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/r/coapis/server)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![React](https://img.shields.io/badge/React-18-blue.svg)](https://react.dev/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Latest-green.svg)](https://fastapi.tiangolo.com/)
+[![i18n](https://img.shields.io/badge/i18n-EN%20%7C%20ZH%20%7C%20JA%20%7C%20RU-orange.svg)](./docs/help/)
 
 **中文** | [English](./README_en.md)
 
-<img src="https://img.icons8.com/color/96/crab.png" alt="CoApis Logo" width="100">
+<img src="https://img.icons8.com/color/96/crab.png" alt="CoApis Logo" width="120">
 
-**企业级多用户 AI 协作平台**
+# 企业级多用户 AI 协作平台
 
-> 多用户共享 · 多智能体团队协作 · 56+ 精炼工具 · 四层记忆体系 · 技能进化引擎 · 七层安全纵深
+> 🚀 **服务端常驻 · 多用户共享 · 多智能体协作 · 越用越聪明**
 >
-> 在服务器端运行和管理多个 AI 智能体，为企业提供安全可控、越用越聪明的 AI 工作空间。
+> 在服务器端运行和管理多个 AI 智能体，为企业提供安全可控、持续进化的 AI 工作空间。
 
-[快速开始](#快速开始) · [核心特性](#核心特性) · [安全特性](#安全特性) · [文档](#文档) · [常见问题](#常见问题)
+[快速开始](#-快速开始) · [核心优势](#-核心优势) · [架构设计](#-架构设计) · [安全特性](#-安全特性) · [文档](#-文档)
+
+---
 
 </div>
 
----
+## 🎯 一句话说清楚
 
-## 新闻
+**CoApis = 企业私有化部署的 AI 助手团队**
 
-- [2026-06-13] **v0.8.0 — 七层安全纵深体系** | 系统级安全加固全面落地。
-
-  | 亮点 | 更新内容 |
-  |------|----------|
-  | **命令风险分类器** | 新增 CommandRiskClassifier，17 种命令类别 × 4 级角色，三级风险分级（自动放行 / 审批确认 / 硬拒绝）。 |
-  | **行为监控与自动封禁** | ToolCallMonitor 新增阻断能力，连续危险操作自动封禁。 |
-  | **环境变量最小化** | 子进程仅暴露 4 个必要变量，杜绝身份信息泄露。 |
-  | **Docker 安全加固** | 资源限制 + 内部网络隔离 + tmpfs 挂载。 |
-  | **安全文档套件** | 新增安全加固指南、运维手册、架构开发者指南三份文档。 |
-
-  另有：白名单语义匹配优化、ImportSandbox/ASTSandbox 集成、敏感文件列表补全、审批消息入记忆。[v0.8.0 更新日志 →](./CHANGELOG.md)
-
-- [2026-06-11] **v0.7.1 — 审计日志统一** | 三套审计日志合并为 SQLite 统一存储。
-
-- [2026-06-08] **v0.7.0 — 多级智能体协作** | 主 Agent 调度 + 子 Agent 并行执行 + 跨 Agent 通信。
+与 ChatGPT / Claude 等个人工具不同，CoApis 让你：
+- 🔒 **数据不出门** — 完全私有化部署，数据留在自己服务器
+- 👥 **多人共享** — 团队共用一套 AI 智能体，每人独立工作空间
+- 🧠 **越用越聪明** — 四层记忆 + 技能进化，Agent 持续成长
+- 🛡️ **企业级安全** — 七层纵深防御 + 完整审计链路
 
 ---
 
-## 导航
+## ⚡ 30 秒快速体验
 
-> **我是新用户，想快速试用**：[快速开始](#快速开始) → 三条命令跑起来 → [配置模型](#配置模型) → 在控制台对话
->
-> **我想接入企业微信 / 钉钉**：完成快速开始 → [频道配置](./docs/help/)
->
-> **我想了解安全机制**：[安全特性](#安全特性) → [安全加固指南](./docs/security-hardening-guide.md)
->
-> **我是运维，需要排查问题**：[运维操作手册](./docs/ops-security-manual.md)
->
-> **我是开发者，想了解架构**：[安全架构指南](./docs/security-architecture.md)
->
-> **我不想用 Docker**：[源码安装](#从源码安装)
+```bash
+# 一键启动（需要 Docker）
+mkdir -p /opt/coapis && cd /opt/coapis
+wget -qO- https://raw.githubusercontent.com/coapis/coapis/main/install.sh | bash
 
----
+# 访问 http://your-server:4200
+# 账号: admin / admin123
+```
 
-## 与同类产品的区别
+**就这么简单。** 无需安装 Node.js、Python、数据库 — Docker 搞定一切。
 
-CoApis 定位为企业级多用户 AI 协作平台，与常见的单用户 AI 助手有本质区别：
-
-| 维度 | 单用户 AI 助手 | CoApis |
-|------|--------------|-----------|
-| 部署方式 | 本地客户端，绑定个人电脑 | 服务端常驻，团队共享 |
-| 用户规模 | 1 人独享 | 多人同时使用，数据隔离 |
-| 使用门槛 | 需要本地安装、配置环境 | 开箱即用，非技术人员也能上手 |
-| 记忆能力 | 会话内有效，关闭即丢失 | 四层记忆，跨会话永久保存 |
-| 智能体 | 平行多智能体 | 三层智能体体系（全局/用户/智能体），支持机构级多部门团队协作，技能多级进化 |
-| 安全防护 | 基础过滤 | 七层纵深防御，完整审计链路 |
-| 企业合规 | 无 | RBAC 权限 + 审计日志 + Token 配额 |
+> 📖 详细步骤见 [安装指南](./docs/help/02-安装部署_zh.md) · [CLI 命令参考](./docs/CLI-REFERENCE_zh.md)
 
 ---
 
-## 快速开始
+## 🏆 核心优势
+
+### 1. 🏢 企业级多用户架构
+
+| 能力 | 说明 |
+|------|------|
+| **服务端常驻** | Agent 7×24 在线，关掉浏览器任务继续跑 |
+| **多用户共享** | 团队成员共享 AI 智能体，独立工作空间 |
+| **数据隔离** | 每人独立的 Agent、文件、记忆空间，互不可见 |
+| **RBAC 权限** | 四级角色（guest/user/advanced/admin），精细权限控制 |
+| **Token 配额** | 按角色分配月度用量，成本可控 |
+
+### 2. 🧠 四层记忆体系 — 真正的"越用越聪明"
+
+| 记忆层 | 用途 | 生命周期 |
+|--------|------|---------|
+| `short_term` | 当前对话上下文 | 会话内 |
+| `long_term` | 跨会话的用户偏好、经验沉淀 | 永久 |
+| `core` | Agent 的核心价值观和思考模式 | 永久 |
+| `ephemeral` | 临时数据、中间推理 | 临时 |
+
+**关键优势：**
+- ✅ Agent 在每次交互中**自动提取有价值信息**写入长期记忆
+- ✅ 语义检索能力，从历史记忆中**精准召回**相关信息
+- ✅ 用户偏好、工作习惯、项目上下文 — **永不遗忘**
+
+### 3. 🌱 技能进化引擎 — 自我学习的智能体
+
+```
+用户需求 → 自动创建技能 → 五维评估 → 晋升/淘汰
+    ↑                                        ↓
+    └──── 持续优化 ←─────── 使用反馈 ←───────┘
+```
+
+**进化机制：**
+- 🔄 **自动生成** — Agent 根据用户需求自动创建新技能
+- 📊 **五维评估** — 精确度、可靠性、有效率、满意度、稳健性
+- ⬆️ **自动晋升** — 高效技能升级到更高层级（全局/用户/智能体）
+- ⬇️ **自动淘汰** — 低效技能降级或移除
+- 🌐 **跨 Agent 传播** — 一个 Agent 验证有效的技能可推广给其他 Agent
+
+### 4. 🛡️ 七层安全纵深 — 企业级安全防护
+
+```
+┌─────────────────────────────────────────────────┐
+│  Layer 7: 审计合规    所有操作可追溯、可导出       │
+│  Layer 6: Docker 加固  资源限制 + 网络隔离         │
+│  Layer 5: 环境最小化   仅暴露 4 个必要变量         │
+│  Layer 4: 工具防护     29 条规则 + 65 个敏感路径   │
+│  Layer 3: 沙箱隔离     进程隔离 + namespace 挂载   │
+│  Layer 2: 行为监控     危险操作自动封禁            │
+│  Layer 1: 命令风险分类  17 类命令 × 4 级权限       │
+└─────────────────────────────────────────────────┘
+```
+
+### 5. 🌐 多语言 & 多渠道
+
+**界面语言：** 中文 · English · 日本語 · Русский（右上角一键切换）
+
+**接入渠道：** 企业微信 · 钉钉 · Slack · Telegram · Webhook
+
+### 6. 🛠️ 56+ 精炼工具
+
+从 108+ 工具精炼为 56+ 个高频实用工具，覆盖：
+
+| 场景 | 工具 |
+|------|------|
+| 📁 文件操作 | 读写、编辑、搜索、版本管理 |
+| 💻 Shell 执行 | 命令执行、环境管理 |
+| 🌐 浏览器自动化 | Playwright 集成、网页抓取 |
+| 📄 文档处理 | PDF、Word、Excel、PPT 生成与解析 |
+| 🔍 网络搜索 | Tavily、Exa 搜索引擎 |
+| 📧 邮件管理 | IMAP/SMTP 收发 |
+| 🧠 记忆检索 | 语义搜索历史记忆 |
+| 🤖 智能体协作 | 跨 Agent 通信、任务分发 |
+
+---
+
+## 🏗️ 架构设计
+
+### 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 前端 | React 18 + TypeScript + Ant Design 5 + Vite 5 |
+| 后端 | Python 3.11+ + FastAPI + SQLite/JSON |
+| 部署 | Docker + Docker Compose + Nginx |
+| LLM | 任意 OpenAI 兼容 API（OpenAI / Ollama / vLLM / LM Studio 等） |
+
+### 系统架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      CoApis Platform                        │
+├─────────────────────────────────────────────────────────────┤
+│  Frontend (React)              Backend (FastAPI)            │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────────────────┐  │
+│  │  Chat UI    │  │  MySpace    │  │  REST + SSE API    │  │
+│  │  (多轮对话) │  │  (文件管理) │  │  (56+ 工具)        │  │
+│  └─────────────┘  └─────────────┘  └────────────────────┘  │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────────────────┐  │
+│  │  Evolution  │  │  Admin      │  │  Security Layer    │  │
+│  │  (进化面板) │  │  (用户管理) │  │  (七层防御)        │  │
+│  └─────────────┘  └─────────────┘  └────────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│                    Agent Core Layer                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────────────────┐  │
+│  │  Foundation │  │  Evolution  │  │  Context Manager   │  │
+│  │  (四层记忆) │  │  (技能进化) │  │  (上下文压缩)      │  │
+│  └─────────────┘  └─────────────┘  └────────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│                    Infrastructure                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────────────────┐  │
+│  │  LLM Service│  │  Storage    │  │  Channels          │  │
+│  │  (多模型)   │  │  (JSON/DB)  │  │  (企微/钉钉/...)   │  │
+│  └─────────────┘  └─────────────┘  └────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 与同类产品的区别
+
+| 维度 | 个人 AI 助手 (ChatGPT/Claude) | CoApis |
+|------|------------------------------|--------|
+| 🏠 **部署** | 本地客户端，绑定个人电脑 | 服务端常驻，团队共享 |
+| 👥 **用户** | 1 人独享 | 多人同时使用，数据隔离 |
+| 🧠 **记忆** | 会话内有效，关闭即丢失 | 四层记忆，跨会话永久保存 |
+| 🤖 **智能体** | 单一助手 | 三层体系（全局/用户/智能体），技能进化 |
+| 🛡️ **安全** | 基础过滤 | 七层纵深防御，完整审计链路 |
+| 🏢 **合规** | 无 | RBAC 权限 + 审计日志 + Token 配额 |
+| 🔧 **扩展** | 插件市场 | 自定义技能 + 多渠道接入 |
+
+---
+
+## 🚀 快速开始
 
 ### 前置要求
 
@@ -103,175 +214,7 @@ nano .env  # 填写 LLM API Key
 docker compose up -d
 ```
 
-> 从源码安装请参考 [从源码安装](#从源码安装) 章节。
-
-### 访问服务
-
-打开浏览器访问 `http://<server-ip>:4200`
-
-- 默认管理员：`admin` / `admin123`
-- ⚠️ 首次登录后请立即修改默认密码
-
----
-
-## 配置模型
-
-首次使用需要配置 LLM API Key，CoApis 支持任意 OpenAI 兼容的 API：
-
-1. 登录后进入 **设置 → 模型**
-2. 选择提供商（OpenAI / Ollama / vLLM / LM Studio 等）
-3. 填写 API Key 和 Base URL
-4. 启用该提供商与模型
-
-也可通过环境变量配置：在 `.env` 文件中设置 `OPENAI_API_KEY`。
-
-> 使用 Ollama / LM Studio 等本地模型时无需 API Key，详见 [配置指南](./docs/CONFIGURATION_zh.md)。
-
----
-
-## 核心特性
-
-<details>
-<summary><b>🏢 企业级多用户</b></summary>
-
-<br>
-
-CoApis 的智能体常驻服务器，7×24 小时在线。用户关掉浏览器后，任务继续跑、记忆不丢失。组织内多名用户共享同一套平台，每人拥有独立的工作空间和 Agent 实例，数据完全隔离。支持跨会话记忆保持和异步执行，定时任务到点自动触发，无需人工盯守。
-
-</details>
-
-<details>
-<summary><b>🤖 三层智能体团队协作</b></summary>
-
-<br>
-
-CoApis 采用三层智能体体系：全局智能体 → 用户智能体 → 任务智能体，逐层覆盖、灵活定制。主 Agent 负责理解意图、拆解任务，将子任务分发给专业子 Agent 并行执行，完成后汇总结果统一交付。子 Agent 自动继承父 Agent 的权限边界，确保协作安全可控。支持机构级多部门团队协作，不同部门可共享或隔离智能体资源。
-
-</details>
-
-<details>
-<summary><b>🧠 四层记忆体系</b></summary>
-
-<br>
-
-| 记忆层 | 用途 | 生命周期 |
-|--------|------|---------|
-| `short_term` | 当前对话上下文 | 会话内 |
-| `long_term` | 跨会话的用户偏好、经验沉淀 | 永久 |
-| `core` | Agent 的核心价值观和思考模式 | 永久 |
-| `ephemeral` | 临时数据、中间推理 | 临时 |
-
-Agent 在每次交互中自动提取有价值的信息写入长期记忆。配合语义检索能力，Agent 可以从历史记忆中精准召回相关信息。
-
-</details>
-
-<details>
-<summary><b>🌱 技能进化引擎</b></summary>
-
-<br>
-
-Agent 具备自我学习能力，可根据用户需求自动创建新技能，并通过五维指标（精确度、可靠性、有效率、满意度、稳健性）持续评估技能质量。达标技能自动晋升，低效技能自动淘汰。一个 Agent 验证有效的技能可推广给其他 Agent。技能体系分为全局、用户、智能体三级，逐层覆盖。
-
-</details>
-
-<details>
-<summary><b>🌐 多语言 & 多渠道</b></summary>
-
-<br>
-
-**界面语言：** 中文 · English · 日本語 · Русский（右上角一键切换）
-
-**接入渠道：** 企业微信 · 钉钉 · Slack · Telegram · Webhook
-
-</details>
-
-<details>
-<summary><b>🛠️ 56+ 精炼工具</b></summary>
-
-<br>
-
-CoApis 从早期 108+ 工具出发，经过深度合并优化，精炼为 56+ 个高频实用工具，覆盖文件操作、Shell 执行、浏览器自动化、文档处理、多媒体分析、网络搜索、邮件管理、记忆检索、智能体协作、安全审计等场景。所有工具均受七层安全防护保护。
-
-</details>
-
-<details>
-<summary><b>🏗️ 企业级能力</b></summary>
-
-<br>
-
-四级 RBAC 权限（guest → user → advanced → admin）、按等级分配的月度 Token 配额、积分激励体系、完整审计日志（支持按用户/事件类型/风险等级查询）、文件版本管理与 409 冲突保护、Cron 定时任务、一键备份恢复。
-
-</details>
-
----
-
-## 安全特性
-
-CoApis 内置七层纵深防御架构，从工作区守卫到审计合规，每层独立拦截、层层互补：
-
-- **命令风险分类** — 17 种命令类别 × 4 级角色权限，危险命令弹窗审批或直接拒绝
-- **行为监控与自动封禁** — 连续危险操作自动封禁，冷却期防误判
-- **沙箱隔离** — 进程隔离、namespace 挂载隔离、CPU/内存资源限制
-- **环境变量最小化** — 子进程仅暴露 4 个必要变量
-- **工具防护引擎** — 29 条 YAML 规则、65 个敏感文件路径保护
-- **完整审计链路** — 所有操作（含被拒绝的）写入 SQLite，可追溯、可导出
-- **Docker 安全加固** — 资源限制 + 内部网络隔离 + tmpfs 挂载
-
-详见 [安全加固指南](./docs/security-hardening-guide.md) · [安全架构指南](./docs/security-architecture.md) · [运维操作手册](./docs/ops-security-manual.md)
-
----
-
-## 常见问题
-
-更多常见问题和故障排查，请访问 [帮助文档 · 常见问题](./docs/help/05-常见问题.md)。
-
----
-
-## 文档
-
-| 主题 | 说明 |
-|------|------|
-| [帮助文档](./docs/help/) | 产品文档（安装、配置、模块帮助、常见问题） |
-| [CLI 命令参考](./docs/CLI-REFERENCE_zh.md) | 命令行工具完整参考 |
-| [安全加固指南](./docs/security-hardening-guide.md) | P0-P3 安全加固总览、环境变量参考、FAQ |
-| [安全架构指南](./docs/security-architecture.md) | 七层架构、执行链路、扩展指南 |
-| [运维操作手册](./docs/ops-security-manual.md) | 白名单维护、封禁处理、告警排查 |
-| [部署指南](./docs/DEPLOYMENT_zh.md) | 生产环境部署 |
-| [API 参考](./docs/API-REFERENCE_zh.md) | API 接口文档 |
-| [配置指南](./docs/CONFIGURATION_zh.md) | 环境变量、Agent 配置详解 |
-
-完整文档见本仓库 [docs/](./docs/) 目录。
-
----
-
-## 路线图
-
-| 方向 | 事项 | 状态 |
-|------|------|------|
-| **安全加固** | Docker 非 root 运行 | 计划中 |
-| **安全加固** | 内核级 seccomp/AppArmor 沙箱 | 计划中 |
-| **智能体协作** | 群聊模式 | 计划中 |
-| **智能体协作** | HiClaw 企业级能力 | 计划中 |
-| **技能生态** | 技能市场（ClawHub 风格） | 征集中 |
-| **频道扩展** | 飞书、QQ 频道 | 征集中 |
-| **Coding 能力** | LSP、工作区版本控制 | 计划中 |
-| **上下文管理** | 上下文智能压缩 | 进行中 |
-
-_状态说明：**进行中** — 正在积极开发；**计划中** — 已排队或设计中；**征集中** — 欢迎社区参与。_
-
----
-
-## 版本策略
-
-| 版本 | 定位 | 许可证 |
-|------|------|--------|
-| CE (社区版) | 开源免费 | Apache 2.0 |
-| EE (企业版) | 商业增强 | Commercial License |
-| CD (云版) | SaaS 服务 | Subscription |
-
----
-
-## 从源码安装
+### 方式三：从源码安装
 
 ```bash
 git clone https://github.com/coapis/coapis.git
@@ -288,10 +231,96 @@ cp docker/.env.example docker/.env
 docker compose -f docker/docker-compose.build.yml up -d --build
 ```
 
-- **开发模式**（测试、格式化）：参照 [CONTRIBUTING.md](CONTRIBUTING.md) 安装开发依赖
-- **版本更新**：`git pull` 后重新构建前端、重启服务
+### 访问服务
 
-> **注意**：快速开始中的"方式三"已合并至此处，避免维护两份相同内容。
+打开浏览器访问 `http://<server-ip>:4200`
+
+- 默认管理员：`admin` / `admin123`
+- ⚠️ 首次登录后请立即修改默认密码
+
+---
+
+## 📚 文档
+
+| 文档 | 说明 |
+|------|------|
+| [安装指南](./docs/help/02-安装部署_zh.md) | 一键安装、Docker 部署、源码安装 |
+| [CLI 命令参考](./docs/CLI-REFERENCE_zh.md) | 命令行工具完整参考 |
+| [配置指南](./docs/help/03-配置指南_zh.md) | 模型、频道、权限配置 |
+| [API 参考](./docs/API-REFERENCE_zh.md) | RESTful API 接口文档 |
+| [安全加固指南](./docs/security-hardening-guide.md) | 七层安全架构详解 |
+| [安全架构指南](./docs/security-architecture.md) | 架构设计与扩展指南 |
+| [运维操作手册](./docs/ops-security-manual.md) | 白名单维护、封禁处理、告警排查 |
+| [部署指南](./docs/DEPLOYMENT_zh.md) | 生产环境部署 |
+| [产品概述](./docs/help/01-产品概述_zh.md) | 产品定位与核心功能 |
+
+---
+
+## 🔧 CLI 命令速查
+
+```bash
+# 系统初始化
+coapis init                          # 交互式初始化
+coapis init --defaults --accept-security  # 非交互式（Docker/脚本）
+
+# 管理命令
+coapis auth                          # 认证管理
+coapis models                        # 模型配置
+coapis channels                      # 频道配置
+coapis cron                          # 定时任务
+coapis admin                         # 管理员工具
+coapis doctor                        # 健康检查
+
+# 查看帮助
+coapis --help                        # 总帮助
+coapis <command> --help              # 子命令帮助
+```
+
+> 📖 完整命令参考见 [CLI-REFERENCE_zh.md](./docs/CLI-REFERENCE_zh.md)
+
+---
+
+## 🛡️ 安全特性
+
+CoApis 内置**七层纵深防御架构**，从工作区守卫到审计合规，每层独立拦截、层层互补：
+
+| 层级 | 能力 | 说明 |
+|------|------|------|
+| L1 | 命令风险分类 | 17 种命令类别 × 4 级角色权限，危险命令弹窗审批或直接拒绝 |
+| L2 | 行为监控与自动封禁 | 连续危险操作自动封禁，冷却期防误判 |
+| L3 | 沙箱隔离 | 进程隔离、namespace 挂载隔离、CPU/内存资源限制 |
+| L4 | 环境变量最小化 | 子进程仅暴露 4 个必要变量 |
+| L5 | 工具防护引擎 | 29 条 YAML 规则、65 个敏感文件路径保护 |
+| L6 | Docker 安全加固 | 资源限制 + 内部网络隔离 + tmpfs 挂载 |
+| L7 | 完整审计链路 | 所有操作（含被拒绝的）写入审计日志，可追溯、可导出 |
+
+详见 [安全加固指南](./docs/security-hardening-guide.md) · [安全架构指南](./docs/security-architecture.md)
+
+---
+
+## 🗺️ 路线图
+
+| 方向 | 事项 | 状态 |
+|------|------|------|
+| **平台** | Docker 非 root 运行 | 计划中 |
+| **平台** | 内核级 seccomp/AppArmor 沙箱 | 计划中 |
+| **智能体** | 群聊模式 | 计划中 |
+| **智能体** | 上下文智能压缩 | 进行中 |
+| **技能生态** | 技能市场（ClawHub 风格） | 征集中 |
+| **频道** | 飞书、QQ 频道 | 征集中 |
+| **Coding** | LSP、工作区版本控制 | 计划中 |
+
+_**进行中** — 正在积极开发 · **计划中** — 已排队或设计中 · **征集中** — 欢迎社区参与_
+
+---
+
+## 版本策略
+
+| 版本 | 定位 | 许可证 |
+|------|------|--------|
+| CE (社区版) | 开源免费 | Apache 2.0 |
+| EE (企业版) | 商业增强 | Commercial License |
+| CD (云版) | SaaS 服务 | Subscription |
 
 ---
 
@@ -303,15 +332,15 @@ docker compose -f docker/docker-compose.build.yml up -d --build
 
 | 渠道 | 链接 |
 |------|------|
-| Gitee | [ouerlai/coapis](https://gitee.com/ouerlai/coapis) |
-| GitHub | [coapis/coapis](https://github.com/coapis/coapis) |
+| Gitee | [ouerlai/coapis-agent](https://gitee.com/ouerlai/coapis-agent) |
+| GitHub | [coapis/coapis-agent](https://github.com/coapis/coapis-agent) |
 | 安全漏洞报告 | [SECURITY.md](SECURITY.md) |
 
 ---
 
 ## 为什么叫 CoApis？
 
-CoApis — Eater（吃货/探索者）+ Claw（爪子）。一只什么都想试试、什么都能抓得住的螃蟹，是你的 AI 工作伙伴。
+CoApis — Eater（吃货/探索者）+ Claw（爪子）。一只什么都想试试、什么都能抓得住的螃蟹，是你的 AI 工作伙伴。 🦀
 
 ---
 
@@ -332,5 +361,3 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ---
-
-</div>
