@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Tabs } from "@agentscope-ai/design";
 import {
@@ -13,11 +13,13 @@ import {
 } from "./components";
 import { PageHeader } from "@/components/PageHeader";
 import { useSkillsPage } from "./useSkillsPage";
+import { usePermission } from "@/hooks/usePermission";
 import { GlobalSkillsTab } from "./GlobalSkillsTab";
 import styles from "./index.module.less";
 
 function SkillsPage() {
   const { t } = useTranslation();
+  const { hasPermission, checkPermissions } = usePermission();
   const [activeTab, setActiveTab] = useState<"my" | "global">("my");
   const {
     skills,
@@ -110,6 +112,8 @@ function SkillsPage() {
                     onImportHub={() => setImportModalOpen(true)}
                     onCreate={handleCreate}
                     onFileChange={handleFileChange}
+                    canWrite={hasPermission("skills:write")}
+                    canDelete={hasPermission("skills:delete")}
                   />
                 </div>
 

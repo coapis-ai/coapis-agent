@@ -2495,5 +2495,8 @@
     "cleaned": "Cleaned {{count}} expired archives",
     "cleanupFailed": "Cleanup failed",
     "error": "Failed to load data"
+  },
+  "permission": {
+    "noAccess": "No permission to perform this action"
   }
 }

@@ -19,6 +19,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useUser } from '@/contexts/UserContext';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import { usePermission } from '@/hooks/usePermission';
 import {
   getEvolutionOverview,
   getUserEvolutionStatus,
@@ -44,6 +45,8 @@ export default function MultiLayerEvolutionPage() {
   const { t } = useTranslation();
   const { user, isAdmin } = useUser();
   const { isAllowed } = useModuleAccess();
+  const { hasPermission } = usePermission();
+  const canDelete = hasPermission("evolution:delete");
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedUser, setSelectedUser] = useState<string>(user?.username || '');
   const [users, setUsers] = useState<Array<{ username: string; label: string }>>([]);
@@ -616,6 +619,8 @@ function FoundationTab({ isAdmin }: { isAdmin: boolean }) {
 
 function ArchiveTab() {
   const { t } = useTranslation();
+  const { hasPermission } = usePermission();
+  const canDelete = hasPermission("evolution:delete");
   const [entries, setEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
@@ -660,7 +665,7 @@ function ArchiveTab() {
         <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>
           {t('common.refresh', '刷新')}
         </Button>
-        <Button danger icon={<DeleteOutlined />} onClick={handleCleanup}>
+        <Button danger icon={<DeleteOutlined />} onClick={handleCleanup} disabled={!canDelete}>
           {t('evolution.cleanup', '清理过期归档')}
         </Button>
         <Statistic title={t('evolution.archiveCount', '归档条目')} value={total} />

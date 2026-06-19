@@ -26,6 +26,7 @@ import { getBuiltinNoticeLines } from "./builtinNotice";
 import { useSkillPool } from "./useSkillPool";
 import { useProgressiveRender } from "../../../hooks/useProgressiveRender";
 import { PageHeader } from "@/components/PageHeader";
+import { PermissionGuard } from "@/components/PermissionGuard";
 import type { PoolSkillSpec } from "../../../api/types";
 import styles from "./index.module.less";
 
@@ -69,13 +70,15 @@ function SkillPoolPage() {
                 >
                   {t("skills.clearSelection")}
                 </Button>
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={pool.handleBatchDeletePool}
-                >
-                  {t("common.delete")} ({pool.selectedPoolSkills.size})
-                </Button>
+                <PermissionGuard module="skill-pool" action="delete">
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={pool.handleBatchDeletePool}
+                  >
+                    {t("common.delete")} ({pool.selectedPoolSkills.size})
+                  </Button>
+                </PermissionGuard>
                 <Button type="primary" onClick={pool.toggleBatchMode}>
                   {t("skills.exitBatch")}
                 </Button>
@@ -131,35 +134,41 @@ function SkillPoolPage() {
                 </div>
                 <div className={styles.headerActionsRight}>
                   <Tooltip title={t("skillPool.uploadZipHint")}>
-                    <Button
-                      type="default"
-                      icon={<UploadOutlined />}
-                      onClick={() => pool.zipInputRef.current?.click()}
-                    >
-                      {t("skills.uploadZip")}
-                    </Button>
+                    <PermissionGuard module="skill-pool" action="write">
+                      <Button
+                        type="default"
+                        icon={<UploadOutlined />}
+                        onClick={() => pool.zipInputRef.current?.click()}
+                      >
+                        {t("skills.uploadZip")}
+                      </Button>
+                    </PermissionGuard>
                   </Tooltip>
                   <Tooltip title={t("skillPool.importHubHint")}>
-                    <Button
-                      type="default"
-                      icon={<ImportOutlined />}
-                      onClick={() => pool.setImportModalOpen(true)}
-                    >
-                      {t("skills.importHub")}
-                    </Button>
+                    <PermissionGuard module="skill-pool" action="write">
+                      <Button
+                        type="default"
+                        icon={<ImportOutlined />}
+                        onClick={() => pool.setImportModalOpen(true)}
+                      >
+                        {t("skills.importHub")}
+                      </Button>
+                    </PermissionGuard>
                   </Tooltip>
                   <Button type="primary" onClick={pool.toggleBatchMode}>
                     {t("skills.batchOperation")}
                   </Button>
                   <Tooltip title={t("skills.createSkillHint")}>
-                    <Button
-                      type="primary"
-                      className={styles.primaryActionButton}
-                      icon={<PlusOutlined />}
-                      onClick={pool.openCreate}
-                    >
-                      {t("skills.createSkill")}
-                    </Button>
+                    <PermissionGuard module="skill-pool" action="write">
+                      <Button
+                        type="primary"
+                        className={styles.primaryActionButton}
+                        icon={<PlusOutlined />}
+                        onClick={pool.openCreate}
+                      >
+                        {t("skills.createSkill")}
+                      </Button>
+                    </PermissionGuard>
                   </Tooltip>
                 </div>
               </>

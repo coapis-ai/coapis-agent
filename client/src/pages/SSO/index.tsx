@@ -18,6 +18,7 @@ import {
   EditOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { usePermission } from "@/hooks/usePermission";
 import { PageHeader } from "@/components/PageHeader";
 import api from "@/api";
 import type { ColumnsType } from "antd/es/table";
@@ -35,6 +36,8 @@ interface SSOProvider {
 
 function SSOPage() {
   const { t } = useTranslation();
+  const { hasPermission } = usePermission();
+  const canWrite = hasPermission("security:write");
   const [loading, setLoading] = useState(false);
   const [providers, setProviders] = useState<SSOProvider[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -141,6 +144,7 @@ function SSOPage() {
             size="small"
             icon={<EditOutlined />}
             onClick={() => handleEdit(record)}
+            disabled={!canWrite}
           >
             {t("common.edit")}
           </Button>
@@ -150,6 +154,7 @@ function SSOPage() {
             danger
             icon={<DeleteOutlined />}
             onClick={() => handleDelete(record.name)}
+            disabled={!canWrite}
           >
             {t("common.delete")}
           </Button>
@@ -164,7 +169,7 @@ function SSOPage() {
         parent={t("nav.sso")}
         current={t("sso.title")}
         center={
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd} disabled={!canWrite}>
             {t("sso.addProvider")}
           </Button>
         }

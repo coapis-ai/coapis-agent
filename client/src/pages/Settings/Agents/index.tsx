@@ -12,6 +12,7 @@ import { useAgents } from "./useAgents";
 import { AgentTable, AgentModal } from "./components";
 import AgentIdentityFiles from "./components/AgentIdentityFiles";
 import { PageHeader } from "@/components/PageHeader";
+import { PermissionGuard } from "@/components/PermissionGuard";
 import { reorderAgents } from "./reorder";
 import GlobalAgentsTab from "@/pages/Admin/GlobalAgentsTab";
 import TemplatesTab from "@/pages/Admin/TemplatesTab";
@@ -24,6 +25,7 @@ export default function AgentsPage() {
   const { agents, loading, deleteAgent, toggleAgent, loadAgents, setAgents } =
     useAgents();
   const { selectedAgent, setSelectedAgent } = useAgentStore();
+  const { hasPermission, checkPermissions } = usePermission();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AgentSummary | null>(null);
   const [reordering, setReordering] = useState(false);
@@ -36,6 +38,10 @@ export default function AgentsPage() {
   const [identityFilesOpen, setIdentityFilesOpen] = useState(false);
   const [identityAgentId, setIdentityAgentId] = useState<string | null>(null);
   const [identityAgentName, setIdentityAgentName] = useState("");
+
+  useEffect(() => {
+    checkPermissions(["agents:create", "agents:delete"]);
+  }, []);
 
   // 过滤出当前用户自己的智能体
   const currentUsername = user?.username || '';
@@ -209,6 +215,7 @@ export default function AgentsPage() {
               onToggle={handleToggle}
               onReorder={handleReorder}
               onOpenFiles={handleOpenIdentityFiles}
+              canDelete={hasPermission("agents:delete")}
             />
           </Card>
           <AgentModal
@@ -251,13 +258,15 @@ export default function AgentsPage() {
         current={t("agent.agents")}
         extra={
           <div className={styles.headerRight}>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleCreate}
-            >
-              {t("agent.create")}
-            </Button>
+            <PermissionGuard module="agents" action="create">
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={handleCreate}
+              >
+                {t("agent.create")}
+              </Button>
+            </PermissionGuard>
           </div>
         }
       />

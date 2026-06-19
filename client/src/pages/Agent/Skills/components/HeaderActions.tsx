@@ -29,6 +29,8 @@ interface HeaderActionsProps {
   onImportHub: () => void;
   onCreate: () => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  canWrite?: boolean;
+  canDelete?: boolean;
 }
 
 export function HeaderActions({
@@ -48,6 +50,8 @@ export function HeaderActions({
   onImportHub,
   onCreate,
   onFileChange,
+  canWrite = true,
+  canDelete = true,
 }: HeaderActionsProps) {
   const { t } = useTranslation();
   const { isAdmin } = useUser();
@@ -94,7 +98,7 @@ export function HeaderActions({
                 </Button>
               </Tooltip>
             ) : null}
-            <Button danger icon={<DeleteOutlined />} onClick={onBatchDelete}>
+            <Button danger icon={<DeleteOutlined />} onClick={onBatchDelete} disabled={!canDelete}>
               {t("common.delete")} ({selectedSkills.size})
             </Button>
           </>
@@ -145,6 +149,7 @@ export function HeaderActions({
                 className={styles.creationActionButton}
                 onClick={onImportHub}
                 icon={<ImportOutlined />}
+                disabled={!canWrite}
               >
                 {t("skills.importHub")}
               </Button>
@@ -158,6 +163,7 @@ export function HeaderActions({
                 className={styles.primaryActionButton}
                 onClick={onCreate}
                 icon={<PlusOutlined />}
+                disabled={!canWrite}
               >
                 {t("skills.createSkill")}
               </Button>

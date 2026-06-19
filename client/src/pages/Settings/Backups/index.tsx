@@ -8,6 +8,7 @@ import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import api, { agentsApi } from "@/api";
 import { PageHeader } from "@/components/PageHeader";
+import { PermissionGuard } from "@/components/PermissionGuard";
 import { useAppMessage } from "@/hooks/useAppMessage";
 import type { BackupMeta } from "@/api/types/backup";
 import type { AgentSummary } from "@/api/types/agents";
@@ -80,13 +81,15 @@ export default function BackupsPage() {
           activeTab === "backup" ? (
             <div className={styles.headerRight}>
               <ImportButton onPick={importFlow.handleImport} />
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => setCreateOpen(true)}
-              >
-                {t("backup.create")}
-              </Button>
+              <PermissionGuard module="backups" action="create">
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setCreateOpen(true)}
+                >
+                  {t("backup.create")}
+                </Button>
+              </PermissionGuard>
             </div>
           ) : undefined
         }

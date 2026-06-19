@@ -12,11 +12,14 @@ import {
 import { useSessions } from "./useSessions";
 import api from "../../../api";
 import { PageHeader } from "@/components/PageHeader";
+import { PermissionGuard } from "@/components/PermissionGuard";
+import { usePermission } from "@/hooks/usePermission";
 import styles from "./index.module.less";
 
 function SessionsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { hasPermission, checkPermissions } = usePermission();
   const {
     sessions,
     loading,
@@ -38,6 +41,10 @@ function SessionsPage() {
   const [availableChannels, setAvailableChannels] = useState<string[]>([]);
 
   const { message } = useAppMessage();
+
+  useEffect(() => {
+    checkPermissions(["sessions:delete"]);
+  }, []);
 
   useEffect(() => {
     const fetchChannelTypes = async () => {
@@ -169,9 +176,11 @@ function SessionsPage() {
               onChannelChange={setFilterChannel}
             />
             {selectedRowKeys.length > 0 && (
-              <Button type="primary" danger onClick={handleBatchDelete}>
-                {t("sessions.batchDeleteButton")} ({selectedRowKeys.length})
-              </Button>
+              <PermissionGuard module="sessions" action="delete">
+                <Button type="primary" danger onClick={handleBatchDelete}>
+                  {t("sessions.batchDeleteButton")} ({selectedRowKeys.length})
+                </Button>
+              </PermissionGuard>
             )}
           </div>
         }

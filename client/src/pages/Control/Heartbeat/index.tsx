@@ -8,6 +8,7 @@ import {
   Switch,
 } from "@agentscope-ai/design";
 import { useAppMessage } from "../../../hooks/useAppMessage";
+import { PermissionGuard } from "@/components/PermissionGuard";
 import { TimePicker } from "antd";
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat";
@@ -257,9 +258,11 @@ function HeartbeatPage() {
             </Form.Item>
 
             <Form.Item className={styles.formActions}>
-              <Button type="primary" htmlType="submit" loading={saving}>
-                {t("common.save")}
-              </Button>
+              <PermissionGuard module="heartbeat" action="write">
+                <Button type="primary" htmlType="submit" loading={saving}>
+                  {t("common.save")}
+                </Button>
+              </PermissionGuard>
             </Form.Item>
           </Form>
         </Card>

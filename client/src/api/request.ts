@@ -102,6 +102,8 @@ export async function request<T = unknown>(
     err.status = response.status;
     if (response.status === 403) {
       err.isForbidden = true;
+      // Override message with a clear permission-denied hint
+      err.message = "无权限执行此操作";
     }
     throw err;
   }

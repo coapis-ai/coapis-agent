@@ -1,6 +1,7 @@
 import { Button, Tabs } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 import { useSecurityPage } from "./useSecurityPage";
+import { PermissionGuard } from "@/components/PermissionGuard";
 import {
   ToolGuardTab,
   RuleModal,
@@ -174,9 +175,11 @@ function SecurityPage() {
           >
             {t("common.reset")}
           </Button>
-          <Button type="primary" onClick={handleSave} loading={saving}>
-            {t("common.save")}
-          </Button>
+          <PermissionGuard module="security" action="write">
+            <Button type="primary" onClick={handleSave} loading={saving}>
+              {t("common.save")}
+            </Button>
+          </PermissionGuard>
         </div>
       )}
 
@@ -189,13 +192,15 @@ function SecurityPage() {
           >
             {t("common.reset")}
           </Button>
-          <Button
-            type="primary"
-            onClick={fileGuardHandlers.save}
-            loading={fileGuardHandlers.saving}
-          >
-            {t("common.save")}
-          </Button>
+          <PermissionGuard module="security" action="write">
+            <Button
+              type="primary"
+              onClick={fileGuardHandlers.save}
+              loading={fileGuardHandlers.saving}
+            >
+              {t("common.save")}
+            </Button>
+          </PermissionGuard>
         </div>
       )}
 

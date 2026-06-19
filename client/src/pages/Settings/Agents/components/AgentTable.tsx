@@ -31,6 +31,7 @@ interface AgentTableProps {
   onToggle: (agentId: string, currentEnabled: boolean) => void;
   onReorder: (activeId: string, overId: string) => void;
   onOpenFiles?: (agent: AgentSummary) => void;
+  canDelete?: boolean;
 }
 
 export function AgentTable({
@@ -42,6 +43,7 @@ export function AgentTable({
   onToggle,
   onReorder,
   onOpenFiles,
+  canDelete = true,
 }: AgentTableProps) {
   const { t } = useTranslation();
   const { isDark } = useTheme();
@@ -207,7 +209,7 @@ export function AgentTable({
             title={t("agent.deleteConfirm")}
             description={t("agent.deleteConfirmDesc")}
             onConfirm={() => onDelete(record.id)}
-            disabled={record.id === "default"}
+            disabled={record.id === "default" || !canDelete}
             okText={t("common.confirm")}
             cancelText={t("common.cancel")}
           >
@@ -216,7 +218,7 @@ export function AgentTable({
               size="middle"
               danger
               icon={<DeleteOutlined />}
-              disabled={record.id === "default"}
+              disabled={record.id === "default" || !canDelete}
               style={record.id === "default" ? disabledStyle : undefined}
               title={
                 record.id === "default"

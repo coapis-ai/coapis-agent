@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Form, Modal } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
+import { PermissionGuard } from "@/components/PermissionGuard";
 import api from "../../../api";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import {
@@ -237,9 +238,11 @@ function ACPPage() {
           </div>
         }
         extra={
-          <Button type="primary" onClick={handleCreateClick}>
-            {t("acp.create")}
-          </Button>
+          <PermissionGuard module="acp" action="write">
+            <Button type="primary" onClick={handleCreateClick}>
+              {t("acp.create")}
+            </Button>
+          </PermissionGuard>
         }
       />
       <div className={styles.channelsContainer}>

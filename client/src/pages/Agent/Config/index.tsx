@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Button, Form, Tabs } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 import { useAgentConfig } from "./useAgentConfig.tsx";
+import { PermissionGuard } from "@/components/PermissionGuard";
 import {
   ReactAgentCard,
   LlmRetryCard,
@@ -224,9 +225,11 @@ function AgentConfigPage() {
         >
           {t("common.reset")}
         </Button>
-        <Button type="primary" onClick={handleSave} loading={saving}>
-          {t("common.save")}
-        </Button>
+        <PermissionGuard module="agent-config" action="write">
+          <Button type="primary" onClick={handleSave} loading={saving}>
+            {t("common.save")}
+          </Button>
+        </PermissionGuard>
       </div>
     </div>
   );

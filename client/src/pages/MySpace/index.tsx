@@ -42,6 +42,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { api, getApiUrl } from '@/api';
 import { buildAuthHeaders } from '@/api/authHeaders';
+import { usePermission } from '@/hooks/usePermission';
 import AgentIdentityPanel from './AgentIdentityPanel';
 
 const FILES_API = '/myfiles';
@@ -86,6 +87,8 @@ const formatTime = (timestamp: number) => {
 
 const MySpacePage: React.FC = () => {
   const { t } = useTranslation();
+  const { hasPermission } = usePermission();
+  const canDelete = hasPermission("myspace:delete");
   
   // 当前激活的类别
   const [activeCategory, setActiveCategory] = useState('files');
@@ -730,7 +733,7 @@ const MySpacePage: React.FC = () => {
                     <Button type="text" icon={<EditOutlined />} onClick={() => setRenameModal({ visible: true, item, value: item.name })} />
                   </Tooltip>
                 ),
-                !isReadOnly && (
+                !isReadOnly && canDelete && (
                   <Tooltip key="delete" title={t('myspace.delete')}>
                     <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDelete(item)} />
                   </Tooltip>
@@ -810,7 +813,7 @@ const MySpacePage: React.FC = () => {
                       style={{ color: '#fff' }}
                       onClick={(e) => { e.stopPropagation(); setRenameModal({ visible: true, item, value: item.name }); }} />
                   )}
-                  {!isReadOnly && (
+                  {!isReadOnly && canDelete && (
                     <Button size="small" type="text" danger
                       icon={<DeleteOutlined style={{ fontSize: 16, color: '#ff4d4f' }} />}
                       onClick={(e) => { e.stopPropagation(); handleDelete(item); }} />

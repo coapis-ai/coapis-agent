@@ -10,6 +10,7 @@ import {
   type ChannelKey,
 } from "./components";
 import { PageHeader } from "@/components/PageHeader";
+import { usePermission } from "@/hooks/usePermission";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import styles from "./index.module.less";
 
@@ -18,6 +19,7 @@ type FilterType = "all" | "builtin" | "custom";
 function ChannelsPage() {
   const { t } = useTranslation();
   const { message } = useAppMessage();
+  const { hasPermission } = usePermission();
   const { channels, orderedKeys, isBuiltin, loading, fetchChannels } =
     useChannels();
   const [filter, setFilter] = useState<FilterType>("all");
@@ -155,6 +157,7 @@ function ChannelsPage() {
         isBuiltin={activeKey ? isBuiltin(activeKey) : true}
         onClose={handleDrawerClose}
         onSubmit={handleSubmit}
+        canWrite={hasPermission("channels:write")}
       />
     </div>
   );

@@ -6,6 +6,7 @@ import api from "../../../api";
 import { useEnvVars } from "./useEnvVars";
 import { EmptyState, AddButton, Toolbar, EnvRow, type Row } from "./components";
 import { PageHeader } from "@/components/PageHeader";
+import { PermissionGuard } from "@/components/PermissionGuard";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import styles from "./index.module.less";
 
@@ -315,7 +316,9 @@ function EnvironmentsPage() {
           </div>
 
           {/* ---- Add button ---- */}
-          <AddButton onClick={addRow} />
+          <PermissionGuard module="environments" action="write">
+            <AddButton onClick={addRow} />
+          </PermissionGuard>
         </div>
       )}
     </div>

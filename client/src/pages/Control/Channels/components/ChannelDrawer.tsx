@@ -97,6 +97,7 @@ interface ChannelDrawerProps {
   isBuiltin: boolean;
   onClose: () => void;
   onSubmit: (values: Record<string, unknown>) => void;
+  canWrite?: boolean;
 }
 
 export function ChannelDrawer({
@@ -109,6 +110,7 @@ export function ChannelDrawer({
   isBuiltin,
   onClose,
   onSubmit,
+  canWrite = true,
 }: ChannelDrawerProps) {
   const { t, i18n } = useTranslation();
   const { isDark } = useTheme();
@@ -1302,7 +1304,7 @@ export function ChannelDrawer({
   const drawerFooter = (
     <div className={styles.formActions}>
       <Button onClick={onClose}>{t("common.cancel")}</Button>
-      <Button type="primary" loading={saving} onClick={() => form.submit()}>
+      <Button type="primary" loading={saving} onClick={() => form.submit()} disabled={!canWrite}>
         {t("common.save")}
       </Button>
     </div>

@@ -12,12 +12,15 @@ import {
 } from "./components";
 import { parseCron, serializeCron } from "./components/parseCron";
 import { PageHeader } from "@/components/PageHeader";
+import { PermissionGuard } from "@/components/PermissionGuard";
+import { usePermission } from "@/hooks/usePermission";
 import styles from "./index.module.less";
 
 type CronJob = CronJobSpecOutput;
 
 function CronJobsPage() {
   const { t } = useTranslation();
+  const { hasPermission, checkPermissions } = usePermission();
   const {
     jobs,
     loading,
@@ -32,6 +35,10 @@ function CronJobsPage() {
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<CronJob>();
   const userTimezoneRef = useRef("UTC");
+
+  useEffect(() => {
+    checkPermissions(["cron-jobs:create", "cron-jobs:update", "cron-jobs:delete"]);
+  }, []);
 
   useEffect(() => {
     api
@@ -205,6 +212,8 @@ function CronJobsPage() {
     onEdit: handleEdit,
     onDelete: handleDelete,
     t,
+    canUpdate: hasPermission("cron-jobs:update"),
+    canDelete: hasPermission("cron-jobs:delete"),
   });
 
   return (
@@ -212,9 +221,11 @@ function CronJobsPage() {
       <PageHeader
         items={[{ title: t("nav.control") }, { title: t("cronJobs.title") }]}
         extra={
-          <Button type="primary" onClick={handleCreate}>
-            + {t("cronJobs.createJob")}
-          </Button>
+          <PermissionGuard module="cron-jobs" action="create">
+            <Button type="primary" onClick={handleCreate}>
+              + {t("cronJobs.createJob")}
+            </Button>
+          </PermissionGuard>
         }
       />
 
