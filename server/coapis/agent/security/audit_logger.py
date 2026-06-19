@@ -121,31 +121,8 @@ class AuditLogger:
             except OSError:
                 pass  # Don't fail the main flow on audit write errors
 
-        # Write to unified audit_logs table (SQLite)
-        try:
-            from ...user_system.database import UserSystemDB
-            db = UserSystemDB()
-            db.insert_audit_log(
-                user_id=0,
-                username=event.username,
-                action=event.event_type,
-                resource_type="security",
-                resource_id=event.tool_name or event.target_path or event.command or "",
-                details={
-                    "event_id": event.event_id,
-                    "result": event.result,
-                    "reason": event.reason,
-                    "user_role": event.user_role,
-                    "workspace_dir": event.workspace_dir,
-                    "metadata": event.metadata or {},
-                    # Phase 1: command risk classification
-                    "risk_level": event.risk_level,
-                    "command_category": event.command_category,
-                    "confirm_result": event.confirm_result,
-                },
-            )
-        except Exception:
-            pass
+        # Note: Removed SQLite database dependency for open source version
+        # Audit logs are stored in JSONL file only (configured via log_file parameter)
 
 
 def create_audit_event(

@@ -13,58 +13,78 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""SQLite writer for token usage — per-user, per-agent tracking.
+"""JSON file writer for token usage — per-user, per-agent tracking.
 
-Writes to user_system.db's token_usage table for detailed analytics.
+Writes to token_usage_details.json for detailed analytics.
+No database dependency - pure JSON file storage.
 """
 
+import json
 import logging
 import os
-import sqlite3
 import time
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Database path (can be overridden via env var)
-_DB_PATH: Optional[Path] = None
+# File path (can be overridden via env var)
+_USAGE_FILE: Optional[Path] = None
 
 
-def _get_db_path() -> Path:
-    """Get the user_system.db path."""
-    global _DB_PATH
-    if _DB_PATH is not None:
-        return _DB_PATH
+def _get_usage_file() -> Path:
+    """Get the token_usage_details.json path."""
+    global _USAGE_FILE
+    if _USAGE_FILE is not None:
+        return _USAGE_FILE
     
     # Check env var first
-    env_path = os.environ.get("COAPIS_USER_SYSTEM_DB")
+    env_path = os.environ.get("COAPIS_TOKEN_USAGE_DETAILS_FILE")
     if env_path:
-        _DB_PATH = Path(env_path)
-        return _DB_PATH
+        _USAGE_FILE = Path(env_path)
+        return _USAGE_FILE
     
-    # Default path
-    _DB_PATH = Path("/apps/ai/coapis/system/user_system.db")
-    return _DB_PATH
+    # Default path: same directory as token_usage.json
+    from ..constant import SYSTEM_DIR
+    _USAGE_FILE = SYSTEM_DIR / "token_usage_details.json"
+    return _USAGE_FILE
 
 
-def _ensure_table_exists(conn: sqlite3.Connection) -> None:
-    """Create token_usage table if it doesn't exist."""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS token_usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL DEFAULT 0,
-            username TEXT NOT NULL DEFAULT 'anonymous',
-            agent_id TEXT,
-            model TEXT NOT NULL,
-            input_tokens INTEGER DEFAULT 0,
-            output_tokens INTEGER DEFAULT 0,
-            total_tokens INTEGER DEFAULT 0,
-            cost_cents REAL DEFAULT 0.0,
-            created_at REAL DEFAULT (strftime('%s', 'now'))
-        )
-    """)
-    conn.commit()
+def _load_data() -> dict:
+    """Load token usage data from JSON file."""
+    usage_file = _get_usage_file()
+    
+    if not usage_file.exists():
+        return {"records": []}
+    
+    try:
+        with open(usage_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if "records" not in data:
+                data["records"] = []
+            return data
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to load token usage data: %s", e)
+        return {"records": []}
+
+
+def _save_data(data: dict) -> None:
+    """Save token usage data to JSON file atomically."""
+    usage_file = _get_usage_file()
+    
+    try:
+        # Ensure directory exists
+        usage_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Atomic write: write to temp file, then rename
+        tmp_file = usage_file.with_suffix(".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        # Rename (atomic on most systems)
+        os.replace(tmp_file, usage_file)
+    except OSError as e:
+        logger.warning("Failed to save token usage data: %s", e)
 
 
 def save_token_usage(
@@ -77,39 +97,37 @@ def save_token_usage(
     total_tokens: int,
     cost_cents: float = 0.0,
 ) -> bool:
-    """Save a token usage record to SQLite.
+    """Save a token usage record to JSON file.
     
     Returns True on success, False on failure.
     """
-    db_path = _get_db_path()
-    
-    # Provide default values for NOT NULL fields
+    # Provide default values
     if user_id is None:
         user_id = 0
     if not username:
         username = "anonymous"
     
+    record = {
+        "user_id": user_id,
+        "username": username,
+        "agent_id": agent_id,
+        "model": model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "cost_cents": cost_cents,
+        "created_at": time.time(),
+    }
+    
     try:
-        conn = sqlite3.connect(str(db_path), timeout=5.0)
-        _ensure_table_exists(conn)
+        data = _load_data()
+        data["records"].append(record)
         
-        conn.execute("""
-            INSERT INTO token_usage 
-            (user_id, username, agent_id, model, input_tokens, output_tokens, total_tokens, cost_cents, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            user_id,
-            username,
-            agent_id,
-            model,
-            input_tokens,
-            output_tokens,
-            total_tokens,
-            cost_cents,
-            time.time(),
-        ))
-        conn.commit()
-        conn.close()
+        # Keep only last 100000 records to prevent file from growing too large
+        if len(data["records"]) > 100000:
+            data["records"] = data["records"][-100000:]
+        
+        _save_data(data)
         
         logger.debug(
             "Token usage saved: user=%s, agent=%s, model=%s, tokens=%d",
@@ -118,8 +136,37 @@ def save_token_usage(
         return True
         
     except Exception as e:
-        logger.warning("Failed to save token usage to SQLite: %s", e)
+        logger.warning("Failed to save token usage: %s", e)
         return False
+
+
+def _filter_records(
+    records: list,
+    username: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> list:
+    """Filter records by criteria."""
+    filtered = records
+    
+    if username:
+        filtered = [r for r in filtered if r.get("username") == username]
+    
+    if agent_id:
+        filtered = [r for r in filtered if r.get("agent_id") == agent_id]
+    
+    if start_date:
+        import datetime
+        start_ts = datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp()
+        filtered = [r for r in filtered if r.get("created_at", 0) >= start_ts]
+    
+    if end_date:
+        import datetime
+        end_ts = datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() + 86399
+        filtered = [r for r in filtered if r.get("created_at", 0) <= end_ts]
+    
+    return filtered
 
 
 def get_user_token_usage(
@@ -137,36 +184,12 @@ def get_user_token_usage(
     Returns:
         Dictionary with total tokens, by_agent, by_model breakdowns
     """
-    db_path = _get_db_path()
-    
-    if not db_path.exists():
-        return {"total_tokens": 0, "by_agent": {}, "by_model": {}}
-    
     try:
-        conn = sqlite3.connect(str(db_path), timeout=5.0)
-        conn.row_factory = sqlite3.Row
+        data = _load_data()
+        records = data.get("records", [])
         
-        # Build query
-        query = "SELECT * FROM token_usage WHERE username = ?"
-        params = [username]
-        
-        if start_date:
-            query += " AND created_at >= ?"
-            # Convert date string to timestamp
-            import datetime
-            start_ts = datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp()
-            params.append(start_ts)
-        
-        if end_date:
-            query += " AND created_at <= ?"
-            # Convert date string to timestamp (end of day)
-            import datetime
-            end_ts = datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() + 86399
-            params.append(end_ts)
-        
-        cursor = conn.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
+        # Filter by username and date range
+        filtered = _filter_records(records, username=username, start_date=start_date, end_date=end_date)
         
         # Aggregate
         total_input = 0
@@ -175,27 +198,27 @@ def get_user_token_usage(
         by_agent = {}
         by_model = {}
         
-        for row in rows:
-            total_input += row["input_tokens"]
-            total_output += row["output_tokens"]
-            total_tokens += row["total_tokens"]
+        for record in filtered:
+            total_input += record.get("input_tokens", 0)
+            total_output += record.get("output_tokens", 0)
+            total_tokens += record.get("total_tokens", 0)
             
             # By agent
-            agent_id = row["agent_id"] or "unknown"
-            if agent_id not in by_agent:
-                by_agent[agent_id] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
-            by_agent[agent_id]["input_tokens"] += row["input_tokens"]
-            by_agent[agent_id]["output_tokens"] += row["output_tokens"]
-            by_agent[agent_id]["total_tokens"] += row["total_tokens"]
-            by_agent[agent_id]["calls"] += 1
+            aid = record.get("agent_id") or "unknown"
+            if aid not in by_agent:
+                by_agent[aid] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
+            by_agent[aid]["input_tokens"] += record.get("input_tokens", 0)
+            by_agent[aid]["output_tokens"] += record.get("output_tokens", 0)
+            by_agent[aid]["total_tokens"] += record.get("total_tokens", 0)
+            by_agent[aid]["calls"] += 1
             
             # By model
-            model = row["model"] or "unknown"
+            model = record.get("model") or "unknown"
             if model not in by_model:
                 by_model[model] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
-            by_model[model]["input_tokens"] += row["input_tokens"]
-            by_model[model]["output_tokens"] += row["output_tokens"]
-            by_model[model]["total_tokens"] += row["total_tokens"]
+            by_model[model]["input_tokens"] += record.get("input_tokens", 0)
+            by_model[model]["output_tokens"] += record.get("output_tokens", 0)
+            by_model[model]["total_tokens"] += record.get("total_tokens", 0)
             by_model[model]["calls"] += 1
         
         return {
@@ -203,7 +226,7 @@ def get_user_token_usage(
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
             "total_tokens": total_tokens,
-            "total_calls": len(rows),
+            "total_calls": len(filtered),
             "by_agent": by_agent,
             "by_model": by_model,
         }
@@ -219,59 +242,41 @@ def get_agent_token_usage(
     end_date: Optional[str] = None,
 ) -> dict:
     """Get token usage summary for an agent."""
-    db_path = _get_db_path()
-    
-    if not db_path.exists():
-        return {"total_tokens": 0, "by_user": {}, "by_model": {}}
-    
     try:
-        conn = sqlite3.connect(str(db_path), timeout=5.0)
-        conn.row_factory = sqlite3.Row
+        data = _load_data()
+        records = data.get("records", [])
         
-        query = "SELECT * FROM token_usage WHERE agent_id = ?"
-        params = [agent_id]
+        # Filter by agent_id and date range
+        filtered = _filter_records(records, agent_id=agent_id, start_date=start_date, end_date=end_date)
         
-        if start_date:
-            query += " AND created_at >= ?"
-            import datetime
-            start_ts = datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp()
-            params.append(start_ts)
-        
-        if end_date:
-            query += " AND created_at <= ?"
-            import datetime
-            end_ts = datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() + 86399
-            params.append(end_ts)
-        
-        cursor = conn.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
-        
+        # Aggregate
         total_input = 0
         total_output = 0
         total_tokens = 0
         by_user = {}
         by_model = {}
         
-        for row in rows:
-            total_input += row["input_tokens"]
-            total_output += row["output_tokens"]
-            total_tokens += row["total_tokens"]
+        for record in filtered:
+            total_input += record.get("input_tokens", 0)
+            total_output += record.get("output_tokens", 0)
+            total_tokens += record.get("total_tokens", 0)
             
-            username = row["username"] or "unknown"
-            if username not in by_user:
-                by_user[username] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
-            by_user[username]["input_tokens"] += row["input_tokens"]
-            by_user[username]["output_tokens"] += row["output_tokens"]
-            by_user[username]["total_tokens"] += row["total_tokens"]
-            by_user[username]["calls"] += 1
+            # By user
+            uname = record.get("username") or "unknown"
+            if uname not in by_user:
+                by_user[uname] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
+            by_user[uname]["input_tokens"] += record.get("input_tokens", 0)
+            by_user[uname]["output_tokens"] += record.get("output_tokens", 0)
+            by_user[uname]["total_tokens"] += record.get("total_tokens", 0)
+            by_user[uname]["calls"] += 1
             
-            model = row["model"] or "unknown"
+            # By model
+            model = record.get("model") or "unknown"
             if model not in by_model:
                 by_model[model] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
-            by_model[model]["input_tokens"] += row["input_tokens"]
-            by_model[model]["output_tokens"] += row["output_tokens"]
-            by_model[model]["total_tokens"] += row["total_tokens"]
+            by_model[model]["input_tokens"] += record.get("input_tokens", 0)
+            by_model[model]["output_tokens"] += record.get("output_tokens", 0)
+            by_model[model]["total_tokens"] += record.get("total_tokens", 0)
             by_model[model]["calls"] += 1
         
         return {
@@ -279,7 +284,7 @@ def get_agent_token_usage(
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
             "total_tokens": total_tokens,
-            "total_calls": len(rows),
+            "total_calls": len(filtered),
             "by_user": by_user,
             "by_model": by_model,
         }

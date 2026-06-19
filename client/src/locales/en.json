@@ -2292,7 +2292,8 @@
     "logout": "Logout",
     "logoutSuccess": "Logged out successfully",
     "sessionExpired": "Session expired, please login again",
-    "unauthorized": "Unauthorized, please login"
+    "unauthorized": "Unauthorized, please login",
+    "rememberMe": "Remember me"
   },
   "account": {
     "title": "Account",

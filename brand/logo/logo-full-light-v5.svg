@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400">
+  <defs>
+    <radialGradient id="head3d" cx="45%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#D4A800"/><stop offset="50%" stop-color="#B8860B"/><stop offset="100%" stop-color="#6B4D00"/>
+    </radialGradient>
+    <radialGradient id="thorax3d" cx="45%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#D4A800"/><stop offset="40%" stop-color="#996515"/><stop offset="100%" stop-color="#5C3D00"/>
+    </radialGradient>
+    <radialGradient id="abdomen3d" cx="45%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#D4A800"/><stop offset="35%" stop-color="#8B6508"/><stop offset="70%" stop-color="#5C3D00"/><stop offset="100%" stop-color="#3D2800"/>
+    </radialGradient>
+    <linearGradient id="wingGL" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#B8860B" stop-opacity="0.4"/><stop offset="100%" stop-color="#5C3D00" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="wingGR" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#B8860B" stop-opacity="0.4"/><stop offset="100%" stop-color="#5C3D00" stop-opacity="0.05"/>
+    </linearGradient>
+    <radialGradient id="wingHL" cx="30%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.15"/><stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bgHalo" cx="50%" cy="48%" r="45%">
+      <stop offset="0%" stop-color="#B8860B" stop-opacity="0.05"/><stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tg" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#B8860B"/><stop offset="50%" stop-color="#996515"/><stop offset="100%" stop-color="#7A5010"/>
+    </linearGradient>
+    <filter id="gl"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+
+  <rect width="1200" height="400" rx="40" fill="#FAFAFA" stroke="#E5E5E5" stroke-width="1"/>
+  <ellipse cx="180" cy="210" rx="160" ry="130" fill="url(#bgHalo)"/>
+
+  <!-- 图标 -->
+  <g transform="translate(-10, 15) scale(0.62)">
+    <path d="M242,215 C195,188 130,195 95,240 C60,285 75,350 125,380 C175,410 228,370 240,330 Q248,300 242,265 Z"
+          fill="url(#wingGL)" stroke="#B8860B" stroke-width="1.5" opacity="0.45"/>
+    <path d="M242,215 C195,188 130,195 95,240 C60,285 75,350 125,380 C175,410 228,370 240,330 Q248,300 242,265 Z" fill="url(#wingHL)"/>
+    <g stroke="#B8860B" stroke-width="0.6" fill="none" opacity="0.15">
+      <path d="M238,225 C200,210 145,218 115,255"/><path d="M236,248 C195,238 140,250 110,285"/>
+      <path d="M234,270 C200,262 155,272 130,300"/>
+    </g>
+    <path d="M270,215 C317,188 382,195 417,240 C452,285 437,350 387,380 C337,410 284,370 272,330 Q264,300 270,265 Z"
+          fill="url(#wingGR)" stroke="#B8860B" stroke-width="1.5" opacity="0.45"/>
+    <path d="M270,215 C317,188 382,195 417,240 C452,285 437,350 387,380 C337,410 284,370 272,330 Q264,300 270,265 Z" fill="url(#wingHL)"/>
+    <g stroke="#B8860B" stroke-width="0.6" fill="none" opacity="0.15">
+      <path d="M274,225 C312,210 367,218 397,255"/><path d="M276,248 C317,238 372,250 402,285"/>
+      <path d="M278,270 C312,262 357,272 382,300"/>
+    </g>
+
+    <ellipse cx="256" cy="340" rx="32" ry="42" fill="url(#abdomen3d)"/>
+    <g fill="none" stroke="#FAFAFA" stroke-width="2.5" opacity="0.35" stroke-linecap="round">
+      <path d="M232,322 Q256,316 280,322"/><path d="M230,337 Q256,330 282,337"/>
+      <path d="M232,352 Q256,346 280,352"/>
+    </g>
+    <ellipse cx="248" cy="325" rx="14" ry="18" fill="#FFFFFF" opacity="0.1"/>
+    <ellipse cx="256" cy="268" rx="26" ry="30" fill="url(#thorax3d)"/>
+    <ellipse cx="248" cy="255" rx="12" ry="14" fill="#FFFFFF" opacity="0.1"/>
+    <ellipse cx="256" cy="230" rx="16" ry="16" fill="url(#head3d)"/>
+    <ellipse cx="250" cy="224" rx="7" ry="8" fill="#FFFFFF" opacity="0.12"/>
+    <ellipse cx="256" cy="248" rx="18" ry="4" fill="#000000" opacity="0.08"/>
+    <ellipse cx="256" cy="298" rx="22" ry="4" fill="#000000" opacity="0.06"/>
+
+    <path d="M248,220 C238,195 220,170 208,155 C200,145 192,143 186,148" stroke="#B8860B" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.8"/>
+    <path d="M264,220 C274,195 292,170 304,155 C312,145 320,143 326,148" stroke="#B8860B" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.8"/>
+    <circle cx="186" cy="148" r="6" fill="#B8860B" filter="url(#gl)" opacity="0.85"/>
+    <circle cx="183" cy="145" r="2.5" fill="#D4A800" opacity="0.4"/>
+    <circle cx="326" cy="148" r="6" fill="#B8860B" filter="url(#gl)" opacity="0.85"/>
+    <circle cx="323" cy="145" r="2.5" fill="#D4A800" opacity="0.4"/>
+  </g>
+
+  <text x="410" y="195" font-family="'SF Pro Display','Segoe UI','Helvetica Neue',Arial,sans-serif"
+        font-size="118" font-weight="700" fill="url(#tg)" letter-spacing="2">CoApis</text>
+  <line x1="410" y1="222" x2="810" y2="222" stroke="#B8860B" stroke-width="1.2" opacity="0.18"/>
+  <text x="410" y="262" font-family="'SF Pro Display','Segoe UI','Helvetica Neue',Arial,sans-serif"
+        font-size="23" fill="#6B7280" letter-spacing="9" font-weight="300">INTELLIGENT AGENT PLATFORM</text>
+  <text x="410" y="302" font-family="'SF Mono','Fira Code',monospace"
+        font-size="12" fill="#B8860B" opacity="0.35" letter-spacing="5">Co-evolution · Multi-Agent · Enterprise</text>
+</svg>

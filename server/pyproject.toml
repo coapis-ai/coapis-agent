@@ -80,7 +80,6 @@ build-backend = "setuptools.build_meta"
 
 [project.scripts]
 coapis = "coapis.cli.main:cli"
-coapis = "coapis.cli.main:cli"
 
 # Optional doctor plugins: callable (DoctorRunContext) -> list[str]
 # [project.entry-points."coapis.doctor"]

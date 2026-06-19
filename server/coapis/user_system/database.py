@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,14 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""User system database layer - SQLite-based persistence.
+"""User system persistence layer - supports both SQLite and JSON file modes.
 
-All tables are created lazily on first access.
-When USER_SYSTEM_ENABLED=False, all operations are no-ops.
+When COAPIS_USER_SYSTEM_ENABLED=True: uses SQLite database (user_system.db)
+When COAPIS_USER_SYSTEM_ENABLED=False: uses JSON files (users.json, audit_logs.json)
+
+This allows open source version to run without database dependency.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -32,12 +35,25 @@ from ..constant import SYSTEM_DIR
 
 logger = logging.getLogger(__name__)
 
-# Database file location - moved to SYSTEM_DIR to align with architecture refactoring
+# Database file location
 USER_DB_PATH = SYSTEM_DIR / "user_system.db"
+
+# JSON file location (for non-database mode)
+_USERS_JSON = SYSTEM_DIR / "users.json"
+_AUDIT_LOGS_JSON = SYSTEM_DIR / "audit_logs.json"
+_SETTINGS_JSON = SYSTEM_DIR / "user_settings.json"
+_PREFERENCES_JSON = SYSTEM_DIR / "user_preferences.json"
+_API_KEYS_JSON = SYSTEM_DIR / "api_keys.json"
+_POINTS_JSON = SYSTEM_DIR / "point_transactions.json"
+
+
+def _is_database_enabled() -> bool:
+    """Check if database mode is enabled."""
+    return os.environ.get("COAPIS_USER_SYSTEM_ENABLED", "false").lower() in ("true", "1", "yes")
 
 
 class UserSystemDB:
-    """Thread-safe SQLite database for user system."""
+    """Thread-safe user system persistence - SQLite or JSON file mode."""
 
     _instance: Optional["UserSystemDB"] = None
     _lock = threading.Lock()
@@ -53,19 +69,32 @@ class UserSystemDB:
     def __init__(self):
         if self._initialized:
             return
-        self._db_dir = USER_DB_PATH.parent
-        self._db_dir.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(
-            str(USER_DB_PATH),
-            check_same_thread=False,
-        )
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute("PRAGMA journal_mode=WAL")
-        self._connection.execute("PRAGMA foreign_keys=ON")
-        self._create_tables()
+        
+        self._use_database = _is_database_enabled()
+        
+        if self._use_database:
+            # SQLite mode
+            self._db_dir = USER_DB_PATH.parent
+            self._db_dir.mkdir(parents=True, exist_ok=True)
+            self._connection = sqlite3.connect(
+                str(USER_DB_PATH),
+                check_same_thread=False,
+            )
+            self._connection.row_factory = sqlite3.Row
+            self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.execute("PRAGMA foreign_keys=ON")
+            self._create_tables()
+            logger.info(f"UserSystemDB initialized in DATABASE mode at {USER_DB_PATH}")
+        else:
+            # JSON file mode
+            SYSTEM_DIR.mkdir(parents=True, exist_ok=True)
+            self._json_lock = threading.Lock()
+            logger.info("UserSystemDB initialized in JSON file mode")
+        
         self._initialized = True
-        logger.info(f"UserSystemDB initialized at {USER_DB_PATH}")
 
+    # ==================== SQLite Methods ====================
+    
     def _create_tables(self):
         """Create all tables if they don't exist."""
         cur = self._connection.cursor()
@@ -86,67 +115,42 @@ class UserSystemDB:
                 total_points_spent INTEGER DEFAULT 0,
                 token_quota_monthly INTEGER DEFAULT 1000000,
                 token_used_monthly INTEGER DEFAULT 0,
-                token_quota_reset_date TEXT,
-                role TEXT DEFAULT 'user',
-                is_active INTEGER DEFAULT 1,
-                created_at REAL,
-                updated_at REAL,
+                token_used_total INTEGER DEFAULT 0,
+                chat_count INTEGER DEFAULT 0,
+                agent_count INTEGER DEFAULT 0,
+                skill_count INTEGER DEFAULT 0,
                 last_login_at REAL,
-                consecutive_login_days INTEGER DEFAULT 0,
-                last_login_date TEXT,
-                muga_key TEXT DEFAULT NULL
+                last_login_ip TEXT,
+                created_at REAL DEFAULT (strftime('%s', 'now')),
+                updated_at REAL DEFAULT (strftime('%s', 'now'))
             )
         """)
 
-        # Point transactions table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS point_transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                type TEXT NOT NULL,
-                amount INTEGER NOT NULL,
-                source TEXT NOT NULL,
-                description TEXT,
-                created_at REAL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-        """)
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_point_transactions_user "
-            "ON point_transactions(username)"
-        )
-
-        # Token usage table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS token_usage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                agent_id TEXT,
-                model TEXT NOT NULL,
-                input_tokens INTEGER DEFAULT 0,
-                output_tokens INTEGER DEFAULT 0,
-                total_tokens INTEGER DEFAULT 0,
-                cost_cents REAL DEFAULT 0,
-                created_at REAL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-        """)
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_token_usage_user "
-            "ON token_usage(username)"
-        )
-
-        # User settings table (key-value per user)
+        # User settings table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
                 setting_key TEXT NOT NULL,
                 setting_value TEXT,
-                PRIMARY KEY (user_id, setting_key),
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                created_at REAL DEFAULT (strftime('%s', 'now')),
+                updated_at REAL DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, setting_key)
+            )
+        """)
+
+        # User preferences table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                preference_key TEXT NOT NULL,
+                preference_value TEXT,
+                created_at REAL DEFAULT (strftime('%s', 'now')),
+                updated_at REAL DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, preference_key)
             )
         """)
 
@@ -155,98 +159,77 @@ class UserSystemDB:
             CREATE TABLE IF NOT EXISTS api_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                key_hash TEXT NOT NULL,
+                key_hash TEXT UNIQUE NOT NULL,
                 key_prefix TEXT NOT NULL,
                 name TEXT,
-                rate_limit INTEGER DEFAULT 10,
-                quota_monthly INTEGER DEFAULT 1000,
-                quota_used INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                created_at REAL,
+                scopes TEXT DEFAULT '["read","write"]',
                 last_used_at REAL,
                 expires_at REAL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                is_active INTEGER DEFAULT 1,
+                created_at REAL DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
 
-        # User preferences table (个人设置)
+        # Point transactions table
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_preferences (
-                user_id INTEGER PRIMARY KEY REFERENCES users(id),
-                theme TEXT DEFAULT 'coapis',
-                language TEXT DEFAULT 'zh',
-                sidebar_collapsed INTEGER DEFAULT 0,
-                chat_display_mode TEXT DEFAULT 'simple',
-                chat_hide_tool_call INTEGER DEFAULT 1,
-                chat_hide_thinking INTEGER DEFAULT 1,
-                chat_hide_footer INTEGER DEFAULT 1,
-                chat_hide_system_messages INTEGER DEFAULT 1,
-                chat_show_timestamps INTEGER DEFAULT 0,
-                chat_show_token_counts INTEGER DEFAULT 0,
-                chat_show_model_name INTEGER DEFAULT 0,
-                chat_auto_scroll INTEGER DEFAULT 1,
-                chat_font_size TEXT DEFAULT 'normal',
-                chat_code_theme TEXT DEFAULT 'dark',
-                email_notifications INTEGER DEFAULT 0,
-                push_notifications INTEGER DEFAULT 0,
-                default_agent_id TEXT,
-                default_model TEXT,
-                updated_at REAL
+            CREATE TABLE IF NOT EXISTS point_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                balance_after INTEGER NOT NULL,
+                transaction_type TEXT NOT NULL,
+                description TEXT,
+                reference_id TEXT,
+                created_at REAL DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
 
-        # Audit logs table (审计日志)
+        # Token usage table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS token_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 0,
+                username TEXT NOT NULL DEFAULT 'anonymous',
+                agent_id TEXT,
+                model TEXT NOT NULL,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                cost_cents REAL DEFAULT 0.0,
+                created_at REAL DEFAULT (strftime('%s', 'now'))
+            )
+        """)
+
+        # Audit logs table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
+                user_id INTEGER,
+                username TEXT,
                 action TEXT NOT NULL,
-                resource_type TEXT NOT NULL,
-                resource_id TEXT NOT NULL,
-                details TEXT DEFAULT '{}',
-                ip_address TEXT DEFAULT '',
-                user_agent TEXT DEFAULT '',
-                created_at REAL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                resource_type TEXT,
+                resource_id TEXT,
+                details TEXT,
+                ip_address TEXT,
+                user_agent TEXT,
+                created_at REAL DEFAULT (strftime('%s', 'now'))
             )
         """)
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_logs_user "
-            "ON audit_logs(username)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_logs_action "
-            "ON audit_logs(action)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_logs_created "
-            "ON audit_logs(created_at)"
-        )
-
-        # ── Migration: Add new columns if they don't exist ──
-        self._migrate_add_column(cur, "user_preferences", "chat_show_timestamps INTEGER DEFAULT 0")
-        self._migrate_add_column(cur, "user_preferences", "chat_show_token_counts INTEGER DEFAULT 0")
-        self._migrate_add_column(cur, "user_preferences", "chat_show_model_name INTEGER DEFAULT 0")
-        self._migrate_add_column(cur, "user_preferences", "chat_auto_scroll INTEGER DEFAULT 1")
-        self._migrate_add_column(cur, "user_preferences", "chat_font_size TEXT DEFAULT 'normal'")
-        self._migrate_add_column(cur, "user_preferences", "chat_code_theme TEXT DEFAULT 'dark'")
 
         self._connection.commit()
-        logger.info("User system tables created/verified")
 
-    def _migrate_add_column(self, cur, table: str, column_def: str):
+    def _add_column_if_not_exists(self, table: str, column_def: str):
         """Add a column to a table if it doesn't exist (SQLite migration helper)."""
         col_name = column_def.split()[0]
         try:
-            cur.execute(f"SELECT {col_name} FROM {table} LIMIT 0")
+            self._connection.execute(f"SELECT {col_name} FROM {table} LIMIT 0")
         except sqlite3.OperationalError:
             try:
-                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+                self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
                 logger.info(f"Migration: Added column '{col_name}' to '{table}'")
             except sqlite3.OperationalError:
-                # Column might have been added by another thread
                 pass
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -271,9 +254,129 @@ class UserSystemDB:
         rows = self._connection.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    # ==================== JSON File Methods ====================
+    
+    def _load_json(self, file_path: Path) -> List[Dict[str, Any]]:
+        """Load data from JSON file."""
+        if not file_path.exists():
+            return []
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load %s: %s", file_path, e)
+            return []
+
+    def _save_json(self, file_path: Path, data: List[Dict[str, Any]]) -> None:
+        """Save data to JSON file atomically."""
+        try:
+            tmp_file = file_path.with_suffix(".tmp")
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_file, file_path)
+        except OSError as e:
+            logger.warning("Failed to save %s: %s", file_path, e)
+
+    def _find_by_key(self, data: List[Dict], key: str, value: Any) -> Optional[Dict]:
+        """Find first item by key-value."""
+        for item in data:
+            if item.get(key) == value:
+                return item
+        return None
+
+    def _find_index_by_key(self, data: List[Dict], key: str, value: Any) -> int:
+        """Find index of first item by key-value."""
+        for i, item in enumerate(data):
+            if item.get(key) == value:
+                return i
+        return -1
+
+    # ==================== Unified Interface ====================
+    
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         """Get user by username."""
-        return self.fetch_one("SELECT * FROM users WHERE username = ?", (username,))
+        if self._use_database:
+            return self.fetch_one("SELECT * FROM users WHERE username = ?", (username,))
+        
+        # JSON mode
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            return self._find_by_key(users, "username", username)
+
+    def insert_user(self, user_data: Dict[str, Any]) -> int:
+        """Insert a new user, return user ID."""
+        if self._use_database:
+            cur = self.execute(
+                "INSERT INTO users (username, email, display_name, password_hash, salt, level, points, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user_data.get("username"),
+                    user_data.get("email"),
+                    user_data.get("display_name"),
+                    user_data.get("password_hash"),
+                    user_data.get("salt"),
+                    user_data.get("level", 0),
+                    user_data.get("points", 0),
+                    time.time(),
+                    time.time(),
+                ),
+            )
+            self.commit()
+            return cur.lastrowid
+        
+        # JSON mode
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            new_id = max([u.get("id", 0) for u in users], default=0) + 1
+            user_data["id"] = new_id
+            user_data["created_at"] = time.time()
+            user_data["updated_at"] = time.time()
+            users.append(user_data)
+            self._save_json(_USERS_JSON, users)
+            return new_id
+
+    def update_user(self, username: str, update_data: Dict[str, Any]) -> bool:
+        """Update user by username."""
+        if self._use_database:
+            set_parts = []
+            params = []
+            for key, value in update_data.items():
+                if key not in ("id", "username", "created_at"):
+                    set_parts.append(f"{key} = ?")
+                    params.append(value)
+            if not set_parts:
+                return False
+            set_parts.append("updated_at = ?")
+            params.append(time.time())
+            params.append(username)
+            self.execute(
+                f"UPDATE users SET {', '.join(set_parts)} WHERE username = ?",
+                tuple(params),
+            )
+            self.commit()
+            return True
+        
+        # JSON mode
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            idx = self._find_index_by_key(users, "username", username)
+            if idx == -1:
+                return False
+            users[idx].update(update_data)
+            users[idx]["updated_at"] = time.time()
+            self._save_json(_USERS_JSON, users)
+            return True
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        """List all users."""
+        if self._use_database:
+            return self.fetch_all("SELECT * FROM users ORDER BY created_at DESC")
+        
+        # JSON mode
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            return sorted(users, key=lambda x: x.get("created_at", 0), reverse=True)
 
     def insert_audit_log(
         self,
@@ -287,18 +390,177 @@ class UserSystemDB:
         user_agent: str = "",
     ):
         """Insert an audit log entry."""
-        import json as _json
-        details_str = _json.dumps(details) if details else "{}"
-        self.execute(
-            "INSERT INTO audit_logs (user_id, username, action, resource_type, resource_id, details, ip_address, user_agent, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, username, action, resource_type, resource_id, details_str, ip_address, user_agent, time.time()),
+        if self._use_database:
+            details_str = json.dumps(details) if details else "{}"
+            self.execute(
+                "INSERT INTO audit_logs (user_id, username, action, resource_type, resource_id, details, ip_address, user_agent, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, username, action, resource_type, resource_id, details_str, ip_address, user_agent, time.time()),
+            )
+            self.commit()
+            return
+        
+        # JSON mode
+        log_entry = {
+            "user_id": user_id,
+            "username": username,
+            "action": action,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "details": details or {},
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "created_at": time.time(),
+        }
+        with self._json_lock:
+            logs = self._load_json(_AUDIT_LOGS_JSON)
+            logs.append(log_entry)
+            # Keep only last 10000 entries
+            if len(logs) > 10000:
+                logs = logs[-10000:]
+            self._save_json(_AUDIT_LOGS_JSON, logs)
+
+    def insert_point_transaction(
+        self,
+        user_id: int,
+        amount: int,
+        balance_after: int,
+        transaction_type: str,
+        description: str = "",
+        reference_id: str = "",
+    ):
+        """Insert a point transaction."""
+        if self._use_database:
+            self.execute(
+                "INSERT INTO point_transactions (user_id, amount, balance_after, transaction_type, description, reference_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, amount, balance_after, transaction_type, description, reference_id, time.time()),
+            )
+            self.commit()
+            return
+        
+        # JSON mode
+        tx = {
+            "user_id": user_id,
+            "amount": amount,
+            "balance_after": balance_after,
+            "transaction_type": transaction_type,
+            "description": description,
+            "reference_id": reference_id,
+            "created_at": time.time(),
+        }
+        with self._json_lock:
+            transactions = self._load_json(_POINTS_JSON)
+            transactions.append(tx)
+            if len(transactions) > 50000:
+                transactions = transactions[-50000:]
+            self._save_json(_POINTS_JSON, transactions)
+
+    def insert_token_usage(
+        self,
+        user_id: int,
+        username: str,
+        agent_id: Optional[str],
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        total_tokens: int,
+        cost_cents: float = 0.0,
+    ):
+        """Insert token usage record."""
+        if self._use_database:
+            self.execute(
+                "INSERT INTO token_usage (user_id, username, agent_id, model, input_tokens, output_tokens, total_tokens, cost_cents, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, username, agent_id, model, input_tokens, output_tokens, total_tokens, cost_cents, time.time()),
+            )
+            self.commit()
+            return
+        
+        # JSON mode - use token_usage_details.json (already implemented in token_usage module)
+        from ..token_usage.db_writer import save_token_usage
+        save_token_usage(
+            user_id=user_id,
+            username=username,
+            agent_id=agent_id,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cost_cents=cost_cents,
         )
-        self.commit()
+
+    def get_user_token_usage(self, username: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+        """Get token usage summary for a user."""
+        if self._use_database:
+            sql = "SELECT * FROM token_usage WHERE username = ?"
+            params = [username]
+            if start_date:
+                import datetime
+                start_ts = datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp()
+                sql += " AND created_at >= ?"
+                params.append(start_ts)
+            if end_date:
+                import datetime
+                end_ts = datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() + 86399
+                sql += " AND created_at <= ?"
+                params.append(end_ts)
+            
+            records = self.fetch_all(sql, tuple(params))
+            
+            total_input = sum(r.get("input_tokens", 0) for r in records)
+            total_output = sum(r.get("output_tokens", 0) for r in records)
+            total_tokens = sum(r.get("total_tokens", 0) for r in records)
+            
+            return {
+                "username": username,
+                "total_input_tokens": total_input,
+                "total_output_tokens": total_output,
+                "total_tokens": total_tokens,
+                "total_calls": len(records),
+            }
+        
+        # JSON mode
+        from ..token_usage.db_writer import get_user_token_usage
+        return get_user_token_usage(username, start_date, end_date)
+
+    def get_agent_token_usage(self, agent_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+        """Get token usage summary for an agent."""
+        if self._use_database:
+            sql = "SELECT * FROM token_usage WHERE agent_id = ?"
+            params = [agent_id]
+            if start_date:
+                import datetime
+                start_ts = datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp()
+                sql += " AND created_at >= ?"
+                params.append(start_ts)
+            if end_date:
+                import datetime
+                end_ts = datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() + 86399
+                sql += " AND created_at <= ?"
+                params.append(end_ts)
+            
+            records = self.fetch_all(sql, tuple(params))
+            
+            total_input = sum(r.get("input_tokens", 0) for r in records)
+            total_output = sum(r.get("output_tokens", 0) for r in records)
+            total_tokens = sum(r.get("total_tokens", 0) for r in records)
+            
+            return {
+                "agent_id": agent_id,
+                "total_input_tokens": total_input,
+                "total_output_tokens": total_output,
+                "total_tokens": total_tokens,
+                "total_calls": len(records),
+            }
+        
+        # JSON mode
+        from ..token_usage.db_writer import get_agent_token_usage
+        return get_agent_token_usage(agent_id, start_date, end_date)
 
     def close(self):
         """Close connection."""
-        if self._connection:
+        if self._use_database and hasattr(self, '_connection') and self._connection:
             self._connection.close()
 
 

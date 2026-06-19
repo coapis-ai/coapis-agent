@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="h" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F"/>
+      <stop offset="100%" stop-color="#FF6B00"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#080B14"/>
+  <!-- 外框 -->
+  <polygon points="32,6 56,20 56,44 32,58 8,44 8,20"
+           fill="none" stroke="#FFD23F" stroke-width="1" opacity="0.2"/>
+  <!-- 翅膀轮廓 -->
+  <path d="M32,20 Q22,18 18,24 Q14,30 18,35 Q22,38 30,34 Z"
+        fill="none" stroke="#FFD23F" stroke-width="0.8" opacity="0.35"/>
+  <path d="M32,20 Q42,18 46,24 Q50,30 46,35 Q42,38 34,34 Z"
+        fill="none" stroke="#FFD23F" stroke-width="0.8" opacity="0.35"/>
+  <!-- 身体 -->
+  <polygon points="32,20 35,22 35,26 32,28 29,26 29,22" fill="url(#h)"/>
+  <polygon points="32,28 36,31 36,37 32,40 28,37 28,31" fill="url(#h)"/>
+  <!-- 触角 -->
+  <line x1="31" y1="20" x2="27" y2="14" stroke="#FFD23F" stroke-width="0.8" stroke-linecap="round" opacity="0.6"/>
+  <circle cx="27" cy="14" r="1.2" fill="#FFD23F" opacity="0.7"/>
+  <line x1="33" y1="20" x2="37" y2="14" stroke="#FFD23F" stroke-width="0.8" stroke-linecap="round" opacity="0.6"/>
+  <circle cx="37" cy="14" r="1.2" fill="#FFD23F" opacity="0.7"/>
+</svg>

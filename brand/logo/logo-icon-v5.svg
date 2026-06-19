@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- 蜜蜂身体：3段渐变，从亮到暗 -->
+    <radialGradient id="head3d" cx="45%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#FFEC80"/>
+      <stop offset="50%" stop-color="#FFB800"/>
+      <stop offset="100%" stop-color="#CC6600"/>
+    </radialGradient>
+    <radialGradient id="thorax3d" cx="45%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#FFEC80"/>
+      <stop offset="40%" stop-color="#FFAA00"/>
+      <stop offset="100%" stop-color="#CC5500"/>
+    </radialGradient>
+    <radialGradient id="abdomen3d" cx="45%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#FFEC80"/>
+      <stop offset="35%" stop-color="#FF9900"/>
+      <stop offset="70%" stop-color="#E65100"/>
+      <stop offset="100%" stop-color="#8B3000"/>
+    </radialGradient>
+    <!-- 翅膀：半透明玻璃质感 -->
+    <linearGradient id="wingGL" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.55"/>
+      <stop offset="30%" stop-color="#FFAA00" stop-opacity="0.3"/>
+      <stop offset="70%" stop-color="#FF8C00" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#FF6B00" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="wingGR" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.55"/>
+      <stop offset="30%" stop-color="#FFAA00" stop-opacity="0.3"/>
+      <stop offset="70%" stop-color="#FF8C00" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#FF6B00" stop-opacity="0.05"/>
+    </linearGradient>
+    <!-- 翅膀高光 -->
+    <radialGradient id="wingHL" cx="30%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <!-- 背景光晕 -->
+    <radialGradient id="bgHalo" cx="50%" cy="48%" r="45%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.08"/>
+      <stop offset="60%" stop-color="#FF8C00" stop-opacity="0.03"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <!-- 投影 -->
+    <radialGradient id="shadow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softShadow">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="512" height="512" rx="56" fill="#060912"/>
+
+  <!-- 背景光晕 -->
+  <ellipse cx="256" cy="280" rx="200" ry="160" fill="url(#bgHalo)"/>
+
+  <!-- 底部投影（立体感关键） -->
+  <ellipse cx="256" cy="420" rx="80" ry="12" fill="url(#shadow)" opacity="0.5"/>
+
+  <!-- ═══ 翅膀：玻璃质感 + 高光 ═══ -->
+  <!-- 左翅底层（阴影面） -->
+  <path d="M242,215 C195,188 130,195 95,240 C60,285 75,350 125,380 C175,410 228,370 240,330 Q248,300 242,265 Z"
+        fill="url(#wingGL)" stroke="none"/>
+  <!-- 左翅轮廓 -->
+  <path d="M242,215 C195,188 130,195 95,240 C60,285 75,350 125,380 C175,410 228,370 240,330 Q248,300 242,265 Z"
+        fill="none" stroke="#FFD23F" stroke-width="1.5" opacity="0.5"/>
+  <!-- 左翅高光层 -->
+  <path d="M242,215 C195,188 130,195 95,240 C60,285 75,350 125,380 C175,410 228,370 240,330 Q248,300 242,265 Z"
+        fill="url(#wingHL)"/>
+  <!-- 左翅脉络 -->
+  <g stroke="#FFD23F" stroke-width="0.7" fill="none" opacity="0.2">
+    <path d="M238,225 C200,210 145,218 115,255"/>
+    <path d="M236,248 C195,238 140,250 110,285"/>
+    <path d="M234,270 C200,262 155,272 130,300"/>
+    <path d="M232,292 C210,286 170,295 150,320"/>
+    <path d="M230,312 C215,308 185,315 168,335"/>
+  </g>
+
+  <!-- 右翅底层 -->
+  <path d="M270,215 C317,188 382,195 417,240 C452,285 437,350 387,380 C337,410 284,370 272,330 Q264,300 270,265 Z"
+        fill="url(#wingGR)" stroke="none"/>
+  <path d="M270,215 C317,188 382,195 417,240 C452,285 437,350 387,380 C337,410 284,370 272,330 Q264,300 270,265 Z"
+        fill="none" stroke="#FFD23F" stroke-width="1.5" opacity="0.5"/>
+  <path d="M270,215 C317,188 382,195 417,240 C452,285 437,350 387,380 C337,410 284,370 272,330 Q264,300 270,265 Z"
+        fill="url(#wingHL)"/>
+  <g stroke="#FFD23F" stroke-width="0.7" fill="none" opacity="0.2">
+    <path d="M274,225 C312,210 367,218 397,255"/>
+    <path d="M276,248 C317,238 372,250 402,285"/>
+    <path d="M278,270 C312,262 357,272 382,300"/>
+    <path d="M280,292 C302,286 342,295 362,320"/>
+    <path d="M282,312 C297,308 327,315 344,335"/>
+  </g>
+
+  <!-- ═══ 蜜蜂身体：3D球体感 ═══ -->
+  <!-- 腹部（最大，最靠前） -->
+  <ellipse cx="256" cy="340" rx="32" ry="42" fill="url(#abdomen3d)"/>
+  <!-- 腹部条纹（弧形，增强立体感） -->
+  <g fill="none" stroke="#060912" stroke-width="2.5" opacity="0.4" stroke-linecap="round">
+    <path d="M232,322 Q256,316 280,322"/>
+    <path d="M230,337 Q256,330 282,337"/>
+    <path d="M232,352 Q256,346 280,352"/>
+    <path d="M236,366 Q256,361 276,366"/>
+  </g>
+  <!-- 腹部高光 -->
+  <ellipse cx="248" cy="325" rx="14" ry="18" fill="#FFFFFF" opacity="0.12"/>
+
+  <!-- 胸部 -->
+  <ellipse cx="256" cy="268" rx="26" ry="30" fill="url(#thorax3d)"/>
+  <!-- 胸部高光 -->
+  <ellipse cx="248" cy="255" rx="12" ry="14" fill="#FFFFFF" opacity="0.15"/>
+  <!-- 胸部边缘暗面 -->
+  <ellipse cx="264" cy="280" rx="10" ry="12" fill="#8B3000" opacity="0.15"/>
+
+  <!-- 头部 -->
+  <ellipse cx="256" cy="230" rx="16" ry="16" fill="url(#head3d)"/>
+  <!-- 头部高光 -->
+  <ellipse cx="250" cy="224" rx="7" ry="8" fill="#FFFFFF" opacity="0.18"/>
+
+  <!-- 体节连接阴影（增加层次） -->
+  <ellipse cx="256" cy="248" rx="18" ry="4" fill="#000000" opacity="0.15"/>
+  <ellipse cx="256" cy="298" rx="22" ry="4" fill="#000000" opacity="0.12"/>
+
+  <!-- ═══ 触角：立体弧线 ═══ -->
+  <path d="M248,220 C238,195 220,170 208,155 C200,145 192,143 186,148"
+        stroke="#FFD23F" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.85"/>
+  <path d="M264,220 C274,195 292,170 304,155 C312,145 320,143 326,148"
+        stroke="#FFD23F" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.85"/>
+  <!-- 触角端点：发光球体 -->
+  <circle cx="186" cy="148" r="7" fill="#FFD23F" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="183" cy="145" r="3" fill="#FFEC80" opacity="0.6"/>
+  <circle cx="326" cy="148" r="7" fill="#FFD23F" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="323" cy="145" r="3" fill="#FFEC80" opacity="0.6"/>
+
+  <!-- ═══ 环境光效 ═══ -->
+  <!-- 顶部环境光 -->
+  <ellipse cx="256" cy="120" rx="60" ry="20" fill="#FFD23F" opacity="0.04" filter="url(#softShadow)"/>
+  <!-- 身体下方反射光 -->
+  <ellipse cx="256" cy="395" rx="30" ry="6" fill="#FFD23F" opacity="0.08" filter="url(#softShadow)"/>
+
+  <!-- ═══ 科技粒子（点缀） ═══ -->
+  <g filter="url(#glow)">
+    <circle cx="186" cy="148" r="2.5" fill="#58A6FF" opacity="0.5"/>
+    <circle cx="326" cy="148" r="2.5" fill="#58A6FF" opacity="0.5"/>
+    <circle cx="95" cy="240" r="2" fill="#58A6FF" opacity="0.35"/>
+    <circle cx="417" cy="240" r="2" fill="#58A6FF" opacity="0.35"/>
+    <circle cx="125" cy="380" r="1.5" fill="#58A6FF" opacity="0.25"/>
+    <circle cx="387" cy="380" r="1.5" fill="#58A6FF" opacity="0.25"/>
+  </g>
+
+  <!-- 底部品牌 -->
+  <text x="256" y="475" text-anchor="middle"
+        font-family="'SF Pro Display','Helvetica Neue',Arial,sans-serif"
+        font-size="14" fill="#FFD23F" opacity="0.35" letter-spacing="10" font-weight="300">COAPIS</text>
+</svg>

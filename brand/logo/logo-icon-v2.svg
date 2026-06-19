@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F"/>
+      <stop offset="100%" stop-color="#FF6B00"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#FF8C00" stop-opacity="0.4"/>
+    </linearGradient>
+    <linearGradient id="glow-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F"/>
+      <stop offset="100%" stop-color="#FF6B00"/>
+    </linearGradient>
+    <filter id="softglow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="nodeglow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <!-- 蜂巢网格 -->
+    <pattern id="hexgrid" width="30" height="52" patternUnits="userSpaceOnUse" patternTransform="translate(256,256)">
+      <polygon points="15,0 30,9 30,26 15,35 0,26 0,9" fill="none" stroke="#FFD23F" stroke-width="0.5" opacity="0.08"/>
+      <polygon points="30,26 45,35 45,52 30,61 15,52 15,35" fill="none" stroke="#FFD23F" stroke-width="0.5" opacity="0.08"/>
+    </pattern>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="512" height="512" rx="56" fill="#080B14"/>
+
+  <!-- 蜂巢网格背景 -->
+  <rect width="512" height="512" rx="56" fill="url(#hexgrid)"/>
+
+  <!-- 外框：双层六边形 -->
+  <polygon points="256,18 472,142 472,370 256,494 40,370 40,142"
+           fill="none" stroke="#FFD23F" stroke-width="1.8" opacity="0.15"/>
+  <polygon points="256,32 460,150 460,362 256,480 52,362 52,150"
+           fill="none" stroke="#FFD23F" stroke-width="0.8" opacity="0.08"/>
+
+  <!-- ═══ 神经网络连线层 ═══ -->
+  <g stroke="#FFD23F" stroke-width="0.8" fill="none" opacity="0.12">
+    <!-- 六边形网格线 -->
+    <line x1="120" y1="160" x2="180" y2="130"/>
+    <line x1="180" y1="130" x2="256" y2="110"/>
+    <line x1="256" y1="110" x2="332" y2="130"/>
+    <line x1="332" y1="130" x2="392" y2="160"/>
+    <line x1="120" y1="160" x2="100" y2="240"/>
+    <line x1="392" y1="160" x2="412" y2="240"/>
+    <line x1="100" y1="240" x2="120" y2="340"/>
+    <line x1="412" y1="240" x2="392" y2="340"/>
+    <line x1="120" y1="340" x2="180" y2="400"/>
+    <line x1="180" y1="400" x2="256" y2="420"/>
+    <line x1="256" y1="420" x2="332" y2="400"/>
+    <line x1="332" y1="400" x2="392" y2="340"/>
+    <line x1="180" y1="130" x2="180" y2="200"/>
+    <line x1="332" y1="130" x2="332" y2="200"/>
+    <line x1="180" y1="200" x2="256" y2="170"/>
+    <line x1="332" y1="200" x2="256" y2="170"/>
+    <line x1="180" y1="200" x2="180" y2="300"/>
+    <line x1="332" y1="200" x2="332" y2="300"/>
+    <line x1="180" y1="300" x2="256" y2="340"/>
+    <line x1="332" y1="300" x2="256" y2="340"/>
+    <line x1="180" y1="300" x2="180" y2="400"/>
+    <line x1="332" y1="300" x2="332" y2="400"/>
+    <line x1="256" y1="170" x2="256" y2="110"/>
+    <line x1="256" y1="340" x2="256" y2="420"/>
+  </g>
+
+  <!-- 神经网络节点 -->
+  <g fill="#FFD23F" opacity="0.2">
+    <circle cx="120" cy="160" r="3"/>
+    <circle cx="180" cy="130" r="3"/>
+    <circle cx="256" cy="110" r="3"/>
+    <circle cx="332" cy="130" r="3"/>
+    <circle cx="392" cy="160" r="3"/>
+    <circle cx="100" cy="240" r="3"/>
+    <circle cx="412" cy="240" r="3"/>
+    <circle cx="120" cy="340" r="3"/>
+    <circle cx="392" cy="340" r="3"/>
+    <circle cx="180" cy="400" r="3"/>
+    <circle cx="256" cy="420" r="3"/>
+    <circle cx="332" cy="400" r="3"/>
+    <circle cx="180" cy="200" r="2.5"/>
+    <circle cx="332" cy="200" r="2.5"/>
+    <circle cx="180" cy="300" r="2.5"/>
+    <circle cx="332" cy="300" r="2.5"/>
+  </g>
+
+  <!-- ═══ 翅膀：六边形蜂巢网格翅膀 ═══ -->
+  <!-- 左翅 -->
+  <g transform="translate(-15, -5)" opacity="0.7">
+    <!-- 翅膀轮廓 -->
+    <path d="M256,190 Q180,170 140,220 Q110,270 150,310 Q190,340 240,300 Q260,280 256,250 Z"
+          fill="none" stroke="#FFD23F" stroke-width="1.2" opacity="0.35"/>
+    <!-- 内部蜂巢格 -->
+    <g stroke="#FFD23F" stroke-width="0.6" fill="none" opacity="0.2">
+      <polygon points="185,215 197,208 209,215 209,229 197,236 185,229"/>
+      <polygon points="209,215 221,208 233,215 233,229 221,236 209,229"/>
+      <polygon points="173,229 185,222 197,229 197,243 185,250 173,243"/>
+      <polygon points="197,229 209,222 221,229 221,243 209,250 197,243"/>
+      <polygon points="221,229 233,222 245,229 245,243 233,250 221,243"/>
+      <polygon points="185,250 197,243 209,250 209,264 197,271 185,264"/>
+      <polygon points="209,250 221,243 233,250 233,264 221,271 209,264"/>
+      <polygon points="173,257 185,250 197,257 197,271 185,278 173,271"/>
+      <polygon points="197,271 209,264 221,271 221,285 209,292 197,285"/>
+      <polygon points="173,285 185,278 197,285 197,299 185,306 173,299"/>
+    </g>
+  </g>
+  <!-- 右翅 -->
+  <g transform="translate(15, -5)" opacity="0.7">
+    <path d="M256,190 Q332,170 372,220 Q402,270 362,310 Q322,340 272,300 Q252,280 256,250 Z"
+          fill="none" stroke="#FFD23F" stroke-width="1.2" opacity="0.35"/>
+    <g stroke="#FFD23F" stroke-width="0.6" fill="none" opacity="0.2">
+      <polygon points="279,215 291,208 303,215 303,229 291,236 279,229"/>
+      <polygon points="303,215 315,208 327,215 327,229 315,236 303,229"/>
+      <polygon points="267,229 279,222 291,229 291,243 279,250 267,243"/>
+      <polygon points="291,229 303,222 315,229 315,243 303,250 291,243"/>
+      <polygon points="315,229 327,222 339,229 339,243 327,250 315,243"/>
+      <polygon points="279,250 291,243 303,250 303,264 291,271 279,264"/>
+      <polygon points="303,250 315,243 327,250 327,264 315,271 303,264"/>
+      <polygon points="267,257 279,250 291,257 291,271 279,278 267,271"/>
+      <polygon points="291,271 303,264 315,271 315,285 303,292 291,285"/>
+      <polygon points="267,285 279,278 291,285 291,299 279,306 267,299"/>
+    </g>
+  </g>
+
+  <!-- ═══ 蜜蜂身体：几何化、更精致 ═══ -->
+  <!-- 头部 - 小六边形 -->
+  <polygon points="256,188 268,195 268,210 256,217 244,210 244,195"
+           fill="url(#g1)" opacity="0.9"/>
+  <polygon points="256,188 268,195 268,210 256,217 244,210 244,195"
+           fill="none" stroke="#FFD23F" stroke-width="0.8" opacity="0.6"/>
+
+  <!-- 胸部 - 中六边形 -->
+  <polygon points="256,217 272,227 272,247 256,257 240,247 240,227"
+           fill="url(#g1)" opacity="0.9"/>
+  <polygon points="256,217 272,227 272,247 256,257 240,247 240,227"
+           fill="none" stroke="#FFD23F" stroke-width="0.8" opacity="0.6"/>
+
+  <!-- 腹部 - 大六边形 -->
+  <polygon points="256,257 276,269 276,297 256,309 236,297 236,269"
+           fill="url(#g1)" opacity="0.9"/>
+  <polygon points="256,257 276,269 276,297 256,309 236,297 236,269"
+           fill="none" stroke="#FFD23F" stroke-width="0.8" opacity="0.6"/>
+
+  <!-- 腹部条纹 (科技感) -->
+  <g stroke="#080B14" stroke-width="2" opacity="0.35">
+    <line x1="240" y1="278" x2="272" y2="278"/>
+    <line x1="238" y1="290" x2="274" y2="290"/>
+  </g>
+
+  <!-- 体节连接处发光 -->
+  <circle cx="256" cy="217" r="4" fill="#FFD23F" filter="url(#nodeglow)" opacity="0.8"/>
+  <circle cx="256" cy="257" r="4" fill="#FFD23F" filter="url(#nodeglow)" opacity="0.8"/>
+
+  <!-- ═══ 触角：更精致的弧线 + 节点 ═══ -->
+  <g stroke="#FFD23F" stroke-width="1.5" fill="none" stroke-linecap="round">
+    <path d="M250,192 Q238,165 222,148" opacity="0.7"/>
+    <path d="M262,192 Q274,165 290,148" opacity="0.7"/>
+  </g>
+  <circle cx="222" cy="148" r="4" fill="#FFD23F" filter="url(#nodeglow)" opacity="0.9"/>
+  <circle cx="290" cy="148" r="4" fill="#FFD23F" filter="url(#nodeglow)" opacity="0.9"/>
+
+  <!-- ═══ 中心焦点：AI 核心发光 ═══ -->
+  <circle cx="256" cy="237" r="20" fill="none" stroke="#FFD23F" stroke-width="0.5" opacity="0.15"/>
+  <circle cx="256" cy="237" r="35" fill="none" stroke="#FFD23F" stroke-width="0.3" opacity="0.08"/>
+  <circle cx="256" cy="237" r="50" fill="none" stroke="#FFD23F" stroke-width="0.2" opacity="0.05"/>
+
+  <!-- ═══ 四角装饰：数据流粒子 ═══ -->
+  <g fill="#FFD23F" filter="url(#nodeglow)">
+    <!-- 左上 -->
+    <circle cx="95" cy="135" r="2" opacity="0.5"/>
+    <circle cx="115" cy="155" r="1.5" opacity="0.3"/>
+    <!-- 右上 -->
+    <circle cx="417" cy="135" r="2" opacity="0.5"/>
+    <circle cx="397" cy="155" r="1.5" opacity="0.3"/>
+    <!-- 左下 -->
+    <circle cx="95" cy="377" r="2" opacity="0.5"/>
+    <circle cx="115" cy="357" r="1.5" opacity="0.3"/>
+    <!-- 右下 -->
+    <circle cx="417" cy="377" r="2" opacity="0.5"/>
+    <circle cx="397" cy="357" r="1.5" opacity="0.3"/>
+  </g>
+
+  <!-- 底部微标 -->
+  <text x="256" y="458" text-anchor="middle"
+        font-family="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        font-size="11" fill="#FFD23F" opacity="0.2" letter-spacing="6">
+    COAPIS
+  </text>
+</svg>

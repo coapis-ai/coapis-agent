@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="body" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F"/>
+      <stop offset="100%" stop-color="#E65100"/>
+    </linearGradient>
+    <linearGradient id="wL" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#FF8C00" stop-opacity="0.1"/>
+    </linearGradient>
+    <linearGradient id="wR" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#FF8C00" stop-opacity="0.1"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#080B14"/>
+  <!-- 翅膀 -->
+  <path d="M30,22 C24,18 16,18 12,23 C8,28 9,35 15,38 C21,41 27,37 29,33 Q30,30 30,27 Z"
+        fill="url(#wL)" stroke="#FFD23F" stroke-width="0.7" opacity="0.5"/>
+  <path d="M34,22 C40,18 48,18 52,23 C56,28 55,35 49,38 C43,41 37,37 35,33 Q34,30 34,27 Z"
+        fill="url(#wR)" stroke="#FFD23F" stroke-width="0.7" opacity="0.5"/>
+  <!-- 身体 -->
+  <ellipse cx="32" cy="22" rx="3" ry="2.5" fill="url(#body)"/>
+  <path d="M32,24.5 C35,24.5 37,26.5 37,29 C37,31.5 35,33.5 32,33.5 C29,33.5 27,31.5 27,29 C27,26.5 29,24.5 32,24.5 Z" fill="url(#body)"/>
+  <path d="M32,33.5 C36,33.5 38,35.5 38,38 C38,42 36,45 32,47 C28,45 26,42 26,38 C26,35.5 28,33.5 32,33.5 Z" fill="url(#body)"/>
+  <!-- 条纹 -->
+  <path d="M28,37 Q32,35.5 36,37" stroke="#080B14" stroke-width="1" fill="none" opacity="0.4" stroke-linecap="round"/>
+  <path d="M27,40 Q32,38.5 37,40" stroke="#080B14" stroke-width="1" fill="none" opacity="0.4" stroke-linecap="round"/>
+  <!-- 触角 -->
+  <path d="M31,21 C29,17 27,15 25,14" stroke="#FFD23F" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.75"/>
+  <circle cx="25" cy="14" r="1.5" fill="#FFD23F" opacity="0.85"/>
+  <path d="M33,21 C35,17 37,15 39,14" stroke="#FFD23F" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.75"/>
+  <circle cx="39" cy="14" r="1.5" fill="#FFD23F" opacity="0.85"/>
+</svg>

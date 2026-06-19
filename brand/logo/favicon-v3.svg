@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="h" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F"/>
+      <stop offset="100%" stop-color="#FF6B00"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#080B14"/>
+  <!-- 蜂巢网格 -->
+  <g stroke="#FFD23F" stroke-width="0.5" fill="none" opacity="0.25">
+    <polygon points="10,10 16,7 22,10 22,18 16,21 10,18"/>
+    <polygon points="22,10 28,7 34,10 34,18 28,21 22,18"/>
+    <polygon points="34,10 40,7 46,10 46,18 40,21 34,18"/>
+    <polygon points="10,26 16,23 22,26 22,34 16,37 10,34"/>
+    <polygon points="22,26 28,23 34,26 34,34 28,37 22,34"/>
+    <polygon points="34,26 40,23 46,26 46,34 40,37 34,34"/>
+    <polygon points="10,42 16,39 22,42 22,50 16,53 10,50"/>
+    <polygon points="22,42 28,39 34,42 34,50 28,53 22,50"/>
+    <polygon points="34,42 40,39 46,42 46,50 40,53 34,50"/>
+    <polygon points="16,18 22,15 28,18 28,26 22,29 16,26"/>
+    <polygon points="28,18 34,15 40,18 40,26 34,29 28,26"/>
+    <polygon points="16,34 22,31 28,34 28,42 22,45 16,42"/>
+    <polygon points="28,34 34,31 40,34 40,42 34,45 28,42"/>
+  </g>
+  <!-- 外框 -->
+  <polygon points="32,5 57,19 57,45 32,59 7,45 7,19"
+           fill="none" stroke="#FFD23F" stroke-width="1.2" opacity="0.35"/>
+  <!-- 翅膀 -->
+  <path d="M32,19 Q22,17 18,23 Q14,29 18,34 Q22,37 30,33 Z"
+        fill="#FFD23F" fill-opacity="0.1" stroke="#FFD23F" stroke-width="0.8" opacity="0.6"/>
+  <path d="M32,19 Q42,17 46,23 Q50,29 46,34 Q42,37 34,33 Z"
+        fill="#FFD23F" fill-opacity="0.1" stroke="#FFD23F" stroke-width="0.8" opacity="0.6"/>
+  <!-- 身体 -->
+  <polygon points="32,19 35,21 35,25 32,27 29,25 29,21" fill="url(#h)"/>
+  <polygon points="32,27 36,30 36,37 32,40 28,37 28,30" fill="url(#h)"/>
+  <!-- 条纹 -->
+  <line x1="29" y1="33" x2="35" y2="33" stroke="#080B14" stroke-width="1" opacity="0.5"/>
+  <!-- 触角 -->
+  <line x1="31" y1="19" x2="27" y2="13" stroke="#FFD23F" stroke-width="1" stroke-linecap="round" opacity="0.8"/>
+  <circle cx="27" cy="13" r="1.8" fill="#FFD23F" opacity="0.9"/>
+  <line x1="33" y1="19" x2="37" y2="13" stroke="#FFD23F" stroke-width="1" stroke-linecap="round" opacity="0.8"/>
+  <circle cx="37" cy="13" r="1.8" fill="#FFD23F" opacity="0.9"/>
+</svg>

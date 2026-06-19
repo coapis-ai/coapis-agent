@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="body" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F"/>
+      <stop offset="60%" stop-color="#FF8C00"/>
+      <stop offset="100%" stop-color="#E65100"/>
+    </linearGradient>
+    <linearGradient id="wingL" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#FF8C00" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="wingR" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#FF8C00" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="trail" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#FF8C00" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="soft">
+      <feGaussianBlur stdDeviation="2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="512" height="512" rx="56" fill="#080B14"/>
+
+  <!-- 微妙的光晕 -->
+  <circle cx="256" cy="260" r="180" fill="#FFD23F" opacity="0.03"/>
+  <circle cx="256" cy="260" r="120" fill="#FFD23F" opacity="0.04"/>
+
+  <!-- ═══ 流动的数据粒子轨迹（从蜜蜂向外扩散） ═══ -->
+  <!-- 左侧弧线 -->
+  <path d="M195,235 Q120,200 80,260 Q50,310 100,360" 
+        stroke="url(#trail)" stroke-width="1.5" fill="none" opacity="0.5"/>
+  <path d="M185,255 Q110,240 70,300 Q45,350 90,390"
+        stroke="url(#trail)" stroke-width="1" fill="none" opacity="0.3"/>
+  <!-- 右侧弧线 -->
+  <path d="M317,235 Q392,200 432,260 Q462,310 412,360"
+        stroke="url(#trail)" stroke-width="1.5" fill="none" opacity="0.5"/>
+  <path d="M327,255 Q402,240 442,300 Q467,350 422,390"
+        stroke="url(#trail)" stroke-width="1" fill="none" opacity="0.3"/>
+
+  <!-- 散落的光点粒子 -->
+  <g filter="url(#soft)">
+    <circle cx="75" cy="255" r="3" fill="#FFD23F" opacity="0.6"/>
+    <circle cx="55" cy="310" r="2.5" fill="#FFD23F" opacity="0.4"/>
+    <circle cx="85" cy="365" r="2" fill="#FFD23F" opacity="0.3"/>
+    <circle cx="437" cy="255" r="3" fill="#FFD23F" opacity="0.6"/>
+    <circle cx="457" cy="310" r="2.5" fill="#FFD23F" opacity="0.4"/>
+    <circle cx="427" cy="365" r="2" fill="#FFD23F" opacity="0.3"/>
+    <!-- 上方散点 -->
+    <circle cx="150" cy="140" r="2" fill="#58A6FF" opacity="0.4"/>
+    <circle cx="362" cy="140" r="2" fill="#58A6FF" opacity="0.4"/>
+    <circle cx="110" cy="185" r="1.5" fill="#58A6FF" opacity="0.3"/>
+    <circle cx="402" cy="185" r="1.5" fill="#58A6FF" opacity="0.3"/>
+    <!-- 下方 -->
+    <circle cx="170" cy="400" r="1.5" fill="#58A6FF" opacity="0.3"/>
+    <circle cx="342" cy="400" r="1.5" fill="#58A6FF" opacity="0.3"/>
+  </g>
+
+  <!-- ═══ 翅膀：流畅的有机曲线 ═══ -->
+  <!-- 左翅 - 大弧线，像展开的翼 -->
+  <path d="M240,220 
+           C200,195 145,195 115,230 
+           C85,265 95,320 135,345 
+           C175,370 220,340 235,305 
+           Q245,275 240,250 Z"
+        fill="url(#wingL)" stroke="#FFD23F" stroke-width="1.2" opacity="0.55"/>
+  <!-- 左翅纹理线 -->
+  <g stroke="#FFD23F" stroke-width="0.6" fill="none" opacity="0.25">
+    <path d="M235,230 C200,215 155,218 130,245"/>
+    <path d="M232,250 C195,240 150,248 125,275"/>
+    <path d="M230,270 C200,262 160,270 140,295"/>
+    <path d="M228,290 C205,285 175,292 155,315"/>
+  </g>
+
+  <!-- 右翅 - 镜像 -->
+  <path d="M272,220 
+           C312,195 367,195 397,230 
+           C427,265 417,320 377,345 
+           C337,370 292,340 277,305 
+           Q267,275 272,250 Z"
+        fill="url(#wingR)" stroke="#FFD23F" stroke-width="1.2" opacity="0.55"/>
+  <!-- 右翅纹理线 -->
+  <g stroke="#FFD23F" stroke-width="0.6" fill="none" opacity="0.25">
+    <path d="M277,230 C312,215 357,218 382,245"/>
+    <path d="M280,250 C317,240 362,248 387,275"/>
+    <path d="M282,270 C312,262 352,270 372,295"/>
+    <path d="M284,290 C307,285 337,292 357,315"/>
+  </g>
+
+  <!-- ═══ 蜜蜂身体：流畅的锥形 ═══ -->
+  <!-- 头部 - 小圆 -->
+  <ellipse cx="256" cy="205" rx="14" ry="13" fill="url(#body)"/>
+  
+  <!-- 胸部 - 圆润 -->
+  <path d="M256,218 
+           C275,218 288,232 288,250 
+           C288,268 275,280 256,280 
+           C237,280 224,268 224,250 
+           C224,232 237,218 256,218 Z"
+        fill="url(#body)"/>
+  
+  <!-- 腹部 - 优雅的锥形 -->
+  <path d="M256,280 
+           C278,280 295,296 295,318 
+           C295,345 278,365 256,375 
+           C234,365 217,345 217,318 
+           C217,296 234,280 256,280 Z"
+        fill="url(#body)"/>
+
+  <!-- 腹部条纹 - 优雅弧线 -->
+  <g stroke="#080B14" fill="none" opacity="0.45" stroke-linecap="round">
+    <path d="M230,305 Q256,298 282,305" stroke-width="2.5"/>
+    <path d="M225,322 Q256,314 287,322" stroke-width="2.5"/>
+    <path d="M228,340 Q256,332 284,340" stroke-width="2"/>
+  </g>
+
+  <!-- 体节连接光泽 -->
+  <ellipse cx="256" cy="218" rx="10" ry="3" fill="#FFD23F" opacity="0.5" filter="url(#soft)"/>
+  <ellipse cx="256" cy="280" rx="14" ry="3" fill="#FFD23F" opacity="0.4" filter="url(#soft)"/>
+
+  <!-- ═══ 触角：优雅的S曲线 ═══ -->
+  <path d="M248,198 C240,175 225,158 215,148 C208,141 200,140 195,145"
+        stroke="#FFD23F" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <path d="M264,198 C272,175 287,158 297,148 C304,141 312,140 317,145"
+        stroke="#FFD23F" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <!-- 触角端点 - 光点 -->
+  <circle cx="195" cy="145" r="5" fill="#FFD23F" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="317" cy="145" r="5" fill="#FFD23F" filter="url(#glow)" opacity="0.9"/>
+
+  <!-- ═══ 中心光晕 ═══ -->
+  <circle cx="256" cy="260" r="8" fill="#FFD23F" opacity="0.15" filter="url(#glow)"/>
+
+  <!-- ═══ 科技节点：翅膀尖端的连接点 ═══ -->
+  <g filter="url(#soft)">
+    <!-- 翅尖节点 -->
+    <circle cx="115" cy="230" r="4" fill="#58A6FF" opacity="0.6"/>
+    <circle cx="135" cy="345" r="3" fill="#58A6FF" opacity="0.4"/>
+    <circle cx="397" cy="230" r="4" fill="#58A6FF" opacity="0.6"/>
+    <circle cx="377" cy="345" r="3" fill="#58A6FF" opacity="0.4"/>
+    <!-- 连接线 -->
+    <line x1="115" y1="230" x2="135" y2="345" stroke="#58A6FF" stroke-width="0.8" opacity="0.3"/>
+    <line x1="397" y1="230" x2="377" y2="345" stroke="#58A6FF" stroke-width="0.8" opacity="0.3"/>
+    <!-- 顶部连接 -->
+    <line x1="195" y1="145" x2="150" y2="140" stroke="#58A6FF" stroke-width="0.8" opacity="0.25"/>
+    <line x1="317" y1="145" x2="362" y2="140" stroke="#58A6FF" stroke-width="0.8" opacity="0.25"/>
+  </g>
+
+  <!-- 底部品牌字 -->
+  <text x="256" y="468" text-anchor="middle"
+        font-family="'SF Pro Display','Helvetica Neue',Arial,sans-serif"
+        font-size="14" fill="#FFD23F" opacity="0.35" letter-spacing="10" font-weight="300">COAPIS</text>
+</svg>

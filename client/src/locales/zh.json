@@ -2186,6 +2186,7 @@
     "passwordPlaceholder": "密码",
     "usernameRequired": "请输入用户名",
     "passwordRequired": "请输入密码",
+    "rememberMe": "记住我",
     "submit": "登录",
     "register": "注册",
     "failed": "登录失败，请检查您的凭据",

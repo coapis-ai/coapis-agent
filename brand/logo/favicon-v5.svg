@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="h3" cx="45%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#FFEC80"/><stop offset="50%" stop-color="#FFB800"/><stop offset="100%" stop-color="#CC6600"/>
+    </radialGradient>
+    <radialGradient id="t3" cx="45%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#FFEC80"/><stop offset="40%" stop-color="#FFAA00"/><stop offset="100%" stop-color="#CC5500"/>
+    </radialGradient>
+    <radialGradient id="a3" cx="45%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#FFEC80"/><stop offset="35%" stop-color="#FF9900"/><stop offset="100%" stop-color="#8B3000"/>
+    </radialGradient>
+    <linearGradient id="wL" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.45"/><stop offset="100%" stop-color="#FF6B00" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="wR" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD23F" stop-opacity="0.45"/><stop offset="100%" stop-color="#FF6B00" stop-opacity="0.05"/>
+    </linearGradient>
+    <radialGradient id="whl" cx="30%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.2"/><stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="gl"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#060912"/>
+  <!-- 翅膀 -->
+  <path d="M31,20 C24,16 14,17 10,23 C6,29 8,37 14,40 C20,43 28,38 30,34 Q31,31 31,27 Z" fill="url(#wL)" stroke="#FFD23F" stroke-width="0.6" opacity="0.5"/>
+  <path d="M31,20 C24,16 14,17 10,23 C6,29 8,37 14,40 C20,43 28,38 30,34 Q31,31 31,27 Z" fill="url(#whl)"/>
+  <path d="M33,20 C40,16 50,17 54,23 C58,29 56,37 50,40 C44,43 36,38 34,34 Q33,31 33,27 Z" fill="url(#wR)" stroke="#FFD23F" stroke-width="0.6" opacity="0.5"/>
+  <path d="M33,20 C40,16 50,17 54,23 C58,29 56,37 50,40 C44,43 36,38 34,34 Q33,31 33,27 Z" fill="url(#whl)"/>
+  <!-- 身体 -->
+  <ellipse cx="32" cy="36" rx="6" ry="9" fill="url(#a3)"/>
+  <path d="M28,33 Q32,31 36,33" stroke="#060912" stroke-width="0.8" fill="none" opacity="0.35" stroke-linecap="round"/>
+  <path d="M27.5,36 Q32,34 36.5,36" stroke="#060912" stroke-width="0.8" fill="none" opacity="0.35" stroke-linecap="round"/>
+  <ellipse cx="30" cy="33" rx="3" ry="4" fill="#FFFFFF" opacity="0.1"/>
+  <ellipse cx="32" cy="25" rx="5.5" ry="6.5" fill="url(#t3)"/>
+  <ellipse cx="30.5" cy="23" rx="2.5" ry="3" fill="#FFFFFF" opacity="0.12"/>
+  <ellipse cx="32" cy="18" rx="4" ry="3.8" fill="url(#h3)"/>
+  <ellipse cx="31" cy="17" rx="1.8" ry="2" fill="#FFFFFF" opacity="0.15"/>
+  <!-- 触角 -->
+  <path d="M30.5,16.5 C29,13 27,11 25.5,10.5" stroke="#FFD23F" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <circle cx="25.5" cy="10.5" r="1.8" fill="#FFD23F" filter="url(#gl)" opacity="0.9"/>
+  <path d="M33.5,16.5 C35,13 37,11 38.5,10.5" stroke="#FFD23F" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <circle cx="38.5" cy="10.5" r="1.8" fill="#FFD23F" filter="url(#gl)" opacity="0.9"/>
+</svg>
