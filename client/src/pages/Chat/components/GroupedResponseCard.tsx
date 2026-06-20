@@ -9,7 +9,7 @@
  * 通过 options.cards 注册：
  *   cards: { 'AgentScopeRuntimeResponseCard': GroupedResponseCard }
  */
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Markdown } from '@agentscope-ai/chat';
 import {
   CheckCircleOutlined,
@@ -17,12 +17,10 @@ import {
   RightOutlined,
   BulbOutlined,
   ToolOutlined,
-  MessageOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import { Avatar, Flex } from 'antd';
 import { useChatAnywhereOptions } from '@agentscope-ai/chat/lib/AgentScopeRuntimeWebUI/core/Context/ChatAnywhereOptionsContext';
-import { TOOL_CATEGORIES } from './EnhancedToolCallCard';
 import styles from '../index.module.less';
 
 // ---------------------------------------------------------------------------
@@ -76,7 +74,6 @@ interface GroupedResponseCardProps {
     status?: string;
     [key: string]: any;
   };
-  isLast?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,24 +131,34 @@ function getToolInfo(msg: OutputMessage): {
   icon: string;
   color: string;
   label: string;
-  bgColor: string;
   loading: boolean;
 } {
   const content = msg.content || [];
   const first = content[0];
   const toolName = first?.data?.name || 'unknown';
-  const cat = (TOOL_CATEGORIES as any)[toolName] || {
-    icon: '⚙️',
-    color: '#595959',
-    label: '工具',
-    bgColor: '#fafafa',
+
+  // Simplified tool category mapping
+  const TOOL_ICONS: Record<string, { icon: string; color: string; label: string }> = {
+    execute_shell_command: { icon: '🖥️', color: '#8c8c8c', label: '命令' },
+    read_file: { icon: '📄', color: '#1890ff', label: '读取' },
+    write_file: { icon: '✏️', color: '#52c41a', label: '写入' },
+    edit_file: { icon: '✏️', color: '#faad14', label: '编辑' },
+    grep_search: { icon: '🔍', color: '#1890ff', label: '搜索' },
+    glob_search: { icon: '📁', color: '#1890ff', label: '搜索' },
+    browser_use: { icon: '🌐', color: '#722ed1', label: '浏览器' },
+    web_search: { icon: '🌐', color: '#722ed1', label: '搜索' },
+    memory_search: { icon: '🧠', color: '#eb2f96', label: '记忆' },
+    view_image: { icon: '🖼️', color: '#13c2c2', label: '图片' },
+    send_file_to_user: { icon: '📤', color: '#fa8c16', label: '发送' },
+    chat_with_agent: { icon: '🤖', color: '#1677ff', label: 'Agent' },
   };
+
+  const cat = TOOL_ICONS[toolName] || { icon: '⚙️', color: '#595959', label: '工具' };
   return {
     name: toolName,
     icon: cat.icon,
     color: cat.color,
     label: cat.label,
-    bgColor: cat.bgColor,
     loading: msg.status === RUN_STATUS.IN_PROGRESS,
   };
 }
@@ -166,7 +173,6 @@ interface SectionProps {
   badge?: React.ReactNode;
   defaultOpen?: boolean;
   accentColor: string;
-  bgColor: string;
   children: React.ReactNode;
   generating?: boolean;
 }
@@ -177,7 +183,6 @@ const CollapsibleSection: React.FC<SectionProps> = ({
   badge,
   defaultOpen = false,
   accentColor,
-  bgColor,
   children,
   generating,
 }) => {
@@ -237,7 +242,6 @@ const ThinkingContent: React.FC<{ msg: OutputMessage }> = ({ msg }) => {
 const ToolInline: React.FC<{ msg: OutputMessage }> = ({ msg }) => {
   const info = getToolInfo(msg);
   const inputStr = msg.content?.[0]?.data?.arguments;
-  const outputStr = msg.content?.[1]?.data?.output;
   const serverLabel = msg.content?.[0]?.data?.server_label;
 
   // 解析输入以生成摘要
@@ -283,7 +287,7 @@ const ToolInline: React.FC<{ msg: OutputMessage }> = ({ msg }) => {
 // GroupedResponseCard 主组件
 // ---------------------------------------------------------------------------
 
-const GroupedResponseCard: React.FC<GroupedResponseCardProps> = ({ data, isLast }) => {
+const GroupedResponseCard: React.FC<GroupedResponseCardProps> = ({ data }) => {
   const output = data.output || [];
 
   const avatar = useChatAnywhereOptions((v: any) => v.welcome?.avatar);
@@ -306,24 +310,9 @@ const GroupedResponseCard: React.FC<GroupedResponseCardProps> = ({ data, isLast 
 
   if (groups.length === 0) return null;
 
-  // 检查是否有正在进行的生成
-  const hasGeneratingTool = output.some(
-    (m) =>
-      (m.type === MSG_TYPE.PLUGIN_CALL ||
-        m.type === MSG_TYPE.MCP_CALL ||
-        m.type === MSG_TYPE.FUNCTION_CALL) &&
-      m.status === RUN_STATUS.IN_PROGRESS,
-  );
+  // Check if there are any active reasoning/tool steps
   const hasGeneratingReasoning = output.some(
     (m) => m.type === MSG_TYPE.REASONING && m.status === RUN_STATUS.IN_PROGRESS,
-  );
-
-  // 统计工具
-  const toolGroups = groups.filter((g) => g.type === 'tools');
-  const totalTools = toolGroups.reduce((sum, g) => sum + g.items.length, 0);
-  const doneTools = toolGroups.reduce(
-    (sum, g) => sum + g.items.filter((m) => m.status !== RUN_STATUS.IN_PROGRESS).length,
-    0,
   );
 
   return (
@@ -355,7 +344,6 @@ const GroupedResponseCard: React.FC<GroupedResponseCardProps> = ({ data, isLast 
               }
               defaultOpen={false}
               accentColor="#722ed1"
-              bgColor="#f9f0ff"
               generating={hasGeneratingReasoning}
             >
               {group.items.map((item) => (
@@ -386,7 +374,6 @@ const GroupedResponseCard: React.FC<GroupedResponseCardProps> = ({ data, isLast 
               }
               defaultOpen={false}
               accentColor="#1890ff"
-              bgColor="#e6f4ff"
               generating={activeCount > 0}
             >
               {toolItems.map((item) => (
