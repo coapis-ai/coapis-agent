@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Card, Button, Form, Tabs } from "antd";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import { PlusOutlined, GlobalOutlined, FileTextOutlined, CloudServerOutlined } from "@ant-design/icons";
@@ -13,6 +13,7 @@ import { AgentTable, AgentModal } from "./components";
 import AgentIdentityFiles from "./components/AgentIdentityFiles";
 import { PageHeader } from "@/components/PageHeader";
 import { PermissionGuard } from "@/components/PermissionGuard";
+import { usePermission } from "@/hooks/usePermission";
 import { reorderAgents } from "./reorder";
 import GlobalAgentsTab from "@/pages/Admin/GlobalAgentsTab";
 import TemplatesTab from "@/pages/Admin/TemplatesTab";

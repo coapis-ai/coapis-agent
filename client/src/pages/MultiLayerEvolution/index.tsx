@@ -45,8 +45,6 @@ export default function MultiLayerEvolutionPage() {
   const { t } = useTranslation();
   const { user, isAdmin } = useUser();
   const { isAllowed } = useModuleAccess();
-  const { hasPermission } = usePermission();
-  const canDelete = hasPermission("evolution:delete");
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedUser, setSelectedUser] = useState<string>(user?.username || '');
   const [users, setUsers] = useState<Array<{ username: string; label: string }>>([]);

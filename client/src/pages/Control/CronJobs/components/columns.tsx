@@ -16,6 +16,8 @@ interface ColumnHandlers {
   onEdit: (job: CronJob) => void;
   onDelete: (jobId: string) => void;
   t: TFunction;
+  canUpdate?: boolean;
+  canDelete?: boolean;
 }
 
 const createCopyToClipboard = (t: TFunction) => async (text: string) => {
@@ -305,13 +307,13 @@ export const createColumns = (
           {
             key: "edit",
             label: handlers.t("cronJobs.edit"),
-            disabled: record.enabled,
+            disabled: record.enabled || !handlers.canUpdate,
             onClick: () => handlers.onEdit(record),
           },
           {
             key: "delete",
             label: handlers.t("cronJobs.delete"),
-            disabled: record.enabled,
+            disabled: record.enabled || !handlers.canDelete,
             danger: true,
             onClick: () => handlers.onDelete(record.id),
           },

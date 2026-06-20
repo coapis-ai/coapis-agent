@@ -19,7 +19,7 @@ import styles from "./index.module.less";
 function SessionsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { hasPermission, checkPermissions } = usePermission();
+  const { checkPermissions } = usePermission();
   const {
     sessions,
     loading,

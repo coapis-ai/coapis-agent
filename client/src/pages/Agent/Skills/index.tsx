@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tabs } from "@agentscope-ai/design";
 import {
@@ -19,7 +19,7 @@ import styles from "./index.module.less";
 
 function SkillsPage() {
   const { t } = useTranslation();
-  const { hasPermission, checkPermissions } = usePermission();
+  const { hasPermission } = usePermission();
   const [activeTab, setActiveTab] = useState<"my" | "global">("my");
   const {
     skills,
