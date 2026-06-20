@@ -104,11 +104,17 @@ def _extract_source_and_filename(block: dict, block_type: str):
     if block_type == "image" and "image_url" in block and "source" not in block:
         url = block["image_url"]
         filename = os.path.basename(urllib.parse.urlparse(url).path) or None
-        return {"type": "url", "url": url}, filename
+        
+        # Resolve to local media path if URL is relative
+        resolved_url = _resolve_media_url(url)
+        return {"type": "url", "url": resolved_url}, filename
+    
     if block_type == "video" and "video_url" in block and "source" not in block:
         url = block["video_url"]
         filename = os.path.basename(urllib.parse.urlparse(url).path) or None
-        return {"type": "url", "url": url}, filename
+        resolved_url = _resolve_media_url(url)
+        return {"type": "url", "url": resolved_url}, filename
+    
     if block_type == "audio" and "data" in block and "source" not in block:
         return {"type": "base64", "data": block["data"]}, None
 
@@ -125,6 +131,56 @@ def _extract_source_and_filename(block: dict, block_type: str):
             filename = os.path.basename(parsed.path) or None
 
     return source, filename
+
+
+def _resolve_media_url(url: str) -> str:
+    """Resolve a relative URL (like /test.jpg) to the user's workspace files directory.
+    
+    When the frontend sends /test.jpg, this resolves to:
+    file:///path/to/workspaces/{username}/files/test.jpg
+    
+    This allows the agent to read files that were uploaded via the chat 
+    attachment system and stored in the user's workspace.
+    """
+    from ...config.context import get_current_workspace_dir, get_current_username
+    
+    # If it's already an absolute URL or file:// URL, return as-is
+    if url.startswith("http://") or url.startswith("https://") or url.startswith("file://"):
+        return url
+    
+    # Only resolve bare filenames (like /test.jpg), not full paths
+    # that already contain directory info
+    parsed = urllib.parse.urlparse(url)
+    basename = os.path.basename(parsed.path)
+    if not basename:
+        return url
+    
+    # Get current workspace directory from context
+    workspace_dir = get_current_workspace_dir()
+    username = get_current_username()
+    
+    if not workspace_dir or not username:
+        logger.debug("_resolve_media_url: No context, returning original URL: %s", url)
+        return url
+    
+    # Check workspace files directory
+    files_dir = Path(workspace_dir) / "files"
+    local_path = files_dir / basename
+    
+    if local_path.exists():
+        logger.debug("_resolve_media_url: Resolved %s -> %s", url, local_path)
+        return local_path.as_uri()  # file:///path/to/file
+    
+    # Also check media directory
+    media_dir = Path(workspace_dir) / "media"
+    local_path = media_dir / basename
+    if local_path.exists():
+        logger.debug("_resolve_media_url: Resolved %s -> %s (media)", url, local_path)
+        return local_path.as_uri()
+    
+    # File not found in either directory
+    logger.warning("_resolve_media_url: File not found: %s in files/ or media/", basename)
+    return url
 
 
 def _media_type_from_path(path: str) -> str:
