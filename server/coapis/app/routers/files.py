@@ -277,7 +277,14 @@ async def upload_file(
             raise HTTPException(status_code=409, detail="文件已存在")
         raise HTTPException(status_code=500, detail=f"上传文件失败: {e}")
 
-    return FileOperationResponse(success=True, message="文件上传成功")
+    # Return format expected by frontend ChatUploadResponse: {url, file_name}
+    return {
+        "success": True,
+        "message": "文件上传成功",
+        "url": result.path,
+        "file_name": result.name,
+        "stored_name": result.path,
+    }
 
 
 @router.get("/download")

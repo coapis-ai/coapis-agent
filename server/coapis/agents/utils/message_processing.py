@@ -89,10 +89,30 @@ async def _process_single_file_block(
 
 
 def _extract_source_and_filename(block: dict, block_type: str):
-    """Extract source and filename from a block."""
+    """Extract source and filename from a block.
+
+    Supports two formats:
+    1. Direct URL format (from @agentscope-ai/chat frontend):
+       {type: "image", image_url: "/path/to/file.png"}
+    2. Source dict format (from channels):
+       {type: "image", source: {type: "url", url: "/path/to/file.png"}}
+    """
     if block_type == "file":
         return block.get("source", {}), block.get("filename")
 
+    # Format 1: Direct URL fields (image_url, video_url, data for audio)
+    if block_type == "image" and "image_url" in block and "source" not in block:
+        url = block["image_url"]
+        filename = os.path.basename(urllib.parse.urlparse(url).path) or None
+        return {"type": "url", "url": url}, filename
+    if block_type == "video" and "video_url" in block and "source" not in block:
+        url = block["video_url"]
+        filename = os.path.basename(urllib.parse.urlparse(url).path) or None
+        return {"type": "url", "url": url}, filename
+    if block_type == "audio" and "data" in block and "source" not in block:
+        return {"type": "base64", "data": block["data"]}, None
+
+    # Format 2: Source dict format
     source = block.get("source", {})
     if not isinstance(source, dict):
         return None, None
