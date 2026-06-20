@@ -306,10 +306,10 @@ function UsersTab() {
     try {
       const values = await editForm.validateFields();
       const overrides = computeOverrides(editRoleVal, editOverrides);
-      // Send null when no changes — backend skips update if None
-      // Send {} to explicitly clear all overrides
-      // Send non-empty dict to set specific overrides
-      values.permission_overrides = overrides;
+      // When overrides is null (no diff from role defaults), send {} to clear
+      // any previously stored overrides — otherwise they'd persist forever.
+      // Send non-empty dict to set specific overrides.
+      values.permission_overrides = overrides !== null ? overrides : {};
       await updateUser(editUser.id, values);
       message.success(t('admin.userUpdated'));
       setEditModal(false);
