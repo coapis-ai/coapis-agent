@@ -1267,6 +1267,32 @@ export default function ChatPage() {
                 _responseOutputAccumulator.messages.set(msgId, msg);
               }
               if (payload.status) msg.status = payload.status;
+
+              // Accumulate content from message payload.
+              // The agentscope_runtime engine sends full content in each
+              // message event (not delta), so we overwrite on each update.
+              // Content items have {object:"content", type:"text", text:"..."}.
+              if (Array.isArray(payload.content) && payload.content.length > 0) {
+                const incoming = payload.content as any[];
+                // If any item has delta=true, append incrementally;
+                // otherwise replace entirely (full content each event).
+                const isDelta = incoming.some((c: any) => c.delta === true);
+                if (isDelta) {
+                  const contentArr = msg.content as any[];
+                  for (const item of incoming) {
+                    const last = contentArr[contentArr.length - 1];
+                    if (last && last.delta && last.type === item.type) {
+                      if (item.text !== undefined)
+                        last.text = (last.text || "") + item.text;
+                    } else {
+                      contentArr.push({ ...item });
+                    }
+                  }
+                } else {
+                  // Full content: replace entirely
+                  msg.content = incoming.map((c: any) => ({ ...c }));
+                }
+              }
             }
           }
 
