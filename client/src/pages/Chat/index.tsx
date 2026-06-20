@@ -39,6 +39,7 @@ import {
 import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
+import GroupedResponseCard from "./components/GroupedResponseCard";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -1343,9 +1344,11 @@ export default function ChatPage() {
         ..._enhancedToolRenderConfig,
         ...toolRenderConfig,  // plugin overrides take priority
       },
-      // Always use default AgentScopeRuntimeResponseCard — it has built-in
-      // collapsible Tool, Thinking, Message, Error rendering via OperateCard.
-      cards: undefined,
+      // Replace default AgentScopeRuntimeResponseCard with grouped layout
+      // that separates thinking, tools, and message into distinct sections.
+      cards: {
+        'AgentScopeRuntimeResponseCard': GroupedResponseCard,
+      } as any,
       actions: {
         list: [
           {

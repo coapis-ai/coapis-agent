@@ -340,3 +340,182 @@
     }
   }
 }
+
+/* =========================================================================
+   GroupedResponseCard — 分组显示样式
+   ========================================================================= */
+
+.groupedCard {
+  margin-bottom: 4px;
+}
+
+.groupedCardSpinner {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+/* ── 可折叠区段 ── */
+.groupedSection {
+  border-left: 3px solid #d9d9d9;
+  margin: 8px 0;
+  border-radius: 0 6px 6px 0;
+  overflow: hidden;
+
+  :global(.dark-mode) & {
+    border-left-color: #444;
+  }
+}
+
+.groupedSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s;
+  border-radius: 0 6px 6px 0;
+
+  &:hover {
+    background-color: rgba(0, 0, 0, 0.03);
+
+    :global(.dark-mode) & {
+      background-color: rgba(255, 255, 255, 0.05);
+    }
+  }
+}
+
+.groupedSectionHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.groupedSectionTitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.65);
+  flex-shrink: 0;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.65);
+  }
+}
+
+.groupedBadge {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  flex-shrink: 0;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.4);
+  }
+}
+
+.groupedSectionArrow {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.3);
+  }
+}
+
+.groupedSectionBody {
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ── 思考内容 ── */
+.groupedThinkingContent {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 4px 8px;
+  background: rgba(114, 46, 209, 0.04);
+  border-radius: 4px;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(114, 46, 209, 0.08);
+  }
+}
+
+/* ── 工具行 ── */
+.toolInline {
+  padding: 4px 8px;
+  margin: 3px 0;
+  border-radius: 4px;
+  background: rgba(24, 144, 255, 0.04);
+  font-size: 12px;
+
+  &:hover {
+    background: rgba(24, 144, 255, 0.08);
+  }
+
+  :global(.dark-mode) & {
+    background: rgba(24, 144, 255, 0.08);
+
+    &:hover {
+      background: rgba(24, 144, 255, 0.12);
+    }
+  }
+}
+
+.toolInlineHeader {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.toolInlineName {
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.75);
+  font-size: 12px;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.75);
+  }
+}
+
+.toolInlineSummary {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  margin-top: 1px;
+  padding-left: 19px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.4);
+  }
+}
+
+/* ── 正文区 ── */
+.groupedMessage {
+  padding: 4px 0;
+}
+
+/* ── 错误区 ── */
+.groupedError {
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #ff4d4f;
+
+  :global(.dark-mode) & {
+    background: rgba(255, 77, 79, 0.1);
+    border-color: rgba(255, 77, 79, 0.3);
+  }
+}
