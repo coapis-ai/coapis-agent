@@ -1205,6 +1205,16 @@ class AgentRunner(Runner):
                     ) + converted.args[1:]
             raise converted from e
         finally:
+            # --- Flush memory manager on interrupt/cancel ---
+            # Ensure any pending summary tasks are properly handled
+            # when the session is interrupted (e.g., /stop, timeout, disconnect).
+            if self.memory_manager is not None:
+                try:
+                    await self.memory_manager.close()
+                    logger.debug("memory_manager.close() called in finally block")
+                except Exception:
+                    logger.warning("Failed to close memory_manager", exc_info=True)
+
             if agent is not None and session_state_loaded:
                 # Use chat.id (UUID) as session key for per-chat isolation
                 await self.session.save_session_state(

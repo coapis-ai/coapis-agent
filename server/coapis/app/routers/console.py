@@ -172,7 +172,7 @@ async def console_chat(
     """
     manager = request.app.state.multi_agent_manager
     if not manager:
-        raise HTTPException(status_code=500, detail="Agent manager not initialized")
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable, please retry later")
 
     # ── Extract agent_id (same logic as before) ──
     input_msgs = payload.get("input", [])

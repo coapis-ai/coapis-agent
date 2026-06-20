@@ -89,23 +89,35 @@ async def create_channel_service(ws: "Workspace", _):
         ChannelManager instance or None if not configured
     """
     # pylint: disable=protected-access
-    if not ws._config.channels:
-        return None
-
-    from ...config import Config, update_last_dispatch
     from ..channels.manager import ChannelManager
     from ..channels.utils import make_process_from_runner
 
-    temp_config = Config(channels=ws._config.channels)
     runner = ws._service_manager.services["runner"]
 
     def on_last_dispatch(channel, user_id, session_id):
+        from ...config import update_last_dispatch
         update_last_dispatch(
             channel=channel,
             user_id=user_id,
             session_id=session_id,
             agent_id=ws.agent_id,
         )
+
+    if not ws._config.channels:
+        # No channels configured — create a minimal ChannelManager
+        # with no active channels so that workspace.channel_manager
+        # is never None.  The console channel (used by web UI) is
+        # handled separately via the API router, not through
+        # ChannelManager, so an empty manager is safe here.
+        cm = ChannelManager(channels=[])
+        ws._service_manager.services["channel_manager"] = cm
+        cm.set_workspace(ws)
+        runner.set_workspace(ws)
+        return cm
+
+    from ...config import Config
+
+    temp_config = Config(channels=ws._config.channels)
 
     cm = ChannelManager.from_config(
         process=make_process_from_runner(runner),
