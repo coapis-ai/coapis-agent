@@ -99,7 +99,7 @@ class ToolExecutionLevel(str, Enum):
 # determines the default security policy.
 
 ROLE_DEFAULT_EXECUTION_LEVEL: dict[str, ToolExecutionLevel] = {
-    "user": ToolExecutionLevel.SMART,
+    "user": ToolExecutionLevel.AUTO,
     "advanced": ToolExecutionLevel.SMART,
     "admin": ToolExecutionLevel.AUTO,
     "superadmin": ToolExecutionLevel.OFF,

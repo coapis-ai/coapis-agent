@@ -294,16 +294,28 @@ class ToolGuardMixin:
             )
 
         # ── CommandRiskClassifier: three-level classification ──
-        try:
-            from ..security.command_risk_classifier import (
-                CommandRiskClassifier,
-                CommandRiskLevel,
-            )
-            if not hasattr(self, "_command_risk_classifier"):
-                self._command_risk_classifier = CommandRiskClassifier()
-            cr = self._command_risk_classifier.classify(
-                tool_name, tool_input, user_role,
-            )
+        # Only applies to shell commands; non-shell tools skip this layer
+        # to avoid false positives from URL/file path parameters.
+        if tool_name != "execute_shell_command":
+            cr = None  # skip CommandRiskClassifier for non-shell tools
+        else:
+            cr = None
+            try:
+                from ..security.command_risk_classifier import (
+                    CommandRiskClassifier,
+                )
+                if not hasattr(self, "_command_risk_classifier"):
+                    self._command_risk_classifier = CommandRiskClassifier()
+                cr = self._command_risk_classifier.classify(
+                    tool_name, tool_input, user_role,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "CommandRiskClassifier error (non-blocking): %s", exc,
+                )
+
+        if cr is not None:
+            from ..security.command_risk_classifier import CommandRiskLevel
             if cr.risk_level == CommandRiskLevel.DENIED:
                 logger.warning(
                     "CommandRiskClassifier: DENIED tool=%s role=%s "
@@ -385,10 +397,6 @@ class ToolGuardMixin:
                     guard_result=guard_result,
                 )
             # AUTO → fall through to existing execution-level logic
-        except Exception as exc:
-            logger.debug(
-                "CommandRiskClassifier error (non-blocking): %s", exc,
-            )
 
         # Role-based policy: admin gets relaxed checks for low-risk tools
         if user_role == "admin" and exec_level.is_smart_mode():

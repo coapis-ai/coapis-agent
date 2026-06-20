@@ -53,18 +53,21 @@ FALLBACK_SHELL_WHITELIST: Dict[str, List[str]] = {
         # 文件操作（限于工作区内，由 is_within_workspace 保护）
         "mkdir *",
         "touch *",
+        "rm *",  # 工作区内允许删除
         "cp *",
         "mv *",
         "tree",
         # 文本处理
         "sort *", "uniq *", "cut *", "tr *", "sed *", "awk *",
-        # 编程工具（仅限脚本文件模式，禁止 -c/-e 内联执行）
-        "python3 *.py", "python *.py",
-        "node *.js", "npm *", "pip3 *", "pip *",
+        # 编程工具
+        "python3 *", "python *",
+        "node *", "npm *", "npx *", "pip3 *", "pip *",
         # 版本控制
         "git *",
-        # 网络（只读，禁止 POST/PUT 上传数据）
-        "curl -s *", "curl --head *", "wget *",
+        # 网络
+        "curl *", "wget *",
+        # 压缩解压
+        "tar *", "zip *", "unzip *",
     ],
     "advanced": [
         # 文件浏览（* 表示允许任意参数）

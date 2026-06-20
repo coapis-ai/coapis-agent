@@ -96,21 +96,21 @@ ROLE_CATEGORY_PERMISSIONS: Dict[str, Dict[CommandCategory, Optional[CommandRiskL
     "user": {
         CommandCategory.FILE_BROWSE: CommandRiskLevel.AUTO,
         CommandCategory.FILE_CREATE: CommandRiskLevel.AUTO,
-        CommandCategory.FILE_DELETE: None,          # DENIED
+        CommandCategory.FILE_DELETE: CommandRiskLevel.CONFIRM,   # 确认后执行
         CommandCategory.FILE_MOVE_COPY: CommandRiskLevel.AUTO,
         CommandCategory.TEXT_PROCESS: CommandRiskLevel.AUTO,
-        CommandCategory.PERMISSION: None,           # DENIED
+        CommandCategory.PERMISSION: CommandRiskLevel.CONFIRM,   # 确认后执行
         CommandCategory.PROCESS_MGMT: None,         # DENIED
         CommandCategory.SERVICE_MGMT: None,         # DENIED
         CommandCategory.PACKAGE_MGMT: None,         # DENIED
         CommandCategory.CONTAINER: None,            # DENIED
         CommandCategory.NETWORK_READONLY: CommandRiskLevel.AUTO,
-        CommandCategory.NETWORK_UPLOAD: None,       # DENIED
+        CommandCategory.NETWORK_UPLOAD: CommandRiskLevel.CONFIRM,  # 确认后执行
         CommandCategory.CODE_EXEC_SCRIPT: CommandRiskLevel.AUTO,
-        CommandCategory.CODE_EXEC_INLINE: CommandRiskLevel.BLOCK,
+        CommandCategory.CODE_EXEC_INLINE: CommandRiskLevel.CONFIRM,  # 确认后执行
         CommandCategory.VERSION_CONTROL_READONLY: CommandRiskLevel.AUTO,
         CommandCategory.VERSION_CONTROL_WRITE: CommandRiskLevel.AUTO,
-        CommandCategory.ARCHIVE: None,              # DENIED
+        CommandCategory.ARCHIVE: CommandRiskLevel.AUTO,          # 自动执行
         CommandCategory.DANGEROUS: CommandRiskLevel.BLOCK,
     },
     "advanced": {
@@ -229,6 +229,7 @@ _COMMAND_PATTERNS: List[Tuple[CommandCategory, str, str]] = [
 
     # CODE EXEC (script — safe)
     (CommandCategory.CODE_EXEC_SCRIPT, r"(python3?|node)\s+\S+\.(py|js)", "script execution"),
+    (CommandCategory.CODE_EXEC_SCRIPT, r"(python3?|node|ruby|perl|php)\s+(-m|--module)\s", "module execution"),
     (CommandCategory.CODE_EXEC_SCRIPT, r"\bnpm\b(?!\s+install)", "npm"),
     (CommandCategory.CODE_EXEC_SCRIPT, r"\bpip3?\b(?!\s+install)", "pip"),
 
