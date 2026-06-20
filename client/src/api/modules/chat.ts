@@ -23,6 +23,7 @@ export const chatApi = {
   uploadFile: async (file: File): Promise<ChatUploadResponse> => {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("path", "media");
     const response = await fetch(getApiUrl("/myfiles/upload"), {
       method: "POST",
       headers: buildAuthHeaders(),
