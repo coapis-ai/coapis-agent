@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>快速入门 - CoApis 帮助中心</title>
+    <link rel="stylesheet" href="help.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦀</text></svg>">
+</head>
+<body>
+    <aside class="sidebar">
+        <a href="index.html" class="sidebar-brand">
+            <span class="logo">🦀</span>
+            <div><div class="brand-text">CoApis</div><div class="brand-sub">帮助中心</div></div>
+        </a>
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">快速入门</div>
+                <a href="01-快速入门.html" class="nav-link active">🚀 快速入门</a>
+                <a href="02-安装部署.html" class="nav-link">📦 安装部署</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">使用指南</div>
+                <a href="03-配置指南.html" class="nav-link">⚙️ 配置指南</a>
+                <a href="04-使用说明.html" class="nav-link">📖 使用说明</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">参考</div>
+                <a href="05-命令参考.html" class="nav-link">💻 命令参考</a>
+                <a href="06-常见问题.html" class="nav-link">❓ 常见问题</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">资源</div>
+                <a href="https://github.com/coapis/coapis" class="nav-link" target="_blank">📂 GitHub</a>
+                <a href="https://gitee.com/ouerlai/coapis-agent" class="nav-link" target="_blank">📂 Gitee</a>
+            </div>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <div class="breadcrumb"><a href="index.html">帮助中心</a> / 快速入门</div>
+
+        <h1>🚀 快速入门</h1>
+        <p class="subtitle">30 秒让 CoApis 跑起来。</p>
+
+        <h2>一键安装（推荐）</h2>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-title">执行安装命令</div>
+                <p>在你的 Linux 服务器上执行：</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/coapis/coapis/main/install.sh | bash</code></pre>
+                <div class="callout callout-info">
+                    <div class="callout-title">💡 前置要求</div>
+                    需要 Linux 系统（Ubuntu 20.04+ / CentOS 8+ / Debian 11+）和 Docker 20.10+。
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-title">打开浏览器访问</div>
+<pre><code>http://你的服务器IP:4200</code></pre>
+            </div>
+
+            <div class="step">
+                <div class="step-title">登录</div>
+                <table>
+                    <tr><th>字段</th><th>值</th></tr>
+                    <tr><td>用户名</td><td><code>admin</code></td></tr>
+                    <tr><td>密码</td><td><code>admin123</code></td></tr>
+                </table>
+                <div class="callout callout-warning">
+                    <div class="callout-title">⚠️ 请立即修改默认密码</div>
+                    首次登录后请到 设置 → 个人资料 修改密码。
+                </div>
+            </div>
+        </div>
+
+        <h2>手动部署</h2>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-title">克隆项目</div>
+<pre><code>mkdir -p /opt/coapis && cd /opt/coapis
+wget -qO- https://raw.githubusercontent.com/coapis/coapis/main/install.sh | bash</code></pre>
+            </div>
+            <div class="step">
+                <div class="step-title">配置 LLM 服务</div>
+                <p>编辑 <code>docker/.env</code>，填写你的 LLM API 地址：</p>
+<pre><code># 使用 Ollama
+COAPIS_LLM_BASE_URL=http://localhost:11434/v1
+
+# 使用 OpenAI
+COAPIS_LLM_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-...</code></pre>
+            </div>
+            <div class="step">
+                <div class="step-title">启动服务</div>
+<pre><code>cd docker && docker compose up -d</code></pre>
+            </div>
+            <div class="step">
+                <div class="step-title">访问</div>
+                <p>打开 <code>http://你的服务器IP:4200</code>，用 <code>admin / admin123</code> 登录。</p>
+            </div>
+        </div>
+
+        <h2>支持的 LLM 服务</h2>
+
+        <table>
+            <tr><th>服务</th><th>说明</th><th>推荐度</th></tr>
+            <tr><td>Ollama</td><td>本地部署，免费，适合小团队</td><td>⭐⭐⭐⭐⭐</td></tr>
+            <tr><td>vLLM</td><td>高性能推理，适合大模型</td><td>⭐⭐⭐⭐⭐</td></tr>
+            <tr><td>OpenAI</td><td>云端 API，开箱即用</td><td>⭐⭐⭐⭐</td></tr>
+            <tr><td>阿里云通义千问</td><td>国内访问快</td><td>⭐⭐⭐⭐</td></tr>
+            <tr><td>LM Studio</td><td>桌面端本地推理</td><td>⭐⭐⭐</td></tr>
+        </table>
+
+        <h2>首次使用</h2>
+
+        <div class="callout callout-success">
+            <div class="callout-title">✅ 登录后你可以</div>
+            <ul>
+                <li>在聊天界面与 AI 对话</li>
+                <li>上传文件到"我的空间"</li>
+                <li>在"技能"中查看 AI 已掌握的技能</li>
+                <li>在"设置"中配置频道、用户、安全等</li>
+            </ul>
+        </div>
+
+        <h2>下一步</h2>
+        <div class="card-grid">
+            <a href="02-安装部署.html" class="card">
+                <div class="card-icon">📦</div>
+                <div class="card-title">详细安装指南</div>
+                <div class="card-desc">Docker、手动、源码三种部署方式</div>
+            </a>
+            <a href="03-配置指南.html" class="card">
+                <div class="card-icon">⚙️</div>
+                <div class="card-title">配置指南</div>
+                <div class="card-desc">环境变量、Agent、Provider 详解</div>
+            </a>
+            <a href="04-使用说明.html" class="card">
+                <div class="card-icon">📖</div>
+                <div class="card-title">使用说明</div>
+                <div class="card-desc">各模块功能详解</div>
+            </a>
+        </div>
+    </main>
+</body>
+</html>

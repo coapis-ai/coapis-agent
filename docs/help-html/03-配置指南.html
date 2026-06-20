@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>配置指南 - CoApis 帮助中心</title>
+    <link rel="stylesheet" href="help.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦀</text></svg>">
+</head>
+<body>
+    <aside class="sidebar">
+        <a href="index.html" class="sidebar-brand">
+            <span class="logo">🦀</span>
+            <div><div class="brand-text">CoApis</div><div class="brand-sub">帮助中心</div></div>
+        </a>
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">快速入门</div>
+                <a href="01-快速入门.html" class="nav-link">🚀 快速入门</a>
+                <a href="02-安装部署.html" class="nav-link">📦 安装部署</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">使用指南</div>
+                <a href="03-配置指南.html" class="nav-link active">⚙️ 配置指南</a>
+                <a href="04-使用说明.html" class="nav-link">📖 使用说明</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">参考</div>
+                <a href="05-命令参考.html" class="nav-link">💻 命令参考</a>
+                <a href="06-常见问题.html" class="nav-link">❓ 常见问题</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">资源</div>
+                <a href="https://github.com/coapis/coapis" class="nav-link" target="_blank">📂 GitHub</a>
+                <a href="https://gitee.com/ouerlai/coapis-agent" class="nav-link" target="_blank">📂 Gitee</a>
+            </div>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <div class="breadcrumb"><a href="index.html">帮助中心</a> / 配置指南</div>
+
+        <h1>⚙️ 配置指南</h1>
+        <p class="subtitle">三层配置体系：环境变量 → Agent 配置 → Provider 配置。</p>
+
+        <h2>配置层级</h2>
+<pre><code>环境变量 (.env)         → 全局配置（LLM 地址、认证、端口等）
+Agent 配置 (config.json) → Agent 行为（模型、记忆、工具调用方式）
+Provider 配置 (providers.json) → LLM 服务（API 地址、密钥）</code></pre>
+        <p>优先级：环境变量 > 配置文件 > 内置默认值</p>
+
+        <h2>目录结构</h2>
+<pre><code>{WORKING_DIR}/
+├── system/              ← 系统级文件（全局共享）
+│   ├── config.json      ← Agent 配置
+│   ├── providers.json   ← Provider 配置
+│   ├── users.json       ← 用户数据
+│   ├── auth.json        ← 认证配置
+│   ├── permissions.json ← 权限配置
+│   └── .secret/         ← 密钥存储
+├── workspaces/          ← 用户级数据（按用户隔离）
+│   └── {username}/      ← 每个用户独立工作区
+├── agents/              ← 全局共享 Agent 模板
+├── skills/              ← 全局共享技能模板
+└── logs/                ← 运行日志</code></pre>
+
+        <h2>环境变量配置</h2>
+        <p>配置文件位置：<code>docker/.env</code></p>
+
+        <h3>核心配置</h3>
+        <table>
+            <tr><th>变量</th><th>类型</th><th>默认值</th><th>说明</th></tr>
+            <tr><td><code>COAPIS_LLM_BASE_URL</code></td><td>string</td><td>-</td><td>LLM API 地址（<strong>必填</strong>）</td></tr>
+            <tr><td><code>COAPIS_AUTH_ENABLED</code></td><td>bool</td><td>True</td><td>启用认证系统</td></tr>
+            <tr><td><code>COAPIS_USER_SYSTEM_ENABLED</code></td><td>bool</td><td>True</td><td>启用多租户用户体系</td></tr>
+            <tr><td><code>COAPIS_WORKING_DIR</code></td><td>string</td><td>/apps/ai/coapis</td><td>工作目录</td></tr>
+            <tr><td><code>COAPIS_PORT</code></td><td>int</td><td>8000</td><td>后端端口</td></tr>
+            <tr><td><code>COAPIS_FRONTEND_PORT</code></td><td>int</td><td>4200</td><td>前端端口</td></tr>
+        </table>
+
+        <h3>LLM 限流配置</h3>
+        <table>
+            <tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+            <tr><td><code>COAPIS_LLM_MAX_CONCURRENT</code></td><td>10</td><td>最大并发 LLM 调用数</td></tr>
+            <tr><td><code>COAPIS_LLM_MAX_QPM</code></td><td>600</td><td>每分钟最大查询数</td></tr>
+            <tr><td><code>COAPIS_LLM_MAX_RETRIES</code></td><td>3</td><td>最大重试次数</td></tr>
+        </table>
+
+        <h3>Token 配额（每月）</h3>
+        <table>
+            <tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+            <tr><td><code>COAPIS_USER_TOKEN_QUOTA_L0</code></td><td>100,000</td><td>L0 用户月配额</td></tr>
+            <tr><td><code>COAPIS_USER_TOKEN_QUOTA_L1</code></td><td>1,000,000</td><td>L1 用户月配额</td></tr>
+            <tr><td><code>COAPIS_USER_TOKEN_QUOTA_L2</code></td><td>5,000,000</td><td>L2 用户月配额</td></tr>
+            <tr><td><code>COAPIS_USER_TOKEN_QUOTA_L3</code></td><td>20,000,000</td><td>L3 用户月配额</td></tr>
+            <tr><td><code>COAPIS_USER_TOKEN_QUOTA_L4</code></td><td>-1</td><td>L4 用户（无限制）</td></tr>
+        </table>
+
+        <h3>限流（每分钟请求数）</h3>
+        <table>
+            <tr><th>变量</th><th>L0</th><th>L1</th><th>L2</th><th>L3</th><th>L4</th></tr>
+            <tr><td>默认值</td><td>10</td><td>10</td><td>50</td><td>200</td><td>1000</td></tr>
+        </table>
+
+        <h2>Agent 配置</h2>
+        <p>配置文件位置：<code>{WORKING_DIR}/system/config.json</code></p>
+
+        <h3>基本结构</h3>
+<pre><code>{
+  "agents": {
+    "active_agent": "default",
+    "profiles": {
+      "default": {
+        "model": "qwen3.6-27b",
+        "provider": "local_llm",
+        "enable_memory": false,
+        "tool_calling_method": "raw"
+      }
+    }
+  }
+}</code></pre>
+
+        <h3>多 Agent 配置</h3>
+<pre><code>{
+  "agents": {
+    "active_agent": "default",
+    "profiles": {
+      "default": {
+        "model": "qwen3.6-27b",
+        "provider": "local_llm",
+        "enable_memory": false,
+        "tool_calling_method": "raw"
+      },
+      "coder": {
+        "model": "deepseek-coder-v2",
+        "provider": "openai",
+        "enable_memory": true,
+        "tool_calling_method": "auto"
+      }
+    }
+  }
+}</code></pre>
+
+        <h2>Provider 配置</h2>
+        <p>配置文件位置：<code>{WORKING_DIR}/system/providers.json</code></p>
+
+        <h3>本地 LLM</h3>
+<pre><code>{
+  "local_llm": {
+    "id": "local_llm",
+    "type": "openai",
+    "api_base": "http://172.16.6.241:8082/v1",
+    "api_key": "none"
+  }
+}</code></pre>
+
+        <h3>OpenAI</h3>
+<pre><code>{
+  "openai": {
+    "id": "openai",
+    "type": "openai",
+    "api_base": "https://api.openai.com/v1",
+    "api_key": "sk-xxx"
+  }
+}</code></pre>
+
+        <h3>阿里云通义千问</h3>
+<pre><code>{
+  "dashscope": {
+    "id": "dashscope",
+    "type": "openai",
+    "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_key": "sk-xxx"
+  }
+}</code></pre>
+
+        <h2>用户等级体系</h2>
+        <table>
+            <tr><th>等级</th><th>积分范围</th><th>Token 配额</th><th>限流</th></tr>
+            <tr><td>L0</td><td>0-99</td><td>100K/月</td><td>10 req/min</td></tr>
+            <tr><td>L1</td><td>100-499</td><td>1M/月</td><td>10 req/min</td></tr>
+            <tr><td>L2</td><td>500-1999</td><td>5M/月</td><td>50 req/min</td></tr>
+            <tr><td>L3</td><td>2000-9999</td><td>20M/月</td><td>200 req/min</td></tr>
+            <tr><td>L4</td><td>10000+</td><td>无限制</td><td>1000 req/min</td></tr>
+        </table>
+
+        <h2>配置验证</h2>
+<pre><code># 检查后端健康
+curl http://localhost:8000/api/health
+
+# 查看配置加载日志
+docker compose logs server | grep -i "config\|provider\|agent"</code></pre>
+
+        <div class="callout callout-info">
+            <div class="callout-title">📖 下一步</div>
+            配置完成后，查看 <a href="04-使用说明.html">使用说明</a> 了解各模块功能。
+        </div>
+    </main>
+</body>
+</html>

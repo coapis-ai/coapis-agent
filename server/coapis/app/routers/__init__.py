@@ -82,6 +82,7 @@ from .user_model_prefs import router as user_model_prefs_router
 from ..inbox import router as inbox_router
 from ..setup import router as setup_router
 from ..onboarding import router as onboarding_router
+from ...recommendation import router as recommendation_router
 from ..search import router as search_router
 from ..i18n import router as i18n_router
 from ..config_hot_reload import router as config_reload_router
@@ -148,6 +149,7 @@ router.include_router(permissions_router)
 router.include_router(inbox_router)
 router.include_router(setup_router)
 router.include_router(onboarding_router)
+router.include_router(recommendation_router)
 router.include_router(search_router)
 router.include_router(i18n_router)
 router.include_router(config_reload_router)

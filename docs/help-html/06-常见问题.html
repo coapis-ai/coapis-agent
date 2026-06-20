@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>常见问题 - CoApis 帮助中心</title>
+    <link rel="stylesheet" href="help.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦀</text></svg>">
+    <style>
+        .faq-item { margin-bottom: 24px; }
+        .faq-q { font-weight: 600; font-size: 15px; margin-bottom: 8px; cursor: pointer; }
+        .faq-q::before { content: "Q: "; color: var(--primary); }
+        .faq-a { padding-left: 16px; border-left: 3px solid var(--border); color: var(--text-secondary); }
+        .faq-a code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <a href="index.html" class="sidebar-brand">
+            <span class="logo">🦀</span>
+            <div><div class="brand-text">CoApis</div><div class="brand-sub">帮助中心</div></div>
+        </a>
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">快速入门</div>
+                <a href="01-快速入门.html" class="nav-link">🚀 快速入门</a>
+                <a href="02-安装部署.html" class="nav-link">📦 安装部署</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">使用指南</div>
+                <a href="03-配置指南.html" class="nav-link">⚙️ 配置指南</a>
+                <a href="04-使用说明.html" class="nav-link">📖 使用说明</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">参考</div>
+                <a href="05-命令参考.html" class="nav-link">💻 命令参考</a>
+                <a href="06-常见问题.html" class="nav-link active">❓ 常见问题</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">资源</div>
+                <a href="https://github.com/coapis/coapis" class="nav-link" target="_blank">📂 GitHub</a>
+                <a href="https://gitee.com/ouerlai/coapis-agent" class="nav-link" target="_blank">📂 Gitee</a>
+            </div>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <div class="breadcrumb"><a href="index.html">帮助中心</a> / 常见问题</div>
+
+        <h1>❓ 常见问题</h1>
+        <p class="subtitle">安装、配置、使用、安全相关常见问题解答。</p>
+
+        <!-- 安装部署 -->
+        <h2>🚀 安装部署</h2>
+
+        <div class="faq-item">
+            <div class="faq-q">启动后无法访问前端页面</div>
+            <div class="faq-a">
+                <p>按以下步骤排查：</p>
+                <ol>
+                    <li>检查容器：<code>docker ps | grep coapis</code></li>
+                    <li>检查端口：<code>docker port coapis-nginx</code></li>
+                    <li>检查防火墙：开放 4200 端口
+<pre><code>firewall-cmd --permanent --add-port=4200/tcp
+firewall-cmd --reload</code></pre>
+                    </li>
+                    <li>查看 Nginx 日志：<code>docker logs coapis-nginx</code></li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">后端服务启动失败</div>
+            <div class="faq-a">
+                <p>常见原因及解决方法：</p>
+                <ul>
+                    <li><strong>LLM 服务不可达</strong>：检查 <code>COAPIS_LLM_BASE_URL</code> 配置，确保网络连通</li>
+                    <li><strong>端口冲突</strong>：<code>lsof -i:8000</code> 检查端口占用</li>
+                    <li><strong>权限问题</strong>：<code>chmod 755 /opt/coapis/data</code></li>
+                    <li><strong>查看日志</strong>：<code>docker logs coapis-server</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">如何升级 CoApis</div>
+            <div class="faq-a">
+<pre><code># 1. 备份
+docker compose exec server python backup.py --full
+
+# 2. 拉取最新代码
+git pull origin main
+
+# 3. 重新构建
+docker compose down
+docker compose up -d --build
+
+# 4. 验证
+curl http://localhost:8000/api/health</code></pre>
+            </div>
+        </div>
+
+        <!-- 用户管理 -->
+        <h2>👤 用户管理</h2>
+
+        <div class="faq-item">
+            <div class="faq-q">如何创建新用户</div>
+            <div class="faq-a">
+                <p>两种方式：</p>
+                <ul>
+                    <li><strong>前端注册</strong>：访问 <code>http://&lt;server&gt;:4200/register</code></li>
+                    <li><strong>管理员创建</strong>：设置 → 智能体管理 → 创建用户</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">用户忘记密码怎么办</div>
+            <div class="faq-a">
+                <p>管理员重置密码：</p>
+<pre><code>curl -X POST http://localhost:8000/api/admin/users/reset-password \
+  -H "Authorization: Bearer &lt;admin-token&gt;" \
+  -d '{"username": "testuser", "new_password": "newpass123"}'</code></pre>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">如何限制用户权限</div>
+            <div class="faq-a">
+                <p>通过用户等级和角色控制：</p>
+                <table>
+                    <tr><th>等级</th><th>Token 配额</th><th>限流</th></tr>
+                    <tr><td>L0</td><td>100K/月</td><td>10 req/min</td></tr>
+                    <tr><td>L1</td><td>1M/月</td><td>10 req/min</td></tr>
+                    <tr><td>L2</td><td>5M/月</td><td>50 req/min</td></tr>
+                    <tr><td>L3</td><td>20M/月</td><td>200 req/min</td></tr>
+                    <tr><td>L4</td><td>无限制</td><td>1000 req/min</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- Agent 配置 -->
+        <h2>🤖 Agent 配置</h2>
+
+        <div class="faq-item">
+            <div class="faq-q">如何添加新的 Agent</div>
+            <div class="faq-a">
+                <p>在 <code>{WORKING_DIR}/system/config.json</code> 中添加：</p>
+<pre><code>{
+  "agents": {
+    "profiles": {
+      "new-agent": {
+        "model": "gpt-4-turbo",
+        "provider": "openai"
+      }
+    }
+  }
+}</code></pre>
+                <p>然后重启：<code>docker compose restart server</code></p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">Agent 回复很慢怎么办</div>
+            <div class="faq-a">
+                <ul>
+                    <li>调整 LLM 并发：<code>COAPIS_LLM_MAX_CONCURRENT=20</code></li>
+                    <li>启用前缀缓存：<code>vllm serve --enable-prefix-caching</code></li>
+                    <li>使用更快的模型（参数量更小或量化版本）</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 文件管理 -->
+        <h2>📁 文件管理</h2>
+
+        <div class="faq-item">
+            <div class="faq-q">文件上传大小限制</div>
+            <div class="faq-a">
+                <p>默认 100MB。可通过 Nginx 调整：</p>
+<pre><code>client_max_body_size 500m;</code></pre>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">文件上传失败</div>
+            <div class="faq-a">
+                <ol>
+                    <li>检查磁盘空间：<code>df -h /opt/coapis/data</code></li>
+                    <li>检查目录权限：<code>ls -la /opt/coapis/data/files</code></li>
+                    <li>查看日志：<code>docker logs coapis-server | grep -i upload</code></li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- 集成配置 -->
+        <h2>🔌 集成配置</h2>
+
+        <div class="faq-item">
+            <div class="faq-q">如何接入企业微信</div>
+            <div class="faq-a">
+                <p>控制 → 频道 → 添加频道 → 选择 WeCom，填入 Corp ID、Agent ID、Secret、Token、EncodingAESKey。</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">如何接入钉钉</div>
+            <div class="faq-a">
+                <p>控制 → 频道 → 添加频道 → 选择 DingTalk，填入 App Key、App Secret、Verification Code。</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">如何配置 MCP 客户端</div>
+            <div class="faq-a">
+<pre><code>{
+  "name": "filesystem",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+}</code></pre>
+            </div>
+        </div>
+
+        <!-- 安全相关 -->
+        <h2>🔐 安全相关</h2>
+
+        <div class="faq-item">
+            <div class="faq-q">如何启用 HTTPS</div>
+            <div class="faq-a">
+<pre><code>server {
+    listen 443 ssl;
+    server_name your-domain.com;
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/key.pem;
+}</code></pre>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">如何查看审计日志</div>
+            <div class="faq-a">
+                <p>前端：设置 → 安全 → 审计日志</p>
+                <p>API：</p>
+<pre><code>curl http://localhost:8000/api/audit/logs \
+  -H "Authorization: Bearer &lt;token&gt;"</code></pre>
+            </div>
+        </div>
+
+        <!-- 性能优化 -->
+        <h2>📊 性能优化</h2>
+
+        <div class="faq-item">
+            <div class="faq-q">Token 配额用完了怎么办</div>
+            <div class="faq-a">
+                <ul>
+                    <li>等待下月重置（按月重置）</li>
+                    <li>提升用户等级（通过积分升级）</li>
+                    <li>管理员调整配额</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-q">如何查看系统版本</div>
+            <div class="faq-a">
+                <ul>
+                    <li>前端：界面右上角显示版本号</li>
+                    <li>API：<code>curl http://localhost:8000/api/health</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="callout callout-info">
+            <div class="callout-title">💡 没有找到答案？</div>
+            <ul>
+                <li>查看 <a href="05-命令参考.html">命令参考</a> 了解更多 CLI 工具</li>
+                <li>查看日志：<code>docker logs coapis-server</code></li>
+                <li>提交 Issue：<a href="https://github.com/coapis/coapis/issues" target="_blank">GitHub Issues</a></li>
+            </ul>
+        </div>
+    </main>
+</body>
+</html>

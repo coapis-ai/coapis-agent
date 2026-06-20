@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>帮助中心 - CoApis</title>
+    <link rel="stylesheet" href="help.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦀</text></svg>">
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <a href="index.html" class="sidebar-brand">
+            <span class="logo">🦀</span>
+            <div>
+                <div class="brand-text">CoApis</div>
+                <div class="brand-sub">帮助中心</div>
+            </div>
+        </a>
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">快速入门</div>
+                <a href="01-快速入门.html" class="nav-link">🚀 快速入门</a>
+                <a href="02-安装部署.html" class="nav-link">📦 安装部署</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">使用指南</div>
+                <a href="03-配置指南.html" class="nav-link">⚙️ 配置指南</a>
+                <a href="04-使用说明.html" class="nav-link">📖 使用说明</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">参考</div>
+                <a href="05-命令参考.html" class="nav-link">💻 命令参考</a>
+                <a href="06-常见问题.html" class="nav-link">❓ 常见问题</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">资源</div>
+                <a href="https://github.com/coapis/coapis" class="nav-link" target="_blank">📂 GitHub</a>
+                <a href="https://gitee.com/ouerlai/coapis-agent" class="nav-link" target="_blank">📂 Gitee</a>
+            </div>
+        </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="breadcrumb"><a href="../index.html">首页</a> / 帮助中心</div>
+
+        <h1>📚 CoApis 帮助中心</h1>
+        <p class="subtitle">从安装到使用，一站式指南。选择你需要的主题开始。</p>
+
+        <h2>🚀 快速开始</h2>
+        <div class="card-grid">
+            <a href="01-快速入门.html" class="card">
+                <div class="card-icon">⚡</div>
+                <div class="card-title">快速入门</div>
+                <div class="card-desc">30 秒体验 CoApis，首次登录指南</div>
+            </a>
+            <a href="02-安装部署.html" class="card">
+                <div class="card-icon">📦</div>
+                <div class="card-title">安装部署</div>
+                <div class="card-desc">Docker 一键部署、手动部署、源码安装</div>
+            </a>
+        </div>
+
+        <h2>📖 使用指南</h2>
+        <div class="card-grid">
+            <a href="03-配置指南.html" class="card">
+                <div class="card-icon">⚙️</div>
+                <div class="card-title">配置指南</div>
+                <div class="card-desc">环境变量、Agent 配置、Provider 配置</div>
+            </a>
+            <a href="04-使用说明.html" class="card">
+                <div class="card-icon">📖</div>
+                <div class="card-title">使用说明</div>
+                <div class="card-desc">聊天、频道、工作区、设置模块详解</div>
+            </a>
+        </div>
+
+        <h2>💻 参考资料</h2>
+        <div class="card-grid">
+            <a href="05-命令参考.html" class="card">
+                <div class="card-icon">💻</div>
+                <div class="card-title">命令参考</div>
+                <div class="card-desc">CLI 命令完整参考手册</div>
+            </a>
+            <a href="06-常见问题.html" class="card">
+                <div class="card-icon">❓</div>
+                <div class="card-title">常见问题</div>
+                <div class="card-desc">安装、配置、使用、安全 FAQ</div>
+            </a>
+        </div>
+
+        <h2>🌐 多语言</h2>
+        <div class="callout callout-info">
+            <div class="callout-title">🌍 四语言支持</div>
+            CoApis 支持中文、English、日本語、Русский。在界面右上角点击 🌐 图标即可切换。
+        </div>
+
+        <h2>🆘 需要帮助？</h2>
+        <table>
+            <tr><th>渠道</th><th>链接</th></tr>
+            <tr><td>GitHub Issues</td><td><a href="https://github.com/coapis/coapis/issues" target="_blank">提交 Issue</a></td></tr>
+            <tr><td>Gitee Issues</td><td><a href="https://gitee.com/ouerlai/coapis-agent/issues" target="_blank">提交 Issue</a></td></tr>
+            <tr><td>查看日志</td><td><code>docker logs coapis-server</code></td></tr>
+        </table>
+    </main>
+</body>
+</html>

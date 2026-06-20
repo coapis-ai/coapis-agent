@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安装部署 - CoApis 帮助中心</title>
+    <link rel="stylesheet" href="help.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦀</text></svg>">
+</head>
+<body>
+    <aside class="sidebar">
+        <a href="index.html" class="sidebar-brand">
+            <span class="logo">🦀</span>
+            <div><div class="brand-text">CoApis</div><div class="brand-sub">帮助中心</div></div>
+        </a>
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">快速入门</div>
+                <a href="01-快速入门.html" class="nav-link">🚀 快速入门</a>
+                <a href="02-安装部署.html" class="nav-link active">📦 安装部署</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">使用指南</div>
+                <a href="03-配置指南.html" class="nav-link">⚙️ 配置指南</a>
+                <a href="04-使用说明.html" class="nav-link">📖 使用说明</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">参考</div>
+                <a href="05-命令参考.html" class="nav-link">💻 命令参考</a>
+                <a href="06-常见问题.html" class="nav-link">❓ 常见问题</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">资源</div>
+                <a href="https://github.com/coapis/coapis" class="nav-link" target="_blank">📂 GitHub</a>
+                <a href="https://gitee.com/ouerlai/coapis-agent" class="nav-link" target="_blank">📂 Gitee</a>
+            </div>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <div class="breadcrumb"><a href="index.html">帮助中心</a> / 安装部署</div>
+
+        <h1>📦 安装部署</h1>
+        <p class="subtitle">三种方式部署 CoApis：一键安装、手动部署、源码安装。</p>
+
+        <h2>前置要求</h2>
+        <table>
+            <tr><th>配置</th><th>最低要求</th><th>推荐配置</th></tr>
+            <tr><td>CPU</td><td>4 核</td><td>8 核+</td></tr>
+            <tr><td>内存</td><td>8 GB</td><td>16 GB+</td></tr>
+            <tr><td>存储</td><td>50 GB</td><td>100 GB+ (SSD)</td></tr>
+            <tr><td>操作系统</td><td colspan="2">Linux (Ubuntu 20.04+ / CentOS 8+ / Debian 11+)</td></tr>
+            <tr><td>Docker</td><td colspan="2">20.10+ 及 Docker Compose 2.0+</td></tr>
+        </table>
+
+        <h2>方式一：一键安装（推荐）</h2>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/coapis/coapis/main/install.sh | bash</code></pre>
+        <p>安装脚本会自动：</p>
+        <ul>
+            <li>检查 Docker 环境</li>
+            <li>克隆项目代码</li>
+            <li>生成配置文件</li>
+            <li>启动所有服务</li>
+        </ul>
+        <p>启动后访问 <code>http://你的服务器IP:4200</code>，用 <code>admin / admin123</code> 登录。</p>
+
+        <h2>方式二：手动部署</h2>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-title">克隆项目</div>
+<pre><code>git clone https://github.com/coapis/coapis.git
+cd coapis-agent</code></pre>
+            </div>
+            <div class="step">
+                <div class="step-title">配置环境变量</div>
+<pre><code>cp docker/.env.example docker/.env
+vim docker/.env</code></pre>
+                <p>关键配置项：</p>
+<pre><code># LLM API 服务地址（必填）
+COAPIS_LLM_BASE_URL=http://your-llm-server:8082/v1
+
+# 启用认证（建议）
+COAPIS_AUTH_ENABLED=True
+COAPIS_USER_SYSTEM_ENABLED=True</code></pre>
+            </div>
+            <div class="step">
+                <div class="step-title">启动服务</div>
+<pre><code>cd docker
+docker compose up -d</code></pre>
+            </div>
+            <div class="step">
+                <div class="step-title">配置 Agent 和 Provider</div>
+                <p>编辑 <code>{WORKING_DIR}/system/config.json</code> 和 <code>providers.json</code>。详见 <a href="03-配置指南.html">配置指南</a>。</p>
+            </div>
+        </div>
+
+        <h2>方式三：源码安装</h2>
+<pre><code># 克隆
+git clone https://github.com/coapis/coapis.git
+cd coapis
+
+# 构建前端
+cd client && npm ci && npm run build && cd ..
+
+# 配置环境变量
+cp docker/.env.example docker/.env
+
+# Docker 构建启动
+docker compose -f docker/docker-compose.build.yml up -d --build</code></pre>
+
+        <h2>LLM 服务配置</h2>
+
+        <h3>使用 Ollama</h3>
+<pre><code># 安装 Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 拉取模型
+ollama pull qwen3.6-27b
+
+# 启动服务
+ollama serve
+
+# 配置 CoApis
+# docker/.env
+COAPIS_LLM_BASE_URL=http://localhost:11434/v1</code></pre>
+
+        <h3>使用 vLLM</h3>
+<pre><code>vllm serve \
+  --model /path/to/model \
+  --tensor-parallel-size 4 \
+  --max_num_seqs 8 \
+  --max-model-len 131072
+
+# docker/.env
+COAPIS_LLM_BASE_URL=http://localhost:8082/v1</code></pre>
+
+        <h3>使用 OpenAI</h3>
+<pre><code># docker/.env
+COAPIS_LLM_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-...</code></pre>
+
+        <h2>验证安装</h2>
+<pre><code># 检查容器
+docker ps | grep coapis
+
+# 健康检查
+curl http://localhost:8000/api/health
+
+# 预期输出
+# {"status": "healthy", "version": "0.1.0"}</code></pre>
+
+        <h2>升级 CoApis</h2>
+<pre><code># 1. 备份
+docker compose exec server python backup.py --full
+
+# 2. 拉取最新代码
+git pull origin main
+
+# 3. 重新构建
+docker compose down
+docker compose up -d --build
+
+# 4. 验证
+curl http://localhost:8000/api/health</code></pre>
+
+        <h2>端口说明</h2>
+        <table>
+            <tr><th>端口</th><th>服务</th><th>说明</th></tr>
+            <tr><td>4200</td><td>Nginx</td><td>前端访问入口</td></tr>
+            <tr><td>8000</td><td>Backend</td><td>后端 API（内部网络）</td></tr>
+        </table>
+
+        <div class="callout callout-info">
+            <div class="callout-title">📖 更多配置</div>
+            安装完成后，查看 <a href="03-配置指南.html">配置指南</a> 了解详细的环境变量和 Agent 配置。
+        </div>
+    </main>
+</body>
+</html>

@@ -120,6 +120,7 @@ def get_user(username: str) -> Optional[Dict[str, Any]]:
         "role": info.get("role", "user"),
         "created_at": info.get("created_at"),
         "last_login": info.get("last_login"),
+        "onboarding_completed": info.get("onboarding_completed", False),
     }
 
 

@@ -1,64 +1,376 @@
 {
-    "version": "2.0",
-    "description": "CoApis permission system — CRUD matrix format. Each module has {read, create, update, delete} booleans.",
-    "roles": {
-        "user": {
-            "name": "用户",
-            "description": "标准用户，可通过权限矩阵配置",
-            "modules": {
-                "chat":       { "read": true, "create": true, "update": true, "delete": false },
-                "myspace":    { "read": true, "create": true, "update": true, "delete": true },
-                "skills":     { "read": true, "create": false, "update": false, "delete": false },
-                "channels":   { "read": true, "create": true, "update": false, "delete": false },
-                "cron-jobs":  { "read": true, "create": true, "update": true, "delete": true },
-                "heartbeat":  { "read": true, "create": false, "update": true, "delete": false },
-                "sessions":   { "read": true, "create": false, "update": true, "delete": false },
-                "tools":      { "read": true, "create": false, "update": false, "delete": false },
-                "mcp":        { "read": true, "create": false, "update": false, "delete": false },
-                "acp":        { "read": true, "create": false, "update": false, "delete": false },
-                "agent-config":  { "read": true, "create": false, "update": false, "delete": false },
-                "agent-stats":   { "read": true, "create": false, "update": false, "delete": false },
-                "models":     { "read": true, "create": false, "update": false, "delete": false },
-                "voice-transcription": { "read": true, "create": false, "update": false, "delete": false },
-                "agents":     { "read": true, "create": false, "update": false, "delete": false },
-                "skill-pool":   { "read": false, "create": false, "update": false, "delete": false },
-                "environments": { "read": false, "create": false, "update": false, "delete": false },
-                "security":     { "read": false, "create": false, "update": false, "delete": false },
-                "token-usage":  { "read": false, "create": false, "update": false, "delete": false },
-                "backups":      { "read": false, "create": false, "update": false, "delete": false },
-                "evolution":    { "read": false, "create": false, "update": false, "delete": false },
-                "admin":        { "read": false, "create": false, "update": false, "delete": false }
-            }
+  "version": "2.0",
+  "description": "EaterClaw permission system — CRUD matrix format. Each module has {read, create, update, delete} booleans.",
+  "roles": {
+    "user": {
+      "name": "用户",
+      "description": "标准用户，可通过权限矩阵配置",
+      "modules": {
+        "chat": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": false
+        },
+        "skills": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": false
+        },
+        "models": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "agents": {
+          "read": true,
+          "create": true,
+          "update": false,
+          "delete": false
         },
         "admin": {
-            "name": "管理员",
-            "description": "拥有所有权限",
-            "modules": "*"
+          "read": false,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "system": {
+          "read": false,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "audit": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "channels": {
+          "read": true
+        },
+        "sessions": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "cron-jobs": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "agent-config": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "myspace": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "evolution": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
         }
+      }
     },
-    "user_overrides": {},
-    "modules": {
-        "chat":    { "name": "聊天",       "icon": "💬", "path": "/chat",              "operations": ["read", "create", "update", "delete"] },
-        "myspace": { "name": "我的空间",   "icon": "📁", "path": "/myspace",           "operations": ["read", "create", "update", "delete"] },
-        "skills":  { "name": "技能",       "icon": "🎯", "path": "/agent/skills",      "operations": ["read", "create", "update", "delete"] },
-        "models":  { "name": "模型管理",   "icon": "🧠", "path": "/settings/models",   "operations": ["read", "create", "update", "delete"] },
-        "channels":  { "name": "频道",     "icon": "📡", "path": "/control/channels",  "operations": ["read", "create", "update", "delete"] },
-        "sessions":  { "name": "会话",     "icon": "👥", "path": "/control/sessions",  "operations": ["read", "create", "update", "delete"] },
-        "cron-jobs": { "name": "定时任务", "icon": "⏰", "path": "/control/cron-jobs", "operations": ["read", "create", "update", "delete"] },
-        "heartbeat": { "name": "心跳检查", "icon": "💓", "path": "/control/heartbeat", "operations": ["read", "create", "update", "delete"] },
-        "tools":   { "name": "工具",       "icon": "🔧", "path": "/agent/tools",       "operations": ["read", "create", "update", "delete"] },
-        "mcp":     { "name": "MCP",        "icon": "🔌", "path": "/agent/mcp",         "operations": ["read", "create", "update", "delete"] },
-        "acp":     { "name": "ACP",        "icon": "🔗", "path": "/agent/acp",         "operations": ["read", "create", "update", "delete"] },
-        "agent-config":  { "name": "运行配置", "icon": "⚙️", "path": "/agent/config",  "operations": ["read", "create", "update", "delete"] },
-        "agent-stats":   { "name": "运行统计", "icon": "📊", "path": "/agent/stats",   "operations": ["read"] },
-        "agents":   { "name": "智能体管理", "icon": "🤖", "path": "/admin/agents",      "operations": ["read", "create", "update", "delete"], "adminOnly": false },
-        "voice-transcription": { "name": "语音转写", "icon": "🎤", "path": "/settings/voice", "operations": ["read", "create", "update", "delete"] },
-        "skill-pool":  { "name": "技能池",  "icon": "📦", "path": "/settings/skill-pool",  "operations": ["read", "create", "update", "delete"], "adminOnly": true },
-        "environments":{ "name": "环境变量","icon": "🌐", "path": "/settings/environments","operations": ["read", "create", "update", "delete"], "adminOnly": true },
-        "security":    { "name": "安全",    "icon": "🔒", "path": "/settings/security",    "operations": ["read", "create", "update", "delete"], "adminOnly": true },
-        "token-usage": { "name": "Token用量","icon": "📊", "path": "/settings/token-usage", "operations": ["read"], "adminOnly": true },
-        "backups":     { "name": "备份恢复", "icon": "💾", "path": "/settings/backups",     "operations": ["read", "create", "update", "delete"], "adminOnly": true },
-        "evolution":   { "name": "进化引擎", "icon": "⚡", "path": "/admin/evolution",      "operations": ["read", "create", "update", "delete"], "adminOnly": true },
-        "admin":       { "name": "管理面板", "icon": "👑", "path": "/admin",                "operations": ["read"], "adminOnly": true }
+    "admin": {
+      "name": "管理员",
+      "description": "拥有所有权限",
+      "modules": "*"
     }
+  },
+  "user_overrides": {
+    "test_perm": {
+      "chat": {
+        "delete": true
+      }
+    },
+    "test": {
+      "channels": {
+        "create": true,
+        "update": true,
+        "delete": true
+      }
+    },
+    "test_menu": {
+      "channels": {
+        "create": true,
+        "update": true,
+        "delete": true
+      },
+      "cron-jobs": {
+        "update": false,
+        "delete": false
+      }
+    },
+    "test_account": {
+      "skills": {
+        "delete": true
+      },
+      "cron-jobs": {
+        "create": false,
+        "update": false,
+        "delete": false
+      },
+      "agent-config": {
+        "read": false,
+        "create": false,
+        "update": false,
+        "delete": false
+      }
+    }
+  },
+  "modules": {
+    "chat": {
+      "name": "聊天",
+      "icon": "💬",
+      "path": "/chat",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "myspace": {
+      "name": "我的空间",
+      "icon": "📁",
+      "path": "/myspace",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "skills": {
+      "name": "技能",
+      "icon": "🎯",
+      "path": "/agent/skills",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "models": {
+      "name": "模型管理",
+      "icon": "🧠",
+      "path": "/settings/models",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "channels": {
+      "name": "频道",
+      "icon": "📡",
+      "path": "/control/channels",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "sessions": {
+      "name": "会话",
+      "icon": "👥",
+      "path": "/control/sessions",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "cron-jobs": {
+      "name": "定时任务",
+      "icon": "⏰",
+      "path": "/control/cron-jobs",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "heartbeat": {
+      "name": "心跳检查",
+      "icon": "💓",
+      "path": "/control/heartbeat",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "tools": {
+      "name": "工具",
+      "icon": "🔧",
+      "path": "/agent/tools",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "mcp": {
+      "name": "MCP",
+      "icon": "🔌",
+      "path": "/agent/mcp",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "acp": {
+      "name": "ACP",
+      "icon": "🔗",
+      "path": "/agent/acp",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "agent-config": {
+      "name": "运行配置",
+      "icon": "⚙️",
+      "path": "/agent/config",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "agent-stats": {
+      "name": "运行统计",
+      "icon": "📊",
+      "path": "/agent/stats",
+      "operations": [
+        "read"
+      ]
+    },
+    "agents": {
+      "name": "智能体管理",
+      "icon": "🤖",
+      "path": "/admin/agents",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "adminOnly": false
+    },
+    "voice-transcription": {
+      "name": "语音转写",
+      "icon": "🎤",
+      "path": "/settings/voice",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "skill-pool": {
+      "name": "技能池",
+      "icon": "📦",
+      "path": "/settings/skill-pool",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "adminOnly": true
+    },
+    "environments": {
+      "name": "环境变量",
+      "icon": "🌐",
+      "path": "/settings/environments",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "adminOnly": true
+    },
+    "security": {
+      "name": "安全",
+      "icon": "🔒",
+      "path": "/settings/security",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "adminOnly": true
+    },
+    "token-usage": {
+      "name": "Token用量",
+      "icon": "📊",
+      "path": "/settings/token-usage",
+      "operations": [
+        "read"
+      ],
+      "adminOnly": true
+    },
+    "backups": {
+      "name": "备份恢复",
+      "icon": "💾",
+      "path": "/settings/backups",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "adminOnly": true
+    },
+    "evolution": {
+      "name": "进化引擎",
+      "icon": "⚡",
+      "path": "/admin/evolution",
+      "operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "adminOnly": true
+    },
+    "admin": {
+      "name": "管理面板",
+      "icon": "👑",
+      "path": "/admin",
+      "operations": [
+        "read"
+      ],
+      "adminOnly": true
+    }
+  }
 }

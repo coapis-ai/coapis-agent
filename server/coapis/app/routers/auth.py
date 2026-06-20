@@ -70,6 +70,7 @@ class RegisterRequest(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     username: str
+    first_login: bool = False
 
 
 class AuthStatusResponse(BaseModel):
@@ -124,6 +125,10 @@ async def login(req: LoginRequest):
             pass
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
+    # Check if this is the first login (no previous last_login)
+    user_info = get_user(req.username)
+    is_first_login = user_info is not None and user_info.get("last_login") is None
+
     # Log successful login
     try:
         from .audit import _append_audit_entry
@@ -138,11 +143,11 @@ async def login(req: LoginRequest):
     except Exception:
         pass
 
-    return LoginResponse(token=token, username=req.username)
+    return LoginResponse(token=token, username=req.username, first_login=is_first_login)
 
 
 @router.post("/register")
-async def register(req: RegisterRequest):
+async def register(req: RegisterRequest, request: Request):
     """注册新用户。
 
     注意：需要 COAPIS_AUTH_ENABLED=true 才能注册。
@@ -200,7 +205,8 @@ async def register(req: RegisterRequest):
         # Don't fail registration - workspace can be initialized later
 
     token = create_token_with_expiry(username, req.expires_in)
-    return LoginResponse(token=token, username=username)
+    # New registration is always first login
+    return LoginResponse(token=token, username=username, first_login=True)
 
 
 def create_token_with_expiry(username: str, expires_in: Optional[int] = None) -> str:
@@ -348,3 +354,101 @@ async def get_seafile_token(request: Request):
 
 # Import get_user_with_creds for the seafile-token endpoint
 from ..user_store import get_user_with_creds
+
+
+# ---------------------------------------------------------------------------
+# Onboarding endpoints
+# ---------------------------------------------------------------------------
+
+class OnboardingCompleteRequest(BaseModel):
+    agent_name: Optional[str] = None
+    agent_style: Optional[str] = None
+    agent_role: Optional[str] = None
+    user_name: Optional[str] = None
+
+
+@router.post("/onboarding/complete")
+async def complete_onboarding(request: Request, req: OnboardingCompleteRequest):
+    """Mark onboarding as completed and save initial identity settings.
+
+    This endpoint is called when the user completes the onboarding flow.
+    It updates the user's onboarding status and writes to PROFILE.md.
+    """
+    user_info = getattr(request.state, "user_info", None)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    username = user_info.get("username") or user_info.get("sub")
+    if not username:
+        raise HTTPException(status_code=401, detail="User not identified")
+
+    # Update user onboarding status
+    from ..user_store import update_user, get_user
+    if not update_user(username, onboarding_completed=True):
+        raise HTTPException(status_code=500, detail="Failed to update user status")
+
+    # Write to PROFILE.md if identity settings provided
+    try:
+        from ..constant import WORKSPACES_DIR
+        workspace_dir = WORKSPACES_DIR / username
+        profile_path = workspace_dir / "PROFILE.md"
+
+        if profile_path.exists():
+            content = profile_path.read_text(encoding="utf-8")
+        else:
+            content = "# PROFILE.md\n\n## 用户资料\n\n- **名字：**\n\n## 身份\n\n- **名字：**\n- **定位：**\n- **风格：**\n"
+
+        # Update identity section
+        if req.agent_name:
+            if "- **名字：**" in content:
+                content = content.replace("- **名字：**", f"- **名字：** {req.agent_name}")
+            else:
+                content += f"\n- **名字：** {req.agent_name}"
+
+        if req.agent_style:
+            if "- **风格：**" in content:
+                content = content.replace("- **风格：**", f"- **风格：** {req.agent_style}")
+            else:
+                content += f"\n- **风格：** {req.agent_style}"
+
+        if req.agent_role:
+            if "- **定位：**" in content:
+                content = content.replace("- **定位：**", f"- **定位：** {req.agent_role}")
+            else:
+                content += f"\n- **定位：** {req.agent_role}"
+
+        if req.user_name:
+            if "- **名字：**" in content.split("## 用户资料")[1] if "## 用户资料" in content else "":
+                content = content.replace("- **名字：**", f"- **名字：** {req.user_name}", 1)
+            else:
+                content += f"\n- **名字：** {req.user_name}"
+
+        profile_path.write_text(content, encoding="utf-8")
+        logger.info(f"Onboarding completed for {username}, PROFILE.md updated")
+
+    except Exception as e:
+        logger.error(f"Failed to update PROFILE.md for {username}: {e}")
+        # Don't fail the request if PROFILE.md update fails
+
+    return {"ok": True, "message": "Onboarding completed"}
+
+
+@router.get("/onboarding/status")
+async def get_onboarding_status(request: Request):
+    """Get user's onboarding status."""
+    user_info = getattr(request.state, "user_info", None)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    username = user_info.get("username") or user_info.get("sub")
+    if not username:
+        raise HTTPException(status_code=401, detail="User not identified")
+
+    from ..user_store import get_user
+    user = get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "onboarding_completed": user.get("onboarding_completed", False),
+    }

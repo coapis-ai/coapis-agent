@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 # Default workspace JSON files
 _WORKSPACE_JSON_DEFAULTS: list[tuple[str, dict]] = [
     ("jobs.json", {"version": 1, "jobs": []}),
-    ("skill.json", {"version": 1, "skills": []}),
+    ("skill.json", {"version": 0, "schema_version": "workspace-skill-manifest.v1", "skills": {}}),
 ]
 
 

@@ -45,17 +45,31 @@ def _get_manager(request: Request) -> Any:
     return request.app.state.multi_agent_manager
 
 
+def _resolve_agent_id(request: Request, agent_id: str) -> str:
+    """Resolve agent_id from request context when default."""
+    if agent_id == "default":
+        username = getattr(request.state, "username", None)
+        if not username:
+            user_info = getattr(request.state, "user_info", None)
+            if user_info and isinstance(user_info, dict):
+                username = user_info.get("username")
+        if username and username != "anonymous":
+            return f"user:{username}"
+    return agent_id
+
+
 # =========================================================================
 # Evolution Engine Status
 # =========================================================================
 
 @router.get("/evolution/status")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def get_evolution_status(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Get evolution engine status and statistics for an agent."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -81,12 +95,13 @@ async def get_evolution_status(
 
 
 @router.get("/evolution/stats")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def get_evolution_stats(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Get comprehensive evolution statistics for an agent."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -104,13 +119,14 @@ async def get_evolution_stats(
 # =========================================================================
 
 @router.get("/evolution/trajectories")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def list_trajectories(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
     limit: int = Query(50, ge=1, le=200, description="Max trajectories to return"),
 ):
     """List trajectory files for an agent."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -137,7 +153,7 @@ async def list_trajectories(
 
 
 @router.get("/evolution/trajectories/{session_id}")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def get_trajectory(
     request: Request,
     session_id: str,
@@ -145,6 +161,7 @@ async def get_trajectory(
     limit: int = Query(100, ge=1, le=500, description="Max entries to return"),
 ):
     """Get trajectory entries for a specific session."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -179,7 +196,7 @@ async def get_trajectory(
 # =========================================================================
 
 @router.get("/evolution/experiences")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def list_experiences(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
@@ -187,6 +204,7 @@ async def list_experiences(
     limit: int = Query(50, ge=1, le=200, description="Max experiences to return"),
 ):
     """List extracted experiences for an agent."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -224,12 +242,13 @@ async def list_experiences(
 
 
 @router.post("/evolution/experiences/extract")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def trigger_extraction(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Trigger experience extraction for the current session."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -256,13 +275,14 @@ async def trigger_extraction(
 
 
 @router.post("/evolution/experiences/{experience_id}/approve")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def approve_experience(
     request: Request,
     experience_id: str,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Approve an extracted experience for storage."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -313,13 +333,14 @@ async def approve_experience(
 
 
 @router.post("/evolution/experiences/{experience_id}/reject")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def reject_experience(
     request: Request,
     experience_id: str,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Reject an extracted experience."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -342,12 +363,13 @@ async def reject_experience(
 # =========================================================================
 
 @router.get("/evolution/knowledge-flow/status")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def get_knowledge_flow_status(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Get knowledge flow status and statistics."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -361,12 +383,13 @@ async def get_knowledge_flow_status(
 
 
 @router.get("/evolution/knowledge-flow/pending")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def list_pending_flows(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """List pending knowledge flow reviews."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -380,7 +403,7 @@ async def list_pending_flows(
 
 
 @router.post("/evolution/knowledge-flow/{record_id}/approve")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def approve_flow(
     request: Request,
     record_id: str,
@@ -388,6 +411,7 @@ async def approve_flow(
     comment: str = Query("", description="Review comment"),
 ):
     """Approve a knowledge flow request."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -405,7 +429,7 @@ async def approve_flow(
 
 
 @router.post("/evolution/knowledge-flow/{record_id}/reject")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def reject_flow(
     request: Request,
     record_id: str,
@@ -413,6 +437,7 @@ async def reject_flow(
     comment: str = Query("", description="Review comment"),
 ):
     """Reject a knowledge flow request."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -434,12 +459,13 @@ async def reject_flow(
 # =========================================================================
 
 @router.get("/evolution/review/status")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def get_review_status(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Get backend review status."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -453,13 +479,14 @@ async def get_review_status(
 
 
 @router.get("/evolution/review/history")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def get_review_history(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
     limit: int = Query(50, ge=1, le=200, description="Max reviews to return"),
 ):
     """Get backend review history."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -473,12 +500,13 @@ async def get_review_history(
 
 
 @router.get("/evolution/review/pending")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def get_pending_reviews(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Get reviews requiring human attention."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -492,12 +520,13 @@ async def get_pending_reviews(
 
 
 @router.post("/evolution/review/start")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def start_review(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Start backend review tasks."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -512,12 +541,13 @@ async def start_review(
 
 
 @router.post("/evolution/review/stop")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def stop_review(
     request: Request,
     agent_id: str = Query("default", description="Agent ID"),
 ):
     """Stop backend review tasks."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -536,7 +566,7 @@ async def stop_review(
 # =========================================================================
 
 @router.post("/evolution/knowledge-flow/approve")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def approve_flow(
     request: Request,
     record_id: str = Query(..., description="Flow record ID to approve"),
@@ -544,6 +574,7 @@ async def approve_flow(
     comment: str = Query("", description="Audit comment"),
 ):
     """Approve a knowledge flow record, executing the promotion."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:
@@ -570,7 +601,7 @@ async def approve_flow(
 
 
 @router.post("/evolution/knowledge-flow/reject")
-@require_permission("admin:admin")
+@require_permission("evolution:read")
 async def reject_flow(
     request: Request,
     record_id: str = Query(..., description="Flow record ID to reject"),
@@ -578,6 +609,7 @@ async def reject_flow(
     comment: str = Query("", description="Rejection reason"),
 ):
     """Reject a knowledge flow record."""
+    agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
     workspace = manager.get_workspace(agent_id)
     if not workspace:

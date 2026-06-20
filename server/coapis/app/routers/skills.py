@@ -59,6 +59,7 @@ from ...agents.skills_manager import (
     _get_skill_mtime,
     _mutate_json,
     _read_skill_from_dir,
+    ensure_skills_initialized,
     get_pool_builtin_update_notice,
     get_pool_builtin_sync_status,
     get_pool_skill_manifest_path,
@@ -372,6 +373,16 @@ def _restore_workspace_skill(snapshot: dict[str, Any]) -> None:
 async def _request_workspace_dir(request: Request) -> Path:
     from ..agent_context import get_agent_for_request
 
+    # If no agent_id is set, derive it from the authenticated username
+    if not hasattr(request.state, "agent_id") or not request.state.agent_id:
+        username = getattr(request.state, "username", None)
+        if not username:
+            user_info = getattr(request.state, "user_info", None)
+            if user_info and isinstance(user_info, dict):
+                username = user_info.get("username")
+        if username and username != "anonymous":
+            request.state.agent_id = f"user:{username}"
+
     workspace = await get_agent_for_request(request)
     return Path(workspace.workspace_dir)
 
@@ -634,6 +645,8 @@ def _build_pool_skill_specs() -> list[PoolSkillSpec]:
 @require_permission("skills:read")
 async def list_skills(request: Request) -> list[SkillSpec]:
     workspace_dir = await _request_workspace_dir(request)
+    # Ensure global defaults are synced before listing
+    ensure_skills_initialized(workspace_dir)
     return _build_workspace_skill_specs(workspace_dir)
 
 

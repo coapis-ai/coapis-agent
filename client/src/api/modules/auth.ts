@@ -4,6 +4,7 @@ export interface LoginResponse {
   token: string;
   username: string;
   message?: string;
+  first_login?: boolean;
 }
 
 export interface AuthStatusResponse {
@@ -70,6 +71,42 @@ export const authApi = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || "Update failed");
+    }
+    return res.json();
+  },
+
+  completeOnboarding: async (data: {
+    agent_name?: string;
+    agent_style?: string;
+    agent_role?: string;
+    user_name?: string;
+  }): Promise<{ ok: boolean }> => {
+    const token = localStorage.getItem("coapis_auth_token") || "";
+    const res = await fetch(getApiUrl("/auth/onboarding/complete"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Failed to complete onboarding");
+    }
+    return res.json();
+  },
+
+  getOnboardingStatus: async (): Promise<{ onboarding_completed: boolean }> => {
+    const token = localStorage.getItem("coapis_auth_token") || "";
+    const res = await fetch(getApiUrl("/auth/onboarding/status"), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Failed to get onboarding status");
     }
     return res.json();
   },

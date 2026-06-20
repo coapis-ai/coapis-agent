@@ -40,6 +40,8 @@ import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import GroupedResponseCard from "./components/GroupedResponseCard";
+import OnboardingModal from "../../components/OnboardingModal";
+import { useRecommendations } from "../../components/Recommendation";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -588,6 +590,9 @@ export default function ChatPage() {
   >(new Map());
   const [planEnabled, setPlanEnabled] = useState(false);
 
+  // Onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
   // Chat display configuration — synced with UserContext (backend preferences)
   const {
     displayConfig,
@@ -614,6 +619,22 @@ export default function ChatPage() {
       cancelled = true;
     };
   }, [selectedAgent]);
+
+  // Check for first login and show onboarding
+  useEffect(() => {
+    const isFirstLogin = localStorage.getItem("coapis_first_login") === "true";
+    if (isFirstLogin) {
+      setShowOnboarding(true);
+      localStorage.removeItem("coapis_first_login");
+    }
+  }, []);
+
+  // Dynamic recommendations for welcome prompts
+  const { recommendations: dynamicRecommendations } = useRecommendations({
+    scene: "chat_welcome",
+    limit: 4,
+    enabled: true,
+  });
 
   const isChatActiveRef = useRef(false);
   isChatActiveRef.current =
@@ -1171,6 +1192,13 @@ export default function ChatPage() {
         ...i18nConfig.welcome,
         nick: "CoApis",
         avatar: "/coapis.png",
+        // Use dynamic recommendations if available, fallback to static prompts
+        prompts: dynamicRecommendations.length > 0
+          ? dynamicRecommendations.map((rec) => ({
+              value: rec.prompt,  // Use the actual prompt text
+              label: `${rec.icon} ${rec.title}`,
+            }))
+          : i18nConfig.welcome.prompts,
       },
       sender: {
         ...(i18nConfig as any)?.sender,
@@ -1602,6 +1630,17 @@ export default function ChatPage() {
           ]}
         />
       </Modal>
+
+      {/* Onboarding Modal for first-time users */}
+      <OnboardingModal
+        open={showOnboarding}
+        onComplete={(data) => {
+          setShowOnboarding(false);
+          // Optionally show a success message
+          message.success("设置完成！开始与你的 AI 助手对话吧！");
+        }}
+        onCancel={() => setShowOnboarding(false)}
+      />
     </div>
     </ChatDisplayConfigContext.Provider>
   );

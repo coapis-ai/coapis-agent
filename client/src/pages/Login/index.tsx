@@ -50,6 +50,10 @@ export default function LoginPage() {
           setAuthToken(res.token);
           window.currentUserId = values.username;
           window.currentChannel = "console";
+          // Store first_login flag for onboarding
+          if (res.first_login) {
+            localStorage.setItem("coapis_first_login", "true");
+          }
           message.success(t("login.registerSuccess"));
           navigate(redirect, { replace: true });
         }
@@ -59,6 +63,10 @@ export default function LoginPage() {
           setAuthToken(res.token);
           window.currentUserId = values.username;
           window.currentChannel = "console";
+          // Store first_login flag for onboarding
+          if (res.first_login) {
+            localStorage.setItem("coapis_first_login", "true");
+          }
           navigate(redirect, { replace: true });
         } else {
           message.info(t("login.authNotEnabled"));
