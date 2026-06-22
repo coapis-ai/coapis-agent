@@ -37,12 +37,12 @@ services:
       # 前端构建产物
       - ../client/dist:/app/coapis/console
       # 开发环境版本覆盖（0.8.7-post1）
-      - ./dev-overrides/coapis/__version__.py:/app/coapis/__version__.py:ro
+      - ./dev-overrides/coapis/__version__.py:/app/coapis/__version__.py
       # Playwright 浏览器持久化
       - ./volume/playwright:/app/volume/playwright:ro
     environment:
       - PYTHONPATH=/app
-      - COAPIS_VERSION=${COAPIS_VERSION:-0.8.27-dev}
+      - COAPIS_VERSION=${COAPIS_VERSION:-0.8.28-dev}
       - COAPIS_AUTH_ENABLED=true
       - COAPIS_USER_SYSTEM_ENABLED=true
       # 共享生产 Playwright（通过宿主机 4201 端口，browserless 认证）
