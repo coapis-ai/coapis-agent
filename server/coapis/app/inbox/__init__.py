@@ -276,7 +276,7 @@ inbox_manager = InboxManager()
 
 # ---- API Router ----
 
-router = APIRouter(prefix="/api/inbox", tags=["Inbox"])
+router = APIRouter(prefix="/inbox", tags=["Inbox"])
 
 
 def _get_user_id(user_info: dict) -> str:

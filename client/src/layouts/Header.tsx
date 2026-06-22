@@ -48,7 +48,7 @@ function UpdateCodeBlock({ code }: { code: string }) {
 
 export default function Header() {
   const { t, i18n } = useTranslation();
-  const { isDark } = useTheme();
+  const { isDark: _isDark } = useTheme();
   const [version, setVersion] = useState<string>("");
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateMarkdown, setUpdateMarkdown] = useState<string>("");
@@ -118,7 +118,7 @@ export default function Header() {
       <AntHeader className={styles.header}>
         <div className={styles.logoWrapper}>
           <img
-            src={isDark ? "/logo-dark.svg" : "/logo-light.svg"}
+            src="/coapis_logo.png"
             alt="CoApis"
             className={styles.logoImg}
           />

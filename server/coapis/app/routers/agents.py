@@ -339,7 +339,6 @@ async def list_agents(request: Request) -> Dict[str, Any]:
         workspaces = manager._workspaces
         
         # Filter workspaces by user (deduplicate by real agent_id)
-        # Only show user-specific agents in the dropdown (not global agents)
         seen_ids = set()
         filtered = []
         for cache_key, ws in workspaces.items():
@@ -348,11 +347,7 @@ async def list_agents(request: Request) -> Dict[str, Any]:
                 continue
             seen_ids.add(real_id)
             
-            # ┌──────────────────────────────────────────────────────────────┐
-            # │ DO NOT CHANGE THIS FILTER — see MEMORY.md "反复出现的Bug"  │
-            # │ Skip ALL global agents (any role: service/hybrid/template)  │
-            # │ Global agents are managed via /admin/global-agents, not here│
-            # └──────────────────────────────────────────────────────────────┘
+            # Skip global agents — users only see their own user-specific agents
             ws_is_global = getattr(ws, "is_global", False)
             if ws_is_global:
                 continue
@@ -369,10 +364,13 @@ async def list_agents(request: Request) -> Dict[str, Any]:
             
             filtered.append((real_id, ws))
         
-        agents = [
-            _agent_to_summary(real_id, ws, request)
-            for real_id, ws in filtered
-        ]
+        agents = []
+        for real_id, ws in filtered:
+            agent = _agent_to_summary(real_id, ws, request)
+            # Ensure username is set for user-specific agents (e.g., user:admin -> admin)
+            if not agent.get('username') and real_id.startswith('user:'):
+                agent['username'] = real_id.split(':', 1)[1]
+            agents.append(agent)
     else:
         # Fallback mode: read from config profiles
         from ...config import load_config
@@ -386,7 +384,7 @@ async def list_agents(request: Request) -> Dict[str, Any]:
             profile_enabled = getattr(profile, "enabled", True)
             profile_is_global = getattr(profile, "is_global", True)
 
-            # Skip ALL global agents — they should not appear in user dropdown
+            # Skip global agents — users only see their own user-specific agents
             if profile_is_global:
                 continue
 
@@ -595,6 +593,12 @@ async def delete_agent(
 
     username = getattr(request.state, "username", None)
     user_role = getattr(request.state, "role", "user")
+    
+    # ┌──────────────────────────────────────────────────────────────┐
+    # │ Prevent deletion of global_default (it's the default agent) │
+    # └──────────────────────────────────────────────────────────────┘
+    if agent_id == "global_default":
+        raise HTTPException(status_code=403, detail="Cannot delete the default agent (global_default)")
     
     try:
         # Admin can delete any agent

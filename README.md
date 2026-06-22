@@ -163,4 +163,4 @@ Apache License 2.0 · Copyright 2026 蜜蜂 & CoApis Contributors
 
 ---
 
-**为什么叫 CoApis？** — Eater（探索者）+ Claw（爪子）。一只什么都想试、什么都能抓的螃蟹。🦀
+**为什么叫 CoApis？** — Eater（探索者）+ Claw（爪子）。一只什么都想试、什么都能抓的蜜蜂。🐝

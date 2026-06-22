@@ -111,9 +111,9 @@ export default function LoginPage() {
       >
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <img
-            src={isDark ? "/logo-dark.svg" : "/logo-light.svg"}
+            src="/coapis_logo.png"
             alt="CoApis"
-            style={{ height: 48, marginBottom: 12 }}
+            style={{ height: 96, marginBottom: 12 }}
           />
           <h2 style={{ margin: 0, fontWeight: 600, fontSize: 20 }}>
             {isRegister ? t("login.registerTitle") : t("login.title")}

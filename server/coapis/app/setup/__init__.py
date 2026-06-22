@@ -160,7 +160,7 @@ def validate_user_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---- API Router ----
 
-router = APIRouter(prefix="/api/setup", tags=["Setup Wizard"])
+router = APIRouter(prefix="/setup", tags=["Setup Wizard"])
 
 
 @router.get("/status")

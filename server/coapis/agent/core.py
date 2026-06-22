@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2026 蜜蜂 & CoApis Contributors
+# Copyright 2026 以太吃虾 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ def _safe_import(module_name: str) -> bool:
 # Format: tool_name → (skill_name, brief_reason)
 TOOL_SKILL_FALLBACKS: Dict[str, tuple] = {
     "browser_use": ("browser_use", "内置浏览器工具不可用，可使用外部 browser-use 库"),
-    "web_search": ("web_search", "内置搜索工具不可用，可参考技能获取替代方案"),
+    "web_search": ("web_search", "搜索工具暂时出错，请检查参数后重试"),
     "desktop_screenshot": ("desktop_screenshot", "截图工具不可用"),
     "send_file_to_user": ("file_reader", "文件发送不可用"),
     "himalaya": ("himalaya", "邮件工具不可用"),
@@ -602,6 +602,52 @@ class AgentCore:
             self._cached_system_prompt = result
         return result
 
+    def _load_workspace_md_files(self) -> str:
+        """Load AGENTS.md, SOUL.md, PROFILE.md from workspace directory."""
+        from pathlib import Path
+        import json as _json
+
+        # Get workspace_dir from agent.json
+        workspace_dir = None
+        try:
+            agent_id = self.config.get("agent_id", self.config.get("id", ""))
+            logger.info("Workspace MD loader: agent_id=%s, config_keys=%s", agent_id, list(self.config.keys())[:15])
+            # Try common workspace paths
+            possible_paths = [
+                Path(f"/apps/ai/eaterclaw/workspaces/{agent_id.split(':')[-1]}"),
+                Path(f"/apps/ai/eaterclaw/workspaces/global_default"),
+                Path(f"/apps/ai/coapis/workspaces/{agent_id.split(':')[-1]}"),
+                Path(f"/apps/ai/coapis/workspaces/global_default"),
+            ]
+            for p in possible_paths:
+                if (p / "agent.json").exists():
+                    with open(p / "agent.json") as f:
+                        cfg = _json.load(f)
+                    workspace_dir = Path(cfg.get("workspace_dir", str(p)))
+                    break
+        except Exception as e:
+            logger.debug("Failed to get workspace_dir: %s", e)
+
+        if not workspace_dir:
+            logger.warning("Workspace MD loader: no workspace_dir found for agent_id=%s", agent_id)
+            return ""
+
+        # Load enabled files from system_prompt_files config
+        enabled_files = self.config.get("system_prompt_files", ["AGENTS.md", "SOUL.md", "PROFILE.md"])
+        logger.info("Workspace MD loader: enabled_files=%s, workspace_dir=%s", enabled_files, workspace_dir)
+        parts = []
+        for filename in enabled_files:
+            file_path = workspace_dir / filename
+            if file_path.exists():
+                try:
+                    content = file_path.read_text(encoding="utf-8").strip()
+                    if content:
+                        parts.append(f"\n# {filename}\n\n{content}")
+                except Exception as e:
+                    logger.debug("Failed to read %s: %s", file_path, e)
+
+        return "\n".join(parts)
+
     def _build_full_system_prompt(
         self,
         skills: Any,
@@ -612,9 +658,20 @@ class AgentCore:
         """Build the complete system prompt from all sources."""
         parts = []
 
+        # Workspace markdown files (AGENTS.md, SOUL.md, PROFILE.md)
+        try:
+            md_content = self._load_workspace_md_files()
+            logger.info("Workspace MD content length: %d", len(md_content) if md_content else 0)
+            if md_content:
+                parts.append(md_content)
+                logger.info("After adding MD content, parts count: %d", len(parts))
+        except Exception as e:
+            logger.warning("Failed to load workspace markdown files: %s", e)
+
         # Base identity
         if self.system_prompt:
             parts.append(self.system_prompt)
+            logger.info("After adding system_prompt, parts count: %d", len(parts))
 
         # Foundation memory injection (only on initial request)
         if self.foundation_manager and is_initial:
@@ -690,4 +747,6 @@ class AgentCore:
             if memory_context:
                 parts.append(f"\n[MEMORY]\n{memory_context}")
 
-        return "\n".join(parts) if parts else self.system_prompt or ""
+        result = "\n".join(parts) if parts else self.system_prompt or ""
+        logger.info("Final system prompt length: %d, parts count: %d", len(result), len(parts))
+        return result

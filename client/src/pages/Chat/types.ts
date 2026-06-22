@@ -5,39 +5,18 @@
  * Stored in localStorage for persistence across sessions.
  */
 export interface ChatDisplayConfig {
-  /** Hide tool call cards (default: true for cleaner UI) */
-  hideToolCall: boolean;
-  /** Hide thinking/deep-think cards (default: true for cleaner UI) */
-  hideThinking: boolean;
-  /** Hide footer with token count, timestamp, model name (default: true) */
-  hideFooter: boolean;
-  /** Hide system messages (default: true) */
-  hideSystemMessages: boolean;
-  /** Display mode: 'simple' = only user+assistant text, 'detailed' = show all */
-  displayMode: 'simple' | 'detailed';
-  /** Show timestamps on messages (default: false) */
-  showTimestamps: boolean;
-  /** Show token counts on messages (default: false) */
-  showTokenCounts: boolean;
-  /** Show model name in message footer (default: false) */
-  showModelName: boolean;
-  /** Auto-scroll to bottom on new messages (default: true) */
+  /** 隐藏细节：开启后显示摘要，点击可展开查看完整内容 */
+  hideDetails: boolean;
+  /** 自动滚动到最新消息 */
   autoScroll: boolean;
-  /** Message font size: 'small' | 'normal' | 'large' */
+  /** 字体大小 */
   fontSize: 'small' | 'normal' | 'large';
-  /** Code block theme: 'light' | 'dark' */
+  /** 代码主题 */
   codeTheme: 'light' | 'dark';
 }
 
 export const DEFAULT_CHAT_DISPLAY_CONFIG: ChatDisplayConfig = {
-  hideToolCall: false,
-  hideThinking: true,
-  hideFooter: false,
-  hideSystemMessages: false,
-  displayMode: 'detailed',
-  showTimestamps: false,
-  showTokenCounts: false,
-  showModelName: false,
+  hideDetails: false,
   autoScroll: true,
   fontSize: 'normal',
   codeTheme: 'dark',

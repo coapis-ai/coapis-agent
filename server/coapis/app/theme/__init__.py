@@ -116,7 +116,7 @@ theme_manager = ThemeManager()
 
 # ---- API Router ----
 
-router = APIRouter(prefix="/api/theme", tags=["Theme"])
+router = APIRouter(prefix="/theme", tags=["Theme"])
 
 
 @router.get("/available")

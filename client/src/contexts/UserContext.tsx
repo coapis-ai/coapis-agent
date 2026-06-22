@@ -18,14 +18,7 @@ interface UserPreferences {
   theme?: string;
   language?: string;
   sidebar_collapsed?: number;
-  chat_display_mode?: string;
-  chat_hide_tool_call?: number;
-  chat_hide_thinking?: number;
-  chat_hide_footer?: number;
-  chat_hide_system_messages?: number;
-  chat_show_timestamps?: number;
-  chat_show_token_counts?: number;
-  chat_show_model_name?: number;
+  chat_hide_details?: number;
   chat_auto_scroll?: number;
   chat_font_size?: string;
   chat_code_theme?: string;

@@ -35,7 +35,7 @@ from .store import get_store
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/recommendations", tags=["recommendations"])
+router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
 # ---------------------------------------------------------------------------

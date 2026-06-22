@@ -260,7 +260,7 @@ search_manager = GlobalSearchManager()
 
 # ---- API Router ----
 
-router = APIRouter(prefix="/api/search", tags=["Search"])
+router = APIRouter(prefix="/search", tags=["Search"])
 
 
 @router.get("")

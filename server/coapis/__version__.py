@@ -13,4 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.8.21"
+"""
+Version is read from the COAPIS_VERSION environment variable.
+
+How to update:
+  - Development (.env):        COAPIS_VERSION=0.8.26-dev
+  - Production (.env.prod):    COAPIS_VERSION=0.8.25
+  - Just change the env var when releasing a new version.
+"""
+
+import os
+
+__version__ = os.environ.get("COAPIS_VERSION", "0.0.0-dev")

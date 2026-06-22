@@ -1,26 +1,26 @@
 /**
- * GroupedResponseCard — 按类型分组的自定义响应卡片
+ * GroupedResponseCard — 按类型分块的自定义响应卡片
  *
- * 替代默认 AgentScopeRuntimeResponseCard，将一个回复中的内容按类型分组：
- * 1. 💭 思考过程 (REASONING) — 默认折叠
- * 2. 🔧 执行步骤 (TOOL_CALL / MCP_CALL) — 默认折叠，显示工具名+状态
- * 3. 📝 正文回复 (MESSAGE) — 默认展开，完整 Markdown
+ * 替代默认 AgentScopeRuntimeResponseCard，将一个回复中的内容按类型分块：
+ * 1. 💭 思考过程 (REASONING) — 单独一块，默认折叠
+ * 2. 🔧 每个工具调用 (PLUGIN_CALL / MCP_CALL / FUNCTION_CALL) — 每个单独一块，默认折叠
+ * 3. 📝 正文回复 (MESSAGE) — 单独一块，默认展开
+ *
+ * 支持摘要模式（hideDetails=true）：每个分块只显示摘要，点击可展开
  *
  * 通过 options.cards 注册：
  *   cards: { 'AgentScopeRuntimeResponseCard': GroupedResponseCard }
  */
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Markdown } from '@agentscope-ai/chat';
 import {
   CheckCircleOutlined,
   LoadingOutlined,
   RightOutlined,
   BulbOutlined,
-  ToolOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { Avatar, Flex } from 'antd';
-import { useChatAnywhereOptions } from '@agentscope-ai/chat/lib/AgentScopeRuntimeWebUI/core/Context/ChatAnywhereOptionsContext';
+import { useChatDisplayConfig } from './SimplifiedResponseCard';
 import styles from '../index.module.less';
 
 // ---------------------------------------------------------------------------
@@ -77,227 +77,218 @@ interface GroupedResponseCardProps {
 }
 
 // ---------------------------------------------------------------------------
-// 分组逻辑
+// Helper: check if a message is a tool input (call)
+// ---------------------------------------------------------------------------
+function maybeToolInput(msg: OutputMessage): boolean {
+  return [MSG_TYPE.PLUGIN_CALL, MSG_TYPE.MCP_CALL, MSG_TYPE.FUNCTION_CALL, MSG_TYPE.COMPONENT_CALL].includes(msg.type as any);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: check if a message is a tool output
+// ---------------------------------------------------------------------------
+function maybeToolOutput(msg: OutputMessage): boolean {
+  return [MSG_TYPE.PLUGIN_CALL_OUTPUT, MSG_TYPE.MCP_CALL_OUTPUT, MSG_TYPE.FUNCTION_CALL_OUTPUT, MSG_TYPE.COMPONENT_CALL_OUTPUT].includes(msg.type as any);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: check if response is still generating
+// ---------------------------------------------------------------------------
+function maybeGenerating(data: { status?: string }): boolean {
+  return [RUN_STATUS.IN_PROGRESS, RUN_STATUS.CREATED].includes(data.status as any);
+}
+
+// ---------------------------------------------------------------------------
+// Merge tool input/output messages (like @agentscope-ai/chat Builder)
+// ---------------------------------------------------------------------------
+function mergeToolMessages(messages: OutputMessage[]): OutputMessage[] {
+  const bufferMessagesMap = new Map<string, ContentItem>();
+  const resMessages: OutputMessage[] = [];
+
+  for (const message of messages || []) {
+    if (maybeToolInput(message) && message.content?.length) {
+      const content = message.content[0];
+      const key = content.data?.call_id || content.data?.name;
+      bufferMessagesMap.set(key, content);
+      resMessages.push(message);
+    } else if (maybeToolOutput(message) && message.content?.length) {
+      const content = message.content[0];
+      const key = content.data?.call_id || content.data?.name;
+      const bufferContent = bufferMessagesMap.get(key);
+      if (bufferContent) {
+        // Merge output into the input message
+        resMessages.forEach((item, idx) => {
+          if (maybeToolInput(item)) {
+            const preContent = item.content?.[0];
+            const preKey = preContent?.data?.call_id || preContent?.data?.name;
+            if (preKey === key) {
+              resMessages[idx] = {
+                ...message,
+                content: [...(item.content || []), content],
+              };
+            }
+          }
+        });
+      }
+    } else {
+      resMessages.push(message);
+    }
+  }
+  return resMessages;
+}
+
+// ---------------------------------------------------------------------------
+// Group messages by type (细粒度分块)
 // ---------------------------------------------------------------------------
 
-interface MessageGroup {
-  type: 'thinking' | 'tools' | 'message' | 'error';
+interface MessageBlock {
+  type: 'thinking' | 'tool' | 'message' | 'error';
   items: OutputMessage[];
 }
 
-function groupMessages(output: OutputMessage[]): MessageGroup[] {
-  const groups: MessageGroup[] = [];
-  let currentTools: OutputMessage[] = [];
-
-  const flushTools = () => {
-    if (currentTools.length > 0) {
-      groups.push({ type: 'tools', items: [...currentTools] });
-      currentTools = [];
-    }
-  };
+function groupMessages(output: OutputMessage[]): MessageBlock[] {
+  const blocks: MessageBlock[] = [];
 
   for (const msg of output) {
     const t = msg.type;
+    
     if (t === MSG_TYPE.REASONING) {
-      flushTools();
-      groups.push({ type: 'thinking', items: [msg] });
-    } else if (
-      t === MSG_TYPE.PLUGIN_CALL ||
-      t === MSG_TYPE.MCP_CALL ||
-      t === MSG_TYPE.FUNCTION_CALL ||
-      t === MSG_TYPE.COMPONENT_CALL
-    ) {
-      currentTools.push(msg);
+      // 思考过程：单独一块
+      blocks.push({ type: 'thinking', items: [msg] });
+    } else if (maybeToolInput(msg)) {
+      // 工具调用：每个单独一块
+      blocks.push({ type: 'tool', items: [msg] });
     } else if (t === MSG_TYPE.MESSAGE) {
-      flushTools();
-      groups.push({ type: 'message', items: [msg] });
+      // 正文回复：单独一块
+      blocks.push({ type: 'message', items: [msg] });
     } else if (t === MSG_TYPE.ERROR) {
-      flushTools();
-      groups.push({ type: 'error', items: [msg] });
+      // 错误：单独一块
+      blocks.push({ type: 'error', items: [msg] });
     }
     // Skip OUTPUT types, HEARTBEAT — they are handled within their parent
   }
 
-  flushTools();
-  return groups;
+  return blocks;
 }
 
 // ---------------------------------------------------------------------------
-// 工具信息提取
+// Tool info extraction
 // ---------------------------------------------------------------------------
 
-function getToolInfo(msg: OutputMessage): {
-  name: string;
-  icon: string;
-  color: string;
-  label: string;
-  loading: boolean;
-} {
-  const content = msg.content || [];
-  const first = content[0];
-  const toolName = first?.data?.name || 'unknown';
-
-  // Simplified tool category mapping
+function getToolInfo(msg: OutputMessage) {
+  const toolName = msg.content?.[0]?.data?.name || 'unknown';
   const TOOL_ICONS: Record<string, { icon: string; color: string; label: string }> = {
-    execute_shell_command: { icon: '🖥️', color: '#8c8c8c', label: '命令' },
-    read_file: { icon: '📄', color: '#1890ff', label: '读取' },
-    write_file: { icon: '✏️', color: '#52c41a', label: '写入' },
-    edit_file: { icon: '✏️', color: '#faad14', label: '编辑' },
-    grep_search: { icon: '🔍', color: '#1890ff', label: '搜索' },
-    glob_search: { icon: '📁', color: '#1890ff', label: '搜索' },
-    browser_use: { icon: '🌐', color: '#722ed1', label: '浏览器' },
-    web_search: { icon: '🌐', color: '#722ed1', label: '搜索' },
+    execute_shell_command: { icon: '🖥️', color: '#1890ff', label: '终端' },
+    read_file: { icon: '📖', color: '#52c41a', label: '读取' },
+    write_file: { icon: '✏️', color: '#faad14', label: '写入' },
+    edit_file: { icon: '🔧', color: '#faad14', label: '编辑' },
+    grep_search: { icon: '🔍', color: '#722ed1', label: '搜索' },
+    glob_search: { icon: '📁', color: '#13c2c2', label: '查找' },
+    web_search: { icon: '🔎', color: '#2f54eb', label: '网页' },
+    browser_use: { icon: '🌐', color: '#1677ff', label: '浏览器' },
     memory_search: { icon: '🧠', color: '#eb2f96', label: '记忆' },
     view_image: { icon: '🖼️', color: '#13c2c2', label: '图片' },
     send_file_to_user: { icon: '📤', color: '#fa8c16', label: '发送' },
-    chat_with_agent: { icon: '🤖', color: '#1677ff', label: 'Agent' },
+    chat_with_agent: { icon: '💬', color: '#722ed1', label: '对话' },
   };
+  return TOOL_ICONS[toolName] || { icon: '⚡', color: '#999', label: toolName };
+}
 
-  const cat = TOOL_ICONS[toolName] || { icon: '⚙️', color: '#595959', label: '工具' };
-  return {
-    name: toolName,
-    icon: cat.icon,
-    color: cat.color,
-    label: cat.label,
-    loading: msg.status === RUN_STATUS.IN_PROGRESS,
-  };
+function generateToolSummary(msg: OutputMessage): string {
+  const toolName = msg.content?.[0]?.data?.name || 'unknown';
+  const args = msg.content?.[0]?.data?.args;
+  if (!args) return getToolInfo(msg).label;
+
+  // Generate brief summary based on tool type
+  if (toolName === 'execute_shell_command' && args.command) {
+    const cmd = String(args.command);
+    return cmd.length > 30 ? cmd.slice(0, 30) + '...' : cmd;
+  }
+  if ((toolName === 'read_file' || toolName === 'write_file') && args.file_path) {
+    const path = String(args.file_path);
+    const parts = path.split('/');
+    return parts[parts.length - 1] || path;
+  }
+  if (toolName === 'grep_search' && args.pattern) {
+    return `搜索 "${args.pattern}"`;
+  }
+  if (toolName === 'web_search' && args.query) {
+    return `搜索 "${args.query}"`;
+  }
+
+  return getToolInfo(msg).label;
 }
 
 // ---------------------------------------------------------------------------
-// 折叠区段组件
+// Collapsible section component
 // ---------------------------------------------------------------------------
 
-interface SectionProps {
+interface CollapsibleSectionProps {
   icon: React.ReactNode;
   title: string;
   badge?: React.ReactNode;
-  defaultOpen?: boolean;
-  accentColor: string;
+  defaultExpanded?: boolean;
   children: React.ReactNode;
-  generating?: boolean;
+  summary?: string;
 }
 
-const CollapsibleSection: React.FC<SectionProps> = ({
+const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   icon,
   title,
   badge,
-  defaultOpen = false,
-  accentColor,
+  defaultExpanded = false,
   children,
-  generating,
+  summary,
 }) => {
-  const [open, setOpen] = useState(defaultOpen);
+  const config = useChatDisplayConfig();
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
-  // Generate 时自动展开
-  useEffect(() => {
-    if (generating) setOpen(true);
-  }, [generating]);
+  // Determine what to show in header
+  const showSummaryInHeader = config.hideDetails && !expanded && summary;
+  const showExpandArrow = summary && config.hideDetails;
 
   return (
-    <div className={styles.groupedSection} style={{ borderLeftColor: accentColor }}>
+    <div className={styles.groupedSection}>
       <div
         className={styles.groupedSectionHeader}
-        onClick={() => setOpen(!open)}
+        onClick={() => setExpanded(!expanded)}
       >
-        <div className={styles.groupedSectionHeaderLeft}>
+        <div className={styles.groupedSectionTitle}>
           {icon}
-          <span className={styles.groupedSectionTitle}>{title}</span>
+          <span>{title}</span>
           {badge}
-          {generating && (
-            <LoadingOutlined style={{ color: accentColor, fontSize: 12 }} />
-          )}
         </div>
-        <RightOutlined
-          className={styles.groupedSectionArrow}
-          style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
-        />
+        {showExpandArrow && (
+          <RightOutlined
+            className={styles.groupedSectionArrow}
+            style={{ transform: expanded ? 'rotate(90deg)' : 'none' }}
+          />
+        )}
       </div>
-      {open && (
-        <div className={styles.groupedSectionBody}>
-          {children}
+      {showSummaryInHeader ? (
+        <div className={styles.groupedSectionSummary} onClick={() => setExpanded(true)}>
+          {summary}
         </div>
+      ) : (
+        expanded && <div className={styles.groupedSectionContent}>{children}</div>
       )}
     </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// 思考内容渲染
-// ---------------------------------------------------------------------------
-
-const ThinkingContent: React.FC<{ msg: OutputMessage }> = ({ msg }) => {
-  const text = msg.content?.find((c) => c.type === 'text')?.text || '';
-  if (!text) return null;
-  return (
-    <div className={styles.groupedThinkingContent}>
-      <Markdown content={text} />
-    </div>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// 工具卡片渲染（精简版 inline 显示）
-// ---------------------------------------------------------------------------
-
-const ToolInline: React.FC<{ msg: OutputMessage }> = ({ msg }) => {
-  const info = getToolInfo(msg);
-  const inputStr = msg.content?.[0]?.data?.arguments;
-  const serverLabel = msg.content?.[0]?.data?.server_label;
-
-  // 解析输入以生成摘要
-  const summary = useMemo(() => {
-    if (!inputStr) return info.name;
-    try {
-      const obj = typeof inputStr === 'string' ? JSON.parse(inputStr) : inputStr;
-      // 简单摘要
-      const keys = Object.keys(obj);
-      if (keys.length === 0) return info.name;
-      const firstVal = obj[keys[0]];
-      if (typeof firstVal === 'string' && firstVal.length > 0) {
-        const short = firstVal.length > 60 ? firstVal.slice(0, 60) + '...' : firstVal;
-        return short;
-      }
-      return info.name;
-    } catch {
-      return info.name;
-    }
-  }, [inputStr, info.name]);
-
-  return (
-    <div className={styles.toolInline}>
-      <div className={styles.toolInlineHeader}>
-        <span style={{ fontSize: 14 }}>{info.icon}</span>
-        <span className={styles.toolInlineName}>
-          {serverLabel ? `${serverLabel} / ` : ''}{info.name}
-        </span>
-        {info.loading ? (
-          <LoadingOutlined style={{ color: info.color, fontSize: 11 }} />
-        ) : (
-          <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 11 }} />
-        )}
-      </div>
-      <div className={styles.toolInlineSummary}>
-        {summary !== info.name ? summary : ''}
-      </div>
-    </div>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// GroupedResponseCard 主组件
+// Main component
 // ---------------------------------------------------------------------------
 
 const GroupedResponseCard: React.FC<GroupedResponseCardProps> = ({ data }) => {
-  const output = data.output || [];
+  // Use mergeToolMessages like the original AgentScopeRuntimeResponseCard
+  const messages = useMemo(() => mergeToolMessages(data.output || []), [data.output]);
+  const blocks = useMemo(() => groupMessages(messages), [messages]);
 
-  const avatar = useChatAnywhereOptions((v: any) => v.welcome?.avatar);
-  const nick = useChatAnywhereOptions((v: any) => v.welcome?.nick);
+  // Check if generating (like original component)
+  const isGenerating = maybeGenerating(data);
 
-  // 分组
-  const groups = useMemo(() => groupMessages(output), [output]);
-
-  // 如果没有任何内容但还在生成，显示 spinner
-  if (groups.length === 0 && data.status === 'in_progress') {
+  // Show spinner if no messages and still generating (like original component)
+  if (!messages.length && isGenerating) {
     return (
       <div className={styles.groupedCard}>
         <div className={styles.groupedCardSpinner}>
@@ -308,114 +299,125 @@ const GroupedResponseCard: React.FC<GroupedResponseCardProps> = ({ data }) => {
     );
   }
 
-  if (groups.length === 0) return null;
-
-  // Check if there are any active reasoning/tool steps
-  const hasGeneratingReasoning = output.some(
-    (m) => m.type === MSG_TYPE.REASONING && m.status === RUN_STATUS.IN_PROGRESS,
-  );
+  if (blocks.length === 0) return null;
 
   return (
     <div className={styles.groupedCard}>
-      {/* 头像行 */}
-      {avatar && (
-        <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
-          <Avatar src={avatar} />
-          {nick && <span style={{ fontSize: 13, color: '#999' }}>{nick}</span>}
-        </Flex>
-      )}
-
-      {groups.map((group, idx) => {
-        // ── 思考区 ──
-        if (group.type === 'thinking') {
-          const text = group.items[0]?.content?.find((c: any) => c.type === 'text')?.text || '';
+      {blocks.map((block, idx) => {
+        // ── 思考过程（默认折叠）──
+        if (block.type === 'thinking') {
+          const text = block.items[0]?.content?.find((c: any) => c.type === 'text')?.text || '';
           const charCount = text.length;
+          const summary = text.length <= 80 ? text : text.slice(0, 80) + '...';
+          
           return (
             <CollapsibleSection
               key={`thinking-${idx}`}
               icon={<BulbOutlined style={{ color: '#722ed1', fontSize: 13 }} />}
               title="思考过程"
               badge={
-                charCount > 0 ? (
-                  <span className={styles.groupedBadge} style={{ color: '#722ed1' }}>
-                    {charCount} 字
-                  </span>
-                ) : undefined
-              }
-              defaultOpen={false}
-              accentColor="#722ed1"
-              generating={hasGeneratingReasoning}
-            >
-              {group.items.map((item) => (
-                <ThinkingContent key={item.id} msg={item} />
-              ))}
-            </CollapsibleSection>
-          );
-        }
-
-        // ── 工具区 ──
-        if (group.type === 'tools') {
-          const toolItems = group.items;
-          const activeCount = toolItems.filter(
-            (m) => m.status === RUN_STATUS.IN_PROGRESS,
-          ).length;
-
-          return (
-            <CollapsibleSection
-              key={`tools-${idx}`}
-              icon={<ToolOutlined style={{ color: '#1890ff', fontSize: 13 }} />}
-              title="执行步骤"
-              badge={
-                <span className={styles.groupedBadge} style={{ color: '#1890ff' }}>
-                  {activeCount > 0
-                    ? `${activeCount} 进行中 / ${toolItems.length} 步`
-                    : `${toolItems.length} 步`}
+                <span className={styles.groupedBadge} style={{ color: '#722ed1' }}>
+                  {charCount} 字
                 </span>
               }
-              defaultOpen={false}
-              accentColor="#1890ff"
-              generating={activeCount > 0}
+              defaultExpanded={false}
+              summary={summary}
             >
-              {toolItems.map((item) => (
-                <ToolInline key={item.id} msg={item} />
-              ))}
+              <div className={styles.groupedContent}>
+                <Markdown content={text} />
+              </div>
             </CollapsibleSection>
           );
         }
 
-        // ── 正文区 ──
-        if (group.type === 'message') {
+        // ── 工具调用（每个单独一块，默认折叠）──
+        if (block.type === 'tool') {
+          const msg = block.items[0];
+          const info = getToolInfo(msg);
+          const toolName = msg.content?.[0]?.data?.name || 'unknown';
+          const hasOutput = msg.content && msg.content.length > 1;
+          const statusIcon = hasOutput ? (
+            <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
+          ) : (
+            <LoadingOutlined style={{ color: '#faad14', fontSize: 12 }} />
+          );
+          const summary = generateToolSummary(msg);
+          
           return (
-            <div key={`message-${idx}`} className={styles.groupedMessage}>
-              {group.items.map((item) => {
-                const textParts = (item.content || [])
-                  .filter((c: any) => c.type === 'text')
-                  .map((c: any) => c.text || '')
-                  .filter(Boolean);
-                if (textParts.length === 0) return null;
-                return (
-                  <Markdown
-                    key={item.id}
-                    content={textParts.join('\n')}
-                  />
-                );
-              })}
-            </div>
+            <CollapsibleSection
+              key={`tool-${idx}`}
+              icon={<span style={{ fontSize: 14 }}>{info.icon}</span>}
+              title={toolName}
+              badge={statusIcon}
+              defaultExpanded={false}
+              summary={summary}
+            >
+              <div className={styles.toolItem}>
+                {/* Show tool output */}
+                {hasOutput && msg.content?.slice(1).map((output, oi) => (
+                  <div key={`output-${oi}`} className={styles.toolOutput}>
+                    {output.text && (
+                      <pre style={{ 
+                        margin: '4px 0', 
+                        padding: '8px', 
+                        background: '#f5f5f5', 
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        overflow: 'auto',
+                        maxHeight: '150px'
+                      }}>
+                        {output.text.slice(0, 500)}
+                        {output.text.length > 500 && '...'}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CollapsibleSection>
           );
         }
 
-        // ── 错误区 ──
-        if (group.type === 'error') {
+        // ── 正文回复（默认展开）──
+        if (block.type === 'message') {
+          const text = block.items[0]?.content?.find((c: any) => c.type === 'text')?.text || '';
+          const summary = text.length <= 200 ? text : text.slice(0, 200) + '...';
+          
           return (
-            <div key={`error-${idx}`} className={styles.groupedError}>
-              <WarningOutlined style={{ color: '#ff4d4f', marginRight: 6 }} />
-              {group.items.map((item) => item.message || '').filter(Boolean).join(', ')}
+            <CollapsibleSection
+              key={`message-${idx}`}
+              icon={<span style={{ fontSize: 13 }}>📝</span>}
+              title="正文回复"
+              defaultExpanded={true}
+              summary={summary}
+            >
+              <div className={styles.groupedContent}>
+                <Markdown content={text} />
+              </div>
+            </CollapsibleSection>
+          );
+        }
+
+        // ── 错误（默认展开）──
+        if (block.type === 'error') {
+          const errorMsg = block.items[0]?.content?.find((c: any) => c.type === 'text')?.text || block.items[0]?.message || '未知错误';
+          return (
+            <div key={`error-${idx}`} className={styles.errorSection}>
+              <WarningOutlined style={{ color: '#ff4d4f', marginRight: 8 }} />
+              <span style={{ color: '#ff4d4f' }}>{errorMsg}</span>
             </div>
           );
         }
 
         return null;
       })}
+
+      {/* 如果正在生成，显示加载状态 */}
+      {isGenerating && blocks.length > 0 && (
+        <div className={styles.generatingIndicator}>
+          <LoadingOutlined style={{ fontSize: 12, color: '#999' }} />
+          <span style={{ marginLeft: 4, color: '#999', fontSize: 12 }}>正在处理...</span>
+        </div>
+      )}
     </div>
   );
 };

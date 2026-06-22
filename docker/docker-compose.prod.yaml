@@ -19,7 +19,7 @@ services:
     env_file:
       - .env.prod
     environment:
-      - BROWSER_CDP_URL=http://playwright:9223
+      - BROWSER_CDP_URL=http://playwright:3000
     restart: unless-stopped
     networks:
       - frontend
@@ -55,26 +55,30 @@ services:
       start_period: 10s
 
   # ── 浏览器服务（CDP 协议）──
-  # chromedp/headless-shell: 9223(socat) → 9222(Chrome CDP)
-  # shm_size: Chrome 必需，低于 512M 会崩溃
+  # browserless/chrome: 专业级 Headless Chrome，支持 0.0.0.0 绑定
+  # 端口 3000 暴露 CDP，外部通过 4201 访问
   playwright:
-    image: chromedp/headless-shell:latest
+    image: browserless/chrome:latest
     container_name: coapis-playwright-prod
     expose:
-      - "9223"
+      - "3000"
     ports:
-      - "4201:9223"
+      - "4201:3000"
     shm_size: "2g"
+    environment:
+      - TOKEN=coapis
+      - MAX_CONCURRENT_SESSIONS=5
+      - MAX_QUEUE_LENGTH=10
     restart: unless-stopped
     networks:
       - frontend
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/9223' 2>/dev/null"]
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/json/version?token=coapis"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
 
 networks:
   frontend:

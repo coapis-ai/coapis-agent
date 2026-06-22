@@ -29,10 +29,12 @@ import atexit
 from concurrent import futures
 import json
 import logging
+import os
 import re
 import shlex
 from pathlib import Path
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -45,11 +47,6 @@ from .registry import register_tool
 from agentscope.message import TextBlock
 from agentscope.tool import ToolResponse
 
-from ...config import (
-    get_playwright_chromium_executable_path,
-    get_system_default_browser,
-    is_running_in_container,
-)
 from ...config.context import get_current_workspace_dir
 from ...constant import WORKING_DIR, EnvVarLoader
 
@@ -60,7 +57,7 @@ logger = logging.getLogger(__name__)
 # Maximum bytes for direct URL downloads (10 MB)
 _MAX_DIRECT_URL_DOWNLOAD_BYTES = 10 * 1024 * 1024
 # CDP connect timeout in seconds
-_CDP_CONNECT_TIMEOUT_SECONDS = 30.0
+_CDP_CONNECT_TIMEOUT_SECONDS = 5.0
 
 # Keywords used to validate executable_path — the binary filename must
 # contain at least one of these (case-insensitive) to be accepted.
@@ -78,6 +75,129 @@ _TRUSTED_BROWSER_KEYWORDS = frozenset(
         "tor",  # Tor Browser
     },
 )
+
+
+# ---------------------------------------------------------------------------
+# Self-contained browser path resolution (no dependency on coapis.config.utils
+# or qwenpaw runtime — avoids module-level import conflicts at server startup)
+# ---------------------------------------------------------------------------
+_COAPIS_PLAYWRIGHT_CHROMIUM_PATH_ENV = "COAPIS_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
+_QWENPAW_PLAYWRIGHT_CHROMIUM_PATH_ENV = "QWENPAW_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
+
+_CONTAINER_MARKER_PATHS = (
+    "/.dockerenv",
+    "/run/.containerenv",
+    "/proc/1/cgroup",
+)
+
+
+def _is_running_in_container() -> bool:
+    """Detect if we're inside a container (Docker/Podman)."""
+    import os as _os
+    for marker in _CONTAINER_MARKER_PATHS:
+        if _os.path.exists(marker):
+            return True
+    try:
+        with open("/proc/1/cgroup", "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+            if "docker" in content or "kubepods" in content or "containerd" in content:
+                return True
+    except (OSError, IOError):
+        pass
+    return False
+
+
+def _get_chromium_executable_path() -> Optional[str]:
+    """Find the Chromium/Chrome executable path.
+
+    This is a self-contained implementation that does NOT depend on
+    ``coapis.config.utils`` or any QwenPaw runtime module.  It checks:
+
+    1. ``COAPIS_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`` env var
+    2. ``QWENPAW_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`` env var (legacy)
+    3. Container-specific hardcoded paths (``/usr/bin/chromium``, etc.)
+    4. System-installed Chrome / Chromium / Edge discovery
+    """
+    # 1. Check CoApis-specific env var first
+    path = os.environ.get(_COAPIS_PLAYWRIGHT_CHROMIUM_PATH_ENV)
+    if path and os.path.isfile(path):
+        return path
+
+    # 2. Check legacy QwenPaw env var
+    path = os.environ.get(_QWENPAW_PLAYWRIGHT_CHROMIUM_PATH_ENV)
+    if path and os.path.isfile(path):
+        return path
+
+    # 3. Container hardcoded paths
+    if _is_running_in_container():
+        for candidate in (
+            "/usr/local/bin/chromium",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/lib/chromium/chromium",
+            "/usr/local/bin/google-chrome",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chrome",
+        ):
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
+
+def _get_system_default_browser() -> tuple[Optional[str], Optional[str]]:
+    """Return (browser_kind, executable_path) for the system default browser.
+
+    Self-contained — no dependency on ``coapis.config.utils``.
+    On Linux containers this simply returns ``(None, None)`` since there is
+    no registered default browser.  On macOS it checks the LaunchServices
+    plist; on other platforms it falls back to ``_chromium_executable_path()``.
+    """
+    if _is_running_in_container():
+        return None, None
+
+    if sys.platform == "darwin":
+        try:
+            import plistlib
+            pref = "~/Library/Preferences"
+            plist_name = "com.apple.LaunchServices.com.apple.launchservices.secure.plist"
+            plist_path = Path(os.path.expanduser(pref)) / plist_name
+            if plist_path.is_file():
+                with open(plist_path, "rb") as f:
+                    data = plistlib.load(f)
+                handlers = data.get("LSHandlers") or data.get("LSHandler")
+                if isinstance(handlers, list):
+                    bundle_id = None
+                    for item in handlers:
+                        if not isinstance(item, dict):
+                            continue
+                        if item.get("LSHandlerURLScheme") in ("http", "https"):
+                            bundle_id = item.get("LSHandlerRoleAll") or item.get("LSHandlerRoleViewer")
+                            if bundle_id:
+                                break
+                    _darwin_bundles = {
+                        "com.apple.safari": ("webkit", None),
+                        "com.google.chrome": ("chromium", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+                        "com.microsoft.edgemac": ("chromium", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+                    }
+                    if bundle_id and bundle_id in _darwin_bundles:
+                        kind, path = _darwin_bundles[bundle_id]
+                        if path and Path(path).is_file():
+                            return kind, path
+                        if kind == "webkit":
+                            return kind, None
+        except Exception:
+            pass
+
+    return None, None
+
+
+# ---------------------------------------------------------------------------
+# Aliases — the rest of this module uses the bare names without underscore
+# prefix (inherited from the original QwenPaw codebase).
+# ---------------------------------------------------------------------------
+is_running_in_container = _is_running_in_container
+get_system_default_browser = _get_system_default_browser
 
 
 def _validate_executable_path(executable_path: str) -> None:
@@ -575,11 +695,16 @@ _workspace_states: dict[str, dict[str, Any]] = {}
 
 def _make_fresh_state(workspace_id: str, workspace_dir: str) -> dict[str, Any]:
     """Create a fresh browser state dict for a workspace."""
-    user_data_dir = (
-        str(Path(workspace_dir) / "browser" / "user_data")
-        if workspace_dir
-        else ""
-    )
+    import tempfile
+    import uuid as _uuid
+
+    if workspace_dir:
+        base = str(Path(workspace_dir) / "browser" / "user_data")
+    else:
+        base = str(Path(tempfile.gettempdir()) / "coapis_browser" / workspace_id)
+    # Append a short UUID so each launch gets a unique user_data_dir,
+    # avoiding SingletonLock collisions when previous launches left stale locks.
+    user_data_dir = f"{base}_{_uuid.uuid4().hex[:8]}"
     return {
         "playwright": None,
         "browser": None,
@@ -749,8 +874,12 @@ def _chromium_launch_args() -> list[str]:
 
 
 def _chromium_executable_path() -> str | None:
-    """Chromium executable path when set (e.g. container); else None."""
-    return get_playwright_chromium_executable_path()
+    """Chromium executable path when set (e.g. container); else None.
+
+    Uses the self-contained ``_get_chromium_executable_path()`` defined in
+    this module — does NOT depend on ``coapis.config.utils`` or QwenPaw.
+    """
+    return _get_chromium_executable_path()
 
 
 def _use_webkit_fallback() -> bool:
@@ -932,9 +1061,16 @@ async def _start_managed_cdp_browser(
                 "Chrome/Chromium/Edge. Safari/WebKit "
                 "is not supported.",
             )
+        # Provide actionable diagnostic information
+        _container = _is_running_in_container()
+        _env_val = os.environ.get(_COAPIS_PLAYWRIGHT_CHROMIUM_PATH_ENV, "")
         raise RuntimeError(
             "Managed CDP mode requires a Chrome/Chromium executable, "
-            "but none was found.",
+            "but none was found.\n"
+            f"  container={_container}  "
+            f"COAPIS_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH={_env_val!r}  "
+            f"default_kind={default_kind}\n"
+            "Set the env var to the full path of your chromium/chrome binary."
         )
 
     chosen_cdp_port = cdp_port or _find_free_local_port()
@@ -1102,14 +1238,6 @@ def _get_locator_by_ref(
     info = refs.get(ref)
     if not info:
         return None
-    role = info.get("role", "generic")
-    name = info.get("name")
-    nth = info.get("nth")
-    root = _get_root(page, frame_selector)
-    locator = root.get_by_role(role, name=name or None)
-    if nth is not None:
-        locator = locator.nth(nth)
-    return locator
 
 
 def _attach_page_listeners(state: dict, page, page_id: str) -> None:
@@ -3883,6 +4011,16 @@ async def browser_use(  # pylint: disable=R0911,R0912
     _ws_id = _cwd.name if _cwd else "default"
     _ws_dir = str(_cwd) if _cwd else ""
     state = _get_workspace_state(_ws_id, _ws_dir)
+
+    # DEBUG: trace chromium path resolution (write to stderr directly)
+    import sys as _dbg_sys
+    _dbg_sys.stderr.write(
+        f"[BROWSER_USE_DBG] action={action} "
+        f"chromium={_get_chromium_executable_path()} "
+        f"container={_is_running_in_container()} "
+        f"ws_dir={_ws_dir!r}\n"
+    )
+    _dbg_sys.stderr.flush()
 
     action = (action or "").strip().lower()
     if not action:

@@ -1,2 +1,2 @@
-# 开发环境版本标识（CoApis 改名后）
-__version__ = "0.8.22-dev"
+import os
+__version__ = os.environ.get("COAPIS_VERSION", "0.0.0-dev")

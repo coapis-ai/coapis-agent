@@ -274,7 +274,7 @@ CONTEXTUAL_TIPS = {
 
 # ---- API Router ----
 
-router = APIRouter(prefix="/api/onboarding", tags=["Onboarding"])
+router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 
 
 @router.get("/tours")

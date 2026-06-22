@@ -602,3 +602,39 @@ async def delete_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     return {"ok": True}
+
+
+@require_permission("chat:write")
+@router.post("/console/chat/stop")
+async def stop_chat(
+    request: Request,
+    chat_id: str = Query(..., description="Chat ID to stop"),
+) -> Dict[str, Any]:
+    """Stop an ongoing chat task.
+    
+    This endpoint stops the background task for the given chat_id,
+    preventing further message generation and pushing.
+    """
+    manager = request.app.state.multi_agent_manager
+    username = getattr(request.state, "username", "anonymous")
+    
+    if not manager:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+    
+    # Get workspace for the user's agent
+    agent_id = f"user:{username}"
+    workspace = manager.get_workspace(agent_id, username=username)
+    
+    if not workspace or not workspace.task_tracker:
+        logger.warning(f"[STOP] No workspace or task_tracker for chat_id={chat_id}")
+        return {"ok": True, "message": "No active task found"}
+    
+    # Request stop via task tracker
+    stopped = await workspace.task_tracker.request_stop(chat_id)
+    
+    if stopped:
+        logger.info(f"[STOP] Successfully stopped chat_id={chat_id}")
+        return {"ok": True, "message": "Chat stopped"}
+    else:
+        logger.debug(f"[STOP] No active task for chat_id={chat_id}")
+        return {"ok": True, "message": "No active task found"}

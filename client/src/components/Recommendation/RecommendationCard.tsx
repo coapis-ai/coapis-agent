@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { Card, Typography, Space, Tooltip } from "antd";
+import { Card, Typography } from "antd";
 import { RightOutlined } from "@ant-design/icons";
 import type { RecommendationItem, RecommendationLayout } from "./types";
 
@@ -20,7 +20,7 @@ const RecommendationCard: React.FC<RecommendationCardProps> = ({
   item,
   layout = "grid",
   onClick,
-  onDismiss,
+  onDismiss: _onDismiss,
 }) => {
   const handleClick = () => {
     onClick?.(item);

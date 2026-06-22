@@ -220,7 +220,7 @@ i18n_manager = I18nManager()
 
 # ---- API Router ----
 
-router = APIRouter(prefix="/api/i18n", tags=["Internationalization"])
+router = APIRouter(prefix="/i18n", tags=["Internationalization"])
 
 
 @router.get("/languages")

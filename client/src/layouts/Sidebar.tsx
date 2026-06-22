@@ -79,6 +79,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       .listAgents()
       .then((res) => {
         const agentList = Array.isArray(res) ? res : (res as any).agents || [];
+        // API already returns only user-specific agents, no filtering needed
         setAgents(agentList);
       })
       .catch(() => {});
@@ -124,7 +125,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
 
   /** Check if a module is allowed for current user */
   const isModuleAllowed = (menuKey: string): boolean => {
-    if (!permissionsLoaded) return false; // Deny while loading (safe default)
+    if (!permissionsLoaded) return true; // Allow while loading (prevent flicker)
     if (allowedModules.includes("all")) return true; // Admin
     
     // First check direct match
@@ -143,7 +144,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       return items; // Admin: allow all
     }
     if (!permissionsLoaded) {
-      return []; // Loading: deny all (safe default)
+      return items; // Loading: show all (prevent menu flicker)
     }
     
     return items.flatMap((item: any) => {

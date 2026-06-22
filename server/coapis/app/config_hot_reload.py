@@ -171,7 +171,7 @@ config_manager: Optional[ConfigHotReloadManager] = None
 
 # ---- API Router ----
 
-router = APIRouter(prefix="/api/config/reload", tags=["Config Hot Reload"])
+router = APIRouter(prefix="/config/reload", tags=["Config Hot Reload"])
 
 
 @router.post("")

@@ -39,7 +39,6 @@ import {
 import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
-import GroupedResponseCard from "./components/GroupedResponseCard";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
 
@@ -1191,7 +1190,7 @@ export default function ChatPage() {
       welcome: {
         ...i18nConfig.welcome,
         nick: "CoApis",
-        avatar: "/coapis.png",
+        avatar: "/bee_icon.png",
         // Use dynamic recommendations if available, fallback to static prompts
         prompts: dynamicRecommendations.length > 0
           ? dynamicRecommendations.map((rec) => ({
@@ -1398,11 +1397,8 @@ export default function ChatPage() {
         ..._enhancedToolRenderConfig,
         ...toolRenderConfig,  // plugin overrides take priority
       },
-      // Replace default AgentScopeRuntimeResponseCard with grouped layout
-      // that separates thinking, tools, and message into distinct sections.
-      cards: {
-        'AgentScopeRuntimeResponseCard': GroupedResponseCard,
-      } as any,
+      // Use default AgentScopeRuntimeResponseCard from @agentscope-ai/chat
+      // It already provides: grouped display, collapse/expand, streaming support
       actions: {
         list: [
           {
@@ -1634,7 +1630,7 @@ export default function ChatPage() {
       {/* Onboarding Modal for first-time users */}
       <OnboardingModal
         open={showOnboarding}
-        onComplete={(data) => {
+        onComplete={(_data) => {
           setShowOnboarding(false);
           // Optionally show a success message
           message.success("设置完成！开始与你的 AI 助手对话吧！");

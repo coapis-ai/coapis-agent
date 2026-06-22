@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2026 蜜蜂 & CoApis Contributors
+# Copyright 2026 以太吃虾 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -650,6 +650,20 @@ class Workspace:
                         func=reg.func,
                         parameters=parameters_schema,
                     )
+
+                # Apply agent config: deny disabled tools
+                try:
+                    agent_config = getattr(ws, '_config', None)
+                    if agent_config and 'tools' in agent_config:
+                        builtin_tools = agent_config['tools'].get('builtin_tools', {})
+                        for tool_name, tool_cfg in builtin_tools.items():
+                            if isinstance(tool_cfg, dict) and tool_cfg.get('enabled') is False:
+                                if tool_name not in registry._denied_tools:
+                                    registry._denied_tools.append(tool_name)
+                                    logger.info("Denied tool (disabled in config): %s", tool_name)
+                except Exception as e:
+                    logger.debug("Failed to apply tool deny list: %s", e)
+
             except Exception as e:
                 logger.warning("Failed to bridge plugin tools: %s", e)
             return registry
@@ -878,7 +892,7 @@ class Workspace:
 
                 # ── filter_thinking ──
                 if _chat_display:
-                    _filter_thinking = _chat_display.hideThinking
+                    _filter_thinking = getattr(_chat_display, 'hideThinking', False) or getattr(_chat_display, 'hideThought', False)
                 elif _ch_cfg and _ch_cfg.get("filter_thinking"):
                     _filter_thinking = True
                 else:
@@ -955,10 +969,14 @@ class Workspace:
                 _render_style = RenderStyle.from_channel(_channel_name, _ch_cfg or {})
                 # Override with user chat_display preferences if available
                 if _chat_display:
-                    if _chat_display.showToolDetails is not None:
+                    if hasattr(_chat_display, 'showToolDetails') and _chat_display.showToolDetails is not None:
                         _render_style.show_tool_details = _chat_display.showToolDetails
-                    if _chat_display.filterThinking is not None:
+                    elif hasattr(_chat_display, 'hideToolCall'):
+                        _render_style.show_tool_details = not _chat_display.hideToolCall
+                    if hasattr(_chat_display, 'filterThinking') and _chat_display.filterThinking is not None:
                         _render_style.show_thinking = not _chat_display.filterThinking
+                    elif hasattr(_chat_display, 'hideThought'):
+                        _render_style.show_thinking = not _chat_display.hideThought
                 _renderer = MessageRenderer(_render_style)
 
                 logger.info(
@@ -972,6 +990,62 @@ class Workspace:
                 # ── Progress feedback state ──
                 _thinking_shown = False
                 _tool_calls_seen = 0
+
+                # ── Block-specific message IDs for @agentscope-ai/chat ──
+                # Each block type (reasoning, plugin_call, message) needs its own
+                # Message event with a unique msg_id for the frontend to render
+                # as separate cards with collapse/expand functionality.
+                _current_phase = None  # "reasoning" | "plugin_call" | "message"
+                _phase_msg_id = None   # msg_id for the current phase's Message event
+
+                async def _close_phase():
+                    """Yield a Message completed event for the current phase."""
+                    nonlocal _current_phase, _phase_msg_id
+                    if _phase_msg_id is None:
+                        return
+                    if _current_phase == "reasoning":
+                        _close_type = MessageType.REASONING
+                    elif _current_phase == "plugin_call":
+                        _close_type = MessageType.PLUGIN_CALL
+                    else:
+                        _close_type = MessageType.MESSAGE
+                    yield Message(
+                        object="message",
+                        id=_phase_msg_id,
+                        role="assistant",
+                        type=_close_type,
+                        content=[],
+                        status=RunStatus.Completed,
+                    )
+                    _current_phase = None
+                    _phase_msg_id = None
+
+                async def _open_phase(phase_type):
+                    """Open a new phase, closing the previous one if needed."""
+                    nonlocal _current_phase, _phase_msg_id
+                    if _current_phase == phase_type and _phase_msg_id is not None:
+                        return  # already open
+                    # Close previous phase
+                    if _phase_msg_id is not None:
+                        async for ev in _close_phase():
+                            yield ev
+                    _current_phase = phase_type
+                    _phase_msg_id = str(uuid_mod.uuid4())
+                    # Determine message type
+                    if phase_type == "reasoning":
+                        msg_type = MessageType.REASONING
+                    elif phase_type == "plugin_call":
+                        msg_type = MessageType.PLUGIN_CALL
+                    else:
+                        msg_type = MessageType.MESSAGE
+                    # Yield Message created event
+                    yield Message(
+                        object="message",
+                        id=_phase_msg_id,
+                        role="assistant",
+                        type=msg_type,
+                        content=[],
+                    )
 
                 async for chunk in self.core.stream_chat(
                     message=user_message,
@@ -1002,9 +1076,12 @@ class Workspace:
                         full_reasoning.append(block.content)
                         rendered = _renderer.render_thinking(block.content)
                         if rendered:
+                            # Open reasoning phase
+                            async for ev in _open_phase("reasoning"):
+                                yield ev
                             yield TextContent(
                                 object="content",
-                                msg_id=msg_id,
+                                msg_id=_phase_msg_id,
                                 type="text",
                                 delta=True,
                                 text=rendered,
@@ -1014,13 +1091,22 @@ class Workspace:
                         rendered = _renderer.render_tool_call(block.content, block.meta)
                         if rendered:
                             full_response.append(rendered)
+                            # Close reasoning phase if open, then open plugin_call
+                            if _current_phase == "reasoning":
+                                async for ev in _close_phase():
+                                    yield ev
+                            async for ev in _open_phase("plugin_call"):
+                                yield ev
                             yield TextContent(
                                 object="content",
-                                msg_id=msg_id,
+                                msg_id=_phase_msg_id,
                                 type="text",
                                 delta=True,
                                 text=rendered,
                             )
+                            # Close plugin_call immediately (each tool call is a separate card)
+                            async for ev in _close_phase():
+                                yield ev
                     elif block.type == "newline":
                         # Separator — include only if we have response content
                         if full_response and _channel_name == "console":
@@ -1048,9 +1134,16 @@ class Workspace:
                                 continue
 
                         full_response.append(text_chunk)
+                        # Close reasoning phase if still open
+                        if _current_phase == "reasoning":
+                            async for ev in _close_phase():
+                                yield ev
+                        # Open message phase (text response)
+                        async for ev in _open_phase("message"):
+                            yield ev
                         yield TextContent(
                             object="content",
-                            msg_id=msg_id,
+                            msg_id=_phase_msg_id,
                             type="text",
                             delta=True,
                             text=text_chunk,
@@ -1119,30 +1212,16 @@ class Workspace:
                 if assistant_reply:
                     context.add_message("assistant", assistant_reply)
 
-                # Yield message completed event with empty content
-                # NOTE: Builder.js concatenates completed.content with existing.content,
-                # so we send empty content to avoid duplicating the streamed content.
-                yield Message(
-                    object="message",
-                    id=msg_id,
-                    role="assistant",
-                    type=MessageType.MESSAGE,
-                    content=[],
-                    status=RunStatus.Completed,
-                )
+                # ── Close any open phase ──
+                async for ev in _close_phase():
+                    yield ev
 
                 # Yield response completed event
                 yield Event(
                     object="response",
                     id=response_id,
                     status=RunStatus.Completed,
-                    output=[Message(
-                        object="message",
-                        id=msg_id,
-                        role="assistant",
-                        type=MessageType.MESSAGE,
-                        content=[TextContent(object="content", type="text", text=assistant_reply)],
-                    )],
+                    output=[],
                 )
 
             return _stream(request)

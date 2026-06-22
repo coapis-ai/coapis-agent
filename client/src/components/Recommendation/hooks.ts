@@ -53,7 +53,7 @@ export function useRecommendations({
       }
 
       const res = await fetch(
-        getApiUrl(`/api/recommendations?${params.toString()}`),
+        getApiUrl(`/recommendations?${params.toString()}`),
         {
           headers: {
             ...buildAuthHeaders(),
@@ -107,7 +107,7 @@ export function useRecommendationFeedback(): UseRecommendationFeedbackResult {
       scene?: string
     ) => {
       try {
-        await fetch(getApiUrl("/api/recommendations/feedback"), {
+        await fetch(getApiUrl("/recommendations/feedback"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

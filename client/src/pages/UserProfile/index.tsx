@@ -34,9 +34,7 @@ export default function UserProfilePage() {
         prefsForm.setFieldsValue({
           theme: (prefsData as any).theme || 'system',
           language: (prefsData as any).language || 'en',
-          chat_display_mode: (prefsData as any).chat_display_mode || 'full',
-          chat_hide_tool_call: !!(prefsData as any).chat_hide_tool_call,
-          chat_hide_thinking: !!(prefsData as any).chat_hide_thinking,
+          chat_hide_details: !!(prefsData as any).chat_hide_details,
         });
       }
       setLoading(false);
@@ -73,9 +71,7 @@ export default function UserProfilePage() {
       await updateUserPreferences({
         theme: values.theme,
         language: values.language,
-        chat_display_mode: values.chat_display_mode,
-        chat_hide_tool_call: values.chat_hide_tool_call ? 1 : 0,
-        chat_hide_thinking: values.chat_hide_thinking ? 1 : 0,
+        chat_hide_details: values.chat_hide_details ? 1 : 0,
       });
       message.success(t('header.settings.save'));
       refreshUser();
@@ -211,22 +207,14 @@ export default function UserProfilePage() {
                   </Form.Item>
                 </Col>
               </Row>
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item name="chat_display_mode" label={t('header.settings.chatDisplayMode')}>
-                    <select className={styles.selectInput}>
-                      <option value="full">{t('header.settings.chatFull')}</option>
-                      <option value="simplified">{t('header.settings.chatSimplified')}</option>
-                      <option value="minimal">{t('header.settings.chatMinimal')}</option>
-                    </select>
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item name="chat_hide_tool_call" valuePropName="checked" label={t('header.settings.hideToolCall')}>
-                    <Switch />
-                  </Form.Item>
-                </Col>
-              </Row>
+              <Form.Item name="chat_hide_details" valuePropName="checked" label={t('header.settings.hideDetails', { defaultValue: '隐藏细节' })}>
+                <Switch />
+              </Form.Item>
+              <div style={{ fontSize: 12, color: '#999', marginTop: -8, marginBottom: 16 }}>
+                {t('header.settings.hideDetailsDesc', { 
+                  defaultValue: '开启后，思考过程、工具调用、正文内容将显示摘要' 
+                })}
+              </div>
             </Form>
           </Card>
 

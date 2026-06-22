@@ -6,12 +6,10 @@
  */
 
 import React from "react";
-import { Spin, Empty, Typography } from "antd";
+import { Spin } from "antd";
 import { useRecommendations } from "./hooks";
 import RecommendationCard from "./RecommendationCard";
-import type { RecommendationProps, RecommendationItem, RecommendationLayout } from "./types";
-
-const { Text } = Typography;
+import type { RecommendationProps, RecommendationItem } from "./types";
 
 const Recommendation: React.FC<RecommendationProps> = ({
   scene = "chat_welcome",
@@ -19,7 +17,7 @@ const Recommendation: React.FC<RecommendationProps> = ({
   layout = "grid",
   category,
   onRecommend,
-  onDismiss,
+  onDismiss: _onDismiss,
   className,
   loading: externalLoading,
 }) => {

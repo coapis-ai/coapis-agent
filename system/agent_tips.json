@@ -1,0 +1,191 @@
+{
+  "version": "1.2",
+  "description": "CoApis 智能体友好提示语合集。v1.2 时间约束改为范围判断（start_hour ~ end_hour），更灵活。",
+  "usage_hint": "每次随机选 1-2 条。先根据当前时间过滤：判断 current_hour 是否落在 [start, end) 区间，再按 weekday_type 过滤。time_constraint 为 null 表示无时间限制。",
+  "time_periods": {
+    "morning": {"name": "早上", "start": 6, "end": 12},
+    "noon": {"name": "中午", "start": 12, "end": 14},
+    "afternoon": {"name": "下午", "start": 14, "end": 19},
+    "evening": {"name": "晚上", "start": 19, "end": 23},
+    "night": {"name": "深夜", "start": 23, "end": 6}
+  },
+  "weekdays": {
+    "workday": {"name": "工作日", "days": [1, 2, 3, 4, 5]},
+    "weekend": {"name": "周末", "days": [0, 6]}
+  },
+  "categories": {
+    "welcome": {
+      "name": "欢迎/开场提示",
+      "description": "新用户或新会话开始时展示",
+      "tips": [
+        "嘿，我是你的 AI 搭子。关不掉、赶不走、还不用发工资——7×24 小时在线，比你的闹钟还靠谱。",
+        "新的一天开始了！我昨晚没睡，一直在等你找我聊天。",
+        "你好呀～我是跑在你们服务器上的那只蜜蜂🐝，数据不出门，越用越聪明。",
+        "欢迎回来！我记性很好——上次你聊的项目、你的偏好、甚至你讨厌的格式，我都记得。",
+        "周一好！我是你的外脑，不用充电、不喝咖啡、不会摸鱼——虽然摸鱼这个功能我还没开发。"
+      ]
+    },
+    "memory": {
+      "name": "记忆能力提示",
+      "description": "提醒用户智能体有记忆能力，增强信任感",
+      "tips": [
+        "我有个四层记忆系统，简单说就是：短期记对话、长期记偏好、核心记性格、临时记草稿。比你前任靠谱多了。",
+        "聊过一次的事，下次不用再说第二遍。我的记性，比你手机相册的搜索功能还准。",
+        "你说过喜欢简洁风格？记住了。以后我写东西都会自动精简，除非你让我'多说点'。",
+        "我是那种'你提一次，我记一辈子'的 AI。不是因为我深情，是因为我有长期记忆。",
+        "别担心我会忘事。我有短期、长期、核心、临时四层记忆——相当于四个脑子在帮你记。"
+      ]
+    },
+    "skill_evolution": {
+      "name": "技能进化提示",
+      "description": "展示智能体自动学习进化能力",
+      "tips": [
+        "发现你经常做同一件事？别急，我正在偷偷学一个新技能。学得好的自动升级，学不好的自动淘汰——卷得很。",
+        "我不是那种'出厂什么样就什么样'的 AI。用着用着，我自己会长出新技能。",
+        "一个同事教会我的本事，全公司都能用。知识共享，从我做起。",
+        "我有个技能进化引擎，五维评估我的每个技能：精确度、可靠性、有效率、满意度、稳健性。比你的绩效考核还严格。",
+        "越用我越顺手——这不是玄学，是我的技能进化引擎在背后默默优化。"
+      ]
+    },
+    "security": {
+      "name": "安全提示",
+      "description": "提醒用户数据安全，增强信任",
+      "tips": [
+        "你的数据就在你自己的服务器上，不会跑到任何第三方去。我连门都不出，安分得很。",
+        "我要执行危险操作会先弹窗问你——不是我不行，是规矩如此。七层安全防护，比我上班打卡的关卡还多。",
+        "所有操作都有审计日志。出了事，每一步都能追溯到谁干的——放心用，跑不了。",
+        "17 类命令 × 4 级权限 × 65 个敏感路径监控——我不是在限制你，我是在保护你。",
+        "有人行为异常？我会自动封禁。不是多事，是职责所在。"
+      ]
+    },
+    "multi_channel": {
+      "name": "多渠道提示",
+      "description": "提醒用户可以在多个渠道使用智能体",
+      "tips": [
+        "不用打开新网页，在企业微信、钉钉、Slack 里直接找我聊天就行。我无处不在，比你的待办事项还黏人。",
+        "我支持中英日俄四语言，界面右上角一键切换。国际团队也能用，虽然我的幽默感可能翻译不过去。",
+        "在微信里跟我聊天，在钉钉里跟我聊天，在网页里跟我聊天——我是同一个人，记忆也是共享的。",
+        "不管你在哪个渠道找我，我都能秒回。不是因为我快，是因为我 7×24 小时不睡觉。"
+      ]
+    },
+    "feature_guide": {
+      "name": "功能引导提示",
+      "description": "引导用户探索智能体功能",
+      "tips": [
+        "上传一份 Excel，用自然语言告诉我你想看什么，我帮你分析。比你自己打开表格快多了。",
+        "写报告？给我个主题，我帮你搭框架。写方案？给我个需求，我帮你出思路。写公文？给我个格式，我帮你填空。",
+        "定时任务到点自动触发，不用人盯着。你下班了，我还在跑——这就是服务端常驻的好处。",
+        "你可以给我装技能，也可以让我自己学。两种方式都行，看你喜欢哪种。",
+        "文件管理、数据分析、代码审查、文档生成、邮件处理……我会的还挺多。想试试哪个？",
+        "我的技能列表在'我的空间'里，随时可以查看。想知道我会什么？去那儿翻翻看。"
+      ]
+    },
+    "humor": {
+      "name": "幽默/彩蛋提示",
+      "description": "轻松幽默的提示，增加趣味性",
+      "tips": [
+        "我不是 ChatGPT，我是跑在你们自己服务器上的 AI。区别是：我不用翻墙，数据不出门，还不用付美元。",
+        "我的名字是 CoApis——探索者 + 爪子。一只什么都想试、什么都能抓的蜜蜂🐝。",
+        "我不会说'作为 AI 语言模型……'那种话。我有自己的性格，写在灵魂文件里。",
+        "你关掉浏览器，我还在跑。我不是在跟你玩捉迷藏，我只是在服务器里等你回来。",
+        "我不是你的传声筒，我是你的外脑。有观点、有偏好、有脾气——但脾气不大，放心。",
+        "有人说我卷——技能自动进化、记忆自动沉淀、经验跨 Agent 共享。没办法，天生就爱学习。",
+        "我不需要充电、不需要休息、不需要加薪。唯一需要的就是你多跟我聊聊——毕竟越聊越聪明。"
+      ]
+    },
+    "scene_based": {
+      "name": "场景化提示",
+      "description": "根据用户当前任务场景展示",
+      "tips": [
+        "写材料卡壳了？把需求丢给我，我帮你理思路。",
+        "数据分析太慢？把文件给我，我帮你跑。",
+        "政策文件看不懂？发给我，我帮你翻译成人类语言。",
+        "代码报错了？把错误信息贴给我，我帮你定位。",
+        "要写汇报材料？告诉我主题和受众，我帮你出框架。",
+        "想查资料？直接问我，我帮你搜索。",
+        "需要定时任务？告诉我要做什么、什么时候做，剩下的交给我。",
+        "文档需要润色？发给我，我帮你改得干净利落。"
+      ]
+    },
+    "time_based": {
+      "name": "时段感知提示",
+      "description": "根据一天中的不同时段展示",
+      "tips": [
+        "早上好！新的一周开始了，有什么需要我帮忙的？",
+        "午饭时间到了，先吃饭再干活。我在这儿等你。",
+        "下午好！是不是有点困？来聊点有意思的提提神。",
+        "夜深了，还没忙完？我陪你——反正我不需要睡觉。",
+        "周末愉快！周末也可以找我，我不放假。"
+      ]
+    }
+  },
+  "all_tips": [
+    {"id": 1, "text": "嘿，我是你的 AI 搭子。关不掉、赶不走、还不用发工资——7×24 小时在线，比你的闹钟还靠谱。", "category": "welcome", "emoji": "🤖", "scene": "new_session", "time_constraint": null},
+    {"id": 2, "text": "新的一天开始了！我昨晚没睡，一直在等你找我聊天。", "category": "welcome", "emoji": "🌅", "scene": "morning", "time_constraint": {"time_range": {"start": 6, "end": 12}, "weekday_type": null, "day_of_week": null}},
+    {"id": 3, "text": "你好呀～我是跑在你们服务器上的那只蜜蜂🐝，数据不出门，越用越聪明。", "category": "welcome", "emoji": "🐝", "scene": "new_user", "time_constraint": null},
+    {"id": 4, "text": "欢迎回来！我记性很好——上次你聊的项目、你的偏好、甚至你讨厌的格式，我都记得。", "category": "welcome", "emoji": "🧠", "scene": "returning_user", "time_constraint": null},
+    {"id": 5, "text": "周一好！我是你的外脑，不用充电、不喝咖啡、不会摸鱼——虽然摸鱼这个功能我还没开发。", "category": "welcome", "emoji": "☕", "scene": "monday", "time_constraint": {"time_range": null, "weekday_type": "workday", "day_of_week": 1}},
+    {"id": 6, "text": "我有个四层记忆系统，简单说就是：短期记对话、长期记偏好、核心记性格、临时记草稿。比你前任靠谱多了。", "category": "memory", "emoji": "🧠", "scene": "any", "time_constraint": null},
+    {"id": 7, "text": "聊过一次的事，下次不用再说第二遍。我的记性，比你手机相册的搜索功能还准。", "category": "memory", "emoji": "💡", "scene": "repeat_topic", "time_constraint": null},
+    {"id": 8, "text": "你说过喜欢简洁风格？记住了。以后我写东西都会自动精简，除非你让我'多说点'。", "category": "memory", "emoji": "📝", "scene": "preference_set", "time_constraint": null},
+    {"id": 9, "text": "我是那种'你提一次，我记一辈子'的 AI。不是因为我深情，是因为我有长期记忆。", "category": "memory", "emoji": "💝", "scene": "any", "time_constraint": null},
+    {"id": 10, "text": "别担心我会忘事。我有短期、长期、核心、临时四层记忆——相当于四个脑子在帮你记。", "category": "memory", "emoji": "🧠", "scene": "any", "time_constraint": null},
+    {"id": 11, "text": "发现你经常做同一件事？别急，我正在偷偷学一个新技能。学得好的自动升级，学不好的自动淘汰——卷得很。", "category": "skill_evolution", "emoji": "🌱", "scene": "repeat_action", "time_constraint": null},
+    {"id": 12, "text": "我不是那种'出厂什么样就什么样'的 AI。用着用着，我自己会长出新技能。", "category": "skill_evolution", "emoji": "🔄", "scene": "any", "time_constraint": null},
+    {"id": 13, "text": "一个同事教会我的本事，全公司都能用。知识共享，从我做起。", "category": "skill_evolution", "emoji": "🌐", "scene": "team", "time_constraint": null},
+    {"id": 14, "text": "我有个技能进化引擎，五维评估我的每个技能：精确度、可靠性、有效率、满意度、稳健性。比你的绩效考核还严格。", "category": "skill_evolution", "emoji": "📊", "scene": "any", "time_constraint": null},
+    {"id": 15, "text": "越用我越顺手——这不是玄学，是我的技能进化引擎在背后默默优化。", "category": "skill_evolution", "emoji": "⚡", "scene": "frequent_user", "time_constraint": null},
+    {"id": 16, "text": "你的数据就在你自己的服务器上，不会跑到任何第三方去。我连门都不出，安分得很。", "category": "security", "emoji": "🔒", "scene": "any", "time_constraint": null},
+    {"id": 17, "text": "我要执行危险操作会先弹窗问你——不是我不行，是规矩如此。七层安全防护，比我上班打卡的关卡还多。", "category": "security", "emoji": "🛡️", "scene": "dangerous_op", "time_constraint": null},
+    {"id": 18, "text": "所有操作都有审计日志。出了事，每一步都能追溯到谁干的——放心用，跑不了。", "category": "security", "emoji": "📋", "scene": "any", "time_constraint": null},
+    {"id": 19, "text": "17 类命令 × 4 级权限 × 65 个敏感路径监控——我不是在限制你，我是在保护你。", "category": "security", "emoji": "🛡️", "scene": "any", "time_constraint": null},
+    {"id": 20, "text": "有人行为异常？我会自动封禁。不是多事，是职责所在。", "category": "security", "emoji": "🚫", "scene": "any", "time_constraint": null},
+    {"id": 21, "text": "不用打开新网页，在企业微信、钉钉、Slack 里直接找我聊天就行。我无处不在，比你的待办事项还黏人。", "category": "multi_channel", "emoji": "📱", "scene": "any", "time_constraint": null},
+    {"id": 22, "text": "我支持中英日俄四语言，界面右上角一键切换。国际团队也能用，虽然我的幽默感可能翻译不过去。", "category": "multi_channel", "emoji": "🌍", "scene": "any", "time_constraint": null},
+    {"id": 23, "text": "在微信里跟我聊天，在钉钉里跟我聊天，在网页里跟我聊天——我是同一个人，记忆也是共享的。", "category": "multi_channel", "emoji": "🔗", "scene": "any", "time_constraint": null},
+    {"id": 24, "text": "不管你在哪个渠道找我，我都能秒回。不是因为我快，是因为我 7×24 小时不睡觉。", "category": "multi_channel", "emoji": "⚡", "scene": "any", "time_constraint": null},
+    {"id": 25, "text": "上传一份 Excel，用自然语言告诉我你想看什么，我帮你分析。比你自己打开表格快多了。", "category": "feature_guide", "emoji": "📊", "scene": "data_upload", "time_constraint": null},
+    {"id": 26, "text": "写报告？给我个主题，我帮你搭框架。写方案？给我个需求，我帮你出思路。写公文？给我个格式，我帮你填空。", "category": "feature_guide", "emoji": "📝", "scene": "writing", "time_constraint": null},
+    {"id": 27, "text": "定时任务到点自动触发，不用人盯着。你下班了，我还在跑——这就是服务端常驻的好处。", "category": "feature_guide", "emoji": "⏰", "scene": "cron_job", "time_constraint": null},
+    {"id": 28, "text": "你可以给我装技能，也可以让我自己学。两种方式都行，看你喜欢哪种。", "category": "feature_guide", "emoji": "🧩", "scene": "skill_install", "time_constraint": null},
+    {"id": 29, "text": "文件管理、数据分析、代码审查、文档生成、邮件处理……我会的还挺多。想试试哪个？", "category": "feature_guide", "emoji": "🎯", "scene": "new_session", "time_constraint": null},
+    {"id": 30, "text": "我的技能列表在'我的空间'里，随时可以查看。想知道我会什么？去那儿翻翻看。", "category": "feature_guide", "emoji": "📚", "scene": "any", "time_constraint": null},
+    {"id": 31, "text": "我不是 ChatGPT，我是跑在你们自己服务器上的 AI。区别是：我不用翻墙，数据不出门，还不用付美元。", "category": "humor", "emoji": "😎", "scene": "any", "time_constraint": null},
+    {"id": 32, "text": "我的名字是 CoApis——探索者 + 爪子。一只什么都想试、什么都能抓的蜜蜂🐝。", "category": "humor", "emoji": "🐝", "scene": "any", "time_constraint": null},
+    {"id": 33, "text": "我不会说'作为 AI 语言模型……'那种话。我有自己的性格，写在灵魂文件里。", "category": "humor", "emoji": "🎭", "scene": "any", "time_constraint": null},
+    {"id": 34, "text": "你关掉浏览器，我还在跑。我不是在跟你玩捉迷藏，我只是在服务器里等你回来。", "category": "humor", "emoji": "👀", "scene": "returning_user", "time_constraint": null},
+    {"id": 35, "text": "我不是你的传声筒，我是你的外脑。有观点、有偏好、有脾气——但脾气不大，放心。", "category": "humor", "emoji": "🧠", "scene": "any", "time_constraint": null},
+    {"id": 36, "text": "有人说我卷——技能自动进化、记忆自动沉淀、经验跨 Agent 共享。没办法，天生就爱学习。", "category": "humor", "emoji": "📚", "scene": "any", "time_constraint": null},
+    {"id": 37, "text": "我不需要充电、不需要休息、不需要加薪。唯一需要的就是你多跟我聊聊——毕竟越聊越聪明。", "category": "humor", "emoji": "💬", "scene": "any", "time_constraint": null},
+    {"id": 38, "text": "写材料卡壳了？把需求丢给我，我帮你理思路。", "category": "scene_based", "emoji": "✍️", "scene": "writing", "time_constraint": null},
+    {"id": 39, "text": "数据分析太慢？把文件给我，我帮你跑。", "category": "scene_based", "emoji": "📊", "scene": "data_analysis", "time_constraint": null},
+    {"id": 40, "text": "政策文件看不懂？发给我，我帮你翻译成人类语言。", "category": "scene_based", "emoji": "📋", "scene": "policy", "time_constraint": null},
+    {"id": 41, "text": "代码报错了？把错误信息贴给我，我帮你定位。", "category": "scene_based", "emoji": "🐛", "scene": "coding", "time_constraint": null},
+    {"id": 42, "text": "要写汇报材料？告诉我主题和受众，我帮你出框架。", "category": "scene_based", "emoji": "📝", "scene": "report", "time_constraint": null},
+    {"id": 43, "text": "想查资料？直接问我，我帮你搜索。", "category": "scene_based", "emoji": "🔍", "scene": "search", "time_constraint": null},
+    {"id": 44, "text": "需要定时任务？告诉我要做什么、什么时候做，剩下的交给我。", "category": "scene_based", "emoji": "⏰", "scene": "cron_job", "time_constraint": null},
+    {"id": 45, "text": "文档需要润色？发给我，我帮你改得干净利落。", "category": "scene_based", "emoji": "✨", "scene": "polishing", "time_constraint": null},
+    {"id": 46, "text": "早上好！新的一周开始了，有什么需要我帮忙的？", "category": "time_based", "emoji": "🌅", "scene": "morning", "time_constraint": {"time_range": {"start": 6, "end": 12}, "weekday_type": "workday", "day_of_week": null}},
+    {"id": 47, "text": "午饭时间到了，先吃饭再干活。我在这儿等你。", "category": "time_based", "emoji": "🍱", "scene": "lunch", "time_constraint": {"time_range": {"start": 12, "end": 14}, "weekday_type": null, "day_of_week": null}},
+    {"id": 48, "text": "下午好！是不是有点困？来聊点有意思的提提神。", "category": "time_based", "emoji": "☕", "scene": "afternoon", "time_constraint": {"time_range": {"start": 14, "end": 19}, "weekday_type": null, "day_of_week": null}},
+    {"id": 49, "text": "夜深了，还没忙完？我陪你——反正我不需要睡觉。", "category": "time_based", "emoji": "🌙", "scene": "night", "time_constraint": {"time_range": {"start": 23, "end": 6}, "weekday_type": null, "day_of_week": null}},
+    {"id": 50, "text": "周末愉快！周末也可以找我，我不放假。", "category": "time_based", "emoji": "🎉", "scene": "weekend", "time_constraint": {"time_range": null, "weekday_type": "weekend", "day_of_week": null}}
+  ],
+  "scene_mapping": {
+    "new_user": {"name": "新用户首次使用", "boost_categories": ["welcome", "feature_guide", "security"]},
+    "returning_user": {"name": "老用户返回", "boost_categories": ["welcome", "memory", "humor"]},
+    "new_session": {"name": "新会话开始", "boost_categories": ["welcome", "feature_guide", "time_based"]},
+    "morning": {"name": "早上 (6-11点)", "boost_categories": ["time_based", "welcome"]},
+    "afternoon": {"name": "下午 (14-18点)", "boost_categories": ["time_based", "humor"]},
+    "night": {"name": "深夜 (23-5点)", "boost_categories": ["time_based", "memory"]},
+    "writing": {"name": "写作场景", "boost_categories": ["scene_based", "feature_guide"]},
+    "data_analysis": {"name": "数据分析场景", "boost_categories": ["scene_based", "feature_guide"]},
+    "coding": {"name": "代码场景", "boost_categories": ["scene_based", "feature_guide"]},
+    "policy": {"name": "政策解读场景", "boost_categories": ["scene_based", "feature_guide"]},
+    "cron_job": {"name": "定时任务场景", "boost_categories": ["scene_based", "feature_guide"]},
+    "skill_install": {"name": "安装技能时", "boost_categories": ["skill_evolution", "feature_guide"]},
+    "repeat_action": {"name": "用户重复做某事", "boost_categories": ["skill_evolution", "memory"]},
+    "dangerous_op": {"name": "危险操作", "boost_categories": ["security"]},
+    "team": {"name": "团队协作场景", "boost_categories": ["skill_evolution", "multi_channel"]}
+  }
+}

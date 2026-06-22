@@ -163,4 +163,4 @@ Apache License 2.0 · Copyright 2026 蜜蜂 & CoApis Contributors
 
 ---
 
-**Why "CoApis"?** — Eater (explorer) + Claw (grip). A crab that tries everything and grabs anything. 🦀
+**Why "CoApis"?** — Eater (explorer) + Claw (grip). A bee that tries everything and grabs anything. 🐝

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2026 蜜蜂 & CoApis Contributors
+# Copyright 2026 以太吃虾 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Built-in web search tool with Tavily + DDGS fallback.
+"""Built-in web search tool with browser + Baidu/Sogou fallback.
 
-Provides a unified ``web_search`` tool that tries Tavily first (AI-powered
-search with good snippets), then falls back to DuckDuckGo (free, no API
-key required). Results are cached in-memory to avoid redundant calls.
+Provides a unified ``web_search`` tool that tries browser (Bing) first
+(no API key needed), then falls back to Baidu, Sogou, DuckDuckGo, Tavily.
+Results are cached in-memory to avoid redundant calls.
 """
 
 from __future__ import annotations
@@ -25,16 +25,31 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import re
 import time
 from typing import Any
+from urllib.parse import quote
 
 from .registry import register_tool
 
 logger = logging.getLogger(__name__)
 
+# ── Config (env-driven) ─────────────────────────────────────────────
+_DEFAULT_BACKEND = os.environ.get("COAPIS_WEB_SEARCH_DEFAULT_BACKEND", "auto")
+_BACKEND_ORDER = [
+    b.strip()
+    for b in os.environ.get(
+        "COAPIS_WEB_SEARCH_BACKEND_ORDER",
+        "browser,baidu,sogou,ddgs,tavily",
+    ).split(",")
+    if b.strip()
+]
+_CACHE_TTL = int(os.environ.get("COAPIS_WEB_SEARCH_CACHE_TTL", "600"))
+_TIMEOUT = int(os.environ.get("COAPIS_WEB_SEARCH_TIMEOUT", "15"))
+
 # ── Cache ─────────────────────────────────────────────────────────────
 
-_CACHE_TTL = 600  # 10 minutes
 _cache: dict[str, tuple[float, list[dict]]] = {}
 
 
@@ -55,7 +70,6 @@ def _get_cached(query: str, backend: str) -> list[dict] | None:
 def _set_cache(query: str, backend: str, results: list[dict]) -> None:
     key = _cache_key(query, backend)
     _cache[key] = (time.time(), results)
-    # Evict old entries if cache grows too large
     if len(_cache) > 200:
         now = time.time()
         stale = [k for k, (ts, _) in _cache.items() if now - ts > _CACHE_TTL]
@@ -63,44 +77,153 @@ def _set_cache(query: str, backend: str, results: list[dict]) -> None:
             del _cache[k]
 
 
-# ── Backend: Tavily ──────────────────────────────────────────────────
+# ── Backend: Browser (Playwright CDP → Bing) ─────────────────────────
 
-def _search_tavily(query: str, max_results: int = 5) -> list[dict] | None:
-    """Search via Tavily API. Returns None if unavailable."""
+async def _search_browser(query: str, max_results: int = 5) -> list[dict] | None:
+    """Search via Playwright browser visiting Bing. Free, no API key."""
     try:
-        from tavily import TavilyClient
-        import os
-        api_key = os.environ.get("TAVILY_API_KEY") or os.environ.get("TAVILY_SEARCH_API_KEY")
-        if not api_key:
-            logger.debug("Tavily API key not set, skipping")
+        import httpx
+
+        cdp_url = os.environ.get("BROWSER_CDP_URL", "")
+        if not cdp_url:
+            logger.debug("BROWSER_CDP_URL not set, skipping browser search")
             return None
 
-        client = TavilyClient(api_key=api_key)
-        response = client.search(
-            query=query,
-            max_results=max_results,
-            search_depth="basic",
-        )
-        results = []
-        for item in response.get("results", []):
-            results.append({
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "snippet": item.get("content", ""),
+        search_urls = {
+            "bing": f"https://www.bing.com/search?q={quote(query)}&count={max_results}",
+            "baidu": f"https://www.baidu.com/s?wd={quote(query)}&rn={max_results}",
+            "google": f"https://www.google.com/search?q={quote(query)}&num={max_results}",
+        }
+        search_engine = os.environ.get("COAPIS_WEB_SEARCH_ENGINE", "bing")
+        url = search_urls.get(search_engine, search_urls["bing"])
+
+        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True, verify=False) as client:
+            resp = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             })
-        return results
-    except ImportError:
-        logger.debug("tavily-python not installed")
+            if resp.status_code != 200:
+                logger.warning("Browser search returned status %d", resp.status_code)
+                return None
+
+            html = resp.text
+            results = []
+
+            if search_engine == "bing":
+                # Bing: multiple patterns to handle different HTML structures
+                patterns = [
+                    r'<li class="b_algo">\s*<h2><a[^>]*href="([^"]*)"[^>]*>(.*?)</a></h2>(?:\s*<p[^>]*>(.*?)</p>)?',
+                    r'<h2><a[^>]*href="(https?://[^"]*)"[^>]*>(.*?)</a></h2>',
+                    r'<a[^>]*href="(https?://[^"]*)"[^>]*class="[^"]*"[^>]*>(.*?)</a>',
+                ]
+                for pattern in patterns:
+                    matches = re.findall(pattern, html, re.DOTALL)
+                    for m in matches[:max_results]:
+                        title = re.sub(r'<[^>]+>', '', m[1]).strip()
+                        snippet = re.sub(r'<[^>]+>', '', m[2]).strip() if len(m) > 2 and m[2] else ""
+                        if title and len(title) > 5 and not title.startswith("http"):
+                            results.append({"title": title, "url": m[0], "snippet": snippet})
+                    if results:
+                        break
+
+            elif search_engine == "baidu":
+                pattern = r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
+                for m in re.findall(pattern, html, re.DOTALL)[:max_results]:
+                    title = re.sub(r'<[^>]+>', '', m[1]).strip()
+                    if title and len(title) > 2:
+                        results.append({"title": title, "url": m[0], "snippet": ""})
+
+            elif search_engine == "google":
+                pattern = r'<a[^>]*href="/url\?q=([^&"]*)"[^>]*><[^>]*>(.*?)</[^>]*></a>'
+                for m in re.findall(pattern, html, re.DOTALL)[:max_results]:
+                    title = re.sub(r'<[^>]+>', '', m[1]).strip()
+                    if title and len(title) > 2:
+                        results.append({"title": title, "url": m[0], "snippet": ""})
+
+            if results:
+                logger.info("Browser search (%s) returned %d results for: %s", search_engine, len(results), query)
+                return results
+            logger.warning("Browser search parsed 0 results from %s (html len=%d)", search_engine, len(html))
+            return None
+
+    except Exception as e:
+        logger.warning("Browser search failed: %s", e)
+        return None
+
+
+# ── Backend: Baidu (httpx direct) ───────────────────────────────────
+
+def _search_baidu(query: str, max_results: int = 5) -> list[dict] | None:
+    """Search via Baidu by scraping search results page with httpx."""
+    try:
+        import httpx
+        url = f"https://www.baidu.com/s?wd={quote(query)}&rn={max_results}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        }
+        resp = httpx.get(url, headers=headers, timeout=_TIMEOUT, follow_redirects=True, verify=False)
+        if resp.status_code != 200:
+            return None
+        html = resp.text
+        if len(html) < 5000 or "百度安全验证" in html or "wappass.baidu.com" in html:
+            logger.warning("Baidu returned captcha or empty page (len=%d)", len(html))
+            return None
+        results = []
+        pattern = r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
+        for href, title_html in re.findall(pattern, html, re.DOTALL)[:max_results]:
+            title = re.sub(r'<[^>]+>', '', title_html).strip()
+            if title and len(title) > 2:
+                results.append({"title": title, "url": href, "snippet": ""})
+        if results:
+            logger.info("Baidu search returned %d results for: %s", len(results), query)
+            return results
         return None
     except Exception as e:
-        logger.warning("Tavily search failed: %s", e)
+        logger.warning("Baidu search failed: %s", e)
+        return None
+
+
+# ── Backend: Sogou ──────────────────────────────────────────────────
+
+def _search_sogou(query: str, max_results: int = 5) -> list[dict] | None:
+    """Search via Sogou by scraping search results page."""
+    try:
+        import httpx
+        url = f"https://www.sogou.com/web?query={quote(query)}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        }
+        resp = httpx.get(url, headers=headers, timeout=_TIMEOUT, follow_redirects=True, verify=False)
+        if resp.status_code != 200:
+            return None
+        html = resp.text
+        if len(html) < 5000:
+            return None
+        results = []
+        pattern = r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
+        for href, title_html in re.findall(pattern, html, re.DOTALL)[:max_results]:
+            title = re.sub(r'<[^>]+>', '', title_html).strip()
+            if title and len(title) > 2:
+                full_url = href if href.startswith("http") else f"https://www.sogou.com{href}"
+                results.append({"title": title, "url": full_url, "snippet": ""})
+        if results:
+            logger.info("Sogou search returned %d results for: %s", len(results), query)
+            return results
+        return None
+    except Exception as e:
+        logger.warning("Sogou search failed: %s", e)
         return None
 
 
 # ── Backend: DuckDuckGo ──────────────────────────────────────────────
 
 def _search_ddgs(query: str, max_results: int = 5) -> list[dict] | None:
-    """Search via DuckDuckGo (free, no API key). Returns None if unavailable."""
+    """Search via DuckDuckGo (free, no API key)."""
     try:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
@@ -121,108 +244,61 @@ def _search_ddgs(query: str, max_results: int = 5) -> list[dict] | None:
         return None
 
 
-# ── Backend: Baidu (httpx direct) ───────────────────────────────────
+# ── Backend: Tavily ──────────────────────────────────────────────────
 
-def _search_baidu(query: str, max_results: int = 5) -> list[dict] | None:
-    """Search via Baidu by scraping search results page with httpx."""
+def _search_tavily(query: str, max_results: int = 5) -> list[dict] | None:
+    """Search via Tavily API. Returns None if unavailable."""
     try:
-        import httpx
-        from urllib.parse import quote
-
-        url = f"https://www.baidu.com/s?wd={quote(query)}&rn={max_results}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-        }
-        resp = httpx.get(url, headers=headers, timeout=15, follow_redirects=True, verify=False)
-        if resp.status_code != 200:
-            logger.warning("Baidu returned status %d", resp.status_code)
+        from tavily import TavilyClient
+        api_key = os.environ.get("TAVILY_API_KEY") or os.environ.get("TAVILY_SEARCH_API_KEY")
+        if not api_key:
             return None
-
-        html = resp.text
-        if len(html) < 5000 or "百度安全验证" in html or "wappass.baidu.com" in html:
-            logger.warning("Baidu returned captcha or empty page (len=%d)", len(html))
-            return None
-
+        client = TavilyClient(api_key=api_key)
+        response = client.search(query=query, max_results=max_results, search_depth="basic")
         results = []
-        import re
-        pattern = r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
-        matches = re.findall(pattern, html, re.DOTALL)
-        for href, title_html in matches[:max_results]:
-            title = re.sub(r'<[^>]+>', '', title_html).strip()
-            if title and len(title) > 2:
-                results.append({"title": title, "url": href, "snippet": ""})
-
-        if results:
-            logger.info("Baidu search returned %d results for: %s", len(results), query)
-            return results
+        for item in response.get("results", []):
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", ""),
+            })
+        return results
+    except ImportError:
         return None
     except Exception as e:
-        logger.warning("Baidu search failed: %s", e)
+        logger.warning("Tavily search failed: %s", e)
         return None
 
 
-def _search_sogou(query: str, max_results: int = 5) -> list[dict] | None:
-    """Search via Sogou by scraping search results page."""
-    try:
-        import httpx
-        import re
-        from urllib.parse import quote
+# ── Backend dispatch table ──────────────────────────────────────────
 
-        url = f"https://www.sogou.com/web?query={quote(query)}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-        }
-        resp = httpx.get(url, headers=headers, timeout=15, follow_redirects=True, verify=False)
-        if resp.status_code != 200:
-            logger.warning("Sogou returned status %d", resp.status_code)
-            return None
-
-        html = resp.text
-        if len(html) < 5000:
-            logger.warning("Sogou returned empty page (len=%d)", len(html))
-            return None
-
-        results = []
-        pattern = r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
-        matches = re.findall(pattern, html, re.DOTALL)
-        for href, title_html in matches[:max_results]:
-            title = re.sub(r'<[^>]+>', '', title_html).strip()
-            if title and len(title) > 2:
-                full_url = href if href.startswith("http") else f"https://www.sogou.com{href}"
-                results.append({"title": title, "url": full_url, "snippet": ""})
-
-        if results:
-            logger.info("Sogou search returned %d results for: %s", len(results), query)
-            return results
-        return None
-    except Exception as e:
-        logger.warning("Sogou search failed: %s", e)
-        return None
-
+_BACKENDS = {
+    "browser": _search_browser,
+    "baidu": _search_baidu,
+    "sogou": _search_sogou,
+    "ddgs": _search_ddgs,
+    "tavily": _search_tavily,
+}
 
 # ── Tool entry ────────────────────────────────────────────────────────
 
 @register_tool(
     name="web_search",
-    description="网络搜索工具。backend=auto时自动fallback: Tavily→DDGS→百度→搜狗。也可指定backend=baidu/sogou/ddgs/tavily。返回results数组含title/url/snippet。",
+    description="网络搜索工具，无需 API Key 即可使用。默认通过浏览器（Bing）搜索，自动 fallback 到其他后端。返回 results 数组含 title/url/snippet。",
     category="builtin",
     tags=["search", "web"],
     scene="general"
 )
 async def web_search(
     query: str = "",
-    backend: str = "auto",
+    backend: str = "",
     max_results: int = 5,
 ) -> dict[str, Any]:
-    """网络搜索，支持自动 fallback。
+    """网络搜索，无需 API Key。默认通过浏览器访问 Bing 搜索。
 
     Args:
         query: 搜索关键词
-        backend: 搜索后端（auto/tavily/ddgs），默认 auto（Tavily 优先）
+        backend: 搜索后端（browser/baidu/sogou/tavily/ddgs），默认 browser
         max_results: 最大返回结果数，默认 5
 
     Returns:
@@ -232,7 +308,12 @@ async def web_search(
         return {"error": "搜索关键词不能为空"}
 
     query = query.strip()
+    try:
+        max_results = int(max_results)
+    except (ValueError, TypeError):
+        max_results = 5
     max_results = max(1, min(max_results, 10))
+    backend = (backend or "").strip() or _DEFAULT_BACKEND
 
     # Check cache first
     cached = _get_cached(query, backend)
@@ -244,33 +325,37 @@ async def web_search(
             "query": query,
         }
 
-    # Try backends in order: fast reliable ones first
+    # Build backend order
+    if backend != "auto":
+        order = [backend]
+    else:
+        order = list(_BACKEND_ORDER)
+
+    # Try backends in order
     results = None
     used_backend = backend
 
-    if backend in ("auto", "tavily"):
-        results = _search_tavily(query, max_results)
-        if results is not None:
-            used_backend = "tavily"
+    for b in order:
+        search_fn = _BACKENDS.get(b)
+        if search_fn is None:
+            continue
+        try:
+            import asyncio
+            if asyncio.iscoroutinefunction(search_fn):
+                results = await search_fn(query, max_results)
+            else:
+                results = search_fn(query, max_results)
+        except Exception as e:
+            logger.warning("Backend %s failed: %s", b, e)
+            results = None
 
-    if results is None and backend in ("auto", "sogou"):
-        results = _search_sogou(query, max_results)
         if results is not None:
-            used_backend = "sogou"
-
-    if results is None and backend in ("auto", "baidu"):
-        results = _search_baidu(query, max_results)
-        if results is not None:
-            used_backend = "baidu"
-
-    if results is None and backend in ("auto", "ddgs"):
-        results = _search_ddgs(query, max_results)
-        if results is not None:
-            used_backend = "ddgs"
+            used_backend = b
+            break
 
     if results is None:
         return {
-            "error": f"所有搜索后端不可用（backend={backend}）。尝试的后端: tavily→ddgs→baidu→sogou 均失败。",
+            "error": f"所有搜索后端不可用。已尝试: {', '.join(order)}",
             "query": query,
         }
 

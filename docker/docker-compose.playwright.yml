@@ -1,27 +1,29 @@
 # ═══════════════════════════════════════════════════════════════════
 # Playwright 独立服务 + CoApis 源码构建
 # 用法: cd docker && docker compose -f docker-compose.playwright.yml up -d --build
-# 浏览器用已缓存的 chromedp/headless-shell，通过 socat 暴露 CDP
+# 浏览器用 browserless/chrome，支持 0.0.0.0 绑定，CDP 端口 3000
 # ═══════════════════════════════════════════════════════════════════
 
 services:
-  # ── 浏览器服务（headless-shell 内部 9223 → socat → 9222）──
+  # ── 浏览器服务（CDP 协议，端口 3000）──
   playwright:
-    image: chromedp/headless-shell:latest
+    image: browserless/chrome:latest
     container_name: coapis-playwright
     expose:
-      - "9222"
+      - "3000"
     ports:
-      - "9222:9222"
+      - "9222:3000"
     shm_size: "2g"
-    # headless-shell 自带 socat 把 9223 转发到 9222，无需额外 command
-    # 健康检查：通过 socat 转发端口检测（9222→9223→Chrome CDP）
+    environment:
+      - TOKEN=coapis
+      - MAX_CONCURRENT_SESSIONS=5
+      - MAX_QUEUE_LENGTH=10
     healthcheck:
-      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/9223' 2>/dev/null"]
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
     restart: unless-stopped
 
   # ── CoApis 应用（通过 CDP 连接浏览器服务）──
@@ -42,7 +44,7 @@ services:
       - COAPIS_WORKSPACES_DIR=${COAPIS_WORKSPACES_DIR:-${COAPIS_WORKING_DIR}/workspaces}
       - COAPIS_AUTH_ENABLED=true
       - COAPIS_USER_SYSTEM_ENABLED=true
-      - BROWSER_CDP_URL=http://playwright:9222
+      - BROWSER_CDP_URL=http://playwright:3000
     depends_on:
       playwright:
         condition: service_healthy

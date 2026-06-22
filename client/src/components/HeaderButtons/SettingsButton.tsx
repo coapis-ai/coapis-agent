@@ -17,11 +17,7 @@ export default function SettingsButton() {
   const [localTheme, setLocalTheme] = useState<ThemeMode>(preferences.theme as ThemeMode || themeMode);
   const [language, setLanguage] = useState(preferences.language || i18n.language || 'en');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!preferences.sidebar_collapsed);
-  const [chatDisplayMode, setChatDisplayMode] = useState(preferences.chat_display_mode || 'full');
-  const [hideToolCall, setHideToolCall] = useState(!!preferences.chat_hide_tool_call);
-  const [hideThinking, setHideThinking] = useState(!!preferences.chat_hide_thinking);
-  const [hideFooter, setHideFooter] = useState(!!preferences.chat_hide_footer);
-  const [hideSystemMessages, setHideSystemMessages] = useState(!!preferences.chat_hide_system_messages);
+  const [hideDetails, setHideDetails] = useState(!!preferences.chat_hide_details);
   const [emailNotif, setEmailNotif] = useState(!!preferences.email_notifications);
   const [pushNotif, setPushNotif] = useState(!!preferences.push_notifications);
 
@@ -30,11 +26,7 @@ export default function SettingsButton() {
     setLocalTheme(preferences.theme as ThemeMode || themeMode);
     setLanguage(preferences.language || i18n.language || 'en');
     setSidebarCollapsed(!!preferences.sidebar_collapsed);
-    setChatDisplayMode(preferences.chat_display_mode || 'full');
-    setHideToolCall(!!preferences.chat_hide_tool_call);
-    setHideThinking(!!preferences.chat_hide_thinking);
-    setHideFooter(!!preferences.chat_hide_footer);
-    setHideSystemMessages(!!preferences.chat_hide_system_messages);
+    setHideDetails(!!preferences.chat_hide_details);
     setEmailNotif(!!preferences.email_notifications);
     setPushNotif(!!preferences.push_notifications);
     setOpen(true);
@@ -45,11 +37,7 @@ export default function SettingsButton() {
       theme: localTheme,
       language,
       sidebar_collapsed: sidebarCollapsed ? 1 : 0,
-      chat_display_mode: chatDisplayMode,
-      chat_hide_tool_call: hideToolCall ? 1 : 0,
-      chat_hide_thinking: hideThinking ? 1 : 0,
-      chat_hide_footer: hideFooter ? 1 : 0,
-      chat_hide_system_messages: hideSystemMessages ? 1 : 0,
+      chat_hide_details: hideDetails ? 1 : 0,
       email_notifications: emailNotif ? 1 : 0,
       push_notifications: pushNotif ? 1 : 0,
     });
@@ -69,7 +57,7 @@ export default function SettingsButton() {
   const items = [
     {
       key: 'appearance',
-      title: t('header.settings.appearance'),
+      title: t('header.settings.appearance', { defaultValue: '外观' }),
       children: (
         <>
           <div style={{ marginBottom: 16 }}>
@@ -112,60 +100,28 @@ export default function SettingsButton() {
     },
     {
       key: 'chat',
-      title: t('header.settings.chat'),
+      title: t('header.settings.chat', { defaultValue: '聊天' }),
       children: (
         <>
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>{t('header.settings.chatDisplayMode')}</Text>
-            <Select
-              value={chatDisplayMode}
-              onChange={setChatDisplayMode}
-              style={{ width: '100%', marginTop: 8 }}
-              options={[
-                { label: t('header.settings.chatFull'), value: 'full' },
-                { label: t('header.settings.chatSimplified'), value: 'simplified' },
-                { label: t('header.settings.chatMinimal'), value: 'minimal' },
-              ]}
-            />
-          </div>
           <div style={{ marginBottom: 12 }}>
-            <Text>{t('header.settings.hideToolCall')}</Text>
+            <Text>{t('header.settings.hideDetails', { defaultValue: '隐藏细节' })}</Text>
             <Switch
-              checked={hideToolCall}
-              onChange={setHideToolCall}
+              checked={hideDetails}
+              onChange={setHideDetails}
               style={{ marginLeft: 8 }}
             />
           </div>
-          <div style={{ marginBottom: 12 }}>
-            <Text>{t('header.settings.hideThinking')}</Text>
-            <Switch
-              checked={hideThinking}
-              onChange={setHideThinking}
-              style={{ marginLeft: 8 }}
-            />
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <Text>{t('header.settings.hideFooter')}</Text>
-            <Switch
-              checked={hideFooter}
-              onChange={setHideFooter}
-              style={{ marginLeft: 8 }}
-            />
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <Text>{t('header.settings.hideSystemMessages')}</Text>
-            <Switch
-              checked={hideSystemMessages}
-              onChange={setHideSystemMessages}
-              style={{ marginLeft: 8 }}
-            />
+          <div style={{ fontSize: 12, color: '#999' }}>
+            {t('header.settings.hideDetailsDesc', { 
+              defaultValue: '开启后，思考过程、工具调用、正文内容将显示摘要' 
+            })}
           </div>
         </>
       ),
     },
     {
       key: 'notifications',
-      title: t('header.settings.notifications'),
+      title: t('header.settings.notifications', { defaultValue: '通知' }),
       children: (
         <>
           <div style={{ marginBottom: 12 }}>
@@ -194,33 +150,34 @@ export default function SettingsButton() {
       <Button
         type="text"
         icon={<SettingOutlined />}
-        title={t('header.settings.title')}
         onClick={handleOpen}
-        style={{ fontSize: '16px' }}
       />
       <Drawer
-        title={t('header.settings.title')}
+        title={t('header.settings.title', { defaultValue: '设置' })}
         placement="right"
-        width={380}
-        open={open}
+        width={360}
         onClose={() => setOpen(false)}
-        extra={
-          <Button type="primary" onClick={handleSave}>
-            {t('header.settings.save')}
-          </Button>
+        open={open}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="primary" onClick={handleSave}>
+              {t('common.save')}
+            </Button>
+          </div>
         }
       >
-        <div>
-          {items.map((section) => (
-            <div key={section.key} style={{ marginBottom: 24 }}>
-              <Text strong style={{ fontSize: 14 }}>
-                {section.title}
-              </Text>
-              <Divider style={{ marginTop: 8, marginBottom: 12 }} />
-              {section.children}
-            </div>
-          ))}
-        </div>
+        {items.map((item, index) => (
+          <div key={item.key}>
+            {index > 0 && <Divider />}
+            <Text strong style={{ display: 'block', marginBottom: 12 }}>
+              {item.title}
+            </Text>
+            {item.children}
+          </div>
+        ))}
       </Drawer>
     </>
   );
