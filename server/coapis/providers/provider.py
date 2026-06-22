@@ -240,6 +240,8 @@ class Provider(ProviderInfo, ABC):
             self.chat_model = str(config["chat_model"])
         if "api_key_prefix" in config and config["api_key_prefix"] is not None:
             self.api_key_prefix = str(config["api_key_prefix"])
+        if "require_api_key" in config and config["require_api_key"] is not None:
+            self.require_api_key = bool(config["require_api_key"])
         if (
             "generate_kwargs" in config
             and config["generate_kwargs"] is not None

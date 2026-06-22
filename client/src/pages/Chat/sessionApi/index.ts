@@ -206,25 +206,65 @@ const buildResponseCard = (
     content: normalizeOutputMessageContent(msg.content),
   }));
 
+  // Build cards array: optional DeepThinking card + response card
+  const cards: Array<{ code: string; data: Record<string, unknown> }> = [];
+
+  // Check if any message is a reasoning/thinking message
+  for (const msg of outputMessages) {
+    const meta = (msg as Record<string, unknown>).metadata as Record<string, unknown> | null | undefined;
+    if (meta && meta.type === "reasoning") {
+      // Extract text content from the reasoning message
+      const content = msg.content;
+      let thinkingText = "";
+      if (typeof content === "string") {
+        thinkingText = content;
+      } else if (Array.isArray(content)) {
+        thinkingText = (content as ContentItem[])
+          .filter((c) => c.type === "text")
+          .map((c) => c.text || "")
+          .join("\n");
+      }
+      if (thinkingText) {
+        cards.push({
+          code: "DeepThinking",
+          data: {
+            content: thinkingText,
+            title: "深度思考",
+            loading: false,
+          },
+        });
+      }
+    }
+  }
+
+  // Filter out reasoning messages from output (they're shown as DeepThinking card)
+  const nonReasoningMessages = normalizedMessages.filter((msg) => {
+    const meta = (msg as Record<string, unknown>).metadata as Record<string, unknown> | null | undefined;
+    return !(meta && meta.type === "reasoning");
+  });
+
+  // Only add response card if there are non-reasoning messages
+  if (nonReasoningMessages.length > 0) {
+    cards.push({
+      code: CARD_RESPONSE,
+      data: {
+        id: `response_${generateId()}`,
+        output: nonReasoningMessages,
+        object: "response",
+        status: "completed",
+        created_at: now,
+        sequence_number: maxSeq + 1,
+        error: null,
+        completed_at: now,
+        usage: null,
+      },
+    });
+  }
+
   return {
     id: generateId(),
     role: ROLE_ASSISTANT,
-    cards: [
-      {
-        code: CARD_RESPONSE,
-        data: {
-          id: `response_${generateId()}`,
-          output: normalizedMessages,
-          object: "response",
-          status: "completed",
-          created_at: now,
-          sequence_number: maxSeq + 1,
-          error: null,
-          completed_at: now,
-          usage: null,
-        },
-      },
-    ],
+    cards,
     msgStatus: "finished",
   };
 };

@@ -39,6 +39,7 @@ import {
 import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
+import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
 
@@ -159,28 +160,11 @@ function payloadCompletesResponse(payload: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Response output accumulator — prevents Builder clobbering on completion
+// Plugin call message type tracker
 // ---------------------------------------------------------------------------
-// When the SSE stream ends, the Builder's handleResponse() does:
-//   data.output = [];  (because completion event has no output)
-//   Object.assign(draft, data);  → wipes all accumulated content
-// We track the accumulated output here and inject it into the completion event.
-const _responseOutputAccumulator: {
-  messages: Map<string, any>;
-  reset: () => void;
-  getOutput: () => any[];
-} = {
-  messages: new Map(),
-  reset() {
-    this.messages.clear();
-  },
-  getOutput() {
-    return Array.from(this.messages.values()).map((m) => ({
-      ...m,
-      content: (m.content || []).map((c: any) => ({ ...c, delta: false })),
-    }));
-  },
-};
+// Tracks which message IDs are PLUGIN_CALL so we can adapt their content
+// deltas (add data.call_id/name) for the library's mergeToolMessages.
+const _pluginCallMsgTypes = new Map<string, string>();
 
 function renderSuggestionLabel(command: string, description: string) {
   return (
@@ -1239,7 +1223,15 @@ export default function ChatPage() {
         responseParser: (chunk: string) => {
           const payload = JSON.parse(chunk) as Record<string, unknown>;
           const completed = payloadCompletesResponse(payload);
-          
+
+          // Debug: log key events
+          if (payload.object === "message" || payload.object === "response") {
+            console.log(`[rp] ${payload.object} type=${(payload as any).type || ""} status=${(payload as any).status || ""} id=${(payload as any).id || (payload as any).msg_id || ""}`);
+          }
+          if (payload.object === "content") {
+            console.log(`[rp] content msg_id=${(payload as any).msg_id} type=${(payload as any).type} delta=${(payload as any).delta} text=${String((payload as any).text || "").substring(0, 60)}`);
+          }
+
           if (payloadRequestsHistoryClear(payload)) {
             pendingClearHistoryRef.current = true;
             if (completed) {
@@ -1247,94 +1239,45 @@ export default function ChatPage() {
             }
           }
 
-          // ── Track accumulated response output ──
-          // Reset on new response
-          if (payload.object === "response" && payload.status === "created") {
-            _responseOutputAccumulator.reset();
+          // Track plugin_call message types so we can identify their content deltas
+          if (payload.object === "message" && payload.type) {
+            const msgId = (payload.id || payload.msg_id) as string;
+            if (msgId && typeof payload.type === "string") {
+              _pluginCallMsgTypes.set(msgId, payload.type);
+            }
           }
-
-          // Accumulate content deltas
+          // Adapt content delta for plugin_call messages
           if (payload.object === "content" && payload.delta) {
             const msgId = payload.msg_id as string;
-            if (msgId) {
-              let msg = _responseOutputAccumulator.messages.get(msgId);
-              if (!msg) {
-                msg = {
-                  id: msgId,
-                  role: "assistant",
-                  type: "message",
-                  status: "in_progress",
-                  content: [],
-                };
-                _responseOutputAccumulator.messages.set(msgId, msg);
-              }
-              const contentArr = msg.content as any[];
-              const last = contentArr[contentArr.length - 1];
-              if (last && last.delta && last.type === payload.type) {
-                if (payload.text !== undefined)
-                  last.text = (last.text || "") + payload.text;
-              } else {
-                contentArr.push({ ...payload });
-              }
+            const msgType = msgId ? _pluginCallMsgTypes.get(msgId) : undefined;
+            if (msgType === "plugin_call" && payload.type === "text") {
+              const pText = String((payload as any).text || "");
+              const toolNameMatch = pText.match(
+                /^(?:🔧\s*|\\uf013\s*)?(\S+?)\s*[\(（]/
+              );
+              const toolName = toolNameMatch ? toolNameMatch[1] : "tool";
+              const callId = `call_${msgId}_0`;
+              (payload as any).data = {
+                call_id: callId,
+                name: toolName,
+                arguments: pText,
+              };
             }
           }
 
-          // Track message events
-          if (payload.object === "message") {
-            const msgId = (payload.id || payload.msg_id) as string;
-            if (msgId) {
-              let msg = _responseOutputAccumulator.messages.get(msgId);
-              if (!msg) {
-                msg = {
-                  id: msgId,
-                  role: "assistant",
-                  type: "message",
-                  content: [],
-                };
-                _responseOutputAccumulator.messages.set(msgId, msg);
-              }
-              if (payload.status) msg.status = payload.status;
-
-              // Accumulate content from message payload.
-              // The agentscope_runtime engine sends full content in each
-              // message event (not delta), so we overwrite on each update.
-              // Content items have {object:"content", type:"text", text:"..."}.
-              if (Array.isArray(payload.content) && payload.content.length > 0) {
-                const incoming = payload.content as any[];
-                // If any item has delta=true, append incrementally;
-                // otherwise replace entirely (full content each event).
-                const isDelta = incoming.some((c: any) => c.delta === true);
-                if (isDelta) {
-                  const contentArr = msg.content as any[];
-                  for (const item of incoming) {
-                    const last = contentArr[contentArr.length - 1];
-                    if (last && last.delta && last.type === item.type) {
-                      if (item.text !== undefined)
-                        last.text = (last.text || "") + item.text;
-                    } else {
-                      contentArr.push({ ...item });
-                    }
-                  }
-                } else {
-                  // Full content: replace entirely
-                  msg.content = incoming.map((c: any) => ({ ...c }));
-                }
-              }
-            }
-          }
-
-          // On completion: inject accumulated output to prevent Builder
-          // handleResponse() from clobbering with empty output[]
+          // On completion: inject Builder's accumulated output to prevent
+          // handleResponse() from wiping all messages via Object.assign(draft, data).
           if (completed) {
-            const output = _responseOutputAccumulator.getOutput();
-            console.log(`[responseParser] Completion(${payload.status}): ${output.length} message(s) with accumulated output`);
-            _responseOutputAccumulator.reset();
-            // Refresh session list so auto-renamed titles (backend) are picked up by the frontend
+            // Clean up plugin call type tracking
+            _pluginCallMsgTypes.clear();
+            const builderOutput = (chatRef.current?.messages?.getMessages?.() as any[]) || [];
+            console.log(`[rp] ★ COMPLETED(${payload.status}): ${builderOutput.length} msgs, chatRef=${!!chatRef.current}`);
+
+            // Refresh session list so auto-renamed titles are picked up
             sessionApi.invalidateSessionList();
             setTimeout(() => sessionApi.getSessionList(), 500);
 
-            // Reset loading state on completion — @agentscope-ai/chat only
-            // resets loading in onCancel, not on normal SSE completion
+            // Reset loading state on completion
             const bridge = runtimeLoadingBridgeRef.current;
             if (bridge?.setLoading) {
               bridge.setLoading(false);
@@ -1343,7 +1286,7 @@ export default function ChatPage() {
             return {
               object: "response",
               status: payload.status || "completed",
-              output,
+              output: builderOutput,
             } as any;
           }
 
@@ -1393,12 +1336,13 @@ export default function ChatPage() {
           });
         },
       },
+      cards: {
+        DeepThinking: CoApisDeepThinking,
+      },
       customToolRenderConfig: {
         ..._enhancedToolRenderConfig,
         ...toolRenderConfig,  // plugin overrides take priority
       },
-      // Use default AgentScopeRuntimeResponseCard from @agentscope-ai/chat
-      // It already provides: grouped display, collapse/expand, streaming support
       actions: {
         list: [
           {

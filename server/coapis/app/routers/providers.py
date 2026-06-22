@@ -83,6 +83,10 @@ class ProviderConfigRequest(BaseModel):
         default=None,
         description="Chat model class name for protocol selection",
     )
+    require_api_key: Optional[bool] = Field(
+        default=None,
+        description="Whether this provider requires an API key",
+    )
     generate_kwargs: Optional[dict] = Field(
         default_factory=dict,
         description=(
@@ -228,6 +232,7 @@ async def configure_provider(
             "api_key": body.api_key,
             "base_url": body.base_url,
             "chat_model": body.chat_model,
+            "require_api_key": body.require_api_key,
             "generate_kwargs": body.generate_kwargs,
         },
     )

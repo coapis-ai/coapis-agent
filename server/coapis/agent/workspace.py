@@ -125,6 +125,9 @@ class Workspace:
         self.role = role
         self.status = "stopped"
         self.config: Optional[Dict[str, Any]] = None
+        # Last streaming reasoning/response for persistence
+        self.last_full_reasoning: list[str] = []
+        self.last_full_response: list[str] = []
 
         # Determine directories based on scope
         if workspace_dir:
@@ -1014,7 +1017,6 @@ class Workspace:
                         id=_phase_msg_id,
                         role="assistant",
                         type=_close_type,
-                        content=[],
                         status=RunStatus.Completed,
                     )
                     _current_phase = None
@@ -1038,12 +1040,14 @@ class Workspace:
                         msg_type = MessageType.PLUGIN_CALL
                     else:
                         msg_type = MessageType.MESSAGE
-                    # Yield Message created event
+                    # Yield Message created event (status=InProgress so that
+                    # the library's Reasoning component renders immediately)
                     yield Message(
                         object="message",
                         id=_phase_msg_id,
                         role="assistant",
                         type=msg_type,
+                        status=RunStatus.InProgress,
                         content=[],
                     )
 
@@ -1211,6 +1215,10 @@ class Workspace:
                             )
                 if assistant_reply:
                     context.add_message("assistant", assistant_reply)
+
+                # Store for persistence (runner reads these)
+                self.last_full_reasoning = full_reasoning
+                self.last_full_response = full_response
 
                 # ── Close any open phase ──
                 async for ev in _close_phase():

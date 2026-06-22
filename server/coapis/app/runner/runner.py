@@ -273,6 +273,7 @@ class AgentRunner(Runner):
         msgs: list,
         assistant_text: str,
         name: str = "New Chat",
+        full_reasoning: list[str] | None = None,
     ) -> None:
         """Persist chat messages to session state (aligned with CoApis).
 
@@ -388,6 +389,17 @@ class AgentRunner(Runner):
             if user_text:
                 user_msg = Msg(name="user", content=[TextBlock(text=user_text)], role="user")
                 await isolated_mem.add(user_msg)
+            # Save reasoning/thinking as a separate message with metadata marker
+            reasoning_text = "".join(full_reasoning) if full_reasoning else ""
+            if reasoning_text:
+                reasoning_msg = Msg(
+                    name="assistant",
+                    content=[TextBlock(text=reasoning_text)],
+                    role="assistant",
+                )
+                # Mark as reasoning so frontend can reconstruct DeepThinking card
+                reasoning_msg.metadata = {"type": "reasoning"}
+                await isolated_mem.add(reasoning_msg)
             if assistant_text:
                 assistant_msg = Msg(name="assistant", content=[TextBlock(text=assistant_text)], role="assistant")
                 await isolated_mem.add(assistant_msg)
@@ -1236,6 +1248,7 @@ class AgentRunner(Runner):
                     msgs=msgs,
                     assistant_text="".join(_evolution_full_response),
                     name=name,
+                    full_reasoning=getattr(self._workspace, 'last_full_reasoning', None),
                 )
             except Exception:
                 logger.warning(

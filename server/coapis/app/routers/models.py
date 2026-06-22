@@ -83,6 +83,7 @@ class ProviderConfigRequest(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     chat_model: Optional[str] = None
+    require_api_key: Optional[bool] = None
     generate_kwargs: Optional[Dict[str, Any]] = None
 
 
@@ -201,6 +202,8 @@ async def configure_provider(
         providers[provider_id]["base_url"] = payload.base_url
     if payload.chat_model is not None:
         providers[provider_id]["model"] = payload.chat_model
+    if payload.require_api_key is not None:
+        providers[provider_id]["require_api_key"] = payload.require_api_key
 
     # Save back to config
     config["providers"] = providers
