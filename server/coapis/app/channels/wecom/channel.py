@@ -169,7 +169,8 @@ class WecomChannel(BaseChannel):
     channel = "wecom"
 
     # Enable real-time streaming via reply_stream
-    _STREAMABLE_TYPES = ("message",)
+    # "reasoning" added to support thinking content streaming
+    _STREAMABLE_TYPES = ("message", "reasoning")
 
     def __init__(
         self,

@@ -448,11 +448,27 @@ class BaseChannel(ABC):
         obj = getattr(event, "object", None)
         is_delta = getattr(event, "delta", False)
 
+        # --- message created → register msg_id → stream_type mapping ---
+        # When workspace sends a Message event with type=REASONING/PLUGIN_CALL/MESSAGE,
+        # we register the mapping so that subsequent TextContent deltas are routed correctly.
+        if obj == "message" and getattr(event, "status", None) != RunStatus.Completed:
+            msg_type = getattr(event, "type", None)
+            msg_id = getattr(event, "id", None)
+            if msg_id and msg_type:
+                # Map MessageType to stream_type
+                if msg_type == MessageType.REASONING:
+                    msg_id_to_stream_type[msg_id] = "reasoning"
+                elif msg_type == MessageType.PLUGIN_CALL:
+                    msg_id_to_stream_type[msg_id] = "tool_call"
+                else:
+                    msg_id_to_stream_type[msg_id] = "message"
+
         # --- content start (delta=False, first content chunk) ---
         if obj == "content" and not is_delta:
-            stream_type = self._resolve_stream_type(event)
+            msg_id = getattr(event, "msg_id", None) or ""
+            # Use mapping from Message event if available, otherwise fall back to heuristic
+            stream_type = msg_id_to_stream_type.get(msg_id, "") or self._resolve_stream_type(event)
             if stream_type and stream_type in self._STREAMABLE_TYPES:
-                msg_id = getattr(event, "msg_id", None)
                 if msg_id:
                     msg_id_to_stream_type[msg_id] = stream_type
                 if stream_type == "reasoning" and self._filter_thinking:
