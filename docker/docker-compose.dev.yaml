@@ -42,7 +42,7 @@ services:
       - ./volume/playwright:/app/volume/playwright:ro
     environment:
       - PYTHONPATH=/app
-      - COAPIS_VERSION=${COAPIS_VERSION:-0.8.28-dev}
+      - COAPIS_VERSION=${COAPIS_VERSION:-0.8.29-dev}
       - COAPIS_AUTH_ENABLED=true
       - COAPIS_USER_SYSTEM_ENABLED=true
       # 共享生产 Playwright（通过宿主机 4201 端口，browserless 认证）
