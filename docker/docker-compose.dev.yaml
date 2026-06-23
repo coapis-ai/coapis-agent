@@ -27,6 +27,8 @@ services:
     container_name: coapis-server-dev
     ports:
       - "4308:8000"
+    env_file:
+      - .env.dev
     volumes:
       # 运行数据（开发环境独立目录）
       - /apps/ai/coapis-dev:/apps/ai/coapis
@@ -40,7 +42,6 @@ services:
       - ./volume/playwright:/app/volume/playwright:ro
     environment:
       - PYTHONPATH=/app
-      - COAPIS_VERSION=${COAPIS_VERSION:-0.8.30-dev}
       # 共享生产 Playwright（通过宿主机 4201 端口，browserless 认证）
       - BROWSER_CDP_URL=http://172.17.0.1:4201?token=coapis
       # 文件上传限制（与 .env.dev 同步）
