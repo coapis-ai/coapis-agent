@@ -48,9 +48,6 @@ async def get_users_config():
 @router.post("/users/register", response_model=UserResponse)
 async def register_user(req: UserCreate):
     """Register a new user with complete workspace initialization."""
-    cfg = get_config()
-    if not cfg.enabled:
-        raise HTTPException(status_code=403, detail="User system is disabled")
 
     # Step 1: Create user in database
     try:
@@ -104,18 +101,12 @@ async def list_users_endpoint(
     page_size: int = Query(20, ge=1, le=100),
 ):
     """List all users with pagination."""
-    cfg = get_config()
-    if not cfg.enabled:
-        raise HTTPException(status_code=403, detail="User system is disabled")
     return list_users(page, page_size)
 
 
 @router.get("/users/{username}", response_model=UserResponse)
 async def get_user(username: str):
     """Get user by username."""
-    cfg = get_config()
-    if not cfg.enabled:
-        raise HTTPException(status_code=403, detail="User system is disabled")
     user = get_user_by_username(username)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -125,9 +116,6 @@ async def get_user(username: str):
 @router.put("/users/{username}", response_model=UserResponse)
 async def update_user_endpoint(username: str, req: UserUpdate):
     """Update user profile."""
-    cfg = get_config()
-    if not cfg.enabled:
-        raise HTTPException(status_code=403, detail="User system is disabled")
     try:
         return update_user(username, req)
     except ValueError as e:
@@ -137,9 +125,6 @@ async def update_user_endpoint(username: str, req: UserUpdate):
 @router.delete("/users/{username}")
 async def delete_user_endpoint(username: str):
     """Delete a user."""
-    cfg = get_config()
-    if not cfg.enabled:
-        raise HTTPException(status_code=403, detail="User system is disabled")
     success = delete_user(username)
     if not success:
         raise HTTPException(status_code=404, detail="User not found")

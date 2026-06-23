@@ -81,7 +81,6 @@ from .migration import (
     ensure_layered_templates,
 )
 from .channels.registry import register_custom_channel_routes
-from ..user_system.config import get_config as get_user_config
 from ..user_system.middleware import (
     install_user_context_middleware,
     install_user_isolation_middleware,
@@ -709,25 +708,20 @@ app = FastAPI(
     openapi_url="/openapi.json" if DOCS_ENABLED else None,
 )
 
-# User system middleware (conditionally enabled)
+# User system middleware
 # NOTE: FastAPI middleware is LIFO (last added = first executed)
 # Execution order must be: Auth → RateLimit → QuotaCheck → UserIsolation → UserContext
 # Therefore registration order (LIFO): UserContext → UserIsolation → QuotaCheck → RateLimit → Auth
 # All middleware now use @app.middleware("http") pattern for SSE compatibility
-user_config = get_user_config()
-if user_config.enabled:
-    # Register in LIFO order (last registered = first executed)
-    # Auth MUST execute first to set request.state.username
-    install_user_context_middleware(app)
-    install_user_isolation_middleware(app)
-    install_quota_check_middleware(app)
-    install_rate_limit_middleware(app)
-    install_auth_middleware(app)
-    logger.info("User system middleware enabled (async-compatible @app.middleware pattern)")
-else:
-    # Auth middleware still needed for token validation
-    install_auth_middleware(app)
-    logger.info("User system disabled (set COAPIS_USER_SYSTEM_ENABLED=true to enable)")
+
+# Register in LIFO order (last registered = first executed)
+# Auth MUST execute first to set request.state.username
+install_user_context_middleware(app)
+install_user_isolation_middleware(app)
+install_quota_check_middleware(app)
+install_rate_limit_middleware(app)
+install_auth_middleware(app)
+logger.info("User system middleware enabled (async-compatible @app.middleware pattern)")
 
 # Apply CORS middleware if CORS_ORIGINS is set
 if CORS_ORIGINS:

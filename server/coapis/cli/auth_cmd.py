@@ -36,12 +36,6 @@ def auth_group() -> None:
 @auth_group.command("reset-password")
 def reset_password_cmd() -> None:
     """Reset the password for the registered web user."""
-    if not is_auth_enabled():
-        click.echo(
-            "Authentication is not enabled.\n"
-            "Set COAPIS_AUTH_ENABLED=true to enable it first.",
-        )
-        return
 
     data = _load_auth_data()
 

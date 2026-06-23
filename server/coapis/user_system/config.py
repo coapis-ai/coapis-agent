@@ -18,11 +18,12 @@
 Simplified: no user levels, no points system.
 All level-based logic has been removed.
 
+The user system is always enabled in the open-source version.
 Environment variables (prefix: COAPIS_USER_):
-- USER_SYSTEM_ENABLED: bool = False
 - TOKEN_QUOTA_DEFAULT: int = 1000000 (monthly token quota per user)
 - TOKEN_QUOTA_HARD_LIMIT: bool = False (soft limit by default)
-- LOCAL_MODEL_FREE_TOKENS: bool = True
+
+Local models are always free of charge.
 """
 from __future__ import annotations
 
@@ -44,18 +45,18 @@ class UserSystemConfig:
 
     def __init__(self):
         prefix = "COAPIS_USER_"
-        # Master switch
-        self.enabled = EnvVarLoader.get_bool("COAPIS_USER_SYSTEM_ENABLED", False)
+        # User system is always enabled in open-source version
+        self.enabled = True
 
         # Token quota (unified, no per-level)
         self.default_token_quota = EnvVarLoader.get_int(
             f"{prefix}TOKEN_QUOTA_DEFAULT", 1_000_000
         )
 
+        # Local models are always free of charge
+        self.local_model_free_tokens = True
+
         # Special settings
-        self.local_model_free_tokens = EnvVarLoader.get_bool(
-            f"{prefix}LOCAL_MODEL_FREE_TOKENS", True
-        )
         self.token_quota_hard_limit = EnvVarLoader.get_bool(
             f"{prefix}TOKEN_QUOTA_HARD_LIMIT", False
         )

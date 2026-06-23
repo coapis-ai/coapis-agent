@@ -62,10 +62,8 @@ async def get_system_overview(request: Request) -> Dict[str, Any]:
     from ....user_system.database import UserSystemDB
     db = UserSystemDB()
 
-    total_users = db.execute("SELECT COUNT(*) as total FROM users").fetchone()["total"]
-    active_users = db.execute(
-        "SELECT COUNT(*) as total FROM users WHERE is_active = 1"
-    ).fetchone()["total"]
+    total_users = db.count_users()
+    active_users = db.count_active_users()
 
     # 获取 Agent 统计
     manager = getattr(request.app.state, "multi_agent_manager", None)

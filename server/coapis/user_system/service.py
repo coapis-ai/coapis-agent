@@ -100,58 +100,43 @@ def create_user(req: UserCreate) -> UserResponse:
     """Create a new user. Raises ValueError if username exists."""
     db = get_db()
 
-    # Check if username already exists
-    existing = db.fetch_one("SELECT id FROM users WHERE username = ?", (req.username,))
-    if existing:
+    if db.user_exists(req.username):
         raise ValueError(f"Username '{req.username}' already exists")
 
-    # Check email uniqueness if provided
-    if req.email:
-        email_exists = db.fetch_one("SELECT id FROM users WHERE email = ?", (req.email,))
-        if email_exists:
-            raise ValueError(f"Email '{req.email}' already registered")
+    if req.email and db.email_exists(req.email):
+        raise ValueError(f"Email '{req.email}' already registered")
 
     password_hash, salt = _hash_password(req.password)
     now = time.time()
     cfg = get_config()
 
-    # Generate MuGA tenant key (UUID) for user-isolated file space
     import uuid
     muga_key = req.muga_key or str(uuid.uuid4())
 
-    # Insert user
-    cur = db.execute("""
-        INSERT INTO users (
-            username, email, display_name, password_hash, salt,
-            token_quota_monthly, token_used_monthly,
-            role, is_active, created_at, updated_at, last_login_at,
-            muga_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        req.username,
-        req.email,
-        req.display_name or req.username,
-        password_hash,
-        salt,
-        cfg.default_token_quota,
-        0,
-        req.role,
-        1,
-        now,
-        now,
-        now,
-        muga_key,
-    ))
-    db.commit()
-
-    user_id = cur.lastrowid
-    return _user_row_to_response(db.fetch_one("SELECT * FROM users WHERE id = ?", (user_id,)))
+    user_data = {
+        "username": req.username,
+        "email": req.email,
+        "display_name": req.display_name or req.username,
+        "password_hash": password_hash,
+        "salt": salt,
+        "token_quota_monthly": cfg.default_token_quota,
+        "token_used_monthly": 0,
+        "role": req.role,
+        "is_active": True,
+        "created_at": now,
+        "updated_at": now,
+        "last_login_at": now,
+        "muga_key": muga_key,
+    }
+    user_id = db.insert_user(user_data)
+    user_data["id"] = user_id
+    return _user_row_to_response(user_data)
 
 
 def get_user_by_username(username: str) -> Optional[UserResponse]:
     """Get user by username."""
     db = get_db()
-    row = db.fetch_one("SELECT * FROM users WHERE username = ?", (username,))
+    row = db.get_user_by_username(username)
     return _user_row_to_response(row) if row else None
 
 
@@ -162,77 +147,55 @@ get_user = get_user_by_username
 def get_user_by_id(user_id: int) -> Optional[UserResponse]:
     """Get user by ID."""
     db = get_db()
-    row = db.fetch_one("SELECT * FROM users WHERE id = ?", (user_id,))
+    row = db.get_user_by_id(user_id)
     return _user_row_to_response(row) if row else None
 
 
 def get_user_by_email(email: str) -> Optional[UserResponse]:
     """Get user by email."""
     db = get_db()
-    row = db.fetch_one("SELECT * FROM users WHERE email = ?", (email,))
+    row = db.get_user_by_email(email)
     return _user_row_to_response(row) if row else None
 
 
 def update_user(username: str, req: UserUpdate) -> UserResponse:
     """Update user profile."""
     db = get_db()
-    existing = db.fetch_one("SELECT * FROM users WHERE username = ?", (username,))
+    existing = db.get_user_by_username(username)
     if not existing:
         raise ValueError(f"User '{username}' not found")
 
-    updates = []
-    params = []
+    updates = {}
 
     if req.email is not None:
-        # Check email uniqueness
         if req.email != existing.get("email"):
-            email_exists = db.fetch_one(
-                "SELECT id FROM users WHERE email = ? AND username != ?",
-                (req.email, username)
-            )
-            if email_exists:
+            if db.email_exists(req.email):
                 raise ValueError(f"Email '{req.email}' already registered")
-        updates.append("email = ?")
-        params.append(req.email)
+        updates["email"] = req.email
 
     if req.display_name is not None:
-        updates.append("display_name = ?")
-        params.append(req.display_name)
+        updates["display_name"] = req.display_name
 
     if req.avatar_url is not None:
-        updates.append("avatar_url = ?")
-        params.append(req.avatar_url)
+        updates["avatar_url"] = req.avatar_url
 
     if req.password is not None:
         password_hash, salt = _hash_password(req.password)
-        updates.append("password_hash = ?")
-        updates.append("salt = ?")
-        params.extend([password_hash, salt])
+        updates["password_hash"] = password_hash
+        updates["salt"] = salt
 
     if req.role is not None:
-        updates.append("role = ?")
-        params.append(req.role)
+        updates["role"] = req.role
 
     if req.token_quota_monthly is not None:
-        updates.append("token_quota_monthly = ?")
-        params.append(req.token_quota_monthly)
+        updates["token_quota_monthly"] = req.token_quota_monthly
 
     if req.is_active is not None:
-        updates.append("is_active = ?")
-        params.append(1 if req.is_active else 0)
+        updates["is_active"] = req.is_active
 
-    if not updates:
-        return get_user_by_username(username)
-
-    updates.append("updated_at = ?")
-    params.append(time.time())
-    params.append(username)
-
-    db.execute(
-        f"UPDATE users SET {', '.join(updates)} WHERE username = ?",
-        tuple(params),
-    )
-    db.commit()
+    if updates:
+        updates["updated_at"] = time.time()
+        db.update_user(username, updates)
 
     return get_user_by_username(username)
 
@@ -240,24 +203,13 @@ def update_user(username: str, req: UserUpdate) -> UserResponse:
 def delete_user(username: str) -> bool:
     """Delete a user."""
     db = get_db()
-    existing = db.fetch_one("SELECT id FROM users WHERE username = ?", (username,))
-    if not existing:
-        return False
-
-    db.execute("DELETE FROM users WHERE username = ?", (username,))
-    db.commit()
-    return True
+    return db.delete_user(username)
 
 
 def list_users(page: int = 1, page_size: int = 20) -> UserListResponse:
     """List users with pagination."""
     db = get_db()
-    total = db.fetch_one("SELECT COUNT(*) as cnt FROM users")["cnt"]
-    offset = (page - 1) * page_size
-    rows = db.fetch_all(
-        "SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        (page_size, offset),
-    )
+    rows, total = db.list_users_page(page, page_size)
     users = [_user_row_to_response(r) for r in rows]
     return UserListResponse(users=users, total=total, page=page, page_size=page_size)
 
@@ -265,7 +217,7 @@ def list_users(page: int = 1, page_size: int = 20) -> UserListResponse:
 def authenticate(username: str, password: str) -> Optional[UserResponse]:
     """Authenticate user by username and password."""
     db = get_db()
-    row = db.fetch_one("SELECT * FROM users WHERE username = ?", (username,))
+    row = db.get_user_by_username(username)
     if not row:
         return None
 
@@ -274,11 +226,6 @@ def authenticate(username: str, password: str) -> Optional[UserResponse]:
     if not verify_password(password, stored_hash, salt):
         return None
 
-    # Update last login
-    db.execute(
-        "UPDATE users SET last_login_at = ? WHERE username = ?",
-        (time.time(), username),
-    )
-    db.commit()
+    db.update_user(username, {"last_login_at": time.time()})
 
     return _user_row_to_response(row)

@@ -42,6 +42,7 @@ import { useUser } from "../contexts/UserContext";
 import styles from "./index.module.less";
 import { useTheme } from "../contexts/ThemeContext";
 import { KEY_TO_PATH, DEFAULT_OPEN_KEYS } from "./constants";
+import { getAgentDisplayName } from "../utils/agentDisplayName";
 import {
   MENU_TO_PERMISSION,
 } from "../config/menuModules";
@@ -534,7 +535,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
                 style={{ width: "100%", marginBottom: 8 }}
                 options={agents.map((a) => ({
                   value: a.id,
-                  label: a.name || a.id,
+                  label: getAgentDisplayName(a, t),
                 }))}
                 placeholder={t("nav.selectAgent", "Select Agent")}
               />

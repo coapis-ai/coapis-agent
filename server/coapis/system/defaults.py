@@ -103,7 +103,7 @@ DEFAULT_ROLES: Dict[str, Dict[str, Any]] = {
         "modules": {
             "chat": {"read": True, "create": True, "update": True, "delete": False},
             "skills": {"read": True, "create": True, "update": True, "delete": False},
-            "models": {"read": False, "create": False, "update": False, "delete": False},
+            "models": {"read": True, "create": True, "update": True, "delete": True},
             "agents": {"read": True, "create": True, "update": False, "delete": False},
             "admin": {"read": False, "create": False, "update": False, "delete": False},
             "system": {"read": False, "create": False, "update": False, "delete": False},
@@ -231,6 +231,4 @@ DEFAULT_WORKSPACE_FILES: List[str] = [
 DEFAULT_ENV_VARS: Dict[str, str] = {
     "COAPIS_PORT": "8000",
     "COAPIS_WORKING_DIR": "/apps/ai/coapis",
-    "COAPIS_AUTH_ENABLED": "false",
-    "COAPIS_USER_SYSTEM_ENABLED": "false",
 }

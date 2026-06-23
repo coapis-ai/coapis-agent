@@ -380,33 +380,27 @@ async def get_public_available_models(request: Request) -> Dict[str, Any]:
     
     global_models = []
     for pi in provider_infos:
-        # 判断 Provider 是否可用：有 Key 或不需要 Key
-        has_key = bool(getattr(pi, 'api_key', ''))
+        # 与前端 RemoteProviderCard 一致的"可用"判断
+        models_list = list(pi.models or []) + list(pi.extra_models or [])
+        if not models_list:
+            continue
+        is_custom = getattr(pi, 'is_custom', False)
+        base_url = getattr(pi, 'base_url', '')
         require_key = getattr(pi, 'require_api_key', True)
-        is_available = has_key or not require_key
-        
-        # 只处理可用的 Provider
-        if not is_available:
+        has_key = bool(getattr(pi, 'api_key', ''))
+        is_configured = (
+            (is_custom and bool(base_url))
+            or (not require_key)
+            or (require_key and has_key)
+        )
+        if not is_configured:
             continue
         
         pid = getattr(pi, 'id', None) or (pi.get('id') if isinstance(pi, dict) else None)
         pname = getattr(pi, 'name', None) or (pi.get('name') if isinstance(pi, dict) else None)
         
-        # 从 ProviderInfo 的 models 字段获取模型列表
         seen_model_ids = set()
-        for m in (pi.models or []):
-            model_id = m.id if hasattr(m, 'id') else (m.get('id') if isinstance(m, dict) else '')
-            model_name = m.name if hasattr(m, 'name') else (m.get('name', model_id) if isinstance(m, dict) else model_id)
-            if model_id and model_id not in seen_model_ids:
-                seen_model_ids.add(model_id)
-                global_models.append({
-                    "id": model_id,
-                    "name": model_name,
-                    "provider_id": pid,
-                    "provider_name": pname,
-                })
-        # 也从 extra_models 获取（去重）
-        for m in (pi.extra_models or []):
+        for m in models_list:
             model_id = m.id if hasattr(m, 'id') else (m.get('id') if isinstance(m, dict) else '')
             model_name = m.name if hasattr(m, 'name') else (m.get('name', model_id) if isinstance(m, dict) else model_id)
             if model_id and model_id not in seen_model_ids:

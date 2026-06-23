@@ -13,10 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""User system middleware - optional quota checking and rate limiting.
-
-These middleware are no-ops when USER_SYSTEM_ENABLED=False,
-ensuring zero impact on existing functionality.
+"""User system middleware - quota checking and rate limiting.
 
 IMPORTANT: Uses @app.middleware("http") pattern to avoid BaseHTTPMiddleware
 thread-pool deadlock with SSE async generators.
@@ -178,14 +175,7 @@ def _should_skip(request: Request) -> bool:
 # ---------------------------------------------------------------------------
 
 def install_user_system_middleware(app) -> None:
-    """Install user system middleware (quota + rate limit).
-
-    These middleware are no-ops when USER_SYSTEM_ENABLED=False.
-    """
-    cfg = get_config()
-    if not cfg.enabled:
-        logger.info("User system disabled — skipping middleware")
-        return
+    """Install user system middleware (quota + rate limit)."""
 
     @app.middleware("http")
     async def user_system_middleware(request: Request, call_next):
@@ -216,7 +206,7 @@ def install_user_system_middleware(app) -> None:
                 )
 
         # ── Token quota check ──
-        if username and cfg.token_quota_hard_limit:
+        if username and get_config().token_quota_hard_limit:
             quota_ok = check_quota(username)
             if not quota_ok:
                 return JSONResponse(

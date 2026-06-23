@@ -458,9 +458,12 @@ class MultiAgentManager:
             if not agent_config.get("enabled", True):
                 continue
             workspace_dir = agent_config.get("workspace_dir")
-            # Priority: explicit username > path inference > None (global)
+            # Priority: explicit username > agent_id prefix > path inference > None (global)
             username = agent_config.get("username")
-            if username is None:
+            if not username and agent_id.startswith("user:"):
+                # Infer username from agent_id (e.g. "user:admin" → "admin")
+                username = agent_id.split(":", 1)[1]
+            if not username:
                 username = self._infer_username_from_workspace_dir(workspace_dir)
             is_global = (username is None)
             await self.create_agent(
@@ -473,6 +476,10 @@ class MultiAgentManager:
         if AGENTS_DIR.exists():
             for agent_dir in AGENTS_DIR.iterdir():
                 if agent_dir.is_dir() and agent_dir.name not in self._workspaces:
+                    # Skip user-specific agents (e.g. "user:admin") —
+                    # they should be created by user provisioning, not recovered as global
+                    if agent_dir.name.startswith("user:"):
+                        continue
                     logger.info(f"Recovering persisted global agent: {agent_dir.name}")
                     await self.create_agent(agent_dir.name, is_global=True)
 
@@ -730,7 +737,9 @@ class MultiAgentManager:
                 # Priority: explicit username in config > path inference > None (global)
                 ref = enabled_agents[agent_id]
                 username = getattr(ref, "username", None)
-                if username is None:
+                if not username and agent_id.startswith("user:"):
+                    username = agent_id.split(":", 1)[1]
+                if not username:
                     workspace_dir = getattr(ref, "workspace_dir", None)
                     username = self._infer_username_from_workspace_dir(workspace_dir)
 

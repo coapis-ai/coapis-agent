@@ -41,10 +41,6 @@ router = APIRouter(tags=["user-system/tokens"])
 @router.post("/tokens/record")
 async def record_token_usage_endpoint(req: TokenRecordRequest):
     """Record token usage for a user."""
-    cfg = get_config()
-    if not cfg.enabled:
-        return {"success": True, "skipped": True, "reason": "User system disabled"}
-
     try:
         record = record_token_usage(req)
     except ValueError as e:
@@ -103,7 +99,6 @@ async def get_token_config():
         "enabled": cfg.enabled,
         "default_monthly_quota": cfg.token_quota_l0,
         "token_quotas": cfg.token_quotas,
-        "local_model_free_tokens": cfg.local_model_free_tokens,
         "token_quota_hard_limit": cfg.token_quota_hard_limit,
     }
 

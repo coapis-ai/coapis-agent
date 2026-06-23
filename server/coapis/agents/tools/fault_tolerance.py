@@ -103,7 +103,7 @@ def _auto_fix(pattern: str) -> dict:
     fixes = {
         "disk_full": {"action": "clean_tmp", "cmd": "find /tmp -type f -mtime +1 -delete"},
         "permission": {"action": "fix_perms", "cmd": "chmod -R u+w ."},
-        "not_found": {"action": "create_dirs", "cmd": "mkdir -p workspaces/default/files"},
+        "not_found": {"action": "create_dirs", "cmd": "mkdir -p workspaces/global_default/files"},
     }
     if pattern in fixes:
         return {"pattern": pattern, "fix": fixes[pattern], "status": "applied", "note": "Fix prepared (execute via shell if needed)"}

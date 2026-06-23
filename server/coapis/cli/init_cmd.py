@@ -225,7 +225,7 @@ def init_cmd(
         click.echo("✓ Skill pool initialized")
 
     # Get default workspace path for subsequent operations
-    default_workspace = Path(f"{WORKING_DIR}/workspaces/default").expanduser()
+    default_workspace = Path(f"{WORKING_DIR}/workspaces/global_default").expanduser()
 
     # --- config.json ---
     write_config = True

@@ -16,7 +16,7 @@
 """User system module - configurable user management with tokens and quotas.
 
 This module is completely independent from existing CoApis functionality.
-It is disabled by default (USER_SYSTEM_ENABLED=False) and can be enabled via env var.
+The user system is always enabled in the open-source version.
 
 Simplified: no user levels, no points system.
 

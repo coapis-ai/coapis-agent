@@ -23,15 +23,13 @@ services:
 
   # ── 后端 API 服务 ──
   server:
-    image: coapis-server:latest
+    image: coapis-server:dev
     container_name: coapis-server-dev
     ports:
       - "4308:8000"
     volumes:
       # 运行数据（开发环境独立目录）
       - /apps/ai/coapis-dev:/apps/ai/coapis
-      # eaterclaw 数据（agent 配置、频道等）
-      - /apps/ai/eaterclaw:/apps/ai/eaterclaw
       # 源码热更新（开发模式）
       - ../server/coapis:/app/coapis
       # 前端构建产物
@@ -43,8 +41,6 @@ services:
     environment:
       - PYTHONPATH=/app
       - COAPIS_VERSION=${COAPIS_VERSION:-0.8.29-dev}
-      - COAPIS_AUTH_ENABLED=true
-      - COAPIS_USER_SYSTEM_ENABLED=true
       # 共享生产 Playwright（通过宿主机 4201 端口，browserless 认证）
       - BROWSER_CDP_URL=http://172.17.0.1:4201?token=coapis
       # 文件上传限制（与 .env.dev 同步）

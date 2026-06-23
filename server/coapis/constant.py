@@ -466,7 +466,6 @@ USERS_FILE = SYSTEM_DIR / "users.json"
 AUTH_FILE = SYSTEM_DIR / "auth.json"
 
 # Auth
-AUTH_ENABLED_ENV = "COAPIS_AUTH_ENABLED"
 TOKEN_EXPIRY_SECONDS = 7 * 24 * 3600  # 7 days default
 TOKEN_EXPIRY_MAX = 100 * 365 * 24 * 3600  # 100 years for permanent
 

@@ -85,13 +85,13 @@ def _ensure_admin_in_db(db: UserSystemDB, admin_username: str) -> int:
         from ...user_store import get_user
         store_user = get_user(admin_username)
         if store_user:
-            db.execute(
-                "INSERT OR IGNORE INTO users (username, email, display_name, role, is_active, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (admin_username, store_user.get("email"), store_user.get("display_name", admin_username),
-                 store_user.get("role", "admin"), 1, time.time(), time.time())
-            )
-            db.commit()
+            db.insert_user({
+                "username": admin_username,
+                "email": store_user.get("email"),
+                "display_name": store_user.get("display_name", admin_username),
+                "role": store_user.get("role", "admin"),
+                "is_active": 1,
+            })
             admin_user = db.get_user_by_username(admin_username)
             if admin_user:
                 logger.info(f"Synced admin user {admin_username} to DB (id={admin_user['id']})")
@@ -115,35 +115,17 @@ async def list_all_users(
 ) -> AdminUserListResponse:
     """列出所有用户."""
     db = UserSystemDB()
-    
-    conditions = []
-    params: List[Any] = []
-    
-    if search:
-        conditions.append("(username LIKE ? OR display_name LIKE ?)")
-        params.extend([f"%{search}%", f"%{search}%"])
-    
-    where = "WHERE " + " AND ".join(conditions) if conditions else ""
-    
-    # 总数
-    total_row = db.execute(f"SELECT COUNT(*) as total FROM users {where}", params).fetchone()
-    total = total_row["total"] if total_row else 0
-    
-    # 分页
-    offset = (page - 1) * page_size
-    rows = db.execute(
-        f"SELECT * FROM users {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        params + [page_size, offset],
-    ).fetchall()
-    
+
+    users, total = db.list_users_page(page=page, page_size=page_size, search=search)
+
     # 移除敏感字段
     safe_users = []
-    for r in rows:
-        safe_user = dict(r)
+    for u in users:
+        safe_user = dict(u)
         safe_user.pop("password_hash", None)
         safe_user.pop("salt", None)
         safe_users.append(safe_user)
-    
+
     return AdminUserListResponse(
         users=safe_users,
         total=total,
@@ -243,12 +225,11 @@ async def get_user_by_id(
 ) -> Dict[str, Any]:
     """获取用户详情."""
     db = UserSystemDB()
-    
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    user = db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    
-    # 软删除（排除 password_hash 和 salt）
+
     safe_user = dict(user)
     safe_user.pop("password_hash", None)
     safe_user.pop("salt", None)
@@ -269,39 +250,25 @@ async def update_user(
     """
     admin_username = getattr(request.state, "username", "anonymous")
     db = UserSystemDB()
-    
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    user = db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    
+
     username = user["username"]
-    updates = []
-    params = []
-    
+    update_data = {}
+
     if payload.role is not None:
-        updates.append("role = ?")
-        params.append(payload.role)
-    
+        update_data["role"] = payload.role
     if payload.display_name is not None:
-        updates.append("display_name = ?")
-        params.append(payload.display_name)
-    
+        update_data["display_name"] = payload.display_name
     if payload.token_quota_monthly is not None:
-        updates.append("token_quota_monthly = ?")
-        params.append(payload.token_quota_monthly)
-    
+        update_data["token_quota_monthly"] = payload.token_quota_monthly
     if payload.is_active is not None:
-        updates.append("is_active = ?")
-        params.append(int(payload.is_active))
-    
-    if updates:
-        updates.append("updated_at = ?")
-        params.append(time.time())
-        params.append(user_id)
-        
-        sql = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
-        db.execute(sql, params)
-        db.commit()
+        update_data["is_active"] = int(payload.is_active)
+
+    if update_data:
+        db.update_user_by_id(user_id, update_data)
         
         # ── 同步到 JSON user_store（认证系统依赖） ──
         if payload.role is not None:
@@ -374,37 +341,34 @@ async def delete_user(
     """
     admin_username = getattr(request.state, "username", "anonymous")
     db = UserSystemDB()
-    
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    user = db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    
+
     username = user["username"]
-    
+
     if body.backup:
         # 硬删除 - 先备份
         from ....constant import WORKING_DIR
         backup_dir = WORKING_DIR / "backups" / "users"
         backup_dir.mkdir(parents=True, exist_ok=True)
-        
+
         timestamp = int(time.time())
         backup_path = backup_dir / f"{username}_{timestamp}"
-        
-        # 备份用户工作区
+
         workspace_dir = WORKING_DIR / "workspaces" / username
         if workspace_dir.exists():
             shutil.copytree(workspace_dir, backup_path / "workspace")
             logger.info(f"Backed up workspace for {username} to {backup_path}")
-        
-        # 备份用户聊天记录
+
         chats_dir = WORKING_DIR / "workspaces" / username / "chat"
         if chats_dir.exists():
             shutil.copytree(chats_dir, backup_path / "chat", dirs_exist_ok=True)
-        
+
         # 从数据库删除
-        db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        db.commit()
-        
+        db.delete_user_by_id(user_id)
+
         # 从 JSON user_store 删除
         try:
             from ...user_store import _load_users, _save_users
@@ -415,13 +379,11 @@ async def delete_user(
                 logger.info(f"Removed {username} from JSON user_store")
         except Exception as e:
             logger.error(f"Failed to remove {username} from JSON user_store: {e}")
-        
-        # 删除用户工作区
+
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir)
             logger.info(f"Deleted workspace for {username}")
-        
-        # Audit log
+
         admin_user_id = _ensure_admin_in_db(db, admin_username)
         db.insert_audit_log(
             user_id=admin_user_id,
@@ -431,14 +393,12 @@ async def delete_user(
             resource_id=str(user_id),
             details={"username": username, "backup_path": str(backup_path)},
         )
-        
+
         return {"success": True, "user_id": user_id, "username": username, "backup_path": str(backup_path)}
     else:
         # 软删除 - 标记为非活跃
-        db.execute("UPDATE users SET is_active = 0, updated_at = ? WHERE id = ?", (time.time(), user_id))
-        db.commit()
-        
-        # Audit log
+        db.update_user_by_id(user_id, {"is_active": 0})
+
         admin_user_id = _ensure_admin_in_db(db, admin_username)
         db.insert_audit_log(
             user_id=admin_user_id,
@@ -447,7 +407,7 @@ async def delete_user(
             resource_type="user",
             resource_id=str(user_id),
         )
-        
+
         return {"success": True, "user_id": user_id}
 
 
@@ -460,20 +420,21 @@ async def reset_user_tokens(
     """重置用户 Token 用量."""
     admin_username = getattr(request.state, "username", "anonymous")
     db = UserSystemDB()
-    
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    user = db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    
-    db.execute("UPDATE users SET token_used_monthly = 0, updated_at = ? WHERE id = ?", (time.time(), user_id))
-    db.commit()
-    
-    db.insert_audit_log(
-        user_id=db.get_user_by_username(admin_username)["id"],
-        username=admin_username,
-        action="admin_reset_tokens",
-        resource_type="user",
-        resource_id=str(user_id),
-    )
-    
+
+    db.update_user_by_id(user_id, {"token_used_monthly": 0})
+
+    admin_user = db.get_user_by_username(admin_username)
+    if admin_user:
+        db.insert_audit_log(
+            user_id=admin_user["id"],
+            username=admin_username,
+            action="admin_reset_tokens",
+            resource_type="user",
+            resource_id=str(user_id),
+        )
+
     return {"success": True, "user_id": user_id}

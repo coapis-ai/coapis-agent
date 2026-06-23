@@ -15,7 +15,7 @@ services:
     ports:
       - "${COAPIS_SERVER_PORT:-4208}:8000"
     volumes:
-      - coapis-data:${COAPIS_WORKING_DIR:-/apps/ai/coapis}
+      - ${COAPIS_WORKING_DIR:-/apps/ai/coapis}:${COAPIS_WORKING_DIR:-/apps/ai/coapis}
       - ./volume/playwright:/app/volume/playwright:ro
     env_file:
       - .env
@@ -25,6 +25,7 @@ services:
       - BROWSER_CDP_URL=http://playwright:9223
     restart: unless-stopped
     networks:
+      - frontend
       - internal
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
@@ -82,7 +83,3 @@ networks:
     driver: bridge
   internal:
     internal: true
-
-volumes:
-  coapis-data:
-    driver: local

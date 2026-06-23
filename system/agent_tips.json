@@ -10,9 +10,10 @@
     "night": {"name": "深夜", "start": 23, "end": 6}
   },
   "weekdays": {
-    "workday": {"name": "工作日", "days": [1, 2, 3, 4, 5]},
-    "weekend": {"name": "周末", "days": [0, 6]}
+    "workday": {"name": "工作日", "days": [0, 1, 2, 3, 4]},
+    "weekend": {"name": "周末", "days": [5, 6]}
   },
+  "weekday_note": "days 使用 Python weekday() 约定：0=周一, 1=周二, ..., 6=周日。day_of_week 字段同理。",
   "categories": {
     "welcome": {
       "name": "欢迎/开场提示",
@@ -124,7 +125,7 @@
     {"id": 2, "text": "新的一天开始了！我昨晚没睡，一直在等你找我聊天。", "category": "welcome", "emoji": "🌅", "scene": "morning", "time_constraint": {"time_range": {"start": 6, "end": 12}, "weekday_type": null, "day_of_week": null}},
     {"id": 3, "text": "你好呀～我是跑在你们服务器上的那只蜜蜂🐝，数据不出门，越用越聪明。", "category": "welcome", "emoji": "🐝", "scene": "new_user", "time_constraint": null},
     {"id": 4, "text": "欢迎回来！我记性很好——上次你聊的项目、你的偏好、甚至你讨厌的格式，我都记得。", "category": "welcome", "emoji": "🧠", "scene": "returning_user", "time_constraint": null},
-    {"id": 5, "text": "周一好！我是你的外脑，不用充电、不喝咖啡、不会摸鱼——虽然摸鱼这个功能我还没开发。", "category": "welcome", "emoji": "☕", "scene": "monday", "time_constraint": {"time_range": null, "weekday_type": "workday", "day_of_week": 1}},
+    {"id": 5, "text": "周一好！我是你的外脑，不用充电、不喝咖啡、不会摸鱼——虽然摸鱼这个功能我还没开发。", "category": "welcome", "emoji": "☕", "scene": "monday", "time_constraint": {"time_range": null, "weekday_type": "workday", "day_of_week": 0}},
     {"id": 6, "text": "我有个四层记忆系统，简单说就是：短期记对话、长期记偏好、核心记性格、临时记草稿。比你前任靠谱多了。", "category": "memory", "emoji": "🧠", "scene": "any", "time_constraint": null},
     {"id": 7, "text": "聊过一次的事，下次不用再说第二遍。我的记性，比你手机相册的搜索功能还准。", "category": "memory", "emoji": "💡", "scene": "repeat_topic", "time_constraint": null},
     {"id": 8, "text": "你说过喜欢简洁风格？记住了。以后我写东西都会自动精简，除非你让我'多说点'。", "category": "memory", "emoji": "📝", "scene": "preference_set", "time_constraint": null},

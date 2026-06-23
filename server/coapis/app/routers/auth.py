@@ -150,7 +150,7 @@ async def login(req: LoginRequest):
 async def register(req: RegisterRequest, request: Request):
     """注册新用户。
 
-    注意：需要 COAPIS_AUTH_ENABLED=true 才能注册。
+    注意：多用户系统必须认证才能注册。
     首次注册的用户自动成为 admin。
     """
     if not is_auth_enabled():

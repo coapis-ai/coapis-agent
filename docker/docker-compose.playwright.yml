@@ -42,8 +42,6 @@ services:
     environment:
       - COAPIS_WORKING_DIR=/data
       - COAPIS_WORKSPACES_DIR=${COAPIS_WORKSPACES_DIR:-${COAPIS_WORKING_DIR}/workspaces}
-      - COAPIS_AUTH_ENABLED=true
-      - COAPIS_USER_SYSTEM_ENABLED=true
       - BROWSER_CDP_URL=http://playwright:3000
     depends_on:
       playwright:

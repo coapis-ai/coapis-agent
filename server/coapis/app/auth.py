@@ -20,7 +20,7 @@ Features:
 - JWT-like token generation (HMAC-SHA256)
 - Token verification and revocation
 - FastAPI middleware for request authentication
-- Auth enabled/disabled via COAPIS_AUTH_ENABLED env var
+- Auth is always enabled in the multi-user system.
 
 File: ~/.coapis/auth/auth.json (JWT secret + revoked tokens)
 """
@@ -43,7 +43,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..constant import (
-    SYSTEM_DIR, AUTH_FILE, AUTH_ENABLED_ENV,
+    SYSTEM_DIR, AUTH_FILE,
     TOKEN_EXPIRY_SECONDS, TOKEN_EXPIRY_MAX,
     PUBLIC_PATHS, PUBLIC_PREFIXES,
 )
@@ -130,9 +130,11 @@ def _save_auth_data(data: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def is_auth_enabled() -> bool:
-    """Check if authentication is enabled via environment variable."""
-    env_flag = os.environ.get(AUTH_ENABLED_ENV, "").strip().lower()
-    return env_flag in ("true", "1", "yes")
+    """Check if authentication is enabled.
+
+    Multi-user system always requires authentication.
+    """
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -493,19 +495,15 @@ def require_role(request: Request, role: str) -> dict:
 def auto_register_from_env() -> None:
     """Auto-register admin user from environment variables.
 
-    Called once during application startup.  If ``COAPIS_AUTH_ENABLED``
-    is truthy and both ``COAPIS_AUTH_USERNAME`` and ``COAPIS_AUTH_PASSWORD``
-    are set, the admin account is created automatically — useful for
-    Docker, Kubernetes, server-panel, and other automated deployments
-    where interactive web registration is not practical.
+    Called once during application startup.  If both ``COAPIS_AUTH_USERNAME``
+    and ``COAPIS_AUTH_PASSWORD`` are set, the admin account is created
+    automatically — useful for Docker, Kubernetes, server-panel, and other
+    automated deployments where interactive web registration is not practical.
 
     Skips silently when:
-    - authentication is not enabled
     - a user has already been registered
     - either env var is missing or empty
     """
-    if not is_auth_enabled():
-        return
     if has_registered_users():
         return
 

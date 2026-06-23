@@ -40,6 +40,7 @@ import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
+import GroupedResponseCard from "./components/GroupedResponseCard";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
 
@@ -1338,6 +1339,7 @@ export default function ChatPage() {
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
+        AgentScopeRuntimeResponseCard: GroupedResponseCard,
       },
       customToolRenderConfig: {
         ..._enhancedToolRenderConfig,

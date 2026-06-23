@@ -15,10 +15,8 @@
 
 """User system persistence layer - supports both SQLite and JSON file modes.
 
-When COAPIS_USER_SYSTEM_ENABLED=True: uses SQLite database (user_system.db)
-When COAPIS_USER_SYSTEM_ENABLED=False: uses JSON files (users.json, audit_logs.json)
-
-This allows open source version to run without database dependency.
+Open-source version uses JSON files (users.json, audit_logs.json).
+Enterprise version can override _is_database_enabled() to use SQLite.
 """
 from __future__ import annotations
 
@@ -47,9 +45,17 @@ _API_KEYS_JSON = SYSTEM_DIR / "api_keys.json"
 _POINTS_JSON = SYSTEM_DIR / "point_transactions.json"
 
 
+# Open-source version: always use JSON mode.
+# Enterprise version can override _is_database_enabled() to use SQLite.
+
+
 def _is_database_enabled() -> bool:
-    """Check if database mode is enabled."""
-    return os.environ.get("COAPIS_USER_SYSTEM_ENABLED", "false").lower() in ("true", "1", "yes")
+    """Check if database mode is enabled.
+
+    Open-source version always returns False (JSON mode).
+    Enterprise version can override this to return True for SQLite.
+    """
+    return False
 
 
 class UserSystemDB:
@@ -125,6 +131,11 @@ class UserSystemDB:
                 updated_at REAL DEFAULT (strftime('%s', 'now'))
             )
         """)
+
+        # ── Schema migration: add columns missing from earlier versions ──
+        self._add_column_if_not_exists("users", "role TEXT DEFAULT 'user'")
+        self._add_column_if_not_exists("users", "is_active INTEGER DEFAULT 1")
+        self._add_column_if_not_exists("users", "muga_key TEXT")
 
         # User settings table
         cur.execute("""
@@ -257,23 +268,52 @@ class UserSystemDB:
     # ==================== JSON File Methods ====================
     
     def _load_json(self, file_path: Path) -> List[Dict[str, Any]]:
-        """Load data from JSON file."""
+        """Load data from JSON file.
+
+        Supports two formats:
+        1. Plain list:  [{"username": "a", ...}, ...]
+        2. Wrapped dict: {"users": {"a": {...}, "b": {...}}}  → extracts values as list
+        """
         if not file_path.exists():
             return []
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data if isinstance(data, list) else []
+                if isinstance(data, list):
+                    return data
+                # Handle {"users": {"username": {...}}} wrapper
+                if isinstance(data, dict):
+                    for key in ("users", "items", "data"):
+                        if key in data and isinstance(data[key], dict):
+                            return list(data[key].values())
+                        if key in data and isinstance(data[key], list):
+                            return data[key]
+                return []
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load %s: %s", file_path, e)
             return []
 
     def _save_json(self, file_path: Path, data: List[Dict[str, Any]]) -> None:
-        """Save data to JSON file atomically."""
+        """Save data to JSON file atomically.
+
+        For users.json, writes wrapped format: {"users": {"username": {...}}}
+        to stay compatible with auth user_store.py.
+        """
         try:
+            # Detect wrapped-dict format by checking if original file uses it
+            save_data: Any = data
+            if file_path.name == "users.json" and data and isinstance(data, list):
+                # Convert list → {"users": {"username": {...}}}
+                wrapped = {}
+                for u in data:
+                    uname = u.get("username")
+                    if uname:
+                        wrapped[uname] = u
+                save_data = {"users": wrapped}
+
             tmp_file = file_path.with_suffix(".tmp")
             with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
             os.replace(tmp_file, file_path)
         except OSError as e:
             logger.warning("Failed to save %s: %s", file_path, e)
@@ -307,9 +347,11 @@ class UserSystemDB:
     def insert_user(self, user_data: Dict[str, Any]) -> int:
         """Insert a new user, return user ID."""
         if self._use_database:
+            now = time.time()
             cur = self.execute(
-                "INSERT INTO users (username, email, display_name, password_hash, salt, level, points, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO users (username, email, display_name, password_hash, salt, "
+                "level, points, role, is_active, muga_key, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_data.get("username"),
                     user_data.get("email"),
@@ -318,8 +360,11 @@ class UserSystemDB:
                     user_data.get("salt"),
                     user_data.get("level", 0),
                     user_data.get("points", 0),
-                    time.time(),
-                    time.time(),
+                    user_data.get("role", "user"),
+                    user_data.get("is_active", 1),
+                    user_data.get("muga_key"),
+                    now,
+                    now,
                 ),
             )
             self.commit()
@@ -368,6 +413,23 @@ class UserSystemDB:
             self._save_json(_USERS_JSON, users)
             return True
 
+    def count_users(self) -> int:
+        """Count all users."""
+        if self._use_database:
+            row = self.fetch_one("SELECT COUNT(*) as total FROM users")
+            return row["total"] if row else 0
+        with self._json_lock:
+            return len(self._load_json(_USERS_JSON))
+
+    def count_active_users(self) -> int:
+        """Count active users."""
+        if self._use_database:
+            row = self.fetch_one("SELECT COUNT(*) as total FROM users WHERE is_active = 1")
+            return row["total"] if row else 0
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            return sum(1 for u in users if u.get("is_active", True))
+
     def list_users(self) -> List[Dict[str, Any]]:
         """List all users."""
         if self._use_database:
@@ -377,6 +439,122 @@ class UserSystemDB:
         with self._json_lock:
             users = self._load_json(_USERS_JSON)
             return sorted(users, key=lambda x: x.get("created_at", 0), reverse=True)
+
+    def user_exists(self, username: str) -> bool:
+        """Check if a user with given username exists."""
+        return self.get_user_by_username(username) is not None
+
+    def email_exists(self, email: str) -> bool:
+        """Check if a user with given email exists."""
+        if not email:
+            return False
+        if self._use_database:
+            return self.fetch_one("SELECT 1 FROM users WHERE email = ?", (email,)) is not None
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            return any(u.get("email") == email for u in users)
+
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user by ID."""
+        if self._use_database:
+            return self.fetch_one("SELECT * FROM users WHERE id = ?", (user_id,))
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            return self._find_by_key(users, "id", user_id)
+
+    def update_user_by_id(self, user_id: int, update_data: Dict[str, Any]) -> bool:
+        """Update user by ID."""
+        if self._use_database:
+            set_parts = []
+            params = []
+            for key, value in update_data.items():
+                if key not in ("id", "username", "created_at"):
+                    set_parts.append(f"{key} = ?")
+                    params.append(value)
+            if not set_parts:
+                return False
+            set_parts.append("updated_at = ?")
+            params.append(time.time())
+            params.append(user_id)
+            self.execute(
+                f"UPDATE users SET {', '.join(set_parts)} WHERE id = ?",
+                tuple(params),
+            )
+            self.commit()
+            return True
+
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            for u in users:
+                if u.get("id") == user_id:
+                    for k, v in update_data.items():
+                        if k not in ("id", "username", "created_at"):
+                            u[k] = v
+                    u["updated_at"] = time.time()
+                    self._save_json(_USERS_JSON, users)
+                    return True
+            return False
+
+    def delete_user_by_id(self, user_id: int) -> bool:
+        """Delete user by ID."""
+        if self._use_database:
+            self.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            self.commit()
+            return True
+
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            new_users = [u for u in users if u.get("id") != user_id]
+            if len(new_users) < len(users):
+                self._save_json(_USERS_JSON, new_users)
+                return True
+            return False
+
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Get user by email."""
+        if not email:
+            return None
+        if self._use_database:
+            return self.fetch_one("SELECT * FROM users WHERE email = ?", (email,))
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            return next((u for u in users if u.get("email") == email), None)
+
+    def delete_user(self, username: str) -> bool:
+        """Delete a user by username."""
+        if self._use_database:
+            existing = self.fetch_one("SELECT 1 FROM users WHERE username = ?", (username,))
+            if not existing:
+                return False
+            self.execute("DELETE FROM users WHERE username = ?", (username,))
+            self.commit()
+            return True
+        with self._json_lock:
+            users = self._load_json(_USERS_JSON)
+            idx = self._find_index_by_key(users, "username", username)
+            if idx < 0:
+                return False
+            users.pop(idx)
+            self._save_json(_USERS_JSON, users)
+            return True
+
+    def list_users_page(self, page: int = 1, page_size: int = 20, search: Optional[str] = None) -> tuple:
+        """List users with pagination and optional search. Returns (users_list, total_count)."""
+        all_users = self.list_users()
+
+        # Apply search filter
+        if search:
+            q = search.lower()
+            all_users = [
+                u for u in all_users
+                if q in (u.get("username", "")).lower()
+                or q in (u.get("display_name", "")).lower()
+                or q in (u.get("email", "") or "").lower()
+            ]
+
+        total = len(all_users)
+        start = (page - 1) * page_size
+        return all_users[start:start + page_size], total
 
     def insert_audit_log(
         self,

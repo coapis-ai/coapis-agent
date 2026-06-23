@@ -30,6 +30,7 @@ Supports:
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -720,7 +721,7 @@ class Workspace:
             async def _stream(request_obj):
                 # Import Event classes
                 from agentscope_runtime.engine.schemas.agent_schemas import (
-                    Event, Message, TextContent, RunStatus, MessageType
+                    Event, Message, TextContent, DataContent, RunStatus, MessageType
                 )
                 import uuid as uuid_mod
 
@@ -1101,12 +1102,25 @@ class Workspace:
                                     yield ev
                             async for ev in _open_phase("plugin_call"):
                                 yield ev
-                            yield TextContent(
+                            # Send DataContent with tool metadata (name, args, call_id)
+                            # so frontend EnhancedToolCallCard / GroupedResponseCard
+                            # can read content[0].data.name correctly.
+                            _tool_meta = block.meta or {}
+                            _tool_data = {
+                                "name": _tool_meta.get("tool_name", "unknown"),
+                                "call_id": _tool_meta.get("call_id", str(uuid_mod.uuid4())),
+                                "arguments": json.dumps(
+                                    _tool_meta.get("tool_args", {}),
+                                    ensure_ascii=False,
+                                ) if isinstance(_tool_meta.get("tool_args"), dict)
+                                else str(_tool_meta.get("tool_args", "")),
+                            }
+                            yield DataContent(
                                 object="content",
                                 msg_id=_phase_msg_id,
-                                type="text",
+                                type="data",
                                 delta=True,
-                                text=rendered,
+                                data=_tool_data,
                             )
                             # Close plugin_call immediately (each tool call is a separate card)
                             async for ev in _close_phase():

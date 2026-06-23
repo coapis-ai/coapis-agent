@@ -71,6 +71,9 @@ docs/*.docx
 docs/*.js
 docs/package*.json
 
+# --- Technical docs (local reference) ---
+tech_docs/
+
 # --- PageIndex local copy ---
 PageIndex/
 

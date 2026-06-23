@@ -40,8 +40,8 @@ async def get_global_config(request: Request) -> Dict[str, Any]:
     cfg = load_config()
 
     return {
-        "user_system_enabled": os.environ.get("COAPIS_USER_SYSTEM_ENABLED", "true").lower() == "true",
-        "auth_enabled": os.environ.get("COAPIS_AUTH_ENABLED", "true").lower() == "true",
+        "user_system_enabled": True,
+        "auth_enabled": True,
         "cors_origins": os.environ.get("COAPIS_CORS_ORIGINS", "*"),
         "token_expiry": int(os.environ.get("COAPIS_TOKEN_EXPIRY_SECONDS", "86400")),
         "max_agents_per_user": int(os.environ.get("COAPIS_MAX_AGENTS_PER_USER", "10")),
