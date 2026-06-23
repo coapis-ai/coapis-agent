@@ -1211,10 +1211,17 @@ class WecomChannel(BaseChannel):
         accumulated_text: str = "",
     ) -> None:
         """Allocate a stream_id for this stream_type."""
+        logger.info(
+            "wecom on_streaming_start stream_type=%s has_frame=%s has_client=%s",
+            stream_type,
+            bool(send_meta.get("wecom_frame")),
+            bool(self._client),
+        )
         self._inject_processing_sid(request, send_meta)
 
         frame = send_meta.get("wecom_frame")
         if not frame or not self._client:
+            logger.warning("wecom on_streaming_start: no frame or client, skipping")
             return
 
         sids = self._get_streaming_sids(send_meta)

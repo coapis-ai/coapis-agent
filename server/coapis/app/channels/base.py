@@ -447,21 +447,43 @@ class BaseChannel(ABC):
 
         obj = getattr(event, "object", None)
         is_delta = getattr(event, "delta", False)
+        msg_id = getattr(event, "id", None) or getattr(event, "msg_id", None) or ""
+
+        logger.info(
+            "dispatch_streaming_event obj=%s delta=%s msg_id=%s type=%s status=%s streamable=%s",
+            obj, is_delta, msg_id[:20] if msg_id else "",
+            getattr(event, "type", ""), getattr(event, "status", ""),
+            self._STREAMABLE_TYPES,
+        )
 
         # --- message created → register msg_id → stream_type mapping ---
         # When workspace sends a Message event with type=REASONING/PLUGIN_CALL/MESSAGE,
         # we register the mapping so that subsequent TextContent deltas are routed correctly.
-        if obj == "message" and getattr(event, "status", None) != RunStatus.Completed:
+        if obj == "message" and getattr(event, "status", None) not in (RunStatus.Completed, RunStatus.Failed):
             msg_type = getattr(event, "type", None)
             msg_id = getattr(event, "id", None)
             if msg_id and msg_type:
                 # Map MessageType to stream_type
+                # REASONING → "reasoning" (filtered if filter_thinking)
+                # PLUGIN_CALL/PLUGIN_CALL_OUTPUT → "message" (display as regular text)
+                # MESSAGE → "message"
                 if msg_type == MessageType.REASONING:
-                    msg_id_to_stream_type[msg_id] = "reasoning"
-                elif msg_type == MessageType.PLUGIN_CALL:
-                    msg_id_to_stream_type[msg_id] = "tool_call"
+                    stream_type = "reasoning"
                 else:
-                    msg_id_to_stream_type[msg_id] = "message"
+                    stream_type = "message"
+                msg_id_to_stream_type[msg_id] = stream_type
+                # Initialize streaming_buffers for this msg_id
+                # (plugin_call messages may not have a content start event)
+                buffer_key = f"{stream_type}:{msg_id}"
+                if stream_type in self._STREAMABLE_TYPES and buffer_key not in streaming_buffers:
+                    if stream_type == "reasoning" and self._filter_thinking:
+                        pass  # Will be filtered when content delta arrives
+                    else:
+                        streaming_buffers[buffer_key] = ""
+                        await self.on_streaming_start(
+                            request, to_handle, event, send_meta,
+                            stream_type, accumulated_text="",
+                        )
 
         # --- content start (delta=False, first content chunk) ---
         if obj == "content" and not is_delta:
@@ -473,7 +495,8 @@ class BaseChannel(ABC):
                     msg_id_to_stream_type[msg_id] = stream_type
                 if stream_type == "reasoning" and self._filter_thinking:
                     return True
-                streaming_buffers[stream_type] = ""
+                buffer_key = f"{stream_type}:{msg_id}"
+                streaming_buffers[buffer_key] = ""
                 await self.on_streaming_start(
                     request, to_handle, event, send_meta,
                     stream_type, accumulated_text="",
@@ -486,31 +509,35 @@ class BaseChannel(ABC):
             stream_type = msg_id_to_stream_type.get(msg_id, "")
             if not stream_type or stream_type not in self._STREAMABLE_TYPES:
                 return False
-            if stream_type not in streaming_buffers:
+            buffer_key = f"{stream_type}:{msg_id}"
+            if buffer_key not in streaming_buffers:
                 return False
             if stream_type == "reasoning" and self._filter_thinking:
                 return True
             delta_text = getattr(event, "text", "") or ""
-            streaming_buffers[stream_type] += delta_text
+            streaming_buffers[buffer_key] += delta_text
             await self.on_streaming_delta(
                 request, to_handle, event, send_meta,
                 stream_type,
-                accumulated_text=streaming_buffers[stream_type],
+                accumulated_text=streaming_buffers[buffer_key],
             )
             return True
 
-        # --- message completed → finish all active streams ---
+        # --- message completed → finish stream for this msg_id ---
         if obj == "message" and getattr(event, "status", None) == RunStatus.Completed:
-            for st, accumulated in list(streaming_buffers.items()):
-                if st == "reasoning" and self._filter_thinking:
-                    streaming_buffers.pop(st, None)
-                    continue
-                await self.on_streaming_end(
-                    request, to_handle, event, send_meta,
-                    st, accumulated_text=accumulated,
-                )
-            streaming_buffers.clear()
-            msg_id_to_stream_type.clear()
+            msg_id = getattr(event, "id", None) or ""
+            stream_type = msg_id_to_stream_type.get(msg_id, "")
+            if stream_type:
+                buffer_key = f"{stream_type}:{msg_id}"
+                accumulated = streaming_buffers.pop(buffer_key, "")
+                if stream_type == "reasoning" and self._filter_thinking:
+                    pass  # Skip filtered reasoning
+                elif accumulated:
+                    await self.on_streaming_end(
+                        request, to_handle, event, send_meta,
+                        stream_type, accumulated_text=accumulated,
+                    )
+                msg_id_to_stream_type.pop(msg_id, None)
             return True
 
         return False
