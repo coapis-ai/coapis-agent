@@ -40,7 +40,7 @@ services:
       - ./volume/playwright:/app/volume/playwright:ro
     environment:
       - PYTHONPATH=/app
-      - COAPIS_VERSION=${COAPIS_VERSION:-0.8.29-dev}
+      - COAPIS_VERSION=${COAPIS_VERSION:-0.8.30-dev}
       # 共享生产 Playwright（通过宿主机 4201 端口，browserless 认证）
       - BROWSER_CDP_URL=http://172.17.0.1:4201?token=coapis
       # 文件上传限制（与 .env.dev 同步）
