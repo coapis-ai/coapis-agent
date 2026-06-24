@@ -1245,9 +1245,10 @@ class Workspace:
                     _session = self.runner.session if self.runner else None
                     # Use chat UUID as session key, matching the load side (spec.id).
                     # The console router sets chat_id via session_context before streaming.
+                    from coapis.config.session_context import get_current_chat_id as _get_chat_id
                     _chat_spec_id = (
                         getattr(request_obj, "chat_id", "")
-                        or _current_chat_id
+                        or _get_chat_id()
                         or chat_key
                     )
                     _chat_spec_user = self.username or user_id or "anonymous"

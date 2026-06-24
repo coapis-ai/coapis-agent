@@ -428,7 +428,7 @@ def agentscope_msg_to_message(
                     arguments = block.get("input")
 
                 call_data = FunctionCall(
-                    call_id=block.get("id"),
+                    call_id=block.get("id") or block.get("tool_use_id", ""),
                     name=block.get("name"),
                     arguments=arguments,
                 ).model_dump()
@@ -451,18 +451,22 @@ def agentscope_msg_to_message(
                 current_message.metadata = metadata
                 current_type = MessageType.PLUGIN_CALL_OUTPUT
 
-                if isinstance(block.get("output"), (dict, list)):
+                # Support both "output" and "content" fields (content is used by ToolResultBlock)
+                _raw_output = block.get("output") or block.get("content")
+                if isinstance(_raw_output, (dict, list)):
                     output = json.dumps(
-                        block.get("output"),
+                        _raw_output,
                         ensure_ascii=False,
                     )
+                elif isinstance(_raw_output, str):
+                    output = _raw_output
                 else:
-                    output = block.get("output")
+                    output = ""
 
                 output_data = FunctionCallOutput(
-                    call_id=block.get("id"),
+                    call_id=block.get("id") or block.get("tool_use_id", ""),
                     name=block.get("name"),
-                    output=output,
+                    output=output or "",
                 ).model_dump(exclude_none=True)
 
                 data_content = DataContent(
