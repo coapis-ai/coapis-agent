@@ -429,7 +429,33 @@ class AgentCore:
                     )
 
                     # Yield tool_result so workspace can persist it to session
-                    _tr_content = str(tool_result)[:4000] if not isinstance(tool_result, str) else tool_result[:4000]
+                    # Extract readable content from tool result (handle ToolResponse)
+                    try:
+                        if isinstance(tool_result, str):
+                            _tr_content = tool_result[:4000]
+                        else:
+                            from agentscope.tool import ToolResponse
+                            if isinstance(tool_result, ToolResponse):
+                                # Extract text blocks from ToolResponse
+                                _tr_parts = []
+                                for _blk in tool_result.content:
+                                    if hasattr(_blk, "model_dump"):
+                                        _blk_dict = _blk.model_dump()
+                                    elif hasattr(_blk, "dict"):
+                                        _blk_dict = _blk.dict()
+                                    else:
+                                        _blk_dict = {"type": "text", "text": str(_blk)}
+                                    if _blk_dict.get("type") == "text":
+                                        _tr_parts.append(_blk_dict.get("text", str(_blk_dict)))
+                                    else:
+                                        _tr_parts.append(json.dumps(_blk_dict, ensure_ascii=False))
+                                _tr_content = "\n".join(_tr_parts)[:4000] if _tr_parts else str(tool_result)[:4000]
+                            elif isinstance(tool_result, dict):
+                                _tr_content = json.dumps(tool_result, ensure_ascii=False, default=str)[:4000]
+                            else:
+                                _tr_content = str(tool_result)[:4000]
+                    except Exception:
+                        _tr_content = str(tool_result)[:4000]
                     yield ResponseBlock(
                         type="tool_result",
                         content=_tr_content,

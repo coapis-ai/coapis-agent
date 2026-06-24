@@ -1143,6 +1143,9 @@ class Workspace:
                                     delta=True,
                                     text=block.content,
                                 )
+                        elif block.type == "tool_result":
+                            # Tool result — only persist to session, never display as text
+                            pass
                         else:
                             # "text" or any other type
                             text_chunk = block.content
