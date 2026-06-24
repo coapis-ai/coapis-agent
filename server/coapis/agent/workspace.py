@@ -1053,123 +1053,130 @@ class Workspace:
                         content=[],
                     )
 
-                async for chunk in self.core.stream_chat(
-                    message=user_message,
-                    context=context,
-                    memory=self.memory,
-                    skills=self.skills,
-                    compressor=self.compressor,
-                    tools=self.tools,
-                    show_tool_details=_show_tool,
+                # ── Stream with CancelledError handling for /stop ──
+                _stopped = False
+                try:
+                    async for chunk in self.core.stream_chat(
+                        message=user_message,
+                        context=context,
+                        memory=self.memory,
+                        skills=self.skills,
+                        compressor=self.compressor,
+                        tools=self.tools,
+                        show_tool_details=_show_tool,
                 ):
-                    from ..agent.core import ResponseBlock
-                    if isinstance(chunk, ResponseBlock):
-                        block = chunk
-                    elif isinstance(chunk, tuple):
-                        text_legacy, is_reason_legacy = chunk
-                        block = ResponseBlock(
-                            type="thinking" if is_reason_legacy else "text",
-                            content=text_legacy,
-                        )
-                    else:
-                        block = ResponseBlock(type="text", content=str(chunk))
-
-                    if not block.content:
-                        continue
-
-                    # Collect raw block for session persistence
-                    _raw_blocks.append(block)
-
-                    # ── Render block via renderer ──
-                    if block.type == "thinking":
-                        full_reasoning.append(block.content)
-                        rendered = _renderer.render_thinking(block.content)
-                        if rendered:
-                            # Open reasoning phase
-                            async for ev in _open_phase("reasoning"):
-                                yield ev
-                            yield TextContent(
-                                object="content",
-                                msg_id=_phase_msg_id,
-                                type="text",
-                                delta=True,
-                                text=rendered,
+                        from ..agent.core import ResponseBlock
+                        if isinstance(chunk, ResponseBlock):
+                            block = chunk
+                        elif isinstance(chunk, tuple):
+                            text_legacy, is_reason_legacy = chunk
+                            block = ResponseBlock(
+                                type="thinking" if is_reason_legacy else "text",
+                                content=text_legacy,
                             )
-                    elif block.type == "tool_call":
-                        _tool_calls_seen += 1
-                        rendered = _renderer.render_tool_call(block.content, block.meta)
-                        if rendered:
-                            full_response.append(rendered)
-                            # Close reasoning phase if open, then open plugin_call
+                        else:
+                            block = ResponseBlock(type="text", content=str(chunk))
+
+                        if not block.content:
+                            continue
+
+                        # Collect raw block for session persistence
+                        _raw_blocks.append(block)
+
+                        # ── Render block via renderer ──
+                        if block.type == "thinking":
+                            full_reasoning.append(block.content)
+                            rendered = _renderer.render_thinking(block.content)
+                            if rendered:
+                                # Open reasoning phase
+                                async for ev in _open_phase("reasoning"):
+                                    yield ev
+                                yield TextContent(
+                                    object="content",
+                                    msg_id=_phase_msg_id,
+                                    type="text",
+                                    delta=True,
+                                    text=rendered,
+                                )
+                        elif block.type == "tool_call":
+                            _tool_calls_seen += 1
+                            rendered = _renderer.render_tool_call(block.content, block.meta)
+                            if rendered:
+                                full_response.append(rendered)
+                                # Close reasoning phase if open, then open plugin_call
+                                if _current_phase == "reasoning":
+                                    async for ev in _close_phase():
+                                        yield ev
+                                async for ev in _open_phase("plugin_call"):
+                                    yield ev
+                                # Send DataContent with tool metadata (name, args, call_id)
+                                # so frontend EnhancedToolCallCard / GroupedResponseCard
+                                # can read content[0].data.name correctly.
+                                _tool_meta = block.meta or {}
+                                _tool_data = {
+                                    "name": _tool_meta.get("tool_name", "unknown"),
+                                    "call_id": _tool_meta.get("call_id", str(uuid_mod.uuid4())),
+                                    "arguments": json.dumps(
+                                        _tool_meta.get("tool_args", {}),
+                                        ensure_ascii=False,
+                                    ) if isinstance(_tool_meta.get("tool_args"), dict)
+                                    else str(_tool_meta.get("tool_args", "")),
+                                }
+                                yield DataContent(
+                                    object="content",
+                                    msg_id=_phase_msg_id,
+                                    type="data",
+                                    delta=True,
+                                    data=_tool_data,
+                                )
+                                # Close plugin_call immediately (each tool call is a separate card)
+                                async for ev in _close_phase():
+                                    yield ev
+                        elif block.type == "newline":
+                            # Separator — include only if we have response content
+                            if full_response and _channel_name == "console":
+                                full_response.append(block.content)
+                                yield TextContent(
+                                    object="content",
+                                    msg_id=msg_id,
+                                    type="text",
+                                    delta=True,
+                                    text=block.content,
+                                )
+                        else:
+                            # "text" or any other type
+                            text_chunk = block.content
+                            # Extra safety: filter 🔧 lines for non-console even if core yielded them
+                            if not _show_tool and _channel_name != "console":
+                                lines = text_chunk.split("\n")
+                                filtered = [
+                                    l for l in lines
+                                    if not l.strip().startswith("🔧")
+                                    and not l.strip().startswith("\\uf013")
+                                ]
+                                text_chunk = "\n".join(filtered)
+                                if not text_chunk.strip():
+                                    continue
+
+                            full_response.append(text_chunk)
+                            # Close reasoning phase if still open
                             if _current_phase == "reasoning":
                                 async for ev in _close_phase():
                                     yield ev
-                            async for ev in _open_phase("plugin_call"):
+                            # Open message phase (text response)
+                            async for ev in _open_phase("message"):
                                 yield ev
-                            # Send DataContent with tool metadata (name, args, call_id)
-                            # so frontend EnhancedToolCallCard / GroupedResponseCard
-                            # can read content[0].data.name correctly.
-                            _tool_meta = block.meta or {}
-                            _tool_data = {
-                                "name": _tool_meta.get("tool_name", "unknown"),
-                                "call_id": _tool_meta.get("call_id", str(uuid_mod.uuid4())),
-                                "arguments": json.dumps(
-                                    _tool_meta.get("tool_args", {}),
-                                    ensure_ascii=False,
-                                ) if isinstance(_tool_meta.get("tool_args"), dict)
-                                else str(_tool_meta.get("tool_args", "")),
-                            }
-                            yield DataContent(
-                                object="content",
-                                msg_id=_phase_msg_id,
-                                type="data",
-                                delta=True,
-                                data=_tool_data,
-                            )
-                            # Close plugin_call immediately (each tool call is a separate card)
-                            async for ev in _close_phase():
-                                yield ev
-                    elif block.type == "newline":
-                        # Separator — include only if we have response content
-                        if full_response and _channel_name == "console":
-                            full_response.append(block.content)
                             yield TextContent(
                                 object="content",
-                                msg_id=msg_id,
+                                msg_id=_phase_msg_id,
                                 type="text",
                                 delta=True,
-                                text=block.content,
+                                text=text_chunk,
                             )
-                    else:
-                        # "text" or any other type
-                        text_chunk = block.content
-                        # Extra safety: filter 🔧 lines for non-console even if core yielded them
-                        if not _show_tool and _channel_name != "console":
-                            lines = text_chunk.split("\n")
-                            filtered = [
-                                l for l in lines
-                                if not l.strip().startswith("🔧")
-                                and not l.strip().startswith("\\uf013")
-                            ]
-                            text_chunk = "\n".join(filtered)
-                            if not text_chunk.strip():
-                                continue
 
-                        full_response.append(text_chunk)
-                        # Close reasoning phase if still open
-                        if _current_phase == "reasoning":
-                            async for ev in _close_phase():
-                                yield ev
-                        # Open message phase (text response)
-                        async for ev in _open_phase("message"):
-                            yield ev
-                        yield TextContent(
-                            object="content",
-                            msg_id=_phase_msg_id,
-                            type="text",
-                            delta=True,
-                            text=text_chunk,
-                        )
+                except asyncio.CancelledError:
+                    _stopped = True
+                    logger.info("Stream cancelled by user (/stop)")
 
                 # Build complete reply: reasoning + content (both parts must be preserved)
                 assistant_reply = "".join(full_reasoning) + "".join(full_response)
