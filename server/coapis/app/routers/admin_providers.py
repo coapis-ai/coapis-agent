@@ -365,44 +365,75 @@ async def test_provider_connection(
 async def get_public_available_models(request: Request) -> Dict[str, Any]:
     """获取可用模型池（所有用户可见）.
     
-    读取 admin 在模型管理中配置的 providers.json，
-    与 /admin/providers 使用同一套数据源。
+    从 ProviderManager 读取所有 provider 中可见的模型。
     """
     username = getattr(request.state, "username", "anonymous")
     
-    providers = _load_providers()
     global_models = []
     
-    for pid, pconfig in providers.items():
-        if not isinstance(pconfig, dict):
-            continue
-        if not pconfig.get("enabled", True):
-            continue
-        
-        models = pconfig.get("models", [])
-        visible = pconfig.get("visible_to_users", True)
-        visible_models = pconfig.get("visible_models", models if visible else [])
-        
-        pname = pconfig.get("name", pid)
-        
-        seen_model_ids = set()
-        for m in visible_models:
-            # models can be strings or dicts
-            if isinstance(m, str):
-                model_id = m
-                model_name = m
-            else:
-                model_id = m.get("id", "") if isinstance(m, dict) else str(m)
-                model_name = m.get("name", model_id) if isinstance(m, dict) else model_id
+    # Read from ProviderManager (the single source of truth)
+    try:
+        from ...providers.provider_manager import ProviderManager
+        pm = ProviderManager.get_instance()
+        provider_infos = await pm.list_provider_info()
+        for info in provider_infos:
+            info_dict = info.model_dump() if hasattr(info, "model_dump") else info
+            pid = info_dict.get("id", "")
+            pname = info_dict.get("name", pid)
+            if not info_dict.get("enabled", True):
+                continue
+            models = info_dict.get("models", []) or []
+            visible = info_dict.get("visible_to_users", True)
+            visible_models = info_dict.get("visible_models", models if visible else [])
             
-            if model_id and model_id not in seen_model_ids:
-                seen_model_ids.add(model_id)
-                global_models.append({
-                    "id": model_id,
-                    "name": model_name,
-                    "provider_id": pid,
-                    "provider_name": pname,
-                })
+            seen_model_ids = set()
+            for m in visible_models:
+                if isinstance(m, str):
+                    model_id = m
+                    model_name = m
+                elif isinstance(m, dict):
+                    model_id = m.get("id", "")
+                    model_name = m.get("name", model_id)
+                else:
+                    continue
+                
+                if model_id and model_id not in seen_model_ids:
+                    seen_model_ids.add(model_id)
+                    global_models.append({
+                        "id": model_id,
+                        "name": model_name,
+                        "provider_id": pid,
+                        "provider_name": pname,
+                    })
+    except Exception as e:
+        logger.warning("Failed to read models from ProviderManager: %s", e)
+        # Fallback to legacy providers.json
+        providers = _load_providers()
+        for pid, pconfig in providers.items():
+            if not isinstance(pconfig, dict):
+                continue
+            if not pconfig.get("enabled", True):
+                continue
+            models = pconfig.get("models", [])
+            visible = pconfig.get("visible_to_users", True)
+            visible_models = pconfig.get("visible_models", models if visible else [])
+            pname = pconfig.get("name", pid)
+            seen_model_ids = set()
+            for m in visible_models:
+                if isinstance(m, str):
+                    model_id = m
+                    model_name = m
+                else:
+                    model_id = m.get("id", "") if isinstance(m, dict) else str(m)
+                    model_name = m.get("name", model_id) if isinstance(m, dict) else model_id
+                if model_id and model_id not in seen_model_ids:
+                    seen_model_ids.add(model_id)
+                    global_models.append({
+                        "id": model_id,
+                        "name": model_name,
+                        "provider_id": pid,
+                        "provider_name": pname,
+                    })
     
     # 获取用户自定义模型（如果有）
     custom_providers = []

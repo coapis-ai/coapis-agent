@@ -1278,27 +1278,69 @@ class Workspace:
                             await _mem.add(_user_msg)
 
                         # Build assistant structured content from raw blocks
-                        _assistant_content = []
+                        # Step 1: Merge consecutive blocks of the same type into complete paragraphs
+                        _merged_blocks = []
+                        _buf_type = None   # current accumulating type
+                        _buf_content = ""  # accumulated content
                         for blk in _raw_blocks:
+                            btype = getattr(blk, "type", "text")
+                            content = getattr(blk, "content", "")
+                            # tool_use / tool_result are never merged
+                            if btype in ("tool_use", "tool_result"):
+                                # flush buffer first
+                                if _buf_content:
+                                    _merged_blocks.append(
+                                        ResponseBlock(type=_buf_type, content=_buf_content)
+                                    )
+                                    _buf_type = None
+                                    _buf_content = ""
+                                _merged_blocks.append(blk)
+                            elif btype == _buf_type:
+                                # same type → accumulate
+                                _buf_content += content
+                            else:
+                                # different type → flush old buffer, start new
+                                if _buf_content:
+                                    _merged_blocks.append(
+                                        ResponseBlock(type=_buf_type, content=_buf_content)
+                                    )
+                                _buf_type = btype
+                                _buf_content = content
+                        # flush remaining
+                        if _buf_content:
+                            _merged_blocks.append(
+                                ResponseBlock(type=_buf_type, content=_buf_content)
+                            )
+                        logger.info(
+                            "Unified persist: %d raw → %d blocks, session=%s",
+                            len(_raw_blocks), len(_merged_blocks), _chat_spec_id[:12],
+                        )
+
+                        # Step 2: Convert merged blocks to agentscope format
+                        # agentscope TypedDicts (ThinkingBlock etc.) have `type` as Required.
+                        _assistant_content = []
+                        for blk in _merged_blocks:
                             btype = getattr(blk, "type", "text")
                             content = getattr(blk, "content", "")
                             meta = getattr(blk, "meta", None) or {}
                             if btype == "thinking":
-                                _assistant_content.append(ThinkingBlock(text=content))
+                                _assistant_content.append(ThinkingBlock(type="thinking", thinking=content))
                             elif btype == "tool_call":
                                 _assistant_content.append(ToolUseBlock(
+                                    type="tool_use",
                                     id=meta.get("call_id", ""),
                                     name=meta.get("tool_name", "unknown"),
                                     input=meta.get("tool_args", {}),
                                 ))
                             elif btype == "tool_result":
                                 _assistant_content.append(ToolResultBlock(
-                                    tool_use_id=meta.get("tool_call_id", ""),
+                                    type="tool_result",
+                                    id=meta.get("tool_call_id", ""),
                                     name=meta.get("tool_name", ""),
-                                    content=[TextBlock(text=content)] if content else [],
+                                    output=[TextBlock(type="text", text=content)] if content else "",
                                 ))
                             elif btype == "text":
-                                _assistant_content.append(TextBlock(text=content))
+                                _assistant_content.append(TextBlock(type="text", text=content))
 
                         if _assistant_content:
                             _assistant_msg = Msg(
