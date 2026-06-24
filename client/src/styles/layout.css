@@ -923,6 +923,13 @@ html.dark-mode .qwenpaw-sender-content {
   /* Added padding for better content spacing - 2026-05-21 */
 }
 
+/* Chat page: no border/padding on mobile for full-width experience */
+.page-content:has(.chat-anywhere-chat-wrapper) {
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
 .table-container {
   height: 100%;
   overflow: hidden;

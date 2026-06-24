@@ -497,6 +497,35 @@ async def put_channel(
 
     # Set channel config in agent's config
     setattr(agent.config.channels, channel_name, channel_config)
+
+    # Merge with existing on-disk config to preserve other channels'
+    # configurations (e.g., wecom bot_id/secret) that may not be loaded
+    # into the in-memory agent.config.channels object.
+    # Without this, model_dump() would serialize all channels with default
+    # values, overwriting user-configured values for untouched channels.
+    agent_config_path = Path(agent.workspace_dir) / "agent.json"
+    if agent_config_path.exists():
+        try:
+            with open(agent_config_path, "r", encoding="utf-8") as f:
+                disk_data = json.load(f)
+            disk_channels = disk_data.get("channels", {})
+            # Update only the target channel in disk data
+            dumped = agent_config.model_dump(exclude_none=True)
+            disk_channels[channel_name] = dumped.get("channels", {}).get(channel_name, {})
+            disk_data["channels"] = disk_channels
+            # Write back merged data directly
+            with open(agent_config_path, "w", encoding="utf-8") as f:
+                json.dump(disk_data, f, ensure_ascii=False, indent=2)
+            # Invalidate cache
+            from ...config.utils import _agent_config_cache, _agent_config_lock
+            with _agent_config_lock:
+                if agent.agent_id in _agent_config_cache:
+                    del _agent_config_cache[agent.agent_id]
+            schedule_agent_reload(request, agent.agent_id)
+            return channel_config
+        except Exception:
+            pass  # Fallback to original save logic
+
     save_agent_config(agent.agent_id, agent.config)
 
     # Hot reload config (async, non-blocking)

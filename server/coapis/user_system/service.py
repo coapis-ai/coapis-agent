@@ -53,7 +53,11 @@ def _hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]
 
 
 def verify_password(password: str, stored_hash: str, salt: str) -> bool:
-    """Verify password against stored hash (constant-time comparison)."""
+    """Verify password against stored hash. Supports both bcrypt and SHA-256."""
+    if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
+        import bcrypt
+        return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+    # Legacy SHA-256
     h, _ = _hash_password(password, salt)
     return hmac.compare_digest(h, stored_hash)
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Flex, Tooltip, Popover } from 'antd';
-import { BgColorsOutlined } from '@ant-design/icons';
+import { Flex, Tooltip, Popover, Drawer } from 'antd';
+import { BgColorsOutlined, MenuOutlined } from '@ant-design/icons';
 import { IconButton } from '@agentscope-ai/design';
 import {
   SparkHistoryLine,
@@ -16,6 +16,8 @@ import { planApi } from '../../../../api/modules/plan';
 import sessionApi from '../../sessionApi';
 import { useAgentStore } from '../../../../stores/agentStore';
 import ModelSelector from '../../ModelSelector';
+import useIsMobile from '../../../../hooks/useIsMobile';
+import MobileNavMenu from '../../../../layouts/MobileNavMenu';
 import styles from './index.module.less';
 
 interface ChatSessionHeaderProps {
@@ -43,9 +45,11 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [planEnabled, setPlanEnabled] = useState(false);
   const { sessions, currentSessionId } = useChatAnywhereSessionsState();
   const { selectedAgent } = useAgentStore();
+  const isMobile = useIsMobile();
 
   // Direct new chat: go through sessionApi so sidebar updates immediately
   const handleNewChat = useCallback(async () => {
@@ -96,43 +100,55 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
   };
 
   return (
+    <>
     <div className={styles.sessionHeader}>
       {/* Left side: icons + title */}
       <Flex align="center" className={styles.headerLeft} gap={4}>
-        {/* Order: Display Settings → Search → History → New Chat → Title */}
-        <Tooltip title={t('chat.settings.title', { defaultValue: '聊天显示设置' })}>
+        {isMobile && (
           <IconButton
             bordered={false}
-            icon={<BgColorsOutlined />}
-            onClick={onShowDisplaySettings}
+            icon={<MenuOutlined />}
+            onClick={() => setDrawerOpen(true)}
           />
-        </Tooltip>
-        
-        {/* Search - dropdown below button */}
-        <Popover
-          content={
-            <ChatSearchDropdown
-              open={searchOpen}
-              onClose={() => setSearchOpen(false)}
-            />
-          }
-          open={searchOpen}
-          onOpenChange={handleSearchToggle}
-          placement="bottomLeft"
-          arrow={{ pointAtCenter: false }}
-          overlayInnerStyle={{ padding: 0 }}
-          overlayStyle={{ marginLeft: '-8px' }}
-        >
-          <Tooltip title={t('chat.searchTooltip')} mouseEnterDelay={0.5}>
-            <span>
+        )}
+        {!isMobile && (
+          <>
+            {/* Order: Display Settings → Search → History → New Chat → Title */}
+            <Tooltip title={t('chat.settings.title', { defaultValue: '聊天显示设置' })}>
               <IconButton
                 bordered={false}
-                icon={<SparkSearchLine />}
-                onClick={handleSearchToggle}
+                icon={<BgColorsOutlined />}
+                onClick={onShowDisplaySettings}
               />
-            </span>
-          </Tooltip>
-        </Popover>
+            </Tooltip>
+            
+            {/* Search - dropdown below button */}
+            <Popover
+              content={
+                <ChatSearchDropdown
+                  open={searchOpen}
+                  onClose={() => setSearchOpen(false)}
+                />
+              }
+              open={searchOpen}
+              onOpenChange={handleSearchToggle}
+              placement="bottomLeft"
+              arrow={{ pointAtCenter: false }}
+              overlayInnerStyle={{ padding: 0 }}
+              overlayStyle={{ marginLeft: '-8px' }}
+            >
+              <Tooltip title={t('chat.searchTooltip')} mouseEnterDelay={0.5}>
+                <span>
+                  <IconButton
+                    bordered={false}
+                    icon={<SparkSearchLine />}
+                    onClick={handleSearchToggle}
+                  />
+                </span>
+              </Tooltip>
+            </Popover>
+          </>
+        )}
         
         {/* History - dropdown below button */}
         <Popover
@@ -174,7 +190,7 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
       </Flex>
       {/* Right side: model selector + plan */}
       <Flex gap={4} align="center" className={styles.headerRight}>
-        <ModelSelector />
+        {!isMobile && <ModelSelector />}
         {planEnabled && (
           <Tooltip title={t('plan.title', 'Plan')} mouseEnterDelay={0.5}>
             <IconButton
@@ -189,6 +205,19 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
         )}
       </Flex>
     </div>
+    {/* Mobile navigation drawer */}
+    {isMobile && (
+      <Drawer
+        placement="left"
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        width={260}
+        styles={{ body: { padding: 0 } }}
+      >
+        <MobileNavMenu onNavigate={() => setDrawerOpen(false)} />
+      </Drawer>
+    )}
+    </>
   );
 };
 

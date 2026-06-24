@@ -262,7 +262,16 @@ class TaskTracker:
                                 q.put_nowait(sse)
                         event_count += 1
                 except asyncio.CancelledError:
-                    logger.debug("run cancelled run_key=%s", run_key)
+                    logger.info("[STOP] run cancelled run_key=%s, sending DONE to client", run_key)
+                    # Yield a terminal [DONE] event so the frontend knows
+                    # the stream has ended (prevents stuck "generating" state).
+                    done_sse = "data: [DONE]\n\n"
+                    tracker = tracker_ref()
+                    if tracker is not None:
+                        async with tracker.lock:
+                            run.buffer.append(done_sse)
+                            for q in run.queues:
+                                q.put_nowait(done_sse)
                 except Exception:
                     logger.exception("run error run_key=%s", run_key)
                     err_sse = (

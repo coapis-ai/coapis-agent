@@ -1,4 +1,4 @@
-import { Layout, Space, Badge, Spin } from "antd";
+import { Layout, Space, Badge, Spin, Drawer } from "antd";
 import { useTranslation } from "react-i18next";
 import { Button, Modal } from "@agentscope-ai/design";
 import styles from "./index.module.less";
@@ -11,7 +11,11 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CopyOutlined, CheckOutlined, TagOutlined } from "@ant-design/icons";
+import { CopyOutlined, CheckOutlined, TagOutlined, MenuOutlined } from "@ant-design/icons";
+
+// Mobile hook
+import useIsMobile from "../hooks/useIsMobile";
+import MobileNavMenu from "./MobileNavMenu";
 
 // New Header button components
 import HelpButton from "../components/HeaderButtons/HelpButton";
@@ -52,6 +56,8 @@ export default function Header() {
   const [version, setVersion] = useState<string>("");
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateMarkdown, setUpdateMarkdown] = useState<string>("");
+  const isMobile = useIsMobile();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     api
@@ -116,39 +122,63 @@ export default function Header() {
   return (
     <>
       <AntHeader className={styles.header}>
-        <div className={styles.logoWrapper}>
-          <img
-            src="/coapis_logo.png"
-            alt="CoApis"
-            className={styles.logoImg}
-          />
-          <div className={styles.logoDivider} />
-          {version && (
-            <Badge
-              dot={!!hasUpdate}
-              color="rgba(255, 157, 77, 1)"
-              offset={[4, 28]}
-            >
-              <span
-                className={`${styles.versionBadge} ${
-                  hasUpdate
-                    ? styles.versionBadgeClickable
-                    : styles.versionBadgeDefault
-                }`}
-                onClick={() => hasUpdate && handleOpenUpdateModal()}
+        {isMobile ? (
+          <div className={styles.mobileHeaderLeft}>
+            <Button
+              type="text"
+              icon={<MenuOutlined style={{ fontSize: 20 }} />}
+              onClick={() => setDrawerOpen(true)}
+              className={styles.hamburgerBtn}
+            />
+          </div>
+        ) : (
+          <div className={styles.logoWrapper}>
+            <img
+              src="/coapis_logo.png"
+              alt="CoApis"
+              className={styles.logoImg}
+            />
+            <div className={styles.logoDivider} />
+            {version && (
+              <Badge
+                dot={!!hasUpdate}
+                color="rgba(255, 157, 77, 1)"
+                offset={[4, 28]}
               >
-                v{version}
-              </span>
-            </Badge>
-          )}
-        </div>
-        <Space size="middle" align="center">
-          <HelpButton onClick={handleNavClick} />
-          <LanguageButton />
-          <SettingsButton />
-          <ProfileButton />
-        </Space>
+                <span
+                  className={`${styles.versionBadge} ${
+                    hasUpdate
+                      ? styles.versionBadgeClickable
+                      : styles.versionBadgeDefault
+                  }`}
+                  onClick={() => hasUpdate && handleOpenUpdateModal()}
+                >
+                  v{version}
+                </span>
+              </Badge>
+            )}
+          </div>
+        )}
+        {isMobile ? null : (
+          <Space size="middle" align="center">
+            <HelpButton onClick={handleNavClick} />
+            <LanguageButton />
+            <SettingsButton />
+            <ProfileButton />
+          </Space>
+        )}
       </AntHeader>
+
+      {/* Mobile navigation drawer */}
+      <Drawer
+        placement="left"
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        width={260}
+        styles={{ body: { padding: 0 } }}
+      >
+        <MobileNavMenu onNavigate={() => setDrawerOpen(false)} />
+      </Drawer>
 
       <Modal
         title={null}

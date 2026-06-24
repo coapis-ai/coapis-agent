@@ -519,3 +519,17 @@
     border-color: rgba(255, 77, 79, 0.3);
   }
 }
+
+/* ── Mobile adaptations ── */
+@media (max-width: 768px) {
+  .chatMessagesArea {
+    padding: 0 4px;
+  }
+
+  /* Hide chat header border for more space */
+  .chatSessionHeader {
+    border-bottom: none !important;
+    min-height: 36px !important;
+    padding: 4px 8px !important;
+  }
+}

@@ -418,19 +418,19 @@ class BaseChannel(ABC):
         pre-processing (e.g. send 'thinking' indicator)."""
 
     @staticmethod
-    def _resolve_stream_type(event: Any) -> str:
-        """Infer stream_type from an event object."""
-        obj = getattr(event, "object", None)
-        if obj != "content":
-            return ""
-        etype = getattr(event, "type", "")
-        if etype != "text":
-            return ""
-        # Distinguish reasoning from normal message by msg_id prefix
-        msg_id = getattr(event, "msg_id", "") or ""
-        if msg_id.startswith("reasoning"):
-            return "reasoning"
-        return "message"
+    def _resolve_stream_type(self, event: Any) -> str:
+        """Map event.type to a stream_type string.
+
+        Returns ``"reasoning"`` or ``"message"`` for streamable text,
+        or the raw type string (e.g. ``"plugin_call"``) otherwise.
+        """
+        msg_type = getattr(event, "type", None)
+        if msg_type is None:
+            return "message"
+        type_str = (
+            msg_type.value if hasattr(msg_type, "value") else str(msg_type)
+        )
+        return type_str
 
     async def _dispatch_streaming_event(
         self,
@@ -441,106 +441,112 @@ class BaseChannel(ABC):
         msg_id_to_stream_type: Dict[str, str],
         streaming_buffers: Dict[str, str],
     ) -> bool:
-        """Dispatch a streaming event to appropriate hook. Returns True if handled."""
-        if not self._STREAMABLE_TYPES:
-            return False
+        """Dispatch streaming hooks for reasoning / message events.
 
+        Returns *True* if the event was consumed by the streaming
+        path (so the caller should skip ``on_event_message_completed``).
+        Non-streamable types (e.g. ``plugin_call``) return *False*,
+        falling through to the normal non-streaming path.
+        """
         obj = getattr(event, "object", None)
-        is_delta = getattr(event, "delta", False)
-        msg_id = getattr(event, "id", None) or getattr(event, "msg_id", None) or ""
+        status = getattr(event, "status", None)
 
-        logger.info(
-            "dispatch_streaming_event obj=%s delta=%s msg_id=%s type=%s status=%s streamable=%s",
-            obj, is_delta, msg_id[:20] if msg_id else "",
-            getattr(event, "type", ""), getattr(event, "status", ""),
-            self._STREAMABLE_TYPES,
-        )
-
-        # --- message created → register msg_id → stream_type mapping ---
-        # When workspace sends a Message event with type=REASONING/PLUGIN_CALL/MESSAGE,
-        # we register the mapping so that subsequent TextContent deltas are routed correctly.
-        if obj == "message" and getattr(event, "status", None) not in (RunStatus.Completed, RunStatus.Failed):
-            msg_type = getattr(event, "type", None)
-            msg_id = getattr(event, "id", None)
-            if msg_id and msg_type:
-                # Map MessageType to stream_type
-                # REASONING → "reasoning" (filtered if filter_thinking)
-                # PLUGIN_CALL/PLUGIN_CALL_OUTPUT → "message" (display as regular text)
-                # MESSAGE → "message"
-                if msg_type == MessageType.REASONING:
-                    stream_type = "reasoning"
-                else:
-                    stream_type = "message"
-                msg_id_to_stream_type[msg_id] = stream_type
-                # Initialize streaming_buffers for this msg_id
-                # (plugin_call messages may not have a content start event)
-                buffer_key = f"{stream_type}:{msg_id}"
-                if stream_type in self._STREAMABLE_TYPES and buffer_key not in streaming_buffers:
-                    if stream_type == "reasoning" and self._filter_thinking:
-                        pass  # Will be filtered when content delta arrives
-                    else:
-                        streaming_buffers[buffer_key] = ""
-                        await self.on_streaming_start(
-                            request, to_handle, event, send_meta,
-                            stream_type, accumulated_text="",
-                        )
-
-        # --- content start (delta=False, first content chunk) ---
-        if obj == "content" and not is_delta:
-            msg_id = getattr(event, "msg_id", None) or ""
-            # Use mapping from Message event if available, otherwise fall back to heuristic
-            stream_type = msg_id_to_stream_type.get(msg_id, "") or self._resolve_stream_type(event)
-            if stream_type and stream_type in self._STREAMABLE_TYPES:
-                if msg_id:
-                    msg_id_to_stream_type[msg_id] = stream_type
-                if stream_type == "reasoning" and self._filter_thinking:
-                    return True
-                buffer_key = f"{stream_type}:{msg_id}"
-                streaming_buffers[buffer_key] = ""
-                await self.on_streaming_start(
-                    request, to_handle, event, send_meta,
-                    stream_type, accumulated_text="",
-                )
-                return True
-
-        # --- content delta (delta=True) ---
-        if obj == "content" and is_delta:
-            msg_id = getattr(event, "msg_id", None) or ""
-            stream_type = msg_id_to_stream_type.get(msg_id, "")
-            if not stream_type or stream_type not in self._STREAMABLE_TYPES:
-                return False
-            buffer_key = f"{stream_type}:{msg_id}"
-            if buffer_key not in streaming_buffers:
-                return False
-            if stream_type == "reasoning" and self._filter_thinking:
-                return True
-            delta_text = getattr(event, "text", "") or ""
-            streaming_buffers[buffer_key] += delta_text
-            await self.on_streaming_delta(
+        if obj == "message" and status == RunStatus.InProgress:
+            return await self._on_stream_msg_start(
                 request, to_handle, event, send_meta,
-                stream_type,
-                accumulated_text=streaming_buffers[buffer_key],
+                msg_id_to_stream_type, streaming_buffers,
             )
-            return True
-
-        # --- message completed → finish stream for this msg_id ---
-        if obj == "message" and getattr(event, "status", None) == RunStatus.Completed:
-            msg_id = getattr(event, "id", None) or ""
-            stream_type = msg_id_to_stream_type.get(msg_id, "")
-            if stream_type:
-                buffer_key = f"{stream_type}:{msg_id}"
-                accumulated = streaming_buffers.pop(buffer_key, "")
-                if stream_type == "reasoning" and self._filter_thinking:
-                    pass  # Skip filtered reasoning
-                elif accumulated:
-                    await self.on_streaming_end(
-                        request, to_handle, event, send_meta,
-                        stream_type, accumulated_text=accumulated,
-                    )
-                msg_id_to_stream_type.pop(msg_id, None)
-            return True
-
+        if obj == "content" and status == RunStatus.InProgress:
+            return await self._on_stream_content_delta(
+                request, to_handle, event, send_meta,
+                msg_id_to_stream_type, streaming_buffers,
+            )
+        if obj == "message" and status == RunStatus.Completed:
+            return await self._on_stream_msg_end(
+                request, to_handle, event, send_meta,
+                msg_id_to_stream_type, streaming_buffers,
+            )
         return False
+
+    async def _on_stream_msg_start(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        msg_id_to_stream_type: Dict[str, str],
+        streaming_buffers: Dict[str, str],
+    ) -> bool:
+        stream_type = self._resolve_stream_type(event)
+        if stream_type not in self._STREAMABLE_TYPES:
+            return False
+        msg_id = getattr(event, "id", None)
+        if msg_id:
+            msg_id_to_stream_type[msg_id] = stream_type
+        if stream_type == "reasoning" and self._filter_thinking:
+            return True
+        streaming_buffers[stream_type] = ""
+        await self.on_streaming_start(
+            request, to_handle, event, send_meta,
+            stream_type, accumulated_text="",
+        )
+        return True
+
+    async def _on_stream_content_delta(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        msg_id_to_stream_type: Dict[str, str],
+        streaming_buffers: Dict[str, str],
+    ) -> bool:
+        if not getattr(event, "delta", False):
+            return False
+        content_msg_id = getattr(event, "msg_id", None) or ""
+        stream_type = msg_id_to_stream_type.get(content_msg_id, "")
+        if not stream_type or stream_type not in self._STREAMABLE_TYPES:
+            return False
+        if stream_type not in streaming_buffers:
+            return False
+        if stream_type == "reasoning" and self._filter_thinking:
+            return True
+        delta_text = getattr(event, "text", "") or ""
+        streaming_buffers[stream_type] = (
+            streaming_buffers.get(stream_type, "") + delta_text
+        )
+        await self.on_streaming_delta(
+            request, to_handle, event, send_meta,
+            stream_type,
+            accumulated_text=streaming_buffers[stream_type],
+        )
+        return True
+
+    async def _on_stream_msg_end(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        msg_id_to_stream_type: Dict[str, str],
+        streaming_buffers: Dict[str, str],
+    ) -> bool:
+        stream_type = self._resolve_stream_type(event)
+        msg_id = getattr(event, "id", None)
+        if msg_id:
+            msg_id_to_stream_type.pop(msg_id, None)
+        if stream_type not in self._STREAMABLE_TYPES:
+            return False
+        if stream_type in streaming_buffers:
+            if stream_type == "reasoning" and self._filter_thinking:
+                streaming_buffers.pop(stream_type, None)
+                return True
+            accumulated = streaming_buffers.pop(stream_type, "")
+            await self.on_streaming_end(
+                request, to_handle, event, send_meta,
+                stream_type, accumulated_text=accumulated,
+            )
+        return True
 
     async def on_streaming_start(
         self,

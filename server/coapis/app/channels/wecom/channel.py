@@ -1211,20 +1211,15 @@ class WecomChannel(BaseChannel):
         accumulated_text: str = "",
     ) -> None:
         """Allocate a stream_id for this stream_type."""
-        logger.info(
-            "wecom on_streaming_start stream_type=%s has_frame=%s has_client=%s",
-            stream_type,
-            bool(send_meta.get("wecom_frame")),
-            bool(self._client),
-        )
+        # Inject processing_stream_id created in _before_consume_process
         self._inject_processing_sid(request, send_meta)
 
         frame = send_meta.get("wecom_frame")
         if not frame or not self._client:
-            logger.warning("wecom on_streaming_start: no frame or client, skipping")
             return
 
         sids = self._get_streaming_sids(send_meta)
+
         if not sids:
             stream_id = await self._cancel_keepalive_and_get_stream_id(
                 send_meta,
@@ -1278,73 +1273,32 @@ class WecomChannel(BaseChannel):
         stream_type: str,
         accumulated_text: str = "",
     ) -> None:
-        """Finalize the stream with finish=True, with block splitting."""
+        """Finish a single streaming segment without affecting others."""
         frame = send_meta.get("wecom_frame")
         sids = self._get_streaming_sids(send_meta)
         stream_id = sids.pop(stream_type, "")
-        if not frame or not self._client:
+        if not frame or not self._client or not stream_id:
             return
 
-        if not stream_id:
-            return
-
-        display_text = accumulated_text
         prefix = self.bot_prefix or ""
+        display_text = accumulated_text
         if prefix and display_text:
             display_text = f"{prefix}  {display_text}"
 
-        # Format markdown tables for WeCom compatibility
         display_text = format_markdown_tables(display_text)
 
-        # ── Split by markdown blocks (##, ###, ---) ──
-        blocks = _split_markdown_blocks(display_text)
-
-        if len(blocks) <= 1:
-            # Single block — original behavior
-            try:
-                await self._client.reply_stream(
-                    frame,
-                    stream_id=stream_id,
-                    content=display_text,
-                    finish=True,
-                )
-            except Exception:
-                logger.debug(
-                    "wecom on_streaming_end failed stream_id=%s",
-                    stream_id[:20],
-                )
-        else:
-            # Multiple blocks — send first via stream, rest as separate messages
-            chatid = (
-                send_meta.get("wecom_chatid")
-                or self._parse_chatid_from_handle(to_handle)
-                or ""
+        try:
+            await self._client.reply_stream(
+                frame,
+                stream_id=stream_id,
+                content=display_text,
+                finish=True,
             )
-            try:
-                # Finalize stream with first block
-                await self._client.reply_stream(
-                    frame,
-                    stream_id=stream_id,
-                    content=blocks[0],
-                    finish=True,
-                )
-                # Send remaining blocks as separate messages
-                for block in blocks[1:]:
-                    if not block.strip():
-                        continue
-                    if chatid:
-                        await self._client.send_message(
-                            chatid,
-                            {
-                                "msgtype": "markdown",
-                                "markdown": {"content": block},
-                            },
-                        )
-            except Exception:
-                logger.debug(
-                    "wecom on_streaming_end split send failed stream_id=%s",
-                    stream_id[:20],
-                )
+        except Exception:
+            logger.debug(
+                "wecom streaming end failed stream_id=%s",
+                stream_id[:20],
+            )
 
     async def send_content_parts(  # pylint: disable=too-many-locals
         self,

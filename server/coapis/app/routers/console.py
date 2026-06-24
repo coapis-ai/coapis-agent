@@ -216,6 +216,8 @@ async def console_chat(
     )
 
     # ── Get console channel ──
+    if workspace.channel_manager is None:
+        await workspace.ensure_channel_manager()
     console_channel = workspace.channel_manager.get_channel("console")
     if console_channel is None:
         raise HTTPException(

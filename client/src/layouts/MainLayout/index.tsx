@@ -4,6 +4,7 @@ import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
+import useIsMobile from "../../hooks/useIsMobile";
 import ConsolePollService from "../../components/ConsolePollService";
 import { ChunkErrorBoundary } from "../../components/ChunkErrorBoundary";
 import { lazyImportWithRetry } from "../../utils/lazyWithRetry";
@@ -85,6 +86,7 @@ export default function MainLayout() {
   const location = useLocation();
   const currentPath = location.pathname;
   const { pluginRoutes } = usePlugins();
+  const isMobile = useIsMobile();
 
   // Resolve selected key: check static routes first, then plugin routes
   let selectedKey = pathToKey[currentPath] || "";
@@ -105,10 +107,10 @@ export default function MainLayout() {
 
   return (
     <Layout className={styles.mainLayout}>
-      <Header />
-      <Layout>
-        <Sidebar selectedKey={selectedKey} />
-        <Content className="page-container">
+      {!(isMobile && isChatRoute) && <Header />}
+      <Layout style={isMobile ? { flexDirection: "column" } : undefined}>
+        {!isMobile && <Sidebar selectedKey={selectedKey} />}
+        <Content className="page-container" style={isMobile ? { width: "100%" } : undefined}>
           <ConsolePollService />
           <div className="page-content">
             {/* Chat: always mounted, hidden when not active */}

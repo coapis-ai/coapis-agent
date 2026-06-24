@@ -1472,6 +1472,51 @@ class Workspace:
             self._active_chats[chat_key] = ChatContext(chat_id=chat_id)
         return self._active_chats[chat_key]
 
+    async def ensure_channel_manager(self) -> None:
+        """Lazily initialize channel_manager if not yet created."""
+        if self.channel_manager is not None:
+            return
+        # Create ConsoleChannel + additional channels from config
+        from ..app.channels.console import ConsoleChannel
+        from ..app.channels.manager import ChannelManager
+        console_channel = ConsoleChannel(
+            process=None,
+            show_tool_details=True,
+            filter_tool_messages=False,
+            filter_thinking=True,
+        )
+        console_channel._workspace = self
+        channels_list = [console_channel]
+        agent_channels = self._config.get("channels", {}) if isinstance(self._config, dict) else {}
+        for channel_key, channel_cfg in agent_channels.items():
+            if channel_key == "console" or not isinstance(channel_cfg, dict):
+                continue
+            if not channel_cfg.get("enabled", False):
+                continue
+            from ..app.channels.registry import channel_registry as registry
+            channel_cls = registry.get(channel_key)
+            if not channel_cls or not hasattr(channel_cls, "from_config"):
+                continue
+            try:
+                channel_config_obj = type("ChannelConfig", (), channel_cfg)()
+                ch = channel_cls.from_config(
+                    process=None,
+                    config=channel_config_obj,
+                    show_tool_details=channel_cfg.get("show_tool_details", True),
+                    filter_tool_messages=channel_cfg.get("filter_tool_messages", False),
+                    filter_thinking=channel_cfg.get("filter_thinking", True),
+                    workspace_dir=self.workspace_dir,
+                )
+                ch._workspace = self
+                channels_list.append(ch)
+            except Exception:
+                pass
+        self.channel_manager = ChannelManager(channels_list)
+        try:
+            await self.channel_manager.start()
+        except Exception:
+            pass
+
     def get_info(self) -> Dict[str, Any]:
         """Get workspace information."""
         return {

@@ -172,7 +172,7 @@ DEFAULT_PERMISSIONS: Dict[str, Any] = {
     "description": "CoApis permission system — CRUD matrix format.",
     "roles": DEFAULT_ROLES,
     "user_overrides": {},
-    "module_definitions": {
+    "modules": {
         "chat": {"name": "聊天", "description": "AI 对话功能"},
         "skills": {"name": "技能", "description": "技能管理"},
         "models": {"name": "模型", "description": "模型配置"},

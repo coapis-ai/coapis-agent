@@ -647,7 +647,9 @@ async def list_skills(request: Request) -> list[SkillSpec]:
     workspace_dir = await _request_workspace_dir(request)
     # Ensure global defaults are synced before listing
     ensure_skills_initialized(workspace_dir)
-    return _build_workspace_skill_specs(workspace_dir)
+    all_skills = _build_workspace_skill_specs(workspace_dir)
+    # "我的技能"只显示用户创建/导入的技能，不显示全局默认技能
+    return [s for s in all_skills if s.source != "global"]
 
 
 @router.post("/refresh")
@@ -656,7 +658,9 @@ async def refresh_skills(request: Request) -> list[SkillSpec]:
     """Force reconcile and return updated workspace skill list."""
     workspace_dir = await _request_workspace_dir(request)
     reconcile_workspace_manifest(workspace_dir)
-    return _build_workspace_skill_specs(workspace_dir)
+    all_skills = _build_workspace_skill_specs(workspace_dir)
+    # "我的技能"只显示用户创建/导入的技能，不显示全局默认技能
+    return [s for s in all_skills if s.source != "global"]
 
 
 @router.get("/hub/search")

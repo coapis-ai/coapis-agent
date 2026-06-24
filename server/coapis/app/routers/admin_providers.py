@@ -365,44 +365,36 @@ async def test_provider_connection(
 async def get_public_available_models(request: Request) -> Dict[str, Any]:
     """获取可用模型池（所有用户可见）.
     
-    只返回真正可用的 Provider：已配置 API Key（或不需要 Key）且有模型。
+    读取 admin 在模型管理中配置的 providers.json，
+    与 /admin/providers 使用同一套数据源。
     """
-    from ...providers.provider_manager import ProviderManager
-    
     username = getattr(request.state, "username", "anonymous")
     
-    # 从 ProviderManager 获取全局模型
-    manager = getattr(request.app.state, "provider_manager", None)
-    if manager is None:
-        manager = ProviderManager.get_instance()
-    
-    provider_infos = await manager.list_provider_info()
-    
+    providers = _load_providers()
     global_models = []
-    for pi in provider_infos:
-        # 与前端 RemoteProviderCard 一致的"可用"判断
-        models_list = list(pi.models or []) + list(pi.extra_models or [])
-        if not models_list:
+    
+    for pid, pconfig in providers.items():
+        if not isinstance(pconfig, dict):
             continue
-        is_custom = getattr(pi, 'is_custom', False)
-        base_url = getattr(pi, 'base_url', '')
-        require_key = getattr(pi, 'require_api_key', True)
-        has_key = bool(getattr(pi, 'api_key', ''))
-        is_configured = (
-            (is_custom and bool(base_url))
-            or (not require_key)
-            or (require_key and has_key)
-        )
-        if not is_configured:
+        if not pconfig.get("enabled", True):
             continue
         
-        pid = getattr(pi, 'id', None) or (pi.get('id') if isinstance(pi, dict) else None)
-        pname = getattr(pi, 'name', None) or (pi.get('name') if isinstance(pi, dict) else None)
+        models = pconfig.get("models", [])
+        visible = pconfig.get("visible_to_users", True)
+        visible_models = pconfig.get("visible_models", models if visible else [])
+        
+        pname = pconfig.get("name", pid)
         
         seen_model_ids = set()
-        for m in models_list:
-            model_id = m.id if hasattr(m, 'id') else (m.get('id') if isinstance(m, dict) else '')
-            model_name = m.name if hasattr(m, 'name') else (m.get('name', model_id) if isinstance(m, dict) else model_id)
+        for m in visible_models:
+            # models can be strings or dicts
+            if isinstance(m, str):
+                model_id = m
+                model_name = m
+            else:
+                model_id = m.get("id", "") if isinstance(m, dict) else str(m)
+                model_name = m.get("name", model_id) if isinstance(m, dict) else model_id
+            
             if model_id and model_id not in seen_model_ids:
                 seen_model_ids.add(model_id)
                 global_models.append({

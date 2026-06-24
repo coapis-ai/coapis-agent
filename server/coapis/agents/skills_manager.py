@@ -563,6 +563,9 @@ def _mutate_json(
 ) -> _RegistryResult:
     with _file_write_lock(_lock_path_for(path)):
         payload = _read_json_unlocked(path, default)
+        # Guard: old manifests may store "skills" as a list; normalise to dict
+        if isinstance(payload.get("skills"), list):
+            payload["skills"] = {}
         result = mutator(payload)
         if result is not False:
             _write_json_atomic(path, payload)
@@ -1467,6 +1470,9 @@ def reconcile_pool_manifest() -> dict[str, Any]:
     def _update(payload: dict[str, Any]) -> dict[str, Any]:
         payload.setdefault("skills", {})
         payload.setdefault("builtin_skill_names", [])
+        # Guard: old manifests may store skills as a list; normalise to dict
+        if isinstance(payload["skills"], list):
+            payload["skills"] = {}
         skills = payload["skills"]
 
         discovered = {
@@ -1555,6 +1561,9 @@ def reconcile_workspace_manifest(workspace_dir: Path) -> dict[str, Any]:
 
     def _update(payload: dict[str, Any]) -> dict[str, Any]:
         payload.setdefault("skills", {})
+        # Guard: old manifests may store skills as a list; normalise to dict
+        if isinstance(payload["skills"], list):
+            payload["skills"] = {}
         skills = payload["skills"]
 
         discovered = {
@@ -1675,7 +1684,11 @@ def _read_json_mtime_cached(
     try:
         mtime_ns = os.stat(path).st_mtime_ns
         text = _read_file_text_cached(str(path), mtime_ns)
-        return json.loads(text)
+        data = json.loads(text)
+        # Guard: old manifests may store "skills" as a list; normalise to dict
+        if isinstance(data.get("skills"), list):
+            data["skills"] = {}
+        return data
     except json.JSONDecodeError:
         logger.warning("Malformed JSON in %s, resetting to default", path)
         return json.loads(json.dumps(default))
@@ -1864,6 +1877,10 @@ def _sync_global_defaults(workspace_dir: Path) -> None:
 
     def _inject(payload: dict[str, Any]) -> dict[str, Any]:
         skills = payload.setdefault("skills", {})
+        # Guard: old manifests may store skills as a list; normalise to dict
+        if isinstance(skills, list):
+            payload["skills"] = {}
+            skills = payload["skills"]
         injected = 0
         for skill_name, global_entry in defaults.items():
             if skill_name in skills:

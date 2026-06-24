@@ -26,7 +26,6 @@ function SkillsPage() {
     hasMore,
     sentinelRef,
     poolSkills,
-    groupedSkills,
     allTags,
     sortedSkills,
     conflictRenameModal,
@@ -72,7 +71,6 @@ function SkillsPage() {
     refreshSkills,
     hardRefresh,
     cancelImport,
-    getCategoryDisplay,
     categoryOptions,
     refreshCategories,
   } = useSkillsPage();
@@ -164,64 +162,40 @@ function SkillsPage() {
                     </span>
                   </div>
                 ) : viewMode === "card" ? (
-                  <div>
-                    {groupedSkills.map((group) => (
-                      <div key={group.category || "uncategorized"}>
-                        <div className={styles.categoryHeader}>
-                          <span className={styles.categoryTitle}>
-                            {getCategoryDisplay(group.category)}
-                          </span>
-                          <span className={styles.categoryCount}>{group.skills.length}</span>
-                        </div>
-                        <div className={styles.skillsGrid}>
-                          {group.skills.map((skill) => (
-                            <SkillCard
-                              key={skill.name}
-                              skill={skill}
-                              selected={
-                                batchModeEnabled ? selectedSkills.has(skill.name) : undefined
-                              }
-                              onSelect={() => toggleSelect(skill.name)}
-                              onClick={() => handleEdit(skill)}
-                              onMouseEnter={() => {}}
-                              onMouseLeave={() => {}}
-                              onToggleEnabled={(e) => handleToggleEnabled(skill, e)}
-                              onDelete={(e) => handleDelete(skill, e)}
-                            />
-                          ))}
-                        </div>
-                      </div>
+                  <div className={styles.skillsGrid}>
+                    {sortedSkills.map((skill) => (
+                      <SkillCard
+                        key={skill.name}
+                        skill={skill}
+                        selected={
+                          batchModeEnabled ? selectedSkills.has(skill.name) : undefined
+                        }
+                        onSelect={() => toggleSelect(skill.name)}
+                        onClick={() => handleEdit(skill)}
+                        onMouseEnter={() => {}}
+                        onMouseLeave={() => {}}
+                        onToggleEnabled={(e) => handleToggleEnabled(skill, e)}
+                        onDelete={(e) => handleDelete(skill, e)}
+                      />
                     ))}
                     {hasMore && <div ref={sentinelRef} style={{ height: 1 }} />}
                   </div>
                 ) : (
-                  <div>
-                    {groupedSkills.map((group) => (
-                      <div key={group.category || "uncategorized"}>
-                        <div className={styles.categoryHeader}>
-                          <span className={styles.categoryTitle}>
-                            {getCategoryDisplay(group.category)}
-                          </span>
-                          <span className={styles.categoryCount}>{group.skills.length}</span>
-                        </div>
-                        <div className={styles.skillsList}>
-                          {group.skills.map((skill) => (
-                            <SkillListItem
-                              key={skill.name}
-                              skill={skill}
-                              batchModeEnabled={batchModeEnabled}
-                              isSelected={selectedSkills.has(skill.name)}
-                              onSelect={() => toggleSelect(skill.name)}
-                              onClick={() => handleEdit(skill)}
-                              onToggleEnabled={async () => {
-                                await toggleEnabled(skill);
-                                await refreshSkills();
-                              }}
-                              onDelete={() => handleDelete(skill)}
-                            />
-                          ))}
-                        </div>
-                      </div>
+                  <div className={styles.skillsList}>
+                    {sortedSkills.map((skill) => (
+                      <SkillListItem
+                        key={skill.name}
+                        skill={skill}
+                        batchModeEnabled={batchModeEnabled}
+                        isSelected={selectedSkills.has(skill.name)}
+                        onSelect={() => toggleSelect(skill.name)}
+                        onClick={() => handleEdit(skill)}
+                        onToggleEnabled={async () => {
+                          await toggleEnabled(skill);
+                          await refreshSkills();
+                        }}
+                        onDelete={() => handleDelete(skill)}
+                      />
                     ))}
                     {hasMore && <div ref={sentinelRef} style={{ height: 1 }} />}
                   </div>

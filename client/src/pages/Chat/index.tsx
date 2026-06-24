@@ -22,6 +22,7 @@ import { buildAuthHeaders } from "../../api/authHeaders";
 import { providerApi } from "../../api/modules/provider";
 import type { ProviderInfo, ModelInfo } from "../../api/types";
 import { useTheme } from "../../contexts/ThemeContext";
+import useIsMobile from "../../hooks/useIsMobile";
 import { useUser } from "../../contexts/UserContext";
 import { useAgentStore } from "../../stores/agentStore";
 import { useChatAnywhereInput, useChatAnywhereSessionsState } from "@agentscope-ai/chat";
@@ -557,6 +558,7 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDark } = useTheme();
+  const isMobile = useIsMobile();
   const { user } = useUser();
   const chatId = useMemo(() => {
     const match = location.pathname.match(/^\/chat\/(.+)$/);
@@ -1186,6 +1188,7 @@ export default function ChatPage() {
       },
       sender: {
         ...(i18nConfig as any)?.sender,
+        disclaimer: isMobile ? undefined : (i18nConfig as any)?.sender?.disclaimer,
         beforeSubmit: handleBeforeSubmit,
         allowSpeech: true,
         attachments: {
@@ -1468,10 +1471,10 @@ export default function ChatPage() {
           style={{
             position: "fixed",
             bottom: 80,
-            right: 24,
+            right: isMobile ? 8 : 24,
             zIndex: 1000,
             maxWidth: 480,
-            width: "calc(100vw - 48px)",
+            width: isMobile ? "calc(100vw - 16px)" : "calc(100vw - 48px)",
           }}
         >
           <ApprovalCard

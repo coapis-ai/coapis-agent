@@ -232,7 +232,24 @@ class AgentCore:
                 # Use json.dumps to ensure proper JSON format (double quotes)
                 # str() produces Python-style single quotes which break LLM JSON parsing
                 try:
-                    tool_result_str = json.dumps(tool_result, ensure_ascii=False, default=str) if isinstance(tool_result, dict) else str(tool_result)
+                    if isinstance(tool_result, dict):
+                        tool_result_str = json.dumps(tool_result, ensure_ascii=False, default=str)
+                    else:
+                        # Handle ToolResponse dataclass (agentscope.tool.ToolResponse)
+                        # Extract content blocks and serialize as proper JSON
+                        from agentscope.tool import ToolResponse
+                        if isinstance(tool_result, ToolResponse):
+                            blocks = []
+                            for block in tool_result.content:
+                                if hasattr(block, "model_dump"):
+                                    blocks.append(block.model_dump())
+                                elif hasattr(block, "dict"):
+                                    blocks.append(block.dict())
+                                else:
+                                    blocks.append({"type": "text", "text": str(block)})
+                            tool_result_str = json.dumps(blocks, ensure_ascii=False, default=str)
+                        else:
+                            tool_result_str = json.dumps(tool_result, ensure_ascii=False, default=str)
                 except Exception:
                     tool_result_str = str(tool_result)
                 messages.append({
@@ -413,7 +430,22 @@ class AgentCore:
 
                     # Use json.dumps to ensure proper JSON format (double quotes)
                     try:
-                        tool_result_str = json.dumps(tool_result, ensure_ascii=False, default=str)[:8000] if isinstance(tool_result, dict) else str(tool_result)[:8000]
+                        if isinstance(tool_result, dict):
+                            tool_result_str = json.dumps(tool_result, ensure_ascii=False, default=str)[:8000]
+                        else:
+                            from agentscope.tool import ToolResponse
+                            if isinstance(tool_result, ToolResponse):
+                                blocks = []
+                                for block in tool_result.content:
+                                    if hasattr(block, "model_dump"):
+                                        blocks.append(block.model_dump())
+                                    elif hasattr(block, "dict"):
+                                        blocks.append(block.dict())
+                                    else:
+                                        blocks.append({"type": "text", "text": str(block)})
+                                tool_result_str = json.dumps(blocks, ensure_ascii=False, default=str)[:8000]
+                            else:
+                                tool_result_str = json.dumps(tool_result, ensure_ascii=False, default=str)[:8000]
                     except Exception:
                         tool_result_str = str(tool_result)[:8000]
                     messages.append({

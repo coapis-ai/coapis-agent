@@ -1842,7 +1842,24 @@ def save_agent_config(
             existing_data = {}
 
     # Merge: start with existing data, overlay with new config data
-    merged_data = {**existing_data, **agent_config.model_dump(exclude_none=True)}
+    new_data = agent_config.model_dump(exclude_none=True)
+
+    # Deep-merge 'channels' to preserve per-channel configs (e.g. wecom bot_id)
+    # that are NOT part of the Pydantic model but stored in agent.json.
+    # Without this, model_dump() serializes ALL channels with defaults,
+    # and the shallow merge overwrites existing user-configured channels.
+    new_channels = new_data.get("channels") or {}
+    existing_channels = existing_data.get("channels") or {}
+    if new_channels or existing_channels:
+        merged_channels = {**existing_channels}
+        for ch_name, ch_config in new_channels.items():
+            if ch_name not in merged_channels:
+                merged_channels[ch_name] = ch_config
+            else:
+                merged_channels[ch_name] = {**merged_channels[ch_name], **ch_config}
+        new_data["channels"] = merged_channels
+
+    merged_data = {**existing_data, **new_data}
 
     # Sync active_model <-> model/provider for compatibility:
     # workspace.py reads model/provider, PUT /models/active writes active_model.

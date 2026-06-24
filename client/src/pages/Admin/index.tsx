@@ -215,7 +215,7 @@ function UsersTab() {
     try {
       const cfg = await permissionsApi.getPermissionsConfig();
       setRoleConfigs(cfg.config?.roles || {});
-      setConfigModules(cfg.config?.modules || {});
+      setConfigModules(cfg.config?.modules || cfg.config?.module_definitions || {});
     } catch {}
   };
 

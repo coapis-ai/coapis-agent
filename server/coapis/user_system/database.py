@@ -342,7 +342,11 @@ class UserSystemDB:
         # JSON mode
         with self._json_lock:
             users = self._load_json(_USERS_JSON)
-            return self._find_by_key(users, "username", username)
+            user = self._find_by_key(users, "username", username)
+            # Ensure 'id' field exists for JSON users (user_preferences.py needs it)
+            if user and "id" not in user:
+                user["id"] = hash(username) & 0x7FFFFFFF  # Stable int from username
+            return user
 
     def insert_user(self, user_data: Dict[str, Any]) -> int:
         """Insert a new user, return user ID."""
