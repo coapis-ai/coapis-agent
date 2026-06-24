@@ -375,6 +375,18 @@ class AgentRunner(Runner):
                 user_chat.id, user_id, channel, allow_not_exist=True,
             )
             memory_state = (state or {}).get("agent", {}).get("memory", {})
+            _existing_blocks = sum(
+                len(msg.get("content", []))
+                for batch in memory_state.get("content", [])
+                if isinstance(batch, list) and batch
+                for msg in [batch[0]]
+                if isinstance(msg, dict)
+            )
+            logger.info(
+                "_persist_chat_messages: loaded memory_state with %d batches, %d total blocks",
+                len(memory_state.get("content", [])),
+                _existing_blocks,
+            )
 
             # Use a FRESH InMemoryMemory to avoid cross-chat contamination.
             # self.memory_manager is shared across all chats and accumulates
@@ -385,6 +397,10 @@ class AgentRunner(Runner):
             isolated_mem = InMemoryMemory()
             if memory_state:
                 isolated_mem.load_state_dict(memory_state, strict=False)
+            logger.info(
+                "_persist_chat_messages: isolated_mem loaded with %d messages",
+                len(isolated_mem.content),
+            )
 
             if user_text:
                 user_msg = Msg(name="user", content=[TextBlock(text=user_text)], role="user")
@@ -403,6 +419,18 @@ class AgentRunner(Runner):
             if assistant_text:
                 assistant_msg = Msg(name="assistant", content=[TextBlock(text=assistant_text)], role="assistant")
                 await isolated_mem.add(assistant_msg)
+
+            logger.info(
+                "_persist_chat_messages: isolated_mem now has %d messages before save",
+                len(isolated_mem.content),
+            )
+            for idx, (m, marks) in enumerate(isolated_mem.content):
+                blocks = getattr(m, "content", [])
+                block_types = [getattr(b, "type", "?") for b in blocks] if isinstance(blocks, list) else []
+                logger.info(
+                    "  [%d] role=%s, blocks=%s, marks=%s",
+                    idx, getattr(m, "role", "?"), block_types, marks,
+                )
 
             # Save updated memory state back to session using chat_id as key
             await session.update_session_state(

@@ -26,7 +26,7 @@ import re
 import json
 import logging
 
-from typing import Union, Sequence
+from typing import Any, Dict, Union, Sequence
 
 import aiofiles
 from agentscope.session import SessionBase
@@ -90,6 +90,105 @@ def sanitize_filename(name: str) -> str:
     return _UNSAFE_FILENAME_RE.sub("--", name)
 
 
+def _normalize_content_block(block: dict) -> dict:
+    """Normalize a single content block: ensure ``type`` exists and strip
+    streaming-event fields that should never be persisted.
+
+    This handles two classes of legacy data:
+    1. Blocks without ``type`` — infer from structure (thinking, tool_use, …)
+    2. Blocks with ``type`` but bloated with streaming-event fields
+       (sequence_number, object, status, error, index, delta, msg_id)
+    """
+    if not isinstance(block, dict):
+        return block
+
+    # --- Step 1: ensure type exists ---
+    if "type" not in block:
+        if "thinking" in block:
+            block["type"] = "thinking"
+        elif "tool_use_id" in block or (
+            "is_error" in block and "content" in block
+        ):
+            block["type"] = "tool_result"
+        elif "id" in block and "name" in block and "input" in block:
+            block["type"] = "tool_use"
+        elif "text" in block:
+            block["type"] = "text"
+        elif "image_url" in block:
+            block["type"] = "image"
+        elif "data" in block and "format" in block:
+            block["type"] = "audio"
+        elif "video_url" in block:
+            block["type"] = "video"
+        else:
+            block["type"] = "text"
+
+    # --- Step 2: strip streaming-event junk if present ---
+    btype = block.get("type", "text")
+    has_streaming_junk = any(
+        k in block
+        for k in ("sequence_number", "object", "status", "error",
+                   "index", "delta", "msg_id")
+    )
+    if has_streaming_junk:
+        if btype == "thinking":
+            clean = {k: block[k] for k in ("type", "thinking") if k in block}
+        elif btype == "tool_use":
+            clean = {k: block[k] for k in ("type", "id", "name", "input") if k in block}
+        elif btype == "tool_result":
+            clean = {k: block[k] for k in ("type", "tool_use_id", "content", "is_error") if k in block}
+        else:
+            clean = {k: block[k] for k in ("type", "text") if k in block}
+        block.clear()
+        block.update(clean)
+
+    return block
+
+
+def _ensure_content_block_types(state_dict: dict) -> dict:
+    """Ensure all content blocks in memory have a 'type' field.
+
+    The agentscope InMemoryMemory stores Msg objects whose content blocks
+    (TextBlock, ThinkingBlock, etc.) sometimes lack the ``type`` key when
+    the agent creates them without it.  This causes history messages to
+    lose their type information after a serialize → deserialize round-trip,
+    making every block appear as plain text.
+
+    This helper patches the ``agent.memory.content`` array in-place before
+    the state dict is written to disk, inferring ``type`` from the block
+    structure for backward-compatible old records.
+    """
+    if not isinstance(state_dict, dict):
+        return state_dict
+
+    memory = state_dict.get("agent", {}).get("memory", {})
+    content = memory.get("content", [])
+    if not isinstance(content, list):
+        return state_dict
+
+    for item in content:
+        # Each item is [msg_dict, marks] or just msg_dict
+        msg_dict = None
+        if isinstance(item, (list, tuple)) and len(item) >= 1:
+            msg_dict = item[0]
+        elif isinstance(item, dict):
+            msg_dict = item
+
+        if not isinstance(msg_dict, dict):
+            continue
+
+        blocks = msg_dict.get("content", [])
+        if not isinstance(blocks, list):
+            continue
+
+        for i, block in enumerate(blocks):
+            if not isinstance(block, dict):
+                continue
+            blocks[i] = _normalize_content_block(block)
+
+    return state_dict
+
+
 class SafeJSONSession(SessionBase):
     """SessionBase subclass with filename sanitization and async file I/O.
 
@@ -135,6 +234,8 @@ class SafeJSONSession(SessionBase):
             name: state_module.state_dict()
             for name, state_module in state_modules_mapping.items()
         }
+        # Ensure content blocks always have 'type' for proper history rendering
+        _ensure_content_block_types(state_dicts)
         session_save_path = self._get_save_path(session_id, user_id=user_id)
         with open(
             session_save_path,
@@ -169,6 +270,8 @@ class SafeJSONSession(SessionBase):
 
             for name, state_module in state_modules_mapping.items():
                 if name in states:
+                    # Patch old records missing 'type' in content blocks
+                    _ensure_content_block_types(states)
                     state_module.load_state_dict(states[name])
             logger.info(
                 "Load session state from %s successfully.",
@@ -232,6 +335,9 @@ class SafeJSONSession(SessionBase):
 
         cur[path[-1]] = value
 
+        # Ensure content blocks always have 'type' for proper history rendering
+        _ensure_content_block_types(states)
+
         with open(
             session_save_path,
             "w",
@@ -278,6 +384,9 @@ class SafeJSONSession(SessionBase):
             ) as file:
                 content = await file.read()
                 states = _safe_json_loads(content, session_save_path)
+
+            # Patch old records missing 'type' in content blocks
+            _ensure_content_block_types(states)
 
             logger.info(
                 "Get session state dict from %s successfully.",

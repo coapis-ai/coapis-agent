@@ -308,131 +308,18 @@ async def console_chat(
                 media_type="text/event-stream",
             )
     else:
-        # ── Define on_complete callback for assistant message persistence ──
-        # This runs in the background task AFTER the stream completes,
-        # regardless of whether the SSE client is still connected.
-        async def _persist_assistant_message(run_key: str, _payload: Any) -> None:
-            """Extract assistant message from event buffer and persist it.
-
-            AgentScope streaming format:
-            - object="content", delta=true, text="..." → streaming text chunks
-            - object="message", status="completed" → completion signal (content usually empty)
-            - object="response", status="completed" → stream end
-
-            We accumulate all delta text chunks to reconstruct the full message.
-            """
-            nonlocal user_cm
-            if not user_cm:
-                return
-            try:
-                run_state = tracker._runs.get(run_key)
-                if not run_state:
-                    logger.warning(f"_persist_assistant_message: no run_state for run_key={run_key}")
-                    return
-
-                # Accumulate streaming text deltas
-                text_parts = []
-
-                for sse in run_state.buffer:
-                    if not sse.startswith("data: "):
-                        continue
-                    try:
-                        data = json.loads(sse[6:])
-                        obj = data.get("object", "")
-
-                        # Accumulate streaming content deltas
-                        if obj == "content" and data.get("delta"):
-                            text = data.get("text", "")
-                            if text:
-                                text_parts.append(text)
-
-                    except (json.JSONDecodeError, KeyError):
-                        continue
-
-                assistant_text = "".join(text_parts).strip()
-
-                if assistant_text:
-                    # Persist to session state (aligned with CoApis pattern)
-                    try:
-                        # Use _get_session_for_user to ensure user-level path
-                        # (workspace.runner.session may point to global path)
-                        from .chats import _get_session_for_user
-                        session_obj = _get_session_for_user(username, request)
-                        if session_obj and chat:
-                            # Use chat.id (UUID) as session key for per-chat isolation
-                            state = await session_obj.get_session_state_dict(
-                                chat.id, chat.user_id,
-                                allow_not_exist=True,
-                            )
-                            memory_state = (state or {}).get("agent", {}).get("memory", {})
-                            from agentscope.memory import InMemoryMemory
-                            mem = InMemoryMemory()
-                            mem.load_state_dict(memory_state, strict=False)
-                            from agentscope.message import Msg, TextBlock
-                            await mem.add(Msg(name="assistant", content=[TextBlock(text=assistant_text)], role="assistant"))
-                            await session_obj.update_session_state(
-                                session_id=chat.id,
-                                key="agent.memory",
-                                value=mem.state_dict(),
-                                user_id=chat.user_id,
-                            )
-                            logger.info(f"Persisted assistant message ({len(assistant_text)} chars) to session chat={chat.id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to persist assistant message to session: {e}")
-                else:
-                    logger.warning(f"_persist_assistant_message: no assistant text accumulated (buffer_size={len(run_state.buffer)})")
-            except Exception as e:
-                logger.warning(f"Failed to persist assistant message: {e}")
-
         queue, started = await tracker.attach_or_start(
             chat.id,
             native_payload,
             console_channel.stream_one,
-            on_complete=_persist_assistant_message,
+            # on_complete callback removed: workspace._process_handler now handles
+            # full structured persistence (thinking, tool_use, tool_result, text blocks)
+            # directly in the session, avoiding text-only overwrite.
         )
 
-    # ── Persist user message immediately (before stream starts) ──
-    # This ensures the user message is saved even if the client disconnects.
-    user_content = ""
-    if native_payload.get("content_parts"):
-        first_part = native_payload["content_parts"][0]
-        if isinstance(first_part, str):
-            user_content = first_part
-        elif isinstance(first_part, dict) and "text" in first_part:
-            user_content = first_part["text"]
-
-    if user_content and user_cm and not is_reconnect:
-        try:
-            # Persist user message to session state (aligned with CoApis pattern)
-            # Use _get_session_for_user to ensure user-level path
-            from .chats import _get_session_for_user
-            session_obj = _get_session_for_user(username, request)
-            if session_obj and chat:
-                # Use chat.id (UUID) as session key for per-chat isolation
-                state = await session_obj.get_session_state_dict(
-                    chat.id, chat.user_id,
-                    allow_not_exist=True,
-                )
-                memory_state = (state or {}).get("agent", {}).get("memory", {})
-                from agentscope.memory import InMemoryMemory
-                mem = InMemoryMemory()
-                mem.load_state_dict(memory_state, strict=False)
-                from agentscope.message import Msg, TextBlock
-                await mem.add(Msg(name="user", content=[TextBlock(text=user_content)], role="user"))
-                await session_obj.update_session_state(
-                    session_id=chat.id,
-                    key="agent.memory",
-                    value=mem.state_dict(),
-                    user_id=chat.user_id,
-                )
-                logger.info(f"Persisted user message to session chat={chat.id}")
-        except Exception as e:
-            logger.warning(f"Failed to persist user message to session: {e}")
-
     # ── SSE event generator ──
-    # Note: Message persistence is handled separately:
-    # 1. User message: persisted immediately above
-    # 2. Assistant message: persisted by on_complete callback after task finishes
+    # Note: All message persistence is handled by workspace._process_handler
+    # (unified persist: user msg + assistant structured blocks in one atomic write)
     async def event_generator() -> AsyncGenerator[str, None]:
         stream_it = tracker.stream_from_queue(queue, chat.id)
         try:

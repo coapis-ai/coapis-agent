@@ -775,12 +775,12 @@ class Workspace:
                     # Persist empty state to session
                     try:
                         session_obj = runner.session if runner else None
-                        if session_obj and chat_spec:
+                        if session_obj:
                             await session_obj.update_session_state(
-                                session_id=chat_spec.session_id,
+                                session_id=chat_key,
                                 key="agent.memory",
                                 value={},
-                                user_id=chat_spec.user_id,
+                                user_id=self.username or user_id or "anonymous",
                             )
                     except Exception:
                         pass
@@ -842,6 +842,7 @@ class Workspace:
                 # AgentCore now yields (text_chunk, is_reasoning) tuples
                 full_response = []
                 full_reasoning = []
+                _raw_blocks = []  # Collect raw ResponseBlock objects for session persistence
 
                 # ── Determine display strategy from user prefs + channel config ──
                 _channel_name = getattr(request_obj, "channel", "") or ""
@@ -1076,6 +1077,9 @@ class Workspace:
                     if not block.content:
                         continue
 
+                    # Collect raw block for session persistence
+                    _raw_blocks.append(block)
+
                     # ── Render block via renderer ──
                     if block.type == "thinking":
                         full_reasoning.append(block.content)
@@ -1233,6 +1237,82 @@ class Workspace:
                 # Store for persistence (runner reads these)
                 self.last_full_reasoning = full_reasoning
                 self.last_full_response = full_response
+
+                # ── Unified session persistence ──
+                # Single atomic write: load existing memory → add user msg + assistant structured blocks → save back.
+                # Uses a generated UUID as session key for per-chat isolation.
+                try:
+                    _session = self.runner.session if self.runner else None
+                    # Use chat UUID as session key, matching the load side (spec.id).
+                    # The console router sets chat_id via session_context before streaming.
+                    _chat_spec_id = (
+                        getattr(request_obj, "chat_id", "")
+                        or _current_chat_id
+                        or chat_key
+                    )
+                    _chat_spec_user = self.username or user_id or "anonymous"
+                    if _session:
+                        from agentscope.memory import InMemoryMemory
+                        from agentscope.message import Msg, TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock
+
+                        # Load existing session state (may have previous turns)
+                        _state = await _session.get_session_state_dict(
+                            _chat_spec_id, _chat_spec_user, allow_not_exist=True,
+                        )
+                        _mem_state = (_state or {}).get("agent", {}).get("memory", {})
+                        _mem = InMemoryMemory()
+                        if _mem_state:
+                            _mem.load_state_dict(_mem_state, strict=False)
+
+                        # Add user message
+                        if user_message.strip():
+                            _user_msg = Msg(name="user", content=[TextBlock(text=user_message)], role="user")
+                            await _mem.add(_user_msg)
+
+                        # Build assistant structured content from raw blocks
+                        _assistant_content = []
+                        for blk in _raw_blocks:
+                            btype = getattr(blk, "type", "text")
+                            content = getattr(blk, "content", "")
+                            meta = getattr(blk, "meta", None) or {}
+                            if btype == "thinking":
+                                _assistant_content.append(ThinkingBlock(text=content))
+                            elif btype == "tool_call":
+                                _assistant_content.append(ToolUseBlock(
+                                    id=meta.get("call_id", ""),
+                                    name=meta.get("tool_name", "unknown"),
+                                    input=meta.get("tool_args", {}),
+                                ))
+                            elif btype == "tool_result":
+                                _assistant_content.append(ToolResultBlock(
+                                    tool_use_id=meta.get("tool_call_id", ""),
+                                    name=meta.get("tool_name", ""),
+                                    content=[TextBlock(text=content)] if content else [],
+                                ))
+                            elif btype == "text":
+                                _assistant_content.append(TextBlock(text=content))
+
+                        if _assistant_content:
+                            _assistant_msg = Msg(
+                                name="assistant",
+                                content=_assistant_content,
+                                role="assistant",
+                            )
+                            await _mem.add(_assistant_msg)
+
+                        # Single atomic save
+                        await _session.update_session_state(
+                            session_id=_chat_spec_id,
+                            key="agent.memory",
+                            value=_mem.state_dict(),
+                            user_id=_chat_spec_user,
+                        )
+                        logger.info(
+                            "Unified persist: %d raw blocks → %d content blocks, session=%s",
+                            len(_raw_blocks), len(_assistant_content), _chat_spec_id[:12],
+                        )
+                except Exception as e:
+                    logger.warning("Unified persist failed: %s", e, exc_info=True)
 
                 # ── Close any open phase ──
                 async for ev in _close_phase():

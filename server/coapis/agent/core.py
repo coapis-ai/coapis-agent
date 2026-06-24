@@ -428,6 +428,14 @@ class AgentCore:
                         meta={"tool_name": tool_name, "tool_args": tool_args},
                     )
 
+                    # Yield tool_result so workspace can persist it to session
+                    _tr_content = str(tool_result)[:4000] if not isinstance(tool_result, str) else tool_result[:4000]
+                    yield ResponseBlock(
+                        type="tool_result",
+                        content=_tr_content,
+                        meta={"tool_name": tool_name, "tool_call_id": tc["id"]},
+                    )
+
                     # Use json.dumps to ensure proper JSON format (double quotes)
                     try:
                         if isinstance(tool_result, dict):
