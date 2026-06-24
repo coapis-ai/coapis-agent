@@ -30,6 +30,7 @@ import styles from "./index.module.less";
 import { IconButton } from "@agentscope-ai/design";
 import ChatSessionInitializer from "./components/ChatSessionInitializer";
 import ChatSessionHeader from "./components/ChatSessionHeader";
+import ChatErrorBoundary from "./components/ChatErrorBoundary";
 import { ApprovalCard } from "../../components/ApprovalCard/ApprovalCard";
 import { commandsApi } from "../../api/modules/commands";
 import { useApprovalContext } from "../../contexts/ApprovalContext";
@@ -41,7 +42,7 @@ import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
-import GroupedResponseCard from "./components/GroupedResponseCard";
+// import GroupedResponseCard from "./components/GroupedResponseCard"; // 暂时禁用，排查问题
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
 
@@ -1342,7 +1343,7 @@ export default function ChatPage() {
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
-        AgentScopeRuntimeResponseCard: GroupedResponseCard,
+        // AgentScopeRuntimeResponseCard: GroupedResponseCard, // 暂时禁用，排查问题
       },
       customToolRenderConfig: {
         ..._enhancedToolRenderConfig,
@@ -1448,11 +1449,13 @@ export default function ChatPage() {
               </Button>
             </div>
           )}
-          <AgentScopeRuntimeWebUI
-            ref={chatRef}
-            key={refreshKey}
-            options={options}
-          />
+          <ChatErrorBoundary>
+            <AgentScopeRuntimeWebUI
+              ref={chatRef}
+              key={refreshKey}
+              options={options}
+            />
+          </ChatErrorBoundary>
         </div>
 
         {/* Chat display settings modal */}
