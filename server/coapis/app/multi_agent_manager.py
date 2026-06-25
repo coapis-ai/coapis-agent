@@ -42,7 +42,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from ..agent.workspace import Workspace
+from ..agents.workspace import Workspace
 from ..config import load_config
 from ..constant import AGENTS_DIR, WORKSPACES_DIR
 from ..app.user_store import get_user_agents_dir, get_user_workspace_dir

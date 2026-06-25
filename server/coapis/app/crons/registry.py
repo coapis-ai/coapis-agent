@@ -61,7 +61,7 @@ class CronManagerRegistry:
         # Try to get channel_manager from user's workspace
         channel_mgr = None
         try:
-            from ..agent.multi_agent_manager import get_multi_agent_manager
+            from ..multi_agent_manager import get_multi_agent_manager
             mam = get_multi_agent_manager()
             if mam:
                 ws = mam.get_workspace_for_user(username)

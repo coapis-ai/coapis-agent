@@ -1113,7 +1113,7 @@ class Workspace:
                         tools=self.tools,
                         show_tool_details=_show_tool,
                 ):
-                        from ..agent.core import ResponseBlock
+                        from .core import ResponseBlock
                         if isinstance(chunk, ResponseBlock):
                             block = chunk
                         elif isinstance(chunk, tuple):

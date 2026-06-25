@@ -382,7 +382,7 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
     # Initialize AuditLogger (structured audit logging for security events)
     # Audit log stored at WORKING_DIR/audit_log/ — mount as Docker volume for persistence
     logger.debug("Initializing AuditLogger...")
-    from ..agent.security.audit_logger import AuditLogger
+    from ..agents.security.audit_logger import AuditLogger
     from ..constant import AUDIT_LOG_DIR
     audit_log_path = AUDIT_LOG_DIR / "audit.jsonl"
     AuditLogger.initialize(str(audit_log_path))

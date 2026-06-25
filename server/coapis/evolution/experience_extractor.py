@@ -36,7 +36,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
-from ..agent.core import AgentCore
+from ..agents.core import AgentCore
 from .evolution_engine import TrajectoryEntry, ExtractedExperience
 
 logger = logging.getLogger(__name__)

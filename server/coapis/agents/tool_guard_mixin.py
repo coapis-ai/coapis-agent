@@ -213,7 +213,7 @@ class ToolGuardMixin:
                 )
                 # Write audit event for behavioral blocking
                 try:
-                    from ..agent.security.audit_logger import AuditLogger, create_audit_event
+                    from .security.audit_logger import AuditLogger, create_audit_event
                     ev = create_audit_event(
                         event_type="tool_monitor_blocked",
                         tool_name=tool_name,
@@ -524,7 +524,7 @@ class ToolGuardMixin:
     ) -> None:
         """Write an audit event for approval flow outcomes."""
         try:
-            from ..agent.security.audit_logger import AuditLogger, create_audit_event
+            from .security.audit_logger import AuditLogger, create_audit_event
             risk_level = ""
             cmd_category = ""
             if guard_result is not None and guard_result.findings:
@@ -672,7 +672,7 @@ class ToolGuardMixin:
 
         # Write audit event with risk classification fields
         try:
-            from ..agent.security.audit_logger import AuditLogger, create_audit_event
+            from .security.audit_logger import AuditLogger, create_audit_event
             meta_extra = {}
             risk_level = ""
             cmd_category = ""
@@ -1049,7 +1049,7 @@ class ToolGuardMixin:
 
         # Write audit event with risk classification fields
         try:
-            from ..agent.security.audit_logger import AuditLogger, create_audit_event
+            from .security.audit_logger import AuditLogger, create_audit_event
             meta_extra = {}
             risk_level = ""
             cmd_category = ""
@@ -1139,7 +1139,7 @@ class ToolGuardMixin:
 
         # Write audit event with risk classification fields
         try:
-            from ..agent.security.audit_logger import AuditLogger, create_audit_event
+            from .security.audit_logger import AuditLogger, create_audit_event
             meta_extra = {}
             risk_level = ""
             cmd_category = ""
