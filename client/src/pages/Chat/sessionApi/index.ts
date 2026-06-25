@@ -153,17 +153,86 @@ function normalizeOutputMessageContent(content: unknown): unknown {
 }
 
 /**
- * Convert a backend message to a response output message.
- * Maps system + plugin_call_output → role "tool" and strips metadata.
+ * Convert a backend message to response output message(s).
+ *
+ * Backend messages can contain MIXED content block types in a single message
+ * (e.g. thinking + text + tool_use).  The frontend GroupedResponseCard expects
+ * each output message to carry exactly ONE semantic type.  This function splits
+ * mixed messages into individual typed messages.
+ *
+ * Content block type → output message type mapping:
+ *   thinking  → reasoning  (metadata.type = "reasoning")
+ *   text      → message
+ *   tool_use  → plugin_call (metadata.type = "plugin_call")
+ *   tool_result → plugin_call_output
  */
-const toOutputMessage = (msg: Message): OutputMessage => ({
-  ...msg,
-  role:
+const BLOCK_TYPE_MAP: Record<string, { msgType: string; metaType?: string; role?: string }> = {
+  thinking:        { msgType: "reasoning", metaType: "reasoning" },
+  text:            { msgType: "message" },
+  tool_use:        { msgType: "plugin_call", metaType: "plugin_call" },
+  tool_result:     { msgType: "plugin_call_output", metaType: "plugin_call_output", role: "tool" },
+  plugin_call:     { msgType: "plugin_call", metaType: "plugin_call" },
+  plugin_call_output: { msgType: "plugin_call_output", metaType: "plugin_call_output", role: "tool" },
+  mcp_call:        { msgType: "mcp_call", metaType: "mcp_call" },
+  mcp_call_output: { msgType: "mcp_call_output", metaType: "mcp_call_output", role: "tool" },
+  reasoning:       { msgType: "reasoning", metaType: "reasoning" },
+  error:           { msgType: "error", metaType: "error" },
+  heartbeat:       { msgType: "heartbeat" },
+};
+
+const toOutputMessage = (msg: Message): OutputMessage[] => {
+  const content = msg.content;
+  const effectiveRole =
     msg.type === TYPE_PLUGIN_CALL_OUTPUT && msg.role === "system"
       ? ROLE_TOOL
-      : msg.role,
-  metadata: msg.metadata ?? null,
-});
+      : msg.role;
+
+  // String content → single message
+  if (typeof content === "string") {
+    return [{ ...msg, role: effectiveRole, metadata: msg.metadata ?? null }];
+  }
+
+  // Array content → split by block type
+  if (Array.isArray(content)) {
+    const parts: OutputMessage[] = [];
+
+    for (const block of content) {
+      const blockType = (block as ContentItem)?.type || "text";
+      let mapping = BLOCK_TYPE_MAP[blockType] || { msgType: "text" };
+
+      // The backend TextContent schema forces type="text" for all text blocks,
+      // including thinking content.  When the message-level type indicates
+      // this is a reasoning message but the block type says "text", override
+      // the mapping to preserve the reasoning semantic.
+      if (
+        blockType === "text" &&
+        (msg.type === "reasoning" || msg.type === "REASONING")
+      ) {
+        mapping = BLOCK_TYPE_MAP["thinking"];
+      }
+
+      parts.push({
+        id: msg.id,
+        name: msg.name,
+        role: mapping.role || effectiveRole,
+        content: [block],
+        metadata: mapping.metaType
+          ? { type: mapping.metaType }
+          : (msg.metadata ?? null),
+        sequence_number: msg.sequence_number,
+        timestamp: msg.timestamp,
+        type: mapping.msgType,
+      } as OutputMessage);
+    }
+
+    return parts.length > 0
+      ? parts
+      : [{ ...msg, role: effectiveRole, metadata: msg.metadata ?? null }];
+  }
+
+  // Fallback
+  return [{ ...msg, role: effectiveRole, metadata: msg.metadata ?? null }];
+};
 
 /** Build a user card (AgentScopeRuntimeRequestCard) from a user message. */
 function buildUserCard(msg: Message): IAgentScopeRuntimeWebUIMessage {
@@ -212,7 +281,8 @@ const buildResponseCard = (
   // Check if any message is a reasoning/thinking message
   for (const msg of outputMessages) {
     const meta = (msg as Record<string, unknown>).metadata as Record<string, unknown> | null | undefined;
-    if (meta && meta.type === "reasoning") {
+    const isReasoning = (meta && meta.type === "reasoning") || (msg as Record<string, unknown>).type === "reasoning";
+    if (isReasoning) {
       // Extract text content from the reasoning message
       const content = msg.content;
       let thinkingText = "";
@@ -240,7 +310,8 @@ const buildResponseCard = (
   // Filter out reasoning messages from output (they're shown as DeepThinking card)
   const nonReasoningMessages = normalizedMessages.filter((msg) => {
     const meta = (msg as Record<string, unknown>).metadata as Record<string, unknown> | null | undefined;
-    return !(meta && meta.type === "reasoning");
+    const isReasoning = (meta && meta.type === "reasoning") || (msg as Record<string, unknown>).type === "reasoning";
+    return !isReasoning;
   });
 
   // Only add response card if there are non-reasoning messages
@@ -289,7 +360,7 @@ const convertMessages = (
     } else {
       const outputMsgs: OutputMessage[] = [];
       while (i < messages.length && messages[i].role !== ROLE_USER) {
-        outputMsgs.push(toOutputMessage(messages[i++]));
+        outputMsgs.push(...toOutputMessage(messages[i++]));
       }
       if (outputMsgs.length) result.push(buildResponseCard(outputMsgs));
     }
