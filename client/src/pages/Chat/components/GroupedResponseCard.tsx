@@ -14,6 +14,8 @@
  */
 import { useMemo, useState, useCallback } from 'react';
 import { Markdown } from '@agentscope-ai/chat';
+import { useChatAnywhereOptions } from '@agentscope-ai/chat/lib/AgentScopeRuntimeWebUI/core/Context/ChatAnywhereOptionsContext';
+import { Avatar, Flex } from 'antd';
 import {
   LoadingOutlined,
   RightOutlined,
@@ -405,6 +407,10 @@ function GroupedResponseCard({ data }: GroupedResponseCardProps) {
     [mergedMessages],
   );
 
+  // Read avatar and nick from ChatAnywhereOptions (same context as AgentScopeRuntimeResponseCard)
+  const avatar = useChatAnywhereOptions((v: any) => v?.welcome?.avatar);
+  const nick = useChatAnywhereOptions((v: any) => v?.welcome?.nick);
+
   if (!messages.length && isGenerating) {
     return (
       <div className={styles.messageBlock}>
@@ -418,6 +424,13 @@ function GroupedResponseCard({ data }: GroupedResponseCardProps) {
 
   return (
     <div className={styles.groupedCard}>
+      {/* Title bar with avatar and nick — same as AgentScopeRuntimeResponseCard */}
+      {avatar && (
+        <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
+          <Avatar src={avatar} size={28} />
+          {nick && <span style={{ fontWeight: 500, fontSize: 14 }}>{nick}</span>}
+        </Flex>
+      )}
       {messages.map((msg, index) => {
         const type = getMessageType(msg);
         const key = msg?.id || `msg_${index}`;
