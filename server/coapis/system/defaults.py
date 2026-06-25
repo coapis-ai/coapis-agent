@@ -221,7 +221,6 @@ DEFAULT_WORKSPACE_FILES: List[str] = [
     "AGENTS.md",
     "SOUL.md",
     "PROFILE.md",
-    "MEMORY.md",
     "HEARTBEAT.md",
 ]
 

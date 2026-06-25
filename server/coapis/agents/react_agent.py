@@ -1021,7 +1021,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             return ""
 
     async def _async_reme_search(self, query: str) -> list[str]:
-        """Async semantic search via ReMeLight memory_search.
+        """Async memory search (file-based + LLM rerank).
 
         Called from reply() (async context) to pre-fetch relevant
         long-term memories before building the system prompt.
@@ -1046,12 +1046,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             snippets = parse_reme_response(result)
             if snippets:
                 logger.info(
-                    "[ReMeLight] Retrieved %d semantic memories for: %s",
+                    "[MemorySearch] Retrieved %d memories for: %s",
                     len(snippets), query[:50],
                 )
             return snippets[:5]
         except Exception as e:
-            logger.debug("[ReMeLight] Semantic search failed: %s", e)
+            logger.debug("[MemorySearch] Search failed: %s", e)
             return []
 
     def _build_sys_prompt(self) -> str:
@@ -1129,36 +1129,20 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             user_workspace_dir=user_ws_dir,
         )
 
-        # ── MemoryInjector: layered memory injection (global + user) ──
+        # ── MemoryInjector: layered memory injection (user only) ──
         try:
             from ..foundation.memory_injector import MemoryInjector
             from ..foundation.memory_quota import MemoryQuota
 
             injector = MemoryInjector(MemoryQuota())
 
-            # Core memory: foundation principles (always inject)
+            # Core memory: only user's own MEMORY.md (global memory removed)
             core_memory = ""
-
-            # Global core memory (from template global agents)
-            global_mem_parts: list[str] = []
-            for gws in global_ws_dirs:
-                global_mem = gws / "MEMORY.md"
-                if global_mem.exists():
-                    gmem = global_mem.read_text(encoding="utf-8").strip()
-                    if gmem:
-                        global_mem_parts.append(gmem)
-            if global_mem_parts:
-                core_memory = "[全局记忆]\n" + "\n\n".join(global_mem_parts)
-
-            # User/workspace memory (overrides or supplements global)
             core_file = self._workspace_dir / "MEMORY.md"
             if core_file.exists():
                 umem = core_file.read_text(encoding="utf-8").strip()
                 if umem:
-                    if core_memory:
-                        core_memory += "\n\n[用户记忆]\n" + umem
-                    else:
-                        core_memory = umem
+                    core_memory = umem
 
             # Long-term memory: from pre-fetched semantic search or fallback
             long_term_memories: list[str] = []
@@ -2211,7 +2195,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         if query:
             self._load_on_demand_skills(query)
 
-        # ── ReMeLight semantic search: pre-fetch long-term memories ──
+        # ── Semantic search: pre-fetch long-term memories ──
         semantic_memories: list[str] = []
         if query and self.memory_manager is not None:
             semantic_memories = await self._async_reme_search(query)

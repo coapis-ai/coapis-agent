@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-全局模板管理 API — 管理 system/templates/ 下的 SOUL.md, MEMORY.md, PROFILE.md
+全局模板管理 API — 管理 system/templates/ 下的 SOUL.md, PROFILE.md
 
 高频操作，通过 Admin 页面管理。
 """
@@ -18,7 +18,7 @@ from ...permissions import require_permission
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-TEMPLATE_FILES = ["SOUL.md", "MEMORY.md", "PROFILE.md"]
+TEMPLATE_FILES = ["SOUL.md", "PROFILE.md"]
 
 
 @router.get("/admin/templates")
@@ -109,7 +109,6 @@ async def reset_template(
     # 无备份时写入默认内容
     defaults = {
         "SOUL.md": "# Soul\n\nI am the global base agent.\n",
-        "MEMORY.md": "# Memory\n\nNo memories yet.\n",
         "PROFILE.md": "# Profile\n\nGlobal base agent profile.\n",
     }
     content = defaults.get(filename, "")
@@ -124,7 +123,7 @@ async def reset_template(
 # ═══════════════════════════════════════════════════════════
 
 # All template files (including extended set)
-ALL_TEMPLATE_FILES = ["SOUL.md", "MEMORY.md", "PROFILE.md", "AGENTS.md", "BOOTSTRAP.md", "HEARTBEAT.md"]
+ALL_TEMPLATE_FILES = ["SOUL.md", "PROFILE.md", "AGENTS.md", "BOOTSTRAP.md", "HEARTBEAT.md"]
 
 
 @router.post("/admin/templates/sync-to-users")

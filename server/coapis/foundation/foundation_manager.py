@@ -24,7 +24,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -76,28 +75,11 @@ class FoundationManager:
         # 待审核队列
         self._pending_memories: list[PendingMemory] = []
 
-        # ReMeLight 实例（可选，用于语义搜索）
-        self._reme: Any = None
-        self._reme_parser_ready: bool = False  # ReMeLight parser not implemented yet
-
         # 注入状态追踪（防止基础记忆重复注入）
         self._core_injected: bool = False
 
         # 确保目录结构存在
         self._ensure_directory_structure()
-
-    def set_reme(self, reme: Any, parser_ready: bool = False) -> None:
-        """
-        设置 ReMeLight 实例（用于语义搜索）。
-
-        如果 ReMeLight 不可用或 parser 未就绪，search_knowledge 会自动回退到关键词匹配。
-
-        Args:
-            reme: ReMeLight 实例
-            parser_ready: ReMeLight 解析器是否已实现（默认 False）
-        """
-        self._reme = reme
-        self._reme_parser_ready = parser_ready
 
     def reset_injection_state(self) -> None:
         """
@@ -201,12 +183,7 @@ class FoundationManager:
 
     def search_knowledge(self, query: str, category: str | None = None) -> list[MemoryEntry]:
         """
-        在知识库中搜索相关记忆。
-
-        回退链: ReMeLight 语义搜索 → 关键词匹配
-        - 如果 ReMeLight 可用且 parser 已就绪且成功，使用语义搜索结果
-        - 如果 ReMeLight 不可用、parser 未就绪、失败或返回空结果，回退到关键词匹配
-        - 关键词匹配是最终兜底，确保始终有结果
+        在知识库中搜索相关记忆（关键词匹配）。
 
         Args:
             query: 搜索查询
@@ -215,45 +192,10 @@ class FoundationManager:
         Returns:
             相关记忆条目列表（按优先级排序）
         """
-        # 只有当 ReMeLight 可用且 parser 已就绪时才尝试语义搜索
-        if self._reme is not None and self._reme_parser_ready:
-            try:
-                results = self._search_with_reme(query, category)
-                if results:
-                    return results
-                logger.info("ReMeLight returned no results, using keyword fallback")
-            except Exception as e:
-                logger.warning(f"ReMeLight search failed, using keyword fallback: {e}")
-
-        # 最终兜底：关键词匹配
         return self._search_with_keywords(query, category)
 
-    def _search_with_reme(self, query: str, category: str | None = None) -> list[MemoryEntry]:
-        """使用 ReMeLight 语义搜索（优先）。"""
-        # 加载所有条目
-        index = self.load_knowledge_index()
-        entries = [MemoryEntry.from_dict(e) for e in index.get("entries", [])]
-
-        # 分类过滤
-        if category:
-            entries = [e for e in entries if e.category == category]
-
-        if not entries:
-            return []
-
-        # 使用 ReMeLight 的语义搜索
-        results = asyncio.run(self._reme.memory_search(
-            query=query,
-            max_results=min(5, len(entries)),
-            min_score=0.1,
-        ))
-
-        # 解析结果
-        parsed = self._parse_reme_results(results, entries)
-        return parsed
-
     def _search_with_keywords(self, query: str, category: str | None = None) -> list[MemoryEntry]:
-        """关键词匹配搜索（最终兜底方案）。"""
+        """关键词匹配搜索。"""
         index = self.load_knowledge_index()
         results = []
 
@@ -272,23 +214,6 @@ class FoundationManager:
         # 按优先级排序
         results.sort(key=lambda e: e.priority_score, reverse=True)
         return results
-
-    def _parse_reme_results(self, results: Any, entries: list[MemoryEntry]) -> list[MemoryEntry]:
-        """
-        解析 ReMeLight 搜索结果。
-
-        当前 ReMeLight 集成尚未完成（_reme 可能是 mock 或未实现 memory_search），
-        此方法返回空列表触发关键词回退。
-
-        TODO: 根据 ReMeLight 实际返回格式实现解析逻辑。
-        预期格式: [{"file_path": "...", "score": 0.9, "content": "..."}, ...]
-        """
-        # 临时占位：返回空列表，触发关键词回退
-        # 未来实现示例:
-        #   entry_map = {e.id: e for e in entries}
-        #   return [entry_map[r.get("id")] for r in results if r.get("id") in entry_map]
-        logger.debug("ReMeLight parsing not implemented yet — returning empty to trigger keyword fallback")
-        return []
 
     # =========================================================================
     # 记忆审核流程

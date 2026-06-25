@@ -117,7 +117,7 @@ async def system_diagnose(request: Request) -> Dict[str, Any]:
     checks.append({"name": "system_dir_clean", "ok": stale_count == 0, "detail": f"{stale_count} stale dirs"})
 
     # 2. 检查全局模板存在
-    for filename in ["SOUL.md", "MEMORY.md", "PROFILE.md"]:
+    for filename in ["SOUL.md", "PROFILE.md"]:
         if not (TEMPLATES_DIR / filename).exists():
             issues.append(f"全局模板缺失: {filename}")
         checks.append({"name": f"template_{filename}", "ok": (TEMPLATES_DIR / filename).exists()})
@@ -125,12 +125,12 @@ async def system_diagnose(request: Request) -> Dict[str, Any]:
     # 3. 检查全局智能体身份文件
     for agent_dir in AGENTS_DIR.iterdir():
         if agent_dir.is_dir():
-            for filename in ["SOUL.md", "MEMORY.md", "PROFILE.md"]:
+            for filename in ["SOUL.md", "PROFILE.md"]:
                 if not (agent_dir / filename).exists():
                     issues.append(f"全局智能体 {agent_dir.name} 缺失 {filename}")
             checks.append({
                 "name": f"agent_{agent_dir.name}_identity",
-                "ok": all((agent_dir / f).exists() for f in ["SOUL.md", "MEMORY.md", "PROFILE.md"]),
+                "ok": all((agent_dir / f).exists() for f in ["SOUL.md", "PROFILE.md"]),
             })
 
     # 4. 检查用户工作区完整性

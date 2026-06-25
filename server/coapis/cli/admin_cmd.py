@@ -164,7 +164,7 @@ def agents_init(agent_id: str):
         click.echo(f"❌ 智能体目录不存在: {agent_dir}")
         return
 
-    for filename in ["SOUL.md", "MEMORY.md", "PROFILE.md"]:
+    for filename in ["SOUL.md", "PROFILE.md"]:
         src = TEMPLATES_DIR / filename
         dst = agent_dir / filename
         if src.exists():
@@ -181,7 +181,7 @@ def agents_init(agent_id: str):
 @admin_group.command("templates-list")
 def templates_list():
     """列出全局模板文件."""
-    files = ["SOUL.md", "MEMORY.md", "PROFILE.md"]
+    files = ["SOUL.md", "PROFILE.md"]
     click.echo("全局模板:")
     for f in files:
         path = TEMPLATES_DIR / f
@@ -197,7 +197,7 @@ def templates_list():
 @click.argument("files", nargs=-1)
 def templates_reset(yes: bool, files: tuple):
     """重置全局模板文件（从代码默认值恢复）."""
-    ALL_TEMPLATES = ["SOUL.md", "MEMORY.md", "PROFILE.md"]
+    ALL_TEMPLATES = ["SOUL.md", "PROFILE.md"]
 
     if not files:
         targets = ALL_TEMPLATES
@@ -221,19 +221,6 @@ _You are not a chatbot. You are becoming someone._
 **Earn trust through competence.** Your human gave you access. Don't make them regret it. Be careful with external operations (emails, tweets, public things). Be bold with internal ones (reading, organizing, learning).
 
 **Remember you're an assistant.** You can see into other people's lives — messages, files, calendars, maybe even their home. That's intimate. Treat it with respect.
-""",
-        "MEMORY.md": """# Long-term Memory
-
-_This is your curated long-term memory. Update it regularly._
-
-## Key Decisions
-_(Record important decisions, their context, and outcomes)_
-
-## Lessons Learned
-_(Document mistakes, corrections, and better approaches)_
-
-## System Architecture Notes
-_(Record architectural decisions and their rationale)_
 """,
         "PROFILE.md": """## Identity
 

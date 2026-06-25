@@ -382,7 +382,21 @@ async def get_public_available_models(request: Request) -> Dict[str, Any]:
             pname = info_dict.get("name", pid)
             if not info_dict.get("enabled", True):
                 continue
+            # 只返回真正可用的 provider（已配置 + 有模型）
+            is_custom = info_dict.get("is_custom", False)
+            base_url = info_dict.get("base_url", "")
+            api_key = info_dict.get("api_key", "")
+            require_api_key = info_dict.get("require_api_key", True)
             models = info_dict.get("models", []) or []
+            extra_models = info_dict.get("extra_models", []) or []
+            total_models = len(models) + len(extra_models)
+            is_configured = (
+                (is_custom and bool(base_url))
+                or (not require_api_key)
+                or (require_api_key and bool(api_key))
+            )
+            if not (is_configured and total_models > 0):
+                continue
             visible = info_dict.get("visible_to_users", True)
             visible_models = info_dict.get("visible_models", models if visible else [])
             
@@ -414,7 +428,21 @@ async def get_public_available_models(request: Request) -> Dict[str, Any]:
                 continue
             if not pconfig.get("enabled", True):
                 continue
+            # 只返回真正可用的 provider（已配置 + 有模型）
+            is_custom = pconfig.get("is_custom", False)
+            p_base_url = pconfig.get("base_url", "")
+            p_api_key = pconfig.get("api_key", "")
+            p_require_api_key = pconfig.get("require_api_key", True)
             models = pconfig.get("models", [])
+            extra_models = pconfig.get("extra_models", [])
+            total_models = len(models) + len(extra_models)
+            p_is_configured = (
+                (is_custom and bool(p_base_url))
+                or (not p_require_api_key)
+                or (p_require_api_key and bool(p_api_key))
+            )
+            if not (p_is_configured and total_models > 0):
+                continue
             visible = pconfig.get("visible_to_users", True)
             visible_models = pconfig.get("visible_models", models if visible else [])
             pname = pconfig.get("name", pid)

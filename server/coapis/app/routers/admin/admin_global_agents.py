@@ -40,7 +40,6 @@ async def list_global_agents(request: Request) -> Dict[str, Any]:
             "path": str(agent_dir),
             "has_agent_json": (agent_dir / "agent.json").exists(),
             "has_soul": (agent_dir / "SOUL.md").exists(),
-            "has_memory": (agent_dir / "MEMORY.md").exists(),
             "has_profile": (agent_dir / "PROFILE.md").exists(),
             "has_skills": (agent_dir / "skills").exists(),
         }
@@ -83,7 +82,7 @@ async def get_global_agent(request: Request, agent_id: str) -> Dict[str, Any]:
             result["agent_json"] = json.load(f)
 
     # 读取身份文件
-    for filename in ["SOUL.md", "MEMORY.md", "PROFILE.md", "AGENTS.md", "BOOTSTRAP.md", "HEARTBEAT.md"]:
+    for filename in ["SOUL.md", "PROFILE.md", "AGENTS.md", "BOOTSTRAP.md", "HEARTBEAT.md"]:
         file_path = agent_dir / filename
         if file_path.exists():
             result[filename.lower().replace(".md", "")] = file_path.read_text(encoding="utf-8")
@@ -124,7 +123,7 @@ async def update_global_agent(
             logger.info(f"Updated agent.json for {agent_id}")
 
     # 更新身份文件
-    for key, filename in [("soul", "SOUL.md"), ("memory", "MEMORY.md"), ("profile", "PROFILE.md"), ("agents", "AGENTS.md"), ("bootstrap", "BOOTSTRAP.md"), ("heartbeat", "HEARTBEAT.md")]:
+    for key, filename in [("soul", "SOUL.md"), ("profile", "PROFILE.md"), ("agents", "AGENTS.md"), ("bootstrap", "BOOTSTRAP.md"), ("heartbeat", "HEARTBEAT.md")]:
         if key in body:
             file_path = agent_dir / filename
             file_path.write_text(body[key], encoding="utf-8")
@@ -145,7 +144,7 @@ async def init_global_agent_identity(
         raise HTTPException(status_code=404, detail=f"全局智能体不存在: {agent_id}")
 
     created = []
-    for filename in ["SOUL.md", "MEMORY.md", "PROFILE.md"]:
+    for filename in ["SOUL.md", "PROFILE.md"]:
         file_path = agent_dir / filename
         template_path = TEMPLATES_DIR / filename
 
@@ -428,7 +427,7 @@ async def create_global_agent(
 
     # 从全局模板继承身份文件
     inherited: list[str] = []
-    for filename in ["SOUL.md", "MEMORY.md", "PROFILE.md"]:
+    for filename in ["SOUL.md", "PROFILE.md"]:
         template_path = TEMPLATES_DIR / filename
         if template_path.exists():
             dest = agent_dir / filename

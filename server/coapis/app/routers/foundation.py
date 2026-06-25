@@ -85,7 +85,6 @@ async def get_foundation_status(request: Request) -> Dict[str, Any]:
         agent_status = {
             "status": workspace.status,
             "core_injected": fm._core_injected,
-            "reme_parser_ready": fm._reme_parser_ready,
             "knowledge_entries": len(entries),
             "categories": len(categories),
             "pending_reviews": len(fm._pending_memories),

@@ -529,7 +529,7 @@ class CrossAgentEvolution:
         """基于字符 n-gram 频率生成文本向量（轻量级，无需外部 API）。
 
         用 bigram/unigram 频率映射到固定维度，通过哈希分散。
-        当 ReMeLight embedding 可用时，可通过 override 方法替换为真实向量。
+        可通过 override 方法替换为真实向量。
         """
         import hashlib
         import math
