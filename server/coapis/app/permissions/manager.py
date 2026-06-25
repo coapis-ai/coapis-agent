@@ -404,15 +404,33 @@ class PermissionManager:
         cmd = command.strip()
         if not cmd:
             return False
+
+        # ── 1. Blacklist check ──
         for p in self.get_shell_blacklist():
             if fnmatch.fnmatch(cmd, p):
                 return False
+
+        # ── 2. Dangerous patterns check ──
         for p in self.get_dangerous_patterns():
             try:
                 if re.compile(p).search(cmd):
                     return False
             except re.error:
                 pass
+
+        # ── 3. Command levels check (L0-L5, takes priority over whitelist) ──
+        command_levels = self.get_command_levels()
+        if command_levels:
+            base = cmd.split()[0]
+            for level, commands in command_levels.items():
+                for level_cmd in commands:
+                    if level_cmd == base or fnmatch.fnmatch(base, level_cmd):
+                        if level == "L5":
+                            return False  # L5: permanently denied
+                        return True  # L0-L4: allowed (L3/L4 approval handled upstream)
+            # Command not found in any level — fall through to whitelist
+
+        # ── 4. Whitelist fallback (legacy, used when command_levels not configured) ──
         whitelist = self.get_shell_whitelist(role)
         if "*" in whitelist:
             return True
