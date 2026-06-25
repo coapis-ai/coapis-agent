@@ -375,6 +375,30 @@ class PermissionManager:
     def get_dangerous_patterns(self) -> List[str]:
         return self._config.get("shell_permissions", {}).get("dangerous_patterns", [])
 
+    def get_command_levels(self) -> Dict[str, List[str]]:
+        """Get command level classification from config.
+
+        Returns:
+            Dict mapping level name (L0-L5) to list of base commands.
+            Returns empty dict if not configured (caller should use fallback).
+        """
+        return self._config.get("shell_permissions", {}).get("command_levels", {})
+
+    def update_command_levels(self, command_levels: Dict[str, List[str]]) -> bool:
+        """Update command level classification in config.
+
+        Args:
+            command_levels: Dict mapping level name (L0-L5) to list of base commands.
+
+        Returns:
+            True if saved successfully.
+        """
+        if "shell_permissions" not in self._config:
+            self._config["shell_permissions"] = {}
+        self._config["shell_permissions"]["command_levels"] = command_levels
+        logger.info("PermissionManager: updated command levels")
+        return self.save_config()
+
     def is_shell_command_allowed(self, role: str, command: str) -> bool:
         import fnmatch, re
         cmd = command.strip()

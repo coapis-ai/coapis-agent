@@ -175,6 +175,46 @@ export async function updateShellPermissions(
 }
 
 /**
+ * Get command level classification (admin only).
+ *
+ * Returns: { success: boolean, command_levels: Record<string, string[]> }
+ */
+export async function getCommandLevels() {
+  const res = await fetch(getApiUrl("/permissions/command-levels"), {
+    method: "GET",
+    headers: buildAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to get command levels");
+  }
+  return res.json();
+}
+
+/**
+ * Update command level classification (admin only).
+ *
+ * Returns: { success: boolean, message: string }
+ */
+export async function updateCommandLevels(
+  commandLevels: Record<string, string[]>
+) {
+  const res = await fetch(getApiUrl("/permissions/command-levels"), {
+    method: "PUT",
+    headers: {
+      ...buildAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ command_levels: commandLevels }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update command levels");
+  }
+  return res.json();
+}
+
+/**
  * Get audit logs (admin only).
  * 
  * Returns: { logs: object[], total: number }
@@ -262,6 +302,8 @@ export const permissionsApi = {
   getPermissionsConfig,
   updateRoleConfig,
   updateShellPermissions,
+  getCommandLevels,
+  updateCommandLevels,
   getAuditLogs,
   getUserOverrides,
   updateUserOverrides,

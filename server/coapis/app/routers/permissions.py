@@ -292,6 +292,39 @@ async def update_shell_permissions(role: str, request: Request, body: dict) -> d
     return {"success": True, "message": f"Shell permissions for role '{role}' updated"}
 
 
+@router.get("/command-levels")
+@require_permission("admin:admin")
+async def get_command_levels(request: Request) -> dict:
+    """Get command level classification (admin only)."""
+    pm = PermissionManager.get_instance()
+    levels = pm.get_command_levels()
+    return {"success": True, "command_levels": levels}
+
+
+@router.put("/command-levels")
+@require_permission("admin:admin")
+async def update_command_levels(request: Request, body: dict) -> dict:
+    """Update command level classification (admin only).
+
+    Body: {"command_levels": {"L0": [...], "L1": [...], ...}}
+    """
+    command_levels = body.get("command_levels", {})
+    if not isinstance(command_levels, dict):
+        raise HTTPException(status_code=400, detail="command_levels must be a dict")
+    # Validate level names
+    valid_levels = {"L0", "L1", "L2", "L3", "L4", "L5"}
+    for key in command_levels:
+        if key not in valid_levels:
+            raise HTTPException(status_code=400, detail=f"Invalid level: {key}")
+        if not isinstance(command_levels[key], list):
+            raise HTTPException(status_code=400, detail=f"Level {key} must be a list")
+    pm = PermissionManager.get_instance()
+    success = pm.update_command_levels(command_levels)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save command levels")
+    return {"success": True, "message": "Command levels updated"}
+
+
 @router.get("/audit")
 @require_permission("admin:admin")
 async def get_audit_logs(

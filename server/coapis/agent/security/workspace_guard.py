@@ -318,6 +318,9 @@ class WorkspaceGuard:
     def classify_command(self, command: str) -> str:
         """Classify a shell command into a security level (L0-L5).
 
+        Reads command levels from PermissionManager if configured,
+        otherwise falls back to hardcoded COMMAND_LEVELS.
+
         Args:
             command: Shell command string
 
@@ -341,17 +344,23 @@ class WorkspaceGuard:
         # Extract base command
         base_cmd = cmd.split()[0]
 
-        # Check command level mapping
-        level = _CMD_TO_LEVEL.get(base_cmd)
+        # Try PermissionManager command_levels first (admin-configurable)
+        pm = self._get_permission_manager()
+        if pm is not None:
+            levels = pm.get_command_levels()
+            if levels:
+                for level_name, cmds in levels.items():
+                    if base_cmd in cmds:
+                        return level_name
+                # Unknown command in PM mode → L3
+                return "L3"
 
+        # Fallback: hardcoded COMMAND_LEVELS
+        level = _CMD_TO_LEVEL.get(base_cmd)
         if level is not None:
             return level
 
         # Unknown commands default to L3 (needs approval)
-        # Admin role gets L4 treatment (needs approval but allowed)
-        role = get_current_user_role() or "user"
-        if role == "admin":
-            return "L3"
         return "L3"
 
     def is_command_allowed(self, command: str, role: str | None = None) -> bool:

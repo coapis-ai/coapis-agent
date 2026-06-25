@@ -1009,6 +1009,54 @@ function ShellSubTab({
   onSave, shellPerms, loading,
 }: any) {
   const { t } = useTranslation();
+  const [cmdLevels, setCmdLevels] = useState<Record<string, string[]>>({});
+  const [levelsLoading, setLevelsLoading] = useState(false);
+  const [activeLevelTab, setActiveLevelTab] = useState('L2');
+
+  const LEVEL_META: Record<string, { label: string; color: string; desc: string }> = {
+    L0: { label: 'L0 只读', color: '#52c41a', desc: t('admin.levelL0Desc', '自动放行 — ls, cat, grep, find 等') },
+    L1: { label: 'L1 安全写入', color: '#73d13d', desc: t('admin.levelL1Desc', '自动放行 — mkdir, cp, mv, touch 等') },
+    L2: { label: 'L2 网络/工具', color: '#1890ff', desc: t('admin.levelL2Desc', '自动放行 — curl, wget, git, python3 等') },
+    L3: { label: 'L3 危险操作', color: '#faad14', desc: t('admin.levelL3Desc', '需用户确认 — rm, tar, zip 等') },
+    L4: { label: 'L4 系统管理', color: '#ff4d4f', desc: t('admin.levelL4Desc', '需 admin 角色 + 确认 — docker, systemctl 等') },
+  };
+
+  useEffect(() => {
+    loadCommandLevels();
+  }, []);
+
+  const loadCommandLevels = async () => {
+    setLevelsLoading(true);
+    try {
+      const res: any = await permissionsApi.getCommandLevels();
+      if (res.command_levels && Object.keys(res.command_levels).length > 0) {
+        setCmdLevels(res.command_levels);
+      }
+    } catch (e: any) {
+      // Silent fail — will use hardcoded defaults
+    } finally {
+      setLevelsLoading(false);
+    }
+  };
+
+  const handleSaveLevels = async () => {
+    setLevelsLoading(true);
+    try {
+      await permissionsApi.updateCommandLevels(cmdLevels);
+      message.success(t('admin.commandLevelsUpdated', '命令分级已保存'));
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setLevelsLoading(false);
+    }
+  };
+
+  const updateLevelCommands = (level: string, text: string) => {
+    setCmdLevels((prev) => ({
+      ...prev,
+      [level]: text.split('\n').map((s) => s.trim()).filter(Boolean),
+    }));
+  };
 
   useEffect(() => {
     const perm = shellPerms[selectedRole];
@@ -1025,56 +1073,113 @@ function ShellSubTab({
 
   return (
     <div>
-      <Row gutter={24}>
-        <Col span={8}>
-          <Card title={t('admin.selectRole')} size="small" style={{ marginBottom: 16 }}>
+      {/* ── Command Levels Card ── */}
+      <Card
+        title={t('admin.commandLevels', '命令分级管理')}
+        size="small"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Button
+            type="primary"
+            size="small"
+            onClick={handleSaveLevels}
+            loading={levelsLoading}
+          >
+            {t('common.save')}
+          </Button>
+        }
+      >
+        <Row gutter={8} style={{ marginBottom: 12 }}>
+          {Object.entries(LEVEL_META).map(([key, meta]) => (
+            <Col key={key}>
+              <Tag
+                color={activeLevelTab === key ? meta.color : undefined}
+                style={{ cursor: 'pointer', padding: '4px 12px' }}
+                onClick={() => setActiveLevelTab(key)}
+              >
+                {meta.label}
+              </Tag>
+            </Col>
+          ))}
+        </Row>
+        {LEVEL_META[activeLevelTab] && (
+          <div>
+            <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
+              {LEVEL_META[activeLevelTab].desc}
+            </div>
+            <Input.TextArea
+              rows={6}
+              value={(cmdLevels[activeLevelTab] || []).join('\n')}
+              onChange={(e) => updateLevelCommands(activeLevelTab, e.target.value)}
+              placeholder={t('admin.commandLevelsPlaceholder', '每行一个命令，如：\ncurl\nwget\ngit')}
+              style={{ fontFamily: 'monospace' }}
+            />
+            <div style={{ marginTop: 4, color: '#aaa', fontSize: 11 }}>
+              {t('admin.commandLevelsHint', '每行一个基础命令名（不含参数）。留空表示该级别无命令。')}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* ── Legacy Shell Permissions (per role) ── */}
+      <Card
+        title={t('admin.shellPermissionsAdvanced', '高级 Shell 权限（按角色）')}
+        size="small"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Button type="primary" onClick={onSave} loading={loading} size="small">
+            {t('common.save')}
+          </Button>
+        }
+      >
+        <Row gutter={24} style={{ marginBottom: 16 }}>
+          <Col span={8}>
             <Select
               value={selectedRole}
               onChange={setSelectedRole}
               style={{ width: '100%' }}
               options={roles.map((r: string) => ({ label: r, value: r }))}
+              placeholder={t('admin.selectRole')}
             />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Button type="primary" onClick={onSave} loading={loading} block>
-            {t('common.save')}
-          </Button>
-        </Col>
-      </Row>
+          </Col>
+        </Row>
 
-      <Row gutter={16}>
-        <Col span={8}>
-          <Card title={t('admin.whitelist')} size="small">
-            <Input.TextArea
-              rows={12}
-              value={whitelist}
-              onChange={(e) => setWhitelist(e.target.value)}
-              placeholder={t('admin.whitelistPlaceholder')}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card title={t('admin.blacklist')} size="small">
-            <Input.TextArea
-              rows={12}
-              value={blacklist}
-              onChange={(e) => setBlacklist(e.target.value)}
-              placeholder={t('admin.blacklistPlaceholder')}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card title={t('admin.dangerousPatterns')} size="small">
-            <Input.TextArea
-              rows={12}
-              value={dangerous}
-              onChange={(e) => setDangerous(e.target.value)}
-              placeholder={t('admin.dangerousPatternsPlaceholder')}
-            />
-          </Card>
-        </Col>
-      </Row>
+        <Row gutter={16}>
+          <Col span={8}>
+            <Card title={t('admin.blacklist')} size="small" type="inner">
+              <Input.TextArea
+                rows={10}
+                value={blacklist}
+                onChange={(e) => setBlacklist(e.target.value)}
+                placeholder={t('admin.blacklistPlaceholder')}
+                style={{ fontFamily: 'monospace' }}
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card title={t('admin.dangerousPatterns')} size="small" type="inner">
+              <Input.TextArea
+                rows={10}
+                value={dangerous}
+                onChange={(e) => setDangerous(e.target.value)}
+                placeholder={t('admin.dangerousPatternsPlaceholder')}
+                style={{ fontFamily: 'monospace' }}
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card title={t('admin.whitelist')} size="small" type="inner">
+              <Input.TextArea
+                rows={10}
+                value={whitelist}
+                onChange={(e) => setWhitelist(e.target.value)}
+                placeholder={t('admin.whitelistPlaceholder')}
+                style={{ fontFamily: 'monospace' }}
+              />
+            </Card>
+          </Col>
+        </Row>
+      </Card>
     </div>
   );
 }
