@@ -396,13 +396,61 @@ async def execute_shell_command(
 
     cmd = _collapse_embedded_newlines((command or "").strip())
 
-    # ── WorkspaceGuard: shell command validation ──
+    # ── WorkspaceGuard: shell command level-based validation ──
     try:
         from ..security.workspace_guard import check_command
-        check_command(cmd)
-    except ValueError as e:
+        cmd_result = check_command(cmd)
+    except Exception as e:
         return ToolResponse(
-            content=[TextBlock(type="text", text=f"权限拒绝: {e}")],
+            content=[TextBlock(type="text", text=f"命令安全检查异常: {e}")],
+        )
+
+    if not cmd_result.get("allowed"):
+        level = cmd_result.get("level", "?")
+        reason = cmd_result.get("reason", "未知原因")
+
+        if cmd_result.get("needs_approval"):
+            # L3/L4: try tool_guard approval flow
+            try:
+                from ...security.tool_guard import ToolGuardEngine
+                engine = ToolGuardEngine()
+                result = engine.guard(
+                    "execute_shell_command",
+                    {"command": cmd},
+                )
+                if not result.is_safe:
+                    from ...security.tool_guard.approval import format_findings_summary
+                    from ...security.tool_guard.i18n import t
+                    summary = format_findings_summary(result)
+                    return ToolResponse(
+                        content=[TextBlock(
+                            type="text",
+                            text=(
+                                f"⚠️ 命令需要确认 [{level}]\n\n"
+                                f"命令: `{cmd[:200]}`\n\n"
+                                f"风险评估:\n{summary}\n\n"
+                                f"请确认是否允许执行此命令。"
+                            ),
+                        )],
+                    )
+            except Exception:
+                pass
+
+            # Fallback: return approval prompt to user
+            return ToolResponse(
+                content=[TextBlock(
+                    type="text",
+                    text=(
+                        f"⚠️ 命令需要确认 [{level}]\n\n"
+                        f"命令: `{cmd[:200]}`\n\n"
+                        f"此命令需要用户确认后才能执行。"
+                    ),
+                )],
+            )
+
+        # L5: permanent deny
+        return ToolResponse(
+            content=[TextBlock(type="text", text=f"🚫 命令被禁止 [{level}]: {reason}")],
         )
 
     if isinstance(timeout, str):

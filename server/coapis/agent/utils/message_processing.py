@@ -144,17 +144,16 @@ def _resolve_media_url(url: str) -> str:
       /media/{filename}  → workspaces/{user}/files/media/{filename}
       /{filename}        → workspaces/{user}/files/{filename}  (legacy)
     """
-    from ...config.context import get_current_workspace_dir, get_current_username
+    from ...config.context import get_current_workspace_dir
     
     # Already an absolute URL – nothing to resolve
     if url.startswith("http://") or url.startswith("https://") or url.startswith("file://"):
         return url
     
     workspace_dir = get_current_workspace_dir()
-    username = get_current_username()
     
-    if not workspace_dir or not username:
-        logger.debug("_resolve_media_url: no context, url=%s", url)
+    if not workspace_dir:
+        logger.debug("_resolve_media_url: no workspace context, url=%s", url)
         return url
     
     parsed = urllib.parse.urlparse(url)

@@ -113,6 +113,58 @@ FALLBACK_DANGEROUS_PATTERNS: List[str] = [
 ]
 
 
+# ── Command level classification ──
+# Levels control how shell commands are handled:
+#   L0 (read-only)     → auto-allow
+#   L1 (safe write)    → auto-allow (within workspace)
+#   L2 (network/tools) → auto-allow
+#   L3 (dangerous)     → needs user approval via tool_guard
+#   L4 (system mgmt)   → needs user approval + admin role
+#   L5 (forbidden)     → permanently denied
+
+COMMAND_LEVELS: Dict[str, List[str]] = {
+    "L0": [
+        "ls", "cat", "head", "tail", "grep", "find", "pwd", "date",
+        "echo", "printf", "wc", "tree", "whoami", "id",
+        "sort", "uniq", "cut", "tr", "sed", "awk",
+        "file", "stat", "du", "df", "env", "printenv",
+        "which", "whereis", "type", "realpath", "basename", "dirname",
+    ],
+    "L1": [
+        "mkdir", "touch", "cp", "mv", "chmod", "chown", "ln",
+    ],
+    "L2": [
+        "curl", "wget", "git",
+        "python3", "python", "node", "npm", "npx", "pip3", "pip",
+        "ffmpeg", "convert",
+    ],
+    "L3": [
+        "rm", "rmdir", "tar", "zip", "unzip", "gzip", "gunzip",
+        "crontab", "tee",
+    ],
+    "L4": [
+        "docker", "docker-compose", "podman",
+        "systemctl", "service",
+        "apt", "apt-get", "yum", "dnf", "pacman",
+        "kill", "pkill", "killall",
+        "mount", "umount", "iptables",
+        "useradd", "userdel", "usermod", "passwd",
+    ],
+    "L5": [
+        # Permanently forbidden — matches FALLBACK_SHELL_BLACKLIST
+    ],
+}
+
+# Auto-approve levels (L0-L2 execute without user confirmation)
+AUTO_APPROVE_LEVELS = {"L0", "L1", "L2"}
+
+# Build reverse lookup: base_command → level
+_CMD_TO_LEVEL: Dict[str, str] = {}
+for _lvl, _cmds in COMMAND_LEVELS.items():
+    for _cmd in _cmds:
+        _CMD_TO_LEVEL[_cmd] = _lvl
+
+
 class WorkspaceGuard:
     """Zero-trust workspace isolation enforcer.
 
@@ -263,106 +315,199 @@ class WorkspaceGuard:
 
         return Path(target_path).expanduser().resolve()
 
+    def classify_command(self, command: str) -> str:
+        """Classify a shell command into a security level (L0-L5).
+
+        Args:
+            command: Shell command string
+
+        Returns:
+            Level string: "L0", "L1", "L2", "L3", "L4", or "L5"
+        """
+        cmd = command.strip()
+        if not cmd:
+            return "L0"
+
+        # L5 blacklist check — permanently denied
+        for pattern in self._get_blacklist():
+            if fnmatch.fnmatch(cmd, pattern):
+                return "L5"
+
+        # Dangerous patterns → L5
+        for pattern in self._compiled_dangerous:
+            if pattern.search(cmd):
+                return "L5"
+
+        # Extract base command
+        base_cmd = cmd.split()[0]
+
+        # Check command level mapping
+        level = _CMD_TO_LEVEL.get(base_cmd)
+
+        if level is not None:
+            return level
+
+        # Unknown commands default to L3 (needs approval)
+        # Admin role gets L4 treatment (needs approval but allowed)
+        role = get_current_user_role() or "user"
+        if role == "admin":
+            return "L3"
+        return "L3"
+
     def is_command_allowed(self, command: str, role: str | None = None) -> bool:
         """Check if shell command is allowed for the current user's role.
+
+        Uses the new level-based classification:
+        - L0/L1/L2: always allowed
+        - L3/L4: allowed (approval handled by caller via tool_guard)
+        - L5: denied
 
         Args:
             command: Shell command string
             role: Override role (defaults to contextvar)
 
         Returns:
-            True if command is allowed, False otherwise
+            True if command is allowed (auto or via approval), False if L5
         """
-        if role is None:
-            role = get_current_user_role() or "user"
+        level = self.classify_command(command)
+        if level == "L5":
+            role = role or get_current_user_role() or "user"
+            logger.warning(
+                f"WorkspaceGuard: L5 forbidden command blocked. "
+                f"role={role}, command={command[:100]}"
+            )
+            return False
+        return True
 
-        # Use PermissionManager if available (supports hot-reload)
-        pm = self._get_permission_manager()
-        if pm is not None:
-            return pm.is_shell_command_allowed(role, command)
+    def check_path(self, target_path: str | Path, operation: str = "read") -> Path:
+        """Validate path and return resolved Path, or raise ValueError.
 
-        # Fallback: hardcoded rules
-        return self._is_command_allowed_fallback(command, role)
+        Args:
+            target_path: Path to validate
+            operation: Operation type ("read", "write", "execute") for logging
 
-    def _is_command_allowed_fallback(self, command: str, role: str) -> bool:
-        """Fallback command check using hardcoded rules."""
-        # Check whitelist first (admin wildcard takes precedence)
-        allowed_commands = self._get_whitelist(role)
+        Returns:
+            Resolved Path object
 
-        # Admin wildcard — admin bypasses all restrictions
-        if "*" in allowed_commands:
-            return True
+        Raises:
+            ValueError: If path escapes workspace boundary
+        """
+        if not self.is_within_workspace(target_path):
+            username = get_current_username() or "unknown"
+            workspace = get_current_workspace_dir() or "unknown"
+            logger.warning(
+                f"WorkspaceGuard: path {operation} blocked. "
+                f"user={username}, path={target_path}, workspace={workspace}"
+            )
 
-        # Check blacklist (non-admin roles only)
-        for blacklist_pattern in self._get_blacklist():
-            if fnmatch.fnmatch(command, blacklist_pattern):
-                logger.warning(
-                    f"WorkspaceGuard: blacklisted command blocked. "
-                    f"role={role}, command={command[:100]}"
-                )
-                return False
+            # Audit log
+            ev = create_audit_event(
+                event_type="path_check",
+                tool_name="workspace_guard",
+                target_path=str(target_path),
+                result="denied",
+                reason=f"路径不在工作空间内: {target_path}",
+            )
+            AuditLogger.log(ev)
 
-        # Check dangerous patterns (non-admin roles only)
-        for pattern in self._compiled_dangerous:
-            if pattern.search(command):
-                logger.warning(
-                    f"WorkspaceGuard: dangerous pattern detected. "
-                    f"role={role}, command={command[:100]}"
-                )
-                return False
+            raise ValueError(
+                f"路径越权: 目标路径 {target_path} 不在工作空间 {workspace} 内"
+            )
 
-        # Extract base command (first word)
-        base_cmd = command.strip().split()[0] if command.strip() else ""
-
-        # Check exact match or pattern match
-        for allowed in allowed_commands:
-            if fnmatch.fnmatch(base_cmd, allowed.split()[0]):
-                return True
-
-        logger.warning(
-            f"WorkspaceGuard: command not in whitelist. "
-            f"role={role}, command={command[:100]}"
+        # Audit allowed path access
+        ev = create_audit_event(
+            event_type="path_check",
+            tool_name="workspace_guard",
+            target_path=str(target_path),
+            result="allowed",
         )
-        return False
+        AuditLogger.log(ev)
 
-    def check_command(self, command: str) -> str:
-        """Validate shell command and return sanitized version, or raise ValueError.
+        return Path(target_path).expanduser().resolve()
+
+    def check_command(self, command: str) -> dict:
+        """Validate shell command and return level-based result.
 
         Args:
             command: Shell command string
 
         Returns:
-            Original command if allowed
-
-        Raises:
-            ValueError: If command is not allowed for current role
+            dict with keys:
+                - "allowed" (bool): Whether the command can execute
+                - "level" (str): Security level (L0-L5)
+                - "needs_approval" (bool): Whether user approval is required
+                - "command" (str): Original command
+                - "reason" (str, optional): Rejection reason (if denied)
         """
         role = get_current_user_role() or "user"
-        if not self.is_command_allowed(command, role):
-            # Audit log
+        level = self.classify_command(command)
+
+        if level == "L5":
             ev = create_audit_event(
                 event_type="command_check",
                 tool_name="workspace_guard",
                 command=command[:200],
                 result="denied",
-                reason=f"角色 {role} 不允许执行命令",
+                reason=f"L5 禁止命令: {command[:80]}",
             )
             AuditLogger.log(ev)
+            return {
+                "allowed": False,
+                "level": level,
+                "needs_approval": False,
+                "command": command,
+                "reason": f"命令被永久禁止: '{command[:100]}'",
+            }
 
-            raise ValueError(
-                f"命令越权: 角色 {role} 不允许执行命令 '{command[:100]}...'"
+        if level in AUTO_APPROVE_LEVELS:
+            ev = create_audit_event(
+                event_type="command_check",
+                tool_name="workspace_guard",
+                command=command[:200],
+                result="allowed",
+                reason=f"Level {level} auto-approved",
             )
+            AuditLogger.log(ev)
+            return {
+                "allowed": True,
+                "level": level,
+                "needs_approval": False,
+                "command": command,
+            }
 
-        # Audit allowed command
+        # L3/L4: needs user approval via tool_guard
+        # L4 additionally requires admin role
+        if level == "L4" and role != "admin":
+            ev = create_audit_event(
+                event_type="command_check",
+                tool_name="workspace_guard",
+                command=command[:200],
+                result="denied",
+                reason=f"L4 命令需要 admin 角色, 当前角色: {role}",
+            )
+            AuditLogger.log(ev)
+            return {
+                "allowed": False,
+                "level": level,
+                "needs_approval": False,
+                "command": command,
+                "reason": f"L4 系统管理命令需要 admin 角色, 当前角色: {role}",
+            }
+
         ev = create_audit_event(
             event_type="command_check",
             tool_name="workspace_guard",
             command=command[:200],
-            result="allowed",
+            result="needs_approval",
+            reason=f"Level {level} needs approval",
         )
         AuditLogger.log(ev)
-
-        return command
+        return {
+            "allowed": False,
+            "level": level,
+            "needs_approval": True,
+            "command": command,
+        }
 
     def reload_patterns(self) -> None:
         """Reload dangerous patterns from config (for hot-reload support)."""
@@ -397,6 +542,14 @@ def is_command_allowed(command: str) -> bool:
     return get_guard().is_command_allowed(command)
 
 
-def check_command(command: str) -> str:
-    """Convenience function: validate command or raise ValueError."""
+def classify_command(command: str) -> str:
+    """Convenience function: classify command into level L0-L5."""
+    return get_guard().classify_command(command)
+
+
+def check_command(command: str) -> dict:
+    """Convenience function: validate command and return level-based result.
+
+    Returns dict with: allowed, level, needs_approval, command, reason(optional).
+    """
     return get_guard().check_command(command)
