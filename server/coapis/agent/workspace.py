@@ -951,8 +951,10 @@ class Workspace:
                                     f"    来源: {r.get('url', '')}"
                                     for i, r in enumerate(_search_result['results'])
                                 )
-                                user_message = (
-                                    f"{user_message}\n\n"
+                                # Keep user_message clean — pass search results
+                                # via context so they reach the LLM but are NOT
+                                # persisted in the user message session record.
+                                _search_context = (
                                     f"[SEARCH_RESULTS] 以下是关于该话题的实时搜索结果（共{len(_search_result['results'])}条），"
                                     f"请基于以下搜索结果中的信息进行汇总回答。要求：\n"
                                     f"1. 按条理清晰地组织回答，使用分点或分段结构\n"
@@ -961,6 +963,7 @@ class Workspace:
                                     f"4. 用中文回答，语气专业但易读\n\n"
                                     f"{_results_text}\n[/SEARCH_RESULTS]"
                                 )
+                                context.add_message("system", _search_context)
                                 logger.info(
                                     "Search pre-fetch: injected %d results for query: %s",
                                     len(_search_result['results']),
@@ -1053,8 +1056,53 @@ class Workspace:
                         content=[],
                     )
 
+                # ── Pre-save user message to session (before stream) ──
+                # Following qwenpaw strategy: user message is persisted BEFORE
+                # stream processing begins, so it survives /stop interruption.
+                logger.info("[DEBUG] Starting pre-save, chat_key=%s", chat_key[:20])
+                _pre_save_done = False
+                try:
+                    _session = self.runner.session if self.runner else None
+                    if _session and user_message.strip():
+                        from coapis.config.session_context import get_current_chat_id as _get_chat_id_pre
+                        _pre_chat_id = (
+                            getattr(request_obj, "chat_id", "")
+                            or _get_chat_id_pre()
+                            or chat_key
+                        )
+                        _pre_user = self.username or user_id or "anonymous"
+                        # Load existing state
+                        _pre_state = await _session.get_session_state_dict(
+                            _pre_chat_id, _pre_user, allow_not_exist=True,
+                        )
+                        _pre_mem_state = (_pre_state or {}).get("agent", {}).get("memory", {})
+                        from agentscope.memory import InMemoryMemory
+                        from agentscope.message import Msg, TextBlock
+                        _pre_mem = InMemoryMemory()
+                        if _pre_mem_state:
+                            _pre_mem.load_state_dict(_pre_mem_state, strict=False)
+                        # Add user message
+                        await _pre_mem.add(
+                            Msg(name="user", content=[TextBlock(text=user_message)], role="user")
+                        )
+                        # Save back (only user message, assistant will be added later)
+                        _pre_new_state = _pre_state.copy() if _pre_state else {}
+                        if "agent" not in _pre_new_state:
+                            _pre_new_state["agent"] = {}
+                        _pre_new_state["agent"]["memory"] = _pre_mem.state_dict()
+                        await _session.update_session_state(
+                            _pre_chat_id, "agent.memory",
+                            _pre_new_state["agent"]["memory"],
+                            user_id=_pre_user,
+                        )
+                        _pre_save_done = True
+                        logger.debug("Pre-saved user message to session, chat=%s", _pre_chat_id[:12])
+                except Exception as e:
+                    logger.warning("Pre-save user message failed: %s", e)
+
                 # ── Stream with CancelledError handling for /stop ──
                 _stopped = False
+                logger.info("[DEBUG] About to call core.stream_chat, user=%s, msg=%s", self.username, user_message[:50])
                 try:
                     async for chunk in self.core.stream_chat(
                         message=user_message,
@@ -1100,13 +1148,15 @@ class Workspace:
                                 )
                         elif block.type == "tool_call":
                             _tool_calls_seen += 1
+                            # Always close reasoning phase when tool_call arrives,
+                            # even if render is empty — prevents subsequent content
+                            # from being rendered inside the thinking area.
+                            if _current_phase == "reasoning":
+                                async for ev in _close_phase():
+                                    yield ev
                             rendered = _renderer.render_tool_call(block.content, block.meta)
                             if rendered:
                                 full_response.append(rendered)
-                                # Close reasoning phase if open, then open plugin_call
-                                if _current_phase == "reasoning":
-                                    async for ev in _close_phase():
-                                        yield ev
                                 async for ev in _open_phase("plugin_call"):
                                     yield ev
                                 # Send DataContent with tool metadata (name, args, call_id)
@@ -1275,8 +1325,8 @@ class Workspace:
                         if _mem_state:
                             _mem.load_state_dict(_mem_state, strict=False)
 
-                        # Add user message
-                        if user_message.strip():
+                        # Add user message (skip if already pre-saved before stream)
+                        if user_message.strip() and not _pre_save_done:
                             _user_msg = Msg(name="user", content=[TextBlock(text=user_message)], role="user")
                             await _mem.add(_user_msg)
 
@@ -1288,8 +1338,8 @@ class Workspace:
                         for blk in _raw_blocks:
                             btype = getattr(blk, "type", "text")
                             content = getattr(blk, "content", "")
-                            # tool_use / tool_result are never merged
-                            if btype in ("tool_use", "tool_result"):
+                            # tool_call / tool_result are never merged (preserves meta)
+                            if btype in ("tool_call", "tool_result"):
                                 # flush buffer first
                                 if _buf_content:
                                     _merged_blocks.append(
@@ -1346,10 +1396,16 @@ class Workspace:
                                 _assistant_content.append(TextBlock(type="text", text=content))
 
                         if _assistant_content:
+                            # Check if there are thinking blocks
+                            _has_thinking = any(
+                                getattr(b, "type", "") == "thinking"
+                                for b in _assistant_content
+                            )
                             _assistant_msg = Msg(
                                 name="assistant",
                                 content=_assistant_content,
                                 role="assistant",
+                                metadata={"type": "reasoning"} if _has_thinking else {},
                             )
                             await _mem.add(_assistant_msg)
 

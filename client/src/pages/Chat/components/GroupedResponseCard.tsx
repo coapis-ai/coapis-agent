@@ -2,18 +2,22 @@
  * GroupedResponseCard — 按类型分块的自定义响应卡片
  *
  * 替代默认 AgentScopeRuntimeResponseCard，将一个回复中的内容按类型分块：
- * 1. 💭 思考过程 (REASONING) — 进行中时展开，完成后折叠
- * 2. 🔧 每个工具调用 (PLUGIN_CALL / MCP_CALL / FUNCTION_CALL) — 默认折叠，显示输入输出
+ * 1. 💭 思考过程 (REASONING) — 进行中时展开，完成后默认折叠，点击可展开
+ * 2. 🔧 每个工具调用 (PLUGIN_CALL / MCP_CALL / FUNCTION_CALL) — 默认折叠，显示名称、输入、输出
  * 3. 📝 正文回复 (MESSAGE) — 默认展开
  *
- * 通过 options.cards 注册：
- *   cards: { 'AgentScopeRuntimeResponseCard': GroupedResponseCard }
+ * 数据格式（对齐 qwenpaw agentscope_msg_to_message 输出）：
+ *   reasoning:        content = [{ type: "text", text: "..." }]
+ *   plugin_call:      content = [{ type: "data", data: { call_id, name, arguments } }]
+ *   plugin_call_output: content = [{ type: "data", data: { call_id, name, output } }]
+ *   message:          content = [{ type: "text", text: "..." }]
  */
-import React, { useMemo } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { Markdown } from '@agentscope-ai/chat';
 import {
   LoadingOutlined,
   RightOutlined,
+  DownOutlined,
   BulbOutlined,
   WarningOutlined,
   CodeOutlined,
@@ -22,7 +26,7 @@ import {
 import styles from '../index.module.less';
 
 // ---------------------------------------------------------------------------
-// Types (mirror @agentscope-ai/chat internal types)
+// Types
 // ---------------------------------------------------------------------------
 
 const MSG_TYPE = {
@@ -52,7 +56,13 @@ const RUN_STATUS = {
 interface ContentItem {
   type?: string;
   text?: string;
+  thinking?: string;
   data?: Record<string, any>;
+  name?: string;
+  input?: Record<string, any>;
+  arguments?: Record<string, any>;
+  output?: any;
+  id?: string;
   [key: string]: any;
 }
 
@@ -75,243 +85,295 @@ interface GroupedResponseCardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: safely get message type
+// Helpers
 // ---------------------------------------------------------------------------
+
 function getMessageType(msg: OutputMessage): string {
   return msg?.type || MSG_TYPE.MESSAGE;
 }
 
-// ---------------------------------------------------------------------------
-// Helper: check if a message is a tool input (call)
-// ---------------------------------------------------------------------------
-function maybeToolInput(msg: OutputMessage): boolean {
-  const type = getMessageType(msg);
-  return (MSG_TYPE as Record<string, string>)[type] !== undefined && 
-         ['PLUGIN_CALL', 'MCP_CALL', 'FUNCTION_CALL', 'COMPONENT_CALL'].includes(type.toUpperCase());
+function isToolCallType(type: string): boolean {
+  return [
+    MSG_TYPE.PLUGIN_CALL, MSG_TYPE.MCP_CALL,
+    MSG_TYPE.FUNCTION_CALL, MSG_TYPE.COMPONENT_CALL,
+  ].includes(type as any);
 }
 
-// ---------------------------------------------------------------------------
-// Helper: check if a message is a tool output
-// ---------------------------------------------------------------------------
-function maybeToolOutput(msg: OutputMessage): boolean {
-  const type = getMessageType(msg);
-  return (MSG_TYPE as Record<string, string>)[type] !== undefined && 
-         ['PLUGIN_CALL_OUTPUT', 'MCP_CALL_OUTPUT', 'FUNCTION_CALL_OUTPUT', 'COMPONENT_CALL_OUTPUT'].includes(type.toUpperCase());
+function isToolOutputType(type: string): boolean {
+  return [
+    MSG_TYPE.PLUGIN_CALL_OUTPUT, MSG_TYPE.MCP_CALL_OUTPUT,
+    MSG_TYPE.FUNCTION_CALL_OUTPUT, MSG_TYPE.COMPONENT_CALL_OUTPUT,
+  ].includes(type as any);
 }
 
-// ---------------------------------------------------------------------------
-// Helper: get tool name from message
-// ---------------------------------------------------------------------------
+/**
+ * Extract tool name from a tool call message.
+ * Data format: content[0] = { type: "data", data: { call_id, name, arguments } }
+ * Fallback: content[0].name (legacy flat format)
+ */
 function getToolName(msg: OutputMessage): string {
   try {
-    const content = msg?.content as ContentItem[];
-    if (Array.isArray(content) && content.length > 0 && content[0]?.data?.name) {
-      return content[0].data.name;
-    }
-  } catch (e) {
-    // ignore
-  }
+    const c = msg?.content?.[0];
+    if (!c) return 'Unknown Tool';
+    // qwenpaw format: data nested
+    if (c.data?.name) return c.data.name;
+    // legacy flat format
+    if (c.name) return c.name;
+    // Legacy tool_use block
+    if (c.type === 'tool_use' && c.name) return c.name;
+  } catch { /* ignore */ }
   return 'Unknown Tool';
 }
 
-// ---------------------------------------------------------------------------
-// Thinking Block
-// ---------------------------------------------------------------------------
-function ThinkingBlock({ msg }: { msg: OutputMessage }) {
+/**
+ * Extract tool call_id from a tool call/output message.
+ * Used for matching calls with outputs.
+ */
+function getCallId(msg: OutputMessage): string {
   try {
-    const content = msg?.content as ContentItem[];
-    if (!Array.isArray(content) || content.length === 0) return null;
+    const c = msg?.content?.[0];
+    if (!c) return '';
+    return c.data?.call_id || c.id || '';
+  } catch { /* ignore */ }
+  return '';
+}
 
-    const text = content[0]?.text || '';
-    const isInProgress = msg?.status === RUN_STATUS.IN_PROGRESS;
-    const isCompleted = msg?.status === RUN_STATUS.COMPLETED || msg?.status === RUN_STATUS.CANCELED;
+/**
+ * Extract tool input (arguments) from a tool call message.
+ */
+function getToolInput(msg: OutputMessage): any {
+  const c = msg?.content?.[0];
+  if (!c) return null;
+  return c.data?.arguments ?? c.arguments ?? c.input ?? c.data?.input ?? null;
+}
 
-    // 如果已完成且没有内容，不显示
-    if (isCompleted && !text) return null;
+/**
+ * Extract tool output from a tool result message.
+ */
+function getToolOutput(msg: OutputMessage): any {
+  const c = msg?.content?.[0];
+  if (!c) return null;
+  return c.data?.output ?? c.output ?? c.data?.result ?? null;
+}
 
-    return (
-      <div className={styles.thinkingBlock}>
-        <div
-          className={styles.thinkingHeader}
-          onClick={(e) => {
-            const target = e.currentTarget.nextElementSibling as HTMLElement;
-            if (target) {
-              target.style.display = target.style.display === 'none' ? 'block' : 'none';
-            }
-          }}
-        >
-          <BulbOutlined style={{ color: '#faad14', marginRight: 8 }} />
-          <span>Thinking</span>
-          {isInProgress && <LoadingOutlined spin style={{ marginLeft: 8, color: '#faad14' }} />}
-          <RightOutlined className={styles.expandIcon} />
-        </div>
-        <div className={styles.thinkingContent} style={{ display: isInProgress ? 'block' : 'none' }}>
-          <div className={styles.thinkingText}>{text}</div>
-        </div>
-      </div>
-    );
-  } catch (e) {
-    console.error('[GroupedResponseCard] ThinkingBlock error:', e);
-    return null;
+/** Format any value to displayable string */
+function formatValue(val: any): string {
+  if (val == null) return '';
+  if (typeof val === 'string') return val;
+  try { return JSON.stringify(val, null, 2); } catch { return String(val); }
+}
+
+/** Extract text from output (handles arrays of content items) */
+function extractOutputText(output: any): string {
+  if (!output) return '';
+  if (typeof output === 'string') return output;
+  if (Array.isArray(output)) {
+    return output.map((item: any) => {
+      if (typeof item === 'string') return item;
+      if (item?.text) return item.text;
+      if (item?.content) return item.content;
+      return JSON.stringify(item);
+    }).join('\n');
   }
+  return formatValue(output);
 }
 
 // ---------------------------------------------------------------------------
-// Tool Block — 自渲染，不依赖 ToolCall 组件
+// Thinking Block — 用 state 管理折叠，默认折叠已完成的
+// ---------------------------------------------------------------------------
+function ThinkingBlock({ msg }: { msg: OutputMessage }) {
+  const content = msg?.content;
+  if (!Array.isArray(content) || content.length === 0) return null;
+
+  // qwenpaw format: content = [{ type: "text", text: "..." }]
+  // Legacy format:   content = [{ type: "thinking", thinking: "..." }]
+  const text = content[0]?.text || content[0]?.thinking || '';
+  const isInProgress = msg?.status === RUN_STATUS.IN_PROGRESS;
+  const isCompleted = msg?.status === RUN_STATUS.COMPLETED || msg?.status === RUN_STATUS.CANCELED;
+
+  // 完成且无内容不显示
+  if (isCompleted && !text) return null;
+
+  // 进行中默认展开，完成后默认折叠
+  const [expanded, setExpanded] = useState(isInProgress);
+  const toggle = useCallback(() => setExpanded(v => !v), []);
+
+  return (
+    <div className={styles.thinkingBlock}>
+      <div className={styles.thinkingHeader} onClick={toggle}>
+        <BulbOutlined style={{ color: '#faad14', marginRight: 8 }} />
+        <span>思考过程</span>
+        {isInProgress && <LoadingOutlined spin style={{ marginLeft: 8, color: '#faad14' }} />}
+        {expanded
+          ? <DownOutlined className={styles.expandIcon} />
+          : <RightOutlined className={styles.expandIcon} />
+        }
+      </div>
+      {expanded && (
+        <div className={styles.thinkingContent}>
+          <div className={styles.thinkingText}>{text}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tool Block — 显示工具名称、输入参数、输出结果
 // ---------------------------------------------------------------------------
 function ToolBlock({ msg }: { msg: OutputMessage }) {
-  try {
-    const content = msg?.content as ContentItem[];
-    if (!Array.isArray(content) || content.length === 0) return null;
+  const toolName = getToolName(msg);
+  const input = getToolInput(msg);
+  const output = getToolOutput(msg);
+  const isInProgress = msg?.status === RUN_STATUS.IN_PROGRESS;
 
-    const toolData = content[0]?.data;
-    const toolName = toolData?.name || 'Unknown Tool';
-    const input = toolData?.arguments;
-    const output = toolData?.output;
-    const isInProgress = msg?.status === RUN_STATUS.IN_PROGRESS;
+  const inputStr = formatValue(input);
+  const outputText = extractOutputText(output);
 
-    const inputStr = input ? (typeof input === 'string' ? input : JSON.stringify(input, null, 2)) : '';
-    const outputStr = output ? (typeof output === 'string' ? output : JSON.stringify(output, null, 2)) : (isInProgress ? '处理中...' : '');
+  // 默认折叠
+  const [expanded, setExpanded] = useState(false);
+  const toggle = useCallback(() => setExpanded(v => !v), []);
 
-    return (
-      <div className={styles.toolBlock}>
-        <div
-          className={styles.toolHeader}
-          onClick={(e) => {
-            const target = e.currentTarget.nextElementSibling as HTMLElement;
-            if (target) {
-              target.style.display = target.style.display === 'none' ? 'block' : 'none';
-            }
-          }}
-        >
-          <CodeOutlined style={{ color: '#1890ff', marginRight: 8 }} />
-          <span style={{ fontWeight: 500 }}>{toolName}</span>
-          {isInProgress && <LoadingOutlined spin style={{ marginLeft: 8, color: '#1890ff' }} />}
-          {!isInProgress && output && <CheckCircleOutlined style={{ marginLeft: 8, color: '#52c41a' }} />}
-          <RightOutlined className={styles.expandIcon} />
-        </div>
-        <div className={styles.toolContent} style={{ display: 'none' }}>
+  return (
+    <div className={styles.toolBlock}>
+      <div className={styles.toolHeader} onClick={toggle}>
+        <CodeOutlined style={{ color: '#1890ff', marginRight: 8 }} />
+        <span style={{ fontWeight: 500 }}>{toolName}</span>
+        {inputStr && (
+          <span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>
+            {inputStr.length > 60 ? inputStr.slice(0, 60) + '...' : inputStr}
+          </span>
+        )}
+        {isInProgress && <LoadingOutlined spin style={{ marginLeft: 8, color: '#1890ff' }} />}
+        {!isInProgress && (output != null) && <CheckCircleOutlined style={{ marginLeft: 8, color: '#52c41a' }} />}
+        {expanded
+          ? <DownOutlined className={styles.expandIcon} />
+          : <RightOutlined className={styles.expandIcon} />
+        }
+      </div>
+      {expanded && (
+        <div className={styles.toolContent}>
           {inputStr && (
             <div className={styles.toolSection}>
               <div className={styles.toolSectionTitle}>输入参数:</div>
               <pre className={styles.toolPre}>{inputStr}</pre>
             </div>
           )}
-          {outputStr && (
+          {outputText && (
             <div className={styles.toolSection}>
               <div className={styles.toolSectionTitle}>输出结果:</div>
-              <pre className={styles.toolPre}>{outputStr}</pre>
+              <div className={styles.toolPre}><Markdown content={outputText} /></div>
+            </div>
+          )}
+          {isInProgress && !outputText && (
+            <div className={styles.toolSection}>
+              <div style={{ color: '#999' }}><LoadingOutlined spin style={{ marginRight: 8 }} />处理中...</div>
             </div>
           )}
         </div>
-      </div>
-    );
-  } catch (e) {
-    console.error('[GroupedResponseCard] ToolBlock error:', e);
-    return null;
-  }
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Message Block
 // ---------------------------------------------------------------------------
 function MessageBlock({ msg }: { msg: OutputMessage }) {
-  try {
-    const content = msg?.content as ContentItem[];
-    if (!Array.isArray(content) || content.length === 0) return null;
+  const content = msg?.content;
+  if (!Array.isArray(content) || content.length === 0) return null;
 
-    const text = content[0]?.text || '';
-    if (!text) return null;
+  // 可能有多个 text block，合并
+  const text = content
+    .filter(c => c.type === 'text' || c.text)
+    .map(c => c.text || '')
+    .filter(Boolean)
+    .join('\n');
 
-    return (
-      <div className={styles.messageBlock}>
-        <Markdown content={text} />
-      </div>
-    );
-  } catch (e) {
-    console.error('[GroupedResponseCard] MessageBlock error:', e);
-    // Fallback: show raw text
-    const text = msg?.content?.[0]?.text || '';
-    return (
-      <div className={styles.messageBlock}>
-        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{text}</pre>
-      </div>
-    );
-  }
+  if (!text) return null;
+
+  return (
+    <div className={styles.messageBlock}>
+      <Markdown content={text} />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Error Block
 // ---------------------------------------------------------------------------
 function ErrorBlock({ msg }: { msg: OutputMessage }) {
-  try {
-    const text = msg?.message || msg?.content?.[0]?.text || 'Unknown error';
-    return (
-      <div className={styles.errorBlock}>
-        <WarningOutlined style={{ color: '#ff4d4f', marginRight: 8 }} />
-        <span>{text}</span>
-      </div>
-    );
-  } catch (e) {
-    return (
-      <div className={styles.errorBlock}>
-        <WarningOutlined style={{ color: '#ff4d4f', marginRight: 8 }} />
-        <span>An error occurred</span>
-      </div>
-    );
-  }
+  const text = msg?.message || msg?.content?.[0]?.text || 'Unknown error';
+  return (
+    <div className={styles.errorBlock}>
+      <WarningOutlined style={{ color: '#ff4d4f', marginRight: 8 }} />
+      <span>{text}</span>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Merge tool call + output pairs
+// Merge tool call + output pairs using call_id
 // ---------------------------------------------------------------------------
 function mergeToolMessages(output: OutputMessage[]): OutputMessage[] {
   if (!Array.isArray(output) || output.length === 0) return [];
 
   const result: OutputMessage[] = [];
-  const callMap = new Map<string, OutputMessage>();
+  // Index tool calls by call_id and tool name
+  const callByIdMap = new Map<string, OutputMessage>();
+  const callByNameMap = new Map<string, OutputMessage>();
 
-  // First pass: collect all tool calls
   for (const msg of output) {
-    if (maybeToolInput(msg)) {
+    if (isToolCallType(getMessageType(msg))) {
+      const callId = getCallId(msg);
       const toolName = getToolName(msg);
-      callMap.set(`${msg?.id}_${toolName}`, msg);
-    }
-  }
-
-  // Second pass: merge outputs with calls
-  for (const msg of output) {
-    if (maybeToolOutput(msg)) {
-      // Find corresponding call and merge
-      for (const [, callMsg] of callMap.entries()) {
-        if (callMsg?.id === msg?.id || callMsg?.id === msg?.id?.replace('_output', '')) {
-          // Merge output into call
-          const mergedContent = [...(callMsg.content || [])];
-          if (Array.isArray(msg.content) && msg.content.length > 0) {
-            mergedContent.push(msg.content[0]);
-          }
-          callMsg.content = mergedContent;
-          callMsg.status = msg.status;
-          break;
-        }
+      if (callId) callByIdMap.set(callId, msg);
+      if (toolName && toolName !== 'Unknown Tool') {
+        callByNameMap.set(toolName, msg);
       }
     }
   }
 
-  // Collect merged calls and other message types
+  // Merge outputs into calls
+  const mergedCallIds = new Set<string>();
   for (const msg of output) {
-    if (maybeToolInput(msg)) {
-      result.push(msg);
-    } else {
-      const type = getMessageType(msg);
-      if (
-        type === MSG_TYPE.MESSAGE ||
-        type === MSG_TYPE.REASONING ||
-        type === MSG_TYPE.ERROR
-      ) {
+    if (isToolOutputType(getMessageType(msg))) {
+      const callId = getCallId(msg);
+      const toolName = msg?.content?.[0]?.data?.name || getToolName(msg);
+
+      // Find matching call
+      let callMsg = (callId && callByIdMap.get(callId)) || undefined;
+      if (!callMsg && toolName && toolName !== 'Unknown Tool') {
+        callMsg = callByNameMap.get(toolName);
+      }
+
+      if (callMsg) {
+        // Merge: attach output data to the call message
+        const outputData = getToolOutput(msg);
+        if (outputData != null && callMsg.content?.[0]) {
+          // Store output in the call's data for ToolBlock to read
+          if (!callMsg.content[0].data) callMsg.content[0].data = {};
+          callMsg.content[0].data.output = outputData;
+        }
+        // Update status
+        if (msg.status) callMsg.status = msg.status;
+        mergedCallIds.add(callId || toolName);
+      } else {
+        // No matching call found — render as standalone output
         result.push(msg);
       }
     }
+  }
+
+  // Collect all messages in order: calls, then reasoning, then messages
+  for (const msg of output) {
+    const type = getMessageType(msg);
+    if (isToolCallType(type)) {
+      result.push(msg);
+    } else if (!isToolOutputType(type)) {
+      result.push(msg);
+    }
+    // Tool outputs that were merged are skipped; standalone ones already added above
   }
 
   return result;
@@ -320,17 +382,13 @@ function mergeToolMessages(output: OutputMessage[]): OutputMessage[] {
 // ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
-const GroupedResponseCard = React.memo(function GroupedResponseCard({
-  data,
-}: GroupedResponseCardProps) {
-  // Handle null/undefined data
+function GroupedResponseCard({ data }: GroupedResponseCardProps) {
   if (!data) return null;
 
   const output = data?.output || [];
   const status = data?.status;
   const isGenerating = status === 'in_progress';
 
-  // Merge tool messages
   const mergedMessages = useMemo(() => {
     try {
       return mergeToolMessages(output);
@@ -340,16 +398,13 @@ const GroupedResponseCard = React.memo(function GroupedResponseCard({
     }
   }, [output]);
 
-  // Filter out heartbeat messages
   const messages = useMemo(
-    () => {
-      if (!Array.isArray(mergedMessages)) return [];
-      return mergedMessages.filter((msg) => getMessageType(msg) !== MSG_TYPE.HEARTBEAT);
-    },
-    [mergedMessages]
+    () => (Array.isArray(mergedMessages) ? mergedMessages : []).filter(
+      (msg) => getMessageType(msg) !== MSG_TYPE.HEARTBEAT
+    ),
+    [mergedMessages],
   );
 
-  // Empty state - no messages yet
   if (!messages.length && isGenerating) {
     return (
       <div className={styles.messageBlock}>
@@ -359,42 +414,35 @@ const GroupedResponseCard = React.memo(function GroupedResponseCard({
     );
   }
 
-  // No messages and not generating - don't render
   if (!messages.length) return null;
 
   return (
-    <>
+    <div className={styles.groupedCard}>
       {messages.map((msg, index) => {
-        try {
-          const type = getMessageType(msg);
-          const key = msg?.id || `msg_${index}`;
-          
-          switch (type) {
-            case MSG_TYPE.REASONING:
-              return <ThinkingBlock key={key} msg={msg} />;
-            case MSG_TYPE.PLUGIN_CALL:
-            case MSG_TYPE.MCP_CALL:
-            case MSG_TYPE.FUNCTION_CALL:
-            case MSG_TYPE.COMPONENT_CALL:
-              return <ToolBlock key={key} msg={msg} />;
-            case MSG_TYPE.MESSAGE:
+        const type = getMessageType(msg);
+        const key = msg?.id || `msg_${index}`;
+
+        switch (type) {
+          case MSG_TYPE.REASONING:
+            return <ThinkingBlock key={key} msg={msg} />;
+          case MSG_TYPE.PLUGIN_CALL:
+          case MSG_TYPE.MCP_CALL:
+          case MSG_TYPE.FUNCTION_CALL:
+          case MSG_TYPE.COMPONENT_CALL:
+            return <ToolBlock key={key} msg={msg} />;
+          case MSG_TYPE.MESSAGE:
+            return <MessageBlock key={key} msg={msg} />;
+          case MSG_TYPE.ERROR:
+            return <ErrorBlock key={key} msg={msg} />;
+          default:
+            if (msg?.content?.[0]?.text) {
               return <MessageBlock key={key} msg={msg} />;
-            case MSG_TYPE.ERROR:
-              return <ErrorBlock key={key} msg={msg} />;
-            default:
-              // Unknown type, try to render as message
-              if (msg?.content?.[0]?.text) {
-                return <MessageBlock key={key} msg={msg} />;
-              }
-              return null;
-          }
-        } catch (e) {
-          console.error('[GroupedResponseCard] Render message error:', e, msg);
-          return null;
+            }
+            return null;
         }
       })}
-    </>
+    </div>
   );
-});
+}
 
 export default GroupedResponseCard;

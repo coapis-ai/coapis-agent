@@ -496,6 +496,9 @@ PUBLIC_PATHS: frozenset = frozenset({
     "/api/tokens/config",
     # Version (used by SPA on load)
     "/api/version",
+    # Login page bootstrap — called before authentication
+    "/api/settings/language",
+    "/api/plugins",
     # SSE streaming endpoints — BaseHTTPMiddleware deadlocks with async generators
     "/api/console/chat",
 })

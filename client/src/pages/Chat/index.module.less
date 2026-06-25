@@ -347,6 +347,9 @@
 
 .groupedCard {
   margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .groupedCardSpinner {
@@ -354,6 +357,146 @@
   align-items: center;
   padding: 8px 12px;
   font-size: 13px;
+}
+
+/* ── Thinking Block ── */
+.thinkingBlock {
+  border-left: 3px solid #722ed1;
+  border-radius: 0 6px 6px 0;
+  overflow: hidden;
+  background: rgba(114, 46, 209, 0.02);
+
+  :global(.dark-mode) & {
+    background: rgba(114, 46, 209, 0.05);
+  }
+}
+
+.thinkingHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s;
+
+  &:hover {
+    background-color: rgba(114, 46, 209, 0.05);
+  }
+}
+
+.thinkingContent {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.thinkingText {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 4px 8px;
+  background: rgba(114, 46, 209, 0.04);
+  border-radius: 4px;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(114, 46, 209, 0.08);
+  }
+}
+
+/* ── Tool Block ── */
+.toolBlock {
+  border-left: 3px solid #1890ff;
+  border-radius: 0 6px 6px 0;
+  overflow: hidden;
+  background: rgba(24, 144, 255, 0.02);
+
+  :global(.dark-mode) & {
+    background: rgba(24, 144, 255, 0.05);
+  }
+}
+
+.toolHeader {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s;
+
+  &:hover {
+    background-color: rgba(24, 144, 255, 0.05);
+  }
+}
+
+.toolContent {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.toolSection {
+  margin-top: 8px;
+}
+
+.toolSectionTitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.65);
+  margin-bottom: 4px;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.65);
+  }
+}
+
+.toolPre {
+  margin: 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+
+  :global(.dark-mode) & {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.expandIcon {
+  margin-left: auto;
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.3);
+  }
+}
+
+/* ── Message Block ── */
+.messageBlock {
+  padding: 4px 0;
+}
+
+/* ── Error Block ── */
+.errorBlock {
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #ff4d4f;
+
+  :global(.dark-mode) & {
+    background: rgba(255, 77, 79, 0.1);
+    border-color: rgba(255, 77, 79, 0.3);
+  }
 }
 
 /* ── 可折叠区段 ── */

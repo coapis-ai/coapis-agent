@@ -374,18 +374,28 @@ async def get_chat(
     messages = []
     try:
         session_obj = _get_session_for_chat(spec, request)
+        state = None
         if session_obj:
             state = await session_obj.get_session_state_dict(
                 spec.id, spec.user_id, allow_not_exist=True,
             )
-            memory_state = (state or {}).get("agent", {}).get("memory", {})
-            if memory_state:
-                from agentscope.memory import InMemoryMemory
-                from agentscope.message import Msg as ASMsg, TextBlock
-                mem = InMemoryMemory()
-                mem.load_state_dict(memory_state, strict=False)
-                memories = await mem.get_memory(prepend_summary=False)
-                messages = agentscope_msg_to_message(memories)
+        # Fallback: when session_obj is None (workspace not registered in
+        # multi_agent_manager), load session file directly from disk.
+        if not state:
+            import json as _json
+            from ...constant import WORKSPACES_DIR as _WS_DIR
+            _session_file = _WS_DIR / spec.user_id / "sessions" / f"{spec.user_id}_{spec.id}.json"
+            if _session_file.exists():
+                state = _json.loads(_session_file.read_text(encoding="utf-8"))
+                logger.info(f"get_chat: loaded session from disk fallback: {_session_file}")
+        memory_state = (state or {}).get("agent", {}).get("memory", {})
+        if memory_state:
+            from agentscope.memory import InMemoryMemory
+            from agentscope.message import Msg as ASMsg, TextBlock
+            mem = InMemoryMemory()
+            mem.load_state_dict(memory_state, strict=False)
+            memories = await mem.get_memory(prepend_summary=False)
+            messages = agentscope_msg_to_message(memories)
     except Exception as e:
         logger.warning(f"Failed to load messages from session: {e}", exc_info=True)
 

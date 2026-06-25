@@ -25,6 +25,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 
+import httpx
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,7 @@ class AgentCore:
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
                 api_key=api_key,
+                timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0),
             )
         return self._client
 

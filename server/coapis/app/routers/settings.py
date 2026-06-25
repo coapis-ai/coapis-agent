@@ -39,9 +39,8 @@ async def get_settings_info(request: Request) -> Dict[str, Any]:
 
 
 @router.get("/settings/language")
-@require_permission("profile:read")
 async def get_language(request: Request) -> Dict[str, Any]:
-    """Get language setting."""
+    """Get language setting. (Public — needed on login page.)"""
     return {"language": "zh"}
 
 

@@ -126,6 +126,13 @@ function resolveContentItemUrl(c: ContentItem): ContentItem {
   return c;
 }
 
+/** Strip [SEARCH_RESULTS]...[/SEARCH_RESULTS] blocks from user message text.
+ *  Old session data may have search results injected into the user message;
+ *  this filters them out so only the original user text is displayed. */
+function stripSearchResults(text: string): string {
+  return text.replace(/\[SEARCH_RESULTS\][\s\S]*?\[\/SEARCH_RESULTS\]\s*/g, '').trim();
+}
+
 /** Map backend message content to request card content (text + image + file). */
 function contentToRequestParts(
   content: unknown,
@@ -134,11 +141,17 @@ function contentToRequestParts(
     return [{ type: "text", text: content, status: "created" }];
   }
   if (!Array.isArray(content)) {
-    return [{ type: "text", text: String(content || ""), status: "created" }];
+    return [{ type: "text", text: stripSearchResults(String(content || "")), status: "created" }];
   }
   const parts = (content as ContentItem[])
     .map(resolveContentItemUrl)
-    .map((c) => ({ ...c, status: "created" }));
+    .map((c) => {
+      // Filter [SEARCH_RESULTS] from text blocks in user messages
+      if (c.type === "text" && c.text) {
+        return { ...c, text: stripSearchResults(c.text), status: "created" };
+      }
+      return { ...c, status: "created" };
+    });
 
   if (parts.length === 0) {
     return [{ type: "text", text: "", status: "created" }];
@@ -155,83 +168,114 @@ function normalizeOutputMessageContent(content: unknown): unknown {
 /**
  * Convert a backend message to response output message(s).
  *
- * Backend messages can contain MIXED content block types in a single message
- * (e.g. thinking + text + tool_use).  The frontend GroupedResponseCard expects
- * each output message to carry exactly ONE semantic type.  This function splits
- * mixed messages into individual typed messages.
+ * The backend uses qwenpaw's `agentscope_msg_to_message` to convert AgentScope
+ * messages into runtime Messages. Each output message already carries the
+ * correct semantic `type` (message / reasoning / plugin_call / plugin_call_output
+ * / mcp_call / mcp_call_output / function_call / function_call_output / error /
+ * heartbeat / component_call / component_call_output).
  *
- * Content block type → output message type mapping:
- *   thinking  → reasoning  (metadata.type = "reasoning")
- *   text      → message
- *   tool_use  → plugin_call (metadata.type = "plugin_call")
- *   tool_result → plugin_call_output
+ * Content blocks within each message share the same semantic type:
+ *   - reasoning messages:  content = [{ type: "text", text: "..." }]
+ *   - plugin_call messages: content = [{ type: "data", data: { call_id, name, arguments } }]
+ *   - plugin_call_output:  content = [{ type: "data", data: { call_id, name, output } }]
+ *   - message messages:     content = [{ type: "text", text: "..." }, ...]
+ *
+ * Strategy: **trust msg.type** as the source of truth. Only fall back to
+ * block-level type detection when msg.type is missing or generic "message".
  */
 const BLOCK_TYPE_MAP: Record<string, { msgType: string; metaType?: string; role?: string }> = {
+  // Legacy block-level type mappings (fallback only)
   thinking:        { msgType: "reasoning", metaType: "reasoning" },
   text:            { msgType: "message" },
   tool_use:        { msgType: "plugin_call", metaType: "plugin_call" },
   tool_result:     { msgType: "plugin_call_output", metaType: "plugin_call_output", role: "tool" },
+  data:            { msgType: "data" },  // generic data — needs msg.type override
+  // Message-level type mappings (primary)
+  message:         { msgType: "message" },
+  reasoning:       { msgType: "reasoning", metaType: "reasoning" },
   plugin_call:     { msgType: "plugin_call", metaType: "plugin_call" },
   plugin_call_output: { msgType: "plugin_call_output", metaType: "plugin_call_output", role: "tool" },
   mcp_call:        { msgType: "mcp_call", metaType: "mcp_call" },
   mcp_call_output: { msgType: "mcp_call_output", metaType: "mcp_call_output", role: "tool" },
-  reasoning:       { msgType: "reasoning", metaType: "reasoning" },
+  function_call:   { msgType: "function_call", metaType: "function_call" },
+  function_call_output: { msgType: "function_call_output", metaType: "function_call_output", role: "tool" },
+  component_call:  { msgType: "component_call", metaType: "component_call" },
+  component_call_output: { msgType: "component_call_output", metaType: "component_call_output", role: "tool" },
   error:           { msgType: "error", metaType: "error" },
   heartbeat:       { msgType: "heartbeat" },
 };
 
 const toOutputMessage = (msg: Message): OutputMessage[] => {
   const content = msg.content;
+  const msgType = (msg.type as string) || "message";
+
+  // Determine role: tool outputs from system role → "tool"
   const effectiveRole =
-    msg.type === TYPE_PLUGIN_CALL_OUTPUT && msg.role === "system"
+    (msgType === "plugin_call_output" || msgType === "mcp_call_output" ||
+     msgType === "function_call_output" || msgType === "component_call_output")
+    && msg.role === "system"
       ? ROLE_TOOL
       : msg.role;
 
+  // --- Single message, no splitting needed ---
+  // The backend already produces one semantic type per message.
+  // Just map msg.type to the correct output type.
+  const mapping = BLOCK_TYPE_MAP[msgType] || { msgType: "message" };
+
   // String content → single message
   if (typeof content === "string") {
-    return [{ ...msg, role: effectiveRole, metadata: msg.metadata ?? null }];
+    return [{
+      ...msg,
+      role: mapping.role || effectiveRole,
+      metadata: mapping.metaType ? { type: mapping.metaType } : (msg.metadata ?? null),
+      type: mapping.msgType,
+    }];
   }
 
-  // Array content → split by block type
+  // Array content → return as single output message (backend already split by type)
   if (Array.isArray(content)) {
-    const parts: OutputMessage[] = [];
-
-    for (const block of content) {
-      const blockType = (block as ContentItem)?.type || "text";
-      let mapping = BLOCK_TYPE_MAP[blockType] || { msgType: "text" };
-
-      // The backend TextContent schema forces type="text" for all text blocks,
-      // including thinking content.  When the message-level type indicates
-      // this is a reasoning message but the block type says "text", override
-      // the mapping to preserve the reasoning semantic.
-      if (
-        blockType === "text" &&
-        (msg.type === "reasoning" || msg.type === "REASONING")
-      ) {
-        mapping = BLOCK_TYPE_MAP["thinking"];
+    // Fallback: if msg.type is generic "message" but blocks suggest a more
+    // specific type (e.g. old sessions with mixed content), split by block.
+    if (msgType === "message" && content.length > 1) {
+      const blockTypes = new Set(content.map(c => (c as ContentItem)?.type).filter(Boolean));
+      if (blockTypes.size > 1) {
+        // Mixed content — split per block
+        const parts: OutputMessage[] = [];
+        for (const block of content) {
+          const bType = (block as ContentItem)?.type || "text";
+          const bMapping = BLOCK_TYPE_MAP[bType] || { msgType: "message" };
+          parts.push({
+            id: msg.id,
+            name: msg.name,
+            role: bMapping.role || effectiveRole,
+            content: [block],
+            metadata: bMapping.metaType ? { type: bMapping.metaType } : (msg.metadata ?? null),
+            sequence_number: msg.sequence_number,
+            timestamp: msg.timestamp,
+            type: bMapping.msgType,
+          } as OutputMessage);
+        }
+        return parts.length > 0 ? parts : [{ ...msg, role: effectiveRole, metadata: msg.metadata ?? null }];
       }
-
-      parts.push({
-        id: msg.id,
-        name: msg.name,
-        role: mapping.role || effectiveRole,
-        content: [block],
-        metadata: mapping.metaType
-          ? { type: mapping.metaType }
-          : (msg.metadata ?? null),
-        sequence_number: msg.sequence_number,
-        timestamp: msg.timestamp,
-        type: mapping.msgType,
-      } as OutputMessage);
     }
 
-    return parts.length > 0
-      ? parts
-      : [{ ...msg, role: effectiveRole, metadata: msg.metadata ?? null }];
+    // Normal case: single semantic type, return as-is
+    return [{
+      ...msg,
+      role: mapping.role || effectiveRole,
+      content,
+      metadata: mapping.metaType ? { type: mapping.metaType } : (msg.metadata ?? null),
+      type: mapping.msgType,
+    }];
   }
 
   // Fallback
-  return [{ ...msg, role: effectiveRole, metadata: msg.metadata ?? null }];
+  return [{
+    ...msg,
+    role: mapping.role || effectiveRole,
+    metadata: mapping.metaType ? { type: mapping.metaType } : (msg.metadata ?? null),
+    type: mapping.msgType,
+  }];
 };
 
 /** Build a user card (AgentScopeRuntimeRequestCard) from a user message. */
@@ -275,52 +319,16 @@ const buildResponseCard = (
     content: normalizeOutputMessageContent(msg.content),
   }));
 
-  // Build cards array: optional DeepThinking card + response card
+  // Build cards: single GroupedResponseCard with ALL messages (including reasoning)
+  // The GroupedResponseCard handles thinking/tool/text rendering internally.
   const cards: Array<{ code: string; data: Record<string, unknown> }> = [];
 
-  // Check if any message is a reasoning/thinking message
-  for (const msg of outputMessages) {
-    const meta = (msg as Record<string, unknown>).metadata as Record<string, unknown> | null | undefined;
-    const isReasoning = (meta && meta.type === "reasoning") || (msg as Record<string, unknown>).type === "reasoning";
-    if (isReasoning) {
-      // Extract text content from the reasoning message
-      const content = msg.content;
-      let thinkingText = "";
-      if (typeof content === "string") {
-        thinkingText = content;
-      } else if (Array.isArray(content)) {
-        thinkingText = (content as ContentItem[])
-          .filter((c) => c.type === "text")
-          .map((c) => c.text || "")
-          .join("\n");
-      }
-      if (thinkingText) {
-        cards.push({
-          code: "DeepThinking",
-          data: {
-            content: thinkingText,
-            title: "深度思考",
-            loading: false,
-          },
-        });
-      }
-    }
-  }
-
-  // Filter out reasoning messages from output (they're shown as DeepThinking card)
-  const nonReasoningMessages = normalizedMessages.filter((msg) => {
-    const meta = (msg as Record<string, unknown>).metadata as Record<string, unknown> | null | undefined;
-    const isReasoning = (meta && meta.type === "reasoning") || (msg as Record<string, unknown>).type === "reasoning";
-    return !isReasoning;
-  });
-
-  // Only add response card if there are non-reasoning messages
-  if (nonReasoningMessages.length > 0) {
+  if (normalizedMessages.length > 0) {
     cards.push({
       code: CARD_RESPONSE,
       data: {
         id: `response_${generateId()}`,
-        output: nonReasoningMessages,
+        output: normalizedMessages,
         object: "response",
         status: "completed",
         created_at: now,
@@ -794,13 +802,10 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         if (userId) params.user_id = userId;
         if (channel) params.channel = channel;
         if (agentId) params.agent_id = agentId;
-        console.log(`[sessionApi] getSessionList: userId=${userId}, channel=${channel}, agentId=${agentId}, params=`, params);
         const chats = await api.listChats(
           Object.keys(params).length > 0 ? params : undefined,
         );
-        console.log(`[sessionApi] getSessionList: got ${Array.isArray(chats) ? chats.length : '?'} chats`);
         const result = this.applyChatsToSessionList(chats);
-        console.log(`[sessionApi] getSessionList: result has ${result.length} sessions`);
         // Notify React so the sidebar re-renders with updated names
         this.onSessionListUpdated?.(result);
         return result;
@@ -821,17 +826,14 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   async getSession(sessionId: string) {
     const existingRequest = this.sessionRequests.get(sessionId);
     if (existingRequest) {
-      console.log(`[sessionApi] getSession(${sessionId}) - reusing existing request`);
       return existingRequest;
     }
 
-    console.log(`[sessionApi] getSession(${sessionId}) - creating new request`);
     const requestPromise = this._doGetSession(sessionId);
     this.sessionRequests.set(sessionId, requestPromise);
 
     try {
       const session = await requestPromise;
-      console.log(`[sessionApi] getSession(${sessionId}) - resolved, messages=${(session?.messages || []).length}, generating=${session?.generating}`);
       // Trigger onSessionSelected only when session actually changes
       if (sessionId !== this.lastSelectedSessionId) {
         this.lastSelectedSessionId = sessionId;
@@ -927,7 +929,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
           this._upsertSession(session);
           return session;
         } catch {
-          console.warn(`Chat ${refreshed.realId} not found after refresh, returning local session`);
         }
       }
 
@@ -965,13 +966,11 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       || sessionId;
     const sessionMeta = fromList || fromListBySessionId || fromListByRealId;
 
-    console.log(`[sessionApi] _doGetSession UUID path: sessionId=${sessionId}, effectiveId=${effectiveId}, fromList=${!!fromList}, fromListBySessionId=${!!fromListBySessionId}, fromListByRealId=${!!fromListByRealId}, _sessions.length=${this._sessions.length}`);
 
     try {
       const chatHistory = await api.getChat(effectiveId, { limit: 50 });
       const generating = isGenerating(chatHistory);
       const messages = convertMessages(chatHistory.messages || []);
-      console.log(`[sessionApi] _doGetSession UUID path: got ${messages.length} converted messages from ${chatHistory.messages?.length || 0} raw messages, effectiveId=${effectiveId}`);
       this.patchLastUserMessage(messages, generating, effectiveId);
       // Prefer spec.name from backend (auto-renamed) over local cache
       const backendName = (chatHistory as any).spec?.name;
@@ -996,7 +995,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       this._upsertSession(session);
       return session;
     } catch {
-      console.warn(`Chat ${effectiveId} not found, returning local session`);
       return this.getLocalSession(sessionId);
     }
   }
