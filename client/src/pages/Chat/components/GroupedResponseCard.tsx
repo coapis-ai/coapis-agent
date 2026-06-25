@@ -12,7 +12,7 @@
  *   plugin_call_output: content = [{ type: "data", data: { call_id, name, output } }]
  *   message:          content = [{ type: "text", text: "..." }]
  */
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Markdown } from '@agentscope-ai/chat';
 import { useChatAnywhereOptions } from '@agentscope-ai/chat/lib/AgentScopeRuntimeWebUI/core/Context/ChatAnywhereOptionsContext';
 import { Avatar, Flex } from 'antd';
@@ -23,7 +23,6 @@ import {
   BulbOutlined,
   WarningOutlined,
   CodeOutlined,
-  CheckCircleOutlined,
 } from '@ant-design/icons';
 import styles from '../index.module.less';
 
@@ -196,9 +195,16 @@ function ThinkingBlock({ msg }: { msg: OutputMessage }) {
   // 完成且无内容不显示
   if (isCompleted && !text) return null;
 
-  // 进行中默认展开，完成后默认折叠
+  // 进行中默认展开，完成后自动折叠
   const [expanded, setExpanded] = useState(isInProgress);
   const toggle = useCallback(() => setExpanded(v => !v), []);
+
+  // 完成时自动折叠
+  useEffect(() => {
+    if (!isInProgress) {
+      setExpanded(false);
+    }
+  }, [isInProgress]);
 
   return (
     <div className={styles.thinkingBlock}>
@@ -206,10 +212,12 @@ function ThinkingBlock({ msg }: { msg: OutputMessage }) {
         <BulbOutlined style={{ color: '#faad14', marginRight: 8 }} />
         <span>思考过程</span>
         {isInProgress && <LoadingOutlined spin style={{ marginLeft: 8, color: '#faad14' }} />}
-        {expanded
-          ? <DownOutlined className={styles.expandIcon} />
-          : <RightOutlined className={styles.expandIcon} />
-        }
+        <span style={{ marginLeft: 8 }}>
+          {expanded
+            ? <DownOutlined className={styles.expandIcon} />
+            : <RightOutlined className={styles.expandIcon} />
+          }
+        </span>
       </div>
       {expanded && (
         <div className={styles.thinkingContent}>
@@ -241,17 +249,13 @@ function ToolBlock({ msg }: { msg: OutputMessage }) {
       <div className={styles.toolHeader} onClick={toggle}>
         <CodeOutlined style={{ color: '#1890ff', marginRight: 8 }} />
         <span style={{ fontWeight: 500 }}>{toolName}</span>
-        {inputStr && (
-          <span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>
-            {inputStr.length > 60 ? inputStr.slice(0, 60) + '...' : inputStr}
-          </span>
-        )}
         {isInProgress && <LoadingOutlined spin style={{ marginLeft: 8, color: '#1890ff' }} />}
-        {!isInProgress && (output != null) && <CheckCircleOutlined style={{ marginLeft: 8, color: '#52c41a' }} />}
-        {expanded
-          ? <DownOutlined className={styles.expandIcon} />
-          : <RightOutlined className={styles.expandIcon} />
-        }
+        <span style={{ marginLeft: 8 }}>
+          {expanded
+            ? <DownOutlined className={styles.expandIcon} />
+            : <RightOutlined className={styles.expandIcon} />
+          }
+        </span>
       </div>
       {expanded && (
         <div className={styles.toolContent}>
