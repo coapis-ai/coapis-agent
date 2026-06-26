@@ -273,3 +273,66 @@ class ChannelManager:
             logger.exception(
                 "consumer loop crashed: %s", ch.channel,
             )
+
+    async def send_text(
+        self,
+        channel: str,
+        user_id: str,
+        session_id: str,
+        text: str,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Send a text message proactively via the specified channel.
+
+        Used by CronExecutor (task_type='text') and other proactive
+        notification paths.  Delegates to the channel's ``send()``
+        method which each concrete channel implements.
+
+        Routing logic (same as each channel's ``to_handle_from_target``):
+        1. Use the channel instance's ``to_handle_from_target`` if
+           available — this produces the correct channel-prefixed
+           handle (e.g. ``wecom:group:<chatid>``,
+           ``dingtalk:sw:<session_id>``).
+        2. Fallback to ``session_id`` directly.
+        3. Final fallback to ``<channel>:<user_id>``.
+
+        Args:
+            channel: Channel ID (e.g. 'wecom', 'console').
+            user_id: Target user identifier.
+            session_id: Target session — should carry the channel
+                prefix (e.g. ``wecom:group:xxx``) for proper routing.
+            text: The message body to send.
+            meta: Optional metadata forwarded to the channel.
+        """
+        ch = self.get_channel(channel)
+        if ch is None:
+            logger.warning(
+                "send_text: channel '%s' not found", channel,
+            )
+            return
+        if not hasattr(ch, "send") or not callable(ch.send):
+            logger.warning(
+                "send_text: channel '%s' has no send() method",
+                channel,
+            )
+            return
+        # Build to_handle using channel's own routing logic (preferred),
+        # falling back to session_id, then to channel:user_id.
+        if hasattr(ch, "to_handle_from_target"):
+            to_handle = ch.to_handle_from_target(
+                user_id=user_id,
+                session_id=session_id or "",
+            )
+        else:
+            to_handle = session_id or f"{channel}:{user_id}"
+        try:
+            logger.info(
+                "send_text: channel=%s to_handle=%s len=%s",
+                channel, (to_handle or "")[:60], len(text or ""),
+            )
+            await ch.send(to_handle=to_handle, text=text, meta=meta)
+        except Exception:
+            logger.exception(
+                "send_text failed: channel=%s to_handle=%s",
+                channel, (to_handle or "")[:60],
+            )

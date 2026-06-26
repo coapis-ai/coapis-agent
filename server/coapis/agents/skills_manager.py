@@ -1569,7 +1569,9 @@ def reconcile_workspace_manifest(workspace_dir: Path) -> dict[str, Any]:
         discovered = {
             path.name: path
             for path in workspace_skills_dir.iterdir()
-            if path.is_dir() and (path / "SKILL.md").exists()
+            if path.is_dir()
+            and not path.name.startswith(".")
+            and (path / "SKILL.md").exists()
         }
 
         for skill_name, skill_dir in sorted(discovered.items()):

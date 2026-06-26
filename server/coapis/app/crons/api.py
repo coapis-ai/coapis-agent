@@ -31,6 +31,39 @@ from ..permissions.decorators import require_permission
 router = APIRouter(prefix="/cron", tags=["cron"])
 
 
+def _normalize_session_id(spec: CronJobSpec, mgr: CronManager) -> None:
+    """Ensure dispatch.target.session_id carries the channel prefix.
+
+    When a cron job is created via the API, the session_id from the
+    frontend may be a bare UUID or username (e.g. "admin", "abc-123").
+    For external channels (wecom, dingtalk, feishu, …) the ``send()``
+    method needs a channel-prefixed handle to resolve the target.
+
+    This function normalizes the session_id by:
+    1. Using the channel's own ``resolve_session_id`` / ``to_handle_from_target``
+       if available (most accurate).
+    2. Falling back to ``<channel>:<session_id>`` prefix.
+    """
+    if not spec.dispatch or not spec.dispatch.target:
+        return
+    sid = (spec.dispatch.target.session_id or "").strip()
+    if not sid:
+        return
+    channel = spec.dispatch.channel or "console"
+    ch_prefix = f"{channel}:"
+    # Already has the channel prefix — nothing to do
+    if sid.startswith(ch_prefix):
+        return
+    # Try channel's own resolution (most accurate)
+    ch = None
+    if mgr._channel_manager is not None:
+        ch = mgr._channel_manager.get_channel(channel)
+    if ch is not None and hasattr(ch, "resolve_session_id"):
+        spec.dispatch.target.session_id = ch.resolve_session_id(sid)
+    else:
+        spec.dispatch.target.session_id = f"{ch_prefix}{sid}"
+
+
 @router.get("/jobs", response_model=list[CronJobSpec])
 @require_permission("cron-jobs:read")
 async def list_jobs(request: Request, mgr: CronManager = Depends(get_user_cron_manager)):
@@ -69,6 +102,8 @@ async def create_job(
     # 默认 agent_id 为 "default"（用户未指定时）
     if not spec.agent_id:
         spec.agent_id = "default"
+    # Normalize session_id for proper channel routing
+    _normalize_session_id(spec, mgr)
     created = spec.model_copy(update={"id": job_id})
     await mgr.create_or_replace_job(created)
     return created
@@ -94,6 +129,8 @@ async def replace_job(
     current_user = request.state.username
     if spec.dispatch and spec.dispatch.target:
         spec.dispatch.target.user_id = current_user
+    # Normalize session_id for proper channel routing
+    _normalize_session_id(spec, mgr)
     await mgr.create_or_replace_job(spec)
     return spec
 
