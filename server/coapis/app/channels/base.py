@@ -417,7 +417,6 @@ class BaseChannel(ABC):
         """Hook called once before running _process. Override for
         pre-processing (e.g. send 'thinking' indicator)."""
 
-    @staticmethod
     def _resolve_stream_type(self, event: Any) -> str:
         """Map event.type to a stream_type string.
 
