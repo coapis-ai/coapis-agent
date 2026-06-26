@@ -1157,7 +1157,6 @@ class Workspace:
                                     type="text",
                                     delta=True,
                                     text=rendered,
-                                    status=RunStatus.InProgress,
                                 )
                         elif block.type == "tool_call":
                             _tool_calls_seen += 1
@@ -1205,7 +1204,6 @@ class Workspace:
                                     type="text",
                                     delta=True,
                                     text=block.content,
-                                    status=RunStatus.InProgress,
                                 )
                         elif block.type == "tool_result":
                             # Tool result — only persist to session, never display as text
@@ -1239,7 +1237,6 @@ class Workspace:
                                 type="text",
                                 delta=True,
                                 text=text_chunk,
-                                status=RunStatus.InProgress,
                             )
 
                 except asyncio.CancelledError:
@@ -1276,7 +1273,6 @@ class Workspace:
                                 type="text",
                                 delta=True,
                                 text=fallback_msg,
-                                status=RunStatus.InProgress,
                             )
 
                 # ── Tool failure fallback for non-console channels ──
@@ -1306,7 +1302,6 @@ class Workspace:
                                 type="text",
                                 delta=True,
                                 text=fallback_msg,
-                                status=RunStatus.InProgress,
                             )
                 if assistant_reply:
                     context.add_message("assistant", assistant_reply)

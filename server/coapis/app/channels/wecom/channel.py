@@ -1228,6 +1228,10 @@ class WecomChannel(BaseChannel):
             stream_id = generate_req_id("stream")
 
         sids[stream_type] = stream_id
+        logger.info(
+            "[STREAM-DEBUG] on_streaming_start stream_type=%s stream_id=%s",
+            stream_type, stream_id[:20] if stream_id else "?",
+        )
 
     async def on_streaming_delta(
         self,
@@ -1251,6 +1255,10 @@ class WecomChannel(BaseChannel):
             display_text = f"{prefix}  {display_text}"
 
         try:
+            logger.info(
+                "[STREAM-DEBUG] on_streaming_delta stream_id=%s text_len=%s",
+                stream_id[:20], len(display_text),
+            )
             await self._client.reply_stream(
                 frame,
                 stream_id=stream_id,
@@ -1259,7 +1267,7 @@ class WecomChannel(BaseChannel):
             )
             self._streaming_text_sent = True
         except Exception:
-            logger.debug(
+            logger.warning(
                 "wecom on_streaming_delta failed stream_id=%s",
                 stream_id[:20],
             )
@@ -1288,6 +1296,10 @@ class WecomChannel(BaseChannel):
         display_text = format_markdown_tables(display_text)
 
         try:
+            logger.info(
+                "[STREAM-DEBUG] on_streaming_end stream_id=%s text_len=%s",
+                stream_id[:20], len(display_text),
+            )
             await self._client.reply_stream(
                 frame,
                 stream_id=stream_id,
@@ -1295,7 +1307,7 @@ class WecomChannel(BaseChannel):
                 finish=True,
             )
         except Exception:
-            logger.debug(
+            logger.warning(
                 "wecom streaming end failed stream_id=%s",
                 stream_id[:20],
             )

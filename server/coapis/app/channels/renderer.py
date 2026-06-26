@@ -195,7 +195,15 @@ class RenderStyle:
 
         # Apply config overrides
         if channel_config:
+            # Map filter_* fields (agent.json convention) to show_* attrs (inverted)
+            if "filter_thinking" in channel_config:
+                style.show_thinking = not channel_config["filter_thinking"]
+            if "filter_tool_messages" in channel_config:
+                style.show_tool_details = not channel_config["filter_tool_messages"]
+            # Direct show_* overrides
             for key, value in channel_config.items():
+                if key.startswith("filter_"):
+                    continue  # Already handled above
                 attr_name = f"show_{key}" if not key.startswith("show_") else key
                 if hasattr(style, attr_name):
                     setattr(style, attr_name, value)

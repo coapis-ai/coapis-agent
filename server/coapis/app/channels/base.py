@@ -449,18 +449,30 @@ class BaseChannel(ABC):
         """
         obj = getattr(event, "object", None)
         status = getattr(event, "status", None)
+        # [TEMP-DEBUG] Log ALL events to find why streaming never triggers
+        _ev_type = getattr(event, "type", None)
+        _ev_id = getattr(event, "id", None)
+        _ev_delta = getattr(event, "delta", None)
+        _ev_text = str(getattr(event, "text", ""))[:50] if hasattr(event, "text") else "-"
+        logger.info(
+            "[EV-DEBUG] obj=%s status=%s type=%s id=%s delta=%s text=%s",
+            obj, status, _ev_type, str(_ev_id)[:12] if _ev_id else None, _ev_delta, _ev_text,
+        )
 
         if obj == "message" and status == RunStatus.InProgress:
+            logger.info("[STREAM-DEBUG] msg_start obj=%s status=%s id=%s type=%s", obj, status, getattr(event, "id", "?"), getattr(event, "type", "?"))
             return await self._on_stream_msg_start(
                 request, to_handle, event, send_meta,
                 msg_id_to_stream_type, streaming_buffers,
             )
         if obj == "content" and status == RunStatus.InProgress:
+            logger.info("[STREAM-DEBUG] content_delta text=%s msg_id=%s", str(getattr(event, "text", ""))[:80], getattr(event, "msg_id", "?"))
             return await self._on_stream_content_delta(
                 request, to_handle, event, send_meta,
                 msg_id_to_stream_type, streaming_buffers,
             )
         if obj == "message" and status == RunStatus.Completed:
+            logger.info("[STREAM-DEBUG] msg_end obj=%s status=%s id=%s type=%s", obj, status, getattr(event, "id", "?"), getattr(event, "type", "?"))
             return await self._on_stream_msg_end(
                 request, to_handle, event, send_meta,
                 msg_id_to_stream_type, streaming_buffers,
