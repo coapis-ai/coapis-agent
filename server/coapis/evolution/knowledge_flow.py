@@ -229,9 +229,23 @@ class KnowledgeFlow:
             flow_record = self._create_promotion_flow(experience, agent_id, user_id)
             flows.append(flow_record)
 
-            if self.config.auto_promote_enabled and not self.config.require_review:
+            # ── 风险分级 ──
+            from ..constant import AUTO_APPROVE_CONFIDENCE
+            if experience.confidence >= AUTO_APPROVE_CONFIDENCE:
+                # L0: 高置信度 → 自动执行流动
+                await self._execute_flow(flow_record)
+                flow_record.status = "completed"
+                flow_record.triggered_by = "auto_L0"
+                await self._save_flow_record(flow_record)
+                logger.info(
+                    "KnowledgeFlow: L0 auto-flow (id=%s, confidence=%.2f)",
+                    experience.experience_id[:8], experience.confidence,
+                )
+            elif self.config.auto_promote_enabled and not self.config.require_review:
+                # Legacy: auto_promote 开关
                 await self._execute_flow(flow_record)
             else:
+                # L1/L2: 需要审核
                 await self._queue_for_review(flow_record)
 
         # Check if experience should be stored in professional layer
@@ -321,6 +335,24 @@ class KnowledgeFlow:
             self._flow_queue.remove(record)
 
         await self._save_flow_record(record)
+
+        # 审计日志
+        try:
+            from .audit_logger import get_audit_logger, AuditEntry
+            get_audit_logger().log(AuditEntry(
+                change_type="promote" if approved else "delete",
+                target_type="experience",
+                target_id=record_id,
+                risk_level="L1",
+                review_method="manual",
+                reviewer="admin",
+                decision="approved" if approved else "rejected",
+                reason=comment or ("KnowledgeFlow 审批通过" if approved else "KnowledgeFlow 审批拒绝"),
+                source_layer=record.source_layer,
+                target_layer=record.target_layer,
+            ))
+        except Exception:
+            pass
 
         logger.info(
             "Flow %s %s: %s",

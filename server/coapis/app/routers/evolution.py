@@ -635,3 +635,120 @@ async def reject_flow(
     flow._flow_queue.remove(record)
     flow._completed_flows.append(record)
     return {"rejected": True, "record_id": record_id, "status": record.status}
+
+
+# ── 审计日志 API ───────────────────────────────────────────────────────────
+
+@router.get("/evolution/audit-log")
+@require_permission("evolution:read")
+async def get_audit_log(
+    request: Request,
+    change_type: Optional[str] = Query(None, description="筛选: add|update|delete|promote|demote|rollback"),
+    target_type: Optional[str] = Query(None, description="筛选: memory|skill|experience|config"),
+    risk_level: Optional[str] = Query(None, description="筛选: L0|L1|L2"),
+    review_method: Optional[str] = Query(None, description="筛选: auto|llm|manual"),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """查询进化审计日志。"""
+    from ...evolution.audit_logger import get_audit_logger
+    al = get_audit_logger()
+    entries = al.query(
+        change_type=change_type,
+        target_type=target_type,
+        risk_level=risk_level,
+        review_method=review_method,
+        limit=limit,
+    )
+    return {"entries": entries, "total": len(entries)}
+
+
+@router.get("/evolution/audit-log/stats")
+@require_permission("evolution:read")
+async def get_audit_log_stats(request: Request):
+    """获取审计日志统计摘要。"""
+    from ...evolution.audit_logger import get_audit_logger
+    al = get_audit_logger()
+    return al.stats()
+
+
+@router.get("/evolution/audit-log/{entry_id}")
+@require_permission("evolution:read")
+async def get_audit_entry(request: Request, entry_id: str):
+    """按 ID 查询单条审计记录。"""
+    from ...evolution.audit_logger import get_audit_logger
+    al = get_audit_logger()
+    entry = al.get_entry(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Audit entry {entry_id} not found")
+    return entry
+
+
+@router.post("/evolution/audit-log/{entry_id}/rollback")
+@require_permission("evolution:write")
+async def rollback_audit_entry(request: Request, entry_id: str):
+    """回滚指定的进化变更。"""
+    from ...evolution.audit_logger import get_audit_logger, AuditEntry
+    al = get_audit_logger()
+    entry = al.get_entry(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Audit entry {entry_id} not found")
+    if not entry.get("rollback_available"):
+        raise HTTPException(status_code=400, detail="This entry is not rollbackable")
+    if entry.get("rolled_back"):
+        raise HTTPException(status_code=400, detail="Already rolled back")
+
+    target_type = entry.get("target_type", "")
+    content_before = entry.get("content_before", "")
+    target_id = entry.get("target_id", "")
+
+    if target_type == "memory" and content_before:
+        # 恢复 MEMORY.md
+        try:
+            from pathlib import Path
+            mem_path = Path(target_id)
+            if mem_path.exists():
+                mem_path.write_text(content_before, encoding="utf-8")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Rollback failed: {e}")
+    elif target_type == "skill" and content_before:
+        # 恢复 SKILL.md
+        try:
+            from pathlib import Path
+            skill_path = Path(target_id)
+            if skill_path.exists():
+                skill_path.write_text(content_before, encoding="utf-8")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Rollback failed: {e}")
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported rollback target_type: {target_type}")
+
+    # 写回滚审计记录
+    rollback_entry = AuditEntry(
+        change_type="rollback",
+        target_type=target_type,
+        target_id=target_id,
+        risk_level="L0",
+        review_method="manual",
+        reviewer="admin",
+        decision="approved",
+        reason=f"回滚 {entry_id}",
+        rollback_available=False,
+    )
+    al.log(rollback_entry)
+
+    # 标记原记录已回滚
+    # (直接追加一条标记记录，因为 JSONL 不支持原地修改)
+    marker = AuditEntry(
+        entry_id=entry_id,
+        change_type="rollback_mark",
+        target_type=target_type,
+        target_id=target_id,
+        reason=f"rolled_back_by_{rollback_entry.entry_id}",
+    )
+    al.log(marker)
+
+    return {
+        "rolled_back": True,
+        "entry_id": entry_id,
+        "rollback_entry_id": rollback_entry.entry_id,
+    }

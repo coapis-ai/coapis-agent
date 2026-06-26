@@ -720,6 +720,56 @@ class CrossAgentEvolution:
             logger.error("CrossAgentEvolution: review error: %s", e)
             return {"same_pattern": False, "should_promote": False, "principle": "", "reason": str(e)}
 
+    async def _llm_auto_review(
+        self,
+        entry: ExperienceEntry,
+        first_review: dict,
+    ) -> dict:
+        """L1 LLM 自动审核：二次审核中置信度经验，决定是否晋升。
+
+        Returns:
+            {"approve": bool, "reason": str, "confidence": float}
+        """
+        if not self.model:
+            return {"approve": False, "reason": "no model available", "confidence": 0.0}
+
+        prompt = (
+            f"你是 CoApis 系统的自动审核员。请审核以下经验是否应该晋升到全局知识库。\n\n"
+            f"经验内容: {entry.content}\n"
+            f"来源用户: {entry.source_user}\n"
+            f"分类: {entry.category}\n"
+            f"置信度: {entry.confidence}\n"
+            f"首次评审理由: {first_review.get('reason', '')}\n"
+            f"提炼原则: {first_review.get('principle', '')}\n\n"
+            f"审核标准:\n"
+            f"1. 内容是否准确、无误导？\n"
+            f"2. 是否对多数用户有价值？\n"
+            f"3. 是否与已有全局知识冲突？\n\n"
+            f'返回JSON: {{"approve": "yes/no", "reason": "...", "confidence": 0.0-1.0}}'
+        )
+
+        try:
+            response = await self.model.chat.completions.create(
+                model=self.model._current_model or "default",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200,
+            )
+            text = response.choices[0].message.content.strip()
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                result = json.loads(text[start:end])
+                return {
+                    "approve": result.get("approve", "no") == "yes",
+                    "reason": result.get("reason", ""),
+                    "confidence": float(result.get("confidence", 0.5)),
+                }
+            return {"approve": False, "reason": "parse error", "confidence": 0.0}
+        except Exception as e:
+            logger.error("CrossAgentEvolution: llm_auto_review error: %s", e)
+            return {"approve": False, "reason": str(e), "confidence": 0.0}
+
     # ------------------------------------------------------------------
     # 定时评审周期
     # ------------------------------------------------------------------
@@ -774,29 +824,83 @@ class CrossAgentEvolution:
             entry.is_generalizable = is_generalizable
             
             if review_result.get("should_promote"):
-                if not is_generalizable:
-                    # 不可泛化 → 标记为需管理员确认，暂不写入全局
-                    entry.bucket = "A"
-                    entry.status = "pending_admin_confirm"
-                    entry.needs_admin_confirm = True
-                    self._bucket_b.remove(entry)
-                    self._bucket_a.append(entry)
-                    logger.info(
-                        "CrossAgentEvolution: non-generalizable, needs admin confirm (id=%s)",
-                        entry.id[:8],
+                # ── 风险分级 ──
+                from ..constant import AUTO_APPROVE_CONFIDENCE
+                confidence = entry.confidence
+                llm_approve = review_result.get("should_promote", False)
+
+                if is_generalizable and confidence >= AUTO_APPROVE_CONFIDENCE:
+                    # L0: 可泛化 + 高置信度 → 自动晋升到基础层
+                    self.promote_to_foundation(
+                        experience_id=entry.id,
+                        promoted_by="auto_L0",
+                        comment=f"自动晋升: 置信度{confidence:.2f}≥{AUTO_APPROVE_CONFIDENCE}",
                     )
+                    self._bucket_b.remove(entry)
+                    risk_level = "L0"
+                    review_method = "auto"
+                    logger.info(
+                        "CrossAgentEvolution: L0 auto-promote (id=%s, confidence=%.2f)",
+                        entry.id[:8], confidence,
+                    )
+                elif is_generalizable and confidence >= self.config.min_confidence:
+                    # L1: 可泛化 + 中置信度 → LLM 二次审核后自动执行
+                    llm_review = await self._llm_auto_review(entry, review_result)
+                    self._bucket_b.remove(entry)
+                    if llm_review.get("approve"):
+                        self.promote_to_foundation(
+                            experience_id=entry.id,
+                            promoted_by="llm_L1",
+                            comment=f"LLM审核通过: {llm_review.get('reason', '')}",
+                        )
+                        risk_level = "L1"
+                        review_method = "llm"
+                        logger.info(
+                            "CrossAgentEvolution: L1 llm-approved (id=%s)",
+                            entry.id[:8],
+                        )
+                    else:
+                        entry.status = "archived"
+                        self._archive_entry(entry)
+                        risk_level = "L1"
+                        review_method = "llm"
+                        logger.info(
+                            "CrossAgentEvolution: L1 llm-rejected (id=%s, reason=%s)",
+                            entry.id[:8], llm_review.get("reason", ""),
+                        )
                 else:
-                    # 可泛化 → 晋升到 A 桶，标记需管理员确认后才写入全局
+                    # L2: 不可泛化 或 低置信度 → 管理员确认
                     entry.bucket = "A"
                     entry.status = "pending_admin_confirm"
                     entry.needs_admin_confirm = True
                     self._bucket_b.remove(entry)
                     self._bucket_a.append(entry)
-                    
+                    risk_level = "L2"
+                    review_method = "manual"
                     logger.info(
-                        "CrossAgentEvolution: promoted (needs admin confirm) (id=%s, principle=%s, generalizable=%s)",
-                        entry.id[:8], review_result.get("principle", ""), is_generalizable,
+                        "CrossAgentEvolution: L2 needs admin confirm (id=%s, generalizable=%s, confidence=%.2f)",
+                        entry.id[:8], is_generalizable, confidence,
                     )
+
+                # 审计日志
+                try:
+                    from .audit_logger import get_audit_logger, AuditEntry
+                    get_audit_logger().log(AuditEntry(
+                        change_type="promote" if risk_level != "L1" or review_method == "llm" else "delete",
+                        target_type="experience",
+                        target_id=entry.id,
+                        risk_level=risk_level,
+                        review_method=review_method,
+                        decision="approved" if risk_level in ("L0", "L1") else "pending",
+                        reason=review_result.get("reason", ""),
+                        content_before=entry.content[:500],
+                        content_after="[foundation]" if risk_level in ("L0", "L1") else "[pending_admin]",
+                        source_user=entry.source_user,
+                        source_agent=entry.source_agent,
+                        rollback_available=(risk_level in ("L0", "L1")),
+                    ))
+                except Exception:
+                    pass
                 
                 # 标记相似条目为已评审
                 for s in similar:
@@ -899,6 +1003,27 @@ class CrossAgentEvolution:
         # 持久化
         self._save_bucket_a()
         self._save_foundation()
+
+        # 审计日志
+        try:
+            from .audit_logger import get_audit_logger, AuditEntry
+            get_audit_logger().log(AuditEntry(
+                change_type="promote",
+                target_type="experience",
+                target_id=experience_id,
+                risk_level="L1",
+                review_method="auto" if not promoted_by else "manual",
+                reviewer=promoted_by or "system",
+                decision="approved",
+                reason=comment or "晋升到全局基础层",
+                content_before=exp.content[:500],
+                content_after="[foundation]",
+                source_user=exp.source_user,
+                source_agent=exp.source_agent,
+                rollback_available=True,
+            ))
+        except Exception:
+            pass
 
         logger.info(
             "CrossAgentEvolution: promoted to foundation (id=%s, by=%s)",
@@ -1057,6 +1182,18 @@ class CrossAgentEvolution:
         self._archive_entry(entry)
         self._save_buckets()
         logger.info("admin_reject: entry %s rejected by %s", entry_id[:8], rejected_by)
+        # 审计日志
+        try:
+            from .audit_logger import get_audit_logger, AuditEntry
+            get_audit_logger().log(AuditEntry(
+                change_type="delete", target_type="experience", target_id=entry_id,
+                risk_level="L2", review_method="manual", reviewer=rejected_by,
+                decision="rejected", reason=reason or f"管理员拒绝: {rejected_by}",
+                content_before=entry.content[:500],
+                source_user=entry.source_user, source_agent=entry.source_agent,
+            ))
+        except Exception:
+            pass
         return True
 
     def get_pending_confirmations(self) -> list[ExperienceEntry]:

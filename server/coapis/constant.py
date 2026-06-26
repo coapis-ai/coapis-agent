@@ -520,3 +520,11 @@ PUBLIC_PREFIXES: tuple = (
 MEMORY_NUDGE_INTERVAL = 5
 SKILL_NUDGE_INTERVAL = 8
 
+# Evolution auto-review thresholds (可配置 via .env)
+AUTO_APPROVE_CONFIDENCE = EnvVarLoader.get_float(
+    "COAPIS_AUTO_APPROVE_CONFIDENCE", default=0.8, min_value=0.0, max_value=1.0,
+)
+SKILL_AUTO_REVIEW_THRESHOLD = EnvVarLoader.get_float(
+    "COAPIS_SKILL_AUTO_REVIEW_THRESHOLD", default=0.5, min_value=0.0, max_value=1.0,
+)
+

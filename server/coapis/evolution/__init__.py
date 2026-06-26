@@ -29,6 +29,7 @@ from .knowledge_flow import KnowledgeFlow, FlowConfig, FlowRecord
 from .backend_review import BackendReview, ReviewSchedule, ReviewResult
 from .cross_agent_evolution import CrossAgentEvolution, CrossAgentEvolutionConfig
 from .memory_capacity import MemoryCapacityManager
+from .audit_logger import AuditLogger, AuditEntry, get_audit_logger
 
 __all__ = [
     "EvolutionEngine",
@@ -46,8 +47,7 @@ __all__ = [
     "CrossAgentEvolution",
     "CrossAgentEvolutionConfig",
     "MemoryCapacityManager",
-    "SkillEvolutionEngine",
-    "SkillMetrics",
-    "SkillMetricsSnapshot",
-    "get_skill_evolution_engine",
+    "AuditLogger",
+    "AuditEntry",
+    "get_audit_logger",
 ]

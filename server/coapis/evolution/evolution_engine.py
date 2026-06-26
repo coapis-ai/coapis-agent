@@ -810,6 +810,20 @@ class EvolutionEngine:
                 existing + new_section,
                 encoding="utf-8",
             )
+            # 审计日志
+            try:
+                from .audit_logger import get_audit_logger, AuditEntry
+                get_audit_logger().log(AuditEntry(
+                    change_type="add", target_type="memory",
+                    target_id=str(memory_file),
+                    risk_level="L0", review_method="auto", decision="approved",
+                    reason="经验自动提取写入 MEMORY.md",
+                    content_before="", content_after=content[:500],
+                    source_user=self._current_user_id,
+                    source_agent=self._current_agent_id,
+                ))
+            except Exception:
+                pass
         except Exception as e:
             logger.warning("Failed to append to MEMORY.md: %s", e)
 
