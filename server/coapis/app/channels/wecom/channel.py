@@ -236,6 +236,10 @@ class WecomChannel(BaseChannel):
 
         # Streaming keepalive tasks keyed by stream_id
         self._keepalive_tasks: Dict[str, asyncio.Task] = {}
+        # Session busy state tracking (for _consume_with_tracker)
+        self._processing_sessions: set = set()
+        # Card handler (template-card subsystem)
+        self._card_handler: Any = None  # initialized in start()
         # Track whether streaming was used for the current consume_one cycle
         # so send_content_parts can skip text to avoid double-sending
         self._streaming_text_sent: bool = False
@@ -1229,8 +1233,74 @@ class WecomChannel(BaseChannel):
 
         sids[stream_type] = stream_id
         logger.info(
-            "[STREAM-DEBUG] on_streaming_start stream_type=%s stream_id=%s",
+            "on_streaming_start stream_type=%s stream_id=%s",
             stream_type, stream_id[:20] if stream_id else "?",
+        )
+
+    # ── Display helpers (qwenpaw-aligned) ──────────────────────────
+
+    def _build_display_text(
+        self,
+        stream_type: str,
+        text: str,
+        send_meta: Dict[str, Any],
+    ) -> str:
+        """Format display text with appropriate prefix.
+
+        reasoning gets 💭 prefix; message gets bot_prefix if configured.
+        """
+        if stream_type == "reasoning":
+            return f"💭 {text}" if text else ""
+        prefix = self.bot_prefix or ""
+        if prefix and text:
+            return f"{prefix}  {text}"
+        return text
+
+    async def _consume_with_tracker(
+        self,
+        request: "AgentRequest",
+        payload: Any,
+    ) -> None:
+        """Consume with TaskTracker registration for /stop support.
+
+        Tracks session busy state so /stop can cancel running tasks.
+        """
+        session_id = getattr(request, "session_id", "") or ""
+        self._processing_sessions.add(session_id)
+        try:
+            await super()._consume_with_tracker(request, payload)
+        finally:
+            self._processing_sessions.discard(session_id)
+
+    async def on_event_message_completed(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+    ) -> None:
+        """Hook: message completed. Try cards first, then fallback.
+
+        If cards/ subsystem is available and can handle this event,
+        let it send a card. Otherwise fall back to default text send.
+        """
+        # Inject processing stream id for card context
+        self._inject_processing_sid(request, send_meta)
+
+        # Try card handler if available
+        card_handler = getattr(self, "_card_handler", None)
+        if card_handler is not None:
+            try:
+                if await card_handler.try_send_card_for_event(
+                    to_handle, event, send_meta,
+                ):
+                    return
+            except Exception:
+                logger.debug("Card handler failed, falling back", exc_info=True)
+
+        # Fallback: default message completed handling
+        await super().on_event_message_completed(
+            request, to_handle, event, send_meta,
         )
 
     async def on_streaming_delta(
@@ -1249,14 +1319,13 @@ class WecomChannel(BaseChannel):
         if not frame or not self._client or not stream_id:
             return
 
-        display_text = accumulated_text
-        prefix = self.bot_prefix or ""
-        if prefix and display_text:
-            display_text = f"{prefix}  {display_text}"
+        display_text = self._build_display_text(
+            stream_type, accumulated_text, send_meta,
+        )
 
         try:
             logger.info(
-                "[STREAM-DEBUG] on_streaming_delta stream_id=%s text_len=%s",
+                "on_streaming_delta stream_id=%s text_len=%s",
                 stream_id[:20], len(display_text),
             )
             await self._client.reply_stream(
@@ -1288,16 +1357,15 @@ class WecomChannel(BaseChannel):
         if not frame or not self._client or not stream_id:
             return
 
-        prefix = self.bot_prefix or ""
-        display_text = accumulated_text
-        if prefix and display_text:
-            display_text = f"{prefix}  {display_text}"
+        display_text = self._build_display_text(
+            stream_type, accumulated_text, send_meta,
+        )
 
         display_text = format_markdown_tables(display_text)
 
         try:
             logger.info(
-                "[STREAM-DEBUG] on_streaming_end stream_id=%s text_len=%s",
+                "on_streaming_end stream_id=%s text_len=%s",
                 stream_id[:20], len(display_text),
             )
             await self._client.reply_stream(
@@ -1613,6 +1681,22 @@ class WecomChannel(BaseChannel):
         # Register event handlers
         self._client.on("message", self._on_message_sync)
         self._client.on("event.enter_chat", self._on_enter_chat_sync)
+
+        # Register template-card callback for interactive cards
+        try:
+            from .cards import WecomCardHandler
+            self._card_handler = WecomCardHandler(self)
+            self._client.on(
+                "template_card_event",
+                self._card_handler.handle_template_card_event_sync,
+            )
+            logger.info("wecom template-card handler registered")
+        except Exception:
+            logger.warning(
+                "wecom template-card handler registration failed, "
+                "interactive cards will not work",
+                exc_info=True,
+            )
 
         # Patch SDK heartbeat to trigger reconnect on pong timeout.
         # Use ensure_future so reconnect survives heartbeat task cancel.

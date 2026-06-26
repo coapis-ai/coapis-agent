@@ -595,6 +595,192 @@ class BaseChannel(ABC):
         """Called when a streaming segment completes.
         accumulated_text is the final full text."""
 
+    # ── Event hooks (qwenpaw-aligned) ──────────────────────────────
+    # Subclasses override these to react to specific events from
+    # _process().  Default implementations are no-ops so existing
+    # channels keep working unchanged.
+
+    async def on_event_content(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+    ) -> bool:
+        """Hook: content event (tool output / data content).
+
+        Return True if the event was fully handled (skip default path).
+        Return False to let the caller continue with default handling.
+        """
+        return False
+
+    async def on_event_message_completed(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+    ) -> None:
+        """Hook: message completed event.
+
+        Called when a message finishes.  Default implementation sends
+        the final message content as a plain text message.
+        """
+        # Default: send the final message content via the channel's
+        # send function.  We extract the full text from the event.
+        try:
+            full_text = self._extract_final_text(event)
+            if full_text:
+                send_fn = self._resolve_send_fn()
+                if send_fn:
+                    await send_fn(to_handle, full_text, send_meta)
+        except Exception:
+            logger.debug(
+                "on_event_message_completed default handler failed",
+                exc_info=True,
+            )
+
+    async def on_event_response(
+        self,
+        request: "AgentRequest",
+        event: Any,
+    ) -> None:
+        """Hook: response event (agent response metadata)."""
+        pass
+
+    def _extract_final_text(self, event: Any) -> str:
+        """Extract final text content from a message completed event."""
+        msg = getattr(event, "message", None)
+        if msg is None:
+            msg = event
+        content_list = getattr(msg, "content", None) or []
+        parts = []
+        for c in content_list:
+            if hasattr(c, "text"):
+                parts.append(getattr(c, "text", ""))
+            elif isinstance(c, dict):
+                parts.append(c.get("text", ""))
+        return "\n".join(p for p in parts if p)
+
+    def _resolve_send_fn(self) -> Any:
+        """Resolve the best available send function for this channel."""
+        for name in ("send_text", "send", "send_message"):
+            fn = getattr(self, name, None)
+            if fn:
+                return fn
+        return None
+
+    def _format_stream_tool_output_body(self, event: Any) -> Optional[str]:
+        """Format tool output for display. Ported from qwenpaw.
+
+        Returns formatted string or None if event is not a tool output.
+        """
+        try:
+            from ..channels.renderer import RenderStyle
+            obj = getattr(event, "object", None)
+            if obj != "content":
+                return None
+            msg_type = getattr(event, "type", None)
+            type_str = (
+                msg_type.value if hasattr(msg_type, "value")
+                else str(msg_type) if msg_type else ""
+            )
+            if type_str not in ("tool_use", "tool_output", "tool_result"):
+                return None
+            content_text = ""
+            for c in (event.content or []):
+                if hasattr(c, "text"):
+                    content_text = getattr(c, "text", "")
+                elif isinstance(c, dict):
+                    content_text = c.get("text", "")
+                break
+            tool_name = ""
+            if hasattr(event, "metadata") and isinstance(event.metadata, dict):
+                tool_name = event.metadata.get("tool_name", "")
+            if not content_text:
+                return None
+            prefix = f"🔧 {tool_name}" if tool_name else "🔧 Tool"
+            truncated = content_text[:1000]
+            if len(content_text) > 1000:
+                truncated += "…"
+            return f"{prefix}\n```\n{truncated}\n```"
+        except Exception:
+            return None
+
+    # ── Tracker-aware consume ──────────────────────────────────────
+
+    async def _consume_with_tracker(
+        self,
+        request: "AgentRequest",
+        payload: Any,
+    ) -> None:
+        """Consume with TaskTracker registration for /stop support.
+
+        Registers the task in TaskTracker so /stop can cancel it.
+        Session busy state is tracked via _processing_sessions.
+        """
+        session_id = getattr(request, "session_id", "") or ""
+
+        chat = await self._workspace.chat_manager.get_or_create_chat(
+            session_id,
+            getattr(request, "user_id", "") or "",
+            getattr(request, "channel", self.channel),
+        )
+
+        queue, is_new = await self._workspace.task_tracker.attach_or_start(
+            chat.id,
+            payload,
+            self._stream_with_tracker_for_task,
+        )
+
+        if is_new:
+            try:
+                async for _ in self._workspace.task_tracker.stream_from_queue(
+                    queue,
+                    chat.id,
+                ):
+                    pass
+            except asyncio.CancelledError:
+                logger.info(f"Task cancelled: chat_id={chat.id}")
+                raise
+
+    async def _stream_with_tracker_for_task(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        send_meta: Dict[str, Any],
+    ) -> None:
+        """Internal stream method called by TaskTracker."""
+        msg_id_to_stream_type: Dict[str, str] = {}
+        streaming_buffers: Dict[str, str] = {}
+
+        try:
+            async for event in self._process(request):
+                obj = getattr(event, "object", None)
+                status = getattr(event, "status", None)
+
+                handled_by_streaming = False
+                if self.streaming_enabled:
+                    handled_by_streaming = await self._dispatch_streaming_event(
+                        request, to_handle, event, send_meta,
+                        msg_id_to_stream_type, streaming_buffers,
+                    )
+
+                if obj == "content" and not handled_by_streaming:
+                    if await self.on_event_content(
+                        request, to_handle, event, send_meta,
+                    ):
+                        continue
+                if obj == "message" and status == RunStatus.Completed:
+                    if not handled_by_streaming:
+                        await self.on_event_message_completed(
+                            request, to_handle, event, send_meta,
+                        )
+                elif obj == "response":
+                    await self.on_event_response(request, event)
+        except Exception:
+            logger.exception("stream_with_tracker failed")
+
     async def consume_one(self, payload: Any) -> None:
         """Consume one payload from queue."""
         logger.info(
@@ -636,11 +822,20 @@ class BaseChannel(ABC):
                     )
 
                 # --- non-streaming fallback ---
+                # content events (tool output) — try hook first
+                if obj == "content" and not handled_by_streaming:
+                    if await self.on_event_content(
+                        request, to_handle, event, send_meta,
+                    ):
+                        continue
+                # message completed — hook for cards / final send
                 if obj == "message" and status == RunStatus.Completed:
                     if not handled_by_streaming:
-                        pass  # Hook for message completed
+                        await self.on_event_message_completed(
+                            request, to_handle, event, send_meta,
+                        )
                 elif obj == "response":
-                    pass  # Hook for response
+                    await self.on_event_response(request, event)
 
         except Exception:
             logger.exception("channel consume_one failed channel=%s", self.channel)
