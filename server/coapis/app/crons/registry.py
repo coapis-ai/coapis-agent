@@ -36,10 +36,27 @@ from .repo.json_repo import JsonJobRepository
 logger = logging.getLogger(__name__)
 
 
+# Module-level singleton for CronManagerRegistry
+_registry_instance: Optional["CronManagerRegistry"] = None
+
+
+def set_registry(registry: "CronManagerRegistry") -> None:
+    """Set the global CronManagerRegistry singleton."""
+    global _registry_instance
+    _registry_instance = registry
+
+
+def get_registry() -> Optional["CronManagerRegistry"]:
+    """Get the global CronManagerRegistry singleton."""
+    return _registry_instance
+
+
 class CronManagerRegistry:
     """Registry that manages per-user CronManager instances.
 
     Lazy-creates CronManager on first access per user.
+    Workspace CronManagers can register themselves via register_manager(),
+    which takes priority over lazy-created instances.
     """
 
     def __init__(self, runner: object, agent_id: str = "default"):
@@ -47,6 +64,17 @@ class CronManagerRegistry:
         self._agent_id = agent_id
         self._managers: Dict[str, CronManager] = {}
         self._started: Dict[str, bool] = {}
+
+    def register_manager(self, username: str, manager: CronManager) -> None:
+        """Register a workspace CronManager for a user.
+
+        This overwrites any lazy-created CronManager, ensuring the API
+        always uses the workspace's CronManager (which has the real runner,
+        channel_manager, memory_manager, heartbeat, and dream).
+        """
+        self._managers[username] = manager
+        self._started[username] = True
+        logger.info(f"Registered workspace CronManager for {username}")
 
     def get_or_create(self, username: str) -> CronManager:
         """Get existing CronManager or create new one for user."""
@@ -58,23 +86,11 @@ class CronManagerRegistry:
         user_cron_dir.mkdir(parents=True, exist_ok=True)
         cron_path = user_cron_dir / "jobs.json"
 
-        # Try to get channel_manager from user's workspace
-        channel_mgr = None
-        try:
-            from ..multi_agent_manager import get_multi_agent_manager
-            mam = get_multi_agent_manager()
-            if mam:
-                ws = mam.get_workspace_for_user(username)
-                if ws:
-                    channel_mgr = getattr(ws, "channel_manager", None)
-        except Exception:
-            pass
-
         repo = JsonJobRepository(cron_path)
         mgr = CronManager(
             repo=repo,
             runner=self._runner,
-            channel_manager=channel_mgr,
+            channel_manager=None,
             agent_id=self._agent_id,
             owner_user_id=username,
         )
@@ -113,12 +129,14 @@ class CronManagerRegistry:
 async def get_user_cron_manager(request: Request) -> CronManager:
     """Get the CronManager for the current authenticated user.
 
-    Must be async so FastAPI calls it in the event loop context,
-    avoiding "no running event loop" errors in Depends().
+    Uses the CronManagerRegistry (module-level singleton).
+    Workspace CronManagers register themselves into the registry on startup.
+    If the workspace hasn't been loaded yet, triggers loading so the
+    workspace's CronManager (with real runner/channel_manager/memory_manager)
+    gets registered.
 
-    Raises 401 if not authenticated, 500 if registry not initialized.
+    Raises 401 if not authenticated.
     """
-    # Must be called after AuthMiddleware sets request.state.username
     username = getattr(request.state, "username", None)
     if not username:
         raise HTTPException(
@@ -126,26 +144,29 @@ async def get_user_cron_manager(request: Request) -> CronManager:
             detail="Authentication required for cron operations",
         )
 
-    registry: Optional[CronManagerRegistry] = getattr(
-        request.app.state, "cron_registry", None
-    )
+    registry = get_registry()
+    if registry is None:
+        registry = getattr(request.app.state, "cron_registry", None)
     if registry is None:
         raise HTTPException(
             status_code=500,
-            detail="CronManagerRegistry not initialized",
+            detail="No CronManager available: registry not initialized",
         )
 
-    # Lazy-create on first access
-    mgr = registry.get_or_create(username)
+    # If registry has no started manager for this user, try loading the
+    # workspace first — this triggers workspace.start() which registers
+    # the workspace's CronManager into the registry.
+    if username not in registry._managers or not registry._started.get(username):
+        try:
+            mam = getattr(request.app.state, "multi_agent_manager", None)
+            if mam:
+                ws = await mam.get_agent("default", username=username)
+                if ws and not ws._started:
+                    await ws.start()
+        except Exception as e:
+            logger.debug(f"Could not trigger workspace load for {username}: {e}")
 
-    # Start manager lazily (idempotent) - await to ensure jobs are registered
+    mgr = registry.get_or_create(username)
     if not registry._started.get(username):
         await registry.start_manager(username)
-
     return mgr
-
-
-# Note: install_cron_middleware is not needed.
-# Lazy-creation happens in get_user_cron_manager() which is called
-# via Depends() in each cron API endpoint. This avoids the
-# "Cannot add middleware after an application has started" error.

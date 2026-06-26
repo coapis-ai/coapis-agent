@@ -366,11 +366,12 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
 
     # Initialize CronManagerRegistry (per-user, stored in workspaces/{username}/crons/)
     logger.debug("Initializing CronManagerRegistry...")
-    from .crons.registry import CronManagerRegistry
+    from .crons.registry import CronManagerRegistry, set_registry
     cron_registry = CronManagerRegistry(
         runner=runner,
         agent_id="global_default",
     )
+    set_registry(cron_registry)
     
     # Initialize PermissionManager (config-driven, supports hot-reload)
     logger.debug("Initializing PermissionManager...")

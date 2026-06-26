@@ -409,7 +409,7 @@ class Workspace:
                 service_class=CronManager,
                 init_args=lambda ws: {  # pylint: disable=protected-access
                     "repo": JsonJobRepository(
-                        str(ws.workspace_dir / "jobs.json"),
+                        str(ws.workspace_dir / "crons" / "jobs.json"),
                     ),
                     "runner": ws._service_manager.services["runner"],
                     "channel_manager": ws._service_manager.services.get(
@@ -420,6 +420,7 @@ class Workspace:
                     )
                     or "UTC",
                     "agent_id": ws.agent_id,
+                    "owner_user_id": ws.username,
                 },
                 start_method="start",
                 stop_method="stop",
@@ -626,6 +627,17 @@ class Workspace:
 
             # 2. Start all services via ServiceManager
             await self._service_manager.start_all()
+
+            # 2.5. Register workspace CronManager into global CronManagerRegistry
+            if self.username and not self.is_global:
+                try:
+                    from ..crons.registry import get_registry
+                    registry = get_registry()
+                    logger.warning(f"[WS_REGISTER] username={self.username}, registry={type(registry).__name__ if registry else None}, cron_manager={type(self.cron_manager).__name__ if self.cron_manager else None}")
+                    if registry and self.cron_manager:
+                        registry.register_manager(self.username, self.cron_manager)
+                except Exception as e:
+                    logger.warning(f"Failed to register CronManager in registry: {e}")
 
             self._started = True
             logger.info(f"Workspace started successfully: {self.agent_id}")

@@ -707,6 +707,18 @@ class Workspace:
         # 启动所有已注册服务
         await self._service_mgr.start_all()
 
+        # 注册 workspace CronManager 到全局 CronManagerRegistry
+        if self.username and not self.is_global:
+            try:
+                from ..app.crons.registry import get_registry
+                registry = get_registry()
+                cron_mgr = self._service_mgr.get("cron_manager")
+                if registry and cron_mgr:
+                    registry.register_manager(self.username, cron_mgr)
+                    logger.info(f"Registered workspace CronManager for {self.username} into global registry")
+            except Exception as e:
+                logger.warning(f"Failed to register CronManager in registry: {e}")
+
         # ChannelManager + ConsoleChannel: SSE event streaming pipeline
         from ..app.channels.console import ConsoleChannel
         from ..app.channels.manager import ChannelManager
@@ -1539,6 +1551,17 @@ class Workspace:
             )
             await self._cron_manager.start()
             logger.info(f"CronManager started for agent {self.agent_id}")
+
+            # 注册到全局 CronManagerRegistry
+            if self.username and not self.is_global:
+                try:
+                    from ..app.crons.registry import get_registry
+                    registry = get_registry()
+                    if registry:
+                        registry.register_manager(self.username, self._cron_manager)
+                        logger.info(f"Registered workspace CronManager for {self.username} into global registry")
+                except Exception as e:
+                    logger.warning(f"Failed to register CronManager in registry: {e}")
         except Exception as e:
             logger.warning(f"CronManager start failed (non-fatal): {e}")
             self._cron_manager = None

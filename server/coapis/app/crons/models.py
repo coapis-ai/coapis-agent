@@ -149,6 +149,13 @@ class CronJobSpec(BaseModel):
     request: Optional[CronJobRequest] = None
     dispatch: DispatchSpec
 
+    # 智能体标识 — 用户可能有多个智能体，用于区分 job 归属
+    agent_id: Optional[str] = Field(
+        default=None,
+        description="Target agent identifier (e.g. 'default', agent name). "
+                    "Null means default agent.",
+    )
+
     runtime: JobRuntimeSpec = Field(default_factory=JobRuntimeSpec)
     meta: Dict[str, Any] = Field(default_factory=dict)
 

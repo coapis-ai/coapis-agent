@@ -762,15 +762,7 @@ def _initialize_agent_workspace(
     _ensure_heartbeat_file(workspace_dir, language)
     _install_initial_skills(workspace_dir, skill_names)
 
-    jobs_file = workspace_dir / "jobs.json"
-    if not jobs_file.exists():
-        with open(jobs_file, "w", encoding="utf-8") as file:
-            json.dump(
-                {"version": 1, "jobs": []},
-                file,
-                ensure_ascii=False,
-                indent=2,
-            )
+    # jobs.json 已移至 crons/jobs.json，由 CronManager 自动创建
 
     chats_file = workspace_dir / "chats.json"
     if not chats_file.exists():

@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 # Default workspace JSON files
 _WORKSPACE_JSON_DEFAULTS: list[tuple[str, dict]] = [
-    ("jobs.json", {"version": 1, "jobs": []}),
+    # jobs.json 已移至 crons/jobs.json，由 CronManager 自动创建
     ("skill.json", {"version": 0, "schema_version": "workspace-skill-manifest.v1", "skills": {}}),
 ]
 

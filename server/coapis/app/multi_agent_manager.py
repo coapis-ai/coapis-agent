@@ -373,6 +373,27 @@ class MultiAgentManager:
 
         return result
 
+    def get_workspace_for_user(self, username: str) -> Optional[Workspace]:
+        """Get the primary workspace for a user.
+
+        Returns the user's default agent workspace, which has the CronManager,
+        ChannelManager, MemoryManager, etc.
+
+        Returns None if no workspace found for this user.
+        """
+        # Try {username}:default first (the default agent)
+        cache_key = f"{username}:default"
+        ws = self._workspaces.get(cache_key)
+        if ws:
+            return ws
+
+        # Try any workspace owned by this user
+        for key, workspace in self._workspaces.items():
+            if workspace.username == username and not workspace.is_global:
+                return workspace
+
+        return None
+
     def get_all_agents(self) -> List[Dict[str, Any]]:
         """Get all agents (admin view)."""
         return [ws.to_dict() for ws in self._workspaces.values()]

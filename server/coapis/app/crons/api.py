@@ -66,6 +66,9 @@ async def create_job(
     current_user = request.state.username
     if spec.dispatch and spec.dispatch.target:
         spec.dispatch.target.user_id = current_user
+    # 默认 agent_id 为 "default"（用户未指定时）
+    if not spec.agent_id:
+        spec.agent_id = "default"
     created = spec.model_copy(update={"id": job_id})
     await mgr.create_or_replace_job(created)
     return created

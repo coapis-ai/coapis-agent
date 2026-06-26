@@ -57,14 +57,14 @@ _WORKSPACE_ITEMS_TO_MIGRATE = [
     ("customized_skills", True),
     # Files
     ("chats.json", False),
-    ("jobs.json", False),
+    # jobs.json 已移至 crons/jobs.json，不再迁移根目录的空文件
     ("feishu_receive_ids.json", False),
     ("dingtalk_session_webhooks.json", False),
 ]
 
 _WORKSPACE_JSON_DEFAULTS: list[tuple[str, dict]] = [
     ("chats.json", {"version": 1, "chats": []}),
-    ("jobs.json", {"version": 1, "jobs": []}),
+    # jobs.json 已移至 crons/jobs.json，由 CronManager 自动创建
 ]
 
 

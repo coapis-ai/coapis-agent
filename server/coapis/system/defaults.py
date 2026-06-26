@@ -214,7 +214,7 @@ DEFAULT_ADMIN_USER: Dict[str, Any] = {
 # ═══════════════════════════════════════════════════════════════════
 DEFAULT_WORKSPACE_TEMPLATE: Dict[str, Any] = {
     "chats.json": {"version": 1, "chats": []},
-    "jobs.json": {"version": 1, "jobs": []},
+    # jobs.json 已移至 crons/jobs.json，不再在 workspace 根目录创建
 }
 
 DEFAULT_WORKSPACE_FILES: List[str] = [
