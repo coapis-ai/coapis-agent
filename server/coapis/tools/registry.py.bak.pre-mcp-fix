@@ -342,11 +342,6 @@ class ToolRegistry:
 
         matched_names &= allowed_names  # Only keep registered tools
 
-        # MCP tools are dynamic — always include them regardless of TOOL_GROUPS
-        for t in allowed:
-            if t.name.startswith("mcp__"):
-                matched_names.add(t.name)
-
         if matched_names:
             selected = [t for t in allowed if t.name in matched_names]
             logger.info(f"Tool selection: {len(selected)} tools from {len(allowed)}")
