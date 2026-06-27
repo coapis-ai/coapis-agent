@@ -799,11 +799,21 @@ class Workspace:
                         if _is_command(_cmd_query):
                             _msg_id_cmd = str(uuid_mod.uuid4())
                             _resp_id_cmd = str(uuid_mod.uuid4())
+                            # ── Yield Message(InProgress) to register stream_type ──
+                            yield Message(
+                                object="message",
+                                id=_msg_id_cmd,
+                                role="assistant",
+                                type=MessageType.MESSAGE,
+                                status=RunStatus.InProgress,
+                                content=[TextBlock(type="text", text="")],
+                            )
                             # Build minimal Msg list for run_command_path
                             _cmd_msgs = [
                                 _CmdMsg(name="user", role="user", content=_cmd_query),
                             ]
                             _cmd_runner = self.runner
+                            _cmd_full_text = ""
                             async for _cmd_msg, _cmd_last in run_command_path(
                                 request_obj, _cmd_msgs, _cmd_runner
                             ):
@@ -818,13 +828,17 @@ class Workspace:
                                             _cmd_text += getattr(_blk, "text", "")
                                         elif isinstance(_blk, dict) and _blk.get("type") == "text":
                                             _cmd_text += _blk.get("text", "")
+                                _cmd_full_text += _cmd_text
+                            # Yield full command output as delta text
+                            if _cmd_full_text:
                                 yield TextContent(
                                     object="content",
                                     msg_id=_msg_id_cmd,
                                     type="text",
-                                    delta=False,
-                                    text=_cmd_text,
+                                    delta=True,
+                                    text=_cmd_full_text,
                                 )
+                            # Yield Message(Completed) to trigger on_streaming_end
                             yield Message(
                                 object="message",
                                 id=_msg_id_cmd,
@@ -852,13 +866,23 @@ class Workspace:
                     context.clear_messages()
                     if self.foundation_manager:
                         self.foundation_manager.reset_injection_state()
-                    # Yield confirmation message
+                    # Yield Message(InProgress) to register stream_type
+                    _clear_msg_id = str(uuid_mod.uuid4())
+                    yield Message(
+                        object="message",
+                        id=_clear_msg_id,
+                        role="assistant",
+                        type=MessageType.MESSAGE,
+                        status=RunStatus.InProgress,
+                        content=[TextBlock(type="text", text="")],
+                    )
+                    # Yield confirmation as delta text
                     confirm_text = "✅ 聊天上下文已清空。"
                     yield TextContent(
                         object="content",
-                        msg_id=msg_id,
+                        msg_id=_clear_msg_id,
                         type="text",
-                        delta=False,
+                        delta=True,
                         text=confirm_text,
                     )
                     # Persist empty state to session
@@ -875,7 +899,7 @@ class Workspace:
                         pass
                     yield Message(
                         object="message",
-                        id=str(uuid_mod.uuid4()),
+                        id=_clear_msg_id,
                         role="assistant",
                         type=MessageType.MESSAGE,
                         status=RunStatus.Completed,

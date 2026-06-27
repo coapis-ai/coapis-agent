@@ -355,17 +355,11 @@ class BaseChannel(ABC):
         self,
         payload: Any,
     ) -> AsyncGenerator[str, None]:
-        """Stream events through TaskTracker for task tracking.
+        """Stream events via TaskTracker, yielding SSE strings.
 
-        This method wraps self._process (the ProcessHandler) and yields
-        SSE-formatted events. Called by TaskTracker.attach_or_start to
-        enable task cancellation.
-
-        Args:
-            payload: Message payload (dict or AgentRequest)
-
-        Yields:
-            SSE-formatted event strings
+        When ``streaming_enabled``, streaming hooks are invoked for
+        reasoning / message events alongside the normal path.
+        (aligned with qwenpaw base.py)
         """
         request = self._payload_to_request(payload)
 
@@ -376,28 +370,50 @@ class BaseChannel(ABC):
 
         to_handle = self.get_to_handle_from_request(request)
 
+        await self._before_consume_process(request)
+
         last_response = None
         process_iterator = None
+        msg_id_to_stream_type: Dict[str, str] = {}
+        streaming_buffers: Dict[str, str] = {}
         try:
-            # self._process is the ProcessHandler (callable) passed to __init__
             process_iterator = self._process(request)
             async for event in process_iterator:
+                # Serialize for SSE yield
                 if hasattr(event, "model_dump_json"):
                     data = event.model_dump_json()
                 elif hasattr(event, "json"):
                     data = event.json()
                 else:
                     data = json.dumps({"text": str(event)})
-
                 yield f"data: {data}\n\n"
 
                 obj = getattr(event, "object", None)
                 status = getattr(event, "status", None)
 
+                # --- streaming path ---
+                handled_by_streaming = False
+                if self.streaming_enabled:
+                    handled_by_streaming = (
+                        await self._dispatch_streaming_event(
+                            request, to_handle, event, send_meta,
+                            msg_id_to_stream_type, streaming_buffers,
+                        )
+                    )
+
+                # --- non-streaming / fallback path ---
+                if obj == "content":
+                    if await self.on_event_content(
+                        request, to_handle, event, send_meta,
+                    ):
+                        continue
                 if obj == "message" and status == RunStatus.Completed:
-                    pass  # Hook for message completed
+                    await self.on_event_message_completed(
+                        request, to_handle, event, send_meta,
+                    )
                 elif obj == "response":
                     last_response = event
+                    await self.on_event_response(request, event)
 
         except asyncio.CancelledError:
             logger.info(
@@ -763,7 +779,7 @@ class BaseChannel(ABC):
         queue, is_new = await self._workspace.task_tracker.attach_or_start(
             chat.id,
             payload,
-            self._stream_with_tracker_for_task,
+            self._stream_with_tracker,
         )
 
         if is_new:
