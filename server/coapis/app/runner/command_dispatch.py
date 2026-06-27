@@ -213,7 +213,7 @@ async def run_command_path(  # pylint: disable=too-many-statements,too-many-bran
         # Get channel_manager from workspace
         channel_manager = workspace.channel_manager
         if channel_manager is not None:
-            channel = await channel_manager.get_channel(channel_id)
+            channel = channel_manager.get_channel(channel_id)
 
         if channel is None:
             logger.error(

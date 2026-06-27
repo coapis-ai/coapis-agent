@@ -796,6 +796,11 @@ class Workspace:
                             run_command_path,
                         )
                         from agentscope.message import Msg as _CmdMsg
+                        logger.info(
+                            "[CMD-DEBUG] _cmd_query=%r, _is_command=%s",
+                            _cmd_query,
+                            _is_command(_cmd_query),
+                        )
                         if _is_command(_cmd_query):
                             _msg_id_cmd = str(uuid_mod.uuid4())
                             _resp_id_cmd = str(uuid_mod.uuid4())
@@ -806,7 +811,7 @@ class Workspace:
                                 role="assistant",
                                 type=MessageType.MESSAGE,
                                 status=RunStatus.InProgress,
-                                content=[TextBlock(type="text", text="")],
+                                content=[TextContent(type="text", text="")],
                             )
                             # Build minimal Msg list for run_command_path
                             _cmd_msgs = [
@@ -836,6 +841,7 @@ class Workspace:
                                     msg_id=_msg_id_cmd,
                                     type="text",
                                     delta=True,
+                                    status=RunStatus.InProgress,
                                     text=_cmd_full_text,
                                 )
                             # Yield Message(Completed) to trigger on_streaming_end
@@ -874,7 +880,7 @@ class Workspace:
                         role="assistant",
                         type=MessageType.MESSAGE,
                         status=RunStatus.InProgress,
-                        content=[TextBlock(type="text", text="")],
+                        content=[TextContent(type="text", text="")],
                     )
                     # Yield confirmation as delta text
                     confirm_text = "✅ 聊天上下文已清空。"

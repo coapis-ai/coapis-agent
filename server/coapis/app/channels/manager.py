@@ -241,72 +241,91 @@ class ChannelManager:
     async def _consumer_loop(self, ch: BaseChannel) -> None:
         """Consume payloads from a channel's queue.
 
-        Critical-priority commands (e.g. /stop, priority level 0) are
-        dispatched as concurrent tasks so they can cancel the currently
-        running normal task instead of waiting in the serial queue.
+        All payloads are dispatched as asyncio tasks so the loop never
+        blocks on a single consume_one.  Critical-priority commands
+        (priority level 0, e.g. /stop) are spawned as independent
+        concurrent tasks that can cancel the currently running normal
+        task without waiting in the serial queue.
         """
         queue = self._queues.get(ch.channel)
         if queue is None:
             return
         logger.info("consumer loop started for channel: %s", ch.channel)
-        # Track spawned critical tasks for cleanup
-        _critical_tasks: set[asyncio.Task] = set()
+        _all_tasks: set[asyncio.Task] = set()
+
+        def _is_critical(payload) -> bool:
+            try:
+                registry = getattr(ch, "_command_registry", None)
+                if registry is not None:
+                    query = ch._extract_query_from_payload(payload)
+                    if query and registry.get_priority_level(query) == 0:
+                        return True
+            except Exception:
+                pass
+            return False
+
+        def _on_done(task: asyncio.Task):
+            _all_tasks.discard(task)
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception(
+                    "consumer task failed channel=%s", ch.channel,
+                )
+
+        def _spawn(payload):
+            critical = _is_critical(payload)
+            label = "critical" if critical else "normal"
+            if critical:
+                logger.info(
+                    "critical command detected, spawning concurrent "
+                    "task for %s",
+                    ch.channel,
+                )
+            else:
+                logger.info(
+                    "consumer loop dispatching to %s, payload_type=%s",
+                    ch.channel,
+                    type(payload).__name__,
+                )
+            task = asyncio.create_task(
+                ch.consume_one(payload),
+                name=f"{label}-{ch.channel}",
+            )
+            _all_tasks.add(task)
+            task.add_done_callback(_on_done)
+
         try:
             while True:
                 try:
                     payload = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=1.0,
+                        queue.get(), timeout=1.0,
                     )
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.CancelledError:
                     break
-
-                # ── Priority detection: critical commands run concurrently ──
-                is_critical = False
-                try:
-                    registry = getattr(ch, "_command_registry", None)
-                    if registry is not None:
-                        query = ch._extract_query_from_payload(payload)
-                        if query and registry.get_priority_level(query) == 0:
-                            is_critical = True
-                except Exception:
-                    pass  # Never let priority check break the loop
-
-                if is_critical:
-                    logger.info(
-                        "critical command detected, spawning concurrent "
-                        "task for %s",
-                        ch.channel,
-                    )
-                    task = asyncio.create_task(
-                        ch.consume_one(payload),
-                        name=f"critical-{ch.channel}",
-                    )
-                    _critical_tasks.add(task)
-                    task.add_done_callback(_critical_tasks.discard)
-                else:
-                    logger.info(
-                        "consumer loop dispatching to %s, payload_type=%s",
-                        ch.channel,
-                        type(payload).__name__,
-                    )
-                    await ch.consume_one(payload)
-                    logger.info(
-                        "consumer loop finished consume_one for %s",
-                        ch.channel,
-                    )
+                _spawn(payload)
                 queue.task_done()
+
+                # Drain any remaining items immediately
+                while not queue.empty():
+                    try:
+                        payload = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    _spawn(payload)
+                    queue.task_done()
         except asyncio.CancelledError:
             logger.info("consumer loop cancelled: %s", ch.channel)
-            for t in _critical_tasks:
+            for t in _all_tasks:
                 t.cancel()
         except Exception:
             logger.exception(
                 "consumer loop crashed: %s", ch.channel,
             )
-
     async def send_text(
         self,
         channel: str,
@@ -369,3 +388,34 @@ class ChannelManager:
                 "send_text failed: channel=%s to_handle=%s",
                 channel, (to_handle or "")[:60],
             )
+
+    async def clear_queue(
+        self,
+        channel_id: str,
+        session_id: str,
+        max_items: int = 20,
+    ) -> int:
+        """Drain up to *max_items* pending payloads from the channel queue.
+
+        Used by /stop handler to remove queued messages after cancelling
+        the running task.
+
+        Returns the number of items removed.
+        """
+        queue = self._queues.get(channel_id)
+        if queue is None:
+            return 0
+        cleared = 0
+        while cleared < max_items and not queue.empty():
+            try:
+                queue.get_nowait()
+                queue.task_done()
+                cleared += 1
+            except asyncio.QueueEmpty:
+                break
+        if cleared:
+            logger.info(
+                "clear_queue: channel=%s cleared=%d",
+                channel_id, cleared,
+            )
+        return cleared
