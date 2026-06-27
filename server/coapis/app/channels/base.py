@@ -100,6 +100,12 @@ class BaseChannel(ABC):
         # v0.8.2: workspace_dir stored in base class for all channels
         self.workspace_dir = workspace_dir
 
+        # CommandRegistry: used by consume_one to route control commands
+        # (e.g. /stop) directly to _process, while non-control commands
+        # go through _consume_with_tracker for TaskTracker registration.
+        from .command_registry import CommandRegistry
+        self._command_registry = CommandRegistry()
+
         # Session rotation: per-user current session tracking.
         # Key = "channel:sender_id", Value = current session_id.
         # Used by resolve_session_id() to support /new session rotation
@@ -703,6 +709,37 @@ class BaseChannel(ABC):
         except Exception:
             return None
 
+    # ── Query extraction for command routing ───────────────────────
+
+    def _extract_query_from_payload(self, payload: Any) -> str:
+        """Extract query text from payload for command detection.
+
+        Args:
+            payload: Native dict or AgentRequest
+
+        Returns:
+            Query text string (empty if not found)
+        """
+        if isinstance(payload, dict):
+            parts = payload.get("content_parts") or []
+            for part in parts:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    return part.get("text") or ""
+                if hasattr(part, "type") and part.type == "text":
+                    return getattr(part, "text", "") or ""
+            return ""
+        if hasattr(payload, "input"):
+            inp = payload.input or []
+            if inp and hasattr(inp[0], "content"):
+                content = inp[0].content or []
+                for part in content:
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            return part.get("text") or ""
+                    elif hasattr(part, "type") and part.type == "text":
+                        return getattr(part, "text", "") or ""
+        return ""
+
     # ── Tracker-aware consume ──────────────────────────────────────
 
     async def _consume_with_tracker(
@@ -784,12 +821,41 @@ class BaseChannel(ABC):
             logger.exception("stream_with_tracker failed")
 
     async def consume_one(self, payload: Any) -> None:
-        """Consume one payload from queue."""
+        """Consume one payload from queue.
+
+        Routes through CommandRegistry:
+        - Non-control commands (e.g. /new, /clear, /compact) →
+          _consume_with_tracker (TaskTracker registration for /stop)
+        - Control commands (e.g. /stop, /approve) → direct _process
+          (bypass TaskTracker so /stop can cancel the non-control task)
+        """
         logger.info(
             "consume_one START channel=%s payload_type=%s",
             self.channel,
             type(payload).__name__,
         )
+
+        # ── Command routing (reference qwenpaw) ────────────────────
+        if self._workspace is not None and self._command_registry is not None:
+            query_text = self._extract_query_from_payload(payload)
+            if query_text:
+                is_control = self._command_registry.is_control_command(
+                    query_text,
+                )
+                logger.debug(
+                    "consume_one: query=%s is_control=%s",
+                    query_text[:50],
+                    is_control,
+                )
+                if not is_control:
+                    # Non-control: route through TaskTracker
+                    request = self._payload_to_request(payload)
+                    await self._before_consume_process(request)
+                    await self._consume_with_tracker(request, payload)
+                    return
+                # Control commands fall through to direct _process
+
+        # ── Direct _process (control commands or no workspace) ──────
         request = self._payload_to_request(payload)
         to_handle = self.get_to_handle_from_request(request)
 
