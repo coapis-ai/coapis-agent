@@ -25,6 +25,8 @@ export interface MCPClientInfo {
   env: Record<string, string>;
   /** Working directory for stdio command */
   cwd: string;
+  /** Configuration source: 'global' (from admin) or 'user' (personal) */
+  source: "global" | "user";
 }
 
 export interface MCPClientCreateRequest {
