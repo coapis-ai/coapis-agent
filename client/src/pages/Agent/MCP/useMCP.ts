@@ -130,6 +130,29 @@ export function useMCP() {
     [t, loadClients],
   );
 
+  const installMCP = useCallback(
+    async (packageName: string, installType: "pip" | "npm") => {
+      try {
+        const result = await api.installMCPPackage({
+          package: packageName,
+          install_type: installType,
+        });
+        if (result.status === "success" || result.status === "already_installed") {
+          message.success(result.message || `Installed ${packageName}`);
+          return true;
+        } else {
+          message.error(result.message || `Failed to install ${packageName}`);
+          return false;
+        }
+      } catch (error: any) {
+        const errorMsg = error?.message || `Failed to install ${packageName}`;
+        message.error(errorMsg);
+        return false;
+      }
+    },
+    [message],
+  );
+
   return {
     clients,
     globalClients,
@@ -139,5 +162,6 @@ export function useMCP() {
     updateClient,
     toggleEnabled,
     deleteClient,
+    installMCP,
   };
 }

@@ -752,6 +752,9 @@ class AgentRunner(Runner):
             mcp_clients = []
             if self._mcp_manager is not None:
                 mcp_clients = await self._mcp_manager.get_clients()
+                logger.warning(f"[MCP_DEBUG] Got {len(mcp_clients)} clients from mcp_manager")
+            else:
+                logger.warning(f"[MCP_DEBUG] _mcp_manager is None!")
 
             # Load agent-specific configuration
             agent_config = load_agent_config(self.agent_id)
@@ -992,6 +995,10 @@ class AgentRunner(Runner):
                 plan_notebook=plan_notebook,
             )
             await agent.register_mcp_clients()
+            mcp_tool_count = len([t for t in (agent.toolkit._functions or {}) if t.startswith("mcp_")]) if hasattr(agent, "toolkit") and agent.toolkit else 0
+            logger.warning(
+                f"[MCP_DEBUG] register_mcp_clients done: mcp_clients={len(mcp_clients)}, toolkit_mcp_tools={mcp_tool_count}, total_tools={len(agent.toolkit._functions) if hasattr(agent, 'toolkit') and agent.toolkit else 0}"
+            )
             agent.set_console_output_enabled(enabled=False)
 
             logger.debug(

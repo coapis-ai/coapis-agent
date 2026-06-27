@@ -88,3 +88,21 @@ export interface MCPClientUpdateRequest {
   /** Working directory for stdio command */
   cwd?: string;
 }
+
+export interface MCPInstallRequest {
+  /** Package name (e.g. 'mcp-server-time') */
+  package: string;
+  /** Package manager type */
+  install_type: "pip" | "npm";
+}
+
+export interface MCPInstallResponse {
+  /** Installation result status */
+  status: "success" | "error" | "already_installed";
+  /** Result message */
+  message: string;
+  /** Package name */
+  package: string;
+  /** Install type used */
+  install_type: string;
+}

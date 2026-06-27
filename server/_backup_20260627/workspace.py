@@ -404,20 +404,6 @@ class Workspace:
         except Exception as e:
             logger.warning(f"Failed to init MCP manager: {e}", exc_info=True)
 
-        # Register MCP tools into ToolRegistry (mcp__ prefix to avoid conflicts)
-        try:
-            if self._mcp_manager:
-                clients = await self._mcp_manager.get_clients()
-                if clients:
-                    count = await self.tools.register_mcp_tools(clients)
-                    if count:
-                        logger.info(
-                            "MCP: registered %d tools into ToolRegistry for %s",
-                            count, self.agent_id,
-                        )
-        except Exception as e:
-            logger.warning(f"MCP tool registration to ToolRegistry failed: {e}")
-
     async def start(self):
         """Initialize all workspace components."""
         # Always ensure identity files exist (handles cached workspace reuse)

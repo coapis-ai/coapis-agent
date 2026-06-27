@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Empty, Modal, Input, Tooltip } from "@agentscope-ai/design";
-import { PlusOutlined, LockOutlined, GlobalOutlined } from "@ant-design/icons";
+import { PlusOutlined, LockOutlined, GlobalOutlined, CloudDownloadOutlined } from "@ant-design/icons";
 import type { MCPClientInfo } from "../../../api/types";
 import { MCPClientCard } from "./components";
 import { useMCP } from "./useMCP";
@@ -64,15 +64,18 @@ function MCPPage() {
     deleteClient,
     createClient,
     updateClient,
+    installMCP,
   } = useMCP();
   const { hasPermission } = usePermission();
   const canWrite = hasPermission("mcp:write");
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installLog, setInstallLog] = useState("");
   const [newClientJson, setNewClientJson] = useState(`{
   "mcpServers": {
     "example-client": {
-      "command": "npx",
-      "args": ["-y", "@example/mcp-server"],
+      "command": "python3",
+      "args": ["-m", "mcp_server_xxx"],
       "env": {
         "API_KEY": "<YOUR_API_KEY>"
       }
@@ -91,6 +94,60 @@ function MCPPage() {
   const handleDelete = async (client: MCPClientInfo, e?: React.MouseEvent) => {
     e?.stopPropagation();
     await deleteClient(client);
+  };
+
+  /**
+   * Try to auto-install MCP package for stdio commands.
+   * Detects: python3 -m xxx → pip install xxx, npx -y xxx → npm install -g xxx
+   */
+  const tryAutoInstall = async (data: any): Promise<boolean> => {
+    const cmd = data.command;
+    const args = data.args || [];
+
+    // python3 -m <module_name> → pip install <package_name>
+    if (cmd === "python3" && args[0] === "-m" && args[1]) {
+      const moduleName = args[1]; // e.g. "mcp_server_time"
+      // Module name → package name (usually same, but underscores → hyphens)
+      const packageName = moduleName.replace(/_/g, "-");
+      setInstallLog(`Installing ${packageName} via pip...`);
+      setInstalling(true);
+      const ok = await installMCP(packageName, "pip");
+      setInstalling(false);
+      if (ok) setInstallLog("");
+      return ok;
+    }
+
+    // npx -y <package> → npm install -g <package>
+    if (cmd === "npx") {
+      // Find the package name: skip -y, --yes flags
+      const pkgArg = args.find(
+        (a: string) => a !== "-y" && a !== "--yes" && !a.startsWith("-"),
+      );
+      if (pkgArg) {
+        // Remove @latest suffix
+        const packageName = pkgArg.replace(/@latest$/, "");
+        setInstallLog(`Installing ${packageName} via npm...`);
+        setInstalling(true);
+        const ok = await installMCP(packageName, "npm");
+        setInstalling(false);
+        if (ok) setInstallLog("");
+        return ok;
+      }
+    }
+
+    // uvx <package> → pip install <package>
+    if (cmd === "uvx" && args[0]) {
+      const packageName = args[0].replace(/@latest$/, "");
+      setInstallLog(`Installing ${packageName} via pip...`);
+      setInstalling(true);
+      const ok = await installMCP(packageName, "pip");
+      setInstalling(false);
+      if (ok) setInstallLog("");
+      return ok;
+    }
+
+    // Unknown command pattern, skip install
+    return true;
   };
 
   const handleCreateClient = async () => {
@@ -133,6 +190,14 @@ function MCPPage() {
 
       let allSuccess = true;
       for (const { key, data } of clientsToCreate) {
+        // Auto-install if stdio type with python3/npx/uvx command
+        if (data.transport === "stdio" && data.command) {
+          const installResult = await tryAutoInstall(data);
+          if (!installResult) {
+            allSuccess = false;
+            continue;
+          }
+        }
         const success = await createClient(key, data);
         if (!success) allSuccess = false;
       }
@@ -239,21 +304,34 @@ function MCPPage() {
       <Modal
         title={t("mcp.create")}
         open={createModalOpen}
-        onCancel={() => setCreateModalOpen(false)}
+        onCancel={() => !installing && setCreateModalOpen(false)}
         footer={
           <div className={styles.modalFooter}>
+            {installing && (
+              <span style={{ marginRight: 12, color: "#1677ff" }}>
+                <CloudDownloadOutlined spin style={{ marginRight: 4 }} />
+                {installLog || "Installing package..."}
+              </span>
+            )}
             <Button
               onClick={() => setCreateModalOpen(false)}
               style={{ marginRight: 8 }}
+              disabled={installing}
             >
               {t("common.cancel")}
             </Button>
-            <Button type="primary" onClick={handleCreateClient}>
-              {t("common.create")}
+            <Button
+              type="primary"
+              onClick={handleCreateClient}
+              loading={installing}
+            >
+              {installing ? "Installing..." : t("common.create")}
             </Button>
           </div>
         }
         width={800}
+        closable={!installing}
+        maskClosable={!installing}
       >
         <div className={styles.importHint}>
           <p className={styles.importHintTitle}>{t("mcp.formatSupport")}:</p>

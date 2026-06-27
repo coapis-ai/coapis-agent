@@ -92,6 +92,53 @@ except Exception as e:
     print(f'⚠ Migration skipped: {e}')
 " 2>/dev/null || echo "⚠ Application migration skipped"
 
+# --- Auto-install MCP packages from saved records ---
+echo ""
+echo "Checking MCP package installations..."
+python3 -c "
+import json, subprocess, os, glob
+
+working_dir = os.environ.get('COAPIS_WORKING_DIR', '/apps/ai/coapis')
+patterns = [
+    os.path.join(working_dir, 'workspaces/*/mcp_installed.json'),
+]
+installed_pip = set()
+installed_npm = set()
+
+for pattern in patterns:
+    for fp in glob.glob(pattern):
+        try:
+            with open(fp) as f:
+                record = json.load(f)
+            installed_pip.update(record.get('pip', []))
+            installed_npm.update(record.get('npm', []))
+        except Exception:
+            pass
+
+if installed_pip or installed_npm:
+    print(f'  Found {len(installed_pip)} pip + {len(installed_npm)} npm packages to restore')
+    for pkg in installed_pip:
+        try:
+            module = pkg.replace('-', '_').split('[')[0]
+            r = subprocess.run(['python3', '-c', f'import {module}'],
+                             capture_output=True, timeout=10)
+            if r.returncode != 0:
+                print(f'  Installing pip: {pkg}')
+                subprocess.run(['pip', 'install', '--no-cache-dir', '-q', pkg],
+                             capture_output=True, timeout=120)
+        except Exception as e:
+            print(f'  Warning: failed to install {pkg}: {e}')
+    for pkg in installed_npm:
+        try:
+            print(f'  Installing npm: {pkg}')
+            subprocess.run(['npm', 'install', '-g', pkg],
+                         capture_output=True, timeout=120)
+        except Exception as e:
+            print(f'  Warning: failed to install {pkg}: {e}')
+else:
+    print('  No MCP packages to restore')
+" 2>&1
+
 # --- Start the backend server ---
 echo ""
 echo "🚀 Starting CoApis backend on port ${COAPIS_PORT:-8000}..."

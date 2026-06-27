@@ -687,3 +687,167 @@ async def delete_global_mcp_client(
     _trigger_reload(request, admin_agent_id)
 
     return {"status": "deleted", "key": client_key, "scope": "global"}
+
+
+# ─── MCP Package Installation ─────────────────────────────────────────────
+
+
+class MCPInstallRequest(BaseModel):
+    """Request to install an MCP server package."""
+
+    package: str = Field(..., description="Package name (e.g. 'mcp-server-time')")
+    install_type: Literal["pip", "npm"] = Field(
+        default="pip",
+        description="Package manager: 'pip' or 'npm'",
+    )
+
+
+class MCPInstallResponse(BaseModel):
+    """Response for MCP package installation."""
+
+    status: Literal["success", "error", "already_installed"]
+    message: str
+    package: str
+    install_type: str
+
+
+def _get_installed_record(agent_id: str) -> Dict[str, List[str]]:
+    """Load installed MCP packages record for a user."""
+    import json as _json
+    from pathlib import Path
+
+    username = agent_id.split(":")[-1] if ":" in agent_id else agent_id
+    record_path = Path(WORKSPACES_DIR) / username / "mcp_installed.json"
+    if record_path.exists():
+        try:
+            return _json.loads(record_path.read_text())
+        except Exception:
+            pass
+    return {"pip": [], "npm": []}
+
+
+def _save_installed_record(agent_id: str, record: Dict[str, List[str]]) -> None:
+    """Save installed MCP packages record for a user."""
+    import json as _json
+    from pathlib import Path
+
+    username = agent_id.split(":")[-1] if ":" in agent_id else agent_id
+    record_path = Path(WORKSPACES_DIR) / username / "mcp_installed.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text(_json.dumps(record, indent=2, ensure_ascii=False))
+
+
+def _validate_package_name(package: str) -> None:
+    """Validate package name for safety."""
+    # Only allow alphanumeric, hyphens, underscores, dots, @, /
+    if not re.match(r'^[@a-zA-Z0-9_./-]+$', package):
+        raise HTTPException(400, detail=f"Invalid package name: {package}")
+    # Block obviously dangerous patterns
+    for bad in ["..", ";", "|", "&", "$", "`", "(", ")"]:
+        if bad in package:
+            raise HTTPException(400, detail=f"Invalid package name: {package}")
+
+
+@router.post(
+    "/mcp/install",
+    response_model=MCPInstallResponse,
+    summary="Install an MCP server package",
+)
+@require_permission("mcp:write")
+async def install_mcp_package(
+    request: Request,
+    body: MCPInstallRequest = Body(...),
+) -> MCPInstallResponse:
+    """Install an MCP server package via pip or npm.
+
+    - Validates package name for safety
+    - Installs with --no-cache-dir (pip) or -g (npm)
+    - Records installed packages for auto-restore on container restart
+    - Returns installation result
+    """
+    import asyncio
+
+    _validate_package_name(body.package)
+
+    # Determine agent_id
+    username = getattr(request.state, "username", "admin")
+    agent_id = f"user:{username}"
+
+    record = _get_installed_record(agent_id)
+    pkg_list = record.setdefault(body.install_type, [])
+
+    # Check if already installed
+    already = body.package in pkg_list
+    if already:
+        # Verify it's actually importable
+        if body.install_type == "pip":
+            try:
+                module_name = body.package.replace("-", "_").split("[")[0]
+                proc = await asyncio.create_subprocess_exec(
+                    "python3", "-c", f"import {module_name}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.wait()
+                if proc.returncode == 0:
+                    return MCPInstallResponse(
+                        status="already_installed",
+                        message=f"{body.package} is already installed",
+                        package=body.package,
+                        install_type=body.install_type,
+                    )
+            except Exception:
+                pass  # Reinstall
+
+    # Build install command
+    if body.install_type == "pip":
+        cmd = ["pip", "install", "--no-cache-dir", "-q", body.package]
+    elif body.install_type == "npm":
+        cmd = ["npm", "install", "-g", body.package]
+    else:
+        raise HTTPException(400, detail=f"Unsupported install type: {body.install_type}")
+
+    logger.info(f"MCP install: {' '.join(cmd)} (user={username})")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        output = stdout.decode("utf-8", errors="replace")[-500:]  # Last 500 chars
+
+        if proc.returncode == 0:
+            # Record successful installation
+            if body.package not in pkg_list:
+                pkg_list.append(body.package)
+            _save_installed_record(agent_id, record)
+
+            return MCPInstallResponse(
+                status="success",
+                message=f"Installed successfully. {output}".strip(),
+                package=body.package,
+                install_type=body.install_type,
+            )
+        else:
+            return MCPInstallResponse(
+                status="error",
+                message=f"Installation failed (exit {proc.returncode}): {output}",
+                package=body.package,
+                install_type=body.install_type,
+            )
+    except asyncio.TimeoutError:
+        return MCPInstallResponse(
+            status="error",
+            message="Installation timed out (120s)",
+            package=body.package,
+            install_type=body.install_type,
+        )
+    except Exception as e:
+        return MCPInstallResponse(
+            status="error",
+            message=f"Installation error: {e}",
+            package=body.package,
+            install_type=body.install_type,
+        )

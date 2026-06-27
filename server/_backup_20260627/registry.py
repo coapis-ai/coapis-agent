@@ -143,57 +143,6 @@ class ToolRegistry:
         logger.debug(f"Registered tool: {name}")
         return tool
 
-    async def register_mcp_tools(self, mcp_clients: list) -> int:
-        """Register MCP tools with mcp__ prefix to avoid conflicts with built-in tools.
-
-        Each MCP tool is wrapped as a ToolInfo with an async closure that
-        delegates to client.call_tool(). The mcp__ prefix convention is
-        consistent with Cursor / Claude Desktop tool naming.
-
-        Args:
-            mcp_clients: List of MCP client instances (with list_tools/call_tool)
-
-        Returns:
-            Number of MCP tools registered
-        """
-        count = 0
-        for client in mcp_clients:
-            try:
-                mcp_tools = await client.list_tools()
-                for mcp_tool in mcp_tools:
-                    prefixed = f"mcp__{mcp_tool.name}"
-
-                    # Factory: capture client + tool name in closure
-                    def _make_wrapper(_client, _tool_name):
-                        async def _mcp_call(**kwargs):
-                            result = await _client.call_tool(_tool_name, kwargs)
-                            # Normalize CallToolResult → dict for ToolRegistry
-                            if hasattr(result, "content"):
-                                texts = []
-                                for blk in result.content:
-                                    texts.append(
-                                        getattr(blk, "text", None) or str(blk)
-                                    )
-                                return {
-                                    "result": "\n".join(texts),
-                                    "is_error": getattr(result, "isError", False),
-                                }
-                            return str(result)
-                        return _mcp_call
-
-                    await self.register(
-                        name=prefixed,
-                        func=_make_wrapper(client, mcp_tool.name),
-                        description=mcp_tool.description or f"MCP tool: {mcp_tool.name}",
-                        parameters=getattr(mcp_tool, "inputSchema", None) or {},
-                        tags=["mcp", client.name],
-                    )
-                    count += 1
-                    logger.info(f"Registered MCP tool: {prefixed} (from {client.name})")
-            except Exception as e:
-                logger.warning(f"Failed to register MCP tools from {client.name}: {e}")
-        return count
-
     async def discover(self):
         """Auto-discover tools from registered modules."""
         # Will be populated by register_builtin_tools and external tools

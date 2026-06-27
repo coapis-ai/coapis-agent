@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 async def create_mcp_service(ws: "Workspace", mcp):
+    print("MCP_FACTORY_CALLED", flush=True)
     """Initialize MCP manager with merged global+user config and attach to runner.
 
     Merge logic:
@@ -47,6 +48,8 @@ async def create_mcp_service(ws: "Workspace", mcp):
     from ...config.config import MCPConfig, load_agent_config
     from ...config.utils import load_config
 
+    logger.warning(f"[MCP_FACTORY] create_mcp_service called for {ws.agent_id}")
+
     # Build merged MCP config (global + user)
     merged_clients = {}
 
@@ -60,7 +63,7 @@ async def create_mcp_service(ws: "Workspace", mcp):
                 merged_clients.update(
                     dict(admin_config.mcp.clients),
                 )
-                logger.debug(
+                logger.warning(
                     "MCP: loaded %d global clients from %s",
                     len(admin_config.mcp.clients),
                     admin_agent_id,
@@ -71,7 +74,7 @@ async def create_mcp_service(ws: "Workspace", mcp):
     # 2. Overlay user's own MCP config
     if ws._config.mcp and ws._config.mcp.clients:
         merged_clients.update(dict(ws._config.mcp.clients))
-        logger.debug(
+        logger.warning(
             "MCP: overlaid %d user clients",
             len(ws._config.mcp.clients),
         )
@@ -81,21 +84,24 @@ async def create_mcp_service(ws: "Workspace", mcp):
         k: v for k, v in merged_clients.items() if v.enabled
     }
 
+    logger.warning(f"[MCP_FACTORY] active_clients: {list(active_clients.keys())}")
+
     if active_clients:
         merged_mcp = MCPConfig(clients=active_clients)
         try:
             await mcp.init_from_config(merged_mcp)
-            logger.info(
+            logger.warning(
                 "MCP: initialized %d clients for %s",
                 len(active_clients),
                 ws.agent_id,
             )
         except Exception as e:
-            logger.warning(f"Failed to init MCP: {e}")
+            logger.warning(f"Failed to init MCP: {e}", exc_info=True)
     else:
-        logger.debug(f"MCP: no active clients for {ws.agent_id}")
+        logger.warning(f"MCP: no active clients for {ws.agent_id}")
 
     ws._service_manager.services["runner"].set_mcp_manager(mcp)
+    logger.warning(f"[MCP_FACTORY] set_mcp_manager done for {ws.agent_id}")
     # pylint: enable=protected-access
 
 

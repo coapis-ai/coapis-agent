@@ -334,89 +334,8 @@ class Workspace:
             except Exception:
                 pass
             r._health = True
-            # Wire MCP manager if initialized
-            if hasattr(self, '_mcp_manager') and self._mcp_manager:
-                r.set_mcp_manager(self._mcp_manager)
             self._runner = r
         return self._runner
-
-    async def _init_mcp_manager(self):
-        """Initialize MCP client manager with merged global+user config.
-
-        Merges admin's MCP config (global pool) with user's own config.
-        User keys override global keys with the same name.
-        """
-        try:
-            from ..app.mcp.manager import MCPClientManager
-            from ..config.config import MCPConfig, load_agent_config
-            from ..config.utils import load_config
-
-            self._mcp_manager = MCPClientManager()
-
-            # Build merged MCP config (global + user)
-            merged_clients = {}
-
-            # 1. Load global pool (admin's MCP)
-            try:
-                config = load_config()
-                admin_agent_id = config.agents.active_agent or "user:admin"
-                if admin_agent_id != self.agent_id:
-                    admin_config = load_agent_config(admin_agent_id)
-                    if admin_config.mcp and admin_config.mcp.clients:
-                        merged_clients.update(dict(admin_config.mcp.clients))
-                        logger.info(
-                            "MCP: loaded %d global clients from %s",
-                            len(admin_config.mcp.clients),
-                            admin_agent_id,
-                        )
-            except Exception as e:
-                logger.debug(f"MCP: no global pool available: {e}")
-
-            # 2. Overlay user's own MCP config
-            agent_config = load_agent_config(self.agent_id, workspace_dir=self.workspace_dir)
-            if agent_config.mcp and agent_config.mcp.clients:
-                merged_clients.update(dict(agent_config.mcp.clients))
-                logger.info(
-                    "MCP: overlaid %d user clients",
-                    len(agent_config.mcp.clients),
-                )
-
-            # 3. Filter out explicitly disabled keys
-            active_clients = {k: v for k, v in merged_clients.items() if v.enabled}
-
-            if active_clients:
-                merged_mcp = MCPConfig(clients=active_clients)
-                await asyncio.wait_for(
-                    self._mcp_manager.init_from_config(merged_mcp),
-                    timeout=30,
-                )
-                clients = await self._mcp_manager.get_clients()
-                logger.info(
-                    "MCP: initialized %d clients for %s",
-                    len(clients),
-                    self.agent_id,
-                )
-            else:
-                logger.debug(f"MCP: no active clients for {self.agent_id}")
-
-        except asyncio.TimeoutError:
-            logger.warning("MCP manager init timed out after 30s, skipping")
-        except Exception as e:
-            logger.warning(f"Failed to init MCP manager: {e}", exc_info=True)
-
-        # Register MCP tools into ToolRegistry (mcp__ prefix to avoid conflicts)
-        try:
-            if self._mcp_manager:
-                clients = await self._mcp_manager.get_clients()
-                if clients:
-                    count = await self.tools.register_mcp_tools(clients)
-                    if count:
-                        logger.info(
-                            "MCP: registered %d tools into ToolRegistry for %s",
-                            count, self.agent_id,
-                        )
-        except Exception as e:
-            logger.warning(f"MCP tool registration to ToolRegistry failed: {e}")
 
     async def start(self):
         """Initialize all workspace components."""
@@ -800,9 +719,6 @@ class Workspace:
 
         # 启动所有已注册服务
         await self._service_mgr.start_all()
-
-        # ── MCP Client Manager: 热加载 MCP 工具 ──────────────────────
-        await self._init_mcp_manager()
 
         # 注册 workspace CronManager 到全局 CronManagerRegistry
         if self.username and not self.is_global:

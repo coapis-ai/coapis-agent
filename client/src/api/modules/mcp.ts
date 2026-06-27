@@ -4,6 +4,8 @@ import type {
   MCPClientCreateRequest,
   MCPClientUpdateRequest,
   MCPToolInfo,
+  MCPInstallRequest,
+  MCPInstallResponse,
 } from "../types";
 
 export const mcpApi = {
@@ -80,4 +82,13 @@ export const mcpApi = {
    */
   listMCPTools: (clientKey: string) =>
     request<MCPToolInfo[]>(`/mcp/${encodeURIComponent(clientKey)}/tools`),
+
+  /**
+   * Install an MCP server package
+   */
+  installMCPPackage: (body: MCPInstallRequest) =>
+    request<MCPInstallResponse>("/mcp/install", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
