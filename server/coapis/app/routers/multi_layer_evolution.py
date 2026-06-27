@@ -51,6 +51,15 @@ def _get_username(request: Request) -> str:
     return request.state.username
 
 
+def _resolve_agent_id(request: Request, agent_id: str) -> str:
+    """Resolve agent_id from request context when default."""
+    if agent_id == "default":
+        username = _get_username(request)
+        if username and username != "anonymous":
+            return f"user:{username}"
+    return agent_id
+
+
 def _get_config_profiles(request: Request) -> Dict[str, Any]:
     """Get agent profiles from config."""
     from ...config import load_config
@@ -559,7 +568,8 @@ async def get_evolution_status_proxy(
 ):
     """Proxy to old evolution status endpoint for backward compatibility."""
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    agent_id = _resolve_agent_id(request, agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 

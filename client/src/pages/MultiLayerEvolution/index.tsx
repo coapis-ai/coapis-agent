@@ -89,33 +89,18 @@ export default function MultiLayerEvolutionPage() {
   const tabItems = [
     {
       key: 'overview',
-      label: <><GlobalOutlined /> {t('evolution.overview', '概览')}</>,
+      label: <><GlobalOutlined /> {t('evolution.overview', '总览')}</>,
       children: <OverviewTab selectedUser={selectedUser} />,
     },
     {
       key: 'user-level',
-      label: <><UserOutlined /> {t('evolution.userLevel', '用户级进化')}</>,
+      label: <><UserOutlined /> {t('evolution.userLevel', '经验')}</>,
       children: <UserLevelTab selectedUser={selectedUser} />,
     },
     {
-      key: 'middle-layer',
-      label: <><DatabaseOutlined /> {t('evolution.middleLayer', '中间层')}</>,
-      children: <MiddleLayerTab selectedUser={selectedUser} isAdmin={isAdmin} />,
-    },
-    {
       key: 'foundation',
-      label: <><ArrowUpOutlined /> {t('evolution.foundation', '全局基础层')}</>,
+      label: <><DatabaseOutlined /> {t('evolution.foundation', '全局知识库')}</>,
       children: <FoundationTab isAdmin={isAdmin} />,
-    },
-    {
-      key: 'archive',
-      label: <><FileTextOutlined /> {t('evolution.archive', '归档管理')}</>,
-      children: <ArchiveTab />,
-    },
-    {
-      key: 'skill-evolution',
-      label: <><BarChartOutlined /> {t('evolution.skillEvolution', '技能进化')}</>,
-      children: <SkillEvolutionTab />,
     },
   ];
 

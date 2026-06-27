@@ -45,14 +45,20 @@ def _get_manager(request: Request) -> Any:
     return request.app.state.multi_agent_manager
 
 
+def _get_username(request: Request) -> str:
+    """Extract username from request state."""
+    username = getattr(request.state, "username", None)
+    if not username:
+        user_info = getattr(request.state, "user_info", None)
+        if user_info and isinstance(user_info, dict):
+            username = user_info.get("username")
+    return username or ""
+
+
 def _resolve_agent_id(request: Request, agent_id: str) -> str:
     """Resolve agent_id from request context when default."""
     if agent_id == "default":
-        username = getattr(request.state, "username", None)
-        if not username:
-            user_info = getattr(request.state, "user_info", None)
-            if user_info and isinstance(user_info, dict):
-                username = user_info.get("username")
+        username = _get_username(request)
         if username and username != "anonymous":
             return f"user:{username}"
     return agent_id
@@ -71,7 +77,7 @@ async def get_evolution_status(
     """Get evolution engine status and statistics for an agent."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -103,7 +109,7 @@ async def get_evolution_stats(
     """Get comprehensive evolution statistics for an agent."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -128,7 +134,7 @@ async def list_trajectories(
     """List trajectory files for an agent."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -163,7 +169,7 @@ async def get_trajectory(
     """Get trajectory entries for a specific session."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -206,7 +212,7 @@ async def list_experiences(
     """List extracted experiences for an agent."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -250,7 +256,7 @@ async def trigger_extraction(
     """Trigger experience extraction for the current session."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -284,7 +290,7 @@ async def approve_experience(
     """Approve an extracted experience for storage."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -342,7 +348,7 @@ async def reject_experience(
     """Reject an extracted experience."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -371,7 +377,7 @@ async def get_knowledge_flow_status(
     """Get knowledge flow status and statistics."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -391,7 +397,7 @@ async def list_pending_flows(
     """List pending knowledge flow reviews."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -413,7 +419,7 @@ async def approve_flow(
     """Approve a knowledge flow request."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -439,7 +445,7 @@ async def reject_flow(
     """Reject a knowledge flow request."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -467,7 +473,7 @@ async def get_review_status(
     """Get backend review status."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -488,7 +494,7 @@ async def get_review_history(
     """Get backend review history."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -508,7 +514,7 @@ async def get_pending_reviews(
     """Get reviews requiring human attention."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -528,7 +534,7 @@ async def start_review(
     """Start backend review tasks."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -549,7 +555,7 @@ async def stop_review(
     """Stop backend review tasks."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -576,7 +582,7 @@ async def approve_flow(
     """Approve a knowledge flow record, executing the promotion."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
@@ -611,7 +617,7 @@ async def reject_flow(
     """Reject a knowledge flow record."""
     agent_id = _resolve_agent_id(request, agent_id)
     manager = _get_manager(request)
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=_get_username(request))
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 

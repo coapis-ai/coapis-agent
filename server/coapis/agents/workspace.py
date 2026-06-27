@@ -804,6 +804,13 @@ class Workspace:
         # ── MCP Client Manager: 热加载 MCP 工具 ──────────────────────
         await self._init_mcp_manager()
 
+        # ── TriggerTracker: 确保技能触发追踪单例已初始化 ──
+        try:
+            from .utils.trigger_tracker import get_trigger_tracker
+            get_trigger_tracker()
+        except Exception as e:
+            logger.debug("TriggerTracker init skipped: %s", e)
+
         # 注册 workspace CronManager 到全局 CronManagerRegistry
         if self.username and not self.is_global:
             try:
@@ -866,6 +873,24 @@ class Workspace:
                 # Reset foundation memory for new sessions
                 if chat_key not in self._active_chats and self.foundation_manager:
                     self.foundation_manager.reset_injection_state()
+
+                # ── Evolution: on_session_start for new chats ──
+                if chat_key not in self._active_chats and self.evolution_engine:
+                    try:
+                        self.evolution_engine.on_session_start(
+                            session_id=session_id,
+                            agent_id=self.agent_id or "unknown",
+                            user_id=self.username or "unknown",
+                        )
+                    except Exception as evo_err:
+                        logger.debug("Evolution on_session_start failed: %s", evo_err)
+
+                # ── Evolution: on_turn_start ──
+                if self.evolution_engine:
+                    try:
+                        self.evolution_engine.on_turn_start(user_message)
+                    except Exception as evo_err:
+                        logger.debug("Evolution on_turn_start failed: %s", evo_err)
 
                 # ── Command routing: delegate to runner's command system ──
                 # This handles /new, /compact, /history, /plan, /approve,
@@ -1046,6 +1071,7 @@ class Workspace:
                 full_response = []
                 full_reasoning = []
                 _raw_blocks = []  # Collect raw ResponseBlock objects for session persistence
+                _evo_tool_calls = []  # Collect tool call info for evolution engine
 
                 # ── Determine display strategy from user prefs + channel config ──
                 _channel_name = getattr(request_obj, "channel", "") or ""
@@ -1352,6 +1378,17 @@ class Workspace:
                                 )
                         elif block.type == "tool_call":
                             _tool_calls_seen += 1
+                            # ── Evolution: collect tool call info ──
+                            if self.evolution_engine:
+                                try:
+                                    _tc_meta = block.meta or {}
+                                    _evo_tool_calls.append({
+                                        "name": _tc_meta.get("tool_name", "unknown"),
+                                        "args": _tc_meta.get("tool_args", {}),
+                                        "call_id": _tc_meta.get("call_id", ""),
+                                    })
+                                except Exception:
+                                    pass
                             # Always close reasoning phase when tool_call arrives,
                             # even if render is empty — prevents subsequent content
                             # from being rendered inside the thinking area.
@@ -1439,6 +1476,16 @@ class Workspace:
 
                 # Build complete reply: reasoning + content (both parts must be preserved)
                 assistant_reply = "".join(full_reasoning) + "".join(full_response)
+
+                # ── Evolution: on_turn_end ──
+                if self.evolution_engine:
+                    try:
+                        self.evolution_engine.on_turn_end(
+                            assistant_message=assistant_reply,
+                            tool_calls=_evo_tool_calls if _evo_tool_calls else None,
+                        )
+                    except Exception as evo_err:
+                        logger.debug("Evolution on_turn_end failed: %s", evo_err)
 
                 # ── Tool failure fallback for non-console channels ──
                 if (
@@ -1634,6 +1681,13 @@ class Workspace:
                 # ── Close any open phase ──
                 async for ev in _close_phase():
                     yield ev
+
+                # ── Evolution: on_session_end ──
+                if self.evolution_engine:
+                    try:
+                        await self.evolution_engine.on_session_end()
+                    except Exception as evo_err:
+                        logger.debug("Evolution on_session_end failed: %s", evo_err)
 
                 # Yield response completed event
                 yield Event(
