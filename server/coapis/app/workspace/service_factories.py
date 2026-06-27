@@ -31,19 +31,70 @@ logger = logging.getLogger(__name__)
 
 
 async def create_mcp_service(ws: "Workspace", mcp):
-    """Initialize MCP manager and attach to runner.
+    """Initialize MCP manager with merged global+user config and attach to runner.
+
+    Merge logic:
+    1. Load admin's MCP config as global pool
+    2. Load user's own MCP config
+    3. User keys override global keys with the same name
+    4. Global-only keys are inherited unless user explicitly disabled them
 
     Args:
         ws: Workspace instance
         mcp: MCPClientManager instance
     """
     # pylint: disable=protected-access
-    if ws._config.mcp:
+    from ...config.config import MCPConfig, load_agent_config
+    from ...config.utils import load_config
+
+    # Build merged MCP config (global + user)
+    merged_clients = {}
+
+    # 1. Load global pool (admin's MCP)
+    try:
+        config = load_config()
+        admin_agent_id = config.agents.active_agent or "user:admin"
+        if admin_agent_id != ws.agent_id:
+            admin_config = load_agent_config(admin_agent_id)
+            if admin_config.mcp and admin_config.mcp.clients:
+                merged_clients.update(
+                    dict(admin_config.mcp.clients),
+                )
+                logger.debug(
+                    "MCP: loaded %d global clients from %s",
+                    len(admin_config.mcp.clients),
+                    admin_agent_id,
+                )
+    except Exception as e:
+        logger.debug(f"MCP: no global pool available: {e}")
+
+    # 2. Overlay user's own MCP config
+    if ws._config.mcp and ws._config.mcp.clients:
+        merged_clients.update(dict(ws._config.mcp.clients))
+        logger.debug(
+            "MCP: overlaid %d user clients",
+            len(ws._config.mcp.clients),
+        )
+
+    # 3. Filter out explicitly disabled keys
+    active_clients = {
+        k: v for k, v in merged_clients.items() if v.enabled
+    }
+
+    if active_clients:
+        merged_mcp = MCPConfig(clients=active_clients)
         try:
-            await mcp.init_from_config(ws._config.mcp)
-            logger.debug(f"MCP initialized for agent: {ws.agent_id}")
+            await mcp.init_from_config(merged_mcp)
+            logger.info(
+                "MCP: initialized %d clients for %s",
+                len(active_clients),
+                ws.agent_id,
+            )
         except Exception as e:
             logger.warning(f"Failed to init MCP: {e}")
+    else:
+        logger.debug(f"MCP: no active clients for {ws.agent_id}")
+
     ws._service_manager.services["runner"].set_mcp_manager(mcp)
     # pylint: enable=protected-access
 

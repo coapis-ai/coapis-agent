@@ -35,6 +35,10 @@ export function useMCP() {
     loadClients();
   }, [loadClients, selectedAgent]);
 
+  // Derived lists: global vs user
+  const globalClients = clients.filter((c) => c.source === "global");
+  const userClients = clients.filter((c) => c.source === "user");
+
   const createClient = useCallback(
     async (
       key: string,
@@ -128,6 +132,8 @@ export function useMCP() {
 
   return {
     clients,
+    globalClients,
+    userClients,
     loading,
     createClient,
     updateClient,

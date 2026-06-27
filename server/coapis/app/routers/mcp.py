@@ -13,299 +13,677 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MCP router - MCP client endpoints with user isolation.
+"""MCP router — unified data source for MCP client management.
 
-Each user's MCP clients are stored in: workspaces/{username}/mcp/mcp_clients.json
-This ensures complete isolation between users.
+Design aligned with qwenpaw:
+- Single source of truth: agent.json → mcp.clients
+- API operations = read/write agent.json + hot-reload via MCPConfigWatcher
+- Global MCP pool: admin's MCP clients serve as system-wide templates
+- Per-user isolation: each user has independent MCP config in their agent.json
+- Merge logic: user config overrides global defaults at runtime
 
-Note: Admin users can manage all MCP clients; regular users only see their own.
+Storage:
+  workspaces/{username}/agent.json → mcp.clients.{key} = MCPClientConfig
 """
 
+from __future__ import annotations
+
 import logging
-import json
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Literal
 
-from ..permissions.decorators import require_permission
-from fastapi import APIRouter, HTTPException, Body
-from fastapi.requests import Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, HTTPException, Path, Request
+from pydantic import BaseModel, Field
 
+from ...config.config import (
+    MCPClientConfig,
+    MCPConfig,
+    load_agent_config,
+    save_agent_config,
+)
 from ...constant import WORKSPACES_DIR
+from ..permissions.decorators import require_permission
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["mcp"])
 
 
+# ─── Request / Response models ────────────────────────────────────────────
+
+
+class MCPClientOAuthStatus(BaseModel):
+    """Summarised OAuth status (placeholder for future)."""
+
+    authorized: bool = False
+    expires_at: float = 0.0
+    scope: str = ""
+    client_id: str = ""
+
+
 class MCPClientInfo(BaseModel):
-    key: str
-    name: str
-    enabled: bool = True
-    transport: str = "stdio"
-    command: str = ""
-    args: List[str] = []
-    env: Dict[str, str] = {}
-    url: str = ""
-    timeout: int = 30
+    """MCP client information for API responses."""
+
+    key: str = Field(..., description="Unique client key identifier")
+    name: str = Field(..., description="Client display name")
+    description: str = Field(default="", description="Client description")
+    enabled: bool = Field(..., description="Whether the client is enabled")
+    transport: Literal["stdio", "streamable_http", "sse"] = Field(
+        ..., description="MCP transport type",
+    )
+    url: str = Field(default="")
+    headers: Dict[str, str] = Field(default_factory=dict)
+    command: str = Field(default="")
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: str = Field(default="")
+    source: str = Field(
+        default="user",
+        description="Configuration source: 'global' or 'user'",
+    )
+    oauth_status: Optional[MCPClientOAuthStatus] = None
 
 
 class MCPClientCreateRequest(BaseModel):
-    key: str
+    """Request body for creating an MCP client."""
+
     name: str
-    transport: str = "stdio"
-    command: str = ""
-    args: List[str] = []
-    env: Dict[str, str] = {}
+    description: str = ""
+    enabled: bool = True
+    transport: Literal["stdio", "streamable_http", "sse"] = "stdio"
     url: str = ""
-    timeout: int = 30
+    headers: Dict[str, str] = Field(default_factory=dict)
+    command: str = ""
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: str = ""
 
 
 class MCPClientUpdateRequest(BaseModel):
+    """Request body for partially updating an MCP client."""
+
     name: Optional[str] = None
+    description: Optional[str] = None
     enabled: Optional[bool] = None
-    transport: Optional[str] = None
+    transport: Optional[Literal["stdio", "streamable_http", "sse"]] = None
+    url: Optional[str] = None
+    headers: Optional[Dict[str, str]] = None
     command: Optional[str] = None
     args: Optional[List[str]] = None
     env: Optional[Dict[str, str]] = None
-    url: Optional[str] = None
-    timeout: Optional[int] = None
+    cwd: Optional[str] = None
 
 
-class MCPToolInfo(BaseModel):
-    name: str
-    description: str = ""
-    input_schema: Dict[str, Any] = {}
+# ─── Helpers ──────────────────────────────────────────────────────────────
 
 
-# Per-user MCP store: {username: {key: MCPClientInfo}}
-_mcp_clients: Dict[str, Dict[str, MCPClientInfo]] = {}
+def _validate_client_key(key: str) -> None:
+    """Validate client key format."""
+    if not key or not re.match(r"^[a-zA-Z0-9_-]+$", key):
+        raise HTTPException(
+            400,
+            detail="Client key must be non-empty and contain only "
+            "letters, digits, underscores, and hyphens.",
+        )
 
 
-def _get_mcp_file(username: str) -> Path:
-    """Get MCP file path for a specific user."""
-    return WORKSPACES_DIR / username / "mcp" / "mcp_clients.json"
+def _mask_env(env: Dict[str, str]) -> Dict[str, str]:
+    """Mask sensitive environment variable values."""
+    sensitive_patterns = {"key", "secret", "token", "password", "api_key"}
+    masked = {}
+    for k, v in env.items():
+        if any(p in k.lower() for p in sensitive_patterns) and v:
+            masked[k] = "***"
+        else:
+            masked[k] = v
+    return masked
 
 
-def _load_mcp_clients(username: str):
-    """Load MCP clients from disk for a specific user."""
-    if username in _mcp_clients:
-        return  # Already loaded
-    mcp_file = _get_mcp_file(username)
-    user_clients: Dict[str, MCPClientInfo] = {}
-    if mcp_file.exists():
-        try:
-            with open(mcp_file) as f:
-                data = json.load(f)
-            for item in data:
-                user_clients[item["key"]] = MCPClientInfo(**item)
-        except Exception as e:
-            logger.error(f"Failed to load MCP clients for {username}: {e}")
-    _mcp_clients[username] = user_clients
+def _build_client_info(
+    key: str,
+    config: MCPClientConfig,
+    source: str = "user",
+) -> MCPClientInfo:
+    """Build MCPClientInfo from config with masked sensitive values."""
+    return MCPClientInfo(
+        key=key,
+        name=config.name,
+        description=getattr(config, "description", ""),
+        enabled=config.enabled,
+        transport=config.transport,
+        url=config.url,
+        headers=config.headers,
+        command=config.command,
+        args=config.args,
+        env=_mask_env(config.env),
+        cwd=getattr(config, "cwd", ""),
+        source=source,
+    )
 
 
-def _save_mcp_clients(username: str):
-    """Save MCP clients to disk for a specific user."""
-    mcp_file = _get_mcp_file(username)
-    mcp_file.parent.mkdir(parents=True, exist_ok=True)
-    user_clients = _mcp_clients.get(username, {})
-    try:
-        with open(mcp_file, "w") as f:
-            json.dump([c.dict() for c in user_clients.values()], f, indent=2)
-    except Exception as e:
-        logger.error(f"Failed to save MCP clients for {username}: {e}")
-
-
-def _get_user_clients(request: Request) -> Dict[str, MCPClientInfo]:
-    """Get MCP clients for the current user."""
+def _get_user_id(request: Request) -> str:
+    """Extract authenticated username from request."""
     username = getattr(request.state, "username", None)
     if not username:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    _load_mcp_clients(username)
-    return _mcp_clients.get(username, {})
+        raise HTTPException(401, detail="Not authenticated")
+    return username
 
 
-@router.get("/mcp")
+def _get_admin_agent_id() -> str:
+    """Get admin's agent ID for global MCP pool."""
+    from ...config.utils import load_config
+
+    config = load_config()
+    # Admin's active agent is the global pool source
+    return config.agents.active_agent or "user:admin"
+
+
+def _load_global_mcp() -> Dict[str, MCPClientConfig]:
+    """Load admin's MCP config as the global pool."""
+    try:
+        admin_agent_id = _get_admin_agent_id()
+        admin_config = load_agent_config(admin_agent_id)
+        if admin_config.mcp and admin_config.mcp.clients:
+            return dict(admin_config.mcp.clients)
+    except Exception as e:
+        logger.debug(f"Could not load global MCP pool: {e}")
+    return {}
+
+
+def _load_user_mcp(agent_id: str) -> Dict[str, MCPClientConfig]:
+    """Load user's own MCP config from their agent.json."""
+    try:
+        agent_config = load_agent_config(agent_id)
+        if agent_config.mcp and agent_config.mcp.clients:
+            return dict(agent_config.mcp.clients)
+    except Exception as e:
+        logger.debug(f"Could not load MCP config for {agent_id}: {e}")
+    return {}
+
+
+def _resolve_effective_mcp(
+    agent_id: str,
+    user_id: str,
+) -> Dict[str, MCPClientConfig]:
+    """Merge global + user MCP configs.
+
+    Rules:
+    - User's own keys take priority over global keys with the same name
+    - If user has a key that global doesn't → user-only
+    - If global has a key that user doesn't → inherited from global
+    - User can disable a global key by setting enabled=False
+    """
+    global_clients = _load_global_mcp()
+    user_clients = _load_user_mcp(agent_id)
+
+    # User config overrides global
+    merged = dict(global_clients)
+    merged.update(user_clients)
+
+    # If user is not admin, filter out admin-only global keys
+    # (admin's keys are available to all unless user explicitly overrides)
+    return merged
+
+
+def _get_agent_id_for_user(user_id: str) -> str:
+    """Get the agent_id for a given user."""
+    from ...config.utils import load_config
+
+    config = load_config()
+    # Check if user has a registered agent profile
+    user_agent_id = f"user:{user_id}"
+    if user_agent_id in config.agents.profiles:
+        return user_agent_id
+    # Fallback to active agent
+    return config.agents.active_agent or "user:admin"
+
+
+def _trigger_reload(request: Request, agent_id: str) -> None:
+    """Trigger MCP config hot-reload.
+
+    The MCPConfigWatcher will automatically pick up agent.json changes
+    within its poll interval (2s). For faster feedback, we also try to
+    directly reinitialize the MCP manager.
+    """
+    try:
+        manager = getattr(request.app.state, "multi_agent_manager", None)
+        if manager:
+            import asyncio
+
+            async def _reload():
+                try:
+                    ws = manager.get_workspace(agent_id)
+                    if ws and ws.mcp_manager:
+                        from ..mcp import MCPClientManager
+                        from ...config.config import MCPConfig
+
+                        # Reload merged config (global + user)
+                        agent_config = load_agent_config(agent_id)
+                        merged = _resolve_effective_mcp(
+                            agent_id,
+                            agent_id.split(":", 1)[-1]
+                            if ":" in agent_id
+                            else agent_id,
+                        )
+                        active = {k: v for k, v in merged.items() if v.enabled}
+                        if active:
+                            await ws.mcp_manager.init_from_config(
+                                MCPConfig(clients=active),
+                            )
+                except Exception as e:
+                    logger.debug(f"MCP hot-reload skipped: {e}")
+
+            asyncio.create_task(_reload())
+    except Exception:
+        pass  # Watcher will pick it up eventually
+
+
+# ─── Personal MCP endpoints ──────────────────────────────────────────────
+
+
+@router.get(
+    "/mcp",
+    response_model=List[MCPClientInfo],
+    summary="List effective MCP clients (global + user merged)",
+)
 @require_permission("mcp:read")
-async def list_mcp_clients(request: Request) -> List[Dict[str, Any]]:
-    """List MCP clients for the current user."""
-    username = getattr(request.state, "username", None)
-    user_role = getattr(request.state, "role", "user")
-    is_admin = (user_role in ("admin", "superadmin"))
+async def list_mcp_clients(request: Request) -> List[MCPClientInfo]:
+    """Get list of all effective MCP clients for the current user.
 
-    if is_admin:
-        # Admin sees all MCP clients from all users
-        all_clients = []
-        for uname, clients in _mcp_clients.items():
-            for c in clients.values():
-                client_dict = c.dict()
-                client_dict["username"] = uname
-                all_clients.append(client_dict)
-        return all_clients
-    else:
-        # Regular user sees only their own
-        user_clients = _get_user_clients(request)
-        return [c.dict() for c in user_clients.values()]
+    Returns the merged view of global (admin) + user's own MCP configs.
+    Each client has a 'source' field indicating whether it comes from
+    the global pool or the user's own config.
+    """
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
+    global_clients = _load_global_mcp()
+    user_clients = _load_user_mcp(agent_id)
+
+    result: List[MCPClientInfo] = []
+
+    # Process global clients (that user hasn't overridden)
+    for key, gconfig in global_clients.items():
+        if key in user_clients:
+            # User has overridden — show user's version with source=user
+            result.append(_build_client_info(key, user_clients[key], "user"))
+        else:
+            # Inherited from global
+            result.append(_build_client_info(key, gconfig, "global"))
+
+    # Process user-only clients
+    for key, uconfig in user_clients.items():
+        if key not in global_clients:
+            result.append(_build_client_info(key, uconfig, "user"))
+
+    return result
 
 
-@router.get("/mcp/{client_key}")
+@router.get(
+    "/mcp/global",
+    response_model=List[MCPClientInfo],
+    summary="List global MCP pool (admin-configured)",
+)
+@require_permission("mcp:read")
+async def list_global_mcp_clients(request: Request) -> List[MCPClientInfo]:
+    """Get the global MCP pool configured by admin."""
+    global_clients = _load_global_mcp()
+    return [
+        _build_client_info(key, config, "global")
+        for key, config in global_clients.items()
+    ]
+
+
+@router.get(
+    "/mcp/{client_key}",
+    response_model=MCPClientInfo,
+    summary="Get a specific MCP client",
+)
 @require_permission("mcp:read")
 async def get_mcp_client(
     request: Request,
-    client_key: str,
-) -> Dict[str, Any]:
-    """Get MCP client details for the current user."""
-    username = getattr(request.state, "username", None)
-    user_role = getattr(request.state, "role", "user")
-    is_admin = (user_role in ("admin", "superadmin"))
+    client_key: str = Path(...),
+) -> MCPClientInfo:
+    """Get details of a specific MCP client."""
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
+    global_clients = _load_global_mcp()
+    user_clients = _load_user_mcp(agent_id)
 
-    if is_admin:
-        # Admin can access any client
-        for uname, clients in _mcp_clients.items():
-            if client_key in clients:
-                result = clients[client_key].dict()
-                result["username"] = uname
-                return result
-        raise HTTPException(status_code=404, detail="MCP client not found")
-    else:
-        # Regular user can only access their own
-        user_clients = _get_user_clients(request)
-        if client_key not in user_clients:
-            raise HTTPException(status_code=404, detail="MCP client not found")
-        return user_clients[client_key].dict()
+    if client_key in user_clients:
+        return _build_client_info(client_key, user_clients[client_key], "user")
+    if client_key in global_clients:
+        return _build_client_info(
+            client_key, global_clients[client_key], "global",
+        )
+    raise HTTPException(404, detail=f"MCP client '{client_key}' not found")
 
 
-@router.post("/mcp")
+@router.post(
+    "/mcp",
+    response_model=MCPClientInfo,
+    summary="Create a personal MCP client",
+    status_code=201,
+)
 @require_permission("mcp:write")
 async def create_mcp_client(
     request: Request,
-    payload: MCPClientCreateRequest = Body(...),
-) -> Dict[str, Any]:
-    """Create a new MCP client for the current user."""
-    username = getattr(request.state, "username", None)
-    if not username:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    client_key: str = Body(..., embed=True),
+    client: MCPClientCreateRequest = Body(..., embed=True),
+) -> MCPClientInfo:
+    """Create a new MCP client in the user's agent.json."""
+    _validate_client_key(client_key)
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
 
-    _load_mcp_clients(username)
-    user_clients = _mcp_clients.setdefault(username, {})
+    # Load current config
+    agent_config = load_agent_config(agent_id)
 
-    if payload.key in user_clients:
-        raise HTTPException(status_code=409, detail="MCP client key already exists")
+    # Initialize mcp config if not exists
+    if agent_config.mcp is None:
+        agent_config.mcp = MCPConfig(clients={})
 
-    client = MCPClientInfo(
-        key=payload.key,
-        name=payload.name,
-        enabled=True,
-        transport=payload.transport,
-        command=payload.command,
-        args=payload.args,
-        env=payload.env,
-        url=payload.url,
-        timeout=payload.timeout,
+    # Check if client already exists
+    if client_key in agent_config.mcp.clients:
+        raise HTTPException(
+            400,
+            detail=f"MCP client '{client_key}' already exists. Use PUT to update.",
+        )
+
+    # Create new client config
+    new_client = MCPClientConfig(
+        name=client.name,
+        description=client.description,
+        enabled=client.enabled,
+        transport=client.transport,
+        url=client.url,
+        headers=client.headers,
+        command=client.command,
+        args=client.args,
+        env=client.env,
+        cwd=client.cwd,
     )
 
-    user_clients[payload.key] = client
-    _save_mcp_clients(username)
+    # Add to agent's config and save
+    agent_config.mcp.clients[client_key] = new_client
+    save_agent_config(agent_id, agent_config)
 
-    return client.dict()
+    # Hot reload
+    _trigger_reload(request, agent_id)
+
+    return _build_client_info(client_key, new_client, "user")
 
 
-@router.put("/mcp/{client_key}")
+@router.put(
+    "/mcp/{client_key}",
+    response_model=MCPClientInfo,
+    summary="Update a personal MCP client",
+)
 @require_permission("mcp:write")
 async def update_mcp_client(
     request: Request,
-    client_key: str,
-    payload: MCPClientUpdateRequest = Body(...),
-) -> Dict[str, Any]:
-    """Update an MCP client for the current user."""
-    username = getattr(request.state, "username", None)
-    if not username:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    client_key: str = Path(...),
+    updates: MCPClientUpdateRequest = Body(...),
+) -> MCPClientInfo:
+    """Update an existing MCP client in the user's agent.json."""
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
 
-    user_clients = _get_user_clients(request)
-    if client_key not in user_clients:
-        raise HTTPException(status_code=404, detail="MCP client not found")
+    agent_config = load_agent_config(agent_id)
 
-    client = user_clients[client_key]
-    if payload.name is not None:
-        client.name = payload.name
-    if payload.enabled is not None:
-        client.enabled = payload.enabled
-    if payload.transport is not None:
-        client.transport = payload.transport
-    if payload.command is not None:
-        client.command = payload.command
-    if payload.args is not None:
-        client.args = payload.args
-    if payload.env is not None:
-        client.env = payload.env
-    if payload.url is not None:
-        client.url = payload.url
-    if payload.timeout is not None:
-        client.timeout = payload.timeout
+    if (
+        agent_config.mcp is None
+        or client_key not in agent_config.mcp.clients
+    ):
+        # If it exists in global but not user, we need to create it in user's config
+        global_clients = _load_global_mcp()
+        if client_key not in global_clients:
+            raise HTTPException(
+                404, detail=f"MCP client '{client_key}' not found",
+            )
+        # Copy global config to user as base for modification
+        if agent_config.mcp is None:
+            agent_config.mcp = MCPConfig(clients={})
+        agent_config.mcp.clients[client_key] = global_clients[
+            client_key
+        ].model_copy()
 
-    _save_mcp_clients(username)
-    return client.dict()
+    client = agent_config.mcp.clients[client_key]
+
+    # Apply partial updates
+    update_data = updates.model_dump(exclude_none=True)
+    for field, value in update_data.items():
+        if hasattr(client, field):
+            setattr(client, field, value)
+
+    save_agent_config(agent_id, agent_config)
+    _trigger_reload(request, agent_id)
+
+    return _build_client_info(client_key, client, "user")
 
 
-@router.patch("/mcp/{client_key}/toggle")
+@router.patch(
+    "/mcp/{client_key}/toggle",
+    response_model=MCPClientInfo,
+    summary="Toggle MCP client enabled status",
+)
 @require_permission("mcp:write")
 async def toggle_mcp_client(
     request: Request,
-    client_key: str,
-) -> Dict[str, Any]:
-    """Toggle MCP client enabled status for the current user."""
-    username = getattr(request.state, "username", None)
-    if not username:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    client_key: str = Path(...),
+) -> MCPClientInfo:
+    """Toggle the enabled status of an MCP client."""
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
 
-    user_clients = _get_user_clients(request)
-    if client_key not in user_clients:
-        raise HTTPException(status_code=404, detail="MCP client not found")
+    agent_config = load_agent_config(agent_id)
 
-    user_clients[client_key].enabled = not user_clients[client_key].enabled
-    _save_mcp_clients(username)
-    return user_clients[client_key].dict()
+    if agent_config.mcp is None or client_key not in agent_config.mcp.clients:
+        # Check if it exists in global — if so, create user override
+        global_clients = _load_global_mcp()
+        if client_key not in global_clients:
+            raise HTTPException(
+                404, detail=f"MCP client '{client_key}' not found",
+            )
+        if agent_config.mcp is None:
+            agent_config.mcp = MCPConfig(clients={})
+        agent_config.mcp.clients[client_key] = global_clients[
+            client_key
+        ].model_copy()
+
+    client = agent_config.mcp.clients[client_key]
+    client.enabled = not client.enabled
+    save_agent_config(agent_id, agent_config)
+    _trigger_reload(request, agent_id)
+
+    return _build_client_info(client_key, client, "user")
 
 
-@router.delete("/mcp/{client_key}")
+@router.delete(
+    "/mcp/{client_key}",
+    summary="Delete a personal MCP client",
+)
 @require_permission("mcp:write")
 async def delete_mcp_client(
     request: Request,
-    client_key: str,
-) -> Dict[str, Any]:
-    """Delete an MCP client for the current user."""
-    username = getattr(request.state, "username", None)
-    if not username:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    client_key: str = Path(...),
+) -> Dict[str, str]:
+    """Delete an MCP client from the user's agent.json.
 
-    user_clients = _get_user_clients(request)
-    if client_key in user_clients:
-        del user_clients[client_key]
-        _save_mcp_clients(username)
-    return {"message": "MCP client deleted"}
+    If the client is inherited from global, this creates a disabled
+    override so it no longer appears for this user.
+    """
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
+
+    agent_config = load_agent_config(agent_id)
+
+    if agent_config.mcp and client_key in agent_config.mcp.clients:
+        del agent_config.mcp.clients[client_key]
+        save_agent_config(agent_id, agent_config)
+        _trigger_reload(request, agent_id)
+        return {"status": "deleted", "key": client_key}
+
+    # Check if it's a global-only client
+    global_clients = _load_global_mcp()
+    if client_key in global_clients:
+        # Create a disabled override to hide it for this user
+        if agent_config.mcp is None:
+            agent_config.mcp = MCPConfig(clients={})
+        disabled = global_clients[client_key].model_copy()
+        disabled.enabled = False
+        agent_config.mcp.clients[client_key] = disabled
+        save_agent_config(agent_id, agent_config)
+        _trigger_reload(request, agent_id)
+        return {"status": "disabled", "key": client_key}
+
+    raise HTTPException(404, detail=f"MCP client '{client_key}' not found")
 
 
-@router.get("/mcp/{client_key}/tools")
+@router.get(
+    "/mcp/{client_key}/tools",
+    summary="List tools exposed by an MCP client",
+)
 @require_permission("mcp:read")
 async def list_mcp_tools(
     request: Request,
-    client_key: str,
+    client_key: str = Path(...),
 ) -> List[Dict[str, Any]]:
-    """List tools from an MCP client for the current user."""
-    user_clients = _get_user_clients(request)
-    if client_key not in user_clients:
-        raise HTTPException(status_code=404, detail="MCP client not found")
+    """List tools provided by a specific MCP server."""
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
 
-    # For now, return empty list
+    # Find the MCP client config
+    user_clients = _load_user_mcp(agent_id)
+    global_clients = _load_global_mcp()
+    client_config = user_clients.get(client_key) or global_clients.get(
+        client_key,
+    )
+
+    if not client_config:
+        raise HTTPException(404, detail=f"MCP client '{client_key}' not found")
+
+    if not client_config.enabled:
+        raise HTTPException(
+            400,
+            detail=f"MCP client '{client_key}' is disabled. "
+            "Enable it first to list tools.",
+        )
+
+    # Try to get tools from the running MCP client manager
+    try:
+        from ..mcp import MCPClientManager
+        from ...config.config import load_config as _load_sys_config
+
+        sys_config = _load_sys_config()
+        # Find workspace with this MCP client connected
+        manager = getattr(request.app.state, "multi_agent_manager", None)
+        if manager:
+            ws = manager.get_workspace(agent_id)
+            if ws and ws.mcp_manager:
+                clients = await ws.mcp_manager.get_clients()
+                for c in clients:
+                    if getattr(c, "name", None) == client_key:
+                        tools = await c.list_tools()
+                        return [
+                            {
+                                "name": t.name,
+                                "description": t.description or "",
+                                "input_schema": t.inputSchema
+                                if hasattr(t, "inputSchema")
+                                else {},
+                            }
+                            for t in tools
+                        ]
+    except Exception as e:
+        logger.warning(f"Failed to list tools for MCP '{client_key}': {e}")
+
+    # Fallback: return empty list (client not connected yet)
     return []
 
 
-# Startup hook
-async def init_mcp_clients():
-    """Initialize MCP clients on startup (load all existing users)."""
-    for user_dir in constant.WORKSPACES_DIR.iterdir():
-        if user_dir.is_dir():
-            _load_mcp_clients(user_dir.name)
-    total = sum(len(v) for v in _mcp_clients.values())
-    logger.info(f"Loaded {total} MCP clients for {len(_mcp_clients)} users")
+# ─── Global MCP pool endpoints (admin only) ──────────────────────────────
+
+
+@router.post(
+    "/mcp/global",
+    response_model=MCPClientInfo,
+    summary="Create a global MCP client (admin only)",
+    status_code=201,
+)
+@require_permission("mcp:write")
+async def create_global_mcp_client(
+    request: Request,
+    client_key: str = Body(..., embed=True),
+    client: MCPClientCreateRequest = Body(..., embed=True),
+) -> MCPClientInfo:
+    """Create a global MCP client in admin's agent.json.
+
+    Only admin users can create global MCP clients.
+    Global clients are inherited by all users unless overridden.
+    """
+    user_id = _get_user_id(request)
+    # Verify admin role
+    role = getattr(request.state, "role", "user")
+    if role != "admin":
+        raise HTTPException(403, detail="Only admins can manage global MCP")
+
+    _validate_client_key(client_key)
+    admin_agent_id = _get_admin_agent_id()
+
+    admin_config = load_agent_config(admin_agent_id)
+    if admin_config.mcp is None:
+        admin_config.mcp = MCPConfig(clients={})
+
+    if client_key in admin_config.mcp.clients:
+        raise HTTPException(
+            400,
+            detail=f"Global MCP client '{client_key}' already exists.",
+        )
+
+    new_client = MCPClientConfig(
+        name=client.name,
+        description=client.description,
+        enabled=client.enabled,
+        transport=client.transport,
+        url=client.url,
+        headers=client.headers,
+        command=client.command,
+        args=client.args,
+        env=client.env,
+        cwd=client.cwd,
+    )
+
+    admin_config.mcp.clients[client_key] = new_client
+    save_agent_config(admin_agent_id, admin_config)
+    _trigger_reload(request, admin_agent_id)
+
+    return _build_client_info(client_key, new_client, "global")
+
+
+@router.delete(
+    "/mcp/global/{client_key}",
+    summary="Delete a global MCP client (admin only)",
+)
+@require_permission("mcp:write")
+async def delete_global_mcp_client(
+    request: Request,
+    client_key: str = Path(...),
+) -> Dict[str, str]:
+    """Delete a global MCP client from admin's agent.json."""
+    role = getattr(request.state, "role", "user")
+    if role != "admin":
+        raise HTTPException(403, detail="Only admins can manage global MCP")
+
+    admin_agent_id = _get_admin_agent_id()
+    admin_config = load_agent_config(admin_agent_id)
+
+    if admin_config.mcp is None or client_key not in admin_config.mcp.clients:
+        raise HTTPException(
+            404, detail=f"Global MCP client '{client_key}' not found",
+        )
+
+    del admin_config.mcp.clients[client_key]
+    save_agent_config(admin_agent_id, admin_config)
+    _trigger_reload(request, admin_agent_id)
+
+    return {"status": "deleted", "key": client_key, "scope": "global"}

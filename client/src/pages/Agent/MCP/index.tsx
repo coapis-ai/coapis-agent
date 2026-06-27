@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Empty, Modal, Input, Tooltip } from "@agentscope-ai/design";
-import { PlusOutlined, LockOutlined } from "@ant-design/icons";
+import { PlusOutlined, LockOutlined, GlobalOutlined } from "@ant-design/icons";
 import type { MCPClientInfo } from "../../../api/types";
 import { MCPClientCard } from "./components";
 import { useMCP } from "./useMCP";
@@ -57,6 +57,8 @@ function MCPPage() {
   const { t } = useTranslation();
   const {
     clients,
+    globalClients,
+    userClients,
     loading,
     toggleEnabled,
     deleteClient,
@@ -95,15 +97,9 @@ function MCPPage() {
     try {
       const parsed = JSON.parse(newClientJson);
 
-      // Support two formats:
-      // Format 1: { "mcpServers": { "key": { "command": "...", ... } } }
-      // Format 2: { "key": { "command": "...", ... } }
-      // Format 3: { "key": "...", "name": "...", "command": "...", ... } (direct)
-
       const clientsToCreate: Array<{ key: string; data: any }> = [];
 
       if (parsed.mcpServers) {
-        // Format 1: nested mcpServers
         Object.entries(parsed.mcpServers).forEach(
           ([key, data]: [string, any]) => {
             clientsToCreate.push({
@@ -116,14 +112,12 @@ function MCPPage() {
         parsed.key &&
         (parsed.command || parsed.url || parsed.baseUrl)
       ) {
-        // Format 3: direct format with key field
         const { key, ...clientData } = parsed;
         clientsToCreate.push({
           key,
           data: normalizeClientData(key, clientData),
         });
       } else {
-        // Format 2: direct client objects with keys
         Object.entries(parsed).forEach(([key, data]: [string, any]) => {
           if (
             typeof data === "object" &&
@@ -137,7 +131,6 @@ function MCPPage() {
         });
       }
 
-      // Create all clients
       let allSuccess = true;
       for (const { key, data } of clientsToCreate) {
         const success = await createClient(key, data);
@@ -193,18 +186,54 @@ function MCPPage() {
           <Empty description={t("mcp.emptyState")} />
         </div>
       ) : (
-        <div className={styles.mcpGrid}>
-          {clients.map((client) => (
-            <MCPClientCard
-              key={client.key}
-              client={client}
-              onToggle={canWrite ? handleToggleEnabled : undefined}
-              onDelete={canWrite ? handleDelete : undefined}
-              onUpdate={canWrite ? updateClient : undefined}
-              readOnly={!canWrite}
-            />
-          ))}
-        </div>
+        <>
+          {/* Global MCP section */}
+          {globalClients.length > 0 && (
+            <div className={styles.mcpSection}>
+              <div className={styles.sectionHeader}>
+                <GlobalOutlined style={{ marginRight: 8 }} />
+                <span>
+                  {t("mcp.globalPool", "系统 MCP（管理员配置）")}
+                </span>
+              </div>
+              <div className={styles.mcpGrid}>
+                {globalClients.map((client) => (
+                  <MCPClientCard
+                    key={client.key}
+                    client={client}
+                    onToggle={canWrite ? handleToggleEnabled : undefined}
+                    onDelete={canWrite ? handleDelete : undefined}
+                    onUpdate={canWrite ? updateClient : undefined}
+                    readOnly={!canWrite}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* User MCP section */}
+          {userClients.length > 0 && (
+            <div className={styles.mcpSection}>
+              <div className={styles.sectionHeader}>
+                <span>
+                  {t("mcp.userClients", "我的 MCP")}
+                </span>
+              </div>
+              <div className={styles.mcpGrid}>
+                {userClients.map((client) => (
+                  <MCPClientCard
+                    key={client.key}
+                    client={client}
+                    onToggle={canWrite ? handleToggleEnabled : undefined}
+                    onDelete={canWrite ? handleDelete : undefined}
+                    onUpdate={canWrite ? updateClient : undefined}
+                    readOnly={!canWrite}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <Modal

@@ -8,9 +8,14 @@ import type {
 
 export const mcpApi = {
   /**
-   * List all MCP clients
+   * List effective MCP clients (global + user merged)
    */
   listMCPClients: () => request<MCPClientInfo[]>("/mcp"),
+
+  /**
+   * List global MCP pool (admin-configured)
+   */
+  listGlobalMCPClients: () => request<MCPClientInfo[]>("/mcp/global"),
 
   /**
    * Get details of a specific MCP client
@@ -19,10 +24,19 @@ export const mcpApi = {
     request<MCPClientInfo>(`/mcp/${encodeURIComponent(clientKey)}`),
 
   /**
-   * Create a new MCP client
+   * Create a new MCP client (personal)
    */
   createMCPClient: (body: MCPClientCreateRequest) =>
     request<MCPClientInfo>("/mcp", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * Create a global MCP client (admin only)
+   */
+  createGlobalMCPClient: (body: MCPClientCreateRequest) =>
+    request<MCPClientInfo>("/mcp/global", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -45,12 +59,21 @@ export const mcpApi = {
     }),
 
   /**
-   * Delete an MCP client
+   * Delete a personal MCP client
    */
   deleteMCPClient: (clientKey: string) =>
     request<{ message: string }>(`/mcp/${encodeURIComponent(clientKey)}`, {
       method: "DELETE",
     }),
+
+  /**
+   * Delete a global MCP client (admin only)
+   */
+  deleteGlobalMCPClient: (clientKey: string) =>
+    request<{ message: string }>(
+      `/mcp/global/${encodeURIComponent(clientKey)}`,
+      { method: "DELETE" },
+    ),
 
   /**
    * List tools from a connected MCP server
