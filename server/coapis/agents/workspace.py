@@ -307,6 +307,19 @@ class Workspace:
             )
             # Set workspace reference so evolution engine hooks work
             r.set_workspace(self)
+            # Initialize context_manager and memory_manager for command dispatch
+            try:
+                from .context.light_context_manager import LightContextManager
+                from .memory_manager import MemoryManager
+                r.context_manager = LightContextManager(
+                    working_dir=str(self.workspace_dir),
+                    agent_id=self.agent_id or "default",
+                )
+                r.memory_manager = MemoryManager(workspace_dir=self.workspace_dir)
+                # Set agent_id for command handler's config loading
+                r.memory_manager.agent_id = self.agent_id or "default"
+            except Exception as _cm_err:
+                logger.warning("Failed to init context/memory manager for runner: %s", _cm_err)
             # Manually initialize session (sync) and mark as healthy.
             # Session messages are stored under workspaces/{username}/sessions/
             # to ensure user-level isolation. Falls back to workspace_dir/sessions/
@@ -769,6 +782,70 @@ class Workspace:
                 # Reset foundation memory for new sessions
                 if chat_key not in self._active_chats and self.foundation_manager:
                     self.foundation_manager.reset_injection_state()
+
+                # ── Command routing: delegate to runner's command system ──
+                # This handles /new, /compact, /history, /plan, /approve,
+                # /stop, /status, /version, /daemon, etc.
+                # /clear and /reset are handled locally below (need context cleanup).
+                _cmd_query = user_message.strip()
+                _clearable_commands = ("/clear", "/reset", "清空上下文")
+                if _cmd_query.lower() not in _clearable_commands:
+                    try:
+                        from ..app.runner.command_dispatch import (
+                            _is_command,
+                            run_command_path,
+                        )
+                        from agentscope.message import Msg as _CmdMsg
+                        if _is_command(_cmd_query):
+                            _msg_id_cmd = str(uuid_mod.uuid4())
+                            _resp_id_cmd = str(uuid_mod.uuid4())
+                            # Build minimal Msg list for run_command_path
+                            _cmd_msgs = [
+                                _CmdMsg(name="user", role="user", content=_cmd_query),
+                            ]
+                            _cmd_runner = self.runner
+                            async for _cmd_msg, _cmd_last in run_command_path(
+                                request_obj, _cmd_msgs, _cmd_runner
+                            ):
+                                # Extract text from Msg
+                                _cmd_text = ""
+                                _cmd_content = getattr(_cmd_msg, "content", "")
+                                if isinstance(_cmd_content, str):
+                                    _cmd_text = _cmd_content
+                                elif isinstance(_cmd_content, list):
+                                    for _blk in _cmd_content:
+                                        if hasattr(_blk, "text"):
+                                            _cmd_text += getattr(_blk, "text", "")
+                                        elif isinstance(_blk, dict) and _blk.get("type") == "text":
+                                            _cmd_text += _blk.get("text", "")
+                                yield TextContent(
+                                    object="content",
+                                    msg_id=_msg_id_cmd,
+                                    type="text",
+                                    delta=False,
+                                    text=_cmd_text,
+                                )
+                            yield Message(
+                                object="message",
+                                id=_msg_id_cmd,
+                                role="assistant",
+                                type=MessageType.MESSAGE,
+                                status=RunStatus.Completed,
+                                content=[],
+                            )
+                            yield Event(
+                                object="response",
+                                id=_resp_id_cmd,
+                                status=RunStatus.Completed,
+                                created_at=int(__import__('time').time() * 1000),
+                                output=[],
+                            )
+                            return
+                    except Exception as _cmd_err:
+                        logger.warning(
+                            "Command routing failed, falling through to LLM: %s",
+                            _cmd_err,
+                        )
 
                 # ── Handle /clear command: reset chat context ──
                 if user_message.strip().lower() in ("/clear", "/reset", "清空上下文"):
