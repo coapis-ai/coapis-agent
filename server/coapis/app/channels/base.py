@@ -402,7 +402,9 @@ class BaseChannel(ABC):
                     )
 
                 # --- non-streaming / fallback path ---
-                if obj == "content":
+                # Only call on_event_content if streaming did NOT handle it.
+                # (matches direct _process path logic in consume_one)
+                if obj == "content" and not handled_by_streaming:
                     if await self.on_event_content(
                         request, to_handle, event, send_meta,
                     ):
@@ -471,14 +473,6 @@ class BaseChannel(ABC):
         """
         obj = getattr(event, "object", None)
         status = getattr(event, "status", None)
-        # [TEMP-DEBUG] Log ALL events to find why streaming never triggers
-        _ev_type = getattr(event, "type", None)
-        _ev_id = getattr(event, "id", None)
-        _ev_delta = getattr(event, "delta", None)
-        _ev_text = str(getattr(event, "text", ""))[:50] if hasattr(event, "text") else "-"
-        logger.info(
-            obj, status, _ev_type, str(_ev_id)[:12] if _ev_id else None, _ev_delta, _ev_text,
-        )
 
         if obj == "message" and status == RunStatus.InProgress:
             return await self._on_stream_msg_start(

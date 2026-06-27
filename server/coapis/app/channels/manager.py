@@ -239,11 +239,18 @@ class ChannelManager:
                 ch.workspace = workspace
 
     async def _consumer_loop(self, ch: BaseChannel) -> None:
-        """Consume payloads from a channel's queue."""
+        """Consume payloads from a channel's queue.
+
+        Critical-priority commands (e.g. /stop, priority level 0) are
+        dispatched as concurrent tasks so they can cancel the currently
+        running normal task instead of waiting in the serial queue.
+        """
         queue = self._queues.get(ch.channel)
         if queue is None:
             return
         logger.info("consumer loop started for channel: %s", ch.channel)
+        # Track spawned critical tasks for cleanup
+        _critical_tasks: set[asyncio.Task] = set()
         try:
             while True:
                 try:
@@ -256,19 +263,45 @@ class ChannelManager:
                 except asyncio.CancelledError:
                     break
 
-                logger.info(
-                    "consumer loop dispatching to %s, payload_type=%s",
-                    ch.channel,
-                    type(payload).__name__,
-                )
-                await ch.consume_one(payload)
-                logger.info(
-                    "consumer loop finished consume_one for %s",
-                    ch.channel,
-                )
+                # ── Priority detection: critical commands run concurrently ──
+                is_critical = False
+                try:
+                    registry = getattr(ch, "_command_registry", None)
+                    if registry is not None:
+                        query = ch._extract_query_from_payload(payload)
+                        if query and registry.get_priority_level(query) == 0:
+                            is_critical = True
+                except Exception:
+                    pass  # Never let priority check break the loop
+
+                if is_critical:
+                    logger.info(
+                        "critical command detected, spawning concurrent "
+                        "task for %s",
+                        ch.channel,
+                    )
+                    task = asyncio.create_task(
+                        ch.consume_one(payload),
+                        name=f"critical-{ch.channel}",
+                    )
+                    _critical_tasks.add(task)
+                    task.add_done_callback(_critical_tasks.discard)
+                else:
+                    logger.info(
+                        "consumer loop dispatching to %s, payload_type=%s",
+                        ch.channel,
+                        type(payload).__name__,
+                    )
+                    await ch.consume_one(payload)
+                    logger.info(
+                        "consumer loop finished consume_one for %s",
+                        ch.channel,
+                    )
                 queue.task_done()
         except asyncio.CancelledError:
             logger.info("consumer loop cancelled: %s", ch.channel)
+            for t in _critical_tasks:
+                t.cancel()
         except Exception:
             logger.exception(
                 "consumer loop crashed: %s", ch.channel,
