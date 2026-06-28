@@ -683,6 +683,10 @@ def register_dynamic_agent(agent_id: str, workspace_dir: str, username: str = No
         if agent_id in data["agents"]["profiles"]:
             existing = data["agents"]["profiles"][agent_id]
             updated = False
+            # Ensure 'id' field exists (required by Pydantic validation)
+            if not existing.get("id"):
+                existing["id"] = agent_id
+                updated = True
             if username is not None and (existing.get("username") is None or existing.get("username") == ""):
                 existing["username"] = username
                 updated = True

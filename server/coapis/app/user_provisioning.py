@@ -79,7 +79,7 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
         The agent_id for the user's default agent (e.g., "user:admin")
     """
     agent_id = f"user:{username}"
-    agent_name = display_name or "Default"
+    agent_name = display_name or f"Default（{username}）"
 
     # 1. Create workspace directory (unified path: workspaces/{username}/)
     workspace_dir = WORKSPACES_DIR / username
