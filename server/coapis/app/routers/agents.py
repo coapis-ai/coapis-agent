@@ -318,56 +318,47 @@ async def reorder_agents(
 @router.get("/agents")
 @require_permission("agents:read")
 async def list_agents(request: Request) -> Dict[str, Any]:
-    """List all managed agents (returns AgentSummary format).
-    
-    For non-admin users, filters to show only:
-    - User-specific agents (owned by current user only)
-    
-    For admin users, shows all agents.
-    
+    """List the current user's agents (returns AgentSummary format).
+
+    Returns only agents owned by the requesting user.  Global agents are
+    managed through a separate endpoint (GlobalAgentsTab) and are NOT
+    included here — the frontend "我的智能体" tab filters by username
+    anyway, so returning them would be wasted work.
+
     Falls back to config-based listing when MultiAgentManager is not available
     (e.g., TestClient mode or during startup).
     """
     manager = get_manager(request)
     
     username = getattr(request.state, "username", None)
-    user_role = getattr(request.state, "role", "user")
-    is_admin = (user_role in ("admin", "superadmin"))
     
     if manager is not None:
-        # Normal mode: use MultiAgentManager workspaces
-        workspaces = manager._workspaces
-        
-        # Filter workspaces by user (deduplicate by real agent_id)
-        seen_ids = set()
+        # Use per-user index + _workspaces composite-key lookup.
+        # Never iterate all workspaces — that would expose other users' agents.
         filtered = []
-        for cache_key, ws in workspaces.items():
-            real_id = _extract_agent_id(cache_key)
-            if real_id in seen_ids:
+        seen_ids = set()
+        candidate_ids = set(manager._user_agents.get(username, []))
+        # Safety net: also scan _workspaces for keys starting with "{username}:"
+        for cache_key in manager._workspaces:
+            if cache_key.startswith(f"{username}:"):
+                agent_id = cache_key.split(":", 1)[1]
+                candidate_ids.add(agent_id)
+        for agent_id in candidate_ids:
+            cache_key = f"{username}:{agent_id}"
+            ws = manager._workspaces.get(cache_key)
+            if ws is None:
                 continue
-            seen_ids.add(real_id)
-            
-            # Skip global agents — users only see their own user-specific agents
-            ws_is_global = getattr(ws, "is_global", False)
-            if ws_is_global:
+            if agent_id in seen_ids:
                 continue
-
-            # Users can only see their own user-specific agents
-            if ws.username != username:
-                continue
-            
-            # Skip agents whose workspace no longer exists (deleted)
+            seen_ids.add(agent_id)
             ws_dir = getattr(ws, "workspace_dir", None)
             if ws_dir and not Path(ws_dir).exists():
-                logger.debug(f"Skipping agent {real_id}: workspace {ws_dir} does not exist")
                 continue
-            
-            filtered.append((real_id, ws))
+            filtered.append((agent_id, ws))
         
         agents = []
         for real_id, ws in filtered:
             agent = _agent_to_summary(real_id, ws, request)
-            # Ensure username is set for user-specific agents (e.g., user:admin -> admin)
             if not agent.get('username') and real_id.startswith('user:'):
                 agent['username'] = real_id.split(':', 1)[1]
             agents.append(agent)

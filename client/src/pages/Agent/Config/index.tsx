@@ -43,6 +43,7 @@ function AgentConfigPage() {
     Form.useWatch("context_manager_backend", form) || "light";
   const memoryBackend =
     Form.useWatch("memory_manager_backend", form) || "remelight";
+  const agentScene = Form.useWatch("agent_scene", form) ?? null;
 
   const dynamicTabs = useMemo(() => {
     const baseTabs = [
@@ -64,7 +65,7 @@ function AgentConfigPage() {
               onTimezoneChange={handleTimezoneChange}
             />
             <SceneSelectorCard
-              value={Form.useWatch("agent_scene", form) ?? null}
+              value={agentScene}
               onChange={(v) => form.setFieldsValue({ agent_scene: v })}
             />
           </div>
