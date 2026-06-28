@@ -67,7 +67,7 @@ class FlowRecord:
 class FlowConfig:
     """Configuration for knowledge flow thresholds (adaptive)."""
     # Instance → Professional thresholds (基础值，会被 importance 动态调整)
-    instance_to_professional_reuse_count: int = 3
+    instance_to_professional_reuse_count: int = 2
     instance_to_professional_user_count: int = 1
     instance_to_professional_min_confidence: float = 0.7
 

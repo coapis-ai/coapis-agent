@@ -462,17 +462,39 @@ class EvolutionEngine:
             user_id=self._current_user_id,
         )
         
-        # 将提取的经验加入待审核队列
-        self._pending_experiences.extend(experiences)
-        
-        # 如果有 knowledge_flow，提交经验进行审核
+        # ── P0: 按置信度自动分级处理 ──
+        auto_approved = 0
+        auto_discarded = 0
+        pending_count = 0
+        for exp in experiences:
+            if exp.confidence >= 0.8:
+                # 高置信度 → 自动通过，直接写入经验库
+                exp.status = "approved"
+                exp.approved_by = "auto_high_confidence"
+                await self._save_experience(exp)
+                auto_approved += 1
+            elif exp.confidence < 0.5:
+                # 低置信度 → 自动丢弃
+                auto_discarded += 1
+            else:
+                # 中间地带 → 进入待审核队列
+                self._pending_experiences.append(exp)
+                pending_count += 1
+
+        # 如果有 knowledge_flow，提交自动通过的经验进行知识流动
         if self.knowledge_flow:
             for exp in experiences:
-                await self.knowledge_flow.evaluate_and_flow(
-                    experience=exp,
-                    agent_id=self._current_agent_id,
-                    user_id=self._current_user_id,
-                )
+                if exp.status == "approved":
+                    await self.knowledge_flow.evaluate_and_flow(
+                        experience=exp,
+                        agent_id=self._current_agent_id,
+                        user_id=self._current_user_id,
+                    )
+
+        logger.info(
+            "EvolutionEngine: extracted %d experiences (auto_approved=%d, pending=%d, discarded=%d)",
+            len(experiences), auto_approved, pending_count, auto_discarded,
+        )
         
         logger.info(
             "EvolutionEngine: extracted %d experiences from trajectory (%d total pending)",
@@ -665,14 +687,12 @@ class EvolutionEngine:
                     diff_summary,
                 )
 
-                # 只有全局智能体才自动覆写（向后兼容）
-                # 用户智能体的梦境优化结果需要管理员确认
-                if not workspace_dir.name.startswith("user:"):
-                    memory_file.write_text(
-                        f"{result.strip()}\n\n<!-- 梦境优化于 {timestamp} (auto-approved) -->\n",
-                        encoding="utf-8",
-                    )
-                    logger.info("Dream optimization auto-approved for global agent")
+                # P1: 所有智能体自动通过梦境优化（已有备份可回滚）
+                memory_file.write_text(
+                    f"{result.strip()}\n\n<!-- 梦境优化于 {timestamp} (auto-approved) -->\n",
+                    encoding="utf-8",
+                )
+                logger.info("Dream optimization auto-approved for %s", workspace_dir.name)
             else:
                 logger.debug("Dream optimization: LLM returned empty/negligible result")
         except Exception as e:
@@ -827,6 +847,34 @@ class EvolutionEngine:
         except Exception as e:
             logger.warning("Failed to append to MEMORY.md: %s", e)
 
+    async def _save_experience(self, exp: "ExtractedExperience") -> None:
+        """保存已通过的经验到经验库（JSONL 文件）。"""
+        exp_dir = self.data_dir / "evolution" / "experiences"
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        exp_file = exp_dir / "approved.jsonl"
+        try:
+            record = exp.to_dict() if hasattr(exp, "to_dict") else {
+                "experience_id": exp.experience_id,
+                "title": exp.title,
+                "content": exp.content,
+                "experience_type": exp.experience_type,
+                "category": exp.category,
+                "tags": exp.tags,
+                "confidence": exp.confidence,
+                "status": exp.status,
+                "approved_by": getattr(exp, "approved_by", ""),
+                "source_session": exp.source_session,
+                "source_agent": exp.source_agent,
+                "source_user": exp.source_user,
+            }
+            safe_append_jsonl(exp_file, record)
+            logger.info(
+                "Experience auto-approved: id=%s, confidence=%.2f, title=%s",
+                exp.experience_id[:8], exp.confidence, exp.title[:30],
+            )
+        except Exception as e:
+            logger.warning("Failed to save experience: %s", e)
+
     def _save_review_request(
         self, review_type: str, prompt: str, result: str = "",
     ) -> None:
@@ -856,13 +904,16 @@ class EvolutionEngine:
             logger.error("Failed to save review request: %s", e)
 
     def _create_skill_draft(self, llm_result: str) -> str | None:
-        """从 LLM 审查结果中解析技能信息并创建草稿。
+        """从 LLM 审查结果中解析技能信息并自动创建生效。
+
+        P2: 自动写入 skills/ 目录，标记 source: auto_generated。
+        用户可在技能页面查看和删除。
 
         Args:
             llm_result: LLM 返回的技能建议 JSON 字符串
 
         Returns:
-            草稿路径，失败返回 None
+            技能路径，失败返回 None
         """
         try:
             # Parse JSON from LLM result
@@ -887,19 +938,18 @@ class EvolutionEngine:
             if not skill_name:
                 return None
 
-            # Create draft directory
-            drafts_dir = self.workspace_dir / ".skill_drafts"
-            drafts_dir.mkdir(parents=True, exist_ok=True)
+            # P2: 直接写入 skills/ 目录（自动生效）
+            skills_dir = self.workspace_dir / "skills"
+            skills_dir.mkdir(parents=True, exist_ok=True)
 
-            draft_dir = drafts_dir / skill_name
-            if draft_dir.exists():
-                # Already has a pending draft
-                logger.info("Skill draft already exists: %s", skill_name)
-                return str(draft_dir)
+            skill_dir = skills_dir / skill_name
+            if skill_dir.exists():
+                logger.info("Skill already exists, skipping: %s", skill_name)
+                return str(skill_dir)
 
-            draft_dir.mkdir(parents=True, exist_ok=True)
+            skill_dir.mkdir(parents=True, exist_ok=True)
 
-            # Generate SKILL.md
+            # Generate SKILL.md with auto_generated marker
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
             skill_md = (
                 f"---\n"
@@ -908,16 +958,16 @@ class EvolutionEngine:
                 f"metadata:\n"
                 f"  coapis:\n"
                 f"    priority: on-demand\n"
-                f"    draft: true\n"
-                f"    created_by: auto_nudge\n"
+                f"    source: auto_generated\n"
+                f"    created_by: evolution_nudge\n"
                 f"    created_at: \"{timestamp}\"\n"
                 f"    action: {action}\n"
                 f"---\n\n"
                 f"# {skill_name}\n\n"
                 f"{description}\n\n"
-                f"<!-- 由 Nudge 审查自动生成，等待管理员确认 -->\n"
+                f"<!-- 由进化系统 Nudge 自动生成，可在技能页面删除 -->\n"
             )
-            (draft_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
 
             # Save metadata
             meta = {
@@ -926,18 +976,17 @@ class EvolutionEngine:
                 "action": action,
                 "created_at": timestamp,
                 "session_id": self._current_session_id,
-                "status": "pending_approval",
-                "approved_by": None,
-                "approved_at": None,
+                "status": "auto_active",
+                "source": "auto_generated",
                 "version": 1,
             }
-            (draft_dir / "draft_meta.json").write_text(
+            (skill_dir / "meta.json").write_text(
                 json.dumps(meta, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
 
-            logger.info("Created skill draft: %s at %s", skill_name, draft_dir)
-            return str(draft_dir)
+            logger.info("Auto-created skill: %s at %s", skill_name, skill_dir)
+            return str(skill_dir)
 
         except Exception as e:
             logger.warning("Failed to create skill draft: %s", e)
