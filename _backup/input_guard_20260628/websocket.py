@@ -91,20 +91,6 @@ async def websocket_chat(
                 await websocket.send_json({"type": "error", "error": "Missing 'message' field"})
                 continue
 
-            # ── Input Guard: 内容安全检测 ──
-            from coapis.security.input_guard import get_input_guard_engine
-            guard_result = get_input_guard_engine().check(user_message)
-            if not guard_result.is_safe:
-                logger.warning(
-                    "Input guard blocked message from agent=%s: %s",
-                    agent_id, [f.rule_id for f in guard_result.findings],
-                )
-                await websocket.send_json({
-                    "type": "error",
-                    "error": guard_result.block_message,
-                })
-                continue
-
             logger.info(f"WebSocket chat: agent={agent_id}, chat={chat_id}, msg={user_message[:50]}")
 
             # Get chat context

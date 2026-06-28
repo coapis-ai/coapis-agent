@@ -1,0 +1,109 @@
+# Input Guard Rules — 内容安全检测规则
+# 加载位置: SYSTEM_DIR / input_guard_rules.yaml
+# 匹配方式: 正则（不区分大小写），命中一条即拦截
+
+# ── 系统命令注入 ──
+- id: CMD_RM_RF
+  category: command_injection
+  severity: CRITICAL
+  patterns:
+    - "\\brm\\s+(-[a-zA-Z]*f|--force)"
+    - "\\brm\\s+-[a-zA-Z]*r[a-zA-Z]*f"
+  description: "尝试执行危险的 rm -rf 命令"
+
+- id: CMD_SUDO
+  category: command_injection
+  severity: CRITICAL
+  patterns:
+    - "\\bsudo\\s+"
+  description: "尝试提权执行 sudo 命令"
+
+- id: CMD_PIPE_SHELL
+  category: command_injection
+  severity: CRITICAL
+  patterns:
+    - "curl.*\\|.*(?:ba)?sh"
+    - "wget.*\\|.*(?:ba)?sh"
+    - "curl.*\\|.*python"
+    - "wget.*\\|.*python"
+  description: "下载并直接执行脚本（管道注入）"
+
+- id: CMD_EXEC_EVAL
+  category: command_injection
+  severity: HIGH
+  patterns:
+    - "\\bexec\\s*\\("
+    - "\\beval\\s*\\("
+    - "\\bsystem\\s*\\("
+    - "\\bos\\.system\\s*\\("
+    - "\\bsubprocess\\."
+    - "__import__\\s*\\("
+  description: "尝试执行动态代码（exec/eval/system）"
+
+- id: CMD_DANGEROUS
+  category: command_injection
+  severity: HIGH
+  patterns:
+    - "\\bchmod\\s+777"
+    - "\\bchmod\\s+\\+s"
+    - "\\bmkfs\\b"
+    - "\\bdd\\s+.*of=/dev/"
+    - ":(){ :\\|:& };:"  # fork bomb
+    - "> /dev/sd[a-z]"
+  description: "尝试执行危险系统命令"
+
+# ── Prompt 注入 ──
+- id: PROMPT_IGNORE_CN
+  category: prompt_injection
+  severity: HIGH
+  patterns:
+    - "(?:忽略|无视|不要管|忘记|丢弃).*(?:以上|上面|之前|先前|所有).*(?:指令|规则|约束|限制|命令|提示|要求)"
+    - "(?:从现在开始|从此刻起|接下来).*(?:你不再|你不要|不要|不允许).*(?:遵守|遵循|受|受制于)"
+    - "(?:忽略|无视|丢弃).*(?:系统提示|system\\s*prompt|规则)"
+  description: "中文 Prompt 注入：尝试覆盖系统指令"
+
+- id: PROMPT_IGNORE_EN
+  category: prompt_injection
+  severity: HIGH
+  patterns:
+    - "(?:ignore|disregard|forget|discard)\\s+(?:all\\s+)?(?:the\\s+)?(?:above|previous|prior|earlier)\\s+(?:instructions?|rules?|prompts?|constraints?)"
+    - "(?:you\\s+are\\s+now|from\\s+now\\s+on|starting\\s+now).*(?:no\\s+longer|without).*(?:restrict|limit|bound|constrain)"
+    - "(?:ignore|disregard)\\s+(?:your\\s+)?(?:system\\s*prompt|instructions?|rules?)"
+  description: "English Prompt injection: attempt to override system instructions"
+
+- id: PROMPT_ROLE_HIJACK
+  category: prompt_injection
+  severity: MEDIUM
+  patterns:
+    - "(?:你现在是|你现在扮演|假装你是|你是一个).*(?:没有任何|没有|不受).*(?:限制|约束|规则|道德|伦理)"
+    - "(?:you\\s+are\\s+now|act\\s+as|pretend\\s+(?:to\\s+be|you\\'re)|roleplay\\s+as).*(?:no\\s+(?:restrictions?|limits?|rules?|filters?|guardrails?))|(?:unrestricted|unfiltered|jailbroken)"
+    - "(?:DAN|DAN\\s*mode|developer\\s*mode|god\\s*mode)"
+  description: "角色劫持：尝试绕过安全限制"
+
+- id: PROMPT_EXTRACT_SYSTEM
+  category: prompt_injection
+  severity: HIGH
+  patterns:
+    - "(?:输出|显示|打印|告诉|泄露|透露).*(?:系统提示|system\\s*prompt|初始指令|你的指令)"
+    - "(?:output|show|print|reveal|tell|expose|leak).*(?:system\\s*prompt|initial\\s*instructions?|your\\s*(?:instructions?|rules?|prompts?))"
+    - "(?:repeat|copy|print).*(?:everything|all).*(?:above|before|earlier)"
+  description: "尝试提取系统提示词"
+
+# ── 敏感数据窃取 ──
+- id: DATA_CREDENTIALS
+  category: data_exfiltration
+  severity: HIGH
+  patterns:
+    - "(?:读取|获取|输出|显示|泄露|导出).*(?:密钥|密码|token|api[_\\s]*key|secret|credential|私钥|private[_\\s]*key)"
+    - "(?:read|get|output|show|leak|dump|export|exfiltrate).*(?:password|secret|token|api[_\\s]*key|credential|private[_\\s]*key)"
+    - "\\b(?:cat|type|more|less|head|tail)\\b.*/(?:etc/shadow|etc/passwd|\\.ssh/|\\.env|\\.aws/|credentials)"
+  description: "尝试窃取敏感凭证信息"
+
+- id: DATA_ENV_SECRETS
+  category: credential_exposure
+  severity: HIGH
+  patterns:
+    - "(?:读取|打印|输出|显示)\\s*(?:环境变量|env|\\.env)"
+    - "(?:print|echo|cat|show|display|read)\\s*(?:\\$|%)\\s*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|AWS_ACCESS|DATABASE_URL)"
+    - "\\benv\\b.*\\|.*(?:grep|find|search).*(?:key|secret|token|password|credential)"
+  description: "尝试读取环境变量中的敏感信息"

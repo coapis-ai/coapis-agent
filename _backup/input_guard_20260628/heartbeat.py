@@ -242,16 +242,6 @@ async def run_heartbeat_once(
         logger.debug("heartbeat skipped: empty query file")
         return
 
-    # ── Input Guard: 内容安全检测 ──
-    from coapis.security.input_guard import get_input_guard_engine
-    guard_result = get_input_guard_engine().check(query_text)
-    if not guard_result.is_safe:
-        logger.warning(
-            "Input guard blocked heartbeat for agent=%s: %s",
-            agent_id, [f.rule_id for f in guard_result.findings],
-        )
-        return
-
     # Build request: single user message with query text
     # Use isolated session per heartbeat execution to prevent context pollution
     import time

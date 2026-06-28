@@ -38,25 +38,6 @@ class CronExecutor:
         - task_type agent: ask agent with prompt, send reply to channel (
             stream_query + send_event)
         """
-        # ── Input Guard: 内容安全检测 ──
-        from coapis.security.input_guard import get_input_guard_engine
-        _guard = get_input_guard_engine()
-        check_texts = []
-        if job.text:
-            check_texts.append(("text", job.text))
-        if job.request and hasattr(job.request, "input") and job.request.input:
-            for msg in job.request.input:
-                if isinstance(msg, dict) and msg.get("content"):
-                    check_texts.append(("prompt", msg["content"]))
-        for label, text in check_texts:
-            guard_result = _guard.check(text)
-            if not guard_result.is_safe:
-                logger.warning(
-                    "Input guard blocked cron job=%s (%s): %s",
-                    job.id, label, [f.rule_id for f in guard_result.findings],
-                )
-                return
-
         target_user_id = job.dispatch.target.user_id
         target_session_id = job.dispatch.target.session_id
 
