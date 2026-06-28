@@ -17,11 +17,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 
 from .base import BaseJobRepository
-from ..models import JobsFile
+from ..models import CronJobSpec, JobsFile
+
+logger = logging.getLogger(__name__)
 
 
 class JsonJobRepository(BaseJobRepository):
@@ -46,7 +49,23 @@ class JsonJobRepository(BaseJobRepository):
             return JobsFile(version=1, jobs=[])
 
         data = json.loads(self._path.read_text(encoding="utf-8"))
-        return JobsFile.model_validate(data)
+        version = data.get("version", 1)
+        raw_jobs = data.get("jobs", [])
+
+        # Validate each job individually — skip malformed ones instead of failing all
+        valid_jobs = []
+        for i, raw in enumerate(raw_jobs):
+            try:
+                job = CronJobSpec.model_validate(raw)
+                valid_jobs.append(job)
+            except Exception as e:
+                job_name = raw.get("name", f"index={i}")
+                logger.warning(
+                    "Skipping malformed cron job '%s' in %s: %s",
+                    job_name, self._path, e,
+                )
+
+        return JobsFile(version=version, jobs=valid_jobs)
 
     async def save(self, jobs_file: JobsFile) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
