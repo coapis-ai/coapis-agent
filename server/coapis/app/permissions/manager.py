@@ -219,7 +219,7 @@ class PermissionManager:
         return any(crud.get(k, False) for k in crud_keys)
 
     def get_allowed_modules(self, role: str = "user") -> List[str]:
-        """Get modules where any CRUD bit is true."""
+        """Get modules where any CRUD bit is true AND not adminOnly (unless admin)."""
         if role == "admin":
             return ["all"]
         roles = self._config.get("roles", {})
@@ -229,7 +229,17 @@ class PermissionManager:
             return ["all"]
         if not isinstance(raw, dict):
             return []
-        return [mod for mod, crud in raw.items() if isinstance(crud, dict) and any(crud.values())]
+        all_modules = self._config.get("modules", {})
+        allowed = []
+        for mod, crud in raw.items():
+            if not isinstance(crud, dict) or not any(crud.values()):
+                continue
+            # Filter out adminOnly modules for non-admin roles
+            mod_def = all_modules.get(mod, {})
+            if mod_def.get("adminOnly", False):
+                continue
+            allowed.append(mod)
+        return allowed
 
     def get_user_effective_permissions(self, username: str, role: str = "user") -> Dict[str, Any]:
         """Full effective permission info for a user."""
