@@ -6,7 +6,7 @@ export { getApiUrl, getApiToken } from "./config";
 
 import { request as _request } from "./request";
 import { rootApi } from "./modules/root";
-import { acpApi } from "./modules/acp";
+// import { acpApi } from "./modules/acp";  // ACP 模块已隐藏 — 2026-06-28
 import { channelApi } from "./modules/channel";
 import { heartbeatApi } from "./modules/heartbeat";
 import { cronJobApi } from "./modules/cronjob";
@@ -40,8 +40,8 @@ export const api = {
   // Root
   ...rootApi,
 
-  // ACP
-  ...acpApi,
+  // ACP — 模块已隐藏 2026-06-28
+  // ...acpApi,
 
   // Channels
   ...channelApi,

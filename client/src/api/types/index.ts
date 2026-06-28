@@ -1,4 +1,4 @@
-export * from "./acp";
+// export * from "./acp";  // ACP 模块已隐藏 — 2026-06-28
 export * from "./agent";
 export * from "./agents";
 export * from "./agentStats";

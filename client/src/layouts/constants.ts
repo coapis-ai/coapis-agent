@@ -28,7 +28,7 @@ export const KEY_TO_PATH: Record<string, string> = {
   "skill-pool": "/skill-pool",
   tools: "/tools",
   mcp: "/mcp",
-  acp: "/acp",
+  // acp: "/acp",  // ACP 模块已隐藏 — 2026-06-28
   workspace: "/workspace",
   agents: "/agents",
   models: "/models",
@@ -61,7 +61,7 @@ export const KEY_TO_LABEL: Record<string, string> = {
   "skill-pool": "nav.skillPool",
   tools: "nav.tools",
   mcp: "nav.mcp",
-  acp: "nav.acp",
+  // acp: "nav.acp",  // ACP 模块已隐藏 — 2026-06-28
   "agent-config": "nav.agentConfig",
   workspace: "nav.workspace",
   myspace: "nav.myspace",

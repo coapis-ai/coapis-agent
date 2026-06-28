@@ -22,7 +22,7 @@ import {
   SparkModifyLine,
   SparkBrowseLine,
   SparkMcpMcpLine,
-  SparkScanLine,
+  // SparkScanLine,  // ACP 模块已隐藏 — 2026-06-28
   SparkToolLine,
   SparkDataLine,
   SparkMicLine,
@@ -239,12 +239,13 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       path: "/mcp",
       label: t("nav.mcp"),
     },
-    {
-      key: "acp",
-      icon: <SparkScanLine size={18} />,
-      path: "/acp",
-      label: t("nav.acp"),
-    },
+    // ACP 模块已隐藏 — 2026-06-28
+    // {
+    //   key: "acp",
+    //   icon: <SparkScanLine size={18} />,
+    //   path: "/acp",
+    //   label: t("nav.acp"),
+    // },
     {
       key: "agent-config",
       icon: <SparkModifyLine size={18} />,
@@ -409,11 +410,12 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           label: collapsed ? null : t("nav.mcp"),
           icon: <SparkMcpMcpLine size={16} />,
         },
-        {
-          key: "acp",
-          label: collapsed ? null : t("nav.acp"),
-          icon: <SparkScanLine size={16} />,
-        },
+        // ACP 模块已隐藏 — 2026-06-28
+        // {
+        //   key: "acp",
+        //   label: collapsed ? null : t("nav.acp"),
+        //   icon: <SparkScanLine size={16} />,
+        // },
         {
           key: "agent-config",
           label: collapsed ? null : t("nav.agentConfig"),

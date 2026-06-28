@@ -24,7 +24,8 @@ const SkillsPage = lazyImportWithRetry("../../pages/Agent/Skills");
 const ToolsPage = lazyImportWithRetry("../../pages/Agent/Tools");
 const WorkspacePage = lazyImportWithRetry("../../pages/Agent/Workspace");
 const MCPPage = lazyImportWithRetry("../../pages/Agent/MCP");
-const ACPPage = lazyImportWithRetry("../../pages/Agent/ACP");
+// ACP 模块已隐藏 — 2026-06-28
+// const ACPPage = lazyImportWithRetry("../../pages/Agent/ACP");
 const ModelsPage = lazyImportWithRetry("../../pages/Settings/Models");
 const EnvironmentsPage = lazyImportWithRetry(
   "../../pages/Settings/Environments",
@@ -60,7 +61,8 @@ const pathToKey: Record<string, string> = {
   "/skills": "skills",
   "/tools": "tools",
   "/mcp": "mcp",
-  "/acp": "acp",
+  // ACP 模块已隐藏 — 2026-06-28
+  // "/acp": "acp",
   "/workspace": "workspace",
   "/agents": "agents",
   "/models": "models",
@@ -138,8 +140,9 @@ export default function MainLayout() {
                   <Route path="/skills" element={<SkillsPage />} />
                   <Route path="/tools" element={<ToolsPage />} />
                   <Route path="/mcp" element={<MCPPage />} />
-                  <Route path="/acp" element={<ACPPage />} />
-                  <Route path="/ACP" element={<Navigate to="/acp" replace />} />
+                  {/* ACP 模块已隐藏 — 2026-06-28 */}
+                  {/* <Route path="/acp" element={<ACPPage />} /> */}
+                  {/* <Route path="/ACP" element={<Navigate to="/acp" replace />} /> */}
                   <Route path="/workspace" element={<WorkspacePage />} />
                   <Route path="/agents" element={<AgentsPage />} />
                   <Route path="/models" element={<ModelsPage />} />

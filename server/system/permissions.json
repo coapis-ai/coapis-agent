@@ -241,17 +241,6 @@
         "delete"
       ]
     },
-    "acp": {
-      "name": "ACP",
-      "icon": "🔗",
-      "path": "/agent/acp",
-      "operations": [
-        "read",
-        "create",
-        "update",
-        "delete"
-      ]
-    },
     "agent-config": {
       "name": "运行配置",
       "icon": "⚙️",

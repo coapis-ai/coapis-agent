@@ -16,7 +16,7 @@ import {
   SparkMagicWandLine,
   SparkToolLine,
   SparkMcpMcpLine,
-  SparkScanLine,
+  // SparkScanLine,  // ACP 模块已隐藏 — 2026-06-28
   SparkModifyLine,
   SparkModePlazaLine,
   SparkBarChartLine,
@@ -37,7 +37,8 @@ const NAV_ITEMS = [
   { key: "/skills", icon: <SparkMagicWandLine size={16} />, labelKey: "nav.skills" },
   { key: "/tools", icon: <SparkToolLine size={16} />, labelKey: "nav.tools" },
   { key: "/mcp", icon: <SparkMcpMcpLine size={16} />, labelKey: "nav.mcp" },
-  { key: "/acp", icon: <SparkScanLine size={16} />, labelKey: "nav.acp" },
+  // ACP 模块已隐藏 — 2026-06-28
+  // { key: "/acp", icon: <SparkScanLine size={16} />, labelKey: "nav.acp" },
   { key: "/agent-config", icon: <SparkModifyLine size={16} />, labelKey: "nav.agentConfig" },
   { key: "/agent-stats", icon: <SparkBarChartLine size={16} />, labelKey: "nav.agentStats" },
   { key: "/agents", icon: <SparkAgentLine size={16} />, labelKey: "nav.agents" },

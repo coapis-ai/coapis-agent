@@ -235,7 +235,7 @@ async def update_channel_config(request: Request, channel_name: str, payload: Di
 
 
 @router.get("/config/heartbeat")
-@require_permission("admin:admin")
+@require_permission("heartbeat:read")
 async def get_heartbeat_config(request: Request) -> Dict[str, Any]:
     config = _load_config(request)
     heartbeat = config.get("heartbeat", {})
@@ -247,7 +247,7 @@ async def get_heartbeat_config(request: Request) -> Dict[str, Any]:
 
 
 @router.put("/config/heartbeat")
-@require_permission("admin:admin")
+@require_permission("heartbeat:update")
 async def update_heartbeat_config(request: Request, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     config = _load_config(request)
     config["heartbeat"] = payload

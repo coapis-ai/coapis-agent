@@ -31,7 +31,7 @@ export const MENU_MODULES: MenuModuleConfig[] = [
   { key: 'skills',      name: 'skills',      group: 'agent',    permission: true,  order: 2 },
   { key: 'tools',       name: 'tools',       group: 'agent',    permission: true,  order: 3 },
   { key: 'mcp',         name: 'mcp',         group: 'agent',    permission: true,  order: 4 },
-  { key: 'acp',         name: 'acp',         group: 'agent',    permission: true,  order: 5 },
+  // { key: 'acp',         name: 'acp',         group: 'agent',    permission: true,  order: 5 },  // ACP 模块已隐藏 — 2026-06-28
   { key: 'agent-config',name: 'agentConfig', group: 'agent',    permission: true,  order: 6 },
   { key: 'agent-stats', name: 'agentStats',  group: 'agent',    permission: true,  order: 7 },
 
