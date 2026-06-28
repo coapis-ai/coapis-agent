@@ -1100,7 +1100,10 @@ export default function ChatPage() {
 
         const res = await chatApi.uploadFile(file);
         onProgress?.({ percent: 100 });
-        onSuccess({ url: chatApi.filePreviewUrl(res.url) });
+        // 直接传文件相对路径给 Agent（如 /media/{filename}），
+        // 由后端 _resolve_media_url 解析为实际工作区路径。
+        // 不再包装为 preview URL，避免 Agent 读错文件。
+        onSuccess({ url: res.url });
       } catch (e) {
         onError?.(e instanceof Error ? e : new Error(String(e)));
       }

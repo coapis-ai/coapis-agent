@@ -14,7 +14,6 @@ import {
   Progress,
   Typography,
   Divider,
-  Image,
   Tabs,
 } from 'antd';
 import type { InputRef } from 'antd';
@@ -33,7 +32,6 @@ import {
   DownloadOutlined,
   UnorderedListOutlined,
   AppstoreOutlined,
-  EyeOutlined,
   CopyOutlined,
   CloudUploadOutlined,
   LoadingOutlined,
@@ -101,11 +99,6 @@ const MySpacePage: React.FC = () => {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [fileTypeFilter, setFileTypeFilter] = useState<string>('all');
   const [usage, setUsage] = useState<{ usage_mb: number; limit_mb: number; usage_percent: number } | null>(null);
-  const [previewModal, setPreviewModal] = useState<{ visible: boolean; item: any; content: string }>({
-    visible: false,
-    item: null,
-    content: '',
-  });
   const [renameModal, setRenameModal] = useState<{ visible: boolean; item: any; value: string }>({
     visible: false,
     item: null,
@@ -224,28 +217,7 @@ const MySpacePage: React.FC = () => {
     if (item.type === 'directory') {
       navigateTo(item.path);
     } else if (item.type === 'file') {
-      // 可预览的文件打开预览，否则直接下载
-      if (item.previewable) {
-        handlePreview(item);
-      } else {
-        // 非预览文件（如 .docx/.zip/.mp4 等）直接下载
-        handleDownload(item);
-      }
-    }
-  };
-
-  // 预览文件
-  const handlePreview = async (item: any) => {
-    if (item.type !== 'file' || !item.previewable) return;
-    setLoading(true);
-    try {
-      const url = `${FILES_API}/preview?path=${encodeURIComponent(item.path)}&category=${activeCategory}`;
-      const res: any = await api.get(url);
-      setPreviewModal({ visible: true, item, content: res.content });
-    } catch (e: any) {
-      message.error(e?.message || t('myspace.previewFailed'));
-    } finally {
-      setLoading(false);
+      handleDownload(item);
     }
   };
 
@@ -712,11 +684,6 @@ const MySpacePage: React.FC = () => {
           renderItem={(item: any) => (
             <List.Item
               actions={[
-                item.type === 'file' && item.previewable && (
-                  <Tooltip key="preview" title={t('myspace.preview')}>
-                    <Button type="text" icon={<EyeOutlined />} onClick={() => handlePreview(item)} />
-                  </Tooltip>
-                ),
                 item.type === 'file' && (
                   <Tooltip key="download" title={t('myspace.download')}>
                     <Button type="text" icon={<DownloadOutlined />} onClick={() => handleDownload(item)} />
@@ -798,11 +765,6 @@ const MySpacePage: React.FC = () => {
                 cursor: 'pointer',
               }}>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {item.type === 'file' && item.previewable && (
-                    <Button size="small" type="text" icon={<EyeOutlined style={{ fontSize: 16 }} />}
-                      style={{ color: '#fff' }}
-                      onClick={(e) => { e.stopPropagation(); handlePreview(item); }} />
-                  )}
                   {item.type === 'file' && (
                     <Button size="small" type="text" icon={<DownloadOutlined style={{ fontSize: 16 }} />}
                       style={{ color: '#fff' }}
@@ -916,37 +878,7 @@ const MySpacePage: React.FC = () => {
         </Modal>
       )}
 
-      {/* 预览弹窗 */}
-      <Modal
-        title={
-          <Space>
-            {previewModal.item?.type === 'file' && getFileIcon(previewModal.item)}
-            <Text ellipsis style={{ maxWidth: 300 }}>{previewModal.item?.name}</Text>
-          </Space>
-        }
-        open={previewModal.visible}
-        onCancel={() => setPreviewModal({ visible: false, item: null, content: '' })}
-        footer={null}
-        width={800}
-        closable
-      >
-        {previewModal.item?.mimeType?.startsWith('image/') ? (
-          <Image
-            src={`data:${previewModal.item.mimeType};base64,${previewModal.content}`}
-            alt={previewModal.item.name}
-            style={{ maxWidth: '100%', maxHeight: 600, objectFit: 'contain' }}
-          />
-        ) : (
-          <pre style={{ 
-            whiteSpace: 'pre-wrap', wordBreak: 'break-word', 
-            maxHeight: 500, overflow: 'auto', 
-            background: '#f6f6f6', padding: 16, borderRadius: 8,
-            fontSize: 13, lineHeight: 1.6,
-          }}>
-            {previewModal.content}
-          </pre>
-        )}
-      </Modal>
+      {/* 预览弹窗已移除 — 2026-06-28 */}
     </div>
   );
 };
