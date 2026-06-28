@@ -16,7 +16,7 @@ import { useTranslation } from "react-i18next";
 import api from "../../../api";
 import { useAgentStore } from "../../../stores/agentStore";
 import type { HeartbeatConfig } from "../../../api/types/heartbeat";
-import { parseEvery, serializeEvery, type EveryUnit } from "./parseEvery";
+import { parseInterval, serializeInterval } from "./parseEvery";
 import { PageHeader } from "@/components/PageHeader";
 import styles from "./index.module.less";
 
@@ -49,24 +49,20 @@ function TimePickerHHmm({
   );
 }
 
-/** Form values: API shape plus flattened fields for interval and time. */
-type HeartbeatFormValues = Omit<HeartbeatConfig, "every"> & {
-  every?: string;
-  everyNumber?: number;
-  everyUnit?: EveryUnit;
-  useActiveHours?: boolean;
+/** Form values for the heartbeat page. */
+interface HeartbeatFormValues {
+  enabled: boolean;
+  intervalMinutes: number;
+  timeoutMinutes: number;
+  target: string;
+  useActiveHours: boolean;
   activeHoursStart?: string;
   activeHoursEnd?: string;
-};
+}
 
 const TARGET_OPTIONS = [
   { value: "main", labelKey: "heartbeat.targetMain" },
   { value: "last", labelKey: "heartbeat.targetLast" },
-];
-
-const EVERY_UNIT_OPTIONS: { value: EveryUnit; labelKey: string }[] = [
-  { value: "m", labelKey: "heartbeat.unitMinutes" },
-  { value: "h", labelKey: "heartbeat.unitHours" },
 ];
 
 function HeartbeatPage() {
@@ -81,15 +77,16 @@ function HeartbeatPage() {
     setLoading(true);
     try {
       const data = await api.getHeartbeatConfig();
-      const everyParts = parseEvery(data.every ?? "6h");
+      const intervalParts = parseInterval(data.interval_seconds);
+      const timeoutParts = parseInterval(data.timeout_seconds);
       form.setFieldsValue({
         enabled: data.enabled ?? false,
-        everyNumber: everyParts.number,
-        everyUnit: everyParts.unit,
+        intervalMinutes: intervalParts.minutes,
+        timeoutMinutes: timeoutParts.minutes,
         target: data.target ?? "main",
-        useActiveHours: !!data.activeHours,
-        activeHoursStart: data.activeHours?.start ?? "08:00",
-        activeHoursEnd: data.activeHours?.end ?? "22:00",
+        useActiveHours: !!data.active_hours,
+        activeHoursStart: data.active_hours?.start ?? "08:00",
+        activeHoursEnd: data.active_hours?.end ?? "22:00",
       });
     } catch (e) {
       console.error("Failed to load heartbeat config:", e);
@@ -105,18 +102,11 @@ function HeartbeatPage() {
   }, [selectedAgent]);
 
   const onFinish = async (values: HeartbeatFormValues) => {
-    const every =
-      values.everyNumber != null && values.everyUnit
-        ? serializeEvery({
-            number: values.everyNumber,
-            unit: values.everyUnit,
-          })
-        : "6h";
     const body: HeartbeatConfig = {
       enabled: values.enabled ?? false,
-      every,
+      interval_seconds: serializeInterval(values.intervalMinutes),
       target: values.target ?? "main",
-      activeHours:
+      active_hours:
         values.useActiveHours &&
         values.activeHoursStart &&
         values.activeHoursEnd
@@ -124,7 +114,8 @@ function HeartbeatPage() {
               start: values.activeHoursStart,
               end: values.activeHoursEnd,
             }
-          : undefined,
+          : null,
+      timeout_seconds: serializeInterval(values.timeoutMinutes),
     };
     setSaving(true);
     try {
@@ -162,8 +153,8 @@ function HeartbeatPage() {
             onFinish={onFinish}
             initialValues={{
               enabled: false,
-              everyNumber: 6,
-              everyUnit: "h",
+              intervalMinutes: 60,
+              timeoutMinutes: 5,
               target: "main",
               useActiveHours: false,
               activeHoursStart: "08:00",
@@ -179,35 +170,40 @@ function HeartbeatPage() {
             </Form.Item>
 
             <Form.Item
+              name="intervalMinutes"
               label={t("heartbeat.every")}
-              required
-              className={styles.everyField}
+              rules={[
+                { required: true, message: t("heartbeat.everyRequired") },
+                {
+                  type: "number",
+                  min: 1,
+                  message: t("heartbeat.everyMin"),
+                },
+              ]}
             >
-              <div className={styles.everyRow}>
-                <Form.Item
-                  name="everyNumber"
-                  rules={[
-                    { required: true, message: t("heartbeat.everyRequired") },
-                    {
-                      type: "number",
-                      min: 1,
-                      message: t("heartbeat.everyMin"),
-                    },
-                  ]}
-                  noStyle
-                >
-                  <InputNumber min={1} className={styles.everyNumber} />
-                </Form.Item>
-                <Form.Item name="everyUnit" noStyle>
-                  <Select
-                    options={EVERY_UNIT_OPTIONS.map((opt) => ({
-                      value: opt.value,
-                      label: t(opt.labelKey),
-                    }))}
-                    className={styles.everyUnit}
-                  />
-                </Form.Item>
-              </div>
+              <InputNumber
+                min={1}
+                addonAfter={t("heartbeat.unitMinutes")}
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="timeoutMinutes"
+              label={t("heartbeat.timeout") || "超时时间"}
+              rules={[
+                {
+                  type: "number",
+                  min: 1,
+                  message: t("heartbeat.everyMin"),
+                },
+              ]}
+            >
+              <InputNumber
+                min={1}
+                addonAfter={t("heartbeat.unitMinutes")}
+                style={{ width: "100%" }}
+              />
             </Form.Item>
 
             <Form.Item

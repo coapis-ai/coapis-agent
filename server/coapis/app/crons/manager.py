@@ -29,16 +29,11 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from agentscope_runtime.engine.schemas.exception import ConfigurationException
 
-from ...config import get_heartbeat_config, get_dream_cron
+from ...config import get_dream_cron
 
 from ..console_push_store import append as push_store_append
 from .executor import CronExecutor
-from .heartbeat import (
-    is_cron_expression,
-    parse_heartbeat_cron,
-    parse_heartbeat_every,
-    run_heartbeat_once,
-)
+from .heartbeat import run_heartbeat_once
 from .models import CronExecutionRecord, CronJobSpec, CronJobState
 from .repo.base import BaseJobRepository
 
@@ -85,6 +80,12 @@ class CronManager:
         self._history: Dict[str, deque] = {}
         self._history_max = 50
 
+    def _load_heartbeat_config(self) -> Dict[str, Any]:
+        """Load heartbeat config from heartbeat.json for this agent."""
+        from ..heartbeat import get_heartbeat_repo
+        key = f"{self._owner_user_id}:{self._agent_id}" if self._owner_user_id else self._agent_id or ""
+        return get_heartbeat_repo().get(key)
+
     async def start(self) -> None:
         async with self._lock:
             if self._started:
@@ -117,9 +118,10 @@ class CronManager:
                         )
 
             # Heartbeat: scheduled job when enabled in config
-            hb = get_heartbeat_config(self._agent_id)
-            if getattr(hb, "enabled", False):
-                trigger = self._build_heartbeat_trigger(hb.every)
+            hb = self._load_heartbeat_config()
+            if hb.get("enabled", False):
+                interval = hb.get("interval_seconds", 3600)
+                trigger = IntervalTrigger(seconds=interval)
                 self._scheduler.add_job(
                     self._heartbeat_callback,
                     trigger=trigger,
@@ -127,9 +129,9 @@ class CronManager:
                     replace_existing=True,
                 )
                 logger.info(
-                    "Heartbeat job scheduled for agent %s: every=%s",
+                    "Heartbeat job scheduled for agent %s: interval=%ss",
                     self._agent_id,
-                    hb.every,
+                    interval,
                 )
 
             # Dream-based memory optimization: cron job from config
@@ -240,15 +242,16 @@ class CronManager:
                 )
                 return
 
-            hb = get_heartbeat_config(self._agent_id)
+            hb = self._load_heartbeat_config()
 
             # Remove existing heartbeat job if present
             if self._scheduler.get_job(HEARTBEAT_JOB_ID):
                 self._scheduler.remove_job(HEARTBEAT_JOB_ID)
 
             # Add heartbeat job if enabled
-            if getattr(hb, "enabled", False):
-                trigger = self._build_heartbeat_trigger(hb.every)
+            if hb.get("enabled", False):
+                interval = hb.get("interval_seconds", 3600)
+                trigger = IntervalTrigger(seconds=interval)
                 self._scheduler.add_job(
                     self._heartbeat_callback,
                     trigger=trigger,
@@ -256,8 +259,8 @@ class CronManager:
                     replace_existing=True,
                 )
                 logger.info(
-                    "heartbeat rescheduled: every=%s",
-                    hb.every,
+                    "heartbeat rescheduled: interval=%ss",
+                    hb.get("interval_seconds", 3600),
                 )
             else:
                 logger.info("heartbeat disabled, job removed")

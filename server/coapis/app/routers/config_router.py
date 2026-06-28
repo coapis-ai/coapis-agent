@@ -237,22 +237,21 @@ async def update_channel_config(request: Request, channel_name: str, payload: Di
 @router.get("/config/heartbeat")
 @require_permission("heartbeat:read")
 async def get_heartbeat_config(request: Request) -> Dict[str, Any]:
-    config = _load_config(request)
-    heartbeat = config.get("heartbeat", {})
-    return {
-        "enabled": heartbeat.get("enabled", False),
-        "interval": heartbeat.get("interval", 30),
-        "endpoint": heartbeat.get("endpoint", ""),
-    }
+    from ..heartbeat import get_heartbeat_repo
+    username = getattr(request.state, "username", None) or "admin"
+    agent_id = request.headers.get("X-Agent-Id") or "global_default"
+    key = f"{username}:{agent_id}"
+    return get_heartbeat_repo().get(key)
 
 
 @router.put("/config/heartbeat")
 @require_permission("heartbeat:update")
 async def update_heartbeat_config(request: Request, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    config = _load_config(request)
-    config["heartbeat"] = payload
-    _save_config(request, config)
-    return payload
+    from ..heartbeat import get_heartbeat_repo
+    username = getattr(request.state, "username", None) or "admin"
+    agent_id = request.headers.get("X-Agent-Id") or "global_default"
+    key = f"{username}:{agent_id}"
+    return get_heartbeat_repo().update(key, payload)
 
 
 @router.get("/config/user-timezone")

@@ -5,7 +5,9 @@ export interface ActiveHoursConfig {
 
 export interface HeartbeatConfig {
   enabled: boolean;
-  every: string;
+  interval_seconds: number;
   target: string;
-  activeHours?: ActiveHoursConfig | null;
+  active_hours?: ActiveHoursConfig | null;
+  timeout_seconds: number;
+  updated_at?: string | null;
 }
