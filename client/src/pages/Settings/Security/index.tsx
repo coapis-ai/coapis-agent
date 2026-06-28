@@ -9,6 +9,7 @@ import {
   SkillScannerSection,
   FileGuardSection,
   AllowNoAuthHostsTab,
+  InputGuardTab,
 } from "./components";
 import { PageHeader } from "@/components/PageHeader";
 import styles from "./index.module.less";
@@ -161,6 +162,15 @@ function SecurityPage() {
               children: (
                 <AllowNoAuthHostsTab onSave={onAllowNoAuthHostsHandlersReady} />
               ),
+            },
+            {
+              key: "inputGuard",
+              label: (
+                <span className={styles.tabLabel}>
+                  {t("security.inputGuard.title")}
+                </span>
+              ),
+              children: <InputGuardTab />,
             },
           ]}
         />

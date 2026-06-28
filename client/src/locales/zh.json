@@ -2131,6 +2131,23 @@
       "saveFailed": "保存免认证主机白名单设置失败",
       "loadFailed": "加载免认证主机白名单设置失败"
     },
+    "inputGuard": {
+      "title": "输入防护",
+      "category": "威胁分类",
+      "severity": "严重级别",
+      "patterns": "匹配规则",
+      "description": "描述",
+      "addRule": "新增规则",
+      "editRule": "编辑规则",
+      "confirmDelete": "确认删除该规则？",
+      "addPattern": "添加匹配模式",
+      "test": "测试",
+      "testTitle": "规则测试",
+      "testPlaceholder": "输入要测试的文本，检查是否会被拦截",
+      "runTest": "运行测试",
+      "reload": "热重载",
+      "reloadSuccess": "规则重载成功"
+    },
     "skillScanner": {
       "title": "技能扫描器",
       "description": "在启用或安装技能前，自动扫描安全威胁。不安全的技能可以被拦截或加入白名单。",

@@ -6,3 +6,4 @@ export * from "./FileGuardSection";
 export * from "./ShellEvasionSection";
 export * from "./ToolGuardTab";
 export * from "./AllowNoAuthHostsTab";
+export { default as InputGuardTab } from "./InputGuardTab";

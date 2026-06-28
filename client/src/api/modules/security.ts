@@ -85,6 +85,33 @@ export interface AllowNoAuthHostsUpdateBody {
   hosts: string[];
 }
 
+// ── Input Guard types ─────────────────────────────────────────────
+
+export interface InputGuardRule {
+  id: string;
+  category: string;
+  severity: string;
+  patterns: string[];
+  description: string;
+}
+
+export interface InputGuardTestResult {
+  is_safe: boolean;
+  max_severity: string;
+  findings: InputGuardFinding[];
+}
+
+export interface InputGuardFinding {
+  id: string;
+  rule_id: string;
+  category: string;
+  severity: string;
+  title: string;
+  description: string;
+  matched_pattern: string | null;
+  snippet: string | null;
+}
+
 export const securityApi = {
   // ── Tool Guard ──────────────────────────────────────────────────
 
@@ -166,5 +193,42 @@ export const securityApi = {
     request<AllowNoAuthHostsResponse>("/config/security/allow-no-auth-hosts", {
       method: "PUT",
       body: JSON.stringify(body),
+    }),
+
+  // ── Input Guard ─────────────────────────────────────────────────
+
+  getInputGuardRules: () =>
+    request<InputGuardRule[]>("/input-guard/rules"),
+
+  getInputGuardRule: (ruleId: string) =>
+    request<InputGuardRule>(`/input-guard/rules/${encodeURIComponent(ruleId)}`),
+
+  addInputGuardRule: (body: InputGuardRule) =>
+    request<InputGuardRule>("/input-guard/rules", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateInputGuardRule: (ruleId: string, body: InputGuardRule) =>
+    request<InputGuardRule>(`/input-guard/rules/${encodeURIComponent(ruleId)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  deleteInputGuardRule: (ruleId: string) =>
+    request<{ status: string; id: string }>(
+      `/input-guard/rules/${encodeURIComponent(ruleId)}`,
+      { method: "DELETE" },
+    ),
+
+  testInputGuardText: (text: string) =>
+    request<InputGuardTestResult>("/input-guard/test", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+
+  reloadInputGuardRules: () =>
+    request<{ status: string; rule_count: number }>("/input-guard/reload", {
+      method: "POST",
     }),
 };

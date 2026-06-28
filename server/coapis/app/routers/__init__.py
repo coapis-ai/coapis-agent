@@ -78,6 +78,7 @@ from .multi_layer_evolution import router as multi_layer_evolution_router
 from .security import router as security_router
 from .permissions import router as permissions_router
 from .admin_providers import router as admin_providers_router
+from .input_guard import router as input_guard_router
 from .user_model_prefs import router as user_model_prefs_router
 from ..inbox import router as inbox_router
 from ..setup import router as setup_router
@@ -145,6 +146,7 @@ router.include_router(foundation_router)
 router.include_router(cross_agent_router)
 router.include_router(multi_layer_evolution_router)
 router.include_router(security_router)
+router.include_router(input_guard_router)
 router.include_router(permissions_router)
 router.include_router(inbox_router)
 router.include_router(setup_router)

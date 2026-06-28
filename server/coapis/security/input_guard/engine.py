@@ -49,6 +49,45 @@ class InputGuardEngine:
                 aggregated.add_finding(finding)
         return aggregated
 
+    def list_rules(self) -> list[dict[str, Any]]:
+        """List all rules from the first RuleBasedInputGuardian."""
+        for g in self._guardians:
+            if isinstance(g, RuleBasedInputGuardian):
+                return g.list_rules()
+        return []
+
+    def get_rule(self, rule_id: str) -> dict[str, Any] | None:
+        for g in self._guardians:
+            if isinstance(g, RuleBasedInputGuardian):
+                return g.get_rule(rule_id)
+        return None
+
+    def add_rule(self, rule: dict[str, Any]) -> None:
+        for g in self._guardians:
+            if isinstance(g, RuleBasedInputGuardian):
+                g.add_rule(rule)
+                return
+
+    def update_rule(self, rule_id: str, rule: dict[str, Any]) -> bool:
+        for g in self._guardians:
+            if isinstance(g, RuleBasedInputGuardian):
+                return g.update_rule(rule_id, rule)
+        return False
+
+    def delete_rule(self, rule_id: str) -> bool:
+        for g in self._guardians:
+            if isinstance(g, RuleBasedInputGuardian):
+                return g.delete_rule(rule_id)
+        return False
+
+    def reload(self) -> int:
+        """Reload all guardians from disk. Returns total rule count."""
+        total = 0
+        for g in self._guardians:
+            if isinstance(g, RuleBasedInputGuardian):
+                total += g.reload()
+        return total
+
 
 def get_input_guard_engine() -> InputGuardEngine:
     """Get or create the global InputGuardEngine singleton."""

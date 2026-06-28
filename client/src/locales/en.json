@@ -2207,6 +2207,23 @@
       "saveFailed": "Failed to save file guard settings",
       "loadFailed": "Failed to load file guard settings"
     },
+    "inputGuard": {
+      "title": "Input Guard",
+      "category": "Category",
+      "severity": "Severity",
+      "patterns": "Patterns",
+      "description": "Description",
+      "addRule": "Add Rule",
+      "editRule": "Edit Rule",
+      "confirmDelete": "Delete this rule?",
+      "addPattern": "Add Pattern",
+      "test": "Test",
+      "testTitle": "Rule Test",
+      "testPlaceholder": "Enter text to test against current rules",
+      "runTest": "Run Test",
+      "reload": "Hot Reload",
+      "reloadSuccess": "Rules reloaded successfully"
+    },
     "allowNoAuthHosts": {
       "title": "Allow No Auth Hosts",
       "warningTitle": "Security Warning",
