@@ -844,6 +844,8 @@ class Workspace:
                 # Extract message text from AgentRequest
                 input_msgs = getattr(request_obj, "input", [])
                 session_id = getattr(request_obj, "session_id", "")
+                if not session_id:
+                    session_id = str(uuid_mod.uuid4())[:8]
                 user_id = getattr(request_obj, "user_id", "")
 
                 user_texts = []
@@ -867,15 +869,18 @@ class Workspace:
                 # Build chat key with user isolation
                 chat_key = f"{self.username}:{session_id}" if self.username else session_id
 
+                # Check if this is a new chat BEFORE creating context
+                _is_new_chat = chat_key not in self._active_chats
+
                 # Get or create chat context
                 context = await self._get_chat_context(chat_key)
 
                 # Reset foundation memory for new sessions
-                if chat_key not in self._active_chats and self.foundation_manager:
+                if _is_new_chat and self.foundation_manager:
                     self.foundation_manager.reset_injection_state()
 
                 # ── Evolution: on_session_start for new chats ──
-                if chat_key not in self._active_chats and self.evolution_engine:
+                if _is_new_chat and self.evolution_engine:
                     try:
                         self.evolution_engine.on_session_start(
                             session_id=session_id,
