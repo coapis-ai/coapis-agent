@@ -350,7 +350,7 @@ function UserLevelTab({ selectedUser }: { selectedUser: string }) {
 // Middle Layer Tab (with promote button for Admin)
 // =================================================================
 
-function MiddleLayerTab({ selectedUser, isAdmin }: { selectedUser: string; isAdmin: boolean }) {
+export function MiddleLayerTab({ selectedUser, isAdmin }: { selectedUser: string; isAdmin: boolean }) {
   const { t } = useTranslation();
   const [activeBucket, setActiveBucket] = useState('a');
   const [bucketA, setBucketA] = useState<BucketEntry[]>([]);
@@ -600,7 +600,7 @@ function FoundationTab({ isAdmin }: { isAdmin: boolean }) {
 // Archive Tab (Phase 4 new feature)
 // =================================================================
 
-function ArchiveTab() {
+export function ArchiveTab() {
   const { t } = useTranslation();
   const { hasPermission } = usePermission();
   const canDelete = hasPermission("evolution:delete");
@@ -696,7 +696,7 @@ interface FunnelData {
   funnel: Array<{ stage: string; count: number }>;
 }
 
-function SkillEvolutionTab() {
+export function SkillEvolutionTab() {
   const [subTab, setSubTab] = useState('dashboard');
   const subItems = [
     { key: 'dashboard', label: <><BarChartOutlined /> 效能看板</>, children: <MetricsDashboard /> },

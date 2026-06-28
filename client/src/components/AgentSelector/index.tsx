@@ -5,7 +5,7 @@ import { SparkDownLine, SparkUpLine } from "@agentscope-ai/icons";
 import { useAgentStore } from "../../stores/agentStore";
 import { agentsApi } from "../../api/modules/agents";
 import { useTranslation } from "react-i18next";
-import { getAgentDisplayName } from "../../utils/agentDisplayName";
+import { getAgentDisplayName, isDefaultAgent } from "../../utils/agentDisplayName";
 import { useNavigate } from "react-router-dom";
 import { useAppMessage } from "../../hooks/useAppMessage";
 import styles from "./index.module.less";
@@ -33,10 +33,11 @@ export default function AgentSelector({
     try {
       setLoading(true);
       const data = await agentsApi.listAgents();
-      // Sort agents: enabled first, disabled last
+      // Sort: default agent first, then by API order (creation time)
       const sortedAgents = [...data.agents].sort((a, b) => {
-        if (a.enabled === b.enabled) return 0;
-        return a.enabled ? -1 : 1;
+        const aDefault = isDefaultAgent(a.id) ? 0 : 1;
+        const bDefault = isDefaultAgent(b.id) ? 0 : 1;
+        return aDefault - bDefault;
       });
       setAgents(sortedAgents);
     } catch (error) {
@@ -62,17 +63,18 @@ export default function AgentSelector({
 
   // Auto-switch to default if the selected agent was deleted or disabled
   useEffect(() => {
-    if (!agents?.length || selectedAgent === "default") return;
+    if (!agents?.length || !selectedAgent) return;
 
     const currentAgent = agents.find((a) => a.id === selectedAgent);
+    const fallback = agents.find((a) => isDefaultAgent(a.id)) || agents[0];
 
     if (!currentAgent) {
       // Agent was deleted — no longer in the list
-      setSelectedAgent("default");
+      if (fallback) setSelectedAgent(fallback.id);
       message.warning(t("agent.currentAgentDeleted"));
     } else if (!currentAgent.enabled) {
       // Agent exists but was disabled
-      setSelectedAgent("default");
+      if (fallback) setSelectedAgent(fallback.id);
       message.warning(t("agent.currentAgentDisabled"));
     }
   }, [agents, selectedAgent, setSelectedAgent, t]);

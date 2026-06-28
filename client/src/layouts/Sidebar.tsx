@@ -42,7 +42,7 @@ import { useUser } from "../contexts/UserContext";
 import styles from "./index.module.less";
 import { useTheme } from "../contexts/ThemeContext";
 import { KEY_TO_PATH, DEFAULT_OPEN_KEYS } from "./constants";
-import { getAgentDisplayName } from "../utils/agentDisplayName";
+import { getAgentDisplayName, isDefaultAgent } from "../utils/agentDisplayName";
 import {
   MENU_TO_PERMISSION,
 } from "../config/menuModules";
@@ -80,11 +80,28 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       .listAgents()
       .then((res) => {
         const agentList = Array.isArray(res) ? res : (res as any).agents || [];
-        // API already returns only user-specific agents, no filtering needed
-        setAgents(agentList);
+        // Sort: user's default agent (user:*) first, then by API order (creation time)
+        const sorted = [...agentList].sort((a, b) => {
+          const aDefault = isDefaultAgent(a.id) ? 0 : 1;
+          const bDefault = isDefaultAgent(b.id) ? 0 : 1;
+          return aDefault - bDefault;
+        });
+        setAgents(sorted);
+
+        // Auto-select: if no valid agent selected, pick the user's default agent
+        const current = useAgentStore.getState().selectedAgent;
+        const currentValid = sorted.some((a) => a.id === current);
+        if (!currentValid) {
+          const defaultAgent = sorted.find((a) => isDefaultAgent(a.id));
+          if (defaultAgent) {
+            setSelectedAgent(defaultAgent.id);
+          } else if (sorted.length > 0) {
+            setSelectedAgent(sorted[0].id);
+          }
+        }
       })
       .catch(() => {});
-  }, [setAgents]);
+  }, [setAgents, setSelectedAgent]);
   
   // Load permissions on mount and when user changes
   useEffect(() => {

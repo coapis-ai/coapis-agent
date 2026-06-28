@@ -438,6 +438,13 @@ async def create_agent(
     # Only set is_global=true when explicitly requested via API payload.
     is_global = payload.is_global is True
 
+    # Guard: user: prefix agents must NEVER be global
+    if is_global and agent_id.startswith("user:"):
+        raise HTTPException(
+            status_code=400,
+            detail="user: 前缀的智能体不能设为全局智能体 (is_global=true)",
+        )
+
     # Handle workspace_dir: user agents must be under workspaces/{username}/agents/
     from ...constant import WORKSPACES_DIR, WORKING_DIR
     workspace_dir = payload.workspace_dir

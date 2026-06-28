@@ -34,7 +34,7 @@ interface AgentStore {
  * Priority:
  *  1. sessionStorage (returning to a tab that already picked an agent)
  *  2. localStorage lastUsedAgent (new tab inherits the most recent choice)
- *  3. "default"
+ *  3. "" (empty — Sidebar will resolve the user's default agent)
  */
 function getInitialSelectedAgent(): string {
   // 1. sessionStorage: returning to a tab that already picked an agent
@@ -66,7 +66,7 @@ function getInitialSelectedAgent(): string {
   } catch {
     /* ignore */
   }
-  return "default";
+  return "";
 }
 
 export const useAgentStore = create<AgentStore>()(
@@ -100,7 +100,7 @@ export const useAgentStore = create<AgentStore>()(
             agents: state.agents.filter((a) => a.id !== agentId),
             lastChatIdByAgent: remainingChatIds,
             ...(state.selectedAgent === agentId
-              ? { selectedAgent: "default" }
+              ? { selectedAgent: "" }
               : {}),
           };
         }),

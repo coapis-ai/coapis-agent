@@ -6,8 +6,8 @@ import { useAgentStore } from "../../stores/agentStore";
 function getSelectedAgent(): string | undefined {
   try {
     const { selectedAgent } = useAgentStore.getState();
-    // "default" means user's own agent — don't send it, let backend resolve by username
-    return selectedAgent && selectedAgent !== "default"
+    // Empty or "default" means user's own agent — don't send it, let backend resolve by username
+    return selectedAgent && selectedAgent !== ""
       ? selectedAgent
       : undefined;
   } catch {

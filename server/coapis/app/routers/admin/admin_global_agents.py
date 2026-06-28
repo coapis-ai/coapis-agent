@@ -35,6 +35,9 @@ async def list_global_agents(request: Request) -> Dict[str, Any]:
             continue
 
         agent_id = agent_dir.name
+        # 跳过用户智能体（user: 前缀），它们不应出现在全局列表中
+        if agent_id.startswith("user:"):
+            continue
         agent_info = {
             "id": agent_id,
             "path": str(agent_dir),

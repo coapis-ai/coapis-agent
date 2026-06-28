@@ -19,7 +19,7 @@ function getSelectedAgentId(): string {
   } catch (error) {
     console.warn("Failed to get selected agent from storage:", error);
   }
-  return "default";
+  return "";
 }
 
 function generateFallbackFilename(): string {

@@ -395,6 +395,10 @@ class CoApisACPAgent(Agent):
         """Return the effective workspace directory."""
         if self._workspace_dir is not None:
             return self._workspace_dir
+        # user:xxx agents live under workspaces/{username}, not workspaces/{agent_id}
+        if agent_id.startswith("user:"):
+            username = agent_id.split(":", 1)[1]
+            return WORKING_DIR / "workspaces" / username
         return WORKING_DIR / "workspaces" / agent_id
 
     async def _ensure_workspace(self) -> Any:
@@ -412,9 +416,18 @@ class CoApisACPAgent(Agent):
         agent_id = self._resolve_agent_id()
         workspace_dir = self._resolve_workspace_dir(agent_id)
 
+        # Determine scope: user:xxx agents belong to a specific user
+        username = None
+        is_global = True
+        if agent_id.startswith("user:"):
+            username = agent_id.split(":", 1)[1]
+            is_global = False
+
         workspace = Workspace(
             agent_id=agent_id,
             workspace_dir=str(workspace_dir),
+            username=username,
+            is_global=is_global,
         )
         await workspace.start()
 
