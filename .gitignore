@@ -90,3 +90,4 @@ enterprise/eaterclaw_enterprise.egg-info/
 # --- Playwright browser binaries (too large for git) ---
 docker/volume/
 server/deploy/chromium-cache/
+*.bak*
