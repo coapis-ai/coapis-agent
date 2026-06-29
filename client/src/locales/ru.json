@@ -1424,6 +1424,9 @@
     "title": "Безопасность",
     "description": "Управление функциями безопасности инструментов и навыков.",
     "toolGuardTitle": "Защита инструментов",
+    "toolDetection": {
+      "title": "Правила обнаружения инструментов"
+    },
     "toolGuardDescription": "Настройте сканирование безопасности для вызовов инструментов. Опасные операции потребуют вашего явного подтверждения перед выполнением.",
     "enabled": "Включить защиту инструментов",
     "enabledTooltip": "При включении вызовы инструментов сканируются на наличие опасных шаблонов перед выполнением",
@@ -1588,6 +1591,30 @@
         "warnDescription": "Обнаружены проблемы безопасности, но навык был включён (режим предупреждения):",
         "goToWhitelist": "Перейти к белому списку",
         "moreFindings": "Ещё {{count}} записей не показано (полный список: Настройки → Безопасность → Сканер навыков)."
+      }
+    },
+    "toolGuard": {
+      "tabs": {
+        "accessControl": "Access Control",
+        "commands": "Command Levels",
+        "rules": "Detection Rules",
+        "evasion": "Evasion Detection"
+      },
+      "actions": {
+        "allow": "Allow",
+        "allowTooltip": "Execute directly, log operation only",
+        "audit": "Audit",
+        "auditTooltip": "Execute directly, record detailed audit log",
+        "confirm": "Confirm",
+        "confirmTooltip": "Requires user approval before execution",
+        "block": "Block",
+        "blockTooltip": "Block execution, record alert log"
+      },
+      "commands": {
+        "allLevels": "All",
+        "commands": "commands",
+        "actionSaved": "Action updated",
+        "actionSaveFailed": "Failed to update action"
       }
     }
   },

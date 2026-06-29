@@ -3,6 +3,7 @@
 from .tool_sandbox import ToolSandbox, SandboxResult
 from .sandboxed_executor import SandboxedExecutor
 from .audit_chain import HashChainAuditLogger
+from .audit_logger import SecurityAuditLogger
 from .tool_monitor import ToolCallMonitor, ToolCallRecord
 from .import_sandbox import ImportSandbox
 from .ast_sandbox import ASTSandbox
@@ -13,6 +14,7 @@ __all__ = [
     "ToolSandbox", "SandboxResult",
     "SandboxedExecutor",
     "HashChainAuditLogger",
+    "SecurityAuditLogger",
     "ToolCallMonitor", "ToolCallRecord",
     "ImportSandbox",
     "ASTSandbox",

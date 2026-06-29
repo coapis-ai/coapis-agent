@@ -1982,6 +1982,9 @@
     "title": "安全",
     "description": "管理工具和技能的安全功能。",
     "toolGuardTitle": "工具防护",
+    "toolDetection": {
+      "title": "工具检测规则"
+    },
     "toolGuardDescription": "配置工具调用的安全扫描。危险操作将在执行前需要你的明确批准。",
     "enabled": "启用工具防护",
     "enabledTooltip": "启用后，工具调用在执行前会被扫描是否包含危险模式",
@@ -2148,6 +2151,15 @@
       "reload": "热重载",
       "reloadSuccess": "规则重载成功"
     },
+    "shellGuard": {
+      "title": "Shell 防护",
+      "dangerRules": "危险命令规则",
+      "evasionDetection": "逃逸检测",
+      "execPolicy": "执行策略",
+      "rulesDesc": "来自 dangerous_shell_commands.yaml，检测已知危险 Shell 命令模式",
+      "evasionDesc": "检测混淆/逃逸手法，防止攻击者绕过命令规则。每个检测项独立开关。",
+      "policyDesc": "按角色配置 Shell 命令执行策略：白名单（允许）、黑名单（禁止）、危险模式（需审批）。"
+    },
     "skillScanner": {
       "title": "技能扫描器",
       "description": "在启用或安装技能前，自动扫描安全威胁。不安全的技能可以被拦截或加入白名单。",
@@ -2197,6 +2209,30 @@
         "warnDescription": "发现安全问题，但技能仍已启用（仅提醒模式）：",
         "goToWhitelist": "前往白名单",
         "moreFindings": "另有 {{count}} 条未列出（完整列表见 设置 → 安全 → 技能扫描）。"
+      }
+    },
+    "toolGuard": {
+      "tabs": {
+        "accessControl": "工具准入",
+        "commands": "命令分级",
+        "rules": "检测规则",
+        "evasion": "逃逸检测"
+      },
+      "actions": {
+        "allow": "放行",
+        "allowTooltip": "直接执行，仅记录操作日志",
+        "audit": "审计",
+        "auditTooltip": "直接执行，记录详细审计日志",
+        "confirm": "审批",
+        "confirmTooltip": "需用户在审批面板中确认后才执行",
+        "block": "拦截",
+        "blockTooltip": "直接拒绝执行，记录告警日志"
+      },
+      "commands": {
+        "allLevels": "全部",
+        "commands": "个命令",
+        "actionSaved": "动作已更新",
+        "actionSaveFailed": "动作更新失败"
       }
     }
   },

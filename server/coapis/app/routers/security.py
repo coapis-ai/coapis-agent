@@ -44,6 +44,7 @@ FILE_GUARD_FILE = SECURITY_DIR / "file_guard.json"
 SKILL_SCANNER_FILE = SECURITY_DIR / "skill_scanner.json"
 ALLOW_NO_AUTH_FILE = SECURITY_DIR / "allow_no_auth_hosts.json"
 BLOCKED_HISTORY_FILE = SECURITY_DIR / "blocked_history.json"
+SHELL_GUARD_FILE = SECURITY_DIR / "shell_guard.json"
 
 
 # ── Default configs ─────────────────────────────────────────────────
@@ -317,3 +318,115 @@ async def update_allow_no_auth_hosts(
         cfg["hosts"] = body["hosts"]
     _save_json(ALLOW_NO_AUTH_FILE, cfg)
     return cfg
+
+
+# ── Shell Guard (独立端点) ──────────────────────────────────────────
+# 从 tool_guard 拆分出来的 Shell 防护独立 API：
+# - YAML 规则读取/替换（来自 dangerous_shell_commands.yaml）
+# - shell_evasion_checks 配置读取/更新
+
+from pathlib import Path as _Path
+
+_SHELL_RULES_FILE = (
+    _Path(__file__).resolve().parent.parent.parent
+    / "security" / "tool_guard" / "rules" / "dangerous_shell_commands.yaml"
+)
+
+
+def _load_shell_yaml_rules() -> List[Dict[str, Any]]:
+    """Load shell rules from YAML file."""
+    import yaml
+    if not _SHELL_RULES_FILE.exists():
+        return []
+    try:
+        with open(_SHELL_RULES_FILE, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or []
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        logger.error("Failed to load shell rules YAML: %s", e)
+        return []
+
+
+def _save_shell_yaml_rules(rules: List[Dict[str, Any]]) -> None:
+    """Save shell rules to YAML file."""
+    import yaml
+    try:
+        with open(_SHELL_RULES_FILE, "w", encoding="utf-8") as f:
+            yaml.dump(rules, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        logger.info("Saved %d shell rules to %s", len(rules), _SHELL_RULES_FILE)
+    except Exception as e:
+        logger.error("Failed to save shell rules YAML: %s", e)
+
+
+DEFAULT_SHELL_GUARD: Dict[str, Any] = {
+    "evasion_checks": {
+        "command_substitution": True,
+        "obfuscated_flags": True,
+        "backslash_escaped_whitespace": True,
+        "backslash_escaped_operators": True,
+        "newlines": True,
+        "comment_quote_desync": True,
+        "quoted_newline": True,
+    },
+}
+
+
+@router.get("/config/security/shell-guard/rules")
+@require_permission("security:read")
+async def get_shell_guard_rules(request: Request) -> List[Dict[str, Any]]:
+    """Get all shell detection rules from YAML."""
+    return _load_shell_yaml_rules()
+
+
+@router.put("/config/security/shell-guard/rules")
+@require_permission("security:write")
+async def update_shell_guard_rules(
+    request: Request,
+    body: List[Dict[str, Any]] = Body(...),
+) -> Dict[str, Any]:
+    """Replace all shell detection rules (full list)."""
+    _save_shell_yaml_rules(body)
+    return {"status": "saved", "count": len(body)}
+
+
+@router.get("/config/security/shell-guard/evasion-checks")
+@require_permission("security:read")
+async def get_shell_evasion_checks(request: Request) -> Dict[str, Any]:
+    """Get shell evasion check toggles."""
+    # 优先从独立 shell_guard.json 读取，兼容从 tool_guard 读取
+    cfg = _load_json(SHELL_GUARD_FILE, DEFAULT_SHELL_GUARD)
+    if "evasion_checks" in cfg:
+        return {"evasion_checks": cfg["evasion_checks"]}
+    # 兼容：从 tool_guard 读取
+    tg = _load_json(TOOL_GUARD_FILE, DEFAULT_TOOL_GUARD)
+    return {"evasion_checks": tg.get("shell_evasion_checks", DEFAULT_SHELL_GUARD["evasion_checks"])}
+
+
+@router.put("/config/security/shell-guard/evasion-checks")
+@require_permission("security:write")
+async def update_shell_evasion_checks(
+    request: Request,
+    body: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """Update shell evasion check toggles."""
+    checks = body.get("evasion_checks", body)
+    cfg = _load_json(SHELL_GUARD_FILE, DEFAULT_SHELL_GUARD)
+    cfg["evasion_checks"] = checks
+    _save_json(SHELL_GUARD_FILE, cfg)
+    # 同步到 tool_guard 兼容字段
+    tg = _load_json(TOOL_GUARD_FILE, DEFAULT_TOOL_GUARD)
+    tg["shell_evasion_checks"] = checks
+    _save_json(TOOL_GUARD_FILE, tg)
+    return {"evasion_checks": checks}
+
+
+@router.get("/config/security/shell-guard/config")
+@require_permission("security:read")
+async def get_shell_guard_config(request: Request) -> Dict[str, Any]:
+    """Get full shell guard config (rules count + evasion checks)."""
+    rules = _load_shell_yaml_rules()
+    evasion_cfg = _load_json(SHELL_GUARD_FILE, DEFAULT_SHELL_GUARD)
+    return {
+        "rules_count": len(rules),
+        "evasion_checks": evasion_cfg.get("evasion_checks", DEFAULT_SHELL_GUARD["evasion_checks"]),
+    }

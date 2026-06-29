@@ -20,14 +20,14 @@ function SecurityPage() {
   const {
     activeTab,
     setActiveTab,
-    form,
-    config,
-    enabled,
-    setEnabled,
-    toolOptions,
-    saving,
-    handleSave,
-    handleReset,
+    form: _unusedForm,
+    config: _unusedConfig,
+    enabled: _unusedEnabled,
+    setEnabled: _unusedSetEnabled,
+    toolOptions: _unusedToolOptions,
+    saving: _unusedSaving,
+    handleSave: _unusedHandleSave,
+    handleReset: _unusedHandleReset,
     mergedRules,
     builtinRules,
     customRules,
@@ -35,8 +35,8 @@ function SecurityPage() {
     deleteCustomRule,
     openAddRule,
     openEditRule,
-    shellEvasionChecks,
-    toggleShellEvasionCheck,
+    shellEvasionChecks: _unused1,
+    toggleShellEvasionCheck: _unused2,
     editModal,
     setEditModal,
     editingRule,
@@ -95,24 +95,17 @@ function SecurityPage() {
               key: "toolGuard",
               label: (
                 <span className={styles.tabLabel}>
-                  {t("security.toolGuardTitle")}
+                  {t("security.toolDetection.title", "工具检测规则")}
                 </span>
               ),
               children: (
                 <ToolGuardTab
-                  form={form}
-                  config={config}
-                  enabled={enabled}
-                  setEnabled={setEnabled}
-                  toolOptions={toolOptions}
                   mergedRules={mergedRules}
                   toggleRule={toggleRule}
                   onPreviewRule={setPreviewRule}
                   onEditRule={openEditRule}
                   onDeleteRule={deleteCustomRule}
                   openAddRule={openAddRule}
-                  shellEvasionChecks={shellEvasionChecks}
-                  toggleShellEvasionCheck={toggleShellEvasionCheck}
                 />
               ),
             },
@@ -175,23 +168,6 @@ function SecurityPage() {
           ]}
         />
       </div>
-
-      {activeTab === "toolGuard" && (
-        <div className={styles.footerButtons}>
-          <Button
-            onClick={handleReset}
-            disabled={saving}
-            style={{ marginRight: 8 }}
-          >
-            {t("common.reset")}
-          </Button>
-          <PermissionGuard module="security" action="write">
-            <Button type="primary" onClick={handleSave} loading={saving}>
-              {t("common.save")}
-            </Button>
-          </PermissionGuard>
-        </div>
-      )}
 
       {activeTab === "fileGuard" && fileGuardHandlers && (
         <div className={styles.footerButtons}>

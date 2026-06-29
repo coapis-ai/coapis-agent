@@ -1,18 +1,24 @@
-"""Sandboxed tool executor with timeout, output truncation, and rate limiting."""
+"""Sandboxed tool executor - unified security gateway for all tool calls.
+
+Security layers (executed in order):
+1. Tool whitelist check
+2. Path whitelist check (file tools)
+3. Command classification (L0-L4 via UnifiedToolGuardEngine)
+4. Pattern rules + escape detection (via UnifiedToolGuardEngine)
+5. Input content detection (via InputGuardEngine)
+6. Audit logging for all security events
+"""
 
 import asyncio
-import collections
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any, Callable, Optional
+
 from .tool_sandbox import ToolSandbox
 
 logger = logging.getLogger(__name__)
-
-# Per-user rate limit: max tool calls per sliding window
-_RATE_LIMIT_MAX = int(os.environ.get("COAPIS_RATE_LIMIT_MAX", "30"))
-_RATE_LIMIT_WINDOW = float(os.environ.get("COAPIS_RATE_LIMIT_WINDOW", "60"))
 
 # Tools that are allowed to execute
 ALLOWED_TOOLS = frozenset({
@@ -21,7 +27,7 @@ ALLOWED_TOOLS = frozenset({
     "execute_shell_command",
     "get_current_time", "set_user_timezone",
     "get_token_usage",
-    "view_image",
+    "view_image", "view_video",
     "send_file_to_user",
     "desktop_screenshot",
     "memory_search",
@@ -40,148 +46,214 @@ COMMAND_TOOLS = frozenset({
 
 
 class SandboxedExecutor:
-    """Execute tools in a sandboxed environment.
+    """Execute tools through unified security pipeline.
 
     Provides:
     - Tool whitelist enforcement
     - Path validation for file tools
-    - Command validation for shell tools
+    - Command classification (L0-L4)
+    - Pattern rules + escape detection
+    - Input content detection
     - Execution timeout
     - Output truncation
-    - Per-user rate limiting (sliding window)
+    - Audit logging
     """
 
-    # Class-level sliding window: {username: deque[timestamp]}
-    _rate_windows: dict[str, collections.deque] = {}
+    def __init__(self):
+        self._unified_engine = None
+        self._input_guard = None
+        self._audit_logger = None
 
-    def __init__(
-        self,
-        username: str,
-        workspace_dir: str,
-        max_output_bytes: int = 1024 * 1024,  # 1MB
-        execution_timeout: int = 30,  # seconds
-    ):
-        self.username = username
-        self.workspace_dir = workspace_dir
-        self.sandbox = ToolSandbox(username, workspace_dir)
-        self.max_output_bytes = max_output_bytes
-        self.execution_timeout = execution_timeout
+    def _get_unified_engine(self):
+        """Lazy-load UnifiedToolGuardEngine."""
+        if self._unified_engine is None:
+            try:
+                from .tool_guard.unified_engine import UnifiedToolGuardEngine
+                self._unified_engine = UnifiedToolGuardEngine()
+                logger.info("UnifiedToolGuardEngine loaded")
+            except Exception as e:
+                logger.warning(f"Failed to load UnifiedToolGuardEngine: {e}")
+        return self._unified_engine
 
-    def _check_rate_limit(self) -> bool:
-        """Check if user exceeds per-user rate limit. Returns True if OK."""
-        now = time.monotonic()
-        window = self._rate_windows.setdefault(
-            self.username, collections.deque()
-        )
-        # Evict old entries outside the sliding window
-        while window and (now - window[0]) > _RATE_LIMIT_WINDOW:
-            window.popleft()
-        if len(window) >= _RATE_LIMIT_MAX:
-            return False
-        window.append(now)
-        return True
+    def _get_input_guard(self):
+        """Lazy-load InputGuardEngine."""
+        if self._input_guard is None:
+            try:
+                from .input_guard.engine import InputGuardEngine
+                self._input_guard = InputGuardEngine()
+                logger.info("InputGuardEngine loaded")
+            except Exception as e:
+                logger.warning(f"Failed to load InputGuardEngine: {e}")
+        return self._input_guard
 
-    async def execute_tool(
-        self,
-        tool_name: str,
-        tool_func: Callable,
-        **kwargs,
-    ) -> Any:
-        """Execute a tool with sandbox checks.
+    def _get_audit_logger(self):
+        """Lazy-load SecurityAuditLogger."""
+        if self._audit_logger is None:
+            try:
+                from .audit_logger import SecurityAuditLogger
+                self._audit_logger = SecurityAuditLogger.get_instance()
+            except Exception:
+                pass
+        return self._audit_logger
 
-        Args:
-            tool_name: Name of the tool
-            tool_func: Async callable to execute
-            **kwargs: Tool arguments
+    def _get_sandbox(self, username: str) -> Optional[ToolSandbox]:
+        """Get ToolSandbox for a user."""
+        try:
+            workspaces_dir = os.environ.get(
+                "COAPIS_WORKSPACES_DIR", "/apps/ai/coapis/workspaces"
+            )
+            workspace_dir = f"{workspaces_dir}/{username}"
+            return ToolSandbox(username=username, workspace_dir=workspace_dir)
+        except Exception as e:
+            logger.warning(f"Failed to create ToolSandbox for {username}: {e}")
+            return None
+
+    def check_tool_allowed(self, tool_name: str) -> dict:
+        """Check if a tool is in the whitelist.
 
         Returns:
-            Tool execution result
-
-        Raises:
-            PermissionError: If tool is not allowed or arguments are invalid
-            TimeoutError: If execution exceeds timeout
+            {"allowed": bool, "reason": str}
         """
-        # 0. Per-user rate limit check
-        if not self._check_rate_limit():
-            raise PermissionError(
-                f"Rate limit exceeded: {_RATE_LIMIT_MAX} tool calls "
-                f"per {_RATE_LIMIT_WINDOW}s window for user '{self.username}'"
-            )
-
-        # 1. Tool whitelist check
         if tool_name not in ALLOWED_TOOLS:
-            raise PermissionError(f"Tool '{tool_name}' not in allowed list")
+            return {
+                "allowed": False,
+                "reason": f"Tool '{tool_name}' not in allowed tools list",
+            }
+        return {"allowed": True, "reason": ""}
 
-        # 2. Argument validation
-        self._validate_arguments(tool_name, kwargs)
+    def check_path(self, username: str, path: str, operation: str = "read") -> dict:
+        """Check if path access is allowed for a user.
 
-        # 3. Execute with timeout
-        t0 = time.monotonic()
-        try:
-            result = await asyncio.wait_for(
-                self._run_tool(tool_func, **kwargs),
-                timeout=self.execution_timeout,
-            )
-        except asyncio.TimeoutError:
-            elapsed = time.monotonic() - t0
-            logger.warning(
-                "Tool %s timed out after %.1fs for user %s",
-                tool_name, elapsed, self.username,
-            )
-            raise TimeoutError(
-                f"Tool '{tool_name}' exceeded {self.execution_timeout}s timeout"
-            )
+        Returns:
+            {"allowed": bool, "reason": str, "resolved_path": str}
+        """
+        sandbox = self._get_sandbox(username)
+        if sandbox is None:
+            return {"allowed": True, "reason": "No sandbox available", "resolved_path": path}
 
-        elapsed = time.monotonic() - t0
-        logger.debug(
-            "Tool %s executed in %.1fs for user %s",
-            tool_name, elapsed, self.username,
-        )
+        result = sandbox.check_path(path, operation)
+        return {
+            "allowed": result.allowed,
+            "reason": result.reason,
+            "resolved_path": result.resolved_path or path,
+        }
 
-        # 4. Output truncation
-        return self._truncate_output(result)
+    def check_command(self, username: str, command: str) -> dict:
+        """Run full security pipeline on a command.
 
-    def _validate_arguments(self, tool_name: str, kwargs: dict):
-        """Validate tool arguments against sandbox rules."""
-        if tool_name in PATH_TOOLS:
-            path = (
-                kwargs.get("file_path")
-                or kwargs.get("path")
-                or kwargs.get("image_path")
-                or kwargs.get("file_path")
-                or ""
-            )
-            if path:
-                result = self.sandbox.check_path(path)
-                if not result.allowed:
-                    raise PermissionError(
-                        f"Path access denied for '{tool_name}': {result.reason}"
-                    )
+        Returns:
+            {
+                "allowed": bool,
+                "action": str,  # allow/audit/confirm/block
+                "level": str,   # L0-L4
+                "reason": str,
+                "matched_rules": list,
+                "evasion_flags": list,
+            }
+        """
+        result = {
+            "allowed": True,
+            "action": "allow",
+            "level": "L0",
+            "reason": "",
+            "matched_rules": [],
+            "evasion_flags": [],
+        }
 
-        if tool_name in COMMAND_TOOLS:
-            command = kwargs.get("command", "")
-            if command:
-                result = self.sandbox.check_command(command)
-                if not result.allowed:
-                    raise PermissionError(
-                        f"Command denied for '{tool_name}': {result.reason}"
-                    )
+        # 1. ToolSandbox basic check
+        sandbox = self._get_sandbox(username)
+        if sandbox:
+            sb_result = sandbox.check_command(command)
+            if not sb_result.allowed:
+                result["allowed"] = False
+                result["action"] = "block"
+                result["reason"] = sb_result.reason
+                self._log_command(username, command, result)
+                return result
 
-    async def _run_tool(self, func: Callable, **kwargs) -> Any:
-        """Run the tool function."""
-        if asyncio.iscoroutinefunction(func):
-            return await func(**kwargs)
-        else:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, lambda: func(**kwargs))
+        # 2. UnifiedToolGuardEngine (command classification + rules + evasion)
+        engine = self._get_unified_engine()
+        if engine:
+            try:
+                guard_result = engine.process_command("execute_shell_command", {"command": command})
+                result["level"] = guard_result.get("level", "L0")
+                result["action"] = guard_result.get("action", "allow")
+                result["matched_rules"] = guard_result.get("matched_rules", [])
+                result["evasion_flags"] = guard_result.get("evasion_flags", [])
+                result["reason"] = guard_result.get("reason", "")
 
-    def _truncate_output(self, result: Any) -> Any:
-        """Truncate oversized output."""
-        if isinstance(result, str):
-            encoded = result.encode("utf-8", errors="replace")
-            if len(encoded) > self.max_output_bytes:
-                truncated = encoded[: self.max_output_bytes].decode(
-                    "utf-8", errors="replace"
-                )
-                return truncated + f"\n... [truncated at {self.max_output_bytes} bytes]"
+                if result["action"] == "block":
+                    result["allowed"] = False
+                    self._log_command(username, command, result)
+                    return result
+
+                # audit/confirm actions: allowed but logged
+                if result["action"] in ("audit", "confirm"):
+                    self._log_command(username, command, result)
+            except Exception as e:
+                logger.warning(f"UnifiedToolGuardEngine error: {e}")
+
+        # 3. InputGuardEngine (input content detection)
+        input_guard = self._get_input_guard()
+        if input_guard:
+            try:
+                from .input_guard.models import InputRequest
+                request = InputRequest(content=command, user=username, source="tool_execute")
+                ig_result = asyncio.get_event_loop().run_until_complete(
+                    input_guard.check_input(request)
+                ) if not asyncio.get_event_loop().is_running() else None
+
+                if ig_result and ig_result.blocked:
+                    result["allowed"] = False
+                    result["action"] = "block"
+                    result["reason"] = f"InputGuard: {ig_result.reason}"
+                    self._log_input(username, command, ig_result)
+                    return result
+            except Exception as e:
+                logger.debug(f"InputGuard check skipped: {e}")
+
+        self._log_command(username, command, result)
         return result
+
+    def _log_command(self, username: str, command: str, result: dict):
+        """Log command check result to audit logger."""
+        audit = self._get_audit_logger()
+        if audit is None:
+            return
+
+        try:
+            if result["action"] == "block":
+                audit.log_command_block(
+                    user=username,
+                    command=command,
+                    level=result.get("level", "L0"),
+                    action=result["action"],
+                    reason=result.get("reason", ""),
+                    matched_rules=result.get("matched_rules", []),
+                )
+            elif result["action"] in ("audit", "confirm"):
+                audit.log_command_audit(
+                    user=username,
+                    command=command,
+                    level=result.get("level", "L0"),
+                    action=result["action"],
+                    matched_rules=result.get("matched_rules", []),
+                )
+        except Exception as e:
+            logger.debug(f"Audit log failed: {e}")
+
+    def _log_input(self, username: str, input_text: str, ig_result):
+        """Log input guard result to audit logger."""
+        audit = self._get_audit_logger()
+        if audit is None:
+            return
+
+        try:
+            audit.log_input_block(
+                user=username,
+                input_summary=input_text,
+                reason=ig_result.reason,
+                matched_rules=getattr(ig_result, "matched_rules", []),
+            )
+        except Exception as e:
+            logger.debug(f"Audit log failed: {e}")

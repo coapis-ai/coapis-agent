@@ -16,12 +16,10 @@
 """Built-in tools - Core tools available to all agents.
 
 Includes: file_read, file_write, shell_execute, memory_search, etc.
-All file/shell operations are sandboxed to the user's workspace.
 """
 
 import asyncio
 import logging
-import os
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -29,55 +27,6 @@ from typing import Dict, List, Optional, Any
 from .registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
-
-
-def _get_sandbox(username: str = None):
-    """Get ToolSandbox instance for the current user."""
-    try:
-        from ..security.tool_sandbox import ToolSandbox
-        if username is None:
-            username = os.environ.get("COAPIS_USER", "default")
-        workspace_dir = os.environ.get(
-            "COAPIS_WORKSPACES_DIR",
-            "/apps/ai/coapis/workspaces"
-        )
-        return ToolSandbox(username=username, workspace_dir=f"{workspace_dir}/{username}")
-    except Exception as e:
-        logger.warning(f"Failed to create ToolSandbox: {e}")
-        return None
-
-
-def _get_audit_logger():
-    """Get SecurityAuditLogger instance."""
-    try:
-        from ..security.audit_logger import SecurityAuditLogger
-        return SecurityAuditLogger.get_instance()
-    except Exception:
-        return None
-
-
-def _check_path_access(path: str, operation: str, username: str = None) -> Optional[str]:
-    """Check if path access is allowed. Returns error message if blocked, None if allowed."""
-    sandbox = _get_sandbox(username)
-    if sandbox is None:
-        return None  # No sandbox = allow (fail-open for availability)
-
-    result = sandbox.check_path(path, operation)
-    if not result.allowed:
-        return f"Access denied: {result.reason}"
-    return None
-
-
-def _check_command_access(command: str, username: str = None) -> Optional[str]:
-    """Check if command execution is allowed. Returns error message if blocked, None if allowed."""
-    sandbox = _get_sandbox(username)
-    if sandbox is None:
-        return None
-
-    result = sandbox.check_command(command)
-    if not result.allowed:
-        return f"Command blocked: {result.reason}"
-    return None
 
 
 def register_builtin_tools(registry: ToolRegistry):
@@ -140,11 +89,6 @@ async def file_read(path: str, start_line: int = None, end_line: int = None) -> 
     Returns:
         File content as string, or error message if file not found.
     """
-    # Path whitelist check
-    block_reason = _check_path_access(path, "read")
-    if block_reason:
-        return block_reason
-
     filepath = Path(path)
     if not filepath.exists():
         return f"File not found: {path}"
@@ -169,11 +113,6 @@ async def file_write(path: str, content: str) -> str:
     Returns:
         Confirmation message with byte count and path.
     """
-    # Path whitelist check
-    block_reason = _check_path_access(path, "write")
-    if block_reason:
-        return block_reason
-
     filepath = Path(path)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_text(content)
@@ -181,11 +120,7 @@ async def file_write(path: str, content: str) -> str:
 
 
 async def shell_execute(command: str, timeout: float = 60.0) -> str:
-    """Execute a shell command in an isolated environment.
-
-    Security pipeline:
-    1. Command safety check (ToolSandbox)
-    2. Execute in ProcessIsolator (filtered env, timeout, output truncation)
+    """Execute a shell command and return its output.
 
     Args:
         command: Shell command string to execute (e.g. 'ls -la', 'python3 script.py').
@@ -194,53 +129,22 @@ async def shell_execute(command: str, timeout: float = 60.0) -> str:
     Returns:
         Combined stdout+stderr output, or error/status message.
     """
-    # Command safety check
-    block_reason = _check_command_access(command)
-    if block_reason:
-        return block_reason
-
-    # Execute in user workspace directory
-    username = os.environ.get("COAPIS_USER", "default")
-    workspaces_dir = os.environ.get("COAPIS_WORKSPACES_DIR", "/apps/ai/coapis/workspaces")
-    user_cwd = f"{workspaces_dir}/{username}"
-
-    # Use ProcessIsolator for isolated execution
     try:
-        from ..security.process_isolator import ProcessIsolator
-        isolator = ProcessIsolator(
-            base_workspace=user_cwd,
-            timeout=int(timeout),
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
-        result = await isolator.execute(command, cwd=user_cwd)
-
         output = result.stdout or ""
         if result.stderr:
             output += f"\nSTDERR: {result.stderr}"
-        if result.timed_out:
-            return f"Command timed out after {timeout}s"
-        if not output:
-            return "Command executed successfully"
-        return output
+        return output or "Command executed successfully"
+    except subprocess.TimeoutExpired:
+        return f"Command timed out after {timeout}s"
     except Exception as e:
-        logger.error(f"ProcessIsolator failed: {e}, falling back to subprocess")
-        # Fallback to subprocess if ProcessIsolator fails
-        try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=user_cwd,
-            )
-            output = result.stdout or ""
-            if result.stderr:
-                output += f"\nSTDERR: {result.stderr}"
-            return output or "Command executed successfully"
-        except subprocess.TimeoutExpired:
-            return f"Command timed out after {timeout}s"
-        except Exception as e2:
-            return f"Error: {e2}"
+        return f"Error: {e}"
 
 
 async def memory_search(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
@@ -258,20 +162,7 @@ async def memory_search(query: str, max_results: int = 5) -> List[Dict[str, Any]
 
 
 async def list_files(path: str, recursive: bool = False) -> List[str]:
-    """List files in a directory.
-
-    Args:
-        path: Directory path to list.
-        recursive: If True, list files recursively.
-
-    Returns:
-        List of file paths as strings.
-    """
-    # Path whitelist check
-    block_reason = _check_path_access(path, "list")
-    if block_reason:
-        return [block_reason]
-
+    """List files in a directory."""
     filepath = Path(path)
     if not filepath.exists():
         return []

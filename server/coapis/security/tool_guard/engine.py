@@ -258,3 +258,24 @@ def get_guard_engine() -> ToolGuardEngine:
     if _engine_instance is None:
         _engine_instance = ToolGuardEngine()
     return _engine_instance
+
+
+# ---------------------------------------------------------------------------
+# Unified engine access (new)
+# ---------------------------------------------------------------------------
+
+_unified_engine_instance = None
+
+
+def get_unified_engine():
+    """Return a lazily-initialised :class:`UnifiedToolGuardEngine` singleton.
+
+    The unified engine loads from ``system/tool_guard.yaml`` and provides
+    ``process_command()`` for the three-layer pipeline (command classification
+    → pattern rules → evasion detection).
+    """
+    global _unified_engine_instance
+    if _unified_engine_instance is None:
+        from .unified_engine import UnifiedToolGuardEngine
+        _unified_engine_instance = UnifiedToolGuardEngine()
+    return _unified_engine_instance

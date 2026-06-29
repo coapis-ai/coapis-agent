@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Input guard engine – orchestrates all registered guardians."""
+"""Input guard engine – orchestrates all registered guardians.
+
+Security checks:
+- Command injection detection
+- Prompt injection detection
+- Data exfiltration detection
+- Path traversal detection
+
+All blocked inputs are logged to SecurityAuditLogger.
+"""
 
 from __future__ import annotations
 
@@ -35,19 +44,65 @@ class InputGuardEngine:
             self._guardians = guardians
         else:
             self._guardians = [RuleBasedInputGuardian(rules_path=rules_path)]
+        self._audit_logger = None
         logger.info(
             "InputGuardEngine initialized with %d guardian(s)",
             len(self._guardians),
         )
 
-    def check(self, text: str) -> InputGuardResult:
-        """Check input text against all guardians. Returns aggregated result."""
+    def _get_audit_logger(self):
+        """Lazy-load SecurityAuditLogger."""
+        if self._audit_logger is None:
+            try:
+                from coapis.security.audit_logger import SecurityAuditLogger
+                self._audit_logger = SecurityAuditLogger.get_instance()
+            except Exception:
+                pass
+        return self._audit_logger
+
+    def check(self, text: str, username: str = "", agent_id: str = "") -> InputGuardResult:
+        """Check input text against all guardians. Returns aggregated result.
+
+        If input is blocked, logs to SecurityAuditLogger.
+        """
         aggregated = InputGuardResult()
         for guardian in self._guardians:
             result = guardian.check(text)
             for finding in result.findings:
                 aggregated.add_finding(finding)
+
+        # Log blocked inputs to audit
+        if not aggregated.is_safe:
+            self._log_blocked_input(text, aggregated, username, agent_id)
+
         return aggregated
+
+    def _log_blocked_input(
+        self, text: str, result: InputGuardResult, username: str, agent_id: str
+    ):
+        """Log blocked input to audit logger."""
+        audit = self._get_audit_logger()
+        if audit is None:
+            return
+
+        try:
+            matched_rules = []
+            for finding in result.findings:
+                matched_rules.append({
+                    "rule_id": getattr(finding, "rule_id", "unknown"),
+                    "category": getattr(finding, "category", "unknown"),
+                    "severity": str(getattr(finding, "severity", "MEDIUM")),
+                })
+
+            audit.log_input_block(
+                user=username or "unknown",
+                input_summary=text[:200],
+                reason=result.block_message or "Input blocked by guard",
+                agent_id=agent_id,
+                matched_rules=matched_rules,
+            )
+        except Exception as e:
+            logger.debug(f"Failed to log blocked input: {e}")
 
     def list_rules(self) -> list[dict[str, Any]]:
         """List all rules from the first RuleBasedInputGuardian."""

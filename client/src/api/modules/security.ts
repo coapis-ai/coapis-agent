@@ -112,6 +112,20 @@ export interface InputGuardFinding {
   snippet: string | null;
 }
 
+// ── Shell Guard types ─────────────────────────────────────────────
+
+export interface ShellRule {
+  id: string;
+  tools?: string[];
+  params?: string[];
+  category: string;
+  severity: string;
+  patterns: string[];
+  exclude_patterns?: string[];
+  description: string;
+  remediation?: string;
+}
+
 export const securityApi = {
   // ── Tool Guard ──────────────────────────────────────────────────
 
@@ -231,4 +245,99 @@ export const securityApi = {
     request<{ status: string; rule_count: number }>("/input-guard/reload", {
       method: "POST",
     }),
+
+  // ── Shell Guard ──────────────────────────────────────────────────
+
+  getShellGuardRules: () =>
+    request<ShellRule[]>("/config/security/shell-guard/rules"),
+
+  getShellEvasionChecks: () =>
+    request<{ evasion_checks: Record<string, boolean> }>(
+      "/config/security/shell-guard/evasion-checks",
+    ),
+
+  updateShellEvasionChecks: (checks: Record<string, boolean>) =>
+    request<{ evasion_checks: Record<string, boolean> }>(
+      "/config/security/shell-guard/evasion-checks",
+      {
+        method: "PUT",
+        body: JSON.stringify(checks),
+      },
+    ),
+
+  getShellGuardConfig: () =>
+    request<{ rules_count: number; evasion_checks: Record<string, boolean> }>(
+      "/config/security/shell-guard/config",
+    ),
+
+  // ── Unified Tool Guard (new) ────────────────────────────────────
+
+  getUnifiedToolGuardConfig: () =>
+    request<{
+      version: string;
+      description: string;
+      access_control: Record<string, any>;
+      commands_count: number;
+      rules_count: number;
+      evasion_checks: Record<string, boolean>;
+    }>("/config/security/tool-guard/config"),
+
+  getUnifiedCommands: () =>
+    request<Record<string, { level: string; desc: string; action: string }>>(
+      "/config/security/tool-guard/commands",
+    ),
+
+  getUnifiedRules: () =>
+    request<ShellRule[]>("/config/security/tool-guard/rules"),
+
+  getUnifiedEvasionChecks: () =>
+    request<{ evasion_checks: Record<string, boolean> }>(
+      "/config/security/tool-guard/evasion-checks",
+    ),
+
+  updateUnifiedEvasionChecks: (checks: Record<string, boolean>) =>
+    request<{ evasion_checks: Record<string, boolean> }>(
+      "/config/security/tool-guard/evasion-checks",
+      {
+        method: "PUT",
+        body: JSON.stringify({ evasion_checks: checks }),
+      },
+    ),
+
+  testUnifiedCommand: (command: string) =>
+    request<{
+      action: string;
+      level: string | null;
+      command: string | null;
+      matched_rules: Array<{
+        id: string;
+        severity: string;
+        category: string;
+        description: string;
+        action: string;
+        matched_text: string;
+      }>;
+      evasion_flags: Array<{
+        id: string;
+        severity: string;
+        description: string;
+      }>;
+      reason: string;
+      duration_ms: number;
+    }>("/config/security/tool-guard/test", {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    }),
+
+  updateSingleCommand: (
+    cmdName: string,
+    body: { level?: string; action?: string; desc?: string },
+  ) =>
+    request<{ level: string; desc: string; action: string }>(
+      `/config/security/tool-guard/commands/${encodeURIComponent(cmdName)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
+    ),
 };

@@ -23,29 +23,12 @@ import asyncio
 import inspect
 import logging
 import functools
-import os
 from typing import Dict, List, Optional, Callable, Any, Awaitable
 from dataclasses import dataclass, field
 
 from .schema_gen import auto_generate_schema, merge_with_manual_schema
 
 logger = logging.getLogger(__name__)
-
-# ─── SandboxedExecutor integration ───
-_sandboxed_executor = None
-
-
-def _get_sandboxed_executor():
-    """Lazy-load SandboxedExecutor to avoid circular imports."""
-    global _sandboxed_executor
-    if _sandboxed_executor is None:
-        try:
-            from ..security.sandboxed_executor import SandboxedExecutor
-            _sandboxed_executor = SandboxedExecutor()
-            logger.info("SandboxedExecutor loaded for tool whitelist checking")
-        except Exception as e:
-            logger.warning(f"Failed to load SandboxedExecutor: {e}")
-    return _sandboxed_executor
 
 # Tool groups — basic is always active; others activated by query keywords.
 TOOL_GROUPS = {
@@ -263,12 +246,7 @@ class ToolRegistry:
         return coerced
 
     async def call(self, name: str, **kwargs) -> Any:
-        """Call a tool with timeout and security checks.
-
-        Security checks (in order):
-        1. Tool existence check
-        2. Deny-list check
-        3. SandboxedExecutor whitelist check
+        """Call a tool with timeout.
 
         Args:
             name: Tool name
@@ -287,25 +265,6 @@ class ToolRegistry:
 
         if name in self._denied_tools:
             raise ValueError(f"Tool denied: {name}")
-
-        # SandboxedExecutor whitelist check
-        executor = _get_sandboxed_executor()
-        if executor:
-            check = executor.check_tool_allowed(name)
-            if not check["allowed"]:
-                # Log to audit
-                try:
-                    from ..security.audit_logger import SecurityAuditLogger
-                    username = os.environ.get("COAPIS_USER", "default")
-                    audit = SecurityAuditLogger.get_instance()
-                    audit.log_tool_denied(
-                        user=username,
-                        tool_name=name,
-                        reason=check["reason"],
-                    )
-                except Exception:
-                    pass
-                raise ValueError(f"Tool not allowed: {name} — {check['reason']}")
 
         # Coerce string args to correct types per parameter schema
         kwargs = self._coerce_args(kwargs, tool.parameters)

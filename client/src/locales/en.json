@@ -2075,6 +2075,9 @@
     "title": "Security",
     "description": "Manage security features for tools and skills.",
     "toolGuardTitle": "Tool Guard",
+    "toolDetection": {
+      "title": "Tool Detection Rules"
+    },
     "toolGuardDescription": "Configure security scanning for tool calls. Dangerous operations will require your explicit approval before execution.",
     "enabled": "Enable Tool Guard",
     "enabledTooltip": "When enabled, tool calls are scanned for dangerous patterns before execution",
@@ -2224,6 +2227,15 @@
       "reload": "Hot Reload",
       "reloadSuccess": "Rules reloaded successfully"
     },
+    "shellGuard": {
+      "title": "Shell Guard",
+      "dangerRules": "Dangerous Command Rules",
+      "evasionDetection": "Evasion Detection",
+      "execPolicy": "Execution Policy",
+      "rulesDesc": "From dangerous_shell_commands.yaml — detects known dangerous shell command patterns",
+      "evasionDesc": "Detects obfuscation/evasion techniques that attempt to bypass command rules. Each check can be toggled independently.",
+      "policyDesc": "Configure per-role shell command execution policy: whitelist (allow), blacklist (block), dangerous patterns (require approval)."
+    },
     "allowNoAuthHosts": {
       "title": "Allow No Auth Hosts",
       "warningTitle": "Security Warning",
@@ -2290,6 +2302,30 @@
         "warnDescription": "Security issues were found but the skill was still enabled (warn mode):",
         "goToWhitelist": "Go to Whitelist",
         "moreFindings": "{{count}} more issues not shown (see Security → Skill Scanner for the full list)."
+      }
+    },
+    "toolGuard": {
+      "tabs": {
+        "accessControl": "Access Control",
+        "commands": "Command Levels",
+        "rules": "Detection Rules",
+        "evasion": "Evasion Detection"
+      },
+      "actions": {
+        "allow": "Allow",
+        "allowTooltip": "Execute directly, log operation only",
+        "audit": "Audit",
+        "auditTooltip": "Execute directly, record detailed audit log",
+        "confirm": "Confirm",
+        "confirmTooltip": "Requires user approval before execution",
+        "block": "Block",
+        "blockTooltip": "Block execution, record alert log"
+      },
+      "commands": {
+        "allLevels": "All",
+        "commands": "commands",
+        "actionSaved": "Action updated",
+        "actionSaveFailed": "Failed to update action"
       }
     }
   },

@@ -1409,6 +1409,9 @@
     "title": "セキュリティ",
     "description": "ツールとスキルのセキュリティ機能を管理します。",
     "toolGuardTitle": "ツールガード",
+    "toolDetection": {
+      "title": "ツール検出ルール"
+    },
     "toolGuardDescription": "ツール呼び出しのセキュリティスキャンを設定します。危険な操作は実行前に明示的な承認が必要になります。",
     "enabled": "ツールガードを有効にする",
     "enabledTooltip": "有効にすると、ツール呼び出しが実行前に危険なパターンをスキャンされます",
@@ -1573,6 +1576,30 @@
         "warnDescription": "セキュリティ問題が見つかりましたが、スキルは引き続き有効です（警告モード）：",
         "goToWhitelist": "ホワイトリストへ",
         "moreFindings": "他に {{count}} 件は表示していません（一覧は 設定 → セキュリティ → スキルスキャナ を参照）。"
+      }
+    },
+    "toolGuard": {
+      "tabs": {
+        "accessControl": "Access Control",
+        "commands": "Command Levels",
+        "rules": "Detection Rules",
+        "evasion": "Evasion Detection"
+      },
+      "actions": {
+        "allow": "Allow",
+        "allowTooltip": "Execute directly, log operation only",
+        "audit": "Audit",
+        "auditTooltip": "Execute directly, record detailed audit log",
+        "confirm": "Confirm",
+        "confirmTooltip": "Requires user approval before execution",
+        "block": "Block",
+        "blockTooltip": "Block execution, record alert log"
+      },
+      "commands": {
+        "allLevels": "All",
+        "commands": "commands",
+        "actionSaved": "Action updated",
+        "actionSaveFailed": "Failed to update action"
       }
     }
   },

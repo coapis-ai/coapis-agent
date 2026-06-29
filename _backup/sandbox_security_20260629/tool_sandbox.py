@@ -1,10 +1,4 @@
-"""Tool execution sandbox - cross-platform path and command validation.
-
-Enforces user workspace isolation:
-- Users can ONLY access their own workspace directory
-- System directories (system/, agents/) are NOT exposed
-- Other users' workspaces are NOT accessible
-"""
+"""Tool execution sandbox - cross-platform path and command validation."""
 
 import os
 import re
@@ -25,15 +19,11 @@ class ToolSandbox:
 
     Validates file paths and shell commands before execution.
     Works on Linux, macOS, and Windows.
-
-    Security model:
-    - Each user can only access their own workspace
-    - System directories are internal-only, not exposed to users
-    - Path traversal and symlink attacks are blocked
     """
 
     # Blocked path patterns (regex)
     BLOCKED_PATTERNS = [
+        r"\.\./\.\./\.\.",
         r"/etc/passwd",
         r"/etc/shadow",
         r"/root/",
@@ -65,24 +55,9 @@ class ToolSandbox:
         self.username = username
         self.workspace_dir = Path(workspace_dir).resolve()
         self.allowed_dirs = self._build_allowed_dirs()
-        self._audit_logger = None
-
-    def _get_audit_logger(self):
-        """Lazy-load audit logger to avoid circular imports."""
-        if self._audit_logger is None:
-            try:
-                from .audit_logger import SecurityAuditLogger
-                self._audit_logger = SecurityAuditLogger.get_instance()
-            except Exception:
-                pass
-        return self._audit_logger
 
     def _build_allowed_dirs(self) -> Set[Path]:
-        """Build set of allowed directories.
-
-        Only user workspace directories are allowed.
-        System directories (system/, agents/) are NOT included.
-        """
+        """Build set of allowed directories."""
         dirs = {
             self.workspace_dir,
             self.workspace_dir / "files",
@@ -97,7 +72,7 @@ class ToolSandbox:
 
         Args:
             path: File path to validate
-            operation: read/write/execute/list
+            operation: read/write/execute
 
         Returns:
             SandboxResult with allowed status and reason
@@ -105,7 +80,6 @@ class ToolSandbox:
         try:
             resolved = Path(path).resolve()
         except (OSError, ValueError) as e:
-            self._log_path_check(path, operation, False, f"Invalid path: {e}")
             return SandboxResult(allowed=False, reason=f"Invalid path: {e}")
 
         path_str = str(resolved)
@@ -113,7 +87,6 @@ class ToolSandbox:
         # Check blocked patterns
         for pattern in self.BLOCKED_PATTERNS:
             if re.search(pattern, path_str, re.IGNORECASE):
-                self._log_path_check(path_str, operation, False, f"Blocked pattern: {pattern}")
                 return SandboxResult(
                     allowed=False,
                     reason=f"Blocked pattern: {pattern}",
@@ -127,10 +100,10 @@ class ToolSandbox:
             except ValueError:
                 continue
 
-        # Path not in any allowed directory
-        reason = f"Path {path_str} not in any allowed directory (user={self.username})"
-        self._log_path_check(path_str, operation, False, reason)
-        return SandboxResult(allowed=False, reason=reason)
+        return SandboxResult(
+            allowed=False,
+            reason=f"Path {path_str} not in any allowed directory",
+        )
 
     def check_command(self, command: str) -> SandboxResult:
         """Check if a shell command is safe.
@@ -146,35 +119,18 @@ class ToolSandbox:
         # Check dangerous patterns
         for dangerous in self.DANGEROUS_COMMANDS:
             if dangerous in cmd_lower:
-                self._log_path_check(command, "execute", False, f"Dangerous command pattern: {dangerous}")
                 return SandboxResult(
                     allowed=False,
                     reason=f"Dangerous command pattern: {dangerous}",
                 )
 
-        # Check path traversal to system dirs
+        # Check path traversal
         if "../" in command and any(
             sensitive in command for sensitive in ["/etc", "/root", "/home"]
         ):
-            self._log_path_check(command, "execute", False, "Path traversal detected in command")
             return SandboxResult(
                 allowed=False,
                 reason="Path traversal detected in command",
             )
 
         return SandboxResult(allowed=True)
-
-    def _log_path_check(self, path: str, operation: str, allowed: bool, reason: str):
-        """Log path check result to audit logger."""
-        logger = self._get_audit_logger()
-        if logger:
-            try:
-                logger.log_path_check(
-                    user=self.username,
-                    path=str(path),
-                    operation=operation,
-                    allowed=allowed,
-                    reason=reason,
-                )
-            except Exception:
-                pass  # Don't let audit logging break the sandbox
