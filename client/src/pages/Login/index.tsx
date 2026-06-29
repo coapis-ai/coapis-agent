@@ -49,7 +49,7 @@ export default function LoginPage() {
         if (res.token) {
           setAuthToken(res.token);
           window.currentUserId = values.username;
-          window.currentChannel = "console";
+          window.currentChannel = "";  // 控制台不设 channel，显示所有来源聊天
           // Store first_login flag for onboarding
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");
@@ -62,7 +62,7 @@ export default function LoginPage() {
         if (res.token) {
           setAuthToken(res.token);
           window.currentUserId = values.username;
-          window.currentChannel = "console";
+          window.currentChannel = "";  // 控制台不设 channel，显示所有来源聊天
           // Store first_login flag for onboarding
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");

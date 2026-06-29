@@ -43,7 +43,7 @@ const ChatActionGroup: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     planApi
-      .getPlanConfig()
+      .getPlanConfig(selectedAgent || undefined)
       .then((cfg) => {
         if (!cancelled) setPlanEnabled(cfg.enabled);
       })

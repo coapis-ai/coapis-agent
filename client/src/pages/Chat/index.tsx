@@ -42,7 +42,6 @@ import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
-import GroupedResponseCard from "./components/GroupedResponseCard";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
 
@@ -597,7 +596,7 @@ export default function ChatPage() {
   useEffect(() => {
     let cancelled = false;
     planApi
-      .getPlanConfig()
+      .getPlanConfig(selectedAgent || undefined)
       .then((cfg) => {
         if (!cancelled) setPlanEnabled(cfg.enabled);
       })
@@ -923,12 +922,21 @@ export default function ChatPage() {
       setSessions(sessions);
     };
 
+    // When a new session's realId (backend UUID) is resolved during createSession,
+    // update chatIdRef so the first message is sent with the correct chat_id.
+    // Without this, the first message would have chat_id=undefined and the
+    // backend might not associate it with the correct chat.
+    sessionApi.onSessionRealIdResolved = (_localId: string, realId: string) => {
+      chatIdRef.current = realId;
+    };
+
     return () => {
       sessionApi.onSessionIdResolved = null;
       sessionApi.onSessionRemoved = null;
       sessionApi.onSessionSelected = null;
       sessionApi.onSessionCreated = null;
       sessionApi.onSessionListUpdated = null;
+      sessionApi.onSessionRealIdResolved = null;
     };
   }, []);
 
@@ -1280,6 +1288,14 @@ export default function ChatPage() {
             _pluginCallMsgTypes.clear();
             const builderOutput = (chatRef.current?.messages?.getMessages?.() as any[]) || [];
             console.log(`[rp] ★ COMPLETED(${payload.status}): ${builderOutput.length} msgs, chatRef=${!!chatRef.current}`);
+            // Diagnostic: store last completion data on window for debugging
+            (window as any).__lastCompletion = {
+              status: payload.status,
+              builderOutputLen: builderOutput.length,
+              chatRefExists: !!chatRef.current,
+              messagesMethod: typeof chatRef.current?.messages?.getMessages,
+              timestamp: Date.now(),
+            };
 
             // Refresh session list so auto-renamed titles are picked up
             sessionApi.invalidateSessionList();
@@ -1346,7 +1362,6 @@ export default function ChatPage() {
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
-        AgentScopeRuntimeResponseCard: GroupedResponseCard,
       },
       customToolRenderConfig: {
         ..._enhancedToolRenderConfig,

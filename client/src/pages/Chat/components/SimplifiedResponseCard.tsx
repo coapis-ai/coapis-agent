@@ -67,7 +67,7 @@ const SimplifiedResponseCard: React.FC<SimplifiedResponseCardProps> = ({
 
   // Filter messages based on config
   const filteredMessages = useMemo(() => {
-    // In hideDetails mode, we still show everything but let GroupedResponseCard handle the summarization
+    // In hideDetails mode, we still show everything; the library's default card handles rendering
     // This card is used as a fallback, so we show all messages
     return outputMessages;
   }, [outputMessages, config]);

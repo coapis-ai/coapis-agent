@@ -9,6 +9,7 @@ import {
   subscribePlanUpdates,
   type PlanStateResponse,
 } from "../../api/modules/plan";
+import { useAgentStore } from "../../stores/agentStore";
 import styles from "./index.module.less";
 
 interface PlanPanelProps {
@@ -43,6 +44,8 @@ function getBackendSessionId(): string {
 const PlanPanel: React.FC<PlanPanelProps> = ({ open, onClose }) => {
   const { t } = useTranslation();
   const { currentSessionId } = useChatAnywhereSessionsState();
+  const { selectedAgent } = useAgentStore();
+  const agentId = selectedAgent || undefined;
   const [plan, setPlan] = useState<PlanStateResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
@@ -55,7 +58,7 @@ const PlanPanel: React.FC<PlanPanelProps> = ({ open, onClose }) => {
     const sid = getBackendSessionId();
     setLoading(true);
     try {
-      const data = await planApi.getCurrentPlan(sid || undefined);
+      const data = await planApi.getCurrentPlan(sid || undefined, agentId);
       // If SSE already provided a non-null plan but the poll returned null,
       // trust SSE — the cache may not have been populated for this session_id
       // yet, or a race condition caused a stale response.
@@ -96,7 +99,7 @@ const PlanPanel: React.FC<PlanPanelProps> = ({ open, onClose }) => {
       if (eventSessionId && mySid && eventSessionId !== mySid) return;
       ssePlanRef.current = updatedPlan;
       setPlan(updatedPlan);
-    });
+    }, undefined, { agentId, sessionId: getBackendSessionId() });
     unsubRef.current = unsub;
 
     return () => {

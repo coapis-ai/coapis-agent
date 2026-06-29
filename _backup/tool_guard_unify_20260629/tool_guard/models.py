@@ -65,9 +65,6 @@ class GuardThreatCategory(str, Enum):
     PROMPT_INJECTION = "prompt_injection"
     CODE_EXECUTION = "code_execution"
     PRIVILEGE_ESCALATION = "privilege_escalation"
-    CONTAINER_MANAGEMENT = "container_management"
-    PACKAGE_MANAGEMENT = "package_management"
-    VERSION_CONTROL = "version_control"
 
 
 # ---------------------------------------------------------------------------

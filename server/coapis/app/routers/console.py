@@ -36,6 +36,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["console"])
 
+import re
+
+# UUID pattern (e.g. "550e8400-e29b-41d4-a716-446655440000")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _is_default_chat_name(name: Optional[str]) -> bool:
+    """Check if a chat name is a 'default' that should be auto-renamed."""
+    if not name:
+        return True
+    if name in ("New Chat", "新聊天", ""):
+        return True
+    # UUID-like names (backend may use chat UUID as name when no text available)
+    if _UUID_RE.match(name):
+        return True
+    # Very short names (likely truncated garbage)
+    if len(name) <= 2:
+        return True
+    return False
+
 
 @require_permission("chat:read")
 @router.get("/console/push-messages")
@@ -286,6 +308,14 @@ async def console_chat(
         )
     elif chat.name in ("New Chat", "新聊天", "") and name != "New Chat":
         # Auto-rename: update chat name from first user message
+        from ..runner.models import ChatUpdate
+        try:
+            await user_cm.patch_chat(chat.id, ChatUpdate(name=name))
+            chat.name = name
+        except Exception as e:
+            logger.warning(f"Failed to auto-rename chat {chat.id}: {e}")
+    elif _is_default_chat_name(chat.name) and name and name != "New Chat":
+        # Auto-rename: also handle UUID-like or other default names
         from ..runner.models import ChatUpdate
         try:
             await user_cm.patch_chat(chat.id, ChatUpdate(name=name))

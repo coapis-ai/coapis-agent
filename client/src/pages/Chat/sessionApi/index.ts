@@ -206,7 +206,9 @@ const BLOCK_TYPE_MAP: Record<string, { msgType: string; metaType?: string; role?
 
 const toOutputMessage = (msg: Message): OutputMessage[] => {
   const content = msg.content;
-  const msgType = (msg.type as string) || "message";
+  // Resolve message type: prefer msg.type, fallback to metadata.type, then "message"
+  // Persisted messages may only have metadata.type (e.g. reasoning messages)
+  const msgType = (msg.type as string) || (msg.metadata as Record<string, string>)?.type || "message";
 
   // Determine role: tool outputs from system role → "tool"
   const effectiveRole =
@@ -318,8 +320,8 @@ const buildResponseCard = (
     content: normalizeOutputMessageContent(msg.content),
   }));
 
-  // Build cards: single GroupedResponseCard with ALL messages (including reasoning)
-  // The GroupedResponseCard handles thinking/tool/text rendering internally.
+  // Build cards: single AgentScopeRuntimeResponseCard with ALL messages (including reasoning)
+  // The library's default card handles thinking/tool/text rendering internally.
   const cards: Array<{ code: string; data: Record<string, unknown> }> = [];
 
   if (normalizedMessages.length > 0) {
@@ -547,6 +549,13 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
    */
   onSessionListUpdated: ((sessions: IAgentScopeRuntimeWebUISession[]) => void) | null = null;
 
+  /**
+   * Called when a newly created session's realId (backend UUID) is resolved
+   * during createSession(). Consumers (Chat/index.tsx) use this to update
+   * chatIdRef so that the first message is sent with the correct chat_id.
+   */
+  onSessionRealIdResolved: ((localId: string, realId: string) => void) | null = null;
+
   /** Public read-only access to the session list. */
   get sessionList(): IAgentScopeRuntimeWebUISession[] {
     return this._sessions;
@@ -722,6 +731,26 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       (e) => !matchedOldIds.has(e.id),
     );
     this._sessions = [...unmatchedLocals, ...merged];
+
+    // Sync currentSessionId: if the current session was matched by sessionId
+    // or realId (but not by id), the library's currentSessionId may still
+    // point to a UUID while the session's id is a local timestamp.  This
+    // causes ChatHeaderTitle to show "New Chat" because find-by-id fails.
+    // Detect the mismatch and fire onSessionIdResolved so the URL and
+    // currentSessionId stay in sync.
+    if (this._currentSessionId) {
+      const current = this._sessions.find(
+        (s) =>
+          s.id === this._currentSessionId ||
+          (s as ExtendedSession).realId === this._currentSessionId ||
+          (s as ExtendedSession).sessionId === this._currentSessionId,
+      ) as ExtendedSession | undefined;
+      if (current && current.realId && current.id !== this._currentSessionId) {
+        // The session's local id differs from currentSessionId (which is the
+        // backend UUID).  Notify the Chat component to navigate to /chat/{realId}.
+        this.onSessionIdResolved?.(current.id, current.realId);
+      }
+    }
 
     if (this.preferredChatId) {
       const preferredId = this.preferredChatId;
@@ -1121,6 +1150,8 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       if (localSession && created?.id) {
         localSession.realId = created.id;
         (session as any).realId = created.id;
+        // Notify consumers so they can update chatIdRef before the first message is sent
+        this.onSessionRealIdResolved?.(id, created.id);
       }
     } catch (err) {
       console.warn("[sessionApi] Failed to persist new chat to backend:", err);
@@ -1140,6 +1171,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
    * Debounced to avoid excessive API calls during rapid message exchanges.
    */
   private _refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private _refreshTimerCascade: ReturnType<typeof setTimeout> | null = null;
 
   scheduleSessionListRefresh(delayMs: number = 1500): void {
     if (this._refreshTimer) {
@@ -1151,6 +1183,19 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         /* ignore refresh errors */
       });
     }, delayMs);
+
+    // Cascade: schedule a second refresh after a longer delay to pick up
+    // backend auto-rename (which only happens after the SSE stream ends).
+    // Long-running model responses can take 10-30s, so 8s is a safety net.
+    if (this._refreshTimerCascade) {
+      clearTimeout(this._refreshTimerCascade);
+    }
+    this._refreshTimerCascade = setTimeout(() => {
+      this._refreshTimerCascade = null;
+      this.getSessionList().catch(() => {
+        /* ignore refresh errors */
+      });
+    }, Math.max(delayMs * 4, 8000));
   }
 
   async removeSession(session: Partial<IAgentScopeRuntimeWebUISession>) {

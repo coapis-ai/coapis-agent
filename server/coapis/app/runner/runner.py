@@ -264,6 +264,45 @@ class AgentRunner(Runner):
             return None
         return manager.get_user_chat_manager(user_id)
 
+    @staticmethod
+    def _extract_summary_from_reasoning(reasoning_text: str, max_chars: int = 800) -> str:
+        """Extract a user-visible summary from reasoning text.
+
+        When the model puts all explanatory text in reasoning blocks
+        and the message block is empty, this method extracts the last
+        meaningful paragraph as a fallback summary.
+
+        Args:
+            reasoning_text: Full concatenated reasoning text
+            max_chars: Maximum characters to extract
+
+        Returns:
+            Extracted summary text, or empty string if nothing useful
+        """
+        if not reasoning_text or not reasoning_text.strip():
+            return ""
+
+        text = reasoning_text.strip()
+
+        # Split into paragraphs (double newline)
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+        if not paragraphs:
+            # Single paragraph — take last N chars
+            return text[-max_chars:] if len(text) > max_chars else text
+
+        # Take the last 1-3 paragraphs that fit within max_chars
+        result_parts = []
+        total_len = 0
+        for p in reversed(paragraphs):
+            if total_len + len(p) > max_chars and result_parts:
+                break
+            result_parts.append(p)
+            total_len += len(p)
+
+        result_parts.reverse()
+        return "\n\n".join(result_parts)
+
     async def _persist_chat_messages(
         self,
         chat,
@@ -419,6 +458,14 @@ class AgentRunner(Runner):
             if assistant_text:
                 assistant_msg = Msg(name="assistant", content=[TextBlock(text=assistant_text)], role="assistant")
                 await isolated_mem.add(assistant_msg)
+            elif reasoning_text:
+                # Fallback: when model puts all text in reasoning blocks
+                # and message block is empty, extract a summary from reasoning
+                # so the user can see something in chat history.
+                summary = self._extract_summary_from_reasoning(reasoning_text)
+                if summary:
+                    assistant_msg = Msg(name="assistant", content=[TextBlock(text=summary)], role="assistant")
+                    await isolated_mem.add(assistant_msg)
 
             logger.info(
                 "_persist_chat_messages: isolated_mem now has %d messages before save",

@@ -152,6 +152,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self._namesake_strategy = namesake_strategy
         self._workspace_dir = workspace_dir
         self._task_tracker = task_tracker
+        self.plan_notebook = plan_notebook  # Connect PlanNotebook to agent
 
         # Extract configuration from agent_config
         running_config = agent_config.running

@@ -293,110 +293,136 @@ class ToolGuardMixin:
                 guard_result=denied_result,
             )
 
-        # ── CommandRiskClassifier: three-level classification ──
-        # Only applies to shell commands; non-shell tools skip this layer
-        # to avoid false positives from URL/file path parameters.
-        if tool_name != "execute_shell_command":
-            cr = None  # skip CommandRiskClassifier for non-shell tools
-        else:
-            cr = None
+        # ── InputGuardEngine: input content detection (ALL tools) ──
+        # Detects prompt injection, data exfiltration, path traversal
+        # across ALL tool inputs — not just shell commands.
+        ctx = getattr(self, "_request_context", None) or {}
+        _ig_user = ctx.get("username", "")
+        _ig_agent = ctx.get("agent_id", "")
+        try:
+            if not hasattr(self, "_input_guard_engine"):
+                from ..security.input_guard.engine import InputGuardEngine
+                self._input_guard_engine = InputGuardEngine()
+            _ig_text = _json.dumps(tool_input, ensure_ascii=False) if tool_input else ""
+            if _ig_text:
+                _ig_result = self._input_guard_engine.check(
+                    _ig_text, username=_ig_user, agent_id=_ig_agent,
+                )
+                if not _ig_result.is_safe:
+                    _ig_findings = []
+                    for _f in _ig_result.findings:
+                        _ig_findings.append(GuardFinding(
+                            id=_f.id,
+                            rule_id=_f.rule_id,
+                            category=GuardThreatCategory(_f.category.value),
+                            severity=GuardSeverity(_f.severity.value),
+                            title=_f.title,
+                            description=_f.description,
+                            tool_name=tool_name,
+                            param_name="input",
+                            matched_value=(_f.snippet or "")[:200],
+                            matched_pattern=_f.matched_pattern,
+                            snippet=_f.snippet,
+                            remediation="Input content security violation",
+                            guardian="input_guard_engine",
+                        ))
+                    logger.warning(
+                        "InputGuardEngine: BLOCKED tool=%s findings=%d",
+                        tool_name, len(_ig_findings),
+                    )
+                    return _GuardAction(
+                        "auto_denied", tool_name, tool_input,
+                        guard_result=ToolGuardResult(
+                            tool_name=tool_name, params=tool_input,
+                            findings=_ig_findings,
+                            guardians_used=["input_guard_engine"],
+                        ),
+                    )
+        except Exception as exc:
+            logger.debug("InputGuardEngine error (non-blocking): %s", exc)
+
+        # ── UnifiedToolGuardEngine: command classification (shell only) ──
+        # Replaces CommandRiskClassifier with 108-command + 29-rule + 7-evasion
+        # pipeline.  Non-shell tools skip this layer (already handled by
+        # InputGuardEngine above).
+        if tool_name == "execute_shell_command":
             try:
-                from ..security.command_risk_classifier import (
-                    CommandRiskClassifier,
+                if not hasattr(self, "_unified_guard_engine"):
+                    from ..security.tool_guard.unified_engine import (
+                        UnifiedToolGuardEngine,
+                    )
+                    self._unified_guard_engine = UnifiedToolGuardEngine()
+                _ue = self._unified_guard_engine.process_command(
+                    tool_name, tool_input,
                 )
-                if not hasattr(self, "_command_risk_classifier"):
-                    self._command_risk_classifier = CommandRiskClassifier()
-                cr = self._command_risk_classifier.classify(
-                    tool_name, tool_input, user_role,
-                )
+                _ue_action = _ue.get("action", "allow")
+                if _ue_action == "block":
+                    _ue_findings = [
+                        GuardFinding(
+                            id=f"unified-{_mr['id']}",
+                            rule_id=_mr["id"],
+                            category=GuardThreatCategory.COMMAND_INJECTION,
+                            severity=GuardSeverity(
+                                _mr.get("severity", "HIGH"),
+                            ),
+                            title=_mr["id"],
+                            description=_mr.get("description", ""),
+                            tool_name=tool_name,
+                            param_name="command",
+                            matched_value=_ue.get("command", "")[:200],
+                            matched_pattern=_mr.get("matched_text", ""),
+                            guardian="unified_tool_guard_engine",
+                        )
+                        for _mr in _ue.get("matched_rules", [])
+                    ]
+                    logger.warning(
+                        "UnifiedToolGuardEngine: BLOCK tool=%s level=%s reason=%s",
+                        tool_name, _ue.get("level"), _ue.get("reason"),
+                    )
+                    return _GuardAction(
+                        "auto_denied", tool_name, tool_input,
+                        guard_result=ToolGuardResult(
+                            tool_name=tool_name, params=tool_input,
+                            findings=_ue_findings,
+                            guardians_used=["unified_tool_guard_engine"],
+                        ),
+                    )
+                if _ue_action == "confirm":
+                    _ue_findings = [
+                        GuardFinding(
+                            id=f"unified-{_mr['id']}",
+                            rule_id=_mr["id"],
+                            category=GuardThreatCategory.COMMAND_INJECTION,
+                            severity=GuardSeverity(
+                                _mr.get("severity", "HIGH"),
+                            ),
+                            title=_mr["id"],
+                            description=_mr.get("description", ""),
+                            tool_name=tool_name,
+                            param_name="command",
+                            matched_value=_ue.get("command", "")[:200],
+                            matched_pattern=_mr.get("matched_text", ""),
+                            guardian="unified_tool_guard_engine",
+                        )
+                        for _mr in _ue.get("matched_rules", [])
+                    ]
+                    logger.info(
+                        "UnifiedToolGuardEngine: CONFIRM tool=%s level=%s reason=%s",
+                        tool_name, _ue.get("level"), _ue.get("reason"),
+                    )
+                    return _GuardAction(
+                        "needs_approval", tool_name, tool_input,
+                        guard_result=ToolGuardResult(
+                            tool_name=tool_name, params=tool_input,
+                            findings=_ue_findings,
+                            guardians_used=["unified_tool_guard_engine"],
+                        ),
+                    )
+                # audit / allow → fall through to execution-level logic
             except Exception as exc:
                 logger.debug(
-                    "CommandRiskClassifier error (non-blocking): %s", exc,
+                    "UnifiedToolGuardEngine error (non-blocking): %s", exc,
                 )
-
-        if cr is not None:
-            from ..security.command_risk_classifier import CommandRiskLevel
-            if cr.risk_level == CommandRiskLevel.DENIED:
-                logger.warning(
-                    "CommandRiskClassifier: DENIED tool=%s role=%s "
-                    "category=%s reason=%s",
-                    tool_name, user_role, cr.command_category.value,
-                    cr.reason,
-                )
-                return _GuardAction(
-                    "auto_denied", tool_name, tool_input,
-                    guard_result=ToolGuardResult(
-                        tool_name=tool_name, params=tool_input,
-                        findings=[GuardFinding(
-                            id="risk-classifier-denied",
-                            rule_id="command_risk_classifier",
-                            category=GuardThreatCategory.COMMAND_INJECTION,
-                            severity=GuardSeverity.CRITICAL,
-                            title="Command Risk: DENIED",
-                            description=cr.reason,
-                            tool_name=tool_name, param_name="command",
-                            matched_value=None, matched_pattern=None,
-                            snippet=None, remediation=cr.reason,
-                            guardian="command_risk_classifier",
-                            metadata={
-                                "risk_level": cr.risk_level.value,
-                                "command_category": cr.command_category.value,
-                            },
-                        )],
-                        guardians_used=["command_risk_classifier"],
-                    ),
-                )
-            if cr.risk_level == CommandRiskLevel.BLOCK:
-                logger.warning(
-                    "CommandRiskClassifier: BLOCK tool=%s role=%s "
-                    "category=%s reason=%s",
-                    tool_name, user_role, cr.command_category.value,
-                    cr.reason,
-                )
-                return _GuardAction(
-                    "auto_denied", tool_name, tool_input,
-                    guard_result=ToolGuardResult(
-                        tool_name=tool_name, params=tool_input,
-                        findings=[GuardFinding(
-                            id="risk-classifier-block",
-                            rule_id="command_risk_classifier",
-                            category=GuardThreatCategory.COMMAND_INJECTION,
-                            severity=GuardSeverity.CRITICAL,
-                            title="Command Risk: BLOCK",
-                            description=cr.reason,
-                            tool_name=tool_name, param_name="command",
-                            matched_value=None, matched_pattern=None,
-                            snippet=None, remediation=cr.reason,
-                            guardian="command_risk_classifier",
-                            metadata={
-                                "risk_level": cr.risk_level.value,
-                                "command_category": cr.command_category.value,
-                            },
-                        )],
-                        guardians_used=["command_risk_classifier"],
-                    ),
-                )
-            if cr.risk_level == CommandRiskLevel.CONFIRM:
-                # Still run engine.guard for detailed findings, but
-                # always require approval regardless of execution level
-                logger.info(
-                    "CommandRiskClassifier: CONFIRM tool=%s role=%s "
-                    "category=%s timeout=%ds",
-                    tool_name, user_role, cr.command_category.value,
-                    cr.timeout_seconds,
-                )
-                guard_result = engine.guard(
-                    tool_name, tool_input, only_always_run=False,
-                )
-                if guard_result is None or not guard_result.findings:
-                    guard_result = self._create_risk_classifier_finding(
-                        tool_name, tool_input, cr,
-                    )
-                return _GuardAction(
-                    "needs_approval", tool_name, tool_input,
-                    guard_result=guard_result,
-                )
-            # AUTO → fall through to existing execution-level logic
 
         # Role-based policy: admin gets relaxed checks for low-risk tools
         if user_role == "admin" and exec_level.is_smart_mode():

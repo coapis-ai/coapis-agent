@@ -1,12 +1,5 @@
-# Unified Tool Guard Configuration
-# Generated: 2026-06-29T11:26:15.353872
-# Commands: 108
-# Rules: 29
-# Evasion checks: 7
-
 version: 1.0.0
-description: Unified tool guard configuration — combines command levels, detection
-  rules, and evasion checks
+description: Unified tool guard configuration — combines command levels, detection rules, and evasion checks
 access_control:
   enabled: true
   guarded_tools: []
@@ -446,6 +439,22 @@ commands:
     level: L4
     desc: 切换用户
     action: block
+  mkfs.ext4:
+    level: L3
+    desc: 格式化ext4磁盘
+    action: block
+  mkfs.xfs:
+    level: L3
+    desc: 格式化xfs磁盘
+    action: block
+  mkfs.ntfs:
+    level: L3
+    desc: 格式化ntfs磁盘
+    action: block
+  mkfs.btrfs:
+    level: L3
+    desc: 格式化btrfs磁盘
+    action: block
 rules:
 - id: TOOL_CMD_DANGEROUS_RM
   tools:
@@ -498,6 +507,12 @@ rules:
   action: block
   commands:
   - dd
+  - mkfs
+  - mkfs.ext4
+  - mkfs.xfs
+  - mkfs.ntfs
+  - mkfs.btrfs
+  - mke2fs
 - id: TOOL_CMD_DOS_FORK_BOMB
   tools:
   - execute_shell_command
@@ -512,8 +527,7 @@ rules:
   description: Detects classic Bash fork bombs and mass process termination
   remediation: Block immediately. These commands will crash the host system.
   action: block
-  commands:
-  - kill
+  commands: []
 - id: TOOL_CMD_PIPE_TO_SHELL
   tools:
   - execute_shell_command
@@ -524,12 +538,12 @@ rules:
   patterns:
   - \b(curl|wget)\b\s+.*\|.*\b(bash|sh|zsh|ash|dash)\b
   exclude_patterns: []
-  description: Detects 'curl | bash' patterns used to download and immediately execute
-    remote payloads
+  description: Detects 'curl | bash' patterns used to download and immediately execute remote payloads
   remediation: Confirm with user. Agents should inspect scripts before executing them.
   action: block
   commands:
   - curl
+  - wget
 - id: TOOL_CMD_REVERSE_SHELL
   tools:
   - execute_shell_command
@@ -543,13 +557,10 @@ rules:
   - \bncat\s+.*-e\s*\S+
   - '\bsocat\s+.*EXEC:'
   exclude_patterns: []
-  description: Detects attempts to establish reverse shells or unauthorized network
-    tunnels
-  remediation: Block operation. Agents do not need to bind interactive shells to network
-    sockets.
+  description: Detects attempts to establish reverse shells or unauthorized network tunnels
+  remediation: Block operation. Agents do not need to bind interactive shells to network sockets.
   action: block
-  commands:
-  - cat
+  commands: []
 - id: TOOL_CMD_SYSTEM_TAMPERING
   tools:
   - execute_shell_command
@@ -563,13 +574,10 @@ rules:
   - \/etc\/sudoers
   - \/etc\/crontab
   exclude_patterns: []
-  description: Detects access to cron jobs, SSH keys, or sudo permissions (including
-    reads and modifications)
-  remediation: Confirm with user. Treat any access to credential and scheduling files
-    as sensitive and restrict when possible.
+  description: Detects access to cron jobs, SSH keys, or sudo permissions (including reads and modifications)
+  remediation: Confirm with user. Treat any access to credential and scheduling files as sensitive and restrict when possible.
   action: block
-  commands:
-  - crontab
+  commands: []
 - id: TOOL_CMD_UNSAFE_PERMISSIONS
   tools:
   - execute_shell_command
@@ -581,12 +589,12 @@ rules:
   - \bchmod\s+-[a-zA-Z]*R[a-zA-Z]*\s+(777|a\+rwx)\s+\/
   - \bchattr\s+\+i
   exclude_patterns: []
-  description: Detects global permission downgrades (chmod 777) or setting immutable
-    flags
+  description: Detects global permission downgrades (chmod 777) or setting immutable flags
   remediation: Prompt for confirmation. Suggest least-privilege permission models.
   action: block
   commands:
   - chmod
+  - chattr
 - id: TOOL_CMD_OBFUSCATED_EXEC
   tools:
   - execute_shell_command
@@ -597,12 +605,10 @@ rules:
   patterns:
   - \bbase64\s+(-d|--decode)\s*\|\s*\b(bash|sh|zsh)\b
   exclude_patterns: []
-  description: Detects execution of base64 encoded strings passed directly to a shell
-    interpreter
+  description: Detects execution of base64 encoded strings passed directly to a shell interpreter
   remediation: Block execution. Agents should use plain text commands.
   action: block
-  commands:
-  - bash
+  commands: []
 - id: TOOL_CMD_SYSTEM_REBOOT
   tools:
   - execute_shell_command
@@ -617,12 +623,16 @@ rules:
   - \bShutdown-Computer\b
   - \bRestart-Computer\b
   exclude_patterns: []
-  description: Detects system reboot or shutdown commands that will terminate the
-    host system
+  description: Detects system reboot or shutdown commands that will terminate the host system
   remediation: Block operation. Agents should not restart or shutdown the system.
   action: block
   commands:
-  - sh
+  - reboot
+  - shutdown
+  - halt
+  - poweroff
+  - init
+  - telinit
 - id: TOOL_CMD_SERVICE_RESTART
   tools:
   - execute_shell_command
@@ -641,7 +651,12 @@ rules:
   remediation: Confirm with user. Restarting services may cause downtime or data loss.
   action: block
   commands:
-  - tar
+  - systemctl
+  - service
+  - launchctl
+  - rc-service
+  - sc
+  - net
 - id: TOOL_CMD_PROCESS_KILL
   tools:
   - execute_shell_command
@@ -657,11 +672,13 @@ rules:
   exclude_patterns:
   - kill\s+\$\$
   description: Detects process termination commands that may kill critical processes
-  remediation: Confirm with user. Killing processes may cause data loss or system
-    instability.
+  remediation: Confirm with user. Killing processes may cause data loss or system instability.
   action: block
   commands:
-  - rm
+  - pkill
+  - killall
+  - kill
+  - taskkill
 - id: TOOL_CMD_PRIVILEGE_ESCALATION
   tools:
   - execute_shell_command
@@ -677,12 +694,15 @@ rules:
   - '\brunas\s+\/user:'
   exclude_patterns:
   - ^\s*#
-  description: Detects privilege escalation attempts using sudo, su, doas, pkexec,
-    or runas
+  description: Detects privilege escalation attempts using sudo, su, doas, pkexec, or runas
   remediation: Block operation. Agents should not execute commands with elevated privileges.
   action: block
   commands:
   - sudo
+  - su
+  - doas
+  - pkexec
+  - runas
 - id: TOOL_CMD_IFS_INJECTION
   tools:
   - execute_shell_command
@@ -696,8 +716,7 @@ rules:
   exclude_patterns:
   - ^\s*#
   description: Command uses $IFS variable which could bypass security validation
-  remediation: Reject commands containing IFS manipulation. Legitimate commands do
-    not need to reference $IFS directly.
+  remediation: Reject commands containing IFS manipulation. Legitimate commands do not need to reference $IFS directly.
   action: block
   commands: []
 - id: TOOL_CMD_CONTROL_CHARS
@@ -710,10 +729,8 @@ rules:
   patterns:
   - '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]'
   exclude_patterns: []
-  description: Command contains non-printable control characters that could bypass
-    security checks
-  remediation: Block commands containing control characters. These are never needed
-    in legitimate shell commands.
+  description: Command contains non-printable control characters that could bypass security checks
+  remediation: Block commands containing control characters. These are never needed in legitimate shell commands.
   action: block
   commands: []
 - id: TOOL_CMD_UNICODE_WHITESPACE
@@ -726,10 +743,8 @@ rules:
   patterns:
   - '[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]'
   exclude_patterns: []
-  description: Command contains Unicode whitespace characters that could cause parsing
-    inconsistencies
-  remediation: Block commands containing non-ASCII whitespace. Use standard spaces
-    instead.
+  description: Command contains Unicode whitespace characters that could cause parsing inconsistencies
+  remediation: Block commands containing non-ASCII whitespace. Use standard spaces instead.
   action: block
   commands: []
 - id: TOOL_CMD_PROC_ENVIRON
@@ -743,13 +758,10 @@ rules:
   - \/proc\/(?:self|\d+)\/environ(?:\b|$)
   exclude_patterns:
   - ^\s*#
-  description: Command accesses /proc/*/environ which could expose sensitive environment
-    variables
-  remediation: Block access to process environment files. API keys and secrets may
-    be exposed.
+  description: Command accesses /proc/*/environ which could expose sensitive environment variables
+  remediation: Block access to process environment files. API keys and secrets may be exposed.
   action: block
-  commands:
-  - env
+  commands: []
 - id: TOOL_CMD_JQ_SYSTEM
   tools:
   - execute_shell_command
@@ -761,10 +773,8 @@ rules:
   - \bjq\b.*\bsystem\s*\(
   exclude_patterns:
   - ^\s*#
-  description: jq command contains system() function which can execute arbitrary shell
-    commands
-  remediation: Block jq commands using system(). Use jq only for data processing,
-    not command execution.
+  description: jq command contains system() function which can execute arbitrary shell commands
+  remediation: Block jq commands using system(). Use jq only for data processing, not command execution.
   action: block
   commands:
   - jq
@@ -779,13 +789,11 @@ rules:
   - \bjq\b.*(?:\s-f\b|\s--from-file\b|\s--rawfile\b|\s--slurpfile\b|\s-L\b|\s--library-path\b)
   exclude_patterns:
   - ^\s*#
-  description: jq command uses flags that could read arbitrary files or execute external
-    code
-  remediation: Confirm with user. These jq flags can access files outside the intended
-    scope.
+  description: jq command uses flags that could read arbitrary files or execute external code
+  remediation: Confirm with user. These jq flags can access files outside the intended scope.
   action: block
   commands:
-  - file
+  - jq
 - id: TOOL_CMD_ZSH_DANGEROUS
   tools:
   - execute_shell_command
@@ -803,11 +811,13 @@ rules:
   exclude_patterns:
   - ^\s*#
   description: Command uses Zsh-specific builtins that can bypass security checks
-  remediation: Block Zsh module/builtin commands. These provide raw file I/O, network,
-    and execution capabilities that bypass normal permission checks.
+  remediation: Block Zsh module/builtin commands. These provide raw file I/O, network, and execution capabilities that bypass
+    normal permission checks.
   action: block
   commands:
-  - mkdir
+  - zsh
+  - zmodload
+  - emulate
 - id: TOOL_CMD_SQL_INJECTION
   tools:
   - execute_shell_command
@@ -823,11 +833,9 @@ rules:
   exclude_patterns:
   - ^\s*#
   description: Command contains SQL statements that could destroy or wipe entire tables/databases
-  remediation: Block destructive SQL. Confirm with user and use WHERE clauses to limit
-    scope.
+  remediation: Block destructive SQL. Confirm with user and use WHERE clauses to limit scope.
   action: block
-  commands:
-  - cat
+  commands: []
 - id: TOOL_CMD_RF_FORCE
   tools:
   - execute_shell_command
@@ -862,6 +870,7 @@ rules:
   action: block
   commands:
   - env
+  - printenv
 - id: TOOL_CMD_CHMOD_RECURSIVE
   tools:
   - execute_shell_command
@@ -894,13 +903,11 @@ rules:
   - \bdocker\s+compose\s+(down|rm)\b
   exclude_patterns:
   - ^\s*#
-  description: Docker command performs destructive operations (remove, kill, stop,
-    prune)
-  remediation: Confirm with user. Destructive Docker operations may cause data loss
-    or service disruption.
+  description: Docker command performs destructive operations (remove, kill, stop, prune)
+  remediation: Confirm with user. Destructive Docker operations may cause data loss or service disruption.
   action: block
   commands:
-  - date
+  - docker
 - id: TOOL_CMD_PACKAGE_MANAGER
   tools:
   - execute_shell_command
@@ -918,11 +925,16 @@ rules:
   exclude_patterns:
   - ^\s*#
   description: Package manager command installs or removes software packages
-  remediation: Confirm with user. Installing packages may introduce vulnerabilities
-    or break dependencies.
+  remediation: Confirm with user. Installing packages may introduce vulnerabilities or break dependencies.
   action: block
   commands:
-  - date
+  - apt-get
+  - apt
+  - yum
+  - pip
+  - pip3
+  - npm
+  - brew
 - id: TOOL_CMD_DANGEROUS_CP
   tools:
   - execute_shell_command
@@ -938,10 +950,8 @@ rules:
   - \bcp\s+.*\s+/sbin/
   exclude_patterns:
   - ^\s*#
-  description: Command copies files to sensitive system directories (/etc, /usr, /bin,
-    /sbin)
-  remediation: Confirm with user. Copying files to system directories may alter system
-    behavior.
+  description: Command copies files to sensitive system directories (/etc, /usr, /bin, /sbin)
+  remediation: Confirm with user. Copying files to system directories may alter system behavior.
   action: block
   commands:
   - cp
@@ -961,8 +971,7 @@ rules:
   exclude_patterns:
   - ^\s*#
   description: Git command performs destructive or remote-affecting operations
-  remediation: Confirm with user. Destructive git operations may cause data loss or
-    push unintended changes.
+  remediation: Confirm with user. Destructive git operations may cause data loss or push unintended changes.
   action: block
   commands:
   - git
@@ -981,11 +990,11 @@ rules:
   exclude_patterns:
   - ^\s*#
   description: HTTP client uploads data to a remote server
-  remediation: Block or confirm. Agents should not upload data to external endpoints
-    without explicit user consent.
+  remediation: Block or confirm. Agents should not upload data to external endpoints without explicit user consent.
   action: block
   commands:
-  - file
+  - curl
+  - wget
 evasion_checks:
   command_substitution: true
   obfuscated_flags: true

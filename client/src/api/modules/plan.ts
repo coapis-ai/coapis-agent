@@ -26,27 +26,37 @@ export interface PlanStateResponse {
 
 export interface PlanConfigResponse {
   enabled: boolean;
+  agent_id?: string;
 }
 
 export const planApi = {
-  getCurrentPlan: (sessionId?: string) =>
-    request<PlanStateResponse | null>(
-      sessionId
-        ? `/plan/current?session_id=${encodeURIComponent(sessionId)}`
-        : "/plan/current",
-    ),
+  getCurrentPlan: (sessionId?: string, agentId?: string) => {
+    const params = new URLSearchParams();
+    if (sessionId) params.set("session_id", sessionId);
+    if (agentId) params.set("agent_id", agentId);
+    const qs = params.toString();
+    return request<PlanStateResponse | null>(
+      `/plan/current${qs ? `?${qs}` : ""}`,
+    );
+  },
 
-  getPlanConfig: () => request<PlanConfigResponse>("/plan/config"),
+  getPlanConfig: (agentId?: string) => {
+    const qs = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+    return request<PlanConfigResponse>(`/plan/config${qs}`);
+  },
 
-  updatePlanConfig: (body: PlanConfigResponse) =>
-    request<PlanConfigResponse>("/plan/config", {
+  updatePlanConfig: (body: PlanConfigResponse, agentId?: string) => {
+    const qs = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+    return request<PlanConfigResponse>(`/plan/config${qs}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    }),
+    });
+  },
 };
 
 /**
  * Subscribe to plan updates via SSE using fetch streaming.
+ * Filters events by sessionId so users only see their own plans.
  * Returns an unsubscribe function.
  */
 export function subscribePlanUpdates(
@@ -55,14 +65,19 @@ export function subscribePlanUpdates(
     sessionId: string | undefined,
   ) => void,
   onError?: (err: unknown) => void,
+  options?: { agentId?: string; sessionId?: string },
 ): () => void {
   let aborted = false;
   const controller = new AbortController();
+  const filterSessionId = options?.sessionId;
 
   async function connect() {
     while (!aborted) {
       try {
-        const url = getApiUrl("/plan/stream");
+        const params = new URLSearchParams();
+        if (options?.agentId) params.set("agent_id", options.agentId);
+        const qs = params.toString();
+        const url = getApiUrl(`/plan/stream${qs ? `?${qs}` : ""}`);
         const response = await fetch(url, {
           headers: buildAuthHeaders(),
           signal: controller.signal,
@@ -89,6 +104,15 @@ export function subscribePlanUpdates(
               try {
                 const data = JSON.parse(line.slice(6));
                 if (data.type === "plan_update") {
+                  // Filter by session if specified
+                  const eventSid = data.session_id || "";
+                  if (
+                    filterSessionId &&
+                    eventSid &&
+                    eventSid !== filterSessionId
+                  ) {
+                    continue;
+                  }
                   onUpdate(data.plan ?? null, data.session_id);
                 }
               } catch {

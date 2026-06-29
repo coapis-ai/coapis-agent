@@ -972,7 +972,6 @@ class Workspace:
                                 id=_resp_id_cmd,
                                 status=RunStatus.Completed,
                                 created_at=int(__import__('time').time() * 1000),
-                                output=[],
                             )
                             return
                     except Exception as _cmd_err:
@@ -1030,7 +1029,6 @@ class Workspace:
                         id=response_id,
                         status=RunStatus.Completed,
                         created_at=int(__import__('time').time() * 1000),
-                        output=[],
                     )
                     return
 
@@ -1047,7 +1045,6 @@ class Workspace:
                     id=response_id,
                     status=RunStatus.Created,
                     created_at=int(__import__('time').time() * 1000),
-                    output=[],
                 )
 
                 # Yield message start event
@@ -1699,7 +1696,6 @@ class Workspace:
                     object="response",
                     id=response_id,
                     status=RunStatus.Completed,
-                    output=[],
                 )
 
             return _stream(request)

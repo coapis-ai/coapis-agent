@@ -61,14 +61,20 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
   }, []);
 
   // Get current session title — prefer real-time data from sessionApi
+  // Match by id, realId, or sessionId to handle merge scenarios where
+  // the session's id is a local timestamp but currentSessionId is a UUID.
   const liveSession = sessionApi.currentSession;
-  const currentSession = sessions.find((s) => s.id === currentSessionId) || liveSession;
+  const currentSession =
+    sessions.find((s) => s.id === currentSessionId) ??
+    sessions.find((s) => (s as any).realId === currentSessionId) ??
+    sessions.find((s) => (s as any).sessionId === currentSessionId) ??
+    liveSession;
   const chatTitle = currentSession?.name || t('chat.newChatTitle', 'New Chat');
 
   useEffect(() => {
     let cancelled = false;
     planApi
-      .getPlanConfig()
+      .getPlanConfig(selectedAgent || undefined)
       .then((cfg) => {
         if (!cancelled) setPlanEnabled(cfg.enabled);
       })
