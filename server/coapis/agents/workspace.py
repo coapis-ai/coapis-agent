@@ -1074,6 +1074,8 @@ class Workspace:
                 full_reasoning = []
                 _raw_blocks = []  # Collect raw ResponseBlock objects for session persistence
                 _evo_tool_calls = []  # Collect tool call info for evolution engine
+                _search_card_html = ""  # Search prefetch card HTML (empty if not used)
+                _search_card_inserted_count = 0  # Track if search card has been inserted
 
                 # ── Determine display strategy from user prefs + channel config ──
                 _channel_name = getattr(request_obj, "channel", "") or ""

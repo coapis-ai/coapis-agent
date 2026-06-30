@@ -1043,7 +1043,7 @@ class AgentRunner(Runner):
             # Ensure session file has a valid plan_notebook dict
             # to prevent TypeError/KeyError during load_state_dict
             # Use chat.id (UUID) as session key for per-chat isolation
-            if plan_notebook is not None:
+            if chat is not None and plan_notebook is not None:
                 try:
                     _states = await self.session.get_session_state_dict(
                         session_id=chat.id,
@@ -1069,18 +1069,19 @@ class AgentRunner(Runner):
                         exc_info=True,
                     )
 
-            try:
-                await self.session.load_session_state(
-                    session_id=chat.id,
-                    user_id=user_id,
-                    agent=agent,
-                )
-            except KeyError as e:
-                logger.warning(
-                    "load_session_state skipped (state schema mismatch): %s; "
-                    "will save fresh state on completion to recover file",
-                    e,
-                )
+            if chat is not None:
+                try:
+                    await self.session.load_session_state(
+                        session_id=chat.id,
+                        user_id=user_id,
+                        agent=agent,
+                    )
+                except KeyError as e:
+                    logger.warning(
+                        "load_session_state skipped (state schema mismatch): %s; "
+                        "will save fresh state on completion to recover file",
+                        e,
+                    )
             session_state_loaded = True
 
             # Rebuild system prompt so it always reflects the latest
@@ -1243,7 +1244,7 @@ class AgentRunner(Runner):
                 except Exception:
                     logger.warning("Failed to close memory_manager", exc_info=True)
 
-            if agent is not None and session_state_loaded:
+            if agent is not None and session_state_loaded and chat is not None:
                 # Use chat.id (UUID) as session key for per-chat isolation
                 await self.session.save_session_state(
                     session_id=chat.id,
@@ -1255,22 +1256,23 @@ class AgentRunner(Runner):
             # This ensures chat history survives page reloads and is
             # properly isolated per user (each user has their own
             # workspaces/{username}/chat/chats.json).
-            try:
-                await self._persist_chat_messages(
-                    chat=chat,
-                    session_id=session_id,
-                    user_id=user_id,
-                    channel=channel,
-                    msgs=msgs,
-                    assistant_text="".join(_evolution_full_response),
-                    name=name,
-                    full_reasoning=getattr(self._workspace, 'last_full_reasoning', None),
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to persist chat messages",
-                    exc_info=True,
-                )
+            if chat is not None:
+                try:
+                    await self._persist_chat_messages(
+                        chat=chat,
+                        session_id=session_id,
+                        user_id=user_id,
+                        channel=channel,
+                        msgs=msgs,
+                        assistant_text="".join(_evolution_full_response),
+                        name=name,
+                        full_reasoning=getattr(self._workspace, 'last_full_reasoning', None),
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to persist chat messages",
+                        exc_info=True,
+                    )
             # ------------------------------------------------
 
             # --- Evolution: session end → experience extraction ---
