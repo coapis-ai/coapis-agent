@@ -1422,7 +1422,7 @@ class Workspace:
                                     yield DataContent(
                                         object="content",
                                         msg_id=msg_id,
-                                        type="tool_call",
+                                        type="data",
                                         delta=True,
                                         data=_tool_data,
                                         status=RunStatus.InProgress,
@@ -1447,7 +1447,7 @@ class Workspace:
                                     yield DataContent(
                                         object="content",
                                         msg_id=msg_id,
-                                        type="tool_result",
+                                        type="data",
                                         delta=True,
                                         data={
                                             "name": _tool_out_meta.get("tool_name", "unknown"),
