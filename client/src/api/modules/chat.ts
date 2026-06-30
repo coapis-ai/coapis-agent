@@ -70,13 +70,16 @@ export const chatApi = {
     if (params?.channel) searchParams.append("channel", params.channel);
     if (params?.agent_id) searchParams.append("agent_id", params.agent_id);
     const query = searchParams.toString();
-    return request<ChatSpec[]>(`/chats${query ? `?${query}` : ""}`);
+    const headers: Record<string, string> = {};
+    if (params?.agent_id) headers["X-Agent-Id"] = params.agent_id;
+    return request<ChatSpec[]>(`/chats${query ? `?${query}` : ""}`, { headers });
   },
 
   createChat: (chat: Partial<ChatSpec>) =>
     request<ChatSpec>("/chats", {
       method: "POST",
       body: JSON.stringify(chat),
+      headers: chat.agent_id ? { "X-Agent-Id": chat.agent_id } : undefined,
     }),
 
   getChat: (chatId: string, opts?: { limit?: number; before?: string }) => {
@@ -132,7 +135,9 @@ export const sessionApi = {
     if (params?.channel) searchParams.append("channel", params.channel);
     if (params?.agent_id) searchParams.append("agent_id", params.agent_id);
     const query = searchParams.toString();
-    return request<Session[]>(`/chats${query ? `?${query}` : ""}`);
+    const headers: Record<string, string> = {};
+    if (params?.agent_id) headers["X-Agent-Id"] = params.agent_id;
+    return request<Session[]>(`/chats${query ? `?${query}` : ""}`, { headers });
   },
 
   getSession: (sessionId: string) =>

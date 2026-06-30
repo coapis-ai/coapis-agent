@@ -17,12 +17,16 @@ services:
     volumes:
       - ${COAPIS_WORKING_DIR:-/apps/ai/coapis}:${COAPIS_WORKING_DIR:-/apps/ai/coapis}
       - ./volume/playwright:/app/volume/playwright:ro
+      # MCP包缓存持久化（避免容器重建后重新下载）
+      - ./volume/mcp:/root/.cache/pip
     env_file:
       - .env
     environment:
       - COAPIS_WORKING_DIR=${COAPIS_WORKING_DIR:-/apps/ai/coapis}
       - COAPIS_WORKSPACES_DIR=${COAPIS_WORKSPACES_DIR:-${COAPIS_WORKING_DIR}/workspaces}
       - BROWSER_CDP_URL=http://playwright:9223
+      # MCP包缓存目录（持久化到宿主机）
+      - PIP_CACHE_DIR=/root/.cache/pip
     restart: unless-stopped
     networks:
       - frontend

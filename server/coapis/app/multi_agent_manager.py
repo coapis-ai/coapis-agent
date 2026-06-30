@@ -60,8 +60,6 @@ class MultiAgentManager:
         self._lock = asyncio.Lock()
         self._pending_starts: Dict[str, asyncio.Event] = {}  # agent_id -> Event
         self._user_chat_managers: Dict[str, Any] = {}  # username -> ChatManager
-
-
     @property
     def agents(self) -> Dict[str, Workspace]:
         """Alias for _workspaces for compatibility."""
@@ -180,23 +178,6 @@ class MultiAgentManager:
                 # Workspace registered but not started — still visible in dropdown
                 # Will be retried when user opens chat (get_agent lazy-loads)
                 pass
-
-            # Replace workspace's chat_manager with per-user ChatManager.
-            # This ensures ALL code paths (runner, proactive memory, stop_handler)
-            # read/write chats from workspaces/{username}/chat/chats.json,
-            # NOT from the agent's own workspace directory.
-            if username and not is_global:
-                user_cm = self.get_user_chat_manager(username)
-                if hasattr(workspace, '_service_manager'):
-                    workspace._service_manager.services["chat_manager"] = user_cm
-                else:
-                    workspace.chat_manager = user_cm
-                if workspace.runner:
-                    workspace.runner.set_chat_manager(user_cm)
-                logger.info(
-                    f"Replaced workspace chat_manager with per-user ChatManager "
-                    f"for {cache_key} → workspaces/{username}/chat/chats.json"
-                )
 
             scope = "user" if (username and not is_global) else "global"
             logger.info(f"Created {scope} agent: {cache_key}" + (f" (user: {username})" if username else ""))
@@ -644,25 +625,6 @@ class MultiAgentManager:
         try:
             await instance.start()
             instance.set_manager(self)
-
-            # Replace workspace's chat_manager with per-user ChatManager.
-            # This ensures ALL code paths (runner, proactive memory, stop_handler)
-            # read/write chats from workspaces/{username}/chat/chats.json,
-            # NOT from the agent's own workspace directory.
-            if username and not is_global:
-                user_cm = self.get_user_chat_manager(username)
-                # Old Workspace: direct attribute; New Workspace: service_manager
-                if hasattr(instance, '_service_manager'):
-                    instance._service_manager.services["chat_manager"] = user_cm
-                else:
-                    instance.chat_manager = user_cm
-                # Also update runner's reference
-                if instance.runner:
-                    instance.runner.set_chat_manager(user_cm)
-                logger.info(
-                    f"Replaced workspace chat_manager with per-user ChatManager "
-                    f"for {cache_key} → workspaces/{username}/chat/chats.json"
-                )
 
             elapsed = time.perf_counter() - t0
             scope = "user" if username else "global"

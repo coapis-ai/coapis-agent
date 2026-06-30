@@ -253,17 +253,6 @@ class AgentRunner(Runner):
             return getattr(sm, "services", {}).get("evolution_engine")
         return None
 
-    def _get_user_chat_manager(self, user_id: str) -> Any | None:
-        """Get per-user ChatManager via MultiAgentManager.
-
-        Returns:
-            ChatManager instance for the user, or None.
-        """
-        manager = getattr(self._workspace, "_manager", None)
-        if manager is None:
-            return None
-        return manager.get_user_chat_manager(user_id)
-
     @staticmethod
     def _extract_summary_from_reasoning(reasoning_text: str, max_chars: int = 800) -> str:
         """Extract a user-visible summary from reasoning text.
@@ -342,30 +331,27 @@ class AgentRunner(Runner):
         # For channel messages (e.g. WeCom, DingTalk), user_id is the channel
         # sender's ID, not a system user ID. Resolve to workspace owner if needed.
         effective_user_id = user_id
-        user_cm = manager.get_user_chat_manager(user_id)
-        if user_cm is None:
-            # User_id is not a system user - try workspace owner
-            ws_username = getattr(self._workspace, 'username', None)
-            if ws_username:
-                logger.info(
-                    "_persist_chat_messages: user_id=%s not found, "
-                    "falling back to workspace owner=%s",
-                    user_id, ws_username,
-                )
-                effective_user_id = ws_username
-                user_cm = manager.get_user_chat_manager(ws_username)
-        
-        if user_cm is None:
-            logger.warning("_persist_chat_messages: no user ChatManager for user_id=%s (or owner), skip", user_id)
+        ws_username = getattr(self._workspace, 'username', None)
+        if ws_username and user_id != ws_username:
+            logger.info(
+                "_persist_chat_messages: user_id=%s resolved to workspace owner=%s",
+                user_id, ws_username,
+            )
+            effective_user_id = ws_username
+
+        # Use workspace's own ChatManager (physical isolation)
+        cm = self._chat_manager
+        if cm is None:
+            logger.warning("_persist_chat_messages: no ChatManager for user_id=%s, skip", user_id)
             return
 
         # Find the chat by UUID (chat.id)
         chat_id = getattr(chat, "id", None)
         user_chat = None
         if chat_id:
-            user_chat = await user_cm.get_chat(chat_id)
+            user_chat = await cm.get_chat(chat_id)
         if user_chat is None:
-            user_chat = await user_cm.get_or_create_chat(
+            user_chat = await cm.get_or_create_chat(
                 session_id, effective_user_id, channel,
                 name=name, agent_id=self.agent_id,
             )
@@ -387,13 +373,13 @@ class AgentRunner(Runner):
             if quick_name:
                 try:
                     from ..runner.models import ChatUpdate
-                    await user_cm.patch_chat(user_chat.id, ChatUpdate(name=quick_name))
+                    await cm.patch_chat(user_chat.id, ChatUpdate(name=quick_name))
                     logger.debug(f"Quick-renamed chat to: {quick_name}")
                 except Exception:
                     logger.debug("Failed to quick-rename chat", exc_info=True)
                 try:
                     asyncio.create_task(
-                        self._generate_llm_title(user_cm, user_chat.id, user_text, assistant_text),
+                        self._generate_llm_title(cm, user_chat.id, user_text, assistant_text),
                     )
                 except Exception:
                     logger.debug("Failed to queue LLM title generation", exc_info=True)
@@ -1067,10 +1053,9 @@ class AgentRunner(Runner):
                 f"agent_id={self.agent_id}",
             )
 
-            # Use per-user ChatManager for proper isolation.
-            # This stores chats in workspaces/{username}/chat/chats.json
-            # instead of the agent's workspace directory.
-            effective_cm = self._get_user_chat_manager(user_id) or self._chat_manager
+            # Use the workspace's own ChatManager (physical isolation).
+            # Each agent's ChatManager reads from its own workspace directory.
+            effective_cm = self._chat_manager
             if effective_cm is not None:
                 # Prefer chat_id from session context (UUID from frontend)
                 # to match the exact chat, instead of session_id which is

@@ -662,129 +662,10 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   }
 
   /** Apply listChats to sessionList; merge realId and generating by session_id. */
-  private applyChatsToSessionList(
-    chats: ChatSpec[],
-  ): IAgentScopeRuntimeWebUISession[] {
-    const newList = chats
-      .filter((c) => c.id && c.id !== "undefined" && c.id !== "null")
-      .map(chatSpecToSession)
-      .reverse();
-
-    // Track which old sessions were matched to backend data
-    const matchedOldIds = new Set<string>();
-
-    const merged = newList.map((s) => {
-      // First try to match by sessionId (works when backend uses same format)
-      let existing = this._sessions.find(
-        (e) =>
-          (e as ExtendedSession).sessionId === (s as ExtendedSession).sessionId,
-      ) as ExtendedSession | undefined;
-
-      // If not found by sessionId, try to match by id (timestamp).
-      if (!existing) {
-        existing = this._sessions.find(
-          (e) => e.id === s.id,
-        ) as ExtendedSession | undefined;
-      }
-
-      // If still not found, try to match by realId (backend UUID).
-      // This handles the case where createSession already resolved the UUID
-      // but the sessionId format differs (e.g. "console:admin" vs timestamp).
-      if (!existing) {
-        const backendId = (s as ExtendedSession).realId || s.id;
-        existing = this._sessions.find(
-          (e) => (e as ExtendedSession).realId === backendId,
-        ) as ExtendedSession | undefined;
-      }
-
-      // NOTE: We intentionally do NOT fall back to "any unmatched local
-      // timestamp session".  That strategy caused cross-chat contamination:
-      // any new session would be hijacked by the first backend chat.
-
-      if (!existing) return s;
-      matchedOldIds.add(existing.id);
-      const next = { ...s } as ExtendedSession;
-      if (existing.realId) {
-        next.id = existing.id;
-        next.realId = existing.realId;
-      } else if (isLocalTimestamp(existing.id)) {
-        next.realId = s.id;
-        next.id = existing.id;
-      }
-      if (existing.generating !== undefined) {
-        next.generating = existing.generating;
-      }
-      // CRITICAL: Preserve messages from the existing session if the backend
-      // session has no messages (messages: []). Without this, navigating from
-      // Sessions page to /chat/{uuid} would overwrite already-loaded messages
-      // with an empty array, causing the chat to appear blank.
-      if ((!next.messages || next.messages.length === 0) && existing.messages && existing.messages.length > 0) {
-        next.messages = existing.messages;
-      }
-      return next as IAgentScopeRuntimeWebUISession;
-    });
-
-    // PRESERVE unmatched local sessions (newly created but not yet in backend)
-    // This prevents the race condition where a fresh session is dropped
-    // during the 1.5s refresh window after createChat.
-    const unmatchedLocals = this._sessions.filter(
-      (e) => !matchedOldIds.has(e.id),
-    );
-    this._sessions = [...unmatchedLocals, ...merged];
-
-    // Sync currentSessionId: if the current session was matched by sessionId
-    // or realId (but not by id), the library's currentSessionId may still
-    // point to a UUID while the session's id is a local timestamp.  This
-    // causes ChatHeaderTitle to show "New Chat" because find-by-id fails.
-    // Detect the mismatch and fire onSessionIdResolved so the URL and
-    // currentSessionId stay in sync.
-    if (this._currentSessionId) {
-      const current = this._sessions.find(
-        (s) =>
-          s.id === this._currentSessionId ||
-          (s as ExtendedSession).realId === this._currentSessionId ||
-          (s as ExtendedSession).sessionId === this._currentSessionId,
-      ) as ExtendedSession | undefined;
-      if (current && current.realId && current.id !== this._currentSessionId) {
-        // The session's local id differs from currentSessionId (which is the
-        // backend UUID).  Notify the Chat component to navigate to /chat/{realId}.
-        this.onSessionIdResolved?.(current.id, current.realId);
-      }
-    }
-
-    if (this.preferredChatId) {
-      const preferredId = this.preferredChatId;
-      this.preferredChatId = null;
-      // Match by id OR realId — after merge, the session's id may be a local
-      // timestamp while the URL contains the backend UUID (realId).
-      const idx = this._sessions.findIndex(
-        (s) => s.id === preferredId || (s as ExtendedSession).realId === preferredId,
-      );
-      if (idx > 0) {
-        const [preferred] = this._sessions.splice(idx, 1);
-        this._sessions.unshift(preferred);
-      }
-      // Ensure the preferred session's id matches the URL chatId so that
-      // the library's setCurrentSessionId(sessionList[0]?.id) produces the
-      // same value ChatSessionInitializer would set, avoiding a redundant
-      // useAsyncEffect re-trigger that would briefly clear messages.
-      if (this._sessions.length > 0) {
-        const first = this._sessions[0] as ExtendedSession;
-        if (first.id !== preferredId && (first.realId === preferredId || first.id === preferredId)) {
-          // id already matches, no-op
-        } else if (first.realId === preferredId && first.id !== preferredId) {
-          // Swap: use the backend UUID as id for consistency with URL
-          first.id = preferredId;
-        }
-      }
-    }
-    return [...this._sessions];
-  }
-
   /**
    * Upsert a session into _sessions after fetching fresh data from backend.
-   * This prevents applyChatsToSessionList (from getSessionList) from
-   * overwriting freshly-loaded messages with stale/empty data.
+   * This prevents getSessionList from overwriting freshly-loaded messages
+   * with stale/empty data.
    */
   private _upsertSession(session: ExtendedSession): void {
     const idx = this._sessions.findIndex(
@@ -833,7 +714,50 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         const chats = await api.listChats(
           Object.keys(params).length > 0 ? params : undefined,
         );
-        const result = this.applyChatsToSessionList(chats);
+
+        // COAPIS FIX: Directly use API response instead of merging with cache.
+        // This prevents duplicate entries caused by mismatched IDs between
+        // local cache (timestamp) and backend (UUID).
+        // Only preserve the current session's messages if they exist in cache.
+        const newList = chats
+          .filter((c) => c.id && c.id !== "undefined" && c.id !== "null")
+          .map(chatSpecToSession)
+          .reverse();
+
+        // Preserve messages from current cache for sessions that have them
+        const messagesMap = new Map<string, any[]>();
+        for (const existing of this._sessions) {
+          if (existing.messages && existing.messages.length > 0) {
+            const key = (existing as ExtendedSession).realId || existing.id;
+            messagesMap.set(key, existing.messages);
+          }
+        }
+
+        // Apply preserved messages to new list
+        const result = newList.map((s) => {
+          const key = (s as ExtendedSession).realId || s.id;
+          const messages = messagesMap.get(key);
+          if (messages && (!s.messages || s.messages.length === 0)) {
+            return { ...s, messages } as any;
+          }
+          return s;
+        });
+
+        this._sessions = result;
+
+        // Handle preferredChatId (move preferred session to front)
+        if (this.preferredChatId) {
+          const preferredId = this.preferredChatId;
+          this.preferredChatId = null;
+          const idx = this._sessions.findIndex(
+            (s) => s.id === preferredId || (s as ExtendedSession).realId === preferredId,
+          );
+          if (idx > 0) {
+            const [preferred] = this._sessions.splice(idx, 1);
+            this._sessions.unshift(preferred);
+          }
+        }
+
         // Notify React so the sidebar re-renders with updated names
         this.onSessionListUpdated?.(result);
         return result;
@@ -1102,66 +1026,71 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     // COAPIS FIX: Set a flag so useChatAnywhereSessionLoader skips its
     // clear+fetch cycle. Without this, the session loader fires during
     // handleSubmit's sleep(100) and wipes the user message just added.
-    // Use a time window to cover multiple triggers:
-    // 1. setCurrentSessionId(localId) from library's createSession
-    // 2. setCurrentSessionId(realId) from ChatSessionInitializer after URL navigation
     (window as any)._coapisSkipSessionLoadUntil = Date.now() + 2000;
 
-    const id = Date.now().toString();
     const extended = session as ExtendedSession | undefined;
-    const newSession: ExtendedSession = {
-      id,
-      name: session?.name || DEFAULT_SESSION_NAME,
-      sessionId: id,
-      userId: extended?.userId || DEFAULT_USER_ID,
-      channel: extended?.channel || DEFAULT_CHANNEL,
-      messages: session?.messages || [],
-      meta: extended?.meta || {},
-    } as ExtendedSession;
+    const sessionName = session?.name || DEFAULT_SESSION_NAME;
+    const channel = extended?.channel || DEFAULT_CHANNEL;
+    const userId = window.currentUserId || DEFAULT_USER_ID;
 
-    this.updateWindowVariables(newSession);
-    this._sessions.unshift(newSession);
-    // Notify React so sidebar and header update immediately
-    this.onSessionListUpdated?.(this._sessions);
-
-    // CRITICAL: The chat library's updateSession() returns the original
-    // session parameter (not the newly created one). The caller then does
-    // setCurrentSessionId(session.id), so we must write the generated id
-    // back onto the input object for the caller to pick it up.
-    if (session && !session.id) {
-      (session as any).id = id;
-      (session as any).sessionId = id;
-    }
-
-    // Persist to backend immediately so the session survives getSessionList refresh.
-    // Without this, applyChatsToSessionList replaces sessionList with backend-only
-    // data, wiping out the local-only session.
+    // CRITICAL: Create backend session FIRST, then add to local cache.
+    // This prevents race conditions where getSessionList() is called before
+    // backend session is created, causing duplicate entries.
     try {
       const agentId = useAgentStore.getState().selectedAgent;
       const created = await api.createChat({
         id: undefined,  // let backend generate UUID
-        name: newSession.name || DEFAULT_SESSION_NAME,
-        session_id: `console:${window.currentUserId || DEFAULT_USER_ID}`,
-        channel: newSession.channel || DEFAULT_CHANNEL,
+        name: sessionName,
+        session_id: `console:${userId}`,
+        channel: channel,
         ...(agentId ? { agent_id: agentId } : {}),
       });
-      // Link local session to backend session
-      const localSession = this._sessions.find((s) => s.id === id) as ExtendedSession | undefined;
-      if (localSession && created?.id) {
-        localSession.realId = created.id;
-        (session as any).realId = created.id;
-        // Notify consumers so they can update chatIdRef before the first message is sent
-        this.onSessionRealIdResolved?.(id, created.id);
+
+      if (!created?.id) {
+        throw new Error("Backend did not return session ID");
       }
+
+      // Create local session with backend UUID as id (no timestamp mismatch)
+      const newSession: ExtendedSession = {
+        id: created.id,  // Use backend UUID directly
+        name: sessionName,
+        sessionId: `console:${userId}`,
+        userId: userId,
+        channel: channel,
+        messages: session?.messages || [],
+        meta: extended?.meta || {},
+        status: created.status ?? "idle",
+        createdAt: created.created_at ?? null,
+        updatedAt: created.updated_at ?? null,
+        pinned: created.pinned ?? false,
+        realId: created.id,  // Same as id since we use backend UUID
+      } as ExtendedSession;
+
+      this.updateWindowVariables(newSession);
+      this._sessions.unshift(newSession);
+      // Notify React so sidebar and header update immediately
+      this.onSessionListUpdated?.(this._sessions);
+
+      // Write the backend UUID back to the input object for the caller
+      if (session) {
+        (session as any).id = created.id;
+        (session as any).sessionId = `console:${userId}`;
+        (session as any).realId = created.id;
+      }
+
+      // Notify consumers about the realId
+      this.onSessionRealIdResolved?.(created.id, created.id);
+
+      // Fire onSessionCreated AFTER successful backend creation
+      this.onSessionCreated?.(created.id);
+
+      console.log(`[sessionApi] Created session: id=${created.id}, name=${sessionName}`);
+      return this._sessions;
+
     } catch (err) {
-      console.warn("[sessionApi] Failed to persist new chat to backend:", err);
+      console.error("[sessionApi] Failed to create session:", err);
+      throw err;  // Let caller handle the error
     }
-
-    // Fire onSessionCreated AFTER api.createChat so realId is already set.
-    // The callback navigates to /chat/{realId} to survive page refresh.
-    this.onSessionCreated?.(id);
-
-    return this._sessions;
   }
 
   /**

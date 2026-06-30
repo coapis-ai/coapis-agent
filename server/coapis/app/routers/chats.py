@@ -107,12 +107,34 @@ def _get_current_user(request: Request) -> tuple[str, bool]:
 
 # ── Helper: get ChatManager from request ──────────────────────────────────
 
-def _get_chat_manager(request: Request):
-    """Get the per-user ChatManager for strict user isolation.
+def _find_workspace_for_agent(request: Request, agent_id: str, username: str):
+    """Find the workspace matching agent_id and username."""
+    manager = getattr(request.app.state, "multi_agent_manager", None)
+    if not manager:
+        return None
+    
+    # Try composite key first
+    for key_format in [f"{username}:{agent_id}", f"global:{agent_id}"]:
+        ws = getattr(manager, '_workspaces', {}).get(key_format)
+        if ws:
+            return ws
+    
+    # Fallback: search all workspaces
+    for key, ws in getattr(manager, '_workspaces', {}).items():
+        ws_agent_id = getattr(ws, 'agent_id', None) or ""
+        ws_username = getattr(ws, 'username', None) or ""
+        if ws_agent_id == agent_id and ws_username == username:
+            return ws
+    
+    return None
 
-    Returns the ChatManager for the current user's own chats directory
-    (workspaces/{username}/chat/chats.json), NOT the global workspace's
-    ChatManager. This ensures complete chat isolation between users.
+
+def _get_chat_manager(request: Request, agent_id: str = None):
+    """Get the ChatManager for the appropriate agent workspace.
+
+    Uses X-Agent-Id header to find the correct workspace, then returns
+    that workspace's ChatManager. This ensures physical isolation -
+    each agent's chats are stored in its own workspace directory.
     """
     manager = getattr(request.app.state, "multi_agent_manager", None)
     if not manager:
@@ -122,16 +144,36 @@ def _get_chat_manager(request: Request):
         )
 
     username, _ = _get_current_user(request)
-
-    # Use per-user ChatManager (isolated storage at workspaces/{username}/chat/)
-    cm = manager.get_user_chat_manager(username)
-    if not cm:
-        raise HTTPException(
-            status_code=503,
-            detail="Chat manager not available",
-        )
-
-    return cm
+    
+    # Try to find workspace for the specific agent
+    if agent_id:
+        ws = _find_workspace_for_agent(request, agent_id, username)
+        if ws and hasattr(ws, 'chat_manager') and ws.chat_manager:
+            return ws.chat_manager
+    
+    # Fallback: find user's default workspace (prefer user:xxx agent)
+    fallback_ws = None
+    for key, ws in getattr(manager, '_workspaces', {}).items():
+        ws_username = getattr(ws, 'username', None) or ""
+        if ws_username != username:
+            continue
+        if not (hasattr(ws, 'chat_manager') and ws.chat_manager):
+            continue
+        ws_agent_id = getattr(ws, 'agent_id', None) or ""
+        # Prefer the user's default agent (user:xxx)
+        if ws_agent_id.startswith("user:"):
+            return ws.chat_manager
+        # Keep first match as fallback
+        if fallback_ws is None:
+            fallback_ws = ws.chat_manager
+    
+    if fallback_ws:
+        return fallback_ws
+    
+    raise HTTPException(
+        status_code=503,
+        detail="Chat manager not available",
+    )
 
 
 # ── Helper: get session for a user (aligned with CoApis pattern) ───────
@@ -271,7 +313,9 @@ async def list_chats(
     # All users (including admin) only see their own chats for session list.
     # The admin aggregation via ?user_id=xxx is available for admin panel use
     # but the default list is always user-scoped for isolation.
-    cm = _get_chat_manager(request)
+    # Use X-Agent-Id header to route to the correct workspace's ChatManager
+    header_agent_id = request.headers.get("X-Agent-Id", "") or agent_id or ""
+    cm = _get_chat_manager(request, agent_id=header_agent_id)
     chats = await cm.list_chats(user_id=username, channel=channel)
     chats = _agent_filter(chats)
     # Ensure browsers never cache chat list responses
@@ -292,7 +336,7 @@ async def create_chat(
     username, ignoring any user_id in the payload.
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request)
+    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
     
     from ..runner.models import ChatSpec as RunnerChatSpec
     
@@ -340,7 +384,7 @@ async def get_chat(
         before: Return messages before this message ID (for "load more")
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request)
+    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
 
     # Get chat spec
     logger.info(f"get_chat: requested chat_id={chat_id}, repo_path={cm._repo.path}")
@@ -441,7 +485,7 @@ async def get_archived_messages(
     Returns older messages that have been rotated out of the hot JSON store.
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request)
+    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
 
     # Verify chat exists and user has access
     spec = await cm.get_chat(chat_id)
@@ -484,7 +528,7 @@ async def update_chat(
     ENFORCES USER ISOLATION: Non-admin users can only update their own chats.
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request)
+    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
     
     # Verify ownership first
     spec = await cm.get_chat(chat_id)
@@ -520,7 +564,7 @@ async def delete_chat(
     ENFORCES USER ISOLATION: Non-admin users can only delete their own chats.
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request)
+    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
     
     # Verify ownership first
     spec = await cm.get_chat(chat_id)
@@ -549,7 +593,7 @@ async def batch_delete_chats(
     ENFORCES USER ISOLATION: Non-admin users can only delete their own chats.
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request)
+    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
     
     # ENFORCE USER ISOLATION: Filter to only user's own chats (unless admin)
     if not is_admin:
