@@ -15,7 +15,6 @@ import { Collapse, Tag, Space, Typography } from 'antd';
 import {
   CheckCircleOutlined,
   LoadingOutlined,
-  CodeOutlined,
   RightOutlined,
 } from '@ant-design/icons';
 
@@ -477,79 +476,61 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
         overflow: 'hidden',
       }}
     >
-      {/* 头部：图标 + 摘要 + 状态 */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '8px 12px',
-          gap: 8,
-          cursor: 'pointer',
-        }}
-      >
-        {/* 工具图标 */}
-        <span style={{ fontSize: 16, flexShrink: 0 }}>{category.icon}</span>
-
-        {/* 摘要区域 */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Tag
-              color={category.color}
-              style={{
-                margin: 0,
-                fontSize: 11,
-                lineHeight: '18px',
-                padding: '0 4px',
-                borderRadius: 3,
-              }}
-            >
-              {category.label}
-            </Tag>
-            <Text
-              strong
-              style={{
-                fontSize: 13,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {summary || titleText}
-            </Text>
-          </div>
-        </div>
-
-        {/* 状态指示器 */}
-        <StatusIndicator loading={loading} elapsed={elapsed} />
-      </div>
-
-      {/* 详情区域：可折叠的输入/输出 */}
-      {(argumentsStr || outputStr) && (
+      {/* 头部：图标 + 工具名 + 折叠按钮（右侧） */}
+      {(argumentsStr || outputStr) ? (
         <Collapse
           ghost
           size="small"
+          expandIconPosition="end"
           expandIcon={({ isActive }) => (
             <RightOutlined
               rotate={isActive ? 90 : 0}
-              style={{ fontSize: 10, color: '#999' }}
+              style={{ fontSize: 11, color: '#999', padding: '4px 0' }}
             />
           )}
           items={[
             {
               key: '1',
               label: (
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  <CodeOutlined style={{ marginRight: 4 }} />
-                  详情
-                  {serverLabel && (
-                    <Tag style={{ marginLeft: 6, fontSize: 10 }}>
-                      {serverLabel}
-                    </Tag>
-                  )}
-                </Text>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '2px 0',
+                  }}
+                >
+                  {/* 工具图标 */}
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>{category.icon}</span>
+
+                  {/* 工具名 */}
+                  <Text
+                    strong
+                    style={{
+                      fontSize: 12,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {titleText}
+                  </Text>
+
+                  {/* 状态指示器 */}
+                  <div style={{ marginLeft: 'auto', marginRight: 8 }}>
+                    <StatusIndicator loading={loading} elapsed={elapsed} />
+                  </div>
+                </div>
               ),
               children: (
-                <div style={{ fontSize: 12 }}>
+                <div style={{ fontSize: 12, padding: '0 0 8px' }}>
+                  {/* 智能摘要 */}
+                  {summary && (
+                    <div style={{ marginBottom: 8, color: '#666', fontSize: 12 }}>
+                      {summary}
+                    </div>
+                  )}
+
                   {/* 输入参数 */}
                   {argumentsStr && (
                     <div style={{ marginBottom: outputStr ? 8 : 0 }}>
@@ -616,6 +597,32 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
             },
           ]}
         />
+      ) : (
+        /* 无详情时只显示标题行 */
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '4px 12px',
+            gap: 6,
+          }}
+        >
+          <span style={{ fontSize: 14, flexShrink: 0 }}>{category.icon}</span>
+          <Text
+            strong
+            style={{
+              fontSize: 12,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {titleText}
+          </Text>
+          <div style={{ marginLeft: 'auto' }}>
+            <StatusIndicator loading={loading} elapsed={elapsed} />
+          </div>
+        </div>
       )}
     </div>
   );

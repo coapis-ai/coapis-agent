@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 class ResponseBlock:
     """Structured output block from stream_chat.
 
-    Attributes:
-        type: Block type — one of "text", "thinking", "tool_call", "tool_output", "newline"
-        content: The text content of this block
-        meta: Optional metadata (tool_name, tool_args, etc.)
+    .. deprecated::
+        Use :class:`stream_utils.ResponseBlock` instead.
+        This alias is kept for backward compatibility during the
+        unified-agent-architecture migration.
     """
     type: str          # "text" | "thinking" | "tool_call" | "tool_output" | "newline"
     content: str = ""

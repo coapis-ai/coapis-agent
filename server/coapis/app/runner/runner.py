@@ -61,7 +61,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_PRINT_END_SIGNAL = "[END]"
 
 
 # ------------------------------------------------------------------
@@ -137,59 +136,11 @@ def _evolution_trigger_turn_end(
         )
 
 
-async def _cancel_streaming_agent_task(task: asyncio.Task) -> None:
-    if task.done():
-        return
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logger.debug(
-            "Streaming agent task finished with error during cancellation",
-            exc_info=True,
-        )
-
-
-async def _stream_printing_messages_interruptible(
-    *,
-    agents: list[Any],
-    coroutine_task: Coroutine[Any, Any, Msg],
-) -> AsyncGenerator[tuple[Msg, bool], None]:
-    """Like agentscope.stream_printing_messages, but cancel the agent task
-    promptly when the outer stream is stopped or closed.
-    """
-
-    queue: asyncio.Queue = asyncio.Queue()
-    for agent in agents:
-        agent.set_msg_queue_enabled(True, queue)
-
-    task = asyncio.create_task(coroutine_task)
-    if task.done():
-        await queue.put(_PRINT_END_SIGNAL)
-    else:
-        task.add_done_callback(lambda _: queue.put_nowait(_PRINT_END_SIGNAL))
-
-    try:
-        while True:
-            printing_msg = await queue.get()
-            if (
-                isinstance(printing_msg, str)
-                and printing_msg == _PRINT_END_SIGNAL
-            ):
-                break
-            msg, last, _ = printing_msg
-            yield msg, last
-
-        exception = task.exception()
-        if exception is not None:
-            raise exception from None
-    except asyncio.CancelledError:
-        await _cancel_streaming_agent_task(task)
-        raise
-    finally:
-        await _cancel_streaming_agent_task(task)
+# Imported from shared module — keep aliases for backward compatibility
+from ...agents.stream_utils import (
+    cancel_streaming_task as _cancel_streaming_agent_task,
+    stream_agent_messages as _stream_printing_messages_interruptible,
+)
 
 
 class AgentRunner(Runner):

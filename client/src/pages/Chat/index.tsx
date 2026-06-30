@@ -14,7 +14,7 @@ import { SparkCopyLine, SparkAttachmentLine } from "@agentscope-ai/icons";
 import { usePlugins } from "../../plugins/PluginContext";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import sessionApi, { convertMessages } from "./sessionApi";
+import sessionApi from "./sessionApi";
 import defaultConfig, { getDefaultConfig } from "./OptionsPanel/defaultConfig";
 import { chatApi } from "../../api/modules/chat";
 import { getApiUrl } from "../../api/config";
@@ -802,13 +802,6 @@ export default function ChatPage() {
   const navigateRef = useRef(navigate);
   const chatRef = useRef<IAgentScopeRuntimeWebUIRef>(null);
   const pendingClearHistoryRef = useRef(false);
-  // "Load more" archived messages state
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
-  // Keep a mutable ref so the load-more callback always sees the latest value
-  const hasMoreRef = useRef(hasMore);
-  hasMoreRef.current = hasMore;
 
   useMessageHistoryNavigation(chatRef, isChatActive, isComposingRef);
   chatIdRef.current = chatId;
@@ -892,14 +885,6 @@ export default function ChatPage() {
       if (targetId !== lastSessionIdRef.current) {
         lastSessionIdRef.current = targetId;
         navigateRef.current(`/chat/${targetId}`, { replace: true });
-        // Sync hasMore/totalCount from loaded session
-        try {
-          const ext = sessionApi.sessionList.find(
-            (s: any) => (s.realId || s.id) === targetId,
-          ) as any;
-          setHasMore(ext?.hasMore ?? false);
-          setTotalCount(ext?.totalCount);
-        } catch { /* ignore */ }
       }
     };
 
@@ -1427,43 +1412,6 @@ export default function ChatPage() {
             }
           }}
         >
-          {/* Load More button — shown when older messages exist in archive */}
-          {hasMore && (
-            <div style={{ textAlign: "center", padding: "8px 0" }}>
-              <Button
-                size="small"
-                type="link"
-                loading={loadingMore}
-                onClick={async () => {
-                  const realId = sessionApi.currentSession?.realId || chatId;
-                  if (!realId) return;
-                  setLoadingMore(true);
-                  try {
-                    const firstMsg = sessionApi.currentSession?.messages?.[0];
-                    const before = firstMsg?.id;
-                    // Try archived data from SQLite
-                    const res = await chatApi.getArchivedMessages(realId, { before, limit: 30 });
-                    if (res.messages?.length) {
-                      const converted = convertMessages(res.messages);
-                      const existing = sessionApi.currentSession?.messages || [];
-                      // @ts-ignore — mutate the live session object
-                      sessionApi.currentSession!.messages = [...converted, ...existing];
-                      setHasMore(res.has_more);
-                      setRefreshKey((k) => k + 1);
-                    } else {
-                      setHasMore(false);
-                    }
-                  } catch (e) {
-                    console.warn("Load more failed:", e);
-                  } finally {
-                    setLoadingMore(false);
-                  }
-                }}
-              >
-                加载更多历史消息 {totalCount ? `(共 ${totalCount} 条)` : ""}
-              </Button>
-            </div>
-          )}
           <ChatErrorBoundary>
             <AgentScopeRuntimeWebUI
               ref={chatRef}

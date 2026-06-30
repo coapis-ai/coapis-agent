@@ -243,10 +243,14 @@ async def shell_execute(command: str, timeout: float = 60.0) -> str:
     if block_reason:
         return block_reason
 
-    # Execute in user workspace directory
+    # Execute in user files directory (workspaces/{username}/files/)
+    # Unified with file_write/file_read: all file operations default to files/ subdirectory.
+    # This avoids user confusion about where files are created.
     username = os.environ.get("COAPIS_USER", "default")
     workspaces_dir = os.environ.get("COAPIS_WORKSPACES_DIR", "/apps/ai/coapis/workspaces")
-    user_cwd = f"{workspaces_dir}/{username}"
+    user_cwd = f"{workspaces_dir}/{username}/files"
+    # Ensure the files directory exists
+    os.makedirs(user_cwd, exist_ok=True)
 
     # Use ProcessIsolator for isolated execution
     try:

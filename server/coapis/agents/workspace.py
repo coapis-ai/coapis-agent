@@ -1347,146 +1347,144 @@ class Workspace:
                 except Exception as e:
                     logger.warning("Pre-save user message failed: %s", e)
 
-                # ── Stream with CancelledError handling for /stop ──
+                # ── Stream via unified CoApisAgent (runner.query_handler) ──
                 _stopped = False
-                logger.info("[DEBUG] About to call core.stream_chat, user=%s, msg=%s", self.username, user_message[:50])
                 try:
-                    async for chunk in self.core.stream_chat(
-                        message=user_message,
-                        context=context,
-                        memory=self.memory,
-                        skills=self.skills,
-                        compressor=self.compressor,
-                        tools=self.tools,
-                        show_tool_details=_show_tool,
-                ):
-                        from .core import ResponseBlock
-                        if isinstance(chunk, ResponseBlock):
-                            block = chunk
-                        elif isinstance(chunk, tuple):
-                            text_legacy, is_reason_legacy = chunk
-                            block = ResponseBlock(
-                                type="thinking" if is_reason_legacy else "text",
-                                content=text_legacy,
-                            )
-                        else:
-                            block = ResponseBlock(type="text", content=str(chunk))
+                    from .stream_utils import msg_to_response_blocks
+                    from agentscope.message import Msg as _StreamMsg
+                    _stream_msgs = [_StreamMsg(name="user", content=user_message, role="user")]
 
-                        if not block.content:
+                    async for _msg_obj, _is_last in self.runner.query_handler(
+                        msgs=_stream_msgs,
+                        request=request_obj,
+                    ):
+                        if not _msg_obj or not getattr(_msg_obj, "content", None):
                             continue
+                        _blocks = msg_to_response_blocks(
+                            _msg_obj,
+                            show_tool=_show_tool,
+                            filter_thinking=_filter_thinking,
+                        )
+                        for block in _blocks:
+                            if not block.content:
+                                continue
 
-                        # Collect raw block for session persistence
-                        _raw_blocks.append(block)
+                            # Collect raw block for session persistence
+                            _raw_blocks.append(block)
 
-                        # ── Render block via renderer ──
-                        if block.type == "thinking":
-                            full_reasoning.append(block.content)
-                            rendered = _renderer.render_thinking(block.content)
-                            if rendered:
-                                # Open reasoning phase
-                                async for ev in _open_phase("reasoning"):
-                                    yield ev
-                                yield TextContent(
-                                    object="content",
-                                    msg_id=_phase_msg_id,
-                                    type="text",
-                                    delta=True,
-                                    text=rendered,
-                                    status=RunStatus.InProgress,
-                                )
-                        elif block.type == "tool_call":
-                            _tool_calls_seen += 1
-                            # ── Evolution: collect tool call info ──
-                            if self.evolution_engine:
-                                try:
-                                    _tc_meta = block.meta or {}
-                                    _evo_tool_calls.append({
-                                        "name": _tc_meta.get("tool_name", "unknown"),
-                                        "args": _tc_meta.get("tool_args", {}),
-                                        "call_id": _tc_meta.get("call_id", ""),
-                                    })
-                                except Exception:
-                                    pass
-                            # Always close reasoning phase when tool_call arrives,
-                            # even if render is empty — prevents subsequent content
-                            # from being rendered inside the thinking area.
-                            if _current_phase == "reasoning":
-                                async for ev in _close_phase():
-                                    yield ev
-                            rendered = _renderer.render_tool_call(block.content, block.meta)
-                            if rendered:
-                                full_response.append(rendered)
-                                async for ev in _open_phase("plugin_call"):
-                                    yield ev
-                                # Send DataContent with tool metadata (name, args, call_id)
-                                # so frontend EnhancedToolCallCard / GroupedResponseCard
-                                # can read content[0].data.name correctly.
-                                _tool_meta = block.meta or {}
-                                _tool_data = {
-                                    "name": _tool_meta.get("tool_name", "unknown"),
-                                    "call_id": _tool_meta.get("call_id", str(uuid_mod.uuid4())),
-                                    "arguments": json.dumps(
-                                        _tool_meta.get("tool_args", {}),
-                                        ensure_ascii=False,
-                                    ) if isinstance(_tool_meta.get("tool_args"), dict)
-                                    else str(_tool_meta.get("tool_args", "")),
-                                }
-                                yield DataContent(
-                                    object="content",
-                                    msg_id=_phase_msg_id,
-                                    type="data",
-                                    delta=True,
-                                    data=_tool_data,
-                                )
-                                # Close plugin_call immediately (each tool call is a separate card)
-                                async for ev in _close_phase():
-                                    yield ev
-                        elif block.type == "newline":
-                            # Separator — include only if we have response content
-                            if full_response and _channel_name == "console":
-                                full_response.append(block.content)
-                                yield TextContent(
-                                    object="content",
-                                    msg_id=msg_id,
-                                    type="text",
-                                    delta=True,
-                                    text=block.content,
-                                    status=RunStatus.InProgress,
-                                )
-                        elif block.type == "tool_result":
-                            # Tool result — only persist to session, never display as text
-                            pass
-                        else:
-                            # "text" or any other type
-                            text_chunk = block.content
-                            # Extra safety: filter 🔧 lines for non-console even if core yielded them
-                            if not _show_tool and _channel_name != "console":
-                                lines = text_chunk.split("\n")
-                                filtered = [
-                                    l for l in lines
-                                    if not l.strip().startswith("🔧")
-                                    and not l.strip().startswith("\\uf013")
-                                ]
-                                text_chunk = "\n".join(filtered)
-                                if not text_chunk.strip():
-                                    continue
-
-                            full_response.append(text_chunk)
-                            # Close reasoning phase if still open
-                            if _current_phase == "reasoning":
-                                async for ev in _close_phase():
-                                    yield ev
-                            # Open message phase (text response)
-                            async for ev in _open_phase("message"):
-                                yield ev
-                            yield TextContent(
-                                object="content",
-                                msg_id=_phase_msg_id,
-                                type="text",
-                                delta=True,
-                                text=text_chunk,
-                                status=RunStatus.InProgress,
-                            )
+                            # ── Render block via renderer ──
+                            if block.type == "thinking":
+                                full_reasoning.append(block.content)
+                                rendered = _renderer.render_thinking(block.content)
+                                if rendered:
+                                    async for ev in _open_phase("reasoning"):
+                                        yield ev
+                                    yield TextContent(
+                                        object="content",
+                                        msg_id=_phase_msg_id,
+                                        type="text",
+                                        delta=True,
+                                        text=rendered,
+                                        status=RunStatus.InProgress,
+                                    )
+                            elif block.type == "tool_call":
+                                _tool_calls_seen += 1
+                                if self.evolution_engine:
+                                    try:
+                                        _tc_meta = block.meta or {}
+                                        _evo_tool_calls.append({
+                                            "name": _tc_meta.get("tool_name", "unknown"),
+                                            "args": _tc_meta.get("tool_args", {}),
+                                            "call_id": _tc_meta.get("call_id", ""),
+                                        })
+                                    except Exception:
+                                        pass
+                                if _current_phase == "reasoning":
+                                    async for ev in _close_phase():
+                                        yield ev
+                                rendered = _renderer.render_tool_call(block.content, block.meta)
+                                if rendered:
+                                    full_response.append(rendered)
+                                    async for ev in _open_phase("plugin_call"):
+                                        yield ev
+                                    _tool_meta = block.meta or {}
+                                    _tool_data = {
+                                        "name": _tool_meta.get("tool_name", "unknown"),
+                                        "call_id": _tool_meta.get("call_id", str(uuid_mod.uuid4())),
+                                        "arguments": json.dumps(
+                                            _tool_meta.get("tool_args", {}),
+                                            ensure_ascii=False,
+                                            default=str,
+                                        ),
+                                    }
+                                    yield DataContent(
+                                        object="content",
+                                        msg_id=msg_id,
+                                        type="tool_call",
+                                        delta=True,
+                                        data=_tool_data,
+                                        status=RunStatus.InProgress,
+                                    )
+                                    yield TextContent(
+                                        object="content",
+                                        msg_id=msg_id,
+                                        type="text",
+                                        delta=True,
+                                        text=rendered,
+                                        status=RunStatus.InProgress,
+                                    )
+                            elif block.type == "tool_output":
+                                rendered = _renderer.render_tool_output(block.content, block.meta)
+                                if rendered:
+                                    async for ev in _close_phase():
+                                        yield ev
+                                    async for ev in _open_phase("tool_output"):
+                                        yield ev
+                                    full_response.append(rendered)
+                                    _tool_out_meta = block.meta or {}
+                                    yield DataContent(
+                                        object="content",
+                                        msg_id=msg_id,
+                                        type="tool_result",
+                                        delta=True,
+                                        data={
+                                            "name": _tool_out_meta.get("tool_name", "unknown"),
+                                            "call_id": _tool_out_meta.get("tool_call_id", ""),
+                                            "output": block.content[:2000] if block.content else "",
+                                        },
+                                        status=RunStatus.InProgress,
+                                    )
+                                    yield TextContent(
+                                        object="content",
+                                        msg_id=msg_id,
+                                        type="text",
+                                        delta=True,
+                                        text=rendered,
+                                        status=RunStatus.InProgress,
+                                    )
+                            elif block.type == "text":
+                                text_content = block.content
+                                full_response.append(text_content)
+                                if _search_card_html and _search_card_inserted_count < 1:
+                                    _search_card_inserted_count += 1
+                                    text_content = _search_card_html + "\n\n" + text_content
+                                    _search_card_html = ""
+                                if _current_phase:
+                                    async for ev in _close_phase():
+                                        yield ev
+                                rendered = _renderer.render_text(text_content)
+                                if rendered:
+                                    full_response.append(rendered)
+                                    yield TextContent(
+                                        object="content",
+                                        msg_id=msg_id,
+                                        type="text",
+                                        delta=True,
+                                        text=rendered,
+                                        status=RunStatus.InProgress,
+                                    )
+                            else:
+                                pass
 
                 except asyncio.CancelledError:
                     _stopped = True
@@ -1534,167 +1532,15 @@ class Workspace:
                                 text=fallback_msg,
                                 status=RunStatus.InProgress,
                             )
-
-                # ── Tool failure fallback for non-console channels ──
-                if (
-                    _tool_calls_seen > 0
-                    and _channel_name != "console"
-                ):
-                    response_lower = assistant_reply.strip().lower()
-                    _teaching_patterns = [
-                        "你可以尝试", "建议你", "请尝试", "你可以通过",
-                        "你可以使用", "建议使用", "可以试试", "你可以访问",
-                        "你可以搜索", "请访问", "你可以打开", "你可以去",
-                        "如何查", "怎么查", "怎么搜", "如何搜",
-                    ]
-                    is_teaching = any(p in response_lower for p in _teaching_patterns)
-                    is_empty = len(assistant_reply.strip()) < 10
-                    if is_teaching or is_empty:
-                        fallback_msg = (
-                            "\n\n⚠️ 抱歉，搜索/查询工具暂时不可用，无法获取实时信息。"
-                            "请稍后再试，或换个方式提问。"
-                        )
-                        if fallback_msg not in assistant_reply:
-                            assistant_reply += fallback_msg
-                            yield TextContent(
-                                object="content",
-                                msg_id=msg_id,
-                                type="text",
-                                delta=True,
-                                text=fallback_msg,
-                                status=RunStatus.InProgress,
-                            )
                 if assistant_reply:
-                    context.add_message("assistant", assistant_reply)
+                    pass  # persistence handled by runner
 
-                # Store for persistence (runner reads these)
+                # Store for legacy access (runner handles persistence)
                 self.last_full_reasoning = full_reasoning
                 self.last_full_response = full_response
 
-                # ── Unified session persistence ──
-                # Single atomic write: load existing memory → add user msg + assistant structured blocks → save back.
-                # Uses a generated UUID as session key for per-chat isolation.
-                try:
-                    _session = self.runner.session if self.runner else None
-                    # Use chat UUID as session key, matching the load side (spec.id).
-                    # The console router sets chat_id via session_context before streaming.
-                    from coapis.config.session_context import get_current_chat_id as _get_chat_id
-                    _chat_spec_id = (
-                        getattr(request_obj, "chat_id", "")
-                        or _get_chat_id()
-                        or chat_key
-                    )
-                    _chat_spec_user = self.username or user_id or "anonymous"
-                    if _session:
-                        from agentscope.memory import InMemoryMemory
-                        from agentscope.message import Msg, TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock
-
-                        # Load existing session state (may have previous turns)
-                        _state = await _session.get_session_state_dict(
-                            _chat_spec_id, _chat_spec_user, allow_not_exist=True,
-                        )
-                        _mem_state = (_state or {}).get("agent", {}).get("memory", {})
-                        _mem = InMemoryMemory()
-                        if _mem_state:
-                            _mem.load_state_dict(_mem_state, strict=False)
-
-                        # Add user message (skip if already pre-saved before stream)
-                        if user_message.strip() and not _pre_save_done:
-                            _user_msg = Msg(name="user", content=[TextBlock(text=user_message)], role="user")
-                            await _mem.add(_user_msg)
-
-                        # Build assistant structured content from raw blocks
-                        # Step 1: Merge consecutive blocks of the same type into complete paragraphs
-                        _merged_blocks = []
-                        _buf_type = None   # current accumulating type
-                        _buf_content = ""  # accumulated content
-                        for blk in _raw_blocks:
-                            btype = getattr(blk, "type", "text")
-                            content = getattr(blk, "content", "")
-                            # tool_call / tool_result are never merged (preserves meta)
-                            if btype in ("tool_call", "tool_result"):
-                                # flush buffer first
-                                if _buf_content:
-                                    _merged_blocks.append(
-                                        ResponseBlock(type=_buf_type, content=_buf_content)
-                                    )
-                                    _buf_type = None
-                                    _buf_content = ""
-                                _merged_blocks.append(blk)
-                            elif btype == _buf_type:
-                                # same type → accumulate
-                                _buf_content += content
-                            else:
-                                # different type → flush old buffer, start new
-                                if _buf_content:
-                                    _merged_blocks.append(
-                                        ResponseBlock(type=_buf_type, content=_buf_content)
-                                    )
-                                _buf_type = btype
-                                _buf_content = content
-                        # flush remaining
-                        if _buf_content:
-                            _merged_blocks.append(
-                                ResponseBlock(type=_buf_type, content=_buf_content)
-                            )
-                        logger.info(
-                            "Unified persist: %d raw → %d blocks, session=%s",
-                            len(_raw_blocks), len(_merged_blocks), _chat_spec_id[:12],
-                        )
-
-                        # Step 2: Convert merged blocks to agentscope format
-                        # agentscope TypedDicts (ThinkingBlock etc.) have `type` as Required.
-                        _assistant_content = []
-                        for blk in _merged_blocks:
-                            btype = getattr(blk, "type", "text")
-                            content = getattr(blk, "content", "")
-                            meta = getattr(blk, "meta", None) or {}
-                            if btype == "thinking":
-                                _assistant_content.append(ThinkingBlock(type="thinking", thinking=content))
-                            elif btype == "tool_call":
-                                _assistant_content.append(ToolUseBlock(
-                                    type="tool_use",
-                                    id=meta.get("call_id", ""),
-                                    name=meta.get("tool_name", "unknown"),
-                                    input=meta.get("tool_args", {}),
-                                ))
-                            elif btype == "tool_result":
-                                _assistant_content.append(ToolResultBlock(
-                                    type="tool_result",
-                                    id=meta.get("tool_call_id", ""),
-                                    name=meta.get("tool_name", ""),
-                                    output=[TextBlock(type="text", text=content)] if content else "",
-                                ))
-                            elif btype == "text":
-                                _assistant_content.append(TextBlock(type="text", text=content))
-
-                        if _assistant_content:
-                            # Check if there are thinking blocks
-                            _has_thinking = any(
-                                getattr(b, "type", "") == "thinking"
-                                for b in _assistant_content
-                            )
-                            _assistant_msg = Msg(
-                                name="assistant",
-                                content=_assistant_content,
-                                role="assistant",
-                                metadata={"type": "reasoning"} if _has_thinking else {},
-                            )
-                            await _mem.add(_assistant_msg)
-
-                        # Single atomic save
-                        await _session.update_session_state(
-                            session_id=_chat_spec_id,
-                            key="agent.memory",
-                            value=_mem.state_dict(),
-                            user_id=_chat_spec_user,
-                        )
-                        logger.info(
-                            "Unified persist: %d raw blocks → %d content blocks, session=%s",
-                            len(_raw_blocks), len(_assistant_content), _chat_spec_id[:12],
-                        )
-                except Exception as e:
-                    logger.warning("Unified persist failed: %s", e, exc_info=True)
+                # NOTE: Persistence is now handled by runner.query_handler()
+                # via ChatManager. No workspace-level persistence needed.
 
                 # ── Close any open phase ──
                 async for ev in _close_phase():

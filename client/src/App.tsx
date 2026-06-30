@@ -54,6 +54,15 @@ const GlobalStyle = createGlobalStyle`
   margin: 0;
   box-sizing: border-box;
 }
+
+/* Hide the blinking cursor dots animation from @agentscope-ai/chat */
+/* The cursor animation doesn't properly disappear after generation completes */
+.coapis-markdown-cursor,
+.coapis-markdown-cursor-dot,
+.coapis-markdown-cursor-dot-dot1,
+.coapis-markdown-cursor-dot-dot2 {
+  display: none !important;
+}
 `;
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
