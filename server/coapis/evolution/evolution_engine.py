@@ -129,6 +129,7 @@ class ExtractedExperience:
     is_generalizable: bool = False  # 是否可泛化到所有 Agent
     memory_type: str = "long_term"  # 目标记忆类型
     importance_score: float = 0.5  # 重要性评分 [0, 1]，用于自适应知识流动阈值
+    status: str = "pending"  # pending | approved | reviewed | rejected | promoted
     
     def to_dict(self) -> dict:
         return {

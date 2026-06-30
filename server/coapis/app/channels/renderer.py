@@ -409,6 +409,14 @@ class MessageRenderer:
         else:
             return ""
 
+    def render_tool_output(self, content: str, meta: dict = None) -> str:
+        """Render a tool_output block based on style."""
+        action = self.get_tool_action(meta.get("tool_name", "") if meta else "")
+        if action == BlockRenderAction.SHOW:
+            return content
+        else:
+            return ""
+
     def render_thinking(self, content: str) -> str:
         """Render a thinking block based on style."""
         action = self.get_thinking_action()

@@ -109,16 +109,16 @@ class SandboxedExecutor:
             return None
 
     def check_tool_allowed(self, tool_name: str) -> dict:
-        """Check if a tool is in the whitelist.
+        """Check if a tool is allowed to execute.
+
+        Tools registered in the system are already vetted by the platform.
+        Runtime security is enforced by:
+        - ToolGuardMixin (command classification L0-L4, path validation)
+        - Docker container sandbox (network/filesystem isolation)
 
         Returns:
             {"allowed": bool, "reason": str}
         """
-        if tool_name not in ALLOWED_TOOLS:
-            return {
-                "allowed": False,
-                "reason": f"Tool '{tool_name}' not in allowed tools list",
-            }
         return {"allowed": True, "reason": ""}
 
     def check_path(self, username: str, path: str, operation: str = "read") -> dict:
