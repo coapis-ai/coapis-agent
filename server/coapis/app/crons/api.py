@@ -20,6 +20,7 @@ Storage path: workspaces/{username}/crons/jobs.json
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -27,6 +28,8 @@ from .manager import CronManager
 from .models import CronExecutionRecord, CronJobSpec, CronJobView
 from .registry import get_user_cron_manager
 from ..permissions.decorators import require_permission
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cron", tags=["cron"])
 
@@ -157,11 +160,30 @@ async def run_job_now(
     mgr: CronManager = Depends(get_user_cron_manager),
 ):
     """Trigger immediate execution of a cron job."""
+    logger.info(
+        "API run_job_now: job_id=%s user=%s",
+        job_id,
+        request.state.user_id if hasattr(request.state, 'user_id') else 'unknown',
+    )
     job = await mgr.get_job(job_id)
     if not job:
+        logger.warning("API run_job_now: job not found: %s", job_id)
         raise HTTPException(status_code=404, detail="job not found")
-    result = await mgr.run_job_once(job_id)
-    return {"result": result}
+    try:
+        result = await mgr.run_job_once(job_id)
+        logger.info(
+            "API run_job_now: job_id=%s result=%s",
+            job_id,
+            result,
+        )
+        return {"result": result}
+    except Exception as e:
+        logger.error(
+            "API run_job_now: job_id=%s error=%s",
+            job_id,
+            repr(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/jobs/{job_id}/pause")

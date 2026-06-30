@@ -285,7 +285,7 @@ async def create_custom_provider_endpoint(
                 base_url=body.default_base_url,
                 api_key_prefix=body.api_key_prefix,
                 chat_model=body.chat_model,
-                extra_models=body.models,
+                models=body.models,
                 owner=username,
             ),
         )
@@ -409,7 +409,7 @@ async def discover_models(
             )
 
         existing_model_ids = {
-            model.id for model in provider.models + provider.extra_models
+            model.id for model in provider.models
         }
 
         ok = manager.update_provider(

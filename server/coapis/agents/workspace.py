@@ -1290,6 +1290,9 @@ class Workspace:
                 # ── Pre-save user message to session (before stream) ──
                 # Following qwenpaw strategy: user message is persisted BEFORE
                 # stream processing begins, so it survives /stop interruption.
+                # NOTE: The console router may have already persisted the user
+                # message synchronously before starting the stream. In that
+                # case, skip the pre-save to avoid duplicate messages.
                 logger.info("[DEBUG] Starting pre-save, chat_key=%s", chat_key[:20])
                 _pre_save_done = False
                 try:
@@ -1312,20 +1315,33 @@ class Workspace:
                         _pre_mem = InMemoryMemory()
                         if _pre_mem_state:
                             _pre_mem.load_state_dict(_pre_mem_state, strict=False)
-                        # Add user message
-                        await _pre_mem.add(
-                            Msg(name="user", content=[TextBlock(text=user_message)], role="user")
-                        )
-                        # Save back (only user message, assistant will be added later)
-                        _pre_new_state = _pre_state.copy() if _pre_state else {}
-                        if "agent" not in _pre_new_state:
-                            _pre_new_state["agent"] = {}
-                        _pre_new_state["agent"]["memory"] = _pre_mem.state_dict()
-                        await _session.update_session_state(
-                            _pre_chat_id, "agent.memory",
-                            _pre_new_state["agent"]["memory"],
-                            user_id=_pre_user,
-                        )
+                        # Check if user message already persisted (by console router)
+                        _existing_memories = await _pre_mem.get_memory(prepend_summary=False)
+                        _already_saved = False
+                        if _existing_memories:
+                            _last = _existing_memories[-1]
+                            if (getattr(_last, "role", "") == "user"
+                                    and user_message.strip() in str(getattr(_last, "content", ""))):
+                                _already_saved = True
+                                logger.debug(
+                                    "User message already persisted by console router, skipping pre-save: chat=%s",
+                                    _pre_chat_id[:12],
+                                )
+                        if not _already_saved:
+                            # Add user message
+                            await _pre_mem.add(
+                                Msg(name="user", content=[TextBlock(text=user_message)], role="user")
+                            )
+                            # Save back (only user message, assistant will be added later)
+                            _pre_new_state = _pre_state.copy() if _pre_state else {}
+                            if "agent" not in _pre_new_state:
+                                _pre_new_state["agent"] = {}
+                            _pre_new_state["agent"]["memory"] = _pre_mem.state_dict()
+                            await _session.update_session_state(
+                                _pre_chat_id, "agent.memory",
+                                _pre_new_state["agent"]["memory"],
+                                user_id=_pre_user,
+                            )
                         _pre_save_done = True
                         logger.debug("Pre-saved user message to session, chat=%s", _pre_chat_id[:12])
                 except Exception as e:

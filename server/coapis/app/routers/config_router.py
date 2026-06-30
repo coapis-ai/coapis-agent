@@ -354,12 +354,11 @@ async def get_config_models(request: Request) -> Dict[str, Any]:
     Admin users see all providers; regular users see only available models.
     Requires 'advanced' role or higher.
     """
-    # Load providers config
-    providers_path = SYSTEM_DIR / "providers.json"
-    providers = []
-    if providers_path.exists():
-        with open(providers_path, "r", encoding="utf-8") as f:
-            providers = json.load(f)
+    # 从 ProviderManager 读取 provider 列表
+    from ...providers.provider_manager import ProviderManager
+    pm = ProviderManager.get_instance()
+    provider_infos = await pm.list_provider_info()
+    providers = [info.model_dump() for info in provider_infos]
     
     # Also check global config for models section
     config = _load_config(request)

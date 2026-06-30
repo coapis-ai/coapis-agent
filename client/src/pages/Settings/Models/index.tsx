@@ -48,7 +48,7 @@ function ModelsPage() {
       }
 
       const hasModels =
-        provider.models.length + provider.extra_models.length > 0;
+        provider.models.length > 0;
       const isAvailable = isConfigured && hasModels;
 
       // Lower number = higher priority (shown first)

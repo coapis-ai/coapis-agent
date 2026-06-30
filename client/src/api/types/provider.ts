@@ -14,10 +14,8 @@ export interface ProviderInfo {
   name: string;
   api_key_prefix: string;
   chat_model: string;
-  /** Built-in models (for built-in providers) or all models (for custom). */
+  /** All models for this provider (unified — no more extra_models). */
   models: ModelInfo[];
-  /** User-added models (deletable). Only populated for built-in providers. */
-  extra_models: ModelInfo[];
   is_custom: boolean;
   is_local: boolean;
   /** Whether this provider supports fetching available models from the provider's API. */

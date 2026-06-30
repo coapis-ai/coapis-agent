@@ -192,11 +192,7 @@ class ModelCommandHandler(BaseControlCommandHandler):
             if provider_info.require_api_key and not provider_info.api_key:
                 continue
             # Skip if provider has no models
-            # (check both models and extra_models)
-            all_models = list(provider_info.models) + list(
-                provider_info.extra_models,
-            )
-            if not all_models:
+            if not provider_info.models:
                 continue
             configured_providers.append(provider_info)
 
@@ -215,10 +211,8 @@ class ModelCommandHandler(BaseControlCommandHandler):
             provider_id = provider_info.id
             provider_name = provider_info.name
 
-            # Get all models for this provider (both built-in and user-added)
-            extra_models = list(provider_info.extra_models)
-            all_models = list(provider_info.models) + extra_models
-            extra_model_ids = {m.id for m in extra_models}
+            # Get all models for this provider
+            all_models = list(provider_info.models)
 
             lines.append(f"\n**Provider: {provider_name}** (`{provider_id}`)")
 
@@ -438,7 +432,7 @@ class ModelCommandHandler(BaseControlCommandHandler):
 
         # Find model
         model_info = None
-        for model in provider.models + provider.extra_models:
+        for model in provider.models:
             if model.id == model_id:
                 model_info = model
                 break

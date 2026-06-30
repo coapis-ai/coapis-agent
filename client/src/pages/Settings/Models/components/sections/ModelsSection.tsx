@@ -13,7 +13,6 @@ interface ModelsSectionProps {
     id: string;
     name: string;
     models?: Array<{ id: string; name: string; is_free?: boolean }>;
-    extra_models?: Array<{ id: string; name: string; is_free?: boolean }>;
     base_url?: string;
     api_key?: string;
     is_custom: boolean;
@@ -51,7 +50,7 @@ export function ModelsSection({
     () =>
       providers.filter((p) => {
         const hasModels =
-          (p.models?.length ?? 0) + (p.extra_models?.length ?? 0) > 0;
+          (p.models?.length ?? 0) > 0;
         if (!hasModels) return false;
         if (p.require_api_key === false) return !!p.base_url;
         if (p.is_custom) return !!p.base_url;
@@ -72,7 +71,6 @@ export function ModelsSection({
   const chosenProvider = providers.find((p) => p.id === selectedProviderId);
   const modelOptions = [
     ...(chosenProvider?.models ?? []),
-    ...(chosenProvider?.extra_models ?? []),
   ];
   const hasModels = modelOptions.length > 0;
 
@@ -93,7 +91,6 @@ export function ModelsSection({
     const selectedProvider = providers.find((p) => p.id === selectedProviderId);
     const selectedModelInfo = [
       ...(selectedProvider?.models ?? []),
-      ...(selectedProvider?.extra_models ?? []),
     ].find((model) => model.id === selectedModel);
 
     if (selectedProvider && selectedModelInfo) {

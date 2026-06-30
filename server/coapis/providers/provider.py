@@ -64,6 +64,11 @@ class ModelInfo(BaseModel):
         description="Per-model generation parameters that override "
         "provider-level generate_kwargs.",
     )
+    source: str = Field(
+        default="builtin",
+        description="Model source: 'builtin' (defined in code) "
+        "or 'added' (user-added via UI/API).",
+    )
 
 
 class ExtendedModelInfo(ModelInfo):
@@ -107,11 +112,8 @@ class ProviderInfo(BaseModel):
     )
     models: List[ModelInfo] = Field(
         default_factory=list,
-        description="List of pre-defined models",
-    )
-    extra_models: List[ModelInfo] = Field(
-        default_factory=list,
-        description="List of user-added models (not fetched from provider)",
+        description="All models (builtin + user-added). "
+        "Use ModelInfo.source to distinguish.",
     )
 
     api_key_prefix: str = Field(
@@ -188,22 +190,18 @@ class Provider(ProviderInfo, ABC):
     async def add_model(
         self,
         model_info: ModelInfo,
-        target: str = "extra_models",
+        target: str = "models",
         timeout: float = 10,  # pylint: disable=unused-argument
     ) -> tuple[bool, str]:
         """Add a model to the provider's model list."""
         model_info.id = model_info.id.strip()
         if any(
             model.id.strip() == model_info.id
-            for model in self.models + self.extra_models
+            for model in self.models
         ):
             return False, f"Model '{model_info.id}' already exists"
-        if target == "extra_models":
-            self.extra_models.append(model_info)
-        elif target == "models":
-            self.models.append(model_info)
-        else:
-            return False, f"Invalid target '{target}' for adding model"
+        model_info.source = "added"
+        self.models.append(model_info)
         return True, ""
 
     async def delete_model(
@@ -211,13 +209,19 @@ class Provider(ProviderInfo, ABC):
         model_id: str,
         timeout: float = 10,  # pylint: disable=unused-argument
     ) -> tuple[bool, str]:
-        """Delete a model from the provider's model list."""
+        """Delete a user-added model from the provider's model list.
+
+        Only models with source='added' can be deleted.
+        """
         model_id = model_id.strip()
-        self.extra_models = [
+        original_len = len(self.models)
+        self.models = [
             model
-            for model in self.extra_models
-            if model.id.strip() != model_id
+            for model in self.models
+            if not (model.id.strip() == model_id and model.source == "added")
         ]
+        if len(self.models) == original_len:
+            return False, f"Model '{model_id}' not found or not deletable"
         return True, ""
 
     def update_config(self, config: Dict) -> None:
@@ -248,17 +252,6 @@ class Provider(ProviderInfo, ABC):
             and isinstance(config["generate_kwargs"], dict)
         ):
             self.generate_kwargs = config["generate_kwargs"]
-        if "extra_models" in config and config["extra_models"] is not None:
-            # Always go through model_validate with dict data to
-            # avoid class-identity issues from dual module loading.
-            self.extra_models = [
-                ModelInfo.model_validate(
-                    model.model_dump()
-                    if isinstance(model, BaseModel)
-                    else model,
-                )
-                for model in config["extra_models"]
-            ]
 
     def get_chat_model_cls(self) -> Type[ChatModelBase]:
         """Return the chat model class associated with this provider."""
@@ -302,7 +295,7 @@ class Provider(ProviderInfo, ABC):
 
         Always returns a new dict so callers never mutate provider state.
         """
-        for model in self.models + self.extra_models:
+        for model in self.models:
             if model.id == model_id:
                 if model.generate_kwargs:
                     return self._deep_merge(
@@ -318,7 +311,7 @@ class Provider(ProviderInfo, ABC):
         config: Dict,
     ) -> bool:
         """Update per-model configuration (e.g. generate_kwargs)."""
-        for model in self.models + self.extra_models:
+        for model in self.models:
             if model.id == model_id:
                 if (
                     "generate_kwargs" in config
@@ -332,7 +325,7 @@ class Provider(ProviderInfo, ABC):
     def has_model(self, model_id: str) -> bool:
         """Check if the provider has a model with the given ID."""
         return any(
-            model.id == model_id for model in self.models + self.extra_models
+            model.id == model_id for model in self.models
         )
 
     @abstractmethod
@@ -370,7 +363,7 @@ class Provider(ProviderInfo, ABC):
             if mock_secret and self.api_key
             else self.api_key
         )
-        # Serialize models/extra_models to plain dicts so that
+        # Serialize models to plain dicts so that
         # ProviderInfo constructs fresh ModelInfo instances using
         # the class in its own module scope.  This avoids pydantic
         # class-identity mismatches when the same module is loaded
@@ -382,7 +375,6 @@ class Provider(ProviderInfo, ABC):
             api_key=api_key,
             chat_model=self.chat_model,
             models=[m.model_dump() for m in self.models],
-            extra_models=[m.model_dump() for m in self.extra_models],
             api_key_prefix=self.api_key_prefix,
             is_local=self.is_local,
             is_custom=self.is_custom,

@@ -296,10 +296,6 @@ export function RemoteModelManageModal({
 
   const [loadingDiscoveredModels, setLoadingDiscoveredModels] = useState(false);
 
-  // For custom providers ALL models are deletable.
-  // For built-in providers only extra_models are deletable.
-  const extraModelIds = new Set((provider.extra_models || []).map((m) => m.id));
-
   const doAddModel = async (id: string, name: string) => {
     await api.addModel(provider.id, { id, name });
     message.success(t("models.modelAdded", { name }));
@@ -315,7 +311,6 @@ export function RemoteModelManageModal({
       const name = values.name?.trim() || id;
       const modelAlreadyExists = [
         ...(provider.models ?? []),
-        ...(provider.extra_models ?? []),
       ].some((model) => model.id.trim() === id);
 
       if (modelAlreadyExists) {
@@ -599,16 +594,13 @@ export function RemoteModelManageModal({
   }, [adding, form, isOpenRouter]);
 
   const filteredModels = useMemo(() => {
-    const all_models = [
-      ...(provider.extra_models ?? []),
-      ...(provider.models ?? []),
-    ];
+    const all_models = [...(provider.models ?? [])];
     const q = modelSearchQuery.trim().toLowerCase();
     if (!q) return all_models;
     return all_models.filter(
       (m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
     );
-  }, [provider.models, provider.extra_models, modelSearchQuery]);
+  }, [provider.models, modelSearchQuery]);
 
   const colors = tagColors(isDark);
 
@@ -635,7 +627,7 @@ export function RemoteModelManageModal({
           <div className={styles.modelListEmpty}>{t("models.noModels")}</div>
         ) : (
           filteredModels.map((m) => {
-            const isDeletable = provider.is_custom || extraModelIds.has(m.id);
+            const isDeletable = provider.is_custom;
             const isConfigOpen = configOpenModelId === m.id;
             return (
               <div key={m.id}>

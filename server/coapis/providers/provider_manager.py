@@ -929,7 +929,25 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         try:
             models = await provider.fetch_models()
             if save:
-                provider.extra_models = models
+                # Merge fetched models with existing, keeping user-added ones
+                existing_added = {
+                    m.id: m for m in provider.models if m.source == "added"
+                }
+                new_models = []
+                for m in models:
+                    m.source = "added"
+                    new_models.append(m)
+                # Keep existing builtin models that weren't overwritten
+                for m in provider.models:
+                    if m.source == "builtin" and m.id not in {
+                        nm.id for nm in new_models
+                    }:
+                        new_models.append(m)
+                # Re-add user-added models
+                for mid, m in existing_added.items():
+                    if mid not in {nm.id for nm in new_models}:
+                        new_models.append(m)
+                provider.models = new_models
                 # Save provider config to appropriate location
                 is_plugin = provider_id in self.plugin_providers
                 if is_plugin:
@@ -1022,7 +1040,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         """Schedule multimodal probing for a model if capability is unknown."""
         provider = self.get_provider(provider_id)
         # Auto-probe multimodal if not yet probed
-        for model in provider.models + provider.extra_models:
+        for model in provider.models:
             if model.id == model_id and model.supports_multimodal is None:
                 asyncio.create_task(
                     self._auto_probe_multimodal(provider_id, model_id),
@@ -1167,7 +1185,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         # Update the model's capability flags.
         # For image_only probes, leave supports_video untouched so a
         # subsequent full probe can fill it in correctly.
-        for model in provider.models + provider.extra_models:
+        for model in provider.models:
             if model.id == model_id:
                 model.supports_image = result.supports_image
                 if not image_only:
@@ -1289,10 +1307,12 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 data,
                 PROVIDER_SECRET_FIELDS,
             )
+            # Detect legacy extra_models before decryption
+            has_extra_models = bool(data.get("extra_models"))
             data = decrypt_dict_fields(data, PROVIDER_SECRET_FIELDS)
             provider = self._provider_from_data(data)
 
-            if needs_rewrite:
+            if needs_rewrite or has_extra_models:
                 try:
                     self._save_provider(
                         provider,
@@ -1301,7 +1321,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                     )
                 except Exception as enc_err:
                     logger.debug(
-                        "Deferred plaintext→encrypted migration"
+                        "Deferred migration write-back"
                         " for provider '%s': %s",
                         provider_id,
                         enc_err,
@@ -1331,7 +1351,27 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         return False
 
     def _provider_from_data(self, data: Dict) -> Provider:
-        """Deserialize provider data to a concrete provider type."""
+        """Deserialize provider data to a concrete provider type.
+
+        Also handles migration: if the data contains ``extra_models``
+        (legacy format), merge them into ``models`` before deserializing.
+        """
+        # ── Legacy migration: merge extra_models into models ──
+        extra_models = data.pop("extra_models", None)
+        if extra_models and isinstance(extra_models, list):
+            existing_ids = {
+                m.get("id") for m in (data.get("models") or []) if isinstance(m, dict)
+            }
+            for m in extra_models:
+                if isinstance(m, dict) and m.get("id") not in existing_ids:
+                    m.setdefault("source", "added")
+                    data.setdefault("models", []).append(m)
+            logger.info(
+                "Merged %d legacy extra_models into models for '%s'",
+                len(extra_models),
+                data.get("id", "?"),
+            )
+
         provider_id = str(data.get("id", ""))
         chat_model = str(data.get("chat_model", ""))
 
@@ -1417,11 +1457,17 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                     continue
                 if "api_key" in config:
                     provider.api_key = config["api_key"]
+                # Merge extra_models into models (legacy migration)
                 if "extra_models" in config:
-                    provider.extra_models = [
+                    extra = [
                         ModelInfo.model_validate(model)
                         for model in config["extra_models"]
                     ]
+                    existing_ids = {m.id for m in provider.models}
+                    for m in extra:
+                        if m.id not in existing_ids:
+                            m.source = "added"
+                            provider.models.append(m)
                 if not provider.freeze_url and "base_url" in config:
                     provider.base_url = config["base_url"]
                 self._save_provider(provider, is_builtin=True)
@@ -1435,8 +1481,8 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                     is_custom=True,
                 )
                 if "models" in data:
-                    # migrate models to extra_models field
-                    custom_provider.extra_models = [
+                    # migrate models into unified models field
+                    custom_provider.models = [
                         ModelInfo.model_validate(model)
                         for model in data["models"]
                     ]
@@ -1475,28 +1521,18 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                     builtin.base_url = provider.base_url
                 builtin.api_key = provider.api_key
                 builtin_model_ids = {m.id for m in builtin.models}
-                # Only overwrite extra_models if stored list is non-empty
-                if provider.extra_models:
-                    builtin.extra_models = [
-                        m
-                        for m in provider.extra_models
-                        if m.id not in builtin_model_ids
-                    ]
+                # Merge stored models into builtin (added models)
+                if provider.models:
+                    added_models = [m for m in provider.models if m.source == "added"]
+                    for m in added_models:
+                        if m.id not in builtin_model_ids:
+                            builtin.models.append(m)
                 builtin.generate_kwargs.update(provider.generate_kwargs)
                 # Restore per-model generate_kwargs for built-in models.
-                # Collect from both stored built-in models and promoted
-                # extra_models (models that were user-added but are now
-                # part of the built-in list).
                 stored_model_kwargs: dict = {}
                 for m in provider.models:
                     if m.generate_kwargs:
                         stored_model_kwargs[m.id] = m.generate_kwargs
-                for m in provider.extra_models:
-                    if m.id in builtin_model_ids and m.generate_kwargs:
-                        stored_model_kwargs.setdefault(
-                            m.id,
-                            m.generate_kwargs,
-                        )
                 if stored_model_kwargs:
                     for model in builtin.models:
                         if model.id in stored_model_kwargs:
@@ -1558,12 +1594,12 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 "coapis-local",
                 {
                     "base_url": "",
-                    "extra_models": [],
+                    "models": [],
                 },
             )
 
         local_provider = self.get_provider("coapis-local")
-        local_models = local_provider.extra_models if local_provider else []
+        local_models = local_provider.models if local_provider else []
         model_id = local_models[0].id if local_models else None
         if model_id is None:
             return
@@ -1601,7 +1637,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
             "coapis-local",
             {
                 "base_url": f"http://127.0.0.1:{setup_result.port}/v1",
-                "extra_models": [setup_result.model_info],
+                "models": [setup_result.model_info],
             },
         )
 
@@ -1659,7 +1695,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                     PROVIDER_SECRET_FIELDS,
                 )
 
-                # Merge saved config (api_key, base_url, extra_models, etc)
+                # Merge saved config (api_key, base_url, models, etc)
                 if "api_key" in saved_config:
                     provider_info.api_key = saved_config["api_key"]
                 if "base_url" in saved_config:
@@ -1668,9 +1704,9 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                     provider_info.generate_kwargs = saved_config[
                         "generate_kwargs"
                     ]
-                # Load extra_models from saved config
+                # Load extra_models from saved config (legacy migration)
                 if "extra_models" in saved_config:
-                    provider_info.extra_models = [
+                    extra = [
                         ModelInfo.model_validate(
                             model.model_dump()
                             if isinstance(model, BaseModel)
@@ -1678,10 +1714,15 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                         )
                         for model in saved_config["extra_models"]
                     ]
+                    existing_ids = {m.id for m in provider_info.models}
+                    for m in extra:
+                        if m.id not in existing_ids:
+                            m.source = "added"
+                            provider_info.models.append(m)
                 logger.info(
                     f"✓ Loaded saved config for plugin provider: "
                     f"{provider_id} "
-                    f"({len(provider_info.extra_models)} extra model(s))",
+                    f"({len(provider_info.models)} model(s))",
                 )
             except Exception as e:
                 logger.warning(

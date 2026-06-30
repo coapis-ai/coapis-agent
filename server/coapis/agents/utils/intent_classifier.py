@@ -34,37 +34,38 @@ _PROVIDER_CONFIG: dict | None = None
 
 
 def _get_provider_config() -> dict | None:
-    """Read LLM provider config from system settings."""
+    """Read LLM provider config from ProviderManager."""
     global _PROVIDER_CONFIG
     if _PROVIDER_CONFIG is not None:
         return _PROVIDER_CONFIG
 
-    config_paths = [
-        Path("/apps/ai/coapis/system/providers.json"),
-        Path(os.environ.get("COAPIS_SYSTEM_DIR", "")) / "providers.json" if os.environ.get("COAPIS_SYSTEM_DIR") else None,
-    ]
-
-    for p in config_paths:
-        if p and p.exists():
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    providers = json.load(f)
-                # Use the first available provider
-                for name, cfg in providers.items():
-                    api_base = cfg.get("api_base", "")
-                    api_key = cfg.get("api_key", "none")
-                    models = cfg.get("models", {})
-                    if models:
-                        model_id = next(iter(models.keys()))
-                        _PROVIDER_CONFIG = {
-                            "api_base": api_base.rstrip("/"),
-                            "api_key": api_key,
-                            "model": model_id,
-                        }
-                        logger.debug("Intent classifier using provider: %s/%s", name, model_id)
-                        return _PROVIDER_CONFIG
-            except Exception as e:
-                logger.debug("Failed to read provider config from %s: %s", p, e)
+    try:
+        from coapis.providers.provider_manager import ProviderManager
+        pm = ProviderManager.get_instance()
+        # 优先使用 active model
+        active = pm.get_active_model()
+        if active:
+            provider = pm.get_provider(active.provider_id)
+            if provider and provider.base_url:
+                _PROVIDER_CONFIG = {
+                    "api_base": provider.base_url.rstrip("/"),
+                    "api_key": provider.api_key or "none",
+                    "model": active.model,
+                }
+                logger.debug("Intent classifier using active model: %s/%s", active.provider_id, active.model)
+                return _PROVIDER_CONFIG
+        # 回退：找第一个有模型且配置好的 provider
+        for pid, provider in {**pm.builtin_providers, **pm.custom_providers}.items():
+            if provider.models and provider.base_url:
+                _PROVIDER_CONFIG = {
+                    "api_base": provider.base_url.rstrip("/"),
+                    "api_key": provider.api_key or "none",
+                    "model": provider.models[0].id,
+                }
+                logger.debug("Intent classifier using provider: %s/%s", pid, provider.models[0].id)
+                return _PROVIDER_CONFIG
+    except Exception as e:
+        logger.debug("Failed to read provider config from ProviderManager: %s", e)
     return None
 
 

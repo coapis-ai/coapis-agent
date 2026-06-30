@@ -47,6 +47,45 @@ def _get_sandbox(username: str = None):
         return None
 
 
+def _resolve_user_path(path: str) -> Path:
+    """Resolve user file path to files/ subdirectory.
+
+    Rules:
+    - Absolute paths: use as-is
+    - Relative paths: resolve to workspaces/{user}/files/{path}
+    - '..' allowed but cannot escape files/ root (security)
+    
+    Args:
+        path: File path (relative or absolute)
+        
+    Returns:
+        Resolved absolute path
+    """
+    filepath = Path(path)
+    
+    # Absolute paths: use as-is
+    if filepath.is_absolute():
+        return filepath
+    
+    # Get current user's workspace files directory
+    username = os.environ.get("COAPIS_USER", "default")
+    workspaces_dir = os.environ.get(
+        "COAPIS_WORKSPACES_DIR", "/apps/ai/coapis/workspaces"
+    )
+    user_files_root = Path(workspaces_dir) / username / "files"
+    
+    # Resolve relative path to user files directory
+    resolved = (user_files_root / path).resolve()
+    
+    # Security check: ensure resolved path is under files/ root
+    # This prevents directory traversal attacks (e.g., ../../etc/passwd)
+    if not str(resolved).startswith(str(user_files_root.resolve())):
+        # Path escapes files/ root - reject and return safe fallback
+        return user_files_root / filepath.name
+    
+    return resolved
+
+
 def _get_audit_logger():
     """Get SecurityAuditLogger instance."""
     try:
@@ -134,6 +173,7 @@ async def file_read(path: str, start_line: int = None, end_line: int = None) -> 
 
     Args:
         path: Path to the file to read (relative or absolute).
+              Relative paths are resolved to workspaces/{user}/files/{path}
         start_line: First line to read (1-based, inclusive). Omit to start from beginning.
         end_line: Last line to read (1-based, inclusive). Omit to read to end.
 
@@ -145,7 +185,9 @@ async def file_read(path: str, start_line: int = None, end_line: int = None) -> 
     if block_reason:
         return block_reason
 
-    filepath = Path(path)
+    # Resolve path to user files directory
+    filepath = _resolve_user_path(path)
+    
     if not filepath.exists():
         return f"File not found: {path}"
 
@@ -164,6 +206,7 @@ async def file_write(path: str, content: str) -> str:
 
     Args:
         path: Path to the file to write (relative or absolute).
+              Relative paths are resolved to workspaces/{user}/files/{path}
         content: The text content to write to the file.
 
     Returns:
@@ -174,7 +217,8 @@ async def file_write(path: str, content: str) -> str:
     if block_reason:
         return block_reason
 
-    filepath = Path(path)
+    # Resolve path to user files directory
+    filepath = _resolve_user_path(path)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_text(content)
     return f"Written {len(content)} bytes to {path}"
@@ -262,6 +306,7 @@ async def list_files(path: str, recursive: bool = False) -> List[str]:
 
     Args:
         path: Directory path to list.
+              Relative paths are resolved to workspaces/{user}/files/{path}
         recursive: If True, list files recursively.
 
     Returns:
@@ -272,7 +317,9 @@ async def list_files(path: str, recursive: bool = False) -> List[str]:
     if block_reason:
         return [block_reason]
 
-    filepath = Path(path)
+    # Resolve path to user files directory
+    filepath = _resolve_user_path(path)
+    
     if not filepath.exists():
         return []
 

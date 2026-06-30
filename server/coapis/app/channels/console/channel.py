@@ -30,6 +30,7 @@ from ..base import (
     OutgoingContentPart,
     ProcessHandler,
 )
+from ...console_push_store import append as push_store_append
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,49 @@ class ConsoleChannel(BaseChannel):
             event_count,
             last_response is not None,
         )
+
+    async def send(
+        self,
+        to_handle: str,
+        text: str,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Send a text message proactively to the console.
+
+        Used by CronExecutor (task_type='text') and other proactive
+        notification paths. Stores the message in console_push_store
+        so the frontend can retrieve it via /api/console/push.
+
+        Args:
+            to_handle: Target handle (session_id or channel:user_id).
+            text: The message body to send.
+            meta: Optional metadata (currently unused).
+        """
+        if not text:
+            return
+
+        # Extract session_id from to_handle
+        # to_handle format: "console:user_id" or "console:user_id:timestamp"
+        session_id = to_handle or "console:unknown"
+
+        logger.info(
+            "ConsoleChannel.send: session_id=%s len=%s",
+            session_id[:60],
+            len(text),
+        )
+
+        try:
+            await push_store_append(session_id, text)
+            logger.info(
+                "ConsoleChannel.send: message stored for session=%s",
+                session_id[:60],
+            )
+        except Exception as e:
+            logger.error(
+                "ConsoleChannel.send failed: session_id=%s error=%s",
+                session_id[:60],
+                repr(e),
+            )
 
     async def consume_one(self, payload: Any) -> None:
         """Process one payload; drain stream_one (no terminal output)."""

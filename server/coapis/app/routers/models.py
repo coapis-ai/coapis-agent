@@ -46,7 +46,6 @@ class ProviderInfo(BaseModel):
     api_key_prefix: str = ""
     chat_model: str = ""
     models: List[Dict[str, Any]] = []
-    extra_models: List[Dict[str, Any]] = []
     is_custom: bool = False
     is_local: bool = False
     support_model_discovery: bool = False
@@ -118,7 +117,6 @@ def _get_providers(request: Request) -> List[Dict[str, Any]]:
             "api_key_prefix": "",
             "chat_model": model,
             "models": models,
-            "extra_models": [],
             "is_custom": False,
             "is_local": "local" in provider_id.lower(),
             "support_model_discovery": False,

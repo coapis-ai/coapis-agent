@@ -317,10 +317,7 @@ function useMultimodalCapabilities(
         });
         return;
       }
-      const allModels: ModelInfo[] = [
-        ...(provider.models ?? []),
-        ...(provider.extra_models ?? []),
-      ];
+      const allModels: ModelInfo[] = [...(provider.models ?? [])];
       const model = allModels.find((m) => m.id === activeModelId);
       setMultimodalCaps({
         supportsMultimodal: model?.supports_multimodal ?? false,

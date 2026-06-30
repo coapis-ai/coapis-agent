@@ -13,24 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Admin Provider Management - 管理员配置全局 Provider 和可用模型池。
+"""Admin Provider Management - 管理员配置全局 Provider。
 
-管理员在此配置 Provider（API Base、API Key、模型列表），
-并决定哪些模型对普通用户可见。
+管理员在此配置 Provider（API Base、API Key、模型列表）。
+模型可用性由 Provider 自身配置状态自动决定（isConfigured && hasModels），
+不需要额外的 visible_to_users / visible_models 配置。
 """
 from __future__ import annotations
 
 import logging
-import json
-import os
-from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from ..permissions.decorators import require_permission
 from fastapi import APIRouter, HTTPException, Body, Request
 from pydantic import BaseModel
 
-from ...constant import WORKSPACES_DIR, WORKING_DIR
+from ...constant import WORKSPACES_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +44,6 @@ class AdminProviderConfig(BaseModel):
     api_key: str = ""
     models: List[str] = []
     enabled: bool = True
-    # 哪些模型对用户可见（True=全部可见，False=需手动勾选）
-    visible_to_users: bool = True
-    # 用户可见的具体模型列表（当 visible_to_users=False 时生效）
-    visible_models: List[str] = []
 
 
 class AdminProviderUpdate(BaseModel):
@@ -59,8 +53,6 @@ class AdminProviderUpdate(BaseModel):
     api_key: Optional[str] = None
     models: Optional[List[str]] = None
     enabled: Optional[bool] = None
-    visible_to_users: Optional[bool] = None
-    visible_models: Optional[List[str]] = None
 
 
 class AvailableModelsResponse(BaseModel):
@@ -85,55 +77,10 @@ class TestConnectionResponse(BaseModel):
 
 # ── Helper functions ─────────────────────────────────────────────────────
 
-def _get_providers_path() -> Path:
-    """获取 providers.json 路径."""
-    return WORKING_DIR / "config" / "providers.json"
-
-
-def _load_providers() -> Dict[str, Any]:
-    """加载全局 Provider 配置."""
-    path = _get_providers_path()
-    if path.exists():
-        with open(path, "r") as f:
-            return json.load(f)
-    return {}
-
-
-def _save_providers(data: Dict[str, Any]) -> None:
-    """保存全局 Provider 配置."""
-    path = _get_providers_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
 def _is_admin(request: Request) -> bool:
     """检查是否为管理员."""
     role = getattr(request.state, "role", "user")
     return role == "admin"
-
-
-def _get_available_models_for_users() -> List[str]:
-    """获取对普通用户可见的模型列表（模型池）."""
-    providers = _load_providers()
-    available = []
-    
-    for pid, pconfig in providers.items():
-        if not isinstance(pconfig, dict):
-            continue
-        if not pconfig.get("enabled", True):
-            continue
-        
-        models = pconfig.get("models", [])
-        visible = pconfig.get("visible_to_users", True)
-        
-        if visible:
-            available.extend(models)
-        else:
-            # 仅返回勾选的可见模型
-            available.extend(pconfig.get("visible_models", []))
-    
-    return list(dict.fromkeys(available))  # 去重保序
 
 
 # ── Routes ───────────────────────────────────────────────────────────────
@@ -141,142 +88,38 @@ def _get_available_models_for_users() -> List[str]:
 @router.get("/admin/providers")
 @require_permission("admin:admin")
 async def get_all_providers(request: Request) -> Dict[str, Any]:
-    """获取所有 Provider 配置（仅管理员）."""
+    """获取所有 Provider 配置（仅管理员）.
+    
+    从 ProviderManager 读取，返回所有 provider 的配置信息。
+    """
     if not _is_admin(request):
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
-    providers = _load_providers()
+    from ...providers.provider_manager import ProviderManager
+    pm = ProviderManager.get_instance()
+    provider_infos = await pm.list_provider_info()
     
-    # 转换为 AdminProviderConfig 格式
     result = []
-    for pid, pconfig in providers.items():
-        if isinstance(pconfig, dict):
-            result.append({
-                "id": pid,
-                "name": pconfig.get("name", pid),
-                "api_base": pconfig.get("api_base", ""),
-                "api_key": pconfig.get("api_key", ""),
-                "models": pconfig.get("models", []),
-                "enabled": pconfig.get("enabled", True),
-                "visible_to_users": pconfig.get("visible_to_users", True),
-                "visible_models": pconfig.get("visible_models", []),
-            })
-        else:
-            # 兼容旧格式（字符串 ID）
-            result.append({
-                "id": pid,
-                "name": pid,
-                "api_base": "",
-                "api_key": "",
-                "models": [],
-                "enabled": True,
-                "visible_to_users": True,
-                "visible_models": [],
-            })
+    for info in provider_infos:
+        d = info.model_dump() if hasattr(info, "model_dump") else info
+        result.append({
+            "id": d.get("id", ""),
+            "name": d.get("name", ""),
+            "base_url": d.get("base_url", ""),
+            "api_key": d.get("api_key", ""),
+            "models": d.get("models", []),
+            "is_custom": d.get("is_custom", False),
+            "is_local": d.get("is_local", False),
+            "require_api_key": d.get("require_api_key", True),
+            "chat_model": d.get("chat_model", ""),
+            "support_model_discovery": d.get("support_model_discovery", False),
+            "support_connection_check": d.get("support_connection_check", True),
+            "freeze_url": d.get("freeze_url", False),
+            "generate_kwargs": d.get("generate_kwargs", {}),
+        })
     
     return {
         "providers": result,
-        "available_models": _get_available_models_for_users(),
-    }
-
-
-@router.put("/admin/providers/{provider_id}")
-@require_permission("admin:admin")
-async def update_provider(
-    request: Request,
-    provider_id: str,
-    payload: AdminProviderUpdate = Body(...),
-) -> Dict[str, Any]:
-    """更新 Provider 配置（仅管理员，部分更新）."""
-    if not _is_admin(request):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    
-    providers = _load_providers()
-    
-    # 确保 Provider 存在
-    if provider_id not in providers:
-        providers[provider_id] = {}
-    
-    pconfig = providers[provider_id]
-    if not isinstance(pconfig, dict):
-        pconfig = providers[provider_id] = {}
-    
-    # 部分更新
-    if payload.name is not None:
-        pconfig["name"] = payload.name
-    if payload.api_base is not None:
-        pconfig["api_base"] = payload.api_base
-    if payload.api_key is not None:
-        pconfig["api_key"] = payload.api_key
-    if payload.models is not None:
-        pconfig["models"] = payload.models
-    if payload.enabled is not None:
-        pconfig["enabled"] = payload.enabled
-    if payload.visible_to_users is not None:
-        pconfig["visible_to_users"] = payload.visible_to_users
-    if payload.visible_models is not None:
-        pconfig["visible_models"] = payload.visible_models
-    
-    # 确保 id 字段存在
-    pconfig["id"] = provider_id
-    
-    providers[provider_id] = pconfig
-    _save_providers(providers)
-    
-    return {
-        "success": True,
-        "provider_id": provider_id,
-        "available_models": _get_available_models_for_users(),
-    }
-
-
-@router.post("/admin/providers")
-@require_permission("admin:admin")
-async def create_provider(
-    request: Request,
-    payload: AdminProviderConfig = Body(...),
-) -> Dict[str, Any]:
-    """创建新 Provider（仅管理员）."""
-    if not _is_admin(request):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    
-    providers = _load_providers()
-    
-    if payload.id in providers:
-        raise HTTPException(status_code=409, detail=f"Provider '{payload.id}' 已存在")
-    
-    providers[payload.id] = payload.model_dump(exclude_unset=True)
-    _save_providers(providers)
-    
-    return {
-        "success": True,
-        "provider_id": payload.id,
-        "available_models": _get_available_models_for_users(),
-    }
-
-
-@router.delete("/admin/providers/{provider_id}")
-@require_permission("admin:admin")
-async def delete_provider(
-    request: Request,
-    provider_id: str,
-) -> Dict[str, Any]:
-    """删除 Provider（仅管理员）."""
-    if not _is_admin(request):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    
-    providers = _load_providers()
-    
-    if provider_id not in providers:
-        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' 不存在")
-    
-    del providers[provider_id]
-    _save_providers(providers)
-    
-    return {
-        "success": True,
-        "provider_id": provider_id,
-        "available_models": _get_available_models_for_users(),
     }
 
 
@@ -287,27 +130,24 @@ async def get_available_models(request: Request) -> AvailableModelsResponse:
     if not _is_admin(request):
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
-    providers = _load_providers()
+    from ...providers.provider_manager import ProviderManager
+    pm = ProviderManager.get_instance()
+    provider_infos = await pm.list_provider_info()
+    
     provider_list = []
     all_models = []
     
-    for pid, pconfig in providers.items():
-        if isinstance(pconfig, dict):
-            models = pconfig.get("models", [])
-            visible = pconfig.get("visible_to_users", True)
-            visible_models = pconfig.get("visible_models", models if visible else [])
-            
-            provider_list.append({
-                "id": pid,
-                "name": pconfig.get("name", pid),
-                "enabled": pconfig.get("enabled", True),
-                "visible_to_users": visible,
-                "models": models,
-                "visible_models": visible_models,
-            })
-            
-            if pconfig.get("enabled", True):
-                all_models.extend(visible_models)
+    for info in provider_infos:
+        d = info.model_dump() if hasattr(info, "model_dump") else info
+        pid = d.get("id", "")
+        models = d.get("models", [])
+        
+        provider_list.append({
+            "id": pid,
+            "name": d.get("name", pid),
+            "models": models,
+        })
+        all_models.extend(m.get("id", m) if isinstance(m, dict) else m for m in models)
     
     unique_models = list(dict.fromkeys(all_models))
     
@@ -365,43 +205,45 @@ async def test_provider_connection(
 async def get_public_available_models(request: Request) -> Dict[str, Any]:
     """获取可用模型池（所有用户可见）.
     
-    从 ProviderManager 读取所有 provider 中可见的模型。
+    遍历 ProviderManager 中所有 provider，
+    isAvailable = isConfigured && hasModels 的自动过滤。
     """
-    username = getattr(request.state, "username", "anonymous")
-    
     global_models = []
     
-    # Read from ProviderManager (the single source of truth)
     try:
         from ...providers.provider_manager import ProviderManager
         pm = ProviderManager.get_instance()
         provider_infos = await pm.list_provider_info()
+        
         for info in provider_infos:
-            info_dict = info.model_dump() if hasattr(info, "model_dump") else info
-            pid = info_dict.get("id", "")
-            pname = info_dict.get("name", pid)
-            if not info_dict.get("enabled", True):
+            d = info.model_dump() if hasattr(info, "model_dump") else info
+            pid = d.get("id", "")
+            pname = d.get("name", pid)
+            
+            # isAvailable = isConfigured && hasModels
+            is_custom = d.get("is_custom", False)
+            base_url = d.get("base_url", "")
+            api_key = d.get("api_key", "")
+            require_api_key = d.get("require_api_key", True)
+            models = d.get("models", []) or []
+            
+            if not models:
                 continue
-            # 只返回真正可用的 provider（已配置 + 有模型）
-            is_custom = info_dict.get("is_custom", False)
-            base_url = info_dict.get("base_url", "")
-            api_key = info_dict.get("api_key", "")
-            require_api_key = info_dict.get("require_api_key", True)
-            models = info_dict.get("models", []) or []
-            extra_models = info_dict.get("extra_models", []) or []
-            total_models = len(models) + len(extra_models)
-            is_configured = (
-                (is_custom and bool(base_url))
-                or (not require_api_key)
-                or (require_api_key and bool(api_key))
-            )
-            if not (is_configured and total_models > 0):
+            
+            # isConfigured 判断（与前端 RemoteProviderCard 一致）
+            is_configured = False
+            if is_custom and base_url:
+                is_configured = True
+            elif not require_api_key:
+                is_configured = True
+            elif require_api_key and api_key:
+                is_configured = True
+            
+            if not is_configured:
                 continue
-            visible = info_dict.get("visible_to_users", True)
-            visible_models = info_dict.get("visible_models", models if visible else [])
             
             seen_model_ids = set()
-            for m in visible_models:
+            for m in models:
                 if isinstance(m, str):
                     model_id = m
                     model_name = m
@@ -420,66 +262,13 @@ async def get_public_available_models(request: Request) -> Dict[str, Any]:
                         "provider_name": pname,
                     })
     except Exception as e:
-        logger.warning("Failed to read models from ProviderManager: %s", e)
-        # Fallback to legacy providers.json
-        providers = _load_providers()
-        for pid, pconfig in providers.items():
-            if not isinstance(pconfig, dict):
-                continue
-            if not pconfig.get("enabled", True):
-                continue
-            # 只返回真正可用的 provider（已配置 + 有模型）
-            is_custom = pconfig.get("is_custom", False)
-            p_base_url = pconfig.get("base_url", "")
-            p_api_key = pconfig.get("api_key", "")
-            p_require_api_key = pconfig.get("require_api_key", True)
-            models = pconfig.get("models", [])
-            extra_models = pconfig.get("extra_models", [])
-            total_models = len(models) + len(extra_models)
-            p_is_configured = (
-                (is_custom and bool(p_base_url))
-                or (not p_require_api_key)
-                or (p_require_api_key and bool(p_api_key))
-            )
-            if not (p_is_configured and total_models > 0):
-                continue
-            visible = pconfig.get("visible_to_users", True)
-            visible_models = pconfig.get("visible_models", models if visible else [])
-            pname = pconfig.get("name", pid)
-            seen_model_ids = set()
-            for m in visible_models:
-                if isinstance(m, str):
-                    model_id = m
-                    model_name = m
-                else:
-                    model_id = m.get("id", "") if isinstance(m, dict) else str(m)
-                    model_name = m.get("name", model_id) if isinstance(m, dict) else model_id
-                if model_id and model_id not in seen_model_ids:
-                    seen_model_ids.add(model_id)
-                    global_models.append({
-                        "id": model_id,
-                        "name": model_name,
-                        "provider_id": pid,
-                        "provider_name": pname,
-                    })
-    
-    # 获取用户自定义模型（如果有）
-    custom_providers = []
-    custom_path = WORKSPACES_DIR / username / "custom_providers.json"
-    if custom_path.exists():
-        try:
-            with open(custom_path, "r") as f:
-                custom_data = json.load(f)
-                custom_providers = custom_data.get("providers", [])
-        except Exception:
-            pass
+        logger.error("Failed to read models from ProviderManager: %s", e)
     
     # 合并去重
     all_models = list(dict.fromkeys([m["id"] for m in global_models]))
     
     return {
         "global_models": global_models,
-        "custom_providers": custom_providers,
         "all_models": all_models,
         "total": len(all_models),
     }

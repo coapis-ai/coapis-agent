@@ -49,7 +49,7 @@ export const RemoteProviderCard = React.memo(function RemoteProviderCard({
     });
   };
 
-  const totalCount = provider.models.length + provider.extra_models.length;
+  const totalCount = provider.models.length;
 
   let isConfigured = false;
 

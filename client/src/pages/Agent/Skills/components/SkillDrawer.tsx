@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Drawer, Form, Input, Button, Select, Tabs, Tag, Table, Progress, Empty, Tooltip } from "@agentscope-ai/design";
+import { Drawer, Form, Input, Button, Select, Tabs, Tag, Empty, Tooltip } from "@agentscope-ai/design";
 import { useAppMessage } from "../../../../hooks/useAppMessage";
 import { useTranslation } from "react-i18next";
 import { ThunderboltOutlined, StopOutlined, SearchOutlined, HistoryOutlined, DownloadOutlined } from "@ant-design/icons";
@@ -78,8 +78,13 @@ interface SkillDrawerProps {
 function TriggerAnalysisTab({ skillName }: { skillName: string }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<{
-    triggers: Array<{ keyword: string; type: string; priority: number }>;
-    trigger_stats: Record<string, { count: number; precision: number }>;
+    base_triggers: Array<{ keyword: string; type: string; priority: number }>;
+    effective_triggers: Array<{ keyword: string; type: string; priority: number }>;
+    overrides: {
+      added_keywords: string[];
+      removed_keywords: string[];
+      refined_keywords: string[];
+    };
   } | null>(null);
 
   useEffect(() => {
@@ -97,45 +102,66 @@ function TriggerAnalysisTab({ skillName }: { skillName: string }) {
   if (loading) return <div style={{ padding: 16, textAlign: "center" }}>加载中...</div>;
   if (!data) return <Empty description="暂无触发数据" />;
 
+  const triggers = data.effective_triggers || [];
+  const baseTriggers = data.base_triggers || [];
+  const overrides = data.overrides || { added_keywords: [], removed_keywords: [], refined_keywords: [] };
+
   return (
     <div style={{ fontSize: 13 }}>
       <div style={{ marginBottom: 12 }}>
-        <strong>触发词 ({data.triggers.length})</strong>
+        <strong>触发词 ({triggers.length})</strong>
         <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {data.triggers.map((t) => (
+          {triggers.map((t) => (
             <Tag key={t.keyword} color={t.type === "pattern" ? "blue" : "green"}>
               {t.keyword}
             </Tag>
           ))}
-          {data.triggers.length === 0 && <span style={{ color: "#999" }}>无触发词</span>}
+          {triggers.length === 0 && <span style={{ color: "#999" }}>无触发词</span>}
         </div>
       </div>
-      <div>
-        <strong>触发统计</strong>
-        {Object.keys(data.trigger_stats).length === 0 ? (
-          <Empty description="暂无触发记录" />
-        ) : (
-          <Table
-            size="small"
-            pagination={false}
-            dataSource={Object.entries(data.trigger_stats).map(([kw, s]) => ({ key: kw, ...s }))}
-            columns={[
-              { title: "关键词", dataIndex: "key", key: "kw" },
-              { title: "触发次数", dataIndex: "count", key: "count", sorter: (a: { count: number }, b: { count: number }) => a.count - b.count },
-              {
-                title: "准确率", dataIndex: "precision", key: "precision",
-                render: (v: number) => (
-                  <Progress
-                    percent={Math.round(v * 100)} size="small"
-                    strokeColor={v >= 0.7 ? "#52c41a" : v >= 0.4 ? "#faad14" : "#ff4d4f"}
-                    style={{ width: 80 }}
-                  />
-                ),
-              },
-            ]}
-          />
-        )}
-      </div>
+      {baseTriggers.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <strong>基础触发词 ({baseTriggers.length})</strong>
+          <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {baseTriggers.map((t) => (
+              <Tag key={t.keyword} color={t.type === "pattern" ? "blue" : "green"}>
+                {t.keyword}
+              </Tag>
+            ))}
+          </div>
+        </div>
+      )}
+      {(overrides.added_keywords.length > 0 || overrides.removed_keywords.length > 0 || overrides.refined_keywords.length > 0) && (
+        <div>
+          <strong>用户覆盖</strong>
+          <div style={{ marginTop: 8 }}>
+            {overrides.added_keywords.length > 0 && (
+              <div>
+                <span style={{ color: "#52c41a" }}>添加: </span>
+                {overrides.added_keywords.map((kw) => (
+                  <Tag key={kw} color="green">{kw}</Tag>
+                ))}
+              </div>
+            )}
+            {overrides.removed_keywords.length > 0 && (
+              <div>
+                <span style={{ color: "#ff4d4f" }}>移除: </span>
+                {overrides.removed_keywords.map((kw) => (
+                  <Tag key={kw} color="red">{kw}</Tag>
+                ))}
+              </div>
+            )}
+            {overrides.refined_keywords.length > 0 && (
+              <div>
+                <span style={{ color: "#faad14" }}>优化: </span>
+                {overrides.refined_keywords.map((kw) => (
+                  <Tag key={kw} color="orange">{kw}</Tag>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -189,27 +189,18 @@ async def get_local_whisper_status(request: Request) -> Dict[str, Any]:
 
 def _list_transcription_providers() -> List[Dict[str, Any]]:
     """List providers that support transcription (Whisper API compatible)."""
-    from ....constant import WORKING_DIR
-
-    providers_path = WORKING_DIR / "config" / "providers.json"
-    if not providers_path.exists():
-        return []
-
-    try:
-        data = json.loads(providers_path.read_text())
-    except Exception:
-        return []
-
+    from ....providers.provider_manager import ProviderManager
+    
+    pm = ProviderManager.get_instance()
+    # 使用同步方式获取 provider 列表（list_provider_info 是异步的，这里直接读内存）
     result = []
-    for pid, pconf in data.items():
-        # A provider supports transcription if it has a transcription_url or is a known Whisper-compatible endpoint
-        base_url = (pconf.get("api_base") or "").strip()
-        name = pconf.get("name") or pconf.get("display_name") or pid
-        # Check if this provider has transcription capability
+    for provider in list(pm.builtin_providers.values()) + list(pm.custom_providers.values()):
+        pid = provider.id
+        base_url = provider.base_url or ""
+        name = provider.name or pid
         has_transcription = (
-            "transcription" in (pconf.get("type") or "").lower()
-            or "whisper" in pid.lower()
-            or "transcription_url" in pconf
+            "whisper" in pid.lower()
+            or "transcription" in pid.lower()
         )
         if has_transcription or base_url:
             result.append({

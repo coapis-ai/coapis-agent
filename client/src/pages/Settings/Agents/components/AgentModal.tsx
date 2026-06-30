@@ -66,7 +66,7 @@ export function AgentModal({
     return providers
       .filter((p) => {
         const hasModels =
-          (p.models?.length ?? 0) + (p.extra_models?.length ?? 0) > 0;
+          (p.models?.length ?? 0) > 0;
         if (!hasModels) return false;
         if (p.require_api_key === false) return !!p.base_url;
         if (p.is_custom) return !!p.base_url;
@@ -76,7 +76,7 @@ export function AgentModal({
       .map((p) => ({
         id: p.id,
         name: p.name,
-        models: [...(p.models ?? []), ...(p.extra_models ?? [])],
+        models: [...(p.models ?? [])],
       }));
   }, [providers]);
 
