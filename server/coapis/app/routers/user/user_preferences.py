@@ -199,26 +199,21 @@ def _load_preferences(username: str) -> UserPreferencesResponse:
     if not user:
         return UserPreferencesResponse()
 
-    row = db.execute(
-        "SELECT * FROM user_preferences WHERE user_id = ?",
-        (user["id"],),
-    ).fetchone()
+    row = db.get_user_preferences(username)
 
     if not row:
         # 创建默认记录
-        db.execute(
-            "INSERT INTO user_preferences "
-            "(user_id, theme, language, updated_at) VALUES (?, ?, ?, ?)",
-            (user["id"], "coapis", "zh", time.time()),
-        )
-        db.commit()
+        db.save_user_preferences(username, {
+            "theme": "coapis",
+            "language": "zh",
+        })
         # 重新读取
-        row = db.execute(
-            "SELECT * FROM user_preferences WHERE user_id = ?",
-            (user["id"],),
-        ).fetchone()
+        row = db.get_user_preferences(username)
 
-    return _row_to_response(dict(row))
+    if not row:
+        return UserPreferencesResponse()
+
+    return _row_to_response(row)
 
 
 def _save_preferences_flat(username: str, flat: FlatPreferencesUpdate) -> UserPreferencesResponse:
@@ -229,9 +224,8 @@ def _save_preferences_flat(username: str, flat: FlatPreferencesUpdate) -> UserPr
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    # 构建 SET 子句（仅包含非 None 字段）
-    set_clauses = []
-    params = []
+    # 构建更新数据（仅包含非 None 字段）
+    update_data = {}
 
     flat_field_map = {
         'theme': ('theme', None),
@@ -257,17 +251,10 @@ def _save_preferences_flat(username: str, flat: FlatPreferencesUpdate) -> UserPr
     for flat_key, (db_col, converter) in flat_field_map.items():
         val = getattr(flat, flat_key)
         if val is not None:
-            set_clauses.append(f"{db_col} = ?")
-            params.append(converter(val) if converter else val)
+            update_data[db_col] = converter(val) if converter else val
 
-    set_clauses.append("updated_at = ?")
-    params.append(time.time())
-    params.append(user["id"])
-
-    if set_clauses:
-        sql = f"UPDATE user_preferences SET {', '.join(set_clauses)} WHERE user_id = ?"
-        db.execute(sql, tuple(params))
-        db.commit()
+    if update_data:
+        db.save_user_preferences(username, update_data)
 
     return _load_preferences(username)
 
@@ -281,66 +268,48 @@ def _save_preferences(username: str, update: UserPreferencesUpdate) -> UserPrefe
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    set_clauses = []
-    params = []
+    update_data = {}
 
     if update.theme is not None:
-        set_clauses.append("theme = ?")
-        params.append(update.theme)
+        update_data["theme"] = update.theme
 
     if update.language is not None:
-        set_clauses.append("language = ?")
-        params.append(update.language)
+        update_data["language"] = update.language
 
     if update.sidebar_collapsed is not None:
-        set_clauses.append("sidebar_collapsed = ?")
-        params.append(1 if update.sidebar_collapsed else 0)
+        update_data["sidebar_collapsed"] = 1 if update.sidebar_collapsed else 0
 
     if update.chat_display is not None:
         cd = update.chat_display
-        set_clauses.extend([
-            "chat_hide_tool_call = ?", "chat_hide_thinking = ?",
-            "chat_hide_footer = ?", "chat_hide_system_messages = ?",
-            "chat_display_mode = ?",
-            "chat_show_timestamps = ?", "chat_show_token_counts = ?",
-            "chat_show_model_name = ?", "chat_auto_scroll = ?",
-            "chat_font_size = ?", "chat_code_theme = ?",
-        ])
-        params.extend([
-            1 if cd.hideToolCall else 0,
-            1 if cd.hideThinking else 0,
-            1 if cd.hideFooter else 0,
-            1 if cd.hideSystemMessages else 0,
-            cd.displayMode,
-            1 if cd.showTimestamps else 0,
-            1 if cd.showTokenCounts else 0,
-            1 if cd.showModelName else 0,
-            1 if cd.autoScroll else 0,
-            cd.fontSize,
-            cd.codeTheme,
-        ])
+        update_data.update({
+            "chat_hide_tool_call": 1 if cd.hideToolCall else 0,
+            "chat_hide_thinking": 1 if cd.hideThinking else 0,
+            "chat_hide_footer": 1 if cd.hideFooter else 0,
+            "chat_hide_system_messages": 1 if cd.hideSystemMessages else 0,
+            "chat_display_mode": cd.displayMode,
+            "chat_show_timestamps": 1 if cd.showTimestamps else 0,
+            "chat_show_token_counts": 1 if cd.showTokenCounts else 0,
+            "chat_show_model_name": 1 if cd.showModelName else 0,
+            "chat_auto_scroll": 1 if cd.autoScroll else 0,
+            "chat_font_size": cd.fontSize,
+            "chat_code_theme": cd.codeTheme,
+        })
 
     if update.notifications is not None:
         n = update.notifications
-        set_clauses.extend(["email_notifications = ?", "push_notifications = ?"])
-        params.extend([1 if n.email else 0, 1 if n.push else 0])
+        update_data.update({
+            "email_notifications": 1 if n.email else 0,
+            "push_notifications": 1 if n.push else 0,
+        })
 
     if update.default_agent_id is not None:
-        set_clauses.append("default_agent_id = ?")
-        params.append(update.default_agent_id)
+        update_data["default_agent_id"] = update.default_agent_id
 
     if update.default_model is not None:
-        set_clauses.append("default_model = ?")
-        params.append(update.default_model)
+        update_data["default_model"] = update.default_model
 
-    set_clauses.append("updated_at = ?")
-    params.append(time.time())
-    params.append(user["id"])
-
-    if set_clauses:
-        sql = f"UPDATE user_preferences SET {', '.join(set_clauses)} WHERE user_id = ?"
-        db.execute(sql, tuple(params))
-        db.commit()
+    if update_data:
+        db.save_user_preferences(username, update_data)
 
     return _load_preferences(username)
 

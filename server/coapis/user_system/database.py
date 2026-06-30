@@ -740,6 +740,69 @@ class UserSystemDB:
         from ..token_usage.db_writer import get_agent_token_usage
         return get_agent_token_usage(agent_id, start_date, end_date)
 
+    # ==================== User Preferences Methods ====================
+
+    def get_user_preferences(self, username: str) -> Optional[Dict[str, Any]]:
+        """Get user preferences by username."""
+        if self._use_database:
+            user = self.get_user_by_username(username)
+            if not user:
+                return None
+            return self.fetch_one("SELECT * FROM user_preferences WHERE user_id = ?", (user["id"],))
+        
+        # JSON mode
+        with self._json_lock:
+            prefs = self._load_json(_PREFERENCES_JSON)
+            return self._find_by_key(prefs, "username", username)
+
+    def save_user_preferences(self, username: str, prefs_data: Dict[str, Any]) -> None:
+        """Save user preferences."""
+        if self._use_database:
+            user = self.get_user_by_username(username)
+            if not user:
+                return
+            # Check if preferences exist
+            existing = self.fetch_one("SELECT * FROM user_preferences WHERE user_id = ?", (user["id"],))
+            if existing:
+                # Update
+                set_clauses = []
+                params = []
+                for key, value in prefs_data.items():
+                    if key not in ("user_id", "username"):
+                        set_clauses.append(f"{key} = ?")
+                        params.append(value)
+                if set_clauses:
+                    set_clauses.append("updated_at = ?")
+                    params.append(time.time())
+                    params.append(user["id"])
+                    sql = f"UPDATE user_preferences SET {', '.join(set_clauses)} WHERE user_id = ?"
+                    self.execute(sql, tuple(params))
+                    self.commit()
+            else:
+                # Insert
+                prefs_data["user_id"] = user["id"]
+                prefs_data["username"] = username
+                prefs_data["updated_at"] = time.time()
+                columns = ", ".join(prefs_data.keys())
+                placeholders = ", ".join(["?"] * len(prefs_data))
+                sql = f"INSERT INTO user_preferences ({columns}) VALUES ({placeholders})"
+                self.execute(sql, tuple(prefs_data.values()))
+                self.commit()
+            return
+        
+        # JSON mode
+        with self._json_lock:
+            prefs = self._load_json(_PREFERENCES_JSON)
+            idx = self._find_index_by_key(prefs, "username", username)
+            if idx >= 0:
+                prefs[idx].update(prefs_data)
+                prefs[idx]["updated_at"] = time.time()
+            else:
+                prefs_data["username"] = username
+                prefs_data["updated_at"] = time.time()
+                prefs.append(prefs_data)
+            self._save_json(_PREFERENCES_JSON, prefs)
+
     def close(self):
         """Close connection."""
         if self._use_database and hasattr(self, '_connection') and self._connection:
