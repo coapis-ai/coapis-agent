@@ -166,3 +166,9 @@ class MemoryManager:
         The BaseMemoryManager (in agents/memory/) provides full tool support.
         """
         return []
+
+    async def close(self):
+        """No-op. This simple file-based MemoryManager has no async resources
+        to release.  Exists so callers (e.g. runner finally block) can
+        uniformly call ``await memory_manager.close()`` without guarding."""
+        pass
