@@ -158,3 +158,11 @@ class MemoryManager:
             entries.append(current_entry)
 
         return entries
+
+    def list_memory_tools(self) -> list:
+        """Return memory-related tool functions for agent registration.
+
+        This simplified MemoryManager does not expose additional memory tools.
+        The BaseMemoryManager (in agents/memory/) provides full tool support.
+        """
+        return []

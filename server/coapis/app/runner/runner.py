@@ -369,7 +369,6 @@ class AgentRunner(Runner):
             # messages from every request — using it would leak messages
             # between different users/chats.
             from agentscope.memory import InMemoryMemory
-            from agentscope.message import Msg, TextBlock
             isolated_mem = InMemoryMemory()
             if memory_state:
                 isolated_mem.load_state_dict(memory_state, strict=False)
@@ -772,7 +771,7 @@ class AgentRunner(Runner):
             }
 
             # ── 从 auth middleware 注入 role（用于记忆配额等多用户场景）──
-            _role = getattr(request.state, "role", None)
+            _role = getattr(getattr(request, "state", None), "role", None)
 
             # ── Fallback: 非HTTP渠道(WeCom等)通过 workspace owner 获取角色 ──
             # 链路: request.state.role → workspace.resolved_role → workspace.owner 的 user role → 默认 'user'
@@ -979,9 +978,9 @@ class AgentRunner(Runner):
                 plan_notebook=plan_notebook,
             )
             await agent.register_mcp_clients()
-            mcp_tool_count = len([t for t in (agent.toolkit._functions or {}) if t.startswith("mcp_")]) if hasattr(agent, "toolkit") and agent.toolkit else 0
+            mcp_tool_count = len([t for t in (agent.toolkit.tools or {}) if t.startswith("mcp_")]) if hasattr(agent, "toolkit") and agent.toolkit else 0
             logger.warning(
-                f"[MCP_DEBUG] register_mcp_clients done: mcp_clients={len(mcp_clients)}, toolkit_mcp_tools={mcp_tool_count}, total_tools={len(agent.toolkit._functions) if hasattr(agent, 'toolkit') and agent.toolkit else 0}"
+                f"[MCP_DEBUG] register_mcp_clients done: mcp_clients={len(mcp_clients)}, toolkit_mcp_tools={mcp_tool_count}, total_tools={len(agent.toolkit.tools) if hasattr(agent, 'toolkit') and agent.toolkit else 0}"
             )
             agent.set_console_output_enabled(enabled=False)
 
@@ -1175,7 +1174,6 @@ class AgentRunner(Runner):
                 partial_text = "".join(_evolution_full_response).strip()
                 if partial_text:
                     try:
-                        from agentscope.message import Msg, TextBlock
                         await agent.memory.add(
                             Msg(
                                 name="assistant",
