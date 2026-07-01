@@ -666,7 +666,11 @@ class ToolGuardMixin:
                 f"- {tg('severity')}: `{severity}`\n"
                 f"- {tg('findings')}: `{count}`\n\n"
                 f"{findings_text}\n\n"
-                f"{tg('blocked_footer')}"
+                f"{tg('blocked_footer')}\n\n"
+                f"---\n"
+                f"**⛔ 此工具已被安全规则拦截。你必须立即停止当前任务，"
+                f"不要尝试使用其他工具或方法来绕过。"
+                f"请告知用户该操作已被拦截，并等待用户下一步指示。**"
             )
         else:
             denied_text = (
@@ -675,7 +679,11 @@ class ToolGuardMixin:
                 f"  {tg('severity')}: {severity}\n"
                 f"  {tg('findings')}: {count}\n\n"
                 f"{findings_text}\n\n"
-                f"{tg('blocked_footer')}"
+                f"{tg('blocked_footer')}\n\n"
+                f"---\n"
+                f"⛔ 此工具已被安全规则拦截。你必须立即停止当前任务，"
+                f"不要尝试使用其他工具或方法来绕过。"
+                f"请告知用户该操作已被拦截，并等待用户下一步指示。"
             )
 
         tool_res_msg = Msg(
@@ -737,9 +745,9 @@ class ToolGuardMixin:
         /approval approve or /approval deny command. During the wait,
         periodic heartbeat messages are sent to keep SSE connection alive.
 
-        In streaming context (SSE), approval would deadlock because the
-        user can't send commands while the stream is open. So we auto-deny
-        and return an error message, letting the agent try alternatives.
+        Works in all contexts (console, wecom, dingtalk, etc.) — the
+        frontend polls /console/push-messages to discover pending
+        approvals and renders interactive ApprovalCard widgets.
         """
         from coapis.security.tool_guard.approval import ApprovalDecision
 
@@ -748,25 +756,16 @@ class ToolGuardMixin:
         channel = str(self._request_context.get("channel") or "")
         agent_id = str(self._request_context.get("agent_id", "unknown"))
 
-        # Detect streaming context: if channel is console/wecom/weixin/dingtalk
-        # and we're inside a stream, approval would deadlock. Auto-deny.
-        is_streaming_context = channel in ("console", "wecom", "weixin", "dingtalk", "feishu", "discord", "telegram")
-        if is_streaming_context:
-            logger.info(
-                "Tool '%s' requires approval (level=L%d) but in streaming "
-                "context (channel=%s) — auto-denying to avoid deadlock. "
-                "Tool input: %s",
-                tool_name,
-                getattr(guard_result, 'level', 0) if hasattr(guard_result, 'level') else 0,
-                channel,
-                str(tool_call.get("input", {}))[:200],
-            )
-            self._log_approval_audit(tool_name, tool_call.get("input", {}), guard_result, "auto_denied_streaming")
-            return await self._acting_denied(
-                tool_call,
-                tool_name,
-                guard_result,
-            )
+        # Log approval request for all channels (streaming or not)
+        logger.info(
+            "Tool '%s' requires approval (level=L%d), channel=%s. "
+            "Creating pending approval and waiting with heartbeat. "
+            "Tool input: %s",
+            tool_name,
+            getattr(guard_result, 'level', 0) if hasattr(guard_result, 'level') else 0,
+            channel,
+            str(tool_call.get("input", {}))[:200],
+        )
 
         # Get root_session_id for cross-session approval routing
         root_session_id = str(
@@ -867,20 +866,22 @@ class ToolGuardMixin:
             request_id: Approval request ID
             future: Future to wait for
             timeout_seconds: Total timeout in seconds
-            heartbeat_interval: Unused (kept for API compatibility)
+            heartbeat_interval: Seconds between heartbeat messages
 
         Returns:
             ApprovalDecision (APPROVED/DENIED/TIMEOUT)
         """
+        from agentscope.message import Msg
         from coapis.security.tool_guard.approval import (
             ApprovalDecision,
         )
 
         logger.debug(
             "[APPROVAL WAIT] Waiting for approval: request_id=%s "
-            "timeout=%.0fs",
+            "timeout=%.0fs heartbeat=%.0fs",
             request_id[:8],
             timeout_seconds,
+            heartbeat_interval,
         )
 
         # Create a wrapper task that can be cancelled
@@ -902,30 +903,70 @@ class ToolGuardMixin:
             request_id[:8],
         )
 
+        # Heartbeat loop: send periodic keep-alive messages while waiting
+        # for the approval Future to resolve. This keeps the SSE connection
+        # alive so the frontend can continue receiving events.
+        elapsed = 0.0
         try:
-            logger.debug(
-                "[APPROVAL WAIT] Calling asyncio.wait_for for request_id=%s",
-                request_id[:8],
-            )
-            decision = await asyncio.wait_for(
-                wait_task,
-                timeout=timeout_seconds,
-            )
-            logger.debug(
-                "[APPROVAL WAIT] asyncio.wait_for completed for request_id=%s "
-                "decision=%s",
-                request_id[:8],
-                decision.value if hasattr(decision, "value") else decision,
-            )
-            return decision
-        except asyncio.TimeoutError:
-            logger.debug(
-                "[APPROVAL WAIT] Timeout for request_id=%s after %.0fs",
-                request_id[:8],
-                timeout_seconds,
-            )
-            wait_task.cancel()
-            return ApprovalDecision.TIMEOUT
+            while True:
+                remaining = timeout_seconds - elapsed
+                if remaining <= 0:
+                    logger.warning(
+                        "[APPROVAL WAIT] Timeout for request_id=%s "
+                        "after %.0fs",
+                        request_id[:8],
+                        timeout_seconds,
+                    )
+                    wait_task.cancel()
+                    return ApprovalDecision.TIMEOUT
+
+                chunk = min(heartbeat_interval, remaining)
+                try:
+                    decision = await asyncio.wait_for(
+                        asyncio.shield(wait_task),
+                        timeout=chunk,
+                    )
+                    # Future resolved — return decision
+                    logger.info(
+                        "[APPROVAL WAIT] Resolved request_id=%s "
+                        "decision=%s elapsed=%.1fs",
+                        request_id[:8],
+                        decision.value
+                        if hasattr(decision, "value")
+                        else decision,
+                        elapsed,
+                    )
+                    return decision
+                except asyncio.TimeoutError:
+                    # This chunk timed out — send heartbeat and continue
+                    elapsed += chunk
+                    try:
+                        self.print(
+                            Msg(
+                                role="assistant",
+                                name=self.name,
+                                content=(
+                                    f"⏳ Waiting for approval... "
+                                    f"({int(elapsed)}s/{int(timeout_seconds)}s)"
+                                ),
+                                metadata={
+                                    "message_type": "tool_guard_heartbeat",
+                                },
+                            ),
+                            False,
+                        )
+                    except Exception as hb_err:
+                        logger.debug(
+                            "[APPROVAL WAIT] Heartbeat send failed "
+                            "(msg_queue disabled?): %s",
+                            hb_err,
+                        )
+                    logger.debug(
+                        "[APPROVAL WAIT] Heartbeat sent for "
+                        "request_id=%s elapsed=%.0fs",
+                        request_id[:8],
+                        elapsed,
+                    )
         except asyncio.CancelledError:
             # Task cancelled (e.g., user /stop or SSE disconnect)
             # Cancel the wait task and auto-deny the pending approval
@@ -1071,14 +1112,22 @@ class ToolGuardMixin:
                 f"🚫 **{tg('tool_blocked')}**\n\n"
                 f"- {tg('tool')}: `{tool_name}`\n"
                 f"- {tg('reason')}: {tg('reason_denied')}\n\n"
-                f"{findings_text}"
+                f"{findings_text}\n\n"
+                f"---\n"
+                f"**⛔ 用户已明确拒绝此工具调用。你必须立即停止当前任务，"
+                f"不要尝试使用其他工具或方法来绕过审批。"
+                f"请直接告知用户该操作已被拒绝，并等待用户下一步指示。**"
             )
         else:
             denied_text = (
                 f"🚫 {tg('tool_blocked')}\n\n"
                 f"  {tg('tool')}: {tool_name}\n"
                 f"  {tg('reason')}: {tg('reason_denied')}\n\n"
-                f"{findings_text}"
+                f"{findings_text}\n\n"
+                f"---\n"
+                f"⛔ 用户已明确拒绝此工具调用。你必须立即停止当前任务，"
+                f"不要尝试使用其他工具或方法来绕过审批。"
+                f"请直接告知用户该操作已被拒绝，并等待用户下一步指示。"
             )
 
         tool_res_msg = Msg(
