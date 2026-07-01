@@ -69,11 +69,20 @@ async def _process_single_file_block(
         url = source.get("url", "")
         if url:
             parsed = urllib.parse.urlparse(url)
+            # file:// URL: 直接返回本地路径，不需要下载
             if parsed.scheme == "file":
                 try:
                     local_path = urllib.request.url2pathname(parsed.path)
+                    logger.debug(
+                        "Processed local file: %s -> %s",
+                        url,
+                        local_path,
+                    )
+                    return local_path
                 except Exception:
                     return None
+            
+            # http/https URL: 下载文件
             local_path = await download_file_from_url(
                 url,
                 filename,
