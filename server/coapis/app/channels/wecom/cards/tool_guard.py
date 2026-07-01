@@ -312,14 +312,33 @@ async def handle(
         user_id,
     )
 
-    # 2. Inject /approval command into the message queue.
-    _enqueue_approval_command(
-        channel,
-        action=action,
-        request_id=request_id,
-        session_ctx=parsed.get("session_ctx") or {},
-        user_id=user_id,
+    # 2. Resolve the approval Future directly so the blocked agent
+    #    can continue executing the tool.  Previously this was done
+    #    by enqueuing a "/approval" text message, but nothing ever
+    #    consumed that message — the Future was never resolved.
+    from ...approvals import get_approval_service
+    from ....security.tool_guard.approval import ApprovalDecision
+
+    svc = get_approval_service()
+    decision = (
+        ApprovalDecision.APPROVED
+        if action == "approve"
+        else ApprovalDecision.DENIED
     )
+    resolved = await svc.resolve_request(request_id, decision)
+    if resolved:
+        logger.info(
+            "wecom approval resolved: request_id=%s decision=%s tool=%s",
+            request_id[:8],
+            decision.value,
+            tool_name,
+        )
+    else:
+        logger.warning(
+            "wecom approval resolve failed (not found or already resolved): "
+            "request_id=%s",
+            request_id[:8],
+        )
 
 
 async def _update_card_resolved(
@@ -358,63 +377,4 @@ async def _update_card_resolved(
         )
 
 
-def _enqueue_approval_command(
-    channel: "WecomChannel",
-    *,
-    action: str,
-    request_id: str,
-    session_ctx: Dict[str, Any],
-    user_id: str,
-) -> None:
-    """Inject ``/approval {action} {request_id}`` into the channel queue."""
-    from agentscope_runtime.engine.schemas.agent_schemas import (
-        ContentType,
-        TextContent,
-    )
 
-    enqueue = getattr(channel, "_enqueue", None)
-    if enqueue is None:
-        logger.warning(
-            "wecom card action: channel enqueue not set, dropping %s %s",
-            action,
-            request_id[:8],
-        )
-        return
-
-    sender_id = str(session_ctx.get("sender_id") or user_id or "")
-    session_id = str(session_ctx.get("session_id") or "")
-    chatid = str(session_ctx.get("chatid") or "")
-    chat_type = str(session_ctx.get("chat_type") or "single")
-    is_group = chat_type == "group"
-
-    command_text = f"/approval {action} {request_id}"
-    payload = {
-        "channel_id": channel.channel,
-        "sender_id": sender_id,
-        "user_id": sender_id,
-        "session_id": session_id,
-        "content_parts": [
-            TextContent(type=ContentType.TEXT, text=command_text),
-        ],
-        "meta": {
-            "wecom_sender_id": sender_id,
-            "wecom_chatid": chatid,
-            "wecom_chat_type": chat_type,
-            "is_group": is_group,
-            "from_card_action": True,
-        },
-    }
-    try:
-        enqueue(payload)
-        logger.info(
-            "wecom card action enqueued: cmd=%s request=%s session=%s",
-            command_text,
-            request_id[:8],
-            session_id[:12],
-        )
-    except Exception:
-        logger.exception(
-            "wecom card action: enqueue failed: %s %s",
-            action,
-            request_id[:8],
-        )
