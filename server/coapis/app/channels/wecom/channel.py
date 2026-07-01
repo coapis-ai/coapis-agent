@@ -1088,34 +1088,31 @@ class WecomChannel(BaseChannel):
     # Streaming hooks — real-time delta push via reply_stream
     # ------------------------------------------------------------------
 
-    _KEEPALIVE_INTERVAL = 15  # seconds between keepalive pings
-    _KEEPALIVE_TIMEOUT = 28  # force-finish after this many seconds
-
     async def _keepalive_processing(
         self,
         frame: Any,
         stream_id: str,
     ) -> None:
-        """Periodically refresh the 'thinking' stream to prevent timeout."""
+        """Periodically refresh the 'thinking' stream to prevent timeout.
+
+        The keepalive runs until either:
+        1. Cancelled by _cancel_keepalive_and_get_stream_id (when LLM responds)
+        2. Safety timeout (5 min) — only triggers if LLM hangs indefinitely
+
+        We do NOT force-finish on timeout because that causes a second
+        "🤔 Thinking..." when the actual LLM response arrives.
+        """
         start = asyncio.get_event_loop().time()
         try:
             while True:
                 await asyncio.sleep(self._KEEPALIVE_INTERVAL)
                 elapsed = asyncio.get_event_loop().time() - start
                 if elapsed >= self._KEEPALIVE_TIMEOUT:
-                    # Force-finish the stream
-                    try:
-                        await self._client.reply_stream(
-                            frame,
-                            stream_id=stream_id,
-                            content="✅ Done",
-                            finish=True,
-                        )
-                    except Exception:
-                        logger.debug(
-                            "wecom: keepalive force-finish failed stream_id=%s",
-                            stream_id[:20],
-                        )
+                    # Safety timeout: just stop refreshing, leave stream open
+                    logger.warning(
+                        "wecom: keepalive safety timeout after %ds, stream_id=%s",
+                        self._KEEPALIVE_TIMEOUT, stream_id[:20],
+                    )
                     break
                 # Refresh with same content (SDK overwrite)
                 try:
@@ -1133,8 +1130,9 @@ class WecomChannel(BaseChannel):
                     break
         except asyncio.CancelledError:
             pass
-        finally:
-            self._keepalive_tasks.pop(stream_id, None)
+        # NOTE: Do NOT pop stream_id here — let _cancel_keepalive_and_get_stream_id
+        # handle cleanup. This ensures the stream_id can be reused even if the
+        # keepalive task finishes due to timeout.
 
     async def _before_consume_process(
         self, request: "AgentRequest"
@@ -1170,8 +1168,17 @@ class WecomChannel(BaseChannel):
         self,
         send_meta: Dict[str, Any],
     ) -> str:
-        """Cancel keepalive and reuse its stream_id, or create a new one."""
+        """Cancel keepalive and reuse its stream_id, or create a new one.
+
+        Always reuses the processing stream_id if it exists, even if the
+        keepalive task has already finished (e.g. due to safety timeout).
+        This prevents creating a second "🤔 Thinking..." stream.
+        """
         processing_sid = send_meta.pop("wecom_processing_stream_id", "")
+        if not processing_sid:
+            return generate_req_id("stream")
+
+        # Cancel keepalive task if still running
         keepalive_task = self._keepalive_tasks.pop(processing_sid, None)
         if keepalive_task is not None and not keepalive_task.done():
             keepalive_task.cancel()
@@ -1179,8 +1186,9 @@ class WecomChannel(BaseChannel):
                 await keepalive_task
             except (asyncio.CancelledError, Exception):
                 pass
-            return processing_sid
-        return generate_req_id("stream")
+
+        # Always reuse the processing stream_id (even if task already finished)
+        return processing_sid
 
     @staticmethod
     def _inject_processing_sid(

@@ -783,10 +783,13 @@ class Workspace:
         ))
 
         # ChatManager (priority=50)
+        # MUST use workspace_dir / "chat" to align with multi_agent_manager
+        # and service_factories. Using data_dir would point to a different
+        # path for user:xxx agents, causing frontend/backend chats.json mismatch.
         def _create_chat_manager(ws):
             from ..app.runner.manager import ChatManager
             from ..app.runner.repo.json_repo import JsonChatRepository
-            repo_dir = ws.data_dir / "chats"
+            repo_dir = ws.workspace_dir / "chat"
             repo_dir.mkdir(parents=True, exist_ok=True)
             chat_repo = JsonChatRepository(str(repo_dir / "chats.json"))
             return ChatManager(repo=chat_repo)

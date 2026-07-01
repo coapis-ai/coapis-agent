@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { Layout, Spin } from "antd";
 import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -9,6 +9,9 @@ import ConsolePollService from "../../components/ConsolePollService";
 import { ChunkErrorBoundary } from "../../components/ChunkErrorBoundary";
 import { lazyImportWithRetry } from "../../utils/lazyWithRetry";
 import { usePlugins } from "../../plugins/PluginContext";
+import { agentsApi } from "../../api/modules/agents";
+import { useAgentStore } from "../../stores/agentStore";
+import { isDefaultAgent } from "../../utils/agentDisplayName";
 import styles from "../index.module.less";
 
 // Chat is eagerly loaded (default landing page)
@@ -89,6 +92,34 @@ export default function MainLayout() {
   const currentPath = location.pathname;
   const { pluginRoutes } = usePlugins();
   const isMobile = useIsMobile();
+  const { setAgents, setSelectedAgent } = useAgentStore();
+
+  // Load agents globally (works on both desktop and mobile)
+  useEffect(() => {
+    agentsApi
+      .listAgents()
+      .then((res) => {
+        const agentList = Array.isArray(res) ? res : (res as any).agents || [];
+        const sorted = [...agentList].sort((a, b) => {
+          const aDefault = isDefaultAgent(a.id) ? 0 : 1;
+          const bDefault = isDefaultAgent(b.id) ? 0 : 1;
+          return aDefault - bDefault;
+        });
+        setAgents(sorted);
+        // Auto-select if no valid agent selected
+        const current = useAgentStore.getState().selectedAgent;
+        const currentValid = sorted.some((a) => a.id === current);
+        if (!currentValid) {
+          const defaultAgent = sorted.find((a) => isDefaultAgent(a.id));
+          if (defaultAgent) {
+            setSelectedAgent(defaultAgent.id);
+          } else if (sorted.length > 0) {
+            setSelectedAgent(sorted[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [setAgents, setSelectedAgent]);
 
   // Resolve selected key: check static routes first, then plugin routes
   let selectedKey = pathToKey[currentPath] || "";

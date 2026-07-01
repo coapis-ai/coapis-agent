@@ -393,11 +393,13 @@ async def console_chat(
 @router.get("/console/sessions")
 async def get_console_sessions(
     request: Request,
-    agent_id: str = Query("default"),
+    agent_id: str = Query(""),
+    channel: str = Query("", description="Filter by channel, empty=all"),
 ) -> Dict[str, Any]:
     """Get chat sessions for console.
     
     ENFORCES USER ISOLATION: Uses per-user ChatManager.
+    channel="" returns all channels (console, wecom, dingtalk, etc).
     """
     manager = request.app.state.multi_agent_manager
     
@@ -417,14 +419,16 @@ async def get_console_sessions(
     if not user_cm:
         return {"sessions": [], "total": 0}
 
+    # channel="console" means "default view" — return all channels
+    effective_channel = "" if channel == "console" else channel
+    # Don't pass user_id — ChatManager is already per-user (file-level isolation).
+    # External channels (wecom, dingtalk) use sender_id as user_id in chat records,
+    # which differs from the workspace owner username. Filtering by user_id would
+    # exclude all external channel chats.
     chats = await user_cm.list_chats(
-        user_id=username,
-        channel="console",
+        channel=effective_channel,
     )
 
-    # Filter by agent_id for multi-agent isolation
-    if agent_id:
-        chats = [c for c in chats if (getattr(c, "agent_id", "") or "default") == agent_id]
 
     sessions = []
     for chat in chats:

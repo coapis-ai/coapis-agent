@@ -93,11 +93,14 @@ class BaseChatRepository(ABC):
         user_id: Optional[str] = None,
         channel: Optional[str] = None,
     ) -> list[ChatSpec]:
-        """List chat specs with optional filters."""
+        """List chat specs with optional filters.
+
+        Empty string ("") is treated as "no filter" (return all).
+        """
         cf = await self.load()
         result = cf.chats
-        if user_id is not None:
+        if user_id:
             result = [c for c in result if c.user_id == user_id]
-        if channel is not None:
+        if channel:
             result = [c for c in result if c.channel == channel]
         return result

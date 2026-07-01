@@ -199,12 +199,10 @@ def _get_session_for_user(user_id: str, request: Request = None):
 def _get_session_for_chat(chat_spec, request: Request = None):
     """Get SafeJSONSession for a specific chat's agent workspace.
 
-    Unlike _get_session_for_user which finds the user's root workspace,
-    this finds the workspace matching the chat's agent_id and user_id.
-    This ensures messages are loaded from the correct user-level session
-    directory (e.g. workspaces/{username}/sessions/{chat_id}.json).
-
-    Falls back to _get_session_for_user if agent_id lookup fails.
+    Finds the workspace matching the chat's agent_id.
+    Uses the authenticated username (not chat.user_id) for workspace lookup,
+    because external channels (wecom, dingtalk) store sender_id as user_id
+    in ChatSpec, which differs from the workspace owner username.
     """
     if request is None:
         return None
@@ -213,25 +211,24 @@ def _get_session_for_chat(chat_spec, request: Request = None):
         return None
 
     agent_id = getattr(chat_spec, "agent_id", None) or ""
-    user_id = getattr(chat_spec, "user_id", None) or ""
+    # Use authenticated username for workspace lookup, not chat.user_id
+    # (chat.user_id may be an external sender ID like wecom open ID)
+    username, _ = _get_current_user(request)
 
-    # Try to find workspace matching agent_id + user_id (user-level isolation).
+    # Try to find workspace matching agent_id + authenticated username
     for key, ws in getattr(manager, '_workspaces', {}).items():
         ws_agent_id = getattr(ws, 'agent_id', None) or ""
         ws_username = getattr(ws, 'username', None) or ""
-        # Match if agent_id matches AND username matches the chat owner.
-        # For chats with empty agent_id, match workspaces with empty/default agent_id.
         agent_match = ws_agent_id == agent_id or (not agent_id and ws_agent_id in ("", "default"))
-        user_match = not user_id or ws_username == user_id
-        if agent_match and user_match:
+        if agent_match and ws_username == username:
             runner = getattr(ws, 'runner', None)
             if runner:
-                logger.debug(f"_get_session_for_chat: found workspace for agent_id={agent_id or 'default'}, user_id={user_id}")
+                logger.debug(f"_get_session_for_chat: found workspace for agent_id={agent_id or 'default'}, username={username}")
                 return getattr(runner, 'session', None)
 
     # Fallback: find user's root workspace (default agent)
-    logger.debug(f"_get_session_for_chat: falling back to user workspace for user_id={user_id}")
-    return _get_session_for_user(user_id, request)
+    logger.debug(f"_get_session_for_chat: falling back to user workspace for username={username}")
+    return _get_session_for_user(username, request)
 
 
 # ── Helper: normalize ChatSpec for frontend ────────────────────────────────
@@ -297,27 +294,20 @@ async def list_chats(
     """
     username, is_admin = _get_current_user(request)
 
-    def _agent_filter(chats):
-        """Filter chats by agent_id.
+    # Use per-user ChatManager — file-level isolation already ensures user isolation.
+    # No need for user_id or agent_id filtering:
+    # - ChatManager is per-user (workspaces/{username}/chat/chats.json)
+    # - External channels (wecom, dingtalk) store sender_id as user_id in ChatSpec,
+    #   so filtering by user_id would exclude them
+    # - agent_id filtering is also unnecessary since all chats in the user's
+    #   ChatManager belong to that user regardless of agent_id value
+    #
+    # channel="console" means "default view" — return all channels
+    # (frontend defaults to channel="console" for the chat dropdown)
+    effective_channel = "" if channel == "console" else channel
+    cm = _get_chat_manager(request)
+    chats = await cm.list_chats(channel=effective_channel)
 
-        Only returns chats whose agent_id matches the requested agent.
-        Uses case-insensitive comparison to handle inconsistencies between
-        frontend (e.g. "Default") and backend (e.g. "default").
-        """
-        if not agent_id:
-            return chats
-        agent_id_lower = agent_id.lower()
-        # Chats with empty agent_id are treated as belonging to "default"
-        return [c for c in chats if (getattr(c, "agent_id", "") or "default").lower() == agent_id_lower]
-
-    # All users (including admin) only see their own chats for session list.
-    # The admin aggregation via ?user_id=xxx is available for admin panel use
-    # but the default list is always user-scoped for isolation.
-    # Use X-Agent-Id header to route to the correct workspace's ChatManager
-    header_agent_id = request.headers.get("X-Agent-Id", "") or agent_id or ""
-    cm = _get_chat_manager(request, agent_id=header_agent_id)
-    chats = await cm.list_chats(user_id=username, channel=channel)
-    chats = _agent_filter(chats)
     # Ensure browsers never cache chat list responses
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
@@ -417,18 +407,21 @@ async def get_chat(
     # Messages are stored at workspaces/{username}/sessions/{chat_id}.json
     messages = []
     try:
+        # Use workspace owner username for session lookup, not spec.user_id
+        # (spec.user_id may be an external sender ID like wecom open ID)
+        session_user_id = username  # from _get_current_user() above
         session_obj = _get_session_for_chat(spec, request)
         state = None
         if session_obj:
             state = await session_obj.get_session_state_dict(
-                spec.id, spec.user_id, allow_not_exist=True,
+                spec.id, session_user_id, allow_not_exist=True,
             )
         # Fallback: when session_obj is None (workspace not registered in
         # multi_agent_manager), load session file directly from disk.
         if not state:
             import json as _json
             from ...constant import WORKSPACES_DIR as _WS_DIR
-            _session_file = _WS_DIR / spec.user_id / "sessions" / f"{spec.user_id}_{spec.id}.json"
+            _session_file = _WS_DIR / session_user_id / "sessions" / f"{session_user_id}_{spec.id}.json"
             if _session_file.exists():
                 state = _json.loads(_session_file.read_text(encoding="utf-8"))
                 logger.info(f"get_chat: loaded session from disk fallback: {_session_file}")
