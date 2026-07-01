@@ -142,11 +142,15 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   const handleCreateSession = useCallback(async () => {
     try {
       await sessionApi.createSession({ name: '' });
+      // Refresh the session list so the new chat appears immediately
+      const list = await sessionApi.getSessionList();
+      setLocalSessions(list as unknown as ExtendedChatSession[]);
+      setSessions(list);
     } catch (err) {
       console.error('[NewChat] Failed:', err);
     }
     props.onClose();
-  }, [props.onClose]);
+  }, [props.onClose, setSessions]);
 
   /** ID of the session currently being renamed */
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -232,6 +236,21 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
         setListLoading(false);
       });
   }, [selectedAgent]); // re-load when agent changes
+
+  /** Refresh session list every time the dropdown opens, so newly created
+   *  chats from the main chat area appear immediately without page refresh */
+  useEffect(() => {
+    if (!props.open) return;
+    sessionApi
+      .getSessionList()
+      .then((list) => {
+        setLocalSessions(list as unknown as ExtendedChatSession[]);
+        setSessions(list);
+      })
+      .catch((err) => {
+        console.error(`[ChatSessionDropdown] refresh on open failed:`, err);
+      });
+  }, [props.open, setSessions]);
 
   /** Navigate to a session and close the dropdown */
   const handleSessionClick = useCallback(
