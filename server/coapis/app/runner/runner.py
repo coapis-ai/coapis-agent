@@ -254,15 +254,17 @@ class AgentRunner(Runner):
         name: str = "New Chat",
         full_reasoning: list[str] | None = None,
         user_text_override: str = "",
+        agent_messages: list | None = None,
     ) -> None:
-        """Persist chat messages to session state (aligned with CoApis).
+        """Persist chat messages to session state.
 
         After the agent finishes processing, this method saves the
-        user message + assistant response to the AgentScope session
-        state file at workspaces/{username}/sessions/{session_id}.json.
+        complete conversation (including tool_call, tool_output,
+        reasoning, assistant) to the AgentScope session state file
+        at workspaces/{username}/sessions/{chat_id}.json.
 
         This ensures:
-        1. Chat history survives page reload
+        1. Chat history survives page reload with full structure
         2. Each user has completely isolated chat storage
         3. Chat title auto-renames from first user message
         4. chats.json only stores metadata (no embedded messages)
@@ -385,42 +387,68 @@ class AgentRunner(Runner):
                 len(isolated_mem.content),
             )
 
-            # ── Dedup: check if last message is already the same user text ──
-            _last_user_text = ""
-            if isolated_mem.content:
-                _last_msg, _ = isolated_mem.content[-1]
-                if getattr(_last_msg, "role", "") == "user":
-                    _last_user_text = getattr(_last_msg, "get_text_content", lambda: "")()
+            # ── Add new messages ──
+            # If agent_messages is provided (from agent.memory), use it directly.
+            # This preserves ALL message types: tool_call, tool_output, mcp_call,
+            # mcp_call_output, reasoning, assistant — not just user + assistant.
+            if agent_messages:
+                # Dedup: skip if first new message is already the last in session
+                _existing_count = len(isolated_mem.content)
+                _skip_first = False
+                if _existing_count > 0 and agent_messages:
+                    _last_existing, _ = isolated_mem.content[-1]
+                    _first_new = agent_messages[0]
+                    # Check if they're the same user message
+                    if (getattr(_last_existing, "role", "") == "user"
+                            and getattr(_first_new, "role", "") == "user"):
+                        _last_text = getattr(_last_existing, "get_text_content", lambda: "")()
+                        _first_text = getattr(_first_new, "get_text_content", lambda: "")()
+                        if _last_text.strip() == _first_text.strip():
+                            _skip_first = True
+                            logger.info("_persist_chat_messages: skipped duplicate user message")
 
-            if user_text and user_text.strip() != _last_user_text.strip():
-                user_msg = Msg(name="user", content=[TextBlock(text=user_text)], role="user")
-                await isolated_mem.add(user_msg)
-                logger.info("_persist_chat_messages: added user message (%d chars)", len(user_text))
-            elif user_text:
-                logger.info("_persist_chat_messages: skipped duplicate user message (%d chars)", len(user_text))
-
-            # Save reasoning/thinking as a separate message with metadata marker
-            reasoning_text = "".join(full_reasoning) if full_reasoning else ""
-            if reasoning_text:
-                reasoning_msg = Msg(
-                    name="assistant",
-                    content=[TextBlock(text=reasoning_text)],
-                    role="assistant",
+                _msgs_to_add = agent_messages[1:] if _skip_first else agent_messages
+                for msg in _msgs_to_add:
+                    await isolated_mem.add(msg)
+                logger.info(
+                    "_persist_chat_messages: added %d agent messages (tool_call, "
+                    "tool_output, reasoning, assistant, etc.)",
+                    len(_msgs_to_add),
                 )
-                # Mark as reasoning so frontend can reconstruct DeepThinking card
-                reasoning_msg.metadata = {"type": "reasoning"}
-                await isolated_mem.add(reasoning_msg)
-            if assistant_text:
-                assistant_msg = Msg(name="assistant", content=[TextBlock(text=assistant_text)], role="assistant")
-                await isolated_mem.add(assistant_msg)
-            elif reasoning_text:
-                # Fallback: when model puts all text in reasoning blocks
-                # and message block is empty, extract a summary from reasoning
-                # so the user can see something in chat history.
-                summary = self._extract_summary_from_reasoning(reasoning_text)
-                if summary:
-                    assistant_msg = Msg(name="assistant", content=[TextBlock(text=summary)], role="assistant")
+            else:
+                # Fallback: old logic for paths that don't pass agent_messages
+                # (e.g. early-exit paths like /mission, /skill info)
+                _last_user_text = ""
+                if isolated_mem.content:
+                    _last_msg, _ = isolated_mem.content[-1]
+                    if getattr(_last_msg, "role", "") == "user":
+                        _last_user_text = getattr(_last_msg, "get_text_content", lambda: "")()
+
+                if user_text and user_text.strip() != _last_user_text.strip():
+                    user_msg = Msg(name="user", content=[TextBlock(text=user_text)], role="user")
+                    await isolated_mem.add(user_msg)
+                    logger.info("_persist_chat_messages: added user message (%d chars)", len(user_text))
+                elif user_text:
+                    logger.info("_persist_chat_messages: skipped duplicate user message (%d chars)", len(user_text))
+
+                # Save reasoning/thinking as a separate message with metadata marker
+                reasoning_text = "".join(full_reasoning) if full_reasoning else ""
+                if reasoning_text:
+                    reasoning_msg = Msg(
+                        name="assistant",
+                        content=[TextBlock(text=reasoning_text)],
+                        role="assistant",
+                    )
+                    reasoning_msg.metadata = {"type": "reasoning"}
+                    await isolated_mem.add(reasoning_msg)
+                if assistant_text:
+                    assistant_msg = Msg(name="assistant", content=[TextBlock(text=assistant_text)], role="assistant")
                     await isolated_mem.add(assistant_msg)
+                elif reasoning_text:
+                    summary = self._extract_summary_from_reasoning(reasoning_text)
+                    if summary:
+                        assistant_msg = Msg(name="assistant", content=[TextBlock(text=summary)], role="assistant")
+                        await isolated_mem.add(assistant_msg)
 
             logger.info(
                 "_persist_chat_messages: isolated_mem now has %d messages before save",
@@ -732,6 +760,7 @@ class AgentRunner(Runner):
         # Initialize variables before try block so they're available in finally
         _evolution_full_response: list[str] = []
         _evolution_full_reasoning: list[str] = []
+        _memory_snapshot_len = 0
         name = "New Chat"
         channel = DEFAULT_CHANNEL
         try:
@@ -1129,6 +1158,11 @@ class AgentRunner(Runner):
             # in the session state.
             agent.rebuild_sys_prompt()
 
+            # Snapshot memory length BEFORE processing so we can extract
+            # only the NEW messages afterwards (includes tool_call, tool_output,
+            # reasoning, assistant — not just user + assistant text).
+            _memory_snapshot_len = len(agent.memory.content) if agent.memory else 0
+
             # --- Execution: Mission Mode (phased) or standard -----
             # Collect full assistant response for evolution engine & chat persistence
 
@@ -1293,6 +1327,22 @@ class AgentRunner(Runner):
             # and append them again.
             if chat is not None:
                 try:
+                    # Extract ALL new messages from agent.memory (includes
+                    # tool_call, tool_output, reasoning, assistant — not just
+                    # user + assistant text).  This is the key difference from
+                    # the old approach that only saved 3 messages.
+                    _new_msgs = []
+                    if agent is not None and agent.memory:
+                        _all_content = agent.memory.content
+                        _new_msgs = [
+                            msg for msg, _marks in _all_content[_memory_snapshot_len:]
+                        ]
+                        logger.info(
+                            "Extracted %d new messages from agent.memory "
+                            "(snapshot_len=%d, total=%d)",
+                            len(_new_msgs), _memory_snapshot_len, len(_all_content),
+                        )
+
                     await self._persist_chat_messages(
                         chat=chat,
                         session_id=session_id,
@@ -1303,6 +1353,7 @@ class AgentRunner(Runner):
                         name=name,
                         full_reasoning=getattr(self._workspace, 'last_full_reasoning', None),
                         user_text_override=query,
+                        agent_messages=_new_msgs,
                     )
                 except Exception:
                     logger.warning(
