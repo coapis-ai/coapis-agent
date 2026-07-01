@@ -1671,16 +1671,36 @@ class WecomChannel(BaseChannel):
         _ws_client_ref = self._client
 
         def _ws_raw_handler(frame: Any) -> None:
-            logger.info("wecom _ws_raw_handler CALLED frame_keys=%s", list(frame.keys()) if isinstance(frame, dict) else type(frame).__name__)
             req_id = (frame.get("headers") or {}).get("req_id", "")
             if req_id and req_id.startswith(_UPLOAD_CMDS):
                 fut = self._upload_ack_futures.get(req_id)
                 if fut and not fut.done() and self._loop:
                     self._loop.call_soon_threadsafe(fut.set_result, frame)
                 return
+
+            # ── Intercept template_card_event before handle_frame ──
+            # The SDK's handle_frame does NOT emit "template_card_event"
+            # to the client event emitter, so registered card callbacks
+            # never fire.  Detect card events here and dispatch directly.
+            body = frame.get("body") or {}
+            event = body.get("event") or {}
+            event_type = event.get("eventtype") or ""
+            if event_type == "template_card_event":
+                card_handler = getattr(self, "_card_handler", None)
+                if card_handler is not None:
+                    try:
+                        card_handler.handle_template_card_event_sync(frame)
+                    except Exception:
+                        logger.exception(
+                            "wecom template_card_event dispatch failed",
+                        )
+                    return
+                logger.warning(
+                    "wecom template_card_event received but no card_handler",
+                )
+
             try:
                 _message_handler.handle_frame(frame, _ws_client_ref)
-                logger.info("wecom handle_frame OK cmd=%s msgtype=%s", frame.get("cmd"), (frame.get("body") or {}).get("msgtype"))
             except Exception:
                 logger.exception("wecom _ws_raw_handler handle_frame failed")
 
