@@ -348,7 +348,7 @@ class AgentRunner(Runner):
 
             # Load existing session state using chat_id as key
             state = await session.get_session_state_dict(
-                user_chat.id, user_id, channel, allow_not_exist=True,
+                user_chat.id, user_id, allow_not_exist=True,
             )
             memory_state = (state or {}).get("agent", {}).get("memory", {})
             _existing_blocks = sum(
@@ -421,7 +421,6 @@ class AgentRunner(Runner):
                 key="agent.memory",
                 value=isolated_mem.state_dict(),
                 user_id=effective_user_id,
-                channel=channel,
             )
 
             logger.info(
@@ -631,6 +630,28 @@ class AgentRunner(Runner):
             )
         elif isinstance(content, str):
             last.content = new_text
+
+    async def stream_query(self, request, **kwargs):
+        """Override base Runner.stream_query to set created_at on response events.
+
+        The base class handles:
+        1. Calling self.query_handler() to get (msg, last) tuples
+        2. Passing through adapt_agentscope_message_stream adapter
+           to convert (msg, last) → proper Event objects (Message, TextContent, DataContent)
+        3. Yielding Events with correct lifecycle (InProgress/Completed)
+
+        This matches QwenPaw's pattern: workspace calls stream_query() instead of
+        query_handler() directly, letting the framework adapter handle all Event
+        construction — fixing tool_call rendering, delta duplication, and message
+        structure issues.
+        """
+        from datetime import datetime, timezone
+
+        created_at = int(datetime.now(timezone.utc).timestamp())
+        async for event in super().stream_query(request, **kwargs):
+            if getattr(event, "object", None) == "response":
+                event.created_at = created_at
+            yield event
 
     async def query_handler(
         self,

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, AsyncGenerator, Coroutine, List
+from typing import Any, AsyncGenerator, Coroutine
 
 from agentscope.message import Msg
 
@@ -55,109 +55,6 @@ class ResponseBlock:
     content: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
 
-
-# ---------------------------------------------------------------------------
-# Msg → ResponseBlock conversion
-# ---------------------------------------------------------------------------
-
-
-def msg_to_response_blocks(
-    msg: Msg,
-    *,
-    show_tool: bool = True,
-    filter_thinking: bool = False,
-) -> List[ResponseBlock]:
-    """Convert an agentscope ``Msg`` to a list of ``ResponseBlock``.
-
-    This is the bridge between the QwenPaw message format (used by
-    ``CoApisAgent`` / ``ReActAgent``) and the ``ResponseBlock`` format
-    consumed by ``workspace._process_handler`` for frontend rendering.
-
-    Args:
-        msg: The agentscope Msg from the agent's msg_queue.
-        show_tool: If False, suppress tool_call and tool_output blocks.
-        filter_thinking: If True, suppress thinking/reasoning blocks.
-
-    Returns:
-        List of ResponseBlock objects ready for Event/Message conversion.
-    """
-    blocks: list[ResponseBlock] = []
-    content = msg.content
-
-    if isinstance(content, str):
-        if content:
-            blocks.append(ResponseBlock(type="text", content=content))
-        return blocks
-
-    if not isinstance(content, list):
-        return blocks
-
-    for item in content:
-        if not isinstance(item, dict):
-            continue
-
-        btype = item.get("type", "")
-
-        if btype == "text":
-            text = item.get("text", "")
-            if text:
-                blocks.append(ResponseBlock(type="text", content=text))
-
-        elif btype == "thinking":
-            if not filter_thinking:
-                text = item.get("thinking", "") or item.get("text", "")
-                if text:
-                    blocks.append(
-                        ResponseBlock(type="thinking", content=text)
-                    )
-
-        elif btype == "tool_use":
-            if show_tool:
-                tool_name = item.get("name", "unknown")
-                tool_input = item.get("input", {})
-                call_id = item.get("id", "")
-                blocks.append(
-                    ResponseBlock(
-                        type="tool_call",
-                        content=f"{tool_name}({tool_input})",
-                        meta={
-                            "tool_name": tool_name,
-                            "tool_args": tool_input,
-                            "call_id": call_id,
-                        },
-                    )
-                )
-
-        elif btype == "tool_result":
-            if show_tool:
-                tool_name = item.get("name", "unknown")
-                call_id = item.get("id", "")
-                output = item.get("output", "")
-                # Flatten output to string
-                if isinstance(output, list):
-                    text_parts = []
-                    for part in output:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            text_parts.append(part.get("text", ""))
-                        elif isinstance(part, str):
-                            text_parts.append(part)
-                    output_text = "\n".join(text_parts)
-                elif isinstance(output, str):
-                    output_text = output
-                else:
-                    output_text = str(output)
-                blocks.append(
-                    ResponseBlock(
-                        type="tool_output",
-                        content=output_text,
-                        meta={
-                            "tool_name": tool_name,
-                            "tool_call_id": call_id,
-                        },
-                    )
-                )
-
-    return blocks
 
 # Sentinel placed into the queue when the agent task finishes,
 # so the consumer loop knows to stop.

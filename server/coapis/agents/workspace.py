@@ -30,14 +30,11 @@ Supports:
 """
 
 import asyncio
-import json
 import logging
-import os
-import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from ..constant import AGENTS_DIR, DATA_DIR, SKILLS_DIR, WORKSPACES_DIR
+from ..constant import AGENTS_DIR, WORKSPACES_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +331,9 @@ class Workspace:
             except Exception:
                 pass
             r._health = True
+            # Wire ChatManager for session persistence
+            if self.chat_manager:
+                r.set_chat_manager(self.chat_manager)
             # Wire MCP manager if initialized
             if hasattr(self, '_mcp_manager') and self._mcp_manager:
                 r.set_mcp_manager(self._mcp_manager)
@@ -837,7 +837,7 @@ class Workspace:
             async def _stream(request_obj):
                 # Import Event classes
                 from agentscope_runtime.engine.schemas.agent_schemas import (
-                    Event, Message, TextContent, DataContent, RunStatus, MessageType
+                    Event, Message, TextContent, RunStatus, MessageType
                 )
                 import uuid as uuid_mod
 
@@ -1035,120 +1035,8 @@ class Workspace:
                 # Add user message to context BEFORE streaming
                 context.add_message("user", user_message)
 
-                # Generate unique IDs for this response
-                response_id = str(uuid_mod.uuid4())
-                msg_id = str(uuid_mod.uuid4())
-
-                # Yield response created event
-                yield Event(
-                    object="response",
-                    id=response_id,
-                    status=RunStatus.Created,
-                    created_at=int(__import__('time').time() * 1000),
-                )
-
-                # Yield message start event
-                yield Message(
-                    object="message",
-                    id=msg_id,
-                    role="assistant",
-                    type=MessageType.MESSAGE,
-                    content=[],
-                )
-
-                # Initialize streaming: yield a delta=False TextContent to signal
-                # stream start. Without this, channel dispatchers that rely on
-                # msg_id_to_stream_type mapping (e.g. WeChat Work) will silently
-                # drop all subsequent delta=True events.
-                yield TextContent(
-                    object="content",
-                    msg_id=msg_id,
-                    type="text",
-                    delta=False,
-                    text="",
-                )
-
-                # Stream through AgentCore and yield proper events
-                # AgentCore now yields (text_chunk, is_reasoning) tuples
-                full_response = []
-                full_reasoning = []
-                _raw_blocks = []  # Collect raw ResponseBlock objects for session persistence
-                _evo_tool_calls = []  # Collect tool call info for evolution engine
-                _search_card_html = ""  # Search prefetch card HTML (empty if not used)
-                _search_card_inserted_count = 0  # Track if search card has been inserted
-
-                # ── Determine display strategy from user prefs + channel config ──
-                _channel_name = getattr(request_obj, "channel", "") or ""
-
-                # Read user preferences (ChatDisplayConfig)
-                _chat_display = None
-                try:
-                    from ..user_system.database import UserSystemDB
-                    _db = UserSystemDB()
-                    # v0.8.2: Always resolve via self.username first.
-                    # self._user_id may be a platform-specific ID (e.g. DingTalk
-                    # staff_id) which is NOT the internal user ID stored in prefs.
-                    _resolved_uid = None
-                    if self.username:
-                        _u = _db.get_user_by_username(self.username)
-                        if _u:
-                            _resolved_uid = _u.get("id")
-                    # Fallback: try raw _user_id only if username resolution failed
-                    if not _resolved_uid:
-                        _resolved_uid = getattr(self, "_user_id", None)
-                    if _resolved_uid:
-                        _prefs = _db.get_preferences(_resolved_uid)
-                        if _prefs and "chat_display" in _prefs:
-                            from ..user_system.models import ChatDisplayConfig
-                            _chat_display = ChatDisplayConfig(**_prefs["chat_display"])
-                except Exception:
-                    pass  # Graceful fallback to defaults
-
-                # Read channel config (filter_tool_messages, filter_thinking)
-                _ch_cfg = None
-                try:
-                    _agent_channels = self._config.get("channels", {}) if isinstance(self._config, dict) else {}
-                    _ch_cfg = _agent_channels.get(_channel_name) if _channel_name else None
-                except Exception:
-                    pass
-
-                # Merge: user preferences > channel config > defaults
-                # Default: show everything (thinking + tool details)
-                # Users complained about "stuck" feeling when messages are filtered
-                # ── show_tool_details ──
-                if _chat_display:
-                    if _chat_display.displayMode == "simple":
-                        _show_tool = False
-                    elif _chat_display.hideToolCall:
-                        _show_tool = False
-                    else:
-                        _show_tool = True
-                elif _ch_cfg and _ch_cfg.get("filter_tool_messages"):
-                    _show_tool = False
-                else:
-                    _show_tool = True
-
-                # ── filter_thinking ──
-                if _chat_display:
-                    _filter_thinking = getattr(_chat_display, 'hideThinking', False) or getattr(_chat_display, 'hideThought', False)
-                elif _ch_cfg and _ch_cfg.get("filter_thinking"):
-                    _filter_thinking = True
-                else:
-                    _filter_thinking = False
-
-                # ── display_mode (for channel-level block splitting) ──
-                _display_mode = "simple"
-                if _chat_display:
-                    _display_mode = _chat_display.displayMode
-
-                logger.debug(
-                    "workspace display config: channel=%s show_tool=%s "
-                    "filter_thinking=%s display_mode=%s",
-                    _channel_name, _show_tool, _filter_thinking, _display_mode,
-                )
-
                 # ── Search intent pre-fetch (force web_search for search queries) ──
-                # Load search config from JSON file (supports customization)
+                _search_card_html = ""
                 _search_cfg_path = Path(__file__).parent / "search_config.json"
                 _search_cfg = {}
                 try:
@@ -1158,395 +1046,45 @@ class Workspace:
                 except Exception:
                     pass
                 _search_keywords = set(_search_cfg.get("search_keywords", [
-                    '新闻', '热点', '热搜', '天气', '比分', '股票', '价格',
-                    'news', 'weather', 'sports', 'score', 'price', 'stock',
-                    '搜索', '查一下', '查查', '帮我查', '最新', '实时', '今天',
-                    'latest', 'realtime', 'today', 'trending',
+                    '新闻', '热点', '热搜', '天气', '比分', '赛事', '最新', '今日',
+                    'today', 'news', 'weather', 'score', 'latest', 'current',
+                    '搜索', '查一下', '帮我查', '帮我搜', 'search', 'look up',
                 ]))
-                _search_max_results = _search_cfg.get("search_max_results", 10)
-                _search_timeout = _search_cfg.get("search_timeout", 15.0)
-                _search_backend = _search_cfg.get("search_backend", "auto")
-                _is_search_query = any(kw in user_message.lower() for kw in _search_keywords)
-
-                if _is_search_query and self.tools:
+                if user_message and any(kw in user_message.lower() for kw in _search_keywords):
                     try:
-                        search_tool = self.tools._tools.get('web_search')
-                        if search_tool:
-                            import asyncio as _aio
-                            _search_result = await _aio.wait_for(
-                                search_tool.func(query=user_message, max_results=_search_max_results, backend=_search_backend),
-                                timeout=_search_timeout
-                            )
-                            if isinstance(_search_result, dict) and _search_result.get('results'):
-                                _results_text = '\n\n'.join(
-                                    f"[{i+1}] {r.get('title', '')}\n"
-                                    f"    摘要: {r.get('snippet', '')}\n"
-                                    f"    来源: {r.get('url', '')}"
-                                    for i, r in enumerate(_search_result['results'])
-                                )
-                                # Keep user_message clean — pass search results
-                                # via context so they reach the LLM but are NOT
-                                # persisted in the user message session record.
-                                _search_context = (
-                                    f"[SEARCH_RESULTS] 以下是关于该话题的实时搜索结果（共{len(_search_result['results'])}条），"
-                                    f"请基于以下搜索结果中的信息进行汇总回答。要求：\n"
-                                    f"1. 按条理清晰地组织回答，使用分点或分段结构\n"
-                                    f"2. 引用具体数据和事实，不要泛泛而谈\n"
-                                    f"3. 如果涉及多条信息，分别列出\n"
-                                    f"4. 用中文回答，语气专业但易读\n\n"
-                                    f"{_results_text}\n[/SEARCH_RESULTS]"
-                                )
-                                context.add_message("system", _search_context)
-                                logger.info(
-                                    "Search pre-fetch: injected %d results for query: %s",
-                                    len(_search_result['results']),
-                                    user_message[:50]
-                                )
+                        from ..tools.builtin import web_search
+                        _search_result = await web_search(query=user_message, max_results=3)
+                        if _search_result and _search_result.get('results'):
+                            _cards = []
+                            for r in _search_result['results'][:3]:
+                                _title = r.get('title', '')
+                                _url = r.get('url', '')
+                                _snippet = r.get('snippet', '')[:120]
+                                _cards.append(f"<div class='search-result'><a href='{_url}' target='_blank'>{_title}</a><p>{_snippet}</p></div>")
+                            _search_card_html = f"<div class='search-card'><h4>🔍 搜索结果</h4>{''.join(_cards)}</div>"
+                            logger.info("Search pre-fetch: %d results for: %s", len(_search_result['results']), user_message[:50])
                     except Exception as e:
                         logger.warning("Search pre-fetch failed: %s", e)
 
-                # ── Initialize renderer from channel + user prefs ──
-                from ..app.channels.renderer import RenderStyle, MessageRenderer
-                _render_style = RenderStyle.from_channel(_channel_name, _ch_cfg or {})
-                # Override with user chat_display preferences if available
-                if _chat_display:
-                    if hasattr(_chat_display, 'showToolDetails') and _chat_display.showToolDetails is not None:
-                        _render_style.show_tool_details = _chat_display.showToolDetails
-                    elif hasattr(_chat_display, 'hideToolCall'):
-                        _render_style.show_tool_details = not _chat_display.hideToolCall
-                    if hasattr(_chat_display, 'filterThinking') and _chat_display.filterThinking is not None:
-                        _render_style.show_thinking = not _chat_display.filterThinking
-                    elif hasattr(_chat_display, 'hideThought'):
-                        _render_style.show_thinking = not _chat_display.hideThought
-                _renderer = MessageRenderer(_render_style)
+                # ── Core stream: delegate to runner.stream_query() ──
+                # stream_query() calls query_handler() internally, then passes
+                # (msg, last) tuples through adapt_agentscope_message_stream adapter
+                # to produce proper Events (Message, TextContent, DataContent)
+                # with correct lifecycle, delta tracking, and per-type msg_ids.
+                async for event in self.runner.stream_query(request_obj):
+                    # Inject search card HTML into first text content event
+                    if (_search_card_html
+                            and getattr(event, "object", None) == "content"
+                            and getattr(event, "delta", False)
+                            and getattr(event, "text", None)):
+                        event.text = _search_card_html + "\n\n" + event.text
+                        _search_card_html = ""  # Only inject once
+                    yield event
 
-                logger.info(
-                    "RenderStyle for %s: thinking=%s tool=%s emoji_only=%s",
-                    _channel_name,
-                    _render_style.show_thinking,
-                    _render_style.show_tool_details,
-                    not _render_style.show_tool_details,
-                )
-
-                # ── Progress feedback state ──
-                _thinking_shown = False
-                _tool_calls_seen = 0
-
-                # ── Block-specific message IDs for @agentscope-ai/chat ──
-                # Each block type (reasoning, plugin_call, message) needs its own
-                # Message event with a unique msg_id for the frontend to render
-                # as separate cards with collapse/expand functionality.
-                _current_phase = None  # "reasoning" | "plugin_call" | "message"
-                _phase_msg_id = None   # msg_id for the current phase's Message event
-
-                async def _close_phase():
-                    """Yield a Message completed event for the current phase."""
-                    nonlocal _current_phase, _phase_msg_id
-                    if _phase_msg_id is None:
-                        return
-                    if _current_phase == "reasoning":
-                        _close_type = MessageType.REASONING
-                    elif _current_phase == "plugin_call":
-                        _close_type = MessageType.PLUGIN_CALL
-                    else:
-                        _close_type = MessageType.MESSAGE
-                    yield Message(
-                        object="message",
-                        id=_phase_msg_id,
-                        role="assistant",
-                        type=_close_type,
-                        status=RunStatus.Completed,
-                    )
-                    _current_phase = None
-                    _phase_msg_id = None
-
-                async def _open_phase(phase_type):
-                    """Open a new phase, closing the previous one if needed."""
-                    nonlocal _current_phase, _phase_msg_id
-                    if _current_phase == phase_type and _phase_msg_id is not None:
-                        return  # already open
-                    # Close previous phase
-                    if _phase_msg_id is not None:
-                        async for ev in _close_phase():
-                            yield ev
-                    _current_phase = phase_type
-                    _phase_msg_id = str(uuid_mod.uuid4())
-                    # Determine message type
-                    if phase_type == "reasoning":
-                        msg_type = MessageType.REASONING
-                    elif phase_type == "plugin_call":
-                        msg_type = MessageType.PLUGIN_CALL
-                    else:
-                        msg_type = MessageType.MESSAGE
-                    # Yield Message created event (status=InProgress so that
-                    # the library's Reasoning component renders immediately)
-                    yield Message(
-                        object="message",
-                        id=_phase_msg_id,
-                        role="assistant",
-                        type=msg_type,
-                        status=RunStatus.InProgress,
-                        content=[],
-                    )
-
-                # ── Pre-save user message to session (before stream) ──
-                # Following qwenpaw strategy: user message is persisted BEFORE
-                # stream processing begins, so it survives /stop interruption.
-                # NOTE: The console router may have already persisted the user
-                # message synchronously before starting the stream. In that
-                # case, skip the pre-save to avoid duplicate messages.
-                logger.info("[DEBUG] Starting pre-save, chat_key=%s", chat_key[:20])
-                _pre_save_done = False
-                try:
-                    _session = self.runner.session if self.runner else None
-                    if _session and user_message.strip():
-                        from coapis.config.session_context import get_current_chat_id as _get_chat_id_pre
-                        _pre_chat_id = (
-                            getattr(request_obj, "chat_id", "")
-                            or _get_chat_id_pre()
-                            or chat_key
-                        )
-                        _pre_user = self.username or user_id or "anonymous"
-                        # Load existing state
-                        _pre_state = await _session.get_session_state_dict(
-                            _pre_chat_id, _pre_user, allow_not_exist=True,
-                        )
-                        _pre_mem_state = (_pre_state or {}).get("agent", {}).get("memory", {})
-                        from agentscope.memory import InMemoryMemory
-                        from agentscope.message import Msg, TextBlock
-                        _pre_mem = InMemoryMemory()
-                        if _pre_mem_state:
-                            _pre_mem.load_state_dict(_pre_mem_state, strict=False)
-                        # Check if user message already persisted (by console router)
-                        _existing_memories = await _pre_mem.get_memory(prepend_summary=False)
-                        _already_saved = False
-                        if _existing_memories:
-                            _last = _existing_memories[-1]
-                            if (getattr(_last, "role", "") == "user"
-                                    and user_message.strip() in str(getattr(_last, "content", ""))):
-                                _already_saved = True
-                                logger.debug(
-                                    "User message already persisted by console router, skipping pre-save: chat=%s",
-                                    _pre_chat_id[:12],
-                                )
-                        if not _already_saved:
-                            # Add user message
-                            await _pre_mem.add(
-                                Msg(name="user", content=[TextBlock(text=user_message)], role="user")
-                            )
-                            # Save back (only user message, assistant will be added later)
-                            _pre_new_state = _pre_state.copy() if _pre_state else {}
-                            if "agent" not in _pre_new_state:
-                                _pre_new_state["agent"] = {}
-                            _pre_new_state["agent"]["memory"] = _pre_mem.state_dict()
-                            await _session.update_session_state(
-                                _pre_chat_id, "agent.memory",
-                                _pre_new_state["agent"]["memory"],
-                                user_id=_pre_user,
-                            )
-                        _pre_save_done = True
-                        logger.debug("Pre-saved user message to session, chat=%s", _pre_chat_id[:12])
-                except Exception as e:
-                    logger.warning("Pre-save user message failed: %s", e)
-
-                # ── Stream via unified CoApisAgent (runner.query_handler) ──
-                _stopped = False
-                try:
-                    from .stream_utils import msg_to_response_blocks
-                    from agentscope.message import Msg as _StreamMsg
-                    _stream_msgs = [_StreamMsg(name="user", content=user_message, role="user")]
-
-                    async for _msg_obj, _is_last in self.runner.query_handler(
-                        msgs=_stream_msgs,
-                        request=request_obj,
-                    ):
-                        if not _msg_obj or not getattr(_msg_obj, "content", None):
-                            continue
-                        _blocks = msg_to_response_blocks(
-                            _msg_obj,
-                            show_tool=_show_tool,
-                            filter_thinking=_filter_thinking,
-                        )
-                        for block in _blocks:
-                            if not block.content:
-                                continue
-
-                            # Collect raw block for session persistence
-                            _raw_blocks.append(block)
-
-                            # ── Render block via renderer ──
-                            if block.type == "thinking":
-                                full_reasoning.append(block.content)
-                                rendered = _renderer.render_thinking(block.content)
-                                if rendered:
-                                    async for ev in _open_phase("reasoning"):
-                                        yield ev
-                                    yield TextContent(
-                                        object="content",
-                                        msg_id=_phase_msg_id,
-                                        type="text",
-                                        delta=True,
-                                        text=rendered,
-                                        status=RunStatus.InProgress,
-                                    )
-                            elif block.type == "tool_call":
-                                _tool_calls_seen += 1
-                                if self.evolution_engine:
-                                    try:
-                                        _tc_meta = block.meta or {}
-                                        _evo_tool_calls.append({
-                                            "name": _tc_meta.get("tool_name", "unknown"),
-                                            "args": _tc_meta.get("tool_args", {}),
-                                            "call_id": _tc_meta.get("call_id", ""),
-                                        })
-                                    except Exception:
-                                        pass
-                                if _current_phase == "reasoning":
-                                    async for ev in _close_phase():
-                                        yield ev
-                                rendered = _renderer.render_tool_call(block.content, block.meta)
-                                if rendered:
-                                    full_response.append(rendered)
-                                    async for ev in _open_phase("plugin_call"):
-                                        yield ev
-                                    _tool_meta = block.meta or {}
-                                    _tool_data = {
-                                        "name": _tool_meta.get("tool_name", "unknown"),
-                                        "call_id": _tool_meta.get("call_id", str(uuid_mod.uuid4())),
-                                        "arguments": json.dumps(
-                                            _tool_meta.get("tool_args", {}),
-                                            ensure_ascii=False,
-                                            default=str,
-                                        ),
-                                    }
-                                    yield DataContent(
-                                        object="content",
-                                        msg_id=msg_id,
-                                        type="data",
-                                        delta=True,
-                                        data=_tool_data,
-                                        status=RunStatus.InProgress,
-                                    )
-                                    yield TextContent(
-                                        object="content",
-                                        msg_id=msg_id,
-                                        type="text",
-                                        delta=True,
-                                        text=rendered,
-                                        status=RunStatus.InProgress,
-                                    )
-                            elif block.type == "tool_output":
-                                rendered = _renderer.render_tool_output(block.content, block.meta)
-                                if rendered:
-                                    async for ev in _close_phase():
-                                        yield ev
-                                    async for ev in _open_phase("tool_output"):
-                                        yield ev
-                                    full_response.append(rendered)
-                                    _tool_out_meta = block.meta or {}
-                                    yield DataContent(
-                                        object="content",
-                                        msg_id=msg_id,
-                                        type="data",
-                                        delta=True,
-                                        data={
-                                            "name": _tool_out_meta.get("tool_name", "unknown"),
-                                            "call_id": _tool_out_meta.get("tool_call_id", ""),
-                                            "output": block.content[:2000] if block.content else "",
-                                        },
-                                        status=RunStatus.InProgress,
-                                    )
-                                    yield TextContent(
-                                        object="content",
-                                        msg_id=msg_id,
-                                        type="text",
-                                        delta=True,
-                                        text=rendered,
-                                        status=RunStatus.InProgress,
-                                    )
-                            elif block.type == "text":
-                                text_content = block.content
-                                full_response.append(text_content)
-                                if _search_card_html and _search_card_inserted_count < 1:
-                                    _search_card_inserted_count += 1
-                                    text_content = _search_card_html + "\n\n" + text_content
-                                    _search_card_html = ""
-                                if _current_phase:
-                                    async for ev in _close_phase():
-                                        yield ev
-                                rendered = _renderer.render_text(text_content)
-                                if rendered:
-                                    full_response.append(rendered)
-                                    yield TextContent(
-                                        object="content",
-                                        msg_id=msg_id,
-                                        type="text",
-                                        delta=True,
-                                        text=rendered,
-                                        status=RunStatus.InProgress,
-                                    )
-                            else:
-                                pass
-
-                except asyncio.CancelledError:
-                    _stopped = True
-                    logger.info("Stream cancelled by user (/stop)")
-
-                # Build complete reply: reasoning + content (both parts must be preserved)
-                assistant_reply = "".join(full_reasoning) + "".join(full_response)
-
-                # ── Evolution: on_turn_end ──
-                if self.evolution_engine:
-                    try:
-                        self.evolution_engine.on_turn_end(
-                            assistant_message=assistant_reply,
-                            tool_calls=_evo_tool_calls if _evo_tool_calls else None,
-                        )
-                    except Exception as evo_err:
-                        logger.debug("Evolution on_turn_end failed: %s", evo_err)
-
-                # ── Tool failure fallback for non-console channels ──
-                if (
-                    _tool_calls_seen > 0
-                    and _channel_name != "console"
-                ):
-                    response_lower = assistant_reply.strip().lower()
-                    _teaching_patterns = [
-                        "你可以尝试", "建议你", "请尝试", "你可以通过",
-                        "你可以使用", "建议使用", "可以试试", "你可以访问",
-                        "你可以搜索", "请访问", "你可以打开", "你可以去",
-                        "如何查", "怎么查", "怎么搜", "如何搜",
-                    ]
-                    is_teaching = any(p in response_lower for p in _teaching_patterns)
-                    is_empty = len(assistant_reply.strip()) < 10
-                    if is_teaching or is_empty:
-                        fallback_msg = (
-                            "\n\n⚠️ 抱歉，搜索/查询工具暂时不可用，无法获取实时信息。"
-                            "请稍后再试，或换个方式提问。"
-                        )
-                        if fallback_msg not in assistant_reply:
-                            assistant_reply += fallback_msg
-                            yield TextContent(
-                                object="content",
-                                msg_id=msg_id,
-                                type="text",
-                                delta=True,
-                                text=fallback_msg,
-                                status=RunStatus.InProgress,
-                            )
-                if assistant_reply:
-                    pass  # persistence handled by runner
-
-                # Store for legacy access (runner handles persistence)
-                self.last_full_reasoning = full_reasoning
-                self.last_full_response = full_response
-
-                # NOTE: Persistence is now handled by runner.query_handler()
-                # via ChatManager. No workspace-level persistence needed.
-
-                # ── Close any open phase ──
-                async for ev in _close_phase():
-                    yield ev
+                # Post-stream: evolution hooks + cleanup
+                # NOTE: Persistence, display config, phase management, and
+                # Event construction are all handled by runner.stream_query()
+                # + adapt_agentscope_message_stream adapter.
 
                 # ── Evolution: on_session_end ──
                 if self.evolution_engine:
@@ -1554,13 +1092,6 @@ class Workspace:
                         await self.evolution_engine.on_session_end()
                     except Exception as evo_err:
                         logger.debug("Evolution on_session_end failed: %s", evo_err)
-
-                # Yield response completed event
-                yield Event(
-                    object="response",
-                    id=response_id,
-                    status=RunStatus.Completed,
-                )
 
             return _stream(request)
 
