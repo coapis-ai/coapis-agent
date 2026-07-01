@@ -211,13 +211,37 @@ class WecomCardHandler:
 
     @staticmethod
     def _extract_task_id(frame: Any) -> Optional[str]:
-        """Extract ``task_id`` from a WeCom template-card callback frame."""
+        """Extract ``task_id`` from a WeCom template-card callback frame.
+
+        The SDK delivers the raw WebSocket frame whose structure is::
+
+            { "body": { "event": { "template_card_event": { "task_id": ... } } } }
+
+        We also tolerate flattened frames where ``task_id`` sits at the
+        top level or directly under ``event``.
+        """
         if hasattr(frame, "task_id"):
             return getattr(frame, "task_id", None)
         if isinstance(frame, dict):
-            return frame.get("task_id")
-        # Try nested structure
-        event = getattr(frame, "event", None)
-        if event and hasattr(event, "task_id"):
-            return getattr(event, "task_id", None)
+            # 1. Flat: frame["task_id"]
+            tid = frame.get("task_id")
+            if tid:
+                return tid
+            # 2. SDK raw frame: body → event → template_card_event → task_id
+            body = frame.get("body") or {}
+            event = body.get("event") or {}
+            card = event.get("template_card_event") or {}
+            tid = card.get("task_id")
+            if tid:
+                return tid
+            # 3. body → event → task_id
+            tid = event.get("task_id")
+            if tid:
+                return tid
+            # 4. frame → event → task_id
+            event2 = frame.get("event") or {}
+            if isinstance(event2, dict):
+                tid = event2.get("task_id")
+                if tid:
+                    return tid
         return None
