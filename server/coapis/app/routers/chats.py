@@ -554,7 +554,7 @@ async def update_chat(
 
 
 @router.delete("/chats/{chat_id}")
-@require_permission("chat:manage")
+@require_permission("chat:delete")
 async def delete_chat(
     request: Request,
     chat_id: str = Path(...),
@@ -583,7 +583,7 @@ async def delete_chat(
 
 
 @router.post("/chats/batch-delete")
-@require_permission("chat:manage")
+@require_permission("chat:delete")
 async def batch_delete_chats(
     request: Request,
     chat_ids: List[str] = Body(...),
