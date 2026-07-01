@@ -101,22 +101,33 @@ def _extract_source_and_filename(block: dict, block_type: str):
     """Extract source and filename from a block.
 
     Supports two formats:
-    1. Direct URL format (from @agentscope-ai/chat frontend):
+    1. Direct URL format (from @agentscope-ai/chat frontend BEFORE conversion):
        {type: "image", image_url: "/path/to/file.png"}
        {type: "file", file_url: "/media/xxx.pdf", file_name: "xxx.pdf"}
-    2. Source dict format (from channels):
+    2. Source dict format (from agentscope message_to_agentscope_msg AFTER conversion):
        {type: "image", source: {type: "url", url: "/path/to/file.png"}}
+       {type: "file", source: {type: "url", url: "/media/xxx.pdf"}, filename: "xxx.pdf"}
     """
     # Format 1: Direct URL fields (image_url, video_url, file_url, data for audio)
     if block_type == "file":
-        # Handle file_url field from @agentscope-ai/chat frontend
+        # Handle file_url field from @agentscope-ai/chat frontend (pre-conversion)
         file_url = block.get("file_url")
         if file_url:
             filename = block.get("file_name") or os.path.basename(urllib.parse.urlparse(file_url).path) or None
             resolved_url = _resolve_media_url(file_url)
             return {"type": "url", "url": resolved_url}, filename
-        # Fallback to source dict format
-        return block.get("source", {}), block.get("filename")
+        # Fallback: source dict format (post-conversion by message_to_agentscope_msg)
+        source = block.get("source", {})
+        filename = block.get("filename")
+        if isinstance(source, dict) and source.get("type") == "url":
+            url = source.get("url", "")
+            if url:
+                # 关键：source.url 也是相对路径（如 /media/xxx.xlsx），需要解析
+                resolved_url = _resolve_media_url(url)
+                source = {"type": "url", "url": resolved_url}
+                if not filename:
+                    filename = os.path.basename(urllib.parse.urlparse(url).path) or None
+        return source, filename
 
     if block_type == "image" and "image_url" in block and "source" not in block:
         url = block["image_url"]
@@ -146,6 +157,9 @@ def _extract_source_and_filename(block: dict, block_type: str):
         if url:
             parsed = urllib.parse.urlparse(url)
             filename = os.path.basename(parsed.path) or None
+            # 关键：对 source.url 也调用 _resolve_media_url
+            resolved_url = _resolve_media_url(url)
+            source = {"type": "url", "url": resolved_url}
 
     return source, filename
 
