@@ -736,6 +736,10 @@ class ToolGuardMixin:
         the user, then blocks waiting for the Future to be resolved by
         /approval approve or /approval deny command. During the wait,
         periodic heartbeat messages are sent to keep SSE connection alive.
+
+        In streaming context (SSE), approval would deadlock because the
+        user can't send commands while the stream is open. So we auto-deny
+        and return an error message, letting the agent try alternatives.
         """
         from coapis.security.tool_guard.approval import ApprovalDecision
 
@@ -743,6 +747,26 @@ class ToolGuardMixin:
         user_id = str(self._request_context.get("user_id") or "")
         channel = str(self._request_context.get("channel") or "")
         agent_id = str(self._request_context.get("agent_id", "unknown"))
+
+        # Detect streaming context: if channel is console/wecom/weixin/dingtalk
+        # and we're inside a stream, approval would deadlock. Auto-deny.
+        is_streaming_context = channel in ("console", "wecom", "weixin", "dingtalk", "feishu", "discord", "telegram")
+        if is_streaming_context:
+            logger.info(
+                "Tool '%s' requires approval (level=L%d) but in streaming "
+                "context (channel=%s) — auto-denying to avoid deadlock. "
+                "Tool input: %s",
+                tool_name,
+                getattr(guard_result, 'level', 0) if hasattr(guard_result, 'level') else 0,
+                channel,
+                str(tool_call.get("input", {}))[:200],
+            )
+            self._log_approval_audit(tool_name, tool_call.get("input", {}), guard_result, "auto_denied_streaming")
+            return await self._acting_denied(
+                tool_call,
+                tool_name,
+                guard_result,
+            )
 
         # Get root_session_id for cross-session approval routing
         root_session_id = str(

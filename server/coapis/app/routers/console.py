@@ -261,6 +261,14 @@ async def console_chat(
     # Check both top-level and biz_params (frontend may pass it in either place)
     request_chat_id = payload.get("chat_id") or (payload.get("biz_params") or {}).get("chat_id")
 
+    # Pass chat_id through native_payload so background tasks can resolve it
+    if request_chat_id:
+        native_payload["meta"]["chat_id"] = request_chat_id
+    elif payload.get("session_id"):
+        # Frontend sometimes sends chat UUID as session_id
+        native_payload["meta"]["chat_id"] = payload["session_id"]
+        request_chat_id = payload["session_id"]
+
     # ── Resolve session_id via channel ──
     resolved_session_id = console_channel.resolve_session_id(
         sender_id=native_payload["sender_id"],
@@ -327,54 +335,11 @@ async def console_chat(
     tracker = workspace.task_tracker
     is_reconnect = payload.get("reconnect") is True
 
-    # ── Pre-persist user message synchronously ──
-    # MUST happen before the stream starts (background task) to guarantee
-    # the user message is in session state when the frontend loads history.
-    # This follows the principle: if there's a message, ensure session exists
-    # first, then write — synchronous, not async.
-    _user_text = ""
-    if native_payload.get("content_parts"):
-        for part in native_payload["content_parts"]:
-            if isinstance(part, str):
-                _user_text += part
-            elif isinstance(part, dict) and "text" in part:
-                _user_text += part["text"]
-    _user_text = _user_text.strip()
-
-    if _user_text and not is_reconnect:
-        try:
-            _session = getattr(getattr(workspace, 'runner', None), 'session', None)
-            if _session:
-                from agentscope.memory import InMemoryMemory
-                from agentscope.message import Msg, TextBlock
-                # Load existing state
-                _pre_state = await _session.get_session_state_dict(
-                    chat.id, username, allow_not_exist=True,
-                )
-                _mem_state = (_pre_state or {}).get("agent", {}).get("memory", {})
-                _mem = InMemoryMemory()
-                if _mem_state:
-                    _mem.load_state_dict(_mem_state, strict=False)
-                # Add user message
-                await _mem.add(
-                    Msg(name="user", content=[TextBlock(text=_user_text)], role="user")
-                )
-                # Save back
-                _new_state = _pre_state.copy() if _pre_state else {}
-                if "agent" not in _new_state:
-                    _new_state["agent"] = {}
-                _new_state["agent"]["memory"] = _mem.state_dict()
-                await _session.update_session_state(
-                    chat.id, "agent.memory",
-                    _new_state["agent"]["memory"],
-                    user_id=username,
-                )
-                logger.info(
-                    "Pre-persisted user message synchronously: chat=%s, user=%s",
-                    chat.id[:12], username,
-                )
-        except Exception as e:
-            logger.warning("Failed to pre-persist user message: %s", e, exc_info=True)
+    # NOTE: User message pre-persist removed.
+    # _persist_chat_messages (in runner.py finally block) is the SINGLE
+    # persistence point for session messages. Pre-persisting caused every
+    # user message to be saved twice (once here, once in _persist_chat_messages),
+    # leading to massive duplication in session files.
 
     if is_reconnect:
         queue = await tracker.attach(chat.id)

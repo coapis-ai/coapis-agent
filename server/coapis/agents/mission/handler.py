@@ -59,7 +59,10 @@ def is_mission_command(query: str | None) -> bool:
     """Return True if the query starts with a mission trigger command."""
     if not query or not isinstance(query, str):
         return False
-    token = query.strip().split(None, 1)[0].lower()
+    parts = query.strip().split(None, 1)
+    if not parts:
+        return False
+    token = parts[0].lower()
     return token in MISSION_COMMANDS
 
 

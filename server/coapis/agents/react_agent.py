@@ -77,6 +77,62 @@ logger = logging.getLogger(__name__)
 NamesakeStrategy = Literal["override", "skip", "raise", "rename"]
 
 
+def _wrap_tool_for_fault_tolerance(func, tool_name: str):
+    """Wrap a tool function for fault tolerance.
+
+    1. Convert dict returns → ToolResponse (agentscope requirement)
+    2. Catch exceptions → return error ToolResponse instead of crashing
+    """
+    import inspect as _inspect
+    from agentscope.tool import ToolResponse as _TR
+    from agentscope.message import TextBlock as _TB
+
+    def _dict_to_tool_response(d: dict) -> _TR:
+        """Convert a dict to a ToolResponse."""
+        if "error" in d:
+            text = f"[Tool Error] {d['error']}"
+        elif "content" in d and isinstance(d["content"], str):
+            text = d["content"]
+        else:
+            text = str(d)
+        return _TR(content=[_TB(type="text", text=text)])
+
+    def _error_tool_response(tool_name: str, exc: Exception) -> _TR:
+        """Create an error ToolResponse from an exception."""
+        text = f"[Tool Error] {tool_name} failed: {type(exc).__name__}: {str(exc)[:500]}"
+        return _TR(content=[_TB(type="text", text=text)])
+
+    if _inspect.iscoroutinefunction(func):
+        async def _async_wrapper(*args, **kwargs):
+            try:
+                result = await func(*args, **kwargs)
+                if isinstance(result, dict):
+                    return _dict_to_tool_response(result)
+                return result
+            except Exception as e:
+                logger.warning("Tool %s failed: %s", tool_name, e, exc_info=True)
+                return _error_tool_response(tool_name, e)
+        _async_wrapper.__name__ = getattr(func, '__name__', tool_name)
+        _async_wrapper.__doc__ = getattr(func, '__doc__', '')
+        # Preserve original_func for agentscope introspection
+        _async_wrapper.original_func = getattr(func, 'original_func', func)
+        return _async_wrapper
+    else:
+        def _sync_wrapper(*args, **kwargs):
+            try:
+                result = func(*args, **kwargs)
+                if isinstance(result, dict):
+                    return _dict_to_tool_response(result)
+                return result
+            except Exception as e:
+                logger.warning("Tool %s failed: %s", tool_name, e, exc_info=True)
+                return _error_tool_response(tool_name, e)
+        _sync_wrapper.__name__ = getattr(func, '__name__', tool_name)
+        _sync_wrapper.__doc__ = getattr(func, '__doc__', '')
+        _sync_wrapper.original_func = getattr(func, 'original_func', func)
+        return _sync_wrapper
+
+
 class CoApisAgent(ToolGuardMixin, ReActAgent):
     """CoApis Agent with integrated tools, skills, and memory management.
 
@@ -307,8 +363,13 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             # compatibility)
             async_exec = async_execution_tools.get(tool_name, False)
 
+            # Wrap tool function for fault tolerance:
+            # 1. Convert dict returns to ToolResponse (agentscope requirement)
+            # 2. Catch exceptions and return error ToolResponse instead of crashing
+            wrapped_func = _wrap_tool_for_fault_tolerance(tool_func, tool_name)
+
             toolkit.register_tool_function(
-                tool_func,
+                wrapped_func,
                 namesake_strategy=namesake_strategy,
                 async_execution=async_exec,
             )
@@ -1577,7 +1638,26 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception as exc:
             _success = False
             _error_msg = str(exc)[:500]
-            raise
+            logger.warning(
+                "Tool %s execution failed: %s — returning error to agent instead of crashing",
+                tool_name, _error_msg,
+            )
+            # Return error message as tool result instead of crashing the stream.
+            # The agent will see the error and can decide what to do next.
+            from agentscope.message import ToolResultBlock
+            error_msg = Msg(
+                "system",
+                [ToolResultBlock(
+                    type="tool_result",
+                    id=tool_call.get("id", ""),
+                    name=tool_name,
+                    output=[{"type": "text", "text": f"[Tool Error] {tool_name}: {_error_msg}"}],
+                )],
+                "system",
+            )
+            await self.print(error_msg, True)
+            await self.memory.add(error_msg)
+            return None
         finally:
             try:
                 _ctx = getattr(self, "_request_context", None) or {}

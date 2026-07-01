@@ -253,6 +253,7 @@ class AgentRunner(Runner):
         assistant_text: str,
         name: str = "New Chat",
         full_reasoning: list[str] | None = None,
+        user_text_override: str = "",
     ) -> None:
         """Persist chat messages to session state (aligned with CoApis).
 
@@ -307,13 +308,20 @@ class AgentRunner(Runner):
                 name=name, agent_id=self.agent_id,
             )
 
-        # Extract user message text
-        user_text = ""
-        if msgs:
+        # Extract user message text - prefer override (raw query) over msgs[-1]
+        # because msgs contains agent internal messages (BOOTSTRAP, system prompts)
+        # not the original user input.
+        user_text = user_text_override.strip() if user_text_override else ""
+        if not user_text and msgs:
             last_msg = msgs[-1]
             user_text = getattr(last_msg, "get_text_content", lambda: "")()
             if not user_text:
                 user_text = str(getattr(last_msg, "content", ""))
+        logger.info(
+            "_persist_chat_messages: user_text_override=%r, final user_text=%r (len=%d), msgs_count=%d",
+            user_text_override[:50] if user_text_override else "",
+            user_text[:80], len(user_text), len(msgs) if msgs else 0,
+        )
 
         # Auto-rename chat from first user message (if still "New Chat")
         current_name = getattr(user_chat, "name", "") or ""
@@ -377,9 +385,20 @@ class AgentRunner(Runner):
                 len(isolated_mem.content),
             )
 
-            if user_text:
+            # ── Dedup: check if last message is already the same user text ──
+            _last_user_text = ""
+            if isolated_mem.content:
+                _last_msg, _ = isolated_mem.content[-1]
+                if getattr(_last_msg, "role", "") == "user":
+                    _last_user_text = getattr(_last_msg, "get_text_content", lambda: "")()
+
+            if user_text and user_text.strip() != _last_user_text.strip():
                 user_msg = Msg(name="user", content=[TextBlock(text=user_text)], role="user")
                 await isolated_mem.add(user_msg)
+                logger.info("_persist_chat_messages: added user message (%d chars)", len(user_text))
+            elif user_text:
+                logger.info("_persist_chat_messages: skipped duplicate user message (%d chars)", len(user_text))
+
             # Save reasoning/thinking as a separate message with metadata marker
             reasoning_text = "".join(full_reasoning) if full_reasoning else ""
             if reasoning_text:
@@ -1028,11 +1047,11 @@ class AgentRunner(Runner):
             # Each agent's ChatManager reads from its own workspace directory.
             effective_cm = self._chat_manager
             if effective_cm is not None:
-                # Prefer chat_id from session context (UUID from frontend)
-                # to match the exact chat, instead of session_id which is
-                # shared across all console chats (e.g. "console:admin").
+                # Prefer chat_id from request (passed via channel_meta)
+                # to match the exact chat. Contextvars don't propagate
+                # to background tasks, so request.chat_id is more reliable.
                 from ...config.session_context import get_current_chat_id
-                ctx_chat_id = get_current_chat_id()
+                ctx_chat_id = getattr(request, 'chat_id', None) or get_current_chat_id()
                 if ctx_chat_id:
                     chat = await effective_cm.get_chat(ctx_chat_id)
                 if chat is None:
@@ -1265,18 +1284,13 @@ class AgentRunner(Runner):
                 except Exception:
                     logger.warning("Failed to close memory_manager", exc_info=True)
 
-            if agent is not None and session_state_loaded and chat is not None:
-                # Use chat.id (UUID) as session key for per-chat isolation
-                await self.session.save_session_state(
-                    session_id=chat.id,
-                    user_id=user_id,
-                    agent=agent,
-                )
-
             # --- Persist messages to user's ChatManager ---
-            # This ensures chat history survives page reloads and is
-            # properly isolated per user (each user has their own
-            # workspaces/{username}/chat/chats.json).
+            # MUST run BEFORE save_session_state to avoid duplication:
+            # _persist_chat_messages loads session state and appends new messages,
+            # then save_session_state overwrites agent.memory with the agent's
+            # internal state. If save_session_state ran first, _persist_chat_messages
+            # would load the agent's internal memory (which already has user+assistant)
+            # and append them again.
             if chat is not None:
                 try:
                     await self._persist_chat_messages(
@@ -1288,12 +1302,19 @@ class AgentRunner(Runner):
                         assistant_text="".join(_evolution_full_response),
                         name=name,
                         full_reasoning=getattr(self._workspace, 'last_full_reasoning', None),
+                        user_text_override=query,
                     )
                 except Exception:
                     logger.warning(
                         "Failed to persist chat messages",
                         exc_info=True,
                     )
+
+            # NOTE: save_session_state removed.
+            # _persist_chat_messages already saves the complete session state
+            # (user message + assistant response + reasoning). Running
+            # save_session_state after it would overwrite with agent's
+            # internal memory, losing the curated message list.
             # ------------------------------------------------
 
             # --- Evolution: session end → experience extraction ---

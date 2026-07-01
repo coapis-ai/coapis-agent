@@ -322,12 +322,17 @@ class BaseChannel(ABC):
             role=Role.USER,
             content=content_parts,
         )
-        return AgentRequest(
+        req = AgentRequest(
             session_id=session_id,
             user_id=sender_id,
             input=[msg],
             channel=channel_id,
         )
+        # Pass chat_id through to request so query_handler can resolve
+        # the correct chat in background tasks (contextvars don't propagate).
+        if channel_meta and channel_meta.get("chat_id"):
+            req.chat_id = channel_meta["chat_id"]
+        return req
 
     def build_agent_request_from_native(
         self,
