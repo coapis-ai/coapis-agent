@@ -170,6 +170,11 @@ def _resolve_media_url(url: str) -> str:
     workspace_dir = get_current_workspace_dir()
     username = get_current_username()
     
+    # 从 workspace_dir 提取用户名（如果 username 未设置）
+    # workspace_dir 格式: /apps/ai/coapis-dev/workspaces/{username}
+    if workspace_dir and not username:
+        username = Path(workspace_dir).name
+    
     if not workspace_dir or not username:
         logger.debug("_resolve_media_url: no context, url=%s", url)
         return url
@@ -197,7 +202,7 @@ def _resolve_media_url(url: str) -> str:
         logger.debug("_resolve_media_url: %s -> %s (ws media)", url, ws_media)
         return ws_media.as_uri()
     
-    logger.warning("_resolve_media_url: file not found for url=%s", url)
+    logger.warning("_resolve_media_url: file not found for url=%s, workspace_dir=%s", url, workspace_dir)
     return url
 
 

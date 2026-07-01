@@ -1095,7 +1095,13 @@ export default function ChatPage() {
         // 不再包装为 preview URL，避免 Agent 读错文件。
         onSuccess({ url: res.url });
       } catch (e) {
-        onError?.(e instanceof Error ? e : new Error(String(e)));
+        // 处理文件已存在的情况（409 Conflict）
+        if (e instanceof Error && e.message.includes("409")) {
+          message.warning(t("chat.attachments.fileExists", "文件已存在，请重命名后重试"));
+          onError?.(new Error("File already exists"));
+        } else {
+          onError?.(e instanceof Error ? e : new Error(String(e)));
+        }
       }
     },
     [multimodalCaps, t],
