@@ -721,6 +721,14 @@ class WecomChannel(BaseChannel):
                         )
 
             text = "\n".join(text_parts).strip()
+
+            # ── Intercept /approval commands before LLM processing ──
+            # /approval approve <request_id>  or  /approval deny <request_id>
+            # These must NOT go to the LLM — resolve the Future directly.
+            if text.startswith("/approval "):
+                await self._handle_approval_command(text, frame)
+                return
+
             if text:
                 content_parts.insert(
                     0,
@@ -787,6 +795,61 @@ class WecomChannel(BaseChannel):
             self._on_enter_chat(frame),
             self._loop,
         )
+
+    async def _handle_approval_command(
+        self,
+        text: str,
+        frame: Any,
+    ) -> None:
+        """Handle /approval approve|deny <request_id> command.
+
+        Resolves the pending approval Future directly so the blocked
+        agent can continue.  Sends a confirmation message to the user.
+        """
+        import re as _re
+        from ..approvals import get_approval_service
+        from ...security.tool_guard.approval import ApprovalDecision
+
+        # Parse: /approval approve <request_id>  or  /approval deny <request_id>
+        m = _re.match(r"^/approval\s+(approve|deny)\s+(\S+)", text)
+        if not m:
+            await self._send_text_via_frame(
+                frame,
+                "格式错误。用法: /approval approve|deny <request_id>",
+            )
+            return
+
+        action = m.group(1)
+        request_id = m.group(2)
+
+        svc = get_approval_service()
+        decision = (
+            ApprovalDecision.APPROVED
+            if action == "approve"
+            else ApprovalDecision.DENIED
+        )
+        resolved = await svc.resolve_request(request_id, decision)
+        if resolved:
+            label = "已批准" if action == "approve" else "已拒绝"
+            await self._send_text_via_frame(
+                frame,
+                f"✅ 审批{label}: {resolved.tool_name} (request: {request_id[:8]})",
+            )
+            logger.info(
+                "wecom /approval command resolved: action=%s request_id=%s tool=%s",
+                action,
+                request_id[:8],
+                resolved.tool_name,
+            )
+        else:
+            await self._send_text_via_frame(
+                frame,
+                f"⚠️ 审批请求未找到或已处理: {request_id[:16]}",
+            )
+            logger.warning(
+                "wecom /approval command: request not found: %s",
+                request_id[:16],
+            )
 
     async def _on_enter_chat(self, frame: Any) -> None:
         """Handle enter_chat event; send welcome reply if configured."""
@@ -1715,7 +1778,7 @@ class WecomChannel(BaseChannel):
             from .cards import WecomCardHandler
             self._card_handler = WecomCardHandler(self)
             self._client.on(
-                "template_card_event",
+                "event.template_card_event",
                 self._card_handler.handle_template_card_event_sync,
             )
             logger.info("wecom template-card handler registered")
