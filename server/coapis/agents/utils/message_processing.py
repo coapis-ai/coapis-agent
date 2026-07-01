@@ -180,7 +180,8 @@ def _resolve_media_url(url: str) -> str:
         return url
     
     parsed = urllib.parse.urlparse(url)
-    basename = os.path.basename(parsed.path)
+    # 关键：先解码 URL 编码（如 %E6%B5%8B%E8%AF%95 → 测试）
+    basename = urllib.parse.unquote(os.path.basename(parsed.path))
     if not basename:
         return url
     
@@ -202,7 +203,7 @@ def _resolve_media_url(url: str) -> str:
         logger.debug("_resolve_media_url: %s -> %s (ws media)", url, ws_media)
         return ws_media.as_uri()
     
-    logger.warning("_resolve_media_url: file not found for url=%s, workspace_dir=%s", url, workspace_dir)
+    logger.warning("_resolve_media_url: file not found for url=%s, basename=%s, workspace_dir=%s", url, basename, workspace_dir)
     return url
 
 
