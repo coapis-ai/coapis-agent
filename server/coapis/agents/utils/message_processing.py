@@ -94,13 +94,21 @@ def _extract_source_and_filename(block: dict, block_type: str):
     Supports two formats:
     1. Direct URL format (from @agentscope-ai/chat frontend):
        {type: "image", image_url: "/path/to/file.png"}
+       {type: "file", file_url: "/media/xxx.pdf", file_name: "xxx.pdf"}
     2. Source dict format (from channels):
        {type: "image", source: {type: "url", url: "/path/to/file.png"}}
     """
+    # Format 1: Direct URL fields (image_url, video_url, file_url, data for audio)
     if block_type == "file":
+        # Handle file_url field from @agentscope-ai/chat frontend
+        file_url = block.get("file_url")
+        if file_url:
+            filename = block.get("file_name") or os.path.basename(urllib.parse.urlparse(file_url).path) or None
+            resolved_url = _resolve_media_url(file_url)
+            return {"type": "url", "url": resolved_url}, filename
+        # Fallback to source dict format
         return block.get("source", {}), block.get("filename")
 
-    # Format 1: Direct URL fields (image_url, video_url, data for audio)
     if block_type == "image" and "image_url" in block and "source" not in block:
         url = block["image_url"]
         filename = os.path.basename(urllib.parse.urlparse(url).path) or None
