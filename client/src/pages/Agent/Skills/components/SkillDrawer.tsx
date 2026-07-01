@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Drawer, Form, Input, Button, Select, Tabs, Tag, Empty, Tooltip } from "@agentscope-ai/design";
+import { Drawer, Form, Input, Button, Select, Tooltip } from "@agentscope-ai/design";
 import { useAppMessage } from "../../../../hooks/useAppMessage";
 import { useTranslation } from "react-i18next";
-import { ThunderboltOutlined, StopOutlined, SearchOutlined, HistoryOutlined, DownloadOutlined } from "@ant-design/icons";
+import { ThunderboltOutlined, StopOutlined, DownloadOutlined } from "@ant-design/icons";
 import type { FormInstance } from "antd";
 import type { SkillSpec, CategorySpec } from "../../../../api/types";
 import { MarkdownCopy } from "../../../../components/MarkdownCopy/MarkdownCopy";
-import { api, skillApi } from "../../../../api";
+import { api } from "../../../../api";
 
 /** Parse YAML frontmatter from a `---`-delimited content string. */
 export function parseFrontmatter(
@@ -73,140 +73,6 @@ interface SkillDrawerProps {
   onSubmit: (values: SkillSpec) => void;
   onContentChange?: (content: string) => void;
   onExport?: (skillNames: string[]) => Promise<void>;
-}
-
-function TriggerAnalysisTab({ skillName }: { skillName: string }) {
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<{
-    base_triggers: Array<{ keyword: string; type: string; priority: number }>;
-    effective_triggers: Array<{ keyword: string; type: string; priority: number }>;
-    overrides: {
-      added_keywords: string[];
-      removed_keywords: string[];
-      refined_keywords: string[];
-    };
-  } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await skillApi.getSkillTriggers(skillName) as any;
-        if (!cancelled) setData(res);
-      } catch { /* silent */ }
-      finally { if (!cancelled) setLoading(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [skillName]);
-
-  if (loading) return <div style={{ padding: 16, textAlign: "center" }}>加载中...</div>;
-  if (!data) return <Empty description="暂无触发数据" />;
-
-  const triggers = data.effective_triggers || [];
-  const baseTriggers = data.base_triggers || [];
-  const overrides = data.overrides || { added_keywords: [], removed_keywords: [], refined_keywords: [] };
-
-  return (
-    <div style={{ fontSize: 13 }}>
-      <div style={{ marginBottom: 12 }}>
-        <strong>触发词 ({triggers.length})</strong>
-        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {triggers.map((t) => (
-            <Tag key={t.keyword} color={t.type === "pattern" ? "blue" : "green"}>
-              {t.keyword}
-            </Tag>
-          ))}
-          {triggers.length === 0 && <span style={{ color: "#999" }}>无触发词</span>}
-        </div>
-      </div>
-      {baseTriggers.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <strong>基础触发词 ({baseTriggers.length})</strong>
-          <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
-            {baseTriggers.map((t) => (
-              <Tag key={t.keyword} color={t.type === "pattern" ? "blue" : "green"}>
-                {t.keyword}
-              </Tag>
-            ))}
-          </div>
-        </div>
-      )}
-      {(overrides.added_keywords.length > 0 || overrides.removed_keywords.length > 0 || overrides.refined_keywords.length > 0) && (
-        <div>
-          <strong>用户覆盖</strong>
-          <div style={{ marginTop: 8 }}>
-            {overrides.added_keywords.length > 0 && (
-              <div>
-                <span style={{ color: "#52c41a" }}>添加: </span>
-                {overrides.added_keywords.map((kw) => (
-                  <Tag key={kw} color="green">{kw}</Tag>
-                ))}
-              </div>
-            )}
-            {overrides.removed_keywords.length > 0 && (
-              <div>
-                <span style={{ color: "#ff4d4f" }}>移除: </span>
-                {overrides.removed_keywords.map((kw) => (
-                  <Tag key={kw} color="red">{kw}</Tag>
-                ))}
-              </div>
-            )}
-            {overrides.refined_keywords.length > 0 && (
-              <div>
-                <span style={{ color: "#faad14" }}>优化: </span>
-                {overrides.refined_keywords.map((kw) => (
-                  <Tag key={kw} color="orange">{kw}</Tag>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function VersionHistoryTab({ skillName }: { skillName: string }) {
-  const [loading, setLoading] = useState(true);
-  const [versions, setVersions] = useState<Array<{
-    version: string; changelog: string; created_at: string; active: boolean; content_size: number;
-  }>>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await skillApi.getSkillVersions(skillName) as any;
-        if (!cancelled) setVersions(res.versions || []);
-      } catch { /* silent */ }
-      finally { if (!cancelled) setLoading(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [skillName]);
-
-  if (loading) return <div style={{ padding: 16, textAlign: "center" }}>加载中...</div>;
-  if (versions.length === 0) return <Empty description="暂无版本历史" />;
-
-  return (
-    <div style={{ fontSize: 13 }}>
-      {versions.map((v) => (
-        <div key={v.version} style={{ padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span>
-              <Tag color={v.active ? "green" : "default"}>
-                v{v.version} {v.active && "(当前)"}
-              </Tag>
-            </span>
-            <span style={{ color: "#999", fontSize: 12 }}>
-              {v.created_at ? new Date(v.created_at).toLocaleDateString() : ""}
-              {v.content_size > 0 && ` · ${Math.round(v.content_size / 1024)}KB`}
-            </span>
-          </div>
-          {v.changelog && <div style={{ marginTop: 4, color: "#666" }}>{v.changelog}</div>}
-        </div>
-      ))}
-    </div>
-  );
 }
 
 export function SkillDrawer({
@@ -539,22 +405,6 @@ export function SkillDrawer({
             <Form.Item name="source" label={t("skills.type")}>
               <Input disabled />
             </Form.Item>
-
-            <Tabs
-              size="small"
-              items={[
-                {
-                  key: "triggers",
-                  label: <><SearchOutlined /> 触发分析</>,
-                  children: <TriggerAnalysisTab skillName={editingSkill.name} />,
-                },
-                {
-                  key: "versions",
-                  label: <><HistoryOutlined /> 版本历史</>,
-                  children: <VersionHistoryTab skillName={editingSkill.name} />,
-                },
-              ]}
-            />
           </>
         )}
       </Form>
