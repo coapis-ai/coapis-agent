@@ -326,23 +326,41 @@ def _update_block_with_local_path(
     block_type: str,
     local_path: str,
 ) -> dict:
-    """Update block with downloaded local path."""
+    """Update block with downloaded local path.
+    
+    For all block types, source is set to a dict with type and url,
+    so the frontend can consistently extract the URL for display/download.
+    """
+    file_uri = Path(local_path).as_uri()
     if block_type == "file":
-        block["source"] = local_path
+        block["source"] = {
+            "type": "url",
+            "url": file_uri,
+        }
         if not block.get("filename"):
             block["filename"] = os.path.basename(local_path)
+        # 保留原始相对路径供前端下载链接使用（如 /media/xxx.xlsx）
+        # 如果 block 中已有 file_url（来自前端），保留它
+        if not block.get("file_url"):
+            # 从 local_path 推导相对路径：workspaces/{user}/files/media/xxx.xlsx → /media/xxx.xlsx
+            parts = Path(local_path).parts
+            if "files" in parts:
+                files_idx = parts.index("files")
+                relative = "/".join(parts[files_idx + 1:])
+                block["file_url"] = f"/{relative}"
+            else:
+                block["file_url"] = f"/{os.path.basename(local_path)}"
+    elif block_type == "audio":
+        block["source"] = {
+            "type": "url",
+            "url": file_uri,
+            "media_type": _media_type_from_path(local_path),
+        }
     else:
-        if block_type == "audio":
-            block["source"] = {
-                "type": "url",
-                "url": Path(local_path).as_uri(),
-                "media_type": _media_type_from_path(local_path),
-            }
-        else:
-            block["source"] = {
-                "type": "url",
-                "url": Path(local_path).as_uri(),
-            }
+        block["source"] = {
+            "type": "url",
+            "url": file_uri,
+        }
     return block
 
 
