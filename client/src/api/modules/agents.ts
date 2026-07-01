@@ -25,7 +25,7 @@ export const agentsApi = {
 
   // Update agent configuration
   updateAgent: (agentId: string, agent: AgentProfileConfig) =>
-    request<AgentProfileConfig>(`/agents/${agentId}`, {
+    request<AgentProfileConfig>(`/workspace/agents/${agentId}`, {
       method: "PUT",
       body: JSON.stringify(agent),
     }),

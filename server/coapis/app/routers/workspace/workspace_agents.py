@@ -191,7 +191,7 @@ async def create_my_agent(
     agent_id = payload.id or f"agent_{username}_{int(__import__('time').time())}"
     
     # 检查是否已存在
-    if manager.get_workspace(agent_id):
+    if manager.get_workspace(agent_id, username=username):
         raise HTTPException(status_code=409, detail=f"智能体 {agent_id} 已存在")
     
     # 构建配置
@@ -251,17 +251,16 @@ async def get_my_agent(
     if not manager:
         raise HTTPException(status_code=503, detail="Agent manager not initialized")
     
-    workspace = manager.get_workspace(agent_id)
+    # 传 username 以便找到用户级智能体（cache key = "{username}:{agent_id}"）
+    workspace = manager.get_workspace(agent_id, username=username)
     if not workspace:
         raise HTTPException(status_code=404, detail="智能体不存在")
     
     # 检查权限（只能访问自己的或全局的）
-    if workspace.username and workspace.username != username and workspace.is_global:
+    if workspace.is_global:
         scope = "global"
-    elif workspace.username == username or (not workspace.username and workspace.is_global):
-        scope = "global" if workspace.is_global else "user"
     else:
-        raise HTTPException(status_code=403, detail="无权访问此智能体")
+        scope = "user"
     
     return _agent_to_summary(agent_id, scope)
 
@@ -279,7 +278,7 @@ async def update_my_agent(
     if not manager:
         raise HTTPException(status_code=503, detail="Agent manager not initialized")
     
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=username)
     if not workspace:
         raise HTTPException(status_code=404, detail="智能体不存在")
     
@@ -287,22 +286,47 @@ async def update_my_agent(
     if not workspace.is_global and workspace.username != username:
         raise HTTPException(status_code=403, detail="无权修改此智能体")
     
-    # 加载当前配置并更新
-    config = _to_dict(load_agent_config(agent_id))
+    # 加载当前配置（AgentProfileConfig 对象）
+    from ....config.config import AgentProfileConfig
+    current_config = load_agent_config(agent_id)
     
+    # 构建更新数据
+    update_data = {}
     if payload.name is not None:
-        config["name"] = payload.name
+        update_data["name"] = payload.name
     if payload.description is not None:
-        config["description"] = payload.description
+        update_data["description"] = payload.description
     if payload.active_model is not None:
-        config["active_model"] = payload.active_model.model_dump()
-        config["provider"] = {
-            "id": payload.active_model.provider_id,
+        update_data["active_model"] = {
+            "provider_id": payload.active_model.provider_id,
             "model": payload.active_model.model,
-            "api_key": "none",
         }
+    if payload.enabled is not None:
+        update_data["enabled"] = payload.enabled
     
-    save_agent_config(agent_id, config)
+    # 合并更新：保留现有配置，覆盖更新字段
+    config_dict = _to_dict(current_config)
+    config_dict.update(update_data)
+    
+    # 转换为 AgentProfileConfig 对象
+    try:
+        agent_config = AgentProfileConfig(**config_dict)
+    except Exception as e:
+        logger.warning(f"Failed to create AgentProfileConfig from dict: {e}, using current config")
+        # 如果转换失败，使用当前配置并手动更新字段
+        agent_config = current_config
+        if payload.name is not None:
+            agent_config.name = payload.name
+        if payload.description is not None:
+            agent_config.description = payload.description
+        if payload.active_model is not None:
+            from ....config.config import ModelSlotConfig
+            agent_config.active_model = ModelSlotConfig(
+                provider_id=payload.active_model.provider_id,
+                model=payload.active_model.model,
+            )
+    
+    save_agent_config(agent_id, agent_config)
     
     # Record audit log
     from ....user_system.database import UserSystemDB
@@ -333,7 +357,7 @@ async def delete_my_agent(
     if not manager:
         raise HTTPException(status_code=503, detail="Agent manager not initialized")
     
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=username)
     if not workspace:
         raise HTTPException(status_code=404, detail="智能体不存在")
     
@@ -398,7 +422,7 @@ async def toggle_my_agent(
     if not manager:
         raise HTTPException(status_code=503, detail="Agent manager not initialized")
     
-    workspace = manager.get_workspace(agent_id)
+    workspace = manager.get_workspace(agent_id, username=username)
     if not workspace:
         raise HTTPException(status_code=404, detail="智能体不存在")
     

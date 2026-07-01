@@ -1,11 +1,11 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Card, Button, Form, Tabs } from "antd";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import { PlusOutlined, GlobalOutlined, FileTextOutlined, CloudServerOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useUser } from "@/contexts/UserContext";
 import { agentsApi } from "../../../api/modules/agents";
-import { invalidateSkillCache, skillApi } from "../../../api/modules/skill";
+import { invalidateSkillCache } from "../../../api/modules/skill";
 import type { AgentSummary } from "../../../api/types/agents";
 import { useAgentStore } from "../../../stores/agentStore";
 import { useAgents } from "./useAgents";
@@ -31,8 +31,6 @@ export default function AgentsPage() {
   const [editingAgent, setEditingAgent] = useState<AgentSummary | null>(null);
   const [reordering, setReordering] = useState(false);
   const [form] = Form.useForm();
-  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
-  const installedSkillsRef = useRef<string[]>([]);
   const { message } = useAppMessage();
 
   // Identity files drawer state
@@ -56,15 +54,11 @@ export default function AgentsPage() {
       active_model_provider: undefined,
       active_model_model: undefined,
     });
-    setSelectedSkills([]);
-    installedSkillsRef.current = [];
     setModalVisible(true);
   };
 
   const handleEdit = async (agent: AgentSummary) => {
     try {
-      setSelectedSkills([]);
-      installedSkillsRef.current = [];
       invalidateSkillCache({ agentId: agent.id });
       const config = await agentsApi.getAgent(agent.id);
       setEditingAgent(agent);
@@ -107,10 +101,6 @@ export default function AgentsPage() {
     }
   };
 
-  const handleInstalledSkillsLoaded = useCallback((skills: string[]) => {
-    installedSkillsRef.current = skills;
-  }, []);
-
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
@@ -131,31 +121,13 @@ export default function AgentsPage() {
       const payload = { ...rest, workspace_dir, active_model };
 
       if (editingAgent) {
-        const previousInstalledSkills = installedSkillsRef.current;
-        const newSkills = selectedSkills.filter(
-          (skill) => !previousInstalledSkills.includes(skill),
-        );
-
-        for (const skill of newSkills) {
-          await skillApi.downloadSkillPoolSkill({
-            skill_name: skill,
-            targets: [{ workspace_id: editingAgent.id }],
-          });
-        }
         await agentsApi.updateAgent(editingAgent.id, payload);
-        installedSkillsRef.current = [
-          ...previousInstalledSkills,
-          ...newSkills.filter(
-            (skill) => !previousInstalledSkills.includes(skill),
-          ),
-        ];
         invalidateSkillCache({ agentId: editingAgent.id });
         message.success(t("agent.updateSuccess"));
       } else {
         const result = await agentsApi.createAgent({
           ...payload,
           language: i18n.language,
-          skill_names: selectedSkills,
           is_global: false,
         });
         message.success(`${t("agent.createSuccess")} (ID: ${result.id})`);
@@ -223,9 +195,6 @@ export default function AgentsPage() {
             open={modalVisible}
             editingAgent={editingAgent}
             form={form}
-            selectedSkills={selectedSkills}
-            onSelectedSkillsChange={setSelectedSkills}
-            onInstalledSkillsLoaded={handleInstalledSkillsLoaded}
             onSave={handleSubmit}
             onCancel={() => setModalVisible(false)}
           />
