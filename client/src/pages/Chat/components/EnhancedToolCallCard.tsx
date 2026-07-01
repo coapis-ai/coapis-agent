@@ -17,6 +17,7 @@ import {
   LoadingOutlined,
   RightOutlined,
 } from '@ant-design/icons';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 const { Text } = Typography;
 
@@ -47,8 +48,10 @@ interface EnhancedToolCallCardProps {
 interface ToolCategory {
   icon: string;
   color: string;
+  darkColor: string;  // 深色模式下的强调色
   label: string;
   bgColor: string;
+  darkBgColor: string;  // 深色模式下的背景色
 }
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
@@ -56,182 +59,234 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   execute_shell_command: {
     icon: '🖥️',
     color: '#1890ff',
+    darkColor: '#4096ff',
     label: '终端',
     bgColor: '#e6f4ff',
+    darkBgColor: '#111d2c',
   },
 
   // 文件读写
   read_file: {
     icon: '📖',
     color: '#52c41a',
+    darkColor: '#73d13d',
     label: '读取',
     bgColor: '#f6ffed',
+    darkBgColor: '#162312',
   },
   write_file: {
     icon: '✏️',
     color: '#faad14',
+    darkColor: '#ffc53d',
     label: '写入',
     bgColor: '#fffbe6',
+    darkBgColor: '#2b2111',
   },
   edit_file: {
     icon: '🔧',
     color: '#faad14',
+    darkColor: '#ffc53d',
     label: '编辑',
     bgColor: '#fffbe6',
+    darkBgColor: '#2b2111',
   },
 
   // 搜索
   grep_search: {
     icon: '🔍',
     color: '#722ed1',
+    darkColor: '#b37feb',
     label: '搜索',
     bgColor: '#f9f0ff',
+    darkBgColor: '#1a1325',
   },
   glob_search: {
     icon: '📁',
     color: '#13c2c2',
+    darkColor: '#36cfc9',
     label: '查找',
     bgColor: '#e6fffb',
+    darkBgColor: '#112123',
   },
   web_search: {
     icon: '🔎',
     color: '#2f54eb',
+    darkColor: '#597ef7',
     label: '网页搜索',
     bgColor: '#f0f5ff',
+    darkBgColor: '#131629',
   },
 
   // 浏览器
   browser_use: {
     icon: '🌐',
     color: '#eb2f96',
+    darkColor: '#f759ab',
     label: '浏览器',
     bgColor: '#fff0f6',
+    darkBgColor: '#2d1225',
   },
 
   // 记忆
   memory_search: {
     icon: '🧠',
     color: '#f5222d',
+    darkColor: '#ff4d4f',
     label: '记忆',
     bgColor: '#fff1f0',
+    darkBgColor: '#2a1215',
   },
 
   // 时间
   get_current_time: {
     icon: '🕐',
     color: '#595959',
+    darkColor: '#8c8c8c',
     label: '时间',
     bgColor: '#fafafa',
+    darkBgColor: '#1f1f1f',
   },
   set_user_timezone: {
     icon: '🕐',
     color: '#595959',
+    darkColor: '#8c8c8c',
     label: '时区',
     bgColor: '#fafafa',
+    darkBgColor: '#1f1f1f',
   },
 
   // 文件传输
   send_file_to_user: {
     icon: '📤',
     color: '#389e0d',
+    darkColor: '#52c41a',
     label: '发送',
     bgColor: '#f6ffed',
+    darkBgColor: '#162312',
   },
 
   // Agent 通信
   chat_with_agent: {
     icon: '🤖',
     color: '#1677ff',
+    darkColor: '#4096ff',
     label: 'Agent',
     bgColor: '#e6f4ff',
+    darkBgColor: '#111d2c',
   },
   submit_to_agent: {
     icon: '🤖',
     color: '#1677ff',
+    darkColor: '#4096ff',
     label: 'Agent',
     bgColor: '#e6f4ff',
+    darkBgColor: '#111d2c',
   },
   check_agent_task: {
     icon: '🤖',
     color: '#1677ff',
+    darkColor: '#4096ff',
     label: 'Agent',
     bgColor: '#e6f4ff',
+    darkBgColor: '#111d2c',
   },
   spawn_subagent: {
     icon: '🤖',
     color: '#1677ff',
+    darkColor: '#4096ff',
     label: '子Agent',
     bgColor: '#e6f4ff',
+    darkBgColor: '#111d2c',
   },
 
   // 计划
   create_plan: {
     icon: '📋',
     color: '#722ed1',
+    darkColor: '#b37feb',
     label: '计划',
     bgColor: '#f9f0ff',
+    darkBgColor: '#1a1325',
   },
   revise_current_plan: {
     icon: '📋',
     color: '#722ed1',
+    darkColor: '#b37feb',
     label: '计划',
     bgColor: '#f9f0ff',
+    darkBgColor: '#1a1325',
   },
   finish_plan: {
     icon: '📋',
     color: '#722ed1',
+    darkColor: '#b37feb',
     label: '计划',
     bgColor: '#f9f0ff',
+    darkBgColor: '#1a1325',
   },
   view_historical_plans: {
     icon: '📋',
     color: '#722ed1',
+    darkColor: '#b37feb',
     label: '计划',
     bgColor: '#f9f0ff',
+    darkBgColor: '#1a1325',
   },
 
   // Token
   get_token_usage: {
     icon: '📊',
     color: '#fa8c16',
+    darkColor: '#ffa940',
     label: '统计',
     bgColor: '#fff7e6',
+    darkBgColor: '#2b1d11',
   },
 
   // 视图
   view_image: {
     icon: '🖼️',
     color: '#13c2c2',
+    darkColor: '#36cfc9',
     label: '图片',
     bgColor: '#e6fffb',
+    darkBgColor: '#112123',
   },
   view_video: {
     icon: '🎬',
     color: '#13c2c2',
+    darkColor: '#36cfc9',
     label: '视频',
     bgColor: '#e6fffb',
+    darkBgColor: '#112123',
   },
   desktop_screenshot: {
     icon: '📸',
     color: '#13c2c2',
+    darkColor: '#36cfc9',
     label: '截图',
     bgColor: '#e6fffb',
+    darkBgColor: '#112123',
   },
 
   // 列表/视图
   list_agents: {
     icon: '👥',
     color: '#595959',
+    darkColor: '#8c8c8c',
     label: '列表',
     bgColor: '#fafafa',
+    darkBgColor: '#1f1f1f',
   },
 };
 
 const DEFAULT_CATEGORY: ToolCategory = {
   icon: '⚙️',
   color: '#595959',
+  darkColor: '#8c8c8c',
   label: '工具',
   bgColor: '#fafafa',
+  darkBgColor: '#1f1f1f',
 };
 
 // ---------------------------------------------------------------------------
@@ -414,6 +469,7 @@ function formatOutput(output: string | undefined): { text: string; isLong: boole
 // ---------------------------------------------------------------------------
 
 const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => {
+  const { isDark } = useTheme();
   const content = data.content;
   if (!content || content.length === 0) return null;
 
@@ -435,6 +491,20 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
 
   // 获取工具分类
   const category = TOOL_CATEGORIES[toolName] || DEFAULT_CATEGORY;
+
+  // 根据主题动态获取颜色
+  const themeColors = useMemo(() => ({
+    accentColor: isDark ? category.darkColor : category.color,
+    bgColor: isDark ? category.darkBgColor : category.bgColor,
+    cardBg: isDark ? '#1f1f1f' : '#fff',
+    borderColor: isDark ? '#303030' : '#e8e8e8',
+    textPrimary: isDark ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.88)',
+    textSecondary: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)',
+    textTertiary: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)',
+    codeBg: isDark ? '#141414' : '#f5f5f5',
+    outputBg: isDark ? '#141414' : '#f6ffed',
+    tagBg: isDark ? '#262626' : '#fafafa',
+  }), [isDark, category]);
 
   // 生成智能摘要
   const summary = useMemo(() => generateSummary(toolName, inputObj), [toolName, inputObj]);
@@ -467,11 +537,11 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
   return (
     <div
       style={{
-        border: `1px solid ${loading ? category.color : '#e8e8e8'}`,
-        borderLeft: `3px solid ${category.color}`,
+        border: `1px solid ${loading ? themeColors.accentColor : themeColors.borderColor}`,
+        borderLeft: `3px solid ${themeColors.accentColor}`,
         borderRadius: 6,
         marginBottom: 8,
-        background: loading ? category.bgColor : '#fff',
+        background: loading ? themeColors.bgColor : themeColors.cardBg,
         transition: 'all 0.3s ease',
         overflow: 'hidden',
       }}
@@ -526,7 +596,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                 <div style={{ fontSize: 12, padding: '0 0 8px' }}>
                   {/* 智能摘要 */}
                   {summary && (
-                    <div style={{ marginBottom: 8, color: '#666', fontSize: 12 }}>
+                    <div style={{ marginBottom: 8, color: themeColors.textSecondary, fontSize: 12 }}>
                       {summary}
                     </div>
                   )}
@@ -539,7 +609,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                       </Text>
                       <pre
                         style={{
-                          background: '#f5f5f5',
+                          background: themeColors.codeBg,
                           padding: 6,
                           borderRadius: 4,
                           fontSize: 11,
@@ -548,6 +618,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                           margin: '4px 0 0',
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-all',
+                          color: themeColors.textPrimary,
                         }}
                       >
                         {typeof argumentsStr === 'string'
@@ -569,14 +640,14 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                       <Text type="secondary" style={{ fontSize: 11 }}>
                         输出:
                         {isOutputLong && (
-                          <Tag style={{ marginLeft: 4, fontSize: 10 }}>
+                          <Tag style={{ marginLeft: 4, fontSize: 10, background: themeColors.tagBg, color: themeColors.textSecondary }}>
                             已截断
                           </Tag>
                         )}
                       </Text>
                       <pre
                         style={{
-                          background: loading ? '#fffbe6' : '#f6ffed',
+                          background: loading ? themeColors.bgColor : themeColors.outputBg,
                           padding: 6,
                           borderRadius: 4,
                           fontSize: 11,
@@ -586,6 +657,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-all',
                           borderLeft: `2px solid ${loading ? '#faad14' : '#52c41a'}`,
+                          color: themeColors.textPrimary,
                         }}
                       >
                         {formattedOutput}
