@@ -36,7 +36,8 @@ server {
     }
 
     # /api/ — 所有后端 API（REST + WebSocket）
-    location /api/ {
+    # ^~ 确保优先于静态资源正则（如 .jpg/.png），避免文件预览URL被拦截
+    location ^~ /api/ {
         # ── CORS：OPTIONS 预检由 nginx 直接响应，不转发到后端 ──
         if ($request_method = 'OPTIONS') {
             add_header 'Access-Control-Allow-Origin' '$http_origin' always;

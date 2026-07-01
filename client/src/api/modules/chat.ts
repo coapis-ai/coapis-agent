@@ -48,6 +48,9 @@ export const chatApi = {
     // avoid double-prefixing when the URL is resolved a second time (e.g.
     // when reloading chat history). See GitHub issue #3600.
     let cleaned = filename.replace(/^\/+/, "");
+    // Strip query parameters (e.g. ?token=xxx from previous replaceMediaURL call)
+    const qIdx = cleaned.indexOf("?");
+    if (qIdx !== -1) cleaned = cleaned.slice(0, qIdx);
     const previewPrefix = FILES_PREVIEW.replace(/^\/+/, "");
     if (cleaned.startsWith(`api/${previewPrefix}/`)) {
       cleaned = cleaned.slice(`api/${previewPrefix}/`.length);

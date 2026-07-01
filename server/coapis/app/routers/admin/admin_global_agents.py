@@ -520,6 +520,9 @@ async def toggle_global_agent(
 
     不需要传 body，默认切换当前状态；也可传 {"enabled": true/false} 指定目标状态。
     """
+    if agent_id in _PROTECTED_AGENTS:
+        raise HTTPException(status_code=400, detail=f"受保护的全局智能体不可禁用: {agent_id}")
+
     agent_dir = AGENTS_DIR / agent_id
     if not agent_dir.exists():
         raise HTTPException(status_code=404, detail=f"全局智能体不存在: {agent_id}")

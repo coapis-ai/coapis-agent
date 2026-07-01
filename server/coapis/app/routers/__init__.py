@@ -53,6 +53,7 @@ from .agent_stats import router as agent_stats_router
 from .auth import router as auth_router
 from .messages import router as messages_router
 from .files import router as files_router
+from .file_preview import router as file_preview_router
 from .settings import router as settings_router
 from .plugins import router as plugins_router
 from .backup import router as backup_router
@@ -172,6 +173,7 @@ router.include_router(cleanup_router)
 router.include_router(access_control_router)
 router.include_router(license_router)
 router.include_router(files_router)
+router.include_router(file_preview_router)  # /files/preview/{path} — chat media serving
 
 # ═══════════════════════════════════════════════════════════
 # Enterprise stubs (always loaded for upgrade prompts)

@@ -116,7 +116,8 @@ def _do_migrate_legacy_workspace() -> bool:
     if "global_default" in config.agents.profiles:
         agent_ref = config.agents.profiles["global_default"]
         if isinstance(agent_ref, AgentProfileRef):
-            workspace_dir = Path(agent_ref.workspace_dir).expanduser()
+            from ..config.config import derive_workspace_dir
+            workspace_dir = derive_workspace_dir("global_default", agent_ref.username)
             agent_config_path = workspace_dir / "agent.json"
             if agent_config_path.exists():
                 logger.debug(
@@ -462,9 +463,11 @@ def _do_migrate_legacy_skills() -> bool:
     # --- Phase 1: Discover workspaces ---
     workspace_dirs: list[Path] = []
     seen_workspaces: set[str] = set()
+    from ..config.config import derive_workspace_dir
     for profile in config.agents.profiles.values():
+        ws_dir = derive_workspace_dir(profile.id, profile.username)
         _register_workspace(
-            Path(profile.workspace_dir).expanduser(),
+            ws_dir,
             workspace_dirs,
             seen_workspaces,
         )
@@ -686,7 +689,8 @@ def _do_ensure_default_agent() -> None:
     # Get or determine default workspace path
     if "global_default" in config.agents.profiles:
         agent_ref = config.agents.profiles["global_default"]
-        default_workspace = Path(agent_ref.workspace_dir).expanduser()
+        from ..config.config import derive_workspace_dir
+        default_workspace = derive_workspace_dir("global_default", agent_ref.username)
         agent_existed = True
     else:
         # Global agent -> use AGENTS_DIR, not WORKSPACES_DIR
@@ -854,7 +858,8 @@ def _do_ensure_qa_agent() -> None:
 
     if qa_id in config.agents.profiles:
         agent_ref = config.agents.profiles[qa_id]
-        qa_workspace = Path(agent_ref.workspace_dir).expanduser()
+        from ..config.config import derive_workspace_dir
+        qa_workspace = derive_workspace_dir(qa_id, agent_ref.username)
         agent_existed = True
     else:
         # Global agent -> use AGENTS_DIR, not WORKSPACES_DIR

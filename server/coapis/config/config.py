@@ -933,8 +933,8 @@ class AgentProfileRef(BaseModel):
 
     id: str = Field(..., description="Unique agent ID")
     workspace_dir: str = Field(
-        ...,
-        description="Path to agent's workspace directory",
+        default="",
+        description="Deprecated: workspace_dir is now derived at runtime from WORKING_DIR. Kept for backward compat.",
     )
     enabled: bool = Field(
         default=True,
@@ -1619,6 +1619,31 @@ ChannelConfigUnion = Union[
 # Agent configuration utility functions
 
 
+def derive_workspace_dir(agent_id: str, username: str = None) -> Path:
+    """Derive workspace directory at runtime from WORKING_DIR.
+
+    Replaces the old pattern of reading hardcoded absolute paths from
+    config.json agents.profiles[*].workspace_dir.
+
+    Rules:
+      - User default agent (agent_id starts with "user:"):
+          WORKSPACES_DIR / {username}
+      - User sub-agent (username provided, no "user:" prefix):
+          WORKSPACES_DIR / {username} / "agents" / {agent_id}
+      - Global agent (no username):
+          AGENTS_DIR / {agent_id}
+    """
+    from ..constant import AGENTS_DIR, WORKSPACES_DIR
+
+    if agent_id.startswith("user:"):
+        uname = agent_id.split(":", 1)[1]
+        return WORKSPACES_DIR / uname
+    elif username:
+        return WORKSPACES_DIR / username / "agents" / agent_id
+    else:
+        return AGENTS_DIR / agent_id
+
+
 def build_fallback_agent_profile_config(
     agent_id: str,
     config: "Config",
@@ -1633,7 +1658,7 @@ def build_fallback_agent_profile_config(
         raise ValueError(f"Agent '{agent_id}' not found in config")
 
     agent_ref = config.agents.profiles[agent_id]
-    workspace_dir = Path(agent_ref.workspace_dir).expanduser()
+    workspace_dir = derive_workspace_dir(agent_id, agent_ref.username)
     return AgentProfileConfig(
         id=agent_id,
         name=agent_id.title(),
@@ -1718,7 +1743,7 @@ def load_agent_config(agent_id: str, workspace_dir: Path = None) -> AgentProfile
             )
 
     agent_ref = config.agents.profiles[agent_id]
-    resolved_workspace_dir = Path(agent_ref.workspace_dir).expanduser()
+    resolved_workspace_dir = derive_workspace_dir(agent_id, agent_ref.username)
     agent_config_path = resolved_workspace_dir / "agent.json"
 
     if not agent_config_path.exists():
@@ -1826,7 +1851,7 @@ def save_agent_config(
             )
 
     agent_ref = config.agents.profiles[agent_id]
-    resolved_workspace_dir = Path(agent_ref.workspace_dir).expanduser()
+    resolved_workspace_dir = derive_workspace_dir(agent_id, agent_ref.username)
     resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
 
     agent_config_path = resolved_workspace_dir / "agent.json"
@@ -1903,7 +1928,7 @@ def migrate_legacy_config_to_multi_agent() -> bool:
         # If it's already a AgentProfileRef, migration done
         if isinstance(agent_ref, AgentProfileRef):
             # Check if default agent config exists
-            workspace_dir = Path(agent_ref.workspace_dir).expanduser()
+            workspace_dir = derive_workspace_dir("global_default", agent_ref.username)
             agent_config_path = workspace_dir / "agent.json"
             if agent_config_path.exists():
                 return False  # Already migrated

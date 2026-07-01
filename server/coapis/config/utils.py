@@ -652,15 +652,19 @@ def save_config(config: Config, config_path: Optional[Path] = None) -> None:
         _config_mtime = None
 
 
-def register_dynamic_agent(agent_id: str, workspace_dir: str, username: str = None) -> bool:
+def register_dynamic_agent(agent_id: str, workspace_dir: str = "", username: str = None) -> bool:
     """Register a dynamically-created agent into config.agents.profiles.
 
     This allows dynamic agents to pass agentscope_runtime A2A validation
     and enables load_agent_config/save_agent_config to work with them.
 
+    ⚠️ workspace_dir is NOT persisted to config.json — it is derived at
+    runtime from WORKING_DIR.  The parameter is kept for backward compat
+    but ignored when writing profiles.
+
     Args:
         agent_id: The agent ID to register
-        workspace_dir: The workspace directory path for this agent
+        workspace_dir: (deprecated, unused) workspace path — now derived at runtime
         username: Owner username for user-level agents (enables isolation)
 
     Returns:
@@ -690,8 +694,9 @@ def register_dynamic_agent(agent_id: str, workspace_dir: str, username: str = No
             if username is not None and (existing.get("username") is None or existing.get("username") == ""):
                 existing["username"] = username
                 updated = True
-            if workspace_dir and not existing.get("workspace_dir"):
-                existing["workspace_dir"] = workspace_dir
+            # Remove stale workspace_dir from existing profiles (migration)
+            if "workspace_dir" in existing:
+                del existing["workspace_dir"]
                 updated = True
             if updated:
                 # Write back updated profile
@@ -706,9 +711,9 @@ def register_dynamic_agent(agent_id: str, workspace_dir: str, username: str = No
             return False
 
         # Register the agent (must include 'id' field for Pydantic validation)
+        # NOTE: workspace_dir is NOT stored — derived at runtime from WORKING_DIR
         profile = {
             "id": agent_id,
-            "workspace_dir": workspace_dir,
             "enabled": True,
         }
         if username is not None:

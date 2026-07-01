@@ -105,6 +105,27 @@ const extractTextFromContent = (content: unknown): string => {
     .join("\n");
 };
 
+/** Normalize absolute filesystem paths to relative paths for file preview.
+ *  e.g. "/apps/ai/coapis/workspaces/admin/files/media/xxx.ppm" → "/media/xxx.ppm"
+ *  If the path is already relative, return as-is. */
+function normalizeFileUrl(url: string | undefined): string {
+  if (!url) return "";
+  // Already a relative path (starts with /media/ or similar)
+  if (url.startsWith("/media/") || url.startsWith("media/")) return url;
+  // Absolute path containing /files/ — extract relative part after /files/
+  const filesIdx = url.indexOf("/files/");
+  if (filesIdx >= 0) {
+    return url.slice(filesIdx + "/files/".length);
+  }
+  // file:// URI — strip scheme
+  if (url.startsWith("file://")) {
+    const stripped = url.slice("file://".length);
+    const idx = stripped.indexOf("/files/");
+    if (idx >= 0) return stripped.slice(idx + "/files/".length);
+  }
+  return url;
+}
+
 function resolveContentItemUrl(c: ContentItem): ContentItem {
   if (c.type === "image" && c.image_url) {
     return { ...c, image_url: toDisplayUrl(c.image_url as string) };
@@ -116,9 +137,11 @@ function resolveContentItemUrl(c: ContentItem): ContentItem {
     return { ...c, video_url: toDisplayUrl(c.video_url as string) };
   }
   if (c.type === "file" && (c.file_url || c.file_id)) {
+    const raw = (c.file_url as string) || (c.file_id as string) || "";
+    const normalized = normalizeFileUrl(raw);
     return {
       ...c,
-      file_url: toDisplayUrl((c.file_url as string) || (c.file_id as string)),
+      file_url: toDisplayUrl(normalized.startsWith("/") ? normalized : `/${normalized}`),
       file_name: (c.filename as string) || (c.file_name as string) || "file",
     };
   }
@@ -811,7 +834,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       // If realId is already resolved, use it directly to fetch history.
       if (fromList?.realId) {
         try {
-          const chatHistory = await api.getChat(fromList.realId, { limit: 50 });
+          const chatHistory = await api.getChat(fromList.realId);
           const generating = isGenerating(chatHistory);
           const messages = convertMessages(chatHistory.messages || []);
           this.patchLastUserMessage(messages, generating, fromList.realId);
@@ -860,7 +883,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         | undefined;
       if (refreshed?.realId) {
         try {
-          const chatHistory = await api.getChat(refreshed.realId, { limit: 50 });
+          const chatHistory = await api.getChat(refreshed.realId);
           const generating = isGenerating(chatHistory);
           const messages = convertMessages(chatHistory.messages || []);
           this.patchLastUserMessage(messages, generating, refreshed.realId);
@@ -920,7 +943,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
 
 
     try {
-      const chatHistory = await api.getChat(effectiveId, { limit: 50 });
+      const chatHistory = await api.getChat(effectiveId);
       const generating = isGenerating(chatHistory);
       const messages = convertMessages(chatHistory.messages || []);
       this.patchLastUserMessage(messages, generating, effectiveId);

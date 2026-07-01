@@ -8,6 +8,7 @@ export interface AgentSummary {
   description: string;
   workspace_dir: string;
   enabled: boolean;
+  is_default?: boolean;
   username?: string;
   active_model?: ModelSlotConfig | null;
 }

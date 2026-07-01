@@ -168,10 +168,10 @@ export function AgentTable({
             size="middle"
             icon={<EditOutlined />}
             onClick={() => onEdit(record)}
-            disabled={record.id === "default"}
-            style={record.id === "default" ? disabledStyle : iconStyle}
+            disabled={!!record.is_default}
+            style={record.is_default ? disabledStyle : iconStyle}
             title={
-              record.id === "default"
+              record.is_default
                 ? t("agent.defaultNotEditable")
                 : undefined
             }
@@ -188,7 +188,7 @@ export function AgentTable({
                 : t("agent.enableConfirmDesc")
             }
             onConfirm={() => onToggle(record.id, record.enabled)}
-            disabled={record.id === "default"}
+            disabled={!!record.is_default}
             okText={t("common.confirm")}
             cancelText={t("common.cancel")}
           >
@@ -196,10 +196,10 @@ export function AgentTable({
               type="text"
               size="middle"
               icon={record.enabled ? <EyeOff size={14} /> : <Eye size={14} />}
-              disabled={record.id === "default"}
-              style={record.id === "default" ? disabledStyle : iconStyle}
+              disabled={!!record.is_default}
+              style={record.is_default ? disabledStyle : iconStyle}
               title={
-                record.id === "default"
+                record.is_default
                   ? t("agent.defaultNotDisablable")
                   : undefined
               }
@@ -209,7 +209,7 @@ export function AgentTable({
             title={t("agent.deleteConfirm")}
             description={t("agent.deleteConfirmDesc")}
             onConfirm={() => onDelete(record.id)}
-            disabled={record.id === "default" || !canDelete}
+            disabled={!!record.is_default || !canDelete}
             okText={t("common.confirm")}
             cancelText={t("common.cancel")}
           >
@@ -218,10 +218,10 @@ export function AgentTable({
               size="middle"
               danger
               icon={<DeleteOutlined />}
-              disabled={record.id === "default" || !canDelete}
-              style={record.id === "default" ? disabledStyle : undefined}
+              disabled={!!record.is_default || !canDelete}
+              style={record.is_default ? disabledStyle : undefined}
               title={
-                record.id === "default"
+                record.is_default
                   ? t("agent.defaultNotDeletable")
                   : undefined
               }

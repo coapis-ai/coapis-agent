@@ -258,6 +258,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self.formatter = formatter
         self.max_iters = running_config.max_iters
 
+        # Configure agentscope built-in memory compression
+        self.compression_config = self._build_compression_config(
+            running_config, model
+        )
+
         # Register memory tools provided by the memory manager
         if self.memory_manager is not None:
             memory_tools = self.memory_manager.list_memory_tools()
@@ -288,6 +293,70 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # Register hooks
         self._register_hooks()
+
+    def _build_compression_config(
+        self, running_config, model
+    ) -> "CompressionConfig | None":
+        """Build agentscope CompressionConfig from agent's running config.
+
+        Uses the light_context_config.context_compact_config settings to
+        configure agentscope's built-in memory compression mechanism.
+
+        Args:
+            running_config: The agent's running configuration.
+            model: The LLM model instance for compression.
+
+        Returns:
+            CompressionConfig if compression is enabled, None otherwise.
+        """
+        try:
+            from agentscope.agent._react_agent import (
+                _ReActAgentWithToolkit as ReActAgentWithToolkit,
+            )
+
+            CompressionConfig = ReActAgentWithToolkit.CompressionConfig
+
+            lcc = running_config.light_context_config
+            ccc = lcc.context_compact_config
+
+            if not ccc.enabled:
+                logger.debug("Context compaction disabled in config")
+                return None
+
+            # Calculate threshold in tokens
+            trigger_threshold = int(
+                running_config.max_input_length * ccc.compact_threshold_ratio
+            )
+
+            # Use CharTokenCounter for lightweight estimation
+            from agentscope.token import CharTokenCounter
+
+            token_counter = CharTokenCounter()
+
+            # CharTokenCounter counts characters, so multiply threshold
+            # by avg chars per token (~4) to align with token-based config
+            # Use the configured divisor for accurate conversion
+            divisor = lcc.token_count_estimate_divisor
+            char_threshold = trigger_threshold * divisor
+
+            config = CompressionConfig(
+                enable=True,
+                agent_token_counter=token_counter,
+                trigger_threshold=char_threshold,
+                keep_recent=3,
+            )
+            logger.info(
+                f"Memory compression enabled: trigger_threshold="
+                f"{trigger_threshold} tokens (~{char_threshold} chars), "
+                f"keep_recent=3"
+            )
+            return config
+        except Exception as e:
+            logger.warning(
+                f"Failed to build compression config: {e}. "
+                "Memory compression disabled."
+            )
+            return None
 
     def _create_toolkit(
         self,

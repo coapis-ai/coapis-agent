@@ -450,24 +450,22 @@ class MultiAgentManager:
 
         # Load agents from config profiles only (not other agents.* keys)
         for agent_id, agent_ref in profiles.items():
-            # Convert AgentProfileRef to dict for compatibility
+            if not agent_ref.enabled:
+                continue
+            # Priority: explicit username > agent_id prefix > None (global)
+            username = agent_ref.username
+            if not username and agent_id.startswith("user:"):
+                username = agent_id.split(":", 1)[1]
+            is_global = (username is None)
+            # Derive workspace_dir at runtime (no longer read from config)
+            from ..config.config import derive_workspace_dir
+            workspace_dir = str(derive_workspace_dir(agent_id, username))
             agent_config = {
                 "id": agent_ref.id,
-                "workspace_dir": agent_ref.workspace_dir,
+                "workspace_dir": workspace_dir,
                 "enabled": agent_ref.enabled,
-                "username": agent_ref.username,
+                "username": username,
             }
-            if not agent_config.get("enabled", True):
-                continue
-            workspace_dir = agent_config.get("workspace_dir")
-            # Priority: explicit username > agent_id prefix > path inference > None (global)
-            username = agent_config.get("username")
-            if not username and agent_id.startswith("user:"):
-                # Infer username from agent_id (e.g. "user:admin" → "admin")
-                username = agent_id.split(":", 1)[1]
-            if not username:
-                username = self._infer_username_from_workspace_dir(workspace_dir)
-            is_global = (username is None)
             await self.create_agent(
                 agent_id, agent_config,
                 username=username,
@@ -604,7 +602,9 @@ class MultiAgentManager:
         # We are the starter — create outside the lock for parallelism
         t0 = time.perf_counter()
         logger.debug(f"Creating new workspace: {cache_key}")
-        workspace_dir = Path(agent_ref.workspace_dir) if agent_ref.workspace_dir else None
+        # Derive workspace_dir at runtime instead of reading from config
+        from ..config.config import derive_workspace_dir
+        workspace_dir = derive_workspace_dir(agent_id, username)
 
         # Determine workspace scope
         # If no username, create global agent; otherwise create user-specific agent

@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { adminApi } from '@/api/modules/admin';
 import GlobalAgentDetail from './GlobalAgentDetail';
 
-const PROTECTED_AGENTS = ['default', 'CoApis_QA_Agent_0.2'];
+const PROTECTED_AGENTS = ['global_default', 'global_qa_agent'];
 
 const ROLE_OPTIONS = [
   { value: 'template', label: 'Template（模板继承）' },
@@ -214,7 +214,7 @@ export default function GlobalAgentsTab() {
           checkedChildren={<PlayCircleOutlined />}
           unCheckedChildren={<StopOutlined />}
           onChange={() => handleToggle(record)}
-          disabled={PROTECTED_AGENTS.includes(record.id) && record.id === 'default'}
+          disabled={PROTECTED_AGENTS.includes(record.id)}
         />
       ),
     },

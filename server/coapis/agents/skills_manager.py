@@ -1636,7 +1636,7 @@ def list_workspaces() -> list[dict[str, str]]:
     workspaces: list[dict[str, str]] = []
     try:
         from ..config.utils import load_config
-        from ..config.config import load_agent_config
+        from ..config.config import load_agent_config, derive_workspace_dir
 
         config = load_config()
         # Only return agents that are still in the configuration
@@ -1652,7 +1652,7 @@ def list_workspaces() -> list[dict[str, str]]:
                     "agent_id": agent_id,
                     "agent_name": agent_name,
                     "workspace_dir": str(
-                        Path(profile.workspace_dir).expanduser(),
+                        derive_workspace_dir(agent_id, profile.username),
                     ),
                     "username": str(profile.username) if profile.username else "",
                 },

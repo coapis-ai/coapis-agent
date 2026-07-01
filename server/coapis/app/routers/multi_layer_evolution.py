@@ -307,10 +307,10 @@ async def get_user_agents(
     profiles = _get_config_profiles(request)
     for agent_id, profile in profiles.items():
         if getattr(profile, "username", None) == username:
-            # Read agent name from agent.json (AgentProfileRef has no 'name' field)
             agent_name = agent_id
             try:
-                agent_json_path = (WORKING_DIR / profile.workspace_dir / "agent.json")
+                from ...config.config import derive_workspace_dir
+                agent_json_path = derive_workspace_dir(agent_id, profile.username) / "agent.json"
                 if agent_json_path.exists():
                     import json as _json
                     agent_data = _json.loads(agent_json_path.read_text())

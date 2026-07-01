@@ -111,10 +111,14 @@ def install_auth_middleware(app):
             return await call_next(request)
 
         # Full authentication required
+        # Support both Authorization header and ?token= query parameter
+        # (query param is used by file preview URLs and WebSocket connections)
         auth_header = request.headers.get("authorization", "")
         token = None
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
+        if not token:
+            token = request.query_params.get("token")
 
         if not token:
             return JSONResponse(

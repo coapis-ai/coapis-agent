@@ -217,7 +217,11 @@ def _register_agent_in_config(
     agent_id: str,
     workspace_dir: Path,
 ) -> None:
-    """Register user's agent in config.json agents.profiles."""
+    """Register user's agent in config.json agents.profiles.
+
+    Note: workspace_dir is NOT persisted — it is derived at runtime
+    from WORKING_DIR.  The parameter is kept for signature compat.
+    """
     config = load_config()
 
     # Check if already registered
@@ -226,9 +230,9 @@ def _register_agent_in_config(
         return
 
     # Add agent profile (include username for user isolation)
+    # NOTE: workspace_dir is NOT stored — derived at runtime
     config.agents.profiles[agent_id] = AgentProfileRef(
         id=agent_id,
-        workspace_dir=str(workspace_dir),
         username=username,
     )
 

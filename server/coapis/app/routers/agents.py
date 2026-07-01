@@ -71,6 +71,7 @@ class AgentSummary(BaseModel):
     description: str = ""
     workspace_dir: str = ""
     enabled: bool = True
+    is_default: bool = False
     active_model: Optional[ModelSlotConfig] = None
 
 
@@ -231,6 +232,15 @@ def _agent_to_summary(agent_id: str, workspace: Any, request: Request) -> Dict[s
     if not ws_username and agent_id.startswith("user:"):
         ws_username = agent_id.split(":", 1)[1]
 
+    # Determine if this is a default agent
+    # - Global default: agent_id == "global_default"
+    # - User default: agent_id == "user:{username}"
+    is_default = False
+    if agent_id == "global_default":
+        is_default = True
+    elif ws_username and agent_id == f"user:{ws_username}":
+        is_default = True
+
     return {
         "id": agent_id,
         "name": name,
@@ -238,6 +248,7 @@ def _agent_to_summary(agent_id: str, workspace: Any, request: Request) -> Dict[s
         "workspace_dir": str(workspace.workspace_dir) if workspace else "",
         "username": ws_username,
         "enabled": True,
+        "is_default": is_default,
         "active_model": active_model.model_dump() if active_model else None,
     }
 
@@ -343,9 +354,63 @@ async def list_agents(request: Request) -> Dict[str, Any]:
             if cache_key.startswith(f"{username}:"):
                 agent_id = cache_key.split(":", 1)[1]
                 candidate_ids.add(agent_id)
+        # Fallback: scan user's agents directory on disk for agents not yet in cache
+        try:
+            from ...app.user_store import get_user_agents_dir, get_user_workspace_dir
+            user_agents_dir = get_user_agents_dir(username)
+            user_ws_dir = get_user_workspace_dir(username)
+            # Check top-level agent.json (user's default agent)
+            if (user_ws_dir / "agent.json").exists():
+                try:
+                    with open(user_ws_dir / "agent.json") as f:
+                        meta = json.load(f)
+                    aid = meta.get("id", "")
+                    if aid:
+                        candidate_ids.add(aid)
+                except Exception:
+                    pass
+            # Check agents subdirectories
+            if user_agents_dir.exists():
+                for item in user_agents_dir.iterdir():
+                    if item.is_dir() and (item / "agent.json").exists():
+                        candidate_ids.add(item.name)
+        except Exception:
+            pass
         for agent_id in candidate_ids:
             cache_key = f"{username}:{agent_id}"
             ws = manager._workspaces.get(cache_key)
+            # Lazy-load: if not in cache, try get_workspace to trigger loading
+            if ws is None:
+                try:
+                    ws = manager.get_workspace(agent_id, username)
+                except Exception:
+                    pass
+            # Final fallback: create minimal workspace from disk if still not in cache
+            if ws is None:
+                try:
+                    from ...app.user_store import get_user_agents_dir, get_user_workspace_dir
+                    user_ws_dir = get_user_workspace_dir(username)
+                    # Check if agent.json exists in user workspace dir (default agent)
+                    agent_json = user_ws_dir / "agent.json"
+                    if agent_json.exists():
+                        meta = json.loads(agent_json.read_text(encoding="utf-8"))
+                        if meta.get("id") == agent_id:
+                            class _DiskWs:
+                                workspace_dir = str(user_ws_dir)
+                                username = username
+                                is_global = False
+                            ws = _DiskWs()
+                    # Check agents subdirectory
+                    if ws is None:
+                        agent_subdir = get_user_agents_dir(username) / agent_id
+                        if (agent_subdir / "agent.json").exists():
+                            class _DiskWs2:
+                                workspace_dir = str(agent_subdir)
+                                username = username
+                                is_global = False
+                            ws = _DiskWs2()
+                except Exception:
+                    pass
             if ws is None:
                 continue
             if agent_id in seen_ids:
@@ -592,11 +657,14 @@ async def delete_agent(
     username = getattr(request.state, "username", None)
     user_role = getattr(request.state, "role", "user")
     
-    # ┌──────────────────────────────────────────────────────────────┐
-    # │ Prevent deletion of global_default (it's the default agent) │
-    # └──────────────────────────────────────────────────────────────┘
+    # ┌──────────────────────────────────────────────────────────────────┐
+    # │ Prevent deletion of default agents (global or user-level)       │
+    # └──────────────────────────────────────────────────────────────────┘
     if agent_id == "global_default":
         raise HTTPException(status_code=403, detail="Cannot delete the default agent (global_default)")
+    # Also protect user default agents: "user:{username}" format
+    if agent_id.startswith("user:"):
+        raise HTTPException(status_code=403, detail=f"Cannot delete the user's default agent ({agent_id})")
     
     try:
         # Admin can delete any agent
@@ -639,6 +707,14 @@ async def toggle_agent_enabled(
     manager = get_manager(request)
     if not manager:
         raise HTTPException(status_code=503, detail="Agent manager not initialized")
+
+    # ┌──────────────────────────────────────────────────────────────────┐
+    # │ Prevent toggling default agents (global or user-level)          │
+    # └──────────────────────────────────────────────────────────────────┘
+    if agent_id == "global_default":
+        raise HTTPException(status_code=403, detail="Cannot disable the default agent (global_default)")
+    if agent_id.startswith("user:"):
+        raise HTTPException(status_code=403, detail=f"Cannot disable the user's default agent ({agent_id})")
 
     username = getattr(request.state, "username", None)
     user_role = getattr(request.state, "role", "user")

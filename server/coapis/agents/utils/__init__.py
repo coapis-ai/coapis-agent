@@ -37,7 +37,7 @@ from .audio_transcription import (
 )
 
 # Estimated token counter
-from .estimate_token_counter import EstimatedTokenCounter
+from .estimate_token_counter import EstimatedTokenCounter, TokenCounterAdapter
 
 # File handling
 from .file_handling import (
@@ -88,6 +88,7 @@ __all__ = [
     "transcribe_audio",
     # Estimated token counter
     "EstimatedTokenCounter",
+    "TokenCounterAdapter",
     # File handling
     "download_file_from_base64",
     "download_file_from_url",

@@ -16,6 +16,8 @@
 
 """Estimated token counter implementation."""
 
+from typing import Any
+
 from agentscope.token import TokenCounterBase
 
 
@@ -52,3 +54,45 @@ class EstimatedTokenCounter(TokenCounterBase):
         if not text:
             return 0
         return int(len(text.encode("utf-8")) / self.estimate_divisor + 0.5)
+
+
+class TokenCounterAdapter(TokenCounterBase):
+    """Adapter to make EstimatedTokenCounter compatible with agentscope's
+    TokenCounterBase interface.
+
+    agentscope's TokenCounterBase.count() expects messages: list[dict],
+    but CoApis's EstimatedTokenCounter.count() expects text: str.
+    This adapter bridges the gap by converting messages to string.
+    """
+
+    def __init__(self, counter: EstimatedTokenCounter):
+        """Initialize with an EstimatedTokenCounter instance.
+
+        Args:
+            counter: The CoApis EstimatedTokenCounter to wrap.
+        """
+        self._counter = counter
+
+    async def count(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        **kwargs: Any,
+    ) -> int:
+        """Count tokens by converting messages to string.
+
+        Args:
+            messages: List of message dicts (agentscope format).
+            tools: Optional list of tool dicts.
+
+        Returns:
+            Estimated token count.
+        """
+        # Convert messages to string representation
+        parts = []
+        for msg in messages:
+            parts.append(str(msg))
+        if tools:
+            parts.append(str(tools))
+        text = "\n".join(parts)
+        return await self._counter.count(text=text)
