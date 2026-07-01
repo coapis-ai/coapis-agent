@@ -47,11 +47,8 @@ psutil>=6.0.0                   # P1: 系统监控，QwenPaw 有
 frontmatter>=2.0.0              # P1: YAML 前处理，QwenPaw 有
 
 # ── 协议/通信（P0 补充） ──
-grpcio>=1.60.0
-grpcio-tools>=1.60.0
-protobuf>=4.25.0
-paho-mqtt>=2.0.0
-agent-client-protocol>=0.9.0
+paho-mqtt>=2.0.0                # MQTT 客户端
+agent-client-protocol>=0.9.0    # ACP 协议
 mcp>=1.0.0                      # P0: MCP 协议，源码中使用
 
 # ── 中文处理 ──

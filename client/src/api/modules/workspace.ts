@@ -141,12 +141,16 @@ export const workspaceApi = {
     ),
 
   // System prompt files management
-  getSystemPromptFiles: () =>
-    request<string[]>("/workspace/system-prompt-files"),
+  getSystemPromptFiles: (agentId?: string) => {
+    const params = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+    return request<string[]>(`/workspace/system-prompt-files${params}`);
+  },
 
-  setSystemPromptFiles: (files: string[]) =>
-    request<string[]>("/workspace/system-prompt-files", {
+  setSystemPromptFiles: (files: string[], agentId?: string) => {
+    const params = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+    return request<string[]>(`/workspace/system-prompt-files${params}`, {
       method: "PUT",
       body: JSON.stringify(files),
-    }),
+    });
+  },
 };

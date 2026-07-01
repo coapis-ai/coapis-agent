@@ -245,9 +245,89 @@ async def list_memory_files(request: Request) -> List[Dict[str, Any]]:
 
 @router.get("/workspace/system-prompt-files")
 @require_permission("myspace:read")
-async def list_system_prompt_files(request: Request) -> List[str]:
-    """List system prompt files."""
-    return []
+async def list_system_prompt_files(
+    request: Request,
+    agent_id: Optional[str] = Query(None, description="Agent ID to query (defaults to current user's agent)"),
+) -> List[str]:
+    """List enabled system prompt files for an agent."""
+    from ...config.config import load_agent_config
+
+    # Resolve agent_id: explicit param > selected agent > user default
+    resolved_agent_id = agent_id or _get_selected_agent_id(request)
+    if not resolved_agent_id:
+        # No agent context, return default list
+        return ["AGENTS.md", "SOUL.md", "PROFILE.md"]
+
+    try:
+        config = load_agent_config(resolved_agent_id)
+        return config.system_prompt_files or ["AGENTS.md", "SOUL.md", "PROFILE.md"]
+    except Exception as e:
+        logger.warning(f"Failed to load system_prompt_files for {resolved_agent_id}: {e}")
+        return ["AGENTS.md", "SOUL.md", "PROFILE.md"]
+
+
+@router.put("/workspace/system-prompt-files")
+@require_permission("myspace:write")
+async def set_system_prompt_files(
+    request: Request,
+    files: List[str] = Body(...),
+    agent_id: Optional[str] = Query(None, description="Agent ID to update"),
+) -> List[str]:
+    """Update enabled system prompt files for an agent."""
+    import json as _json
+    from ...config.config import load_agent_config, derive_workspace_dir
+    from ...config.utils import load_config
+
+    resolved_agent_id = agent_id or _get_selected_agent_id(request)
+    if not resolved_agent_id:
+        raise HTTPException(status_code=400, detail="No agent_id specified")
+
+    # Deduplicate and validate
+    clean_files = list(dict.fromkeys(f for f in files if isinstance(f, str) and f.strip()))
+
+    # Load current config, update system_prompt_files, save
+    try:
+        agent_config = load_agent_config(resolved_agent_id)
+        agent_config.system_prompt_files = clean_files
+    except Exception as e:
+        logger.error(f"Failed to load agent config for {resolved_agent_id}: {e}")
+        raise HTTPException(status_code=404, detail=f"Agent '{resolved_agent_id}' not found")
+
+    # Write directly to agent.json to preserve all fields
+    try:
+        config = load_config()
+        agent_ref = config.agents.profiles.get(resolved_agent_id)
+        workspace_dir = derive_workspace_dir(resolved_agent_id, agent_ref.username if agent_ref else None)
+        agent_json_path = workspace_dir / "agent.json"
+
+        if agent_json_path.exists():
+            data = _json.loads(agent_json_path.read_text(encoding="utf-8"))
+        else:
+            data = {}
+
+        data["system_prompt_files"] = clean_files
+        agent_json_path.write_text(_json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        logger.info(f"Updated system_prompt_files for {resolved_agent_id}: {clean_files}")
+    except Exception as e:
+        logger.error(f"Failed to save system_prompt_files for {resolved_agent_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
+
+    return clean_files
+
+
+def _get_selected_agent_id(request: Request) -> Optional[str]:
+    """Extract selected agent ID from request context."""
+    # Try from query param or header
+    agent_id = request.headers.get("X-Agent-Id")
+    if agent_id:
+        return agent_id
+    # Try from multi_agent_manager state
+    manager = getattr(request.app.state, 'multi_agent_manager', None)
+    if manager:
+        username = getattr(request.state, 'username', None)
+        if username:
+            return f"user:{username}"
+    return None
 
 
 # ── Running Config (user+) ──────────────────────────────────────────────

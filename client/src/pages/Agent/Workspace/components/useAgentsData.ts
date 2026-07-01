@@ -89,7 +89,7 @@ export const useAgentsData = () => {
 
   const fetchEnabledFiles = async () => {
     try {
-      const result = await workspaceApi.getSystemPromptFiles();
+      const result = await workspaceApi.getSystemPromptFiles(selectedAgent || undefined);
       const enabled = Array.isArray(result) ? result : [];
       setEnabledFiles(enabled);
       return enabled;
@@ -247,7 +247,7 @@ export const useAgentsData = () => {
       : [...enabledFiles, filename];
 
     try {
-      await workspaceApi.setSystemPromptFiles(newEnabledFiles);
+      await workspaceApi.setSystemPromptFiles(newEnabledFiles, selectedAgent || undefined);
       setEnabledFiles(newEnabledFiles);
       message.success(
         t("workspace.configUpdated") || "System prompt configuration updated",
@@ -263,7 +263,7 @@ export const useAgentsData = () => {
 
   const handleReorderFiles = async (newOrder: string[]) => {
     try {
-      await workspaceApi.setSystemPromptFiles(newOrder);
+      await workspaceApi.setSystemPromptFiles(newOrder, selectedAgent || undefined);
       setEnabledFiles(newOrder);
     } catch (error) {
       console.error("Failed to reorder files", error);

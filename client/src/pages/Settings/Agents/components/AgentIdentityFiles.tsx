@@ -109,16 +109,17 @@ export default function AgentIdentityFiles({
 
   // Load enabled files list
   const loadEnabledFiles = useCallback(async () => {
+    if (!agentId) return;
     setEnabledLoading(true);
     try {
-      const list = await workspaceApi.getSystemPromptFiles();
+      const list = await workspaceApi.getSystemPromptFiles(agentId || undefined);
       setEnabledFiles(list || []);
     } catch {
       setEnabledFiles([]);
     } finally {
       setEnabledLoading(false);
     }
-  }, []);
+  }, [agentId]);
 
   // Load all on open
   useEffect(() => {
@@ -182,7 +183,7 @@ export default function AgentIdentityFiles({
     newList = [...new Set(newList)];
     setEnabledFiles(newList);
     try {
-      await workspaceApi.setSystemPromptFiles(newList);
+      await workspaceApi.setSystemPromptFiles(newList, agentId || undefined);
       msg.success(
         checked
           ? t("agent.fileEnabled", "已启用") + `: ${fileName}`
