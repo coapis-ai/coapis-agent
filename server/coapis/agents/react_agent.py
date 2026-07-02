@@ -508,9 +508,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
     def _register_skills(self, toolkit: Toolkit) -> None:
         """Load and register skills from workspace directory.
 
-        Supports priority-based loading:
-        - Core skills (priority=core or no priority): always loaded
-        - On-demand skills (priority=on-demand): deferred until intent match
+        Two-tier loading strategy:
+        - always_load=True skills: registered immediately (core)
+        - always_load=False skills: deferred until user intent match (on-demand)
+
+        Also builds a SkillSelector index for fast keyword-based skill selection.
 
         Args:
             toolkit: Toolkit to register skills to
@@ -539,6 +541,9 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         from .skills_manager import get_skill_pool_dir
         skill_pool_dir = get_skill_pool_dir()
 
+        # ── Collect all skill metadata for SkillSelector index ──
+        skill_meta_list: list[dict] = []
+
         for skill_name in effective_skills:
             skill_dir = working_skills_dir / skill_name
             # Fallback: if not in workspace, try skill pool
@@ -549,18 +554,28 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 else:
                     continue
 
-            # Read priority from SKILL.md frontmatter
+            # Read always_load from SKILL.md frontmatter (new field)
+            always_load = self._get_skill_always_load(skill_dir)
+            # Fallback: read legacy priority field
             priority = self._get_skill_priority(skill_dir)
-            if priority == "on-demand":
-                triggers = self._get_skill_triggers(skill_dir, getattr(self, '_workspace_dir', None))
-                self._on_demand_skills[skill_name] = (skill_dir, triggers)
-                # Register summary-only entry so LLM knows the skill exists
-                self._register_skill_summary(toolkit, skill_dir)
-                logger.debug(
-                    "Deferred on-demand skill: %s (triggers=%s, pool=%s)",
-                    skill_name, triggers, skill_dir == (skill_pool_dir / skill_name),
-                )
-            else:
+            # Use clean trigger_keywords for SkillSelector index
+            # (NOT _get_skill_triggers which mixes in patterns/hints)
+            trigger_keywords = self._get_skill_trigger_keywords(skill_dir)
+            # Keep legacy triggers for _load_on_demand_skills Phase 2 fallback
+            legacy_triggers = self._get_skill_triggers(skill_dir, getattr(self, '_workspace_dir', None))
+            desc = self._get_skill_summary(skill_dir)
+
+            # Build metadata for SkillSelector (clean keywords only)
+            skill_meta_list.append({
+                "name": skill_name,
+                "dir": str(skill_dir),
+                "trigger_keywords": trigger_keywords,
+                "always_load": always_load,
+                "description": desc,
+            })
+
+            # Classify: always_load → core, otherwise → on-demand
+            if always_load or priority == "core":
                 self._core_skills[skill_name] = skill_dir
                 try:
                     toolkit.register_agent_skill(str(skill_dir))
@@ -570,9 +585,35 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                         "Failed to register skill '%s': %s",
                         skill_name, e,
                     )
+            else:
+                self._on_demand_skills[skill_name] = (skill_dir, legacy_triggers)
+                # Register summary-only entry so LLM knows the skill exists
+                self._register_skill_summary(toolkit, skill_dir)
+                logger.debug(
+                    "Deferred on-demand skill: %s (triggers=%s, pool=%s)",
+                    skill_name, triggers, skill_dir == (skill_pool_dir / skill_name),
+                )
+
+        # ── Build SkillSelector index for fast keyword matching ──
+        try:
+            from .utils.skill_selector import SkillSelector
+            self._skill_selector = SkillSelector({
+                "enable_llm_fallback": False,  # LLM handled by _load_on_demand_skills
+                "max_selected_skills": 15,
+                "min_keyword_length": 2,
+            })
+            self._skill_selector.build_index(skill_meta_list)
+            logger.info(
+                "SkillSelector index built: %d keywords, %d always-load",
+                len(self._skill_selector.keyword_index),
+                len(self._skill_selector.always_load_skills),
+            )
+        except Exception as e:
+            logger.warning("Failed to build SkillSelector index: %s", e)
+            self._skill_selector = None
 
         logger.info(
-            "Skills loaded: %d core, %d on-demand (deferred)",
+            "Skills loaded: %d core (always_load), %d on-demand (deferred)",
             len(self._core_skills), len(self._on_demand_skills),
         )
 
@@ -658,6 +699,48 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception:
             pass
         return "core"
+
+    @staticmethod
+    def _get_skill_always_load(skill_dir: Path) -> bool:
+        """Read always_load field from SKILL.md frontmatter."""
+        try:
+            md_file = skill_dir / "SKILL.md"
+            if not md_file.exists():
+                return False
+            content = md_file.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    import yaml
+                    meta = yaml.safe_load(parts[1]) or {}
+                    return bool(meta.get("always_load", False))
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def _get_skill_trigger_keywords(skill_dir: Path) -> list[str]:
+        """Read top-level trigger_keywords from SKILL.md frontmatter.
+
+        Unlike _get_skill_triggers() which mixes keywords + patterns + hints,
+        this only reads the clean trigger_keywords list used by SkillSelector.
+        """
+        try:
+            md_file = skill_dir / "SKILL.md"
+            if not md_file.exists():
+                return []
+            content = md_file.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    import yaml
+                    meta = yaml.safe_load(parts[1]) or {}
+                    kw = meta.get("trigger_keywords", [])
+                    if isinstance(kw, list):
+                        return [str(k) for k in kw if k]
+        except Exception:
+            pass
+        return []
 
     @staticmethod
     def _get_skill_intent_hints(skill_dir: Path) -> list[str]:
@@ -1021,28 +1104,26 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             except Exception as e:
                 logger.error("Failed to load on-demand skill '%s': %s", skill_name, e)
 
-        # ── Phase 2: Keyword matching (for skills not matched by LLM) ──
-        msg_lower = user_message.lower()
-        keyword_log = {}
-        for skill_name, (skill_dir, keywords) in list(self._on_demand_skills.items()):
-            if skill_name in loaded:
-                continue
-            if not keywords:
-                keyword_log[skill_name] = {"triggers": [], "matched": [], "result": "no_triggers"}
-                continue
-            matched = [kw for kw in keywords if kw in msg_lower]
-            keyword_log[skill_name] = {
-                "triggers": keywords[:10],  # 只显示前10个
-                "matched": matched,
-                "result": "matched" if matched else "no_match",
-            }
-            if matched:
+        # ── Phase 2: Keyword matching via SkillSelector index (fast) ──
+        # Use the inverted index built in _register_skills() for O(1) keyword lookup
+        # instead of iterating all on-demand skills
+        skill_selector = getattr(self, "_skill_selector", None)
+        if skill_selector:
+            # Use SkillSelector's fast keyword index
+            selector_matched = skill_selector._keyword_match(user_message)
+            for skill_name in selector_matched:
+                if skill_name in loaded or skill_name not in self._on_demand_skills:
+                    continue
+                skill_dir, keywords = self._on_demand_skills[skill_name]
+                # Find which keywords matched for logging
+                msg_lower = user_message.lower()
+                matched = [kw for kw in keywords if kw in msg_lower]
                 try:
                     if self._scan_and_register_skill(
                         skill_name=skill_name,
                         skill_dir=skill_dir,
                         trigger_method="keyword",
-                        matched_keywords=matched,
+                        matched_keywords=matched or ["selector_index"],
                         user_message=user_message,
                         tracker=tracker,
                         ctx=ctx,
@@ -1050,19 +1131,54 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                         loaded.append(skill_name)
                         del self._on_demand_skills[skill_name]
                         logger.info(
-                            "[TriggerDebug] ✓ Loaded skill '%s' via keyword match: %s",
+                            "[TriggerDebug] ✓ Loaded skill '%s' via SkillSelector keyword match: %s",
                             skill_name, matched,
                         )
                 except Exception as e:
                     logger.error("Failed to load on-demand skill '%s': %s", skill_name, e)
+        else:
+            # Fallback: original linear scan if SkillSelector not available
+            msg_lower = user_message.lower()
+            keyword_log = {}
+            for skill_name, (skill_dir, keywords) in list(self._on_demand_skills.items()):
+                if skill_name in loaded:
+                    continue
+                if not keywords:
+                    keyword_log[skill_name] = {"triggers": [], "matched": [], "result": "no_triggers"}
+                    continue
+                matched = [kw for kw in keywords if kw in msg_lower]
+                keyword_log[skill_name] = {
+                    "triggers": keywords[:10],
+                    "matched": matched,
+                    "result": "matched" if matched else "no_match",
+                }
+                if matched:
+                    try:
+                        if self._scan_and_register_skill(
+                            skill_name=skill_name,
+                            skill_dir=skill_dir,
+                            trigger_method="keyword",
+                            matched_keywords=matched,
+                            user_message=user_message,
+                            tracker=tracker,
+                            ctx=ctx,
+                        ):
+                            loaded.append(skill_name)
+                            del self._on_demand_skills[skill_name]
+                            logger.info(
+                                "[TriggerDebug] ✓ Loaded skill '%s' via keyword match: %s",
+                                skill_name, matched,
+                            )
+                    except Exception as e:
+                        logger.error("Failed to load on-demand skill '%s': %s", skill_name, e)
 
-        # ── 输出未匹配技能的详情 ──
-        not_loaded = {k: v for k, v in keyword_log.items() if v["result"] != "matched" and k not in loaded}
-        if not_loaded:
-            logger.info(
-                "[TriggerDebug] Not loaded skills detail: %s",
-                {k: v["result"] for k, v in not_loaded.items()},
-            )
+            # 输出未匹配技能的详情
+            not_loaded = {k: v for k, v in keyword_log.items() if v["result"] != "matched" and k not in loaded}
+            if not_loaded:
+                logger.info(
+                    "[TriggerDebug] Not loaded skills detail: %s",
+                    {k: v["result"] for k, v in not_loaded.items()},
+                )
 
         if loaded:
             logger.info("[TriggerDebug] Final loaded %d on-demand skills: %s", len(loaded), loaded)
@@ -1467,6 +1583,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         if self._env_context is not None:
             sys_prompt = sys_prompt + "\n\n" + self._env_context
+
+        # Inject agent skill prompt — tells LLM which skills are available
+        try:
+            agent_skill_prompt = self.toolkit.get_agent_skill_prompt()
+            if agent_skill_prompt:
+                sys_prompt = sys_prompt + "\n\n" + agent_skill_prompt
+        except Exception as e:
+            logger.warning("Failed to inject skill prompt: %s", e)
 
         return sys_prompt
 
