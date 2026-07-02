@@ -243,6 +243,94 @@ async def list_memory_files(request: Request) -> List[Dict[str, Any]]:
     return result
 
 
+@router.get("/workspace/memory/content")
+@require_permission("myspace:read")
+async def get_memory_content(
+    request: Request,
+    level: str = Query("user", description="Memory level: 'user' or 'agent'"),
+    agent_id: Optional[str] = Query(None, description="Agent ID (required when level=agent)"),
+) -> Dict[str, Any]:
+    """Read MEMORY.md content at user or agent level.
+
+    - level=user: reads workspaces/{username}/MEMORY.md
+    - level=agent: reads agent's workspace_dir/MEMORY.md
+    """
+    username = getattr(request.state, "username", None)
+
+    if level == "user":
+        if not username:
+            raise HTTPException(400, "username required for user-level memory")
+        from ...constant import WORKSPACES_DIR
+        memory_path = WORKSPACES_DIR / username / "MEMORY.md"
+    elif level == "agent":
+        # Resolve agent workspace_dir
+        resolved_id = agent_id or _get_selected_agent_id(request)
+        if not resolved_id:
+            raise HTTPException(400, "agent_id required for agent-level memory")
+        from ...config.config import derive_workspace_dir
+        try:
+            memory_path = derive_workspace_dir(resolved_id, username) / "MEMORY.md"
+        except Exception as e:
+            raise HTTPException(404, f"Agent not found: {e}")
+    else:
+        raise HTTPException(400, f"Invalid level: {level}, must be 'user' or 'agent'")
+
+    content = ""
+    if memory_path.exists():
+        content = memory_path.read_text(encoding="utf-8")
+
+    return {
+        "level": level,
+        "path": str(memory_path),
+        "content": content,
+        "exists": memory_path.exists(),
+    }
+
+
+class MemoryContentUpdate(BaseModel):
+    content: str
+    level: str = "user"
+    agent_id: Optional[str] = None
+
+
+@router.put("/workspace/memory/content")
+@require_permission("myspace:write")
+async def update_memory_content(
+    request: Request,
+    body: MemoryContentUpdate,
+) -> Dict[str, Any]:
+    """Write MEMORY.md content at user or agent level."""
+    username = getattr(request.state, "username", None)
+    level = body.level
+
+    if level == "user":
+        if not username:
+            raise HTTPException(400, "username required for user-level memory")
+        from ...constant import WORKSPACES_DIR
+        memory_path = WORKSPACES_DIR / username / "MEMORY.md"
+    elif level == "agent":
+        resolved_id = body.agent_id or _get_selected_agent_id(request)
+        if not resolved_id:
+            raise HTTPException(400, "agent_id required for agent-level memory")
+        from ...config.config import derive_workspace_dir
+        try:
+            memory_path = derive_workspace_dir(resolved_id, username) / "MEMORY.md"
+        except Exception as e:
+            raise HTTPException(404, f"Agent not found: {e}")
+    else:
+        raise HTTPException(400, f"Invalid level: {level}")
+
+    memory_path.parent.mkdir(parents=True, exist_ok=True)
+    memory_path.write_text(body.content, encoding="utf-8")
+
+    return {
+        "level": level,
+        "path": str(memory_path),
+        "size": len(body.content),
+        "ok": True,
+    }
+
+
 @router.get("/workspace/system-prompt-files")
 @require_permission("myspace:read")
 async def list_system_prompt_files(

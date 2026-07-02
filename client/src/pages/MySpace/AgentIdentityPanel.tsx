@@ -9,6 +9,7 @@ import {
   Tag,
   Empty,
   message,
+  Segmented,
 } from "antd";
 import {
   SaveOutlined,
@@ -24,6 +25,7 @@ import {
 } from "@ant-design/icons";
 
 import { agentsApi } from "@/api/modules/agents";
+import { workspaceApi } from "@/api/modules/workspace";
 import { useAgentStore } from "@/stores/agentStore";
 import { XMarkdown } from "@ant-design/x-markdown";
 import { stripFrontmatter } from "@/utils/markdown";
@@ -56,9 +58,62 @@ export default function AgentIdentityPanel() {
   const [previewMode, setPreviewMode] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
 
+  // Two-level memory state
+  const [memoryLevel, setMemoryLevel] = useState<"user" | "agent">("user");
+  const [memoryContent, setMemoryContent] = useState<Record<string, { content: string; originalContent: string; modified: boolean; loading: boolean }>>({});
+
   const currentAgent = agents?.find((a) => a.id === selectedAgent);
   const agentId = selectedAgent;
   const agentName = currentAgent?.name || selectedAgent;
+
+  // Load two-level memory content
+  const loadMemoryContent = useCallback(async (level: "user" | "agent") => {
+    if (!agentId) return;
+    setMemoryContent(prev => ({
+      ...prev,
+      [level]: { ...prev[level], loading: true },
+    }));
+    try {
+      const res = await workspaceApi.getMemoryContent(level, agentId);
+      const content = res.content || "";
+      setMemoryContent(prev => ({
+        ...prev,
+        [level]: { content, originalContent: content, modified: false, loading: false },
+      }));
+    } catch {
+      setMemoryContent(prev => ({
+        ...prev,
+        [level]: { content: "", originalContent: "", modified: false, loading: false },
+      }));
+    }
+  }, [agentId]);
+
+  // Save two-level memory content
+  const handleSaveMemory = async (level: "user" | "agent") => {
+    if (!agentId) return;
+    const mem = memoryContent[level];
+    if (!mem) return;
+    setSaving(true);
+    try {
+      await workspaceApi.saveMemoryContent(level, mem.content, agentId);
+      message.success(`${level === "user" ? "用户级" : "智能体级"}记忆保存成功`);
+      setMemoryContent(prev => ({
+        ...prev,
+        [level]: { ...prev[level], originalContent: mem.content, modified: false },
+      }));
+    } catch (e: any) {
+      message.error(e?.message || "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Load memory on agent change and level switch
+  useEffect(() => {
+    if (agentId) {
+      loadMemoryContent(memoryLevel);
+    }
+  }, [agentId, memoryLevel, loadMemoryContent]);
 
   // Load file content
   const loadFile = useCallback(
@@ -168,7 +223,155 @@ export default function AgentIdentityPanel() {
     );
   }
 
+  // ── Render MEMORY.md tab with two-level editor ──
+  const renderMemoryTab = () => {
+    const mem = memoryContent[memoryLevel];
+    const isModified = mem?.modified ?? false;
+    const isPreview = previewMode["MEMORY.md"] ?? false;
+
+    return (
+      <div style={{ padding: "8px 0" }}>
+        {/* Level switcher */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 12,
+          }}
+        >
+          <Space>
+            <Segmented
+              value={memoryLevel}
+              onChange={(val) => setMemoryLevel(val as "user" | "agent")}
+              options={[
+                {
+                  label: (
+                    <Space size={4}>
+                      <UserOutlined />
+                      <span>用户级</span>
+                    </Space>
+                  ),
+                  value: "user",
+                },
+                {
+                  label: (
+                    <Space size={4}>
+                      <DatabaseOutlined />
+                      <span>智能体级</span>
+                    </Space>
+                  ),
+                  value: "agent",
+                },
+              ]}
+            />
+            {isModified && <Tag color="orange">已修改</Tag>}
+          </Space>
+          <Space>
+            <Button
+              size="small"
+              icon={isPreview ? <EditOutlined /> : <EyeOutlined />}
+              onClick={() => togglePreview("MEMORY.md")}
+            >
+              {isPreview ? "编辑" : "预览"}
+            </Button>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => loadMemoryContent(memoryLevel)}
+              disabled={mem?.loading}
+            >
+              刷新
+            </Button>
+            <Button
+              type="primary"
+              size="small"
+              icon={<SaveOutlined />}
+              onClick={() => handleSaveMemory(memoryLevel)}
+              disabled={!isModified || saving}
+              loading={saving}
+            >
+              保存
+            </Button>
+          </Space>
+        </div>
+
+        <Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
+          {memoryLevel === "user"
+            ? "用户级记忆：跨所有智能体共享的偏好、习惯和项目上下文"
+            : "智能体级记忆：仅此智能体拥有的专业知识和技能经验"}
+        </Text>
+
+        {/* Editor / Preview */}
+        {isPreview ? (
+          <div
+            style={{
+              background: "#fafafa",
+              border: "1px solid #e8e8e8",
+              borderRadius: 8,
+              padding: 20,
+              minHeight: 400,
+              maxHeight: "calc(100vh - 360px)",
+              overflow: "auto",
+            }}
+          >
+            {mem?.content ? (
+              <XMarkdown>{stripFrontmatter(mem.content)}</XMarkdown>
+            ) : (
+              <Text type="secondary">记忆为空</Text>
+            )}
+          </div>
+        ) : (
+          <TextArea
+            value={mem?.content ?? ""}
+            onChange={(e) => {
+              const newContent = e.target.value;
+              setMemoryContent((prev) => ({
+                ...prev,
+                [memoryLevel]: {
+                  ...prev[memoryLevel],
+                  content: newContent,
+                  modified: newContent !== prev[memoryLevel]?.originalContent,
+                },
+              }));
+            }}
+            autoSize={{ minRows: 18, maxRows: 40 }}
+            style={{
+              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+              fontSize: 13,
+              lineHeight: 1.6,
+              background: "#1e1e1e",
+              color: "#d4d4d4",
+              border: "1px solid #333",
+              borderRadius: 8,
+              padding: 16,
+            }}
+            placeholder={`编辑${memoryLevel === "user" ? "用户级" : "智能体级"}记忆...`}
+          />
+        )}
+      </div>
+    );
+  };
+
+  // ── Render regular file tabs ──
   const tabItems = IDENTITY_FILES.map((f) => {
+    // MEMORY.md gets special two-level editor
+    if (f.key === "MEMORY.md") {
+      const mem = memoryContent[memoryLevel];
+      const isModified = mem?.modified ?? false;
+      return {
+        key: f.key,
+        label: (
+          <Space size={4}>
+            {f.icon}
+            <span>{f.label}</span>
+            {isModified && <Tag color="orange" style={{ marginLeft: 4 }}>已修改</Tag>}
+          </Space>
+        ),
+        children: renderMemoryTab(),
+      };
+    }
+
     const file = files[f.key];
     const isModified = file?.modified ?? false;
     const isPreview = previewMode[f.key] ?? false;

@@ -43,20 +43,6 @@ async def check_command(
         "command_token": None,
     }
 
-
-@router.post("/approval/approve")
-async def approve_request(
-    request: Request,
-    payload: Dict[str, Any] = Body(...),
-) -> Dict[str, Any]:
-    """Approve a pending request."""
-    return {"success": True, "message": "Request approved"}
-
-
-@router.post("/approval/deny")
-async def deny_request(
-    request: Request,
-    payload: Dict[str, Any] = Body(...),
-) -> Dict[str, Any]:
-    """Deny a pending request."""
-    return {"success": True, "message": "Request denied"}
+# NOTE: /approval/approve and /approval/deny are in approval.py router
+# (prefix="/approval"). Removed fake stubs here that were shadowing the
+# real endpoints which resolve approval Futures.

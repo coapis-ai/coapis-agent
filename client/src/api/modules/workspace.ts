@@ -140,6 +140,34 @@ export const workspaceApi = {
       },
     ),
 
+  // ── Two-level memory (user + agent) ──
+
+  /** Read MEMORY.md content at user or agent level. */
+  getMemoryContent: (level: "user" | "agent", agentId?: string) => {
+    const params = new URLSearchParams({ level });
+    if (agentId) params.set("agent_id", agentId);
+    return request<{
+      level: string;
+      path: string;
+      content: string;
+      exists: boolean;
+    }>(`/workspace/memory/content?${params.toString()}`);
+  },
+
+  /** Write MEMORY.md content at user or agent level. */
+  saveMemoryContent: (
+    level: "user" | "agent",
+    content: string,
+    agentId?: string,
+  ) =>
+    request<{ ok: boolean; path: string; size: number }>(
+      `/workspace/memory/content`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ content, level, agent_id: agentId }),
+      },
+    ),
+
   // System prompt files management
   getSystemPromptFiles: (agentId?: string) => {
     const params = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";

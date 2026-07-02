@@ -59,12 +59,32 @@ class ReMeLightMemoryManager(BaseMemoryManager):
     - retrieve: auto-retrieve relevant memories for conversation context
     """
 
-    def __init__(self, working_dir: str, agent_id: str):
+    def __init__(
+        self,
+        working_dir: str,
+        agent_id: str,
+        username: str | None = None,
+    ):
         super().__init__(working_dir=working_dir, agent_id=agent_id)
+        self._workspace_dir = Path(working_dir)
+        self._username = username
+
+        # Derive user-level memory directory.
+        # Rule: if username is known → WORKSPACES_DIR/{username}
+        #        (constant, independent of workspace_dir)
+        #        if no username → None (global agent, no user-level)
+        if username:
+            from ...constant import WORKSPACES_DIR
+            self._user_workspace: Path | None = WORKSPACES_DIR / username
+        else:
+            self._user_workspace = None
+
         logger.info(
             "ReMeLightMemoryManager init: "
-            "agent_id=%s, working_dir=%s (file-based mode)",
-            agent_id, working_dir,
+            "agent_id=%s, working_dir=%s, username=%s, "
+            "user_workspace=%s (file-based mode)",
+            agent_id, working_dir, username,
+            self._user_workspace,
         )
         self.summary_toolkit = None
 
@@ -92,15 +112,37 @@ class ReMeLightMemoryManager(BaseMemoryManager):
     # ── File-based memory search ─────────────────────────────────────
 
     def _collect_memory_files(self) -> list[Path]:
-        """Collect all searchable memory files in the workspace."""
+        """Collect all searchable memory files: agent-level + user-level.
+
+        Two-level search:
+          Level 2 (agent): workspace_dir/MEMORY.md, workspace_dir/memory/*.md
+          Level 1 (user):  user_workspace/MEMORY.md, user_workspace/memory/*.md
+
+        For user default agents (user:xxx), workspace_dir == user_workspace,
+        so only one level is searched (no duplication).
+        For sub-agents, user_workspace is different → both levels searched.
+        """
         ws = Path(self.working_dir)
         files: list[Path] = []
-        mem_file = ws / "MEMORY.md"
-        if mem_file.exists():
-            files.append(mem_file)
-        mem_dir = ws / "memory"
-        if mem_dir.is_dir():
-            files.extend(sorted(mem_dir.glob("*.md")))
+
+        # --- Level 2: Agent-level (always) ---
+        agent_mem = ws / "MEMORY.md"
+        if agent_mem.exists():
+            files.append(agent_mem)
+        agent_mem_dir = ws / "memory"
+        if agent_mem_dir.is_dir():
+            files.extend(sorted(agent_mem_dir.glob("*.md")))
+
+        # --- Level 1: User-level (skip if same as workspace) ---
+        uw = self._user_workspace
+        if uw and uw != ws:
+            user_mem = uw / "MEMORY.md"
+            if user_mem.exists():
+                files.append(user_mem)
+            user_mem_dir = uw / "memory"
+            if user_mem_dir.is_dir():
+                files.extend(sorted(user_mem_dir.glob("*.md")))
+
         return files
 
     @staticmethod
@@ -287,11 +329,13 @@ class ReMeLightMemoryManager(BaseMemoryManager):
         return await self._extract_and_save_memory(messages)
 
     async def _extract_and_save_memory(self, messages: list[Msg]) -> str:
-        """Extract high-value info from messages and append to MEMORY.md.
+        """Extract high-value info from messages → write to correct level.
 
-        Uses LLM to identify important decisions, preferences, facts,
-        and corrections from conversation history, then appends them
-        to the workspace's MEMORY.md file.
+        Two-level write routing:
+          - User preferences / habits → user_workspace/MEMORY.md
+          - Agent-specific knowledge → workspace_dir/MEMORY.md
+
+        Uses LLM to classify and extract, then writes to the correct target.
         """
         try:
             conv_parts = []
@@ -310,18 +354,44 @@ class ReMeLightMemoryManager(BaseMemoryManager):
             chat_model, formatter = create_model_and_formatter(self.agent_id)
             set_current_workspace_dir(Path(self.working_dir))
 
-            extract_prompt = (
-                "从以下对话中提取值得长期记忆的信息。只提取以下类型：\n"
-                "1. 用户明确的偏好或习惯\n"
-                "2. 重要的决策或结论\n"
-                "3. 关键的事实或数据\n"
-                "4. 用户纠正过的错误认知\n"
-                "5. 重要的待办事项或承诺\n\n"
-                "不要提取：闲聊、一般性问答、临时性信息。\n\n"
-                "如果有值得记忆的内容，输出简洁的要点列表（每条一行，以 - 开头）。\n"
-                "如果没有值得记忆的内容，输出：无\n\n"
-                f"对话内容：\n{conv_text}"
+            # Ask LLM to classify extracted info into two categories
+            has_user_ws = (
+                self._user_workspace is not None
+                and self._user_workspace != self._workspace_dir
             )
+
+            if has_user_ws:
+                extract_prompt = (
+                    "从以下对话中提取值得长期记忆的信息，并按类型分类。\n\n"
+                    "## 分类规则\n"
+                    "- [USER] 用户明确的偏好、习惯、个人资料、项目上下文、工作方式\n"
+                    "- [AGENT] 智能体专属知识、技能经验、领域专业知识、工具使用技巧\n"
+                    "- [SKIP] 闲聊、一般性问答、临时性信息\n\n"
+                    "## 输出格式\n"
+                    "每条信息一行，格式：[类型] 内容\n"
+                    "示例：\n"
+                    "[USER] 用户喜欢用 pytest 而不是 unittest\n"
+                    "[USER] 用户的项目代码在 /apps/ai/tool-dev/dev-coapis\n"
+                    "[AGENT] 处理 Django ORM 时要注意 N+1 查询\n"
+                    "[AGENT] 代码审查时先检查 imports 再检查逻辑\n"
+                    "[SKIP] 无\n\n"
+                    f"对话内容：\n{conv_text}"
+                )
+            else:
+                # No user workspace distinction (default agent or global)
+                # → all writes go to workspace_dir
+                extract_prompt = (
+                    "从以下对话中提取值得长期记忆的信息。只提取以下类型：\n"
+                    "1. 用户明确的偏好或习惯\n"
+                    "2. 重要的决策或结论\n"
+                    "3. 关键的事实或数据\n"
+                    "4. 用户纠正过的错误认知\n"
+                    "5. 重要的待办事项或承诺\n\n"
+                    "不要提取：闲聊、一般性问答、临时性信息。\n\n"
+                    "如果有值得记忆的内容，输出简洁的要点列表（每条一行，以 - 开头）。\n"
+                    "如果没有值得记忆的内容，输出：无\n\n"
+                    f"对话内容：\n{conv_text}"
+                )
 
             msg = Msg(role="user", name="memory_extractor", content=extract_prompt)
             response = await chat_model(msg, formatter=formatter)
@@ -331,27 +401,136 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                 logger.info("[MemoryExtract] Nothing worth saving")
                 return ""
 
-            memory_path = Path(self.working_dir) / "MEMORY.md"
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            entry = f"\n\n## 自动提取 ({now})\n{result_text}\n"
 
-            existing = ""
-            if memory_path.exists():
-                existing = memory_path.read_text(encoding="utf-8")
+            if has_user_ws:
+                # Parse classified output → route to correct target
+                user_items: list[str] = []
+                agent_items: list[str] = []
 
-            if self._keyword_score(result_text[:100], existing) > 0.8:
-                logger.info("[MemoryExtract] Similar content already in MEMORY.md")
+                for line in result_text.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("[USER]"):
+                        user_items.append(line[6:].strip())
+                    elif line.startswith("[AGENT]"):
+                        agent_items.append(line[7:].strip())
+                    elif line.startswith("[SKIP]"):
+                        continue
+                    else:
+                        # Unclassified → treat as agent-level
+                        agent_items.append(line)
+
+                saved_any = False
+
+                if user_items:
+                    user_content = "\n".join(f"- {item}" for item in user_items)
+                    user_path = self._user_workspace / "MEMORY.md"
+                    self._append_memory_safe(
+                        user_path, user_content, now, "用户记忆",
+                    )
+                    saved_any = True
+
+                if agent_items:
+                    agent_content = "\n".join(f"- {item}" for item in agent_items)
+                    agent_path = self._workspace_dir / "MEMORY.md"
+                    self._append_memory_safe(
+                        agent_path, agent_content, now, "智能体记忆",
+                    )
+                    saved_any = True
+
+                if saved_any:
+                    logger.info(
+                        "[MemoryExtract] Routed: %d user-level, %d agent-level items",
+                        len(user_items), len(agent_items),
+                    )
                 return result_text
+            else:
+                # No user workspace → write to workspace_dir (backward compat)
+                memory_path = self._workspace_dir / "MEMORY.md"
+                entry = f"\n\n## 自动提取 ({now})\n{result_text}\n"
 
-            with open(memory_path, "a", encoding="utf-8") as f:
-                f.write(entry)
+                existing = ""
+                if memory_path.exists():
+                    existing = memory_path.read_text(encoding="utf-8")
 
-            logger.info("[MemoryExtract] Saved %d chars to MEMORY.md", len(result_text))
-            return result_text
+                if self._keyword_score(result_text[:100], existing) > 0.8:
+                    logger.info("[MemoryExtract] Similar content already in MEMORY.md")
+                    return result_text
+
+                self._append_memory_safe(
+                    memory_path, result_text, now, "记忆",
+                )
+                return result_text
 
         except Exception as e:
             logger.warning("[MemoryExtract] Failed: %s", e)
             return ""
+
+    @staticmethod
+    def _append_memory_safe(
+        target: Path,
+        content: str,
+        timestamp: str,
+        label: str,
+    ) -> None:
+        """Append memory to target file with dedup and file lock.
+
+        Args:
+            target: Target MEMORY.md path.
+            content: Content to append.
+            timestamp: Formatted timestamp string.
+            label: Human-readable label for logging.
+        """
+        import fcntl
+
+        if not content or not content.strip():
+            return
+
+        entry = f"\n\n## 自动提取 ({timestamp})\n{content}\n"
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Read existing content for dedup
+        existing = ""
+        if target.exists():
+            existing = target.read_text(encoding="utf-8")
+
+        # Check for duplicate (keyword overlap > 80%)
+        query_tokens = set(
+            re.findall(r'[\w\u4e00-\u9fff]+', content[:100].lower())
+        )
+        if query_tokens:
+            text_lower = existing.lower()
+            matched = sum(1 for t in query_tokens if t in text_lower)
+            if matched / len(query_tokens) > 0.8:
+                logger.info(
+                    "[MemoryExtract] Similar content already in %s: %s",
+                    label, target.name,
+                )
+                return
+
+        # File lock + append (atomic for concurrent writes)
+        lock_path = target.with_suffix(target.suffix + ".lock")
+        lock_path.touch(exist_ok=True)
+        try:
+            with open(lock_path, "w") as lock_f:
+                fcntl.flock(lock_f, fcntl.LOCK_EX)
+                try:
+                    with open(target, "a", encoding="utf-8") as f:
+                        f.write(entry)
+                finally:
+                    fcntl.flock(lock_f, fcntl.LOCK_UN)
+        except OSError:
+            # Fallback: no locking (e.g. non-POSIX filesystem)
+            with open(target, "a", encoding="utf-8") as f:
+                f.write(entry)
+
+        logger.info(
+            "[MemoryExtract] Saved %d chars to %s: %s",
+            len(content), label, target.name,
+        )
 
     async def retrieve(
         self,

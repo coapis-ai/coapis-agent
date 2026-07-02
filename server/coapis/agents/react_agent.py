@@ -1260,20 +1260,50 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             user_workspace_dir=user_ws_dir,
         )
 
-        # ── MemoryInjector: layered memory injection (user only) ──
+        # ── MemoryInjector: two-level memory injection ──
+        # User-level (workspaces/{username}/): base preferences, habits
+        # Agent-level (workspace_dir): agent-specific knowledge, skills
         try:
             from ..foundation.memory_injector import MemoryInjector
             from ..foundation.memory_quota import MemoryQuota
 
             injector = MemoryInjector(MemoryQuota())
 
-            # Core memory: only user's own MEMORY.md (global memory removed)
+            # --- User-level memory (Level 1: base) ---
+            user_memory = ""
+            user_profile = ""
+            # user_ws_dir already resolved above (workspaces/{username}/)
+            if user_ws_dir and user_ws_dir != self._workspace_dir:
+                user_mem_file = Path(user_ws_dir) / "MEMORY.md"
+                if user_mem_file.exists():
+                    umem = user_mem_file.read_text(encoding="utf-8").strip()
+                    if umem:
+                        user_memory = umem
+
+                user_profile_file = Path(user_ws_dir) / "USER.md"
+                if user_profile_file.exists():
+                    uprof = user_profile_file.read_text(encoding="utf-8").strip()
+                    if uprof:
+                        user_profile = uprof
+
+            # --- Agent-level memory (Level 2: supplement) ---
+            agent_memory = ""
+            agent_mem_file = self._workspace_dir / "MEMORY.md"
+            if agent_mem_file.exists():
+                amem = agent_mem_file.read_text(encoding="utf-8").strip()
+                if amem:
+                    agent_memory = amem
+
+            # Build core memory: user-level first, then agent-level
             core_memory = ""
-            core_file = self._workspace_dir / "MEMORY.md"
-            if core_file.exists():
-                umem = core_file.read_text(encoding="utf-8").strip()
-                if umem:
-                    core_memory = umem
+            if user_memory:
+                core_memory += f"## 用户记忆\n{user_memory}\n\n"
+            if user_profile:
+                core_memory += f"## 用户画像\n{user_profile}\n\n"
+            if agent_memory:
+                core_memory += f"## 智能体记忆\n{agent_memory}"
+
+            core_memory = core_memory.strip()
 
             # Long-term memory: from pre-fetched semantic search or fallback
             long_term_memories: list[str] = []
@@ -1297,9 +1327,6 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     except Exception:
                         pass
 
-            # Short-term memory: not applicable here (session state handles it)
-            # Ephemeral: handled by agent's own message history
-
             # 从 request_context 获取 role（用于记忆配额控制）
             _role = self._request_context.get("role", "")
 
@@ -1315,6 +1342,13 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             memory_section = injection.to_prompt()
             if memory_section:
                 sys_prompt = sys_prompt + "\n\n" + memory_section
+
+            logger.info(
+                "[MemoryInjector] user_memory=%d chars, user_profile=%d chars, "
+                "agent_memory=%d chars, long_term=%d entries",
+                len(user_memory), len(user_profile),
+                len(agent_memory), len(long_term_memories),
+            )
 
         except Exception as mem_err:
             logger.debug(

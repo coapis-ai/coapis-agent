@@ -65,10 +65,53 @@ async def get_push_messages(
     request: Request,
     session_id: str = Query(None),
 ) -> Dict[str, Any]:
-    """Get push messages and pending approvals."""
+    """Get push messages and pending approvals.
+
+    Returns real pending approvals from the global ApprovalService
+    so that the frontend can render interactive ApprovalCard widgets.
+    """
+    from ..approvals import get_approval_service
+    from ...security.tool_guard.approval import format_findings_summary
+
+    pending_approvals: list[Dict[str, Any]] = []
+    try:
+        svc = get_approval_service()
+        # If session_id provided, filter by that session; otherwise return all
+        if session_id:
+            pendings = await svc.list_pending_by_session(session_id)
+        else:
+            pendings = await svc.get_all_pending_by_session(session_id=None)
+
+        for p in pendings:
+            guard_result = getattr(p, "extra", {}).get("guard_result")
+            findings_summary = ""
+            if guard_result:
+                try:
+                    findings_summary = format_findings_summary(guard_result)
+                except Exception:
+                    findings_summary = ""
+            tool_call = getattr(p, "extra", {}).get("tool_call", {})
+            tool_input = tool_call.get("input", {}) if isinstance(tool_call, dict) else {}
+
+            pending_approvals.append({
+                "request_id": p.request_id,
+                "session_id": p.session_id,
+                "root_session_id": p.root_session_id,
+                "agent_id": p.agent_id,
+                "tool_name": p.tool_name,
+                "severity": p.severity,
+                "findings_count": p.findings_count,
+                "findings_summary": findings_summary,
+                "tool_params": tool_input,
+                "created_at": p.created_at,
+                "timeout_seconds": p.timeout_seconds,
+            })
+    except Exception:
+        logger.debug("Failed to fetch pending approvals", exc_info=True)
+
     return {
         "messages": [],
-        "pending_approvals": [],
+        "pending_approvals": pending_approvals,
     }
 
 
