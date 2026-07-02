@@ -23,9 +23,12 @@ from typing import Optional
 
 import click
 
-from agentscope_runtime.engine.schemas.exception import (
-    AppBaseException,
-)
+try:
+    from agentscope_runtime.engine.schemas.exception import (
+        AppBaseException,
+    )
+except ImportError:
+    AppBaseException = Exception  # type: ignore[misc,assignment]
 
 from ..providers.provider import ModelInfo, Provider, ProviderInfo
 from ..providers.provider_manager import ProviderManager

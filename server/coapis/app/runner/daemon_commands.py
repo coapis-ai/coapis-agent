@@ -28,8 +28,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from agentscope.message import Msg, TextBlock
-
 from ...constant import WORKING_DIR
 from ...config import load_config
 from ...utils.logging import LOG_NAMESPACE, LOG_FILE_PATH
@@ -249,6 +247,8 @@ class DaemonCommandHandlerMixin:
         context: DaemonContext,
     ) -> Msg:
         """Run daemon subcommand; return a single assistant Msg."""
+        from agentscope.message import Msg, TextBlock  # lazy: avoid heavy import at CLI load time
+
         parsed = parse_daemon_query(query)
         if not parsed:
             return Msg(

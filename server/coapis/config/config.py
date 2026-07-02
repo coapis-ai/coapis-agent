@@ -29,9 +29,15 @@ from pydantic import (
     model_validator,
 )
 import shortuuid
-from agentscope_runtime.engine.schemas.exception import (
-    ConfigurationException,
-)
+def _get_configuration_exception():
+    """Lazy import to avoid pulling agentscope_runtime at module load time."""
+    try:
+        from agentscope_runtime.engine.schemas.exception import (
+            ConfigurationException,
+        )
+        return ConfigurationException
+    except ImportError:
+        return Exception
 
 from .timezone import detect_system_timezone
 from ..constant import (
@@ -846,7 +852,7 @@ class AgentsRunningConfig(BaseModel):
     def validate_llm_retry_backoff(self) -> "AgentsRunningConfig":
         """Validate LLM retry backoff relationships."""
         if self.llm_backoff_cap < self.llm_backoff_base:
-            raise ConfigurationException(
+            raise _get_configuration_exception()(
                 config_key="llm_backoff",
                 message=(
                     "llm_backoff_cap must be greater than or equal to "
@@ -1204,14 +1210,14 @@ class MCPClientConfig(BaseModel):
         """Validate required fields for each MCP transport type."""
         if self.transport == "stdio":
             if not self.command.strip():
-                raise ConfigurationException(
+                raise _get_configuration_exception()(
                     config_key="mcp.command",
                     message="stdio MCP client requires non-empty command",
                 )
             return self
 
         if not self.url.strip():
-            raise ConfigurationException(
+            raise _get_configuration_exception()(
                 config_key="mcp.url",
                 message=f"{self.transport} MCP client requires non-empty url",
             )
@@ -1737,7 +1743,7 @@ def load_agent_config(agent_id: str, workspace_dir: Path = None) -> AgentProfile
             config = load_config()  # Reload to get updated config
         else:
             # Cannot resolve workspace_dir without config entry or explicit path
-            raise ConfigurationException(
+            raise _get_configuration_exception()(
                 config_key="agent",
                 message=f"Agent '{agent_id}' not found in config",
             )
@@ -1838,14 +1844,14 @@ def save_agent_config(
         if workspace_dir is not None:
             registered = register_dynamic_agent(agent_id, str(workspace_dir))
             if not registered:
-                raise ConfigurationException(
+                raise _get_configuration_exception()(
                     config_key="agent",
                     message=f"Failed to register dynamic agent '{agent_id}'",
                 )
             config = load_config()  # Reload to get updated config
         else:
             # Cannot resolve workspace_dir without config entry or explicit path
-            raise ConfigurationException(
+            raise _get_configuration_exception()(
                 config_key="agent",
                 message=f"Agent '{agent_id}' not found in config",
             )

@@ -14,32 +14,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Runner module with chat manager for coordinating repository."""
-from .runner import AgentRunner
-from .api import router
-from .manager import ChatManager
-from .models import (
-    ChatSpec,
-    ChatHistory,
-    ChatsFile,
-)
-from .repo import (
-    BaseChatRepository,
-    JsonChatRepository,
-)
+"""Runner module with chat manager for coordinating repository.
+
+All heavy imports (agentscope, model factories, etc.) are lazy so that
+CLI commands like ``coapis daemon`` can load ``daemon_commands`` without
+pulling in the full runtime.
+"""
+
+_LAZY_IMPORTS = {
+    "AgentRunner": (".runner", "AgentRunner"),
+    "router": (".api", "router"),
+    "ChatManager": (".manager", "ChatManager"),
+    "ChatSpec": (".models", "ChatSpec"),
+    "ChatHistory": (".models", "ChatHistory"),
+    "ChatsFile": (".models", "ChatsFile"),
+    "BaseChatRepository": (".repo", "BaseChatRepository"),
+    "JsonChatRepository": (".repo", "JsonChatRepository"),
+}
+
+__all__ = list(_LAZY_IMPORTS)
 
 
-__all__ = [
-    # Core classes
-    "AgentRunner",
-    "ChatManager",
-    # API
-    "router",
-    # Models
-    "ChatSpec",
-    "ChatHistory",
-    "ChatsFile",
-    # Chat Repository
-    "BaseChatRepository",
-    "JsonChatRepository",
-]
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr = _LAZY_IMPORTS[name]
+        import importlib
+        mod = importlib.import_module(module_path, __name__)
+        return getattr(mod, attr)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

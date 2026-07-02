@@ -22,9 +22,12 @@ from pathlib import Path
 from typing import Optional
 
 import click
-from agentscope_runtime.engine.schemas.exception import (
-    AppBaseException,
-)
+try:
+    from agentscope_runtime.engine.schemas.exception import (
+        AppBaseException,
+    )
+except ImportError:
+    AppBaseException = Exception  # type: ignore[misc,assignment]
 
 from ..config import (
     get_config_path,
