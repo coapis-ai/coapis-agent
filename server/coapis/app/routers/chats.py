@@ -176,6 +176,42 @@ def _get_chat_manager(request: Request, agent_id: str = None):
     )
 
 
+async def _find_chat_across_managers(request: Request, chat_id: str, username: str):
+    """Search for a chat across ALL of the user's ChatManagers.
+
+    Searches in order:
+    1. User-level ChatManager (workspaces/{user}/chat/)
+    2. All agent-level ChatManagers (workspaces/{user}/agents/{id}/chat/)
+
+    Returns:
+        (ChatSpec, ChatManager) tuple, or (None, None) if not found.
+    """
+    manager = getattr(request.app.state, "multi_agent_manager", None)
+    if not manager:
+        return None, None
+
+    # 1. User-level ChatManager
+    user_cm = manager.get_user_chat_manager(username)
+    if user_cm:
+        spec = await user_cm.get_chat(chat_id)
+        if spec:
+            return spec, user_cm
+
+    # 2. All agent-level ChatManagers for this user
+    for key, ws in getattr(manager, '_workspaces', {}).items():
+        ws_username = getattr(ws, 'username', None) or ""
+        if ws_username != username:
+            continue
+        ws_cm = getattr(ws, 'chat_manager', None)
+        if not ws_cm or ws_cm is user_cm:
+            continue
+        spec = await ws_cm.get_chat(chat_id)
+        if spec:
+            return spec, ws_cm
+
+    return None, None
+
+
 # ── Helper: get session for a user (aligned with CoApis pattern) ───────
 
 def _get_session_for_user(user_id: str, request: Request = None):
@@ -555,12 +591,16 @@ async def delete_chat(
     """Delete a chat session.
     
     ENFORCES USER ISOLATION: Non-admin users can only delete their own chats.
+    Searches across all of the user's ChatManagers (user-level + agent-level).
     """
     username, is_admin = _get_current_user(request)
     cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
     
-    # Verify ownership first
+    # Try primary ChatManager first
     spec = await cm.get_chat(chat_id)
+    if not spec:
+        # Fallback: search across all user's ChatManagers
+        spec, cm = await _find_chat_across_managers(request, chat_id, username)
     if not spec:
         raise HTTPException(status_code=404, detail="Chat not found")
     
@@ -584,22 +624,36 @@ async def batch_delete_chats(
     """Delete multiple chat sessions.
     
     ENFORCES USER ISOLATION: Non-admin users can only delete their own chats.
+    Searches across all of the user's ChatManagers (user-level + agent-level).
     """
     username, is_admin = _get_current_user(request)
     cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
-    
-    # ENFORCE USER ISOLATION: Filter to only user's own chats (unless admin)
-    if not is_admin:
-        # Verify each chat belongs to current user
-        allowed_ids = []
-        for chat_id in chat_ids:
-            spec = await cm.get_chat(chat_id)
-            if spec and spec.user_id == username:
-                allowed_ids.append(chat_id)
-        chat_ids = allowed_ids
-    
-    deleted = await cm.delete_chats(chat_ids)
-    if not deleted:
+
+    # For each chat_id, find the ChatManager that owns it
+    # Group by ChatManager for efficient batch deletion
+    cm_to_ids: Dict[Any, List[str]] = {}  # ChatManager -> [chat_ids]
+
+    for chat_id in chat_ids:
+        # Try primary ChatManager first
+        spec = await cm.get_chat(chat_id)
+        target_cm = cm
+        if not spec:
+            # Fallback: search across all user's ChatManagers
+            spec, target_cm = await _find_chat_across_managers(request, chat_id, username)
+        if not spec:
+            continue
+        # ENFORCE USER ISOLATION
+        if not is_admin and spec.user_id != username:
+            continue
+        cm_to_ids.setdefault(target_cm, []).append(chat_id)
+
+    total_deleted = 0
+    for target_cm, ids in cm_to_ids.items():
+        deleted = await target_cm.delete_chats(ids)
+        if deleted:
+            total_deleted += len(ids)
+
+    if total_deleted == 0:
         raise HTTPException(status_code=404, detail="No chats found to delete")
-    
-    return {"success": True, "deleted_count": len(chat_ids)}
+
+    return {"success": True, "deleted_count": total_deleted}
