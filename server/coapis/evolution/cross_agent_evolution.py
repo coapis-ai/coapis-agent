@@ -1065,6 +1065,72 @@ class CrossAgentEvolution:
     # 容量管理
     # ------------------------------------------------------------------
 
+    def auto_review_and_promote(self) -> dict:
+        """自动评审B桶经验并晋升到A桶。
+
+        评审规则（纯阈值，不调LLM）：
+        - confidence >= 0.7 → 晋升A桶
+        - confidence < 0.5  → 丢弃归档
+        - 其余保留等待更多证据
+
+        A桶溢出时，最高置信度条目晋升Foundation。
+
+        Returns:
+            dict: {promoted, discarded, remaining, to_foundation}
+        """
+        if not self._bucket_b:
+            return {"promoted": 0, "discarded": 0, "remaining": 0, "to_foundation": 0}
+
+        promoted = 0
+        discarded = 0
+        remaining = []
+
+        for exp in list(self._bucket_b):
+            if exp.confidence >= 0.7:
+                exp.bucket = "A"
+                exp.status = "approved"
+                exp.promoted_at = datetime.now().isoformat()
+                self._bucket_a.append(exp)
+                promoted += 1
+            elif exp.confidence < 0.5:
+                exp.status = "discarded"
+                self._archive_entry(exp)
+                discarded += 1
+            else:
+                remaining.append(exp)
+
+        self._bucket_b = remaining
+
+        # A桶溢出 → 最高置信度晋升Foundation
+        to_foundation = 0
+        if len(self._bucket_a) > self.config.bucket_a_capacity:
+            self._bucket_a.sort(key=lambda e: e.confidence, reverse=True)
+            overflow = self._bucket_a[self.config.bucket_a_capacity:]
+            self._bucket_a = self._bucket_a[:self.config.bucket_a_capacity]
+            for exp in overflow:
+                exp.bucket = "foundation"
+                exp.status = "promoted"
+                exp.promoted_at = datetime.now().isoformat()
+                self._foundation.append(exp)
+                to_foundation += 1
+            self._save_foundation()
+
+        self._save_buckets()
+
+        if promoted or discarded or to_foundation:
+            logger.info(
+                "CrossAgentEvolution: auto_review completed "
+                "(promoted=%d, discarded=%d, remaining=%d, to_foundation=%d)",
+                promoted, discarded, len(remaining), to_foundation,
+            )
+
+        return {
+            "promoted": promoted,
+            "discarded": discarded,
+            "remaining": len(remaining),
+            "to_foundation": to_foundation,
+        }
+
     def _evict_oldest_from_bucket_b(self) -> ExperienceEntry | None:
         """B 桶满时淘汰最早的未审核条目。"""
         if not self._bucket_b:

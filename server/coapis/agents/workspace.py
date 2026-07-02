@@ -893,6 +893,56 @@ class Workspace:
                     except Exception as evo_err:
                         logger.debug("Evolution on_session_start failed: %s", evo_err)
 
+                # ── Dream优化 + 轨迹清理 + B桶自动晋升 (新会话触发) ──
+                if _is_new_chat and self.evolution_engine:
+                    import time as _time
+
+                    # 1. Dream优化：每24小时整理一次 MEMORY.md
+                    try:
+                        _dream_file = self.evolution_engine.data_dir / "evolution" / "last_dream.txt"
+                        _last_dream = 0.0
+                        if _dream_file.exists():
+                            try:
+                                _last_dream = float(_dream_file.read_text().strip())
+                            except (ValueError, OSError):
+                                pass
+                        if _time.time() - _last_dream > 86400:
+                            _dream_file.parent.mkdir(parents=True, exist_ok=True)
+                            _dream_file.write_text(str(_time.time()))
+                            asyncio.create_task(
+                                self.evolution_engine._trigger_dream_optimization()
+                            )
+                            logger.info("[Dream] Triggered dream optimization (last=%.0fs ago)", _time.time() - _last_dream)
+                    except Exception as dream_err:
+                        logger.debug("[Dream] Trigger skipped: %s", dream_err)
+
+                    # 2. 轨迹清理：删除30天前的旧轨迹文件
+                    try:
+                        _traj_dir = self.evolution_engine.data_dir / "evolution" / "trajectories"
+                        if _traj_dir.exists():
+                            _cutoff = _time.time() - 30 * 86400
+                            _cleaned = 0
+                            for _f in _traj_dir.glob("*.jsonl"):
+                                if _f.stat().st_mtime < _cutoff:
+                                    _f.unlink()
+                                    _cleaned += 1
+                            if _cleaned:
+                                logger.info("[Evolution] Cleaned %d old trajectory files", _cleaned)
+                    except Exception as cleanup_err:
+                        logger.debug("[Trajectory] Cleanup skipped: %s", cleanup_err)
+
+                    # 3. B桶自动晋升：扫描并晋升高置信度经验
+                    try:
+                        if hasattr(self, 'cross_agent_evolution') and self.cross_agent_evolution:
+                            _result = self.cross_agent_evolution.auto_review_and_promote()
+                            if _result.get("promoted") or _result.get("to_foundation"):
+                                logger.info(
+                                    "[Evolution] B-bucket auto-review: %d promoted, %d to foundation",
+                                    _result.get("promoted", 0), _result.get("to_foundation", 0),
+                                )
+                    except Exception as review_err:
+                        logger.debug("[Evolution] B-bucket review skipped: %s", review_err)
+
                 # ── Evolution: on_turn_start ──
                 if self.evolution_engine:
                     try:

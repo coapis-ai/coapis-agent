@@ -468,19 +468,15 @@ class EvolutionEngine:
         auto_discarded = 0
         pending_count = 0
         for exp in experiences:
-            if exp.confidence >= 0.8:
-                # 高置信度 → 自动通过，直接写入经验库
+            if exp.confidence >= 0.5:
+                # 合理置信度 → 自动批准，直接写入经验库
                 exp.status = "approved"
-                exp.approved_by = "auto_high_confidence"
+                exp.approved_by = "auto_approved"
                 await self._save_experience(exp)
                 auto_approved += 1
-            elif exp.confidence < 0.5:
+            else:
                 # 低置信度 → 自动丢弃
                 auto_discarded += 1
-            else:
-                # 中间地带 → 进入待审核队列
-                self._pending_experiences.append(exp)
-                pending_count += 1
 
         # 如果有 knowledge_flow，提交自动通过的经验进行知识流动
         if self.knowledge_flow:
@@ -493,8 +489,8 @@ class EvolutionEngine:
                     )
 
         logger.info(
-            "EvolutionEngine: extracted %d experiences (auto_approved=%d, pending=%d, discarded=%d)",
-            len(experiences), auto_approved, pending_count, auto_discarded,
+            "EvolutionEngine: extracted %d experiences (auto_approved=%d, discarded=%d)",
+            len(experiences), auto_approved, auto_discarded,
         )
         
         logger.info(

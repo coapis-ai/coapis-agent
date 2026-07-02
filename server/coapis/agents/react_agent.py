@@ -1327,6 +1327,76 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     except Exception:
                         pass
 
+            # ── 读取已批准的进化经验 ──
+            try:
+                import json as _json
+                _exp_file = (
+                    Path(os.environ.get("COAPIS_DATA_DIR", "/data"))
+                    / "evolution" / "experiences" / "approved.jsonl"
+                )
+                if _exp_file.exists():
+                    _experiences = []
+                    for _line in _exp_file.read_text(encoding="utf-8").splitlines():
+                        _line = _line.strip()
+                        if not _line:
+                            continue
+                        try:
+                            _exp = _json.loads(_line)
+                            _exp_agent = _exp.get("source_agent", "")
+                            if _exp_agent and agent_id and _exp_agent != agent_id:
+                                continue
+                            _experiences.append(_exp)
+                        except _json.JSONDecodeError:
+                            continue
+
+                    _experiences.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+                    _top_exps = _experiences[:15]
+
+                    if _top_exps:
+                        _exp_text = "以下是从过往对话中提炼的经验教训，在回答时参考：\n"
+                        for _i, _exp in enumerate(_top_exps, 1):
+                            _title = _exp.get("title", "")
+                            _content = _exp.get("content", "")
+                            _etype = _exp.get("experience_type", "")
+                            if _title or _content:
+                                _exp_text += f"\n{_i}. [{_etype}] {_title}\n   {_content}\n"
+                        long_term_memories.append(_exp_text)
+                        logger.info(
+                            "[Evolution] Injected %d approved experiences into context",
+                            len(_top_exps),
+                        )
+            except Exception as _exp_err:
+                logger.debug("[Evolution] Failed to load experiences: %s", _exp_err)
+
+            # ── 读取全局基础层经验 ──
+            try:
+                import json as _json2
+                _found_file = (
+                    Path(os.environ.get("COAPIS_DATA_DIR", "/data"))
+                    / "cross_evolution" / "foundation.json"
+                )
+                if _found_file.exists():
+                    _found_data = _json2.loads(
+                        _found_file.read_text(encoding="utf-8")
+                    )
+                    if isinstance(_found_data, list) and _found_data:
+                        _found_data.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+                        _top_found = _found_data[:10]
+                        if _top_found:
+                            _found_text = "以下是跨智能体共享的核心经验：\n"
+                            for _i, _exp in enumerate(_top_found, 1):
+                                _title = _exp.get("title", "")
+                                _content = _exp.get("content", "")
+                                if _title or _content:
+                                    _found_text += f"\n{_i}. {_title}\n   {_content}\n"
+                            long_term_memories.append(_found_text)
+                            logger.info(
+                                "[Evolution] Injected %d foundation experiences",
+                                len(_top_found),
+                            )
+            except Exception as _found_err:
+                logger.debug("[Evolution] Failed to load foundation: %s", _found_err)
+
             # 从 request_context 获取 role（用于记忆配额控制）
             _role = self._request_context.get("role", "")
 

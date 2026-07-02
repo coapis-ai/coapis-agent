@@ -204,13 +204,21 @@ class ApprovalService:
 
     async def get_all_pending_by_session(
         self,
-        session_id: str,
+        session_id: str | None,
     ) -> list[PendingApproval]:
-        """Return all pending approvals for *session_id* (FIFO order)."""
+        """Return pending approvals, optionally filtered by session_id.
+
+        When *session_id* is None, returns ALL pending approvals across
+        all sessions (used by ConsolePollService which polls globally).
+        """
         async with self._lock:
+            if session_id is None:
+                return [
+                    p for p in self._pending.values()
+                    if p.status == "pending"
+                ]
             return [
-                p
-                for p in self._pending.values()
+                p for p in self._pending.values()
                 if p.session_id == session_id and p.status == "pending"
             ]
 
