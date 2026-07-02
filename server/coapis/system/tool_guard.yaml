@@ -7,6 +7,9 @@ access_control:
   custom_rules: []
   disabled_rules: []
 commands:
+  # ════════════════════════════════════════════════════════════════
+  #  L0: 纯只读 — 自动执行，无需审批
+  # ════════════════════════════════════════════════════════════════
   ls:
     level: L0
     desc: 列出目录内容
@@ -91,6 +94,10 @@ commands:
     level: L0
     desc: 流编辑器
     action: allow
+
+  # ════════════════════════════════════════════════════════════════
+  #  L1: 本地写操作 — 审计日志，自动执行
+  # ════════════════════════════════════════════════════════════════
   mkdir:
     level: L1
     desc: 创建目录
@@ -127,334 +134,869 @@ commands:
     level: L1
     desc: 截断文件
     action: audit
+
+  # ════════════════════════════════════════════════════════════════
+  #  L2: 网络/代码执行 — 带子命令感知和参数降级
+  # ════════════════════════════════════════════════════════════════
   curl:
     level: L2
     desc: HTTP 请求
     action: confirm
+    demotion:
+      # 只读 GET 请求（无 -X POST/PUT/DELETE、无 -d/--data、无 -F）→ 降级
+      read_only:
+        level: L1
+        action: audit
+        desc: 只读GET请求，无数据上传
+        exclude_patterns:
+          - '-X\s+(POST|PUT|DELETE|PATCH)'
+          - '-d\s'
+          - '--data'
+          - '--data-raw'
+          - '--data-binary'
+          - '--data-urlencode'
+          - '-F\s'
+          - '--form'
+          - '--upload-file'
+          - '-T\s'
+
   wget:
     level: L2
     desc: 下载文件
     action: confirm
+    demotion:
+      # 纯下载（无 --post-data/--post-file/--body-file）→ 降级
+      download_only:
+        level: L1
+        action: audit
+        desc: 纯下载文件，无数据上传
+        exclude_patterns:
+          - "--post-data"
+          - "--post-file"
+          - "--body-file"
+
   git:
     level: L2
     desc: 版本控制
     action: confirm
+    sub_commands:
+      # ── 只读子命令 → L0 ──
+      status:   { level: L0, action: allow, desc: "查看工作区状态" }
+      log:      { level: L0, action: allow, desc: "查看提交日志" }
+      show:     { level: L0, action: allow, desc: "查看提交详情" }
+      diff:     { level: L0, action: allow, desc: "查看差异" }
+      branch:   { level: L0, action: allow, desc: "查看/列出分支" }
+      tag:      { level: L0, action: allow, desc: "查看/列出标签" }
+      blame:    { level: L0, action: allow, desc: "查看行归属" }
+      shortlog: { level: L0, action: allow, desc: "提交统计" }
+      describe: { level: L0, action: allow, desc: "描述最近标签" }
+      ls-files: { level: L0, action: allow, desc: "列出跟踪文件" }
+      ls-remote: { level: L0, action: allow, desc: "列出远程引用" }
+      remote:   { level: L0, action: allow, desc: "查看远程仓库" }
+      rev-parse: { level: L0, action: allow, desc: "解析引用" }
+      # ── 本地写操作 → L1 ──
+      add:      { level: L1, action: audit, desc: "暂存文件" }
+      commit:   { level: L1, action: audit, desc: "提交变更" }
+      stash:    { level: L1, action: audit, desc: "暂存工作区" }
+      checkout: { level: L1, action: audit, desc: "切换分支/恢复文件" }
+      switch:   { level: L1, action: audit, desc: "切换分支" }
+      restore:  { level: L1, action: audit, desc: "恢复文件" }
+      merge:    { level: L1, action: audit, desc: "合并分支" }
+      rebase:   { level: L1, action: audit, desc: "变基" }
+      cherry-pick: { level: L1, action: audit, desc: "拣选提交" }
+      revert:   { level: L1, action: audit, desc: "撤销提交" }
+      clean:    { level: L1, action: audit, desc: "清理未跟踪文件" }
+      init:     { level: L1, action: audit, desc: "初始化仓库" }
+      config:   { level: L1, action: audit, desc: "配置仓库" }
+      # ── 远程操作 → L2（保持 confirm）──
+      push:     { level: L2, action: confirm, desc: "推送到远程" }
+      pull:     { level: L2, action: confirm, desc: "从远程拉取" }
+      fetch:    { level: L2, action: confirm, desc: "获取远程更新" }
+      clone:    { level: L2, action: confirm, desc: "克隆仓库" }
+      # ── 破坏性操作 → L3 ──
+      reset:    { level: L3, action: confirm, desc: "重置工作区（可能丢失变更）" }
+    demotion:
+      # git branch 无 -D/-m 时是只读
+      branch_readonly:
+        level: L0
+        action: allow
+        desc: "只读分支查看"
+        patterns:
+          - 'git\s+branch(?!\s+-[DdMm])'
+      # git branch -D/-m 是破坏性操作 → L1
+      branch_destructive:
+        level: L1
+        action: audit
+        desc: "分支破坏性操作（删除/重命名）"
+        patterns:
+          - 'git\s+branch\s+-[a-zA-Z]*[Dm]'
+          - 'git\s+branch\s+--delete'
+          - 'git\s+branch\s+--move'
+      # git checkout/switch 到新分支名（非 --force）→ L1
+      checkout_safe:
+        level: L1
+        action: audit
+        desc: "安全切换分支"
+        patterns:
+          - 'git\s+(checkout|switch)\b'
+        exclude_patterns:
+          - "--force"
+          - '-f\s'
+
   python:
     level: L2
     desc: Python 解释器
     action: confirm
+    sub_commands:
+      # 执行 .py 脚本文件 → L1
+      file: { level: L1, action: audit, desc: "执行脚本文件" }
+    demotion:
+      # 执行脚本文件（python script.py）→ L1
+      script_file:
+        level: L1
+        action: audit
+        desc: "执行脚本文件"
+        patterns:
+          - 'python[3]?\s+(-[A-Za-z]*\s+)*[\w./-]+\.py'
+      # 版本查看（python --version）→ L0
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'python[3]?\s+--version'
+
   python3:
     level: L2
     desc: Python3 解释器
     action: confirm
+    sub_commands:
+      file: { level: L1, action: audit, desc: "执行脚本文件" }
+    demotion:
+      script_file:
+        level: L1
+        action: audit
+        desc: "执行脚本文件"
+        patterns:
+          - 'python3\s+(-[A-Za-z]*\s+)*[\w./-]+\.py'
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'python3\s+--version'
+
   pip:
     level: L2
     desc: Python 包管理
     action: confirm
+    sub_commands:
+      # 只读查询 → L0
+      list:     { level: L0, action: allow, desc: "列出已安装包" }
+      show:     { level: L0, action: allow, desc: "查看包信息" }
+      freeze:   { level: L0, action: allow, desc: "导出依赖列表" }
+      check:    { level: L0, action: allow, desc: "检查依赖兼容性" }
+      # 写操作 → L2 保持 confirm
+      install:  { level: L2, action: confirm, desc: "安装包" }
+      uninstall: { level: L2, action: confirm, desc: "卸载包" }
+      download: { level: L1, action: audit, desc: "下载包（不安装）" }
+
   pip3:
     level: L2
     desc: Python3 包管理
     action: confirm
+    sub_commands:
+      list:     { level: L0, action: allow, desc: "列出已安装包" }
+      show:     { level: L0, action: allow, desc: "查看包信息" }
+      freeze:   { level: L0, action: allow, desc: "导出依赖列表" }
+      check:    { level: L0, action: allow, desc: "检查依赖兼容性" }
+      install:  { level: L2, action: confirm, desc: "安装包" }
+      uninstall: { level: L2, action: confirm, desc: "卸载包" }
+      download: { level: L1, action: audit, desc: "下载包（不安装）" }
+
   node:
     level: L2
     desc: Node.js 运行时
     action: confirm
+    sub_commands:
+      file: { level: L1, action: audit, desc: "执行脚本文件" }
+    demotion:
+      # 执行脚本文件（node script.js）→ L1
+      script_file:
+        level: L1
+        action: audit
+        desc: "执行脚本文件"
+        patterns:
+          - 'node\s+(-[A-Za-z]*\s+)*[\w./-]+\.\w+'
+      # 版本查看 → L0
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'node\s+--version'
+          - 'node\s+-v'
+
   npm:
     level: L2
     desc: Node 包管理
     action: confirm
+    sub_commands:
+      # 只读查询 → L0
+      list:    { level: L0, action: allow, desc: "列出已安装包" }
+      ls:      { level: L0, action: allow, desc: "列出已安装包" }
+      view:    { level: L0, action: allow, desc: "查看包信息" }
+      info:    { level: L0, action: allow, desc: "查看包信息" }
+      outdated: { level: L0, action: allow, desc: "查看过期包" }
+      doctor:  { level: L0, action: allow, desc: "诊断环境" }
+      config:  { level: L0, action: allow, desc: "查看配置" }
+      version: { level: L0, action: allow, desc: "查看版本" }
+      # 写操作 → L2 保持 confirm
+      install: { level: L2, action: confirm, desc: "安装依赖" }
+      i:       { level: L2, action: confirm, desc: "安装依赖（简写）" }
+      ci:      { level: L2, action: confirm, desc: "干净安装" }
+      uninstall: { level: L2, action: confirm, desc: "卸载依赖" }
+      update:  { level: L2, action: confirm, desc: "更新依赖" }
+      publish: { level: L2, action: confirm, desc: "发布包" }
+      # 脚本执行 → L1
+      run:     { level: L1, action: audit, desc: "运行脚本" }
+      start:   { level: L1, action: audit, desc: "启动项目" }
+      test:    { level: L1, action: audit, desc: "运行测试" }
+      build:   { level: L1, action: audit, desc: "构建项目" }
+
   npx:
     level: L2
     desc: Node 包执行
     action: confirm
+    demotion:
+      # 版本查看 → L0
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'npx\s+--version'
+
   java:
     level: L2
     desc: Java 运行时
     action: confirm
+    demotion:
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'java\s+--version'
+          - 'java\s+-version'
+
   javac:
     level: L2
     desc: Java 编译器
     action: confirm
+    demotion:
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'javac\s+--version'
+          - 'javac\s+-version'
+
   gcc:
     level: L2
     desc: C 编译器
     action: confirm
+    demotion:
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'gcc\s+--version'
+
   make:
     level: L2
     desc: 构建工具
     action: confirm
+    demotion:
+      # make clean / make list 等只读目标 → L1
+      safe_targets:
+        level: L1
+        action: audit
+        desc: "构建操作"
+        patterns:
+          - 'make\s+(clean|list|help|info|print-|debug)'
+
   cmake:
     level: L2
     desc: CMake 构建
     action: confirm
+    demotion:
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'cmake\s+--version'
+
   cargo:
     level: L2
     desc: Rust 包管理
     action: confirm
+    sub_commands:
+      # 只读查询 → L0
+      version:  { level: L0, action: allow, desc: "查看版本" }
+      search:   { level: L0, action: allow, desc: "搜索包" }
+      doc:      { level: L0, action: allow, desc: "生成文档" }
+      tree:     { level: L0, action: allow, desc: "查看依赖树" }
+      # 构建操作 → L1
+      build:    { level: L1, action: audit, desc: "编译项目" }
+      check:    { level: L1, action: audit, desc: "检查代码" }
+      test:     { level: L1, action: audit, desc: "运行测试" }
+      clippy:   { level: L1, action: audit, desc: "Lint检查" }
+      fmt:      { level: L1, action: audit, desc: "格式化代码" }
+      clean:    { level: L1, action: audit, desc: "清理构建" }
+      # 包管理 → L2 保持 confirm
+      install:  { level: L2, action: confirm, desc: "安装包" }
+      uninstall: { level: L2, action: confirm, desc: "卸载包" }
+      publish:  { level: L2, action: confirm, desc: "发布包" }
+
   go:
     level: L2
     desc: Go 工具链
     action: confirm
+    sub_commands:
+      # 只读查询 → L0
+      version:  { level: L0, action: allow, desc: "查看版本" }
+      env:      { level: L0, action: allow, desc: "查看环境变量" }
+      list:     { level: L0, action: allow, desc: "列出包" }
+      # 构建操作 → L1
+      build:    { level: L1, action: audit, desc: "编译项目" }
+      test:     { level: L1, action: audit, desc: "运行测试" }
+      vet:      { level: L1, action: audit, desc: "静态检查" }
+      fmt:      { level: L1, action: audit, desc: "格式化代码" }
+      clean:    { level: L1, action: audit, desc: "清理构建" }
+      # 包管理 → L2
+      get:      { level: L2, action: confirm, desc: "获取依赖" }
+      install:  { level: L2, action: confirm, desc: "安装包" }
+
   ruby:
     level: L2
     desc: Ruby 解释器
     action: confirm
+    demotion:
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'ruby\s+--version'
+          - 'ruby\s+-v'
+
   perl:
     level: L2
     desc: Perl 解释器
     action: confirm
+    demotion:
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'perl\s+--version'
+          - 'perl\s+-v'
+
   php:
     level: L2
     desc: PHP 解释器
     action: confirm
+    demotion:
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'php\s+--version'
+          - 'php\s+-v'
+
   bash:
     level: L2
     desc: Bash shell
     action: confirm
+    demotion:
+      version:
+        level: L0
+        action: allow
+        desc: "查看版本"
+        patterns:
+          - 'bash\s+--version'
+
   sh:
     level: L2
     desc: Shell
     action: confirm
+
   source:
     level: L2
     desc: 执行脚本
     action: confirm
+
   ssh:
     level: L2
     desc: 远程登录
     action: confirm
+
   scp:
     level: L2
     desc: 远程复制
     action: confirm
+
   rsync:
     level: L2
     desc: 远程同步
     action: confirm
+    demotion:
+      # dry-run 模式 → L1
+      dry_run:
+        level: L1
+        action: audit
+        desc: "Dry-run 模式，不实际传输"
+        patterns:
+          - 'rsync\s+.*--dry-run'
+          - 'rsync\s+.*-n\b'
+
   crontab:
     level: L2
     desc: 定时任务管理
     action: confirm
+    demotion:
+      # 查看定时任务 → L0
+      list:
+        level: L0
+        action: allow
+        desc: "查看定时任务"
+        patterns:
+          - 'crontab\s+-l'
+
   at:
     level: L2
     desc: 定时执行
     action: confirm
+
   jq:
     level: L2
     desc: JSON 处理
     action: confirm
+    demotion:
+      # 纯查询（无输出重定向、无 -w）→ L0
+      readonly:
+        level: L0
+        action: allow
+        desc: "JSON 查询（只读）"
+        exclude_patterns:
+          - '>\s'
+          - '\btee\b'
+          - '-f\s'
+          - "--from-file"
+          - "--rawfile"
+          - "--slurpfile"
+          - '-L\s'
+
   yq:
     level: L2
     desc: YAML 处理
     action: confirm
+    demotion:
+      readonly:
+        level: L0
+        action: allow
+        desc: "YAML 查询（只读）"
+        exclude_patterns:
+          - '>\s'
+          - '-i\b'
+          - "--inplace"
+
   xmllint:
     level: L2
     desc: XML 处理
     action: confirm
+    demotion:
+      readonly:
+        level: L0
+        action: allow
+        desc: "XML 查询（只读）"
+        exclude_patterns:
+          - '>\s'
+          - "--xpath"
+
+  # ════════════════════════════════════════════════════════════════
+  #  L3: 高危操作 — 带路径感知降级
+  # ════════════════════════════════════════════════════════════════
   rm:
     level: L3
     desc: 删除文件/目录
     action: block
+    demotion:
+      # 删除工作区内文件 → 降级为 confirm（需要确认但不直接 block）
+      safe_path:
+        level: L2
+        action: confirm
+        desc: "删除工作区内文件"
+        safe_paths:
+          - "/tmp/"
+          - "/var/tmp/"
+          - "/apps/ai/"
+          - "/home/"
+
   rmdir:
     level: L3
     desc: 删除空目录
     action: block
+    demotion:
+      safe_path:
+        level: L2
+        action: confirm
+        desc: "删除工作区内空目录"
+        safe_paths:
+          - "/tmp/"
+          - "/var/tmp/"
+          - "/apps/ai/"
+          - "/home/"
+
   tar:
     level: L3
     desc: 归档压缩
     action: block
+    demotion:
+      safe_path:
+        level: L1
+        action: audit
+        desc: "工作区内归档操作"
+        safe_paths:
+          - "/tmp/"
+          - "/var/tmp/"
+          - "/apps/ai/"
+          - "/home/"
+      list_only:
+        level: L0
+        action: allow
+        desc: "查看归档内容（不解压）"
+        patterns:
+          - 'tar\s+(-[A-Za-z]*t[A-Za-z]*|-[A-Za-z]*t)\s'
+          - 'tar\s+t[A-Za-z]*\s'
+
   zip:
     level: L3
     desc: ZIP 压缩
     action: audit
+    demotion:
+      safe_path:
+        level: L1
+        action: audit
+        desc: "工作区内压缩"
+        safe_paths:
+          - "/tmp/"
+          - "/var/tmp/"
+          - "/apps/ai/"
+          - "/home/"
+
   unzip:
     level: L3
     desc: ZIP 解压
     action: audit
+    demotion:
+      safe_path:
+        level: L1
+        action: audit
+        desc: "工作区内解压"
+        safe_paths:
+          - "/tmp/"
+          - "/var/tmp/"
+          - "/apps/ai/"
+          - "/home/"
+      list_only:
+        level: L0
+        action: allow
+        desc: "查看ZIP内容（不解压）"
+        patterns:
+          - 'unzip\s+(-[A-Za-z]*l[A-Za-z]*|-[A-Za-z]*l)\s'
+
   gzip:
     level: L3
     desc: GZ 压缩
     action: audit
+    demotion:
+      safe_path:
+        level: L1
+        action: audit
+        desc: "工作区内压缩"
+        safe_paths:
+          - "/tmp/"
+          - "/var/tmp/"
+          - "/apps/ai/"
+          - "/home/"
+
   gunzip:
     level: L3
     desc: GZ 解压
     action: audit
+    demotion:
+      safe_path:
+        level: L1
+        action: audit
+        desc: "工作区内解压"
+        safe_paths:
+          - "/tmp/"
+          - "/var/tmp/"
+          - "/apps/ai/"
+          - "/home/"
+
   kill:
     level: L3
     desc: 终止进程
     action: block
+    demotion:
+      sigterm:
+        level: L2
+        action: confirm
+        desc: "发送 SIGTERM 信号（优雅终止）"
+        exclude_patterns:
+          - '-9'
+          - 'SIGKILL'
+          - '-KILL'
+
   killall:
     level: L3
     desc: 按名称终止进程
     action: block
+    demotion:
+      sigterm:
+        level: L2
+        action: confirm
+        desc: "发送 SIGTERM 信号（优雅终止）"
+        exclude_patterns:
+          - '-9'
+          - 'SIGKILL'
+
   pkill:
     level: L3
     desc: 按模式终止进程
     action: block
+    demotion:
+      sigterm:
+        level: L2
+        action: confirm
+        desc: "发送 SIGTERM 信号（优雅终止）"
+        exclude_patterns:
+          - '-9'
+          - 'SIGKILL'
+
   nohup:
     level: L3
     desc: 后台运行
     action: audit
+
   screen:
     level: L3
     desc: 终端复用
     action: audit
+
   tmux:
     level: L3
     desc: 终端复用
     action: audit
+
   iptables:
     level: L3
     desc: 防火墙规则
     action: block
+
   ufw:
     level: L3
     desc: 防火墙管理
     action: block
+
   nc:
     level: L3
     desc: 网络调试
     action: audit
+
   nmap:
     level: L3
     desc: 端口扫描
     action: block
+
   tcpdump:
     level: L3
     desc: 抓包分析
     action: audit
+
   dd:
     level: L3
     desc: 磁盘复制
     action: block
+
   mkfs:
     level: L3
     desc: 格式化磁盘
     action: block
+
   fdisk:
     level: L3
     desc: 磁盘分区
     action: block
+
   fsck:
     level: L3
     desc: 磁盘检查
     action: block
+
   docker:
     level: L4
     desc: 容器管理
     action: block
+
   docker-compose:
     level: L4
     desc: 容器编排
     action: block
+
   podman:
     level: L4
     desc: 容器管理
     action: block
+
   systemctl:
     level: L4
     desc: 系统服务管理
     action: block
+
   service:
     level: L4
     desc: 服务管理
     action: block
+
   apt:
     level: L4
     desc: Debian 包管理
     action: block
+
   apt-get:
     level: L4
     desc: Debian 包管理
     action: block
+
   yum:
     level: L4
     desc: RPM 包管理
     action: block
+
   dnf:
     level: L4
     desc: RPM 包管理
     action: block
+
   pacman:
     level: L4
     desc: Arch 包管理
     action: block
+
   rpm:
     level: L4
     desc: RPM 包操作
     action: block
+
   dpkg:
     level: L4
     desc: Debian 包操作
     action: block
+
   snap:
     level: L4
     desc: Snap 包管理
     action: block
+
   flatpak:
     level: L4
     desc: Flatpak 包管理
     action: block
+
   reboot:
     level: L4
     desc: 重启系统
     action: block
+
   shutdown:
     level: L4
     desc: 关机
     action: block
+
   halt:
     level: L4
     desc: 停机
     action: block
+
   poweroff:
     level: L4
     desc: 断电关机
     action: block
+
   useradd:
     level: L4
     desc: 添加用户
     action: block
+
   userdel:
     level: L4
     desc: 删除用户
     action: block
+
   groupadd:
     level: L4
     desc: 添加用户组
     action: block
+
   groupdel:
     level: L4
     desc: 删除用户组
     action: block
+
   passwd:
     level: L4
     desc: 修改密码
     action: block
+
   sudo:
     level: L4
     desc: 提权执行
     action: block
+
   su:
     level: L4
     desc: 切换用户
     action: block
+
   mkfs.ext4:
     level: L3
     desc: 格式化ext4磁盘
     action: block
+
   mkfs.xfs:
     level: L3
     desc: 格式化xfs磁盘
     action: block
+
   mkfs.ntfs:
     level: L3
     desc: 格式化ntfs磁盘
     action: block
+
   mkfs.btrfs:
     level: L3
     desc: 格式化btrfs磁盘
     action: block
+
 rules:
 - id: TOOL_CMD_DANGEROUS_RM
   tools:

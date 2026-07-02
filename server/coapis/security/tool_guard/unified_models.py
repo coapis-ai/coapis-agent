@@ -46,14 +46,66 @@ class AccessControlConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class SubCommandEntry(BaseModel):
+    """Sub-command risk level override.
+
+    When a command has sub-commands (e.g. ``git status``, ``git push``),
+    the sub-command entry overrides the parent command's level/action.
+    """
+
+    level: str = Field(description="L0/L1/L2/L3/L4")
+    action: str = Field(
+        default="allow",
+        description="allow / audit / confirm / block",
+    )
+    desc: str = ""
+
+
+class DemotionRule(BaseModel):
+    """Context-aware demotion rule.
+
+    When conditions are met (safe path, read-only params, etc.),
+    the command's risk level is automatically lowered.
+    """
+
+    level: str = Field(description="Demoted level: L0/L1/L2/L3/L4")
+    action: str = Field(description="Demoted action: allow / audit / confirm / block")
+    desc: str = ""
+    # ── Condition: pattern matching ──
+    patterns: list[str] = Field(
+        default_factory=list,
+        description="Demote when command matches ANY of these patterns (OR logic)",
+    )
+    exclude_patterns: list[str] = Field(
+        default_factory=list,
+        description="Do NOT demote when command matches ANY of these (overrides patterns)",
+    )
+    # ── Condition: path safety ──
+    safe_paths: list[str] = Field(
+        default_factory=list,
+        description="Demote when all paths in command fall under these prefixes",
+    )
+
+
 class CommandEntry(BaseModel):
-    """A single command with its risk level and default action."""
+    """A single command with its risk level, default action, and optional
+    sub-command / demotion configuration."""
 
     level: str = Field(description="L0/L1/L2/L3/L4")
     desc: str = ""
     action: str = Field(
         default="allow",
         description="Default action: allow / audit / confirm / block",
+    )
+    # ── Sub-command overrides ──
+    sub_commands: dict[str, SubCommandEntry] = Field(
+        default_factory=dict,
+        description="Sub-command level overrides, e.g. git.status → L0",
+    )
+    # ── Demotion rules ──
+    demotion: dict[str, DemotionRule] = Field(
+        default_factory=dict,
+        description="Demotion rules that lower risk when conditions are met",
     )
 
 

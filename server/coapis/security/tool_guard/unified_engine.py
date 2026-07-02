@@ -148,6 +148,194 @@ def _extract_command_name(command_str: str) -> str | None:
     return None
 
 
+def _extract_sub_command(command_str: str, cmd_name: str | None) -> str | None:
+    """Extract the sub-command from a shell command string.
+
+    For ``git status`` → ``status``, ``npm install --save`` → ``install``.
+    Skips flags (``-v``, ``--help``) to find the first positional arg
+    after the command name.
+    """
+    if not cmd_name:
+        return None
+    import shlex
+    try:
+        tokens = shlex.split(command_str, posix=True)
+    except ValueError:
+        tokens = command_str.split()
+
+    skip_prefixes = {"sudo", "doas", "pkexec", "time", "nice", "nohup"}
+    skip_env_prefixes = {"env", "export"}
+
+    found_cmd = False
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in skip_prefixes:
+            i += 1
+            continue
+        if tok in skip_env_prefixes:
+            i += 1
+            while i < len(tokens) and "=" in tokens[i] and not tokens[i].startswith("-"):
+                i += 1
+            continue
+        if "=" in tok and not tok.startswith("-") and tok[0].isalpha():
+            i += 1
+            continue
+        if not found_cmd:
+            # This should be cmd_name
+            if tok == cmd_name:
+                found_cmd = True
+            i += 1
+            continue
+        # After cmd_name, skip flags to find sub-command
+        if tok.startswith("-"):
+            # Flags with values: -X POST, --data '...'
+            if tok in ("-X", "-d", "-F", "-T", "-o", "-O", "-L", "-e", "-A", "-H"):
+                i += 2  # skip flag + value
+                continue
+            i += 1
+            continue
+        # First non-flag token after cmd_name = sub-command
+        return tok
+    return None
+
+
+def _extract_paths_from_command(command_str: str) -> list[str]:
+    """Extract file/directory paths from a command string.
+
+    Returns paths that look like absolute or relative file references.
+    """
+    import shlex
+    try:
+        tokens = shlex.split(command_str, posix=True)
+    except ValueError:
+        tokens = command_str.split()
+
+    paths = []
+    skip_next = False
+    for tok in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        # Skip flags
+        if tok.startswith("-"):
+            # flags that take a value argument
+            if tok in ("-X", "-d", "-F", "-T", "-o", "-O", "-e", "-A", "-H", "--output",
+                        "--data", "--data-raw", "--data-binary", "--data-urlencode",
+                        "--form", "--upload-file", "--post-data", "--post-file", "--body-file"):
+                skip_next = True
+            continue
+        # Skip env assignments
+        if "=" in tok and not tok.startswith("-") and tok[0].isalpha():
+            continue
+        # Skip URLs (http://, https://, ftp://)
+        if "://" in tok:
+            continue
+        # Skip command names (single word, no slashes or dots)
+        if "/" not in tok and "." not in tok and not tok.startswith("."):
+            continue
+        paths.append(tok)
+    return paths
+
+
+def _apply_demotion_rules(
+    command_str: str,
+    cmd_name: str | None,
+    current_level: str,
+    current_action: str,
+    demotion_rules: dict[str, Any],
+) -> tuple[str, str, str]:
+    """Apply demotion rules to potentially lower the risk level.
+
+    Returns (new_level, new_action, reason).
+    """
+    if not demotion_rules:
+        return current_level, current_action, ""
+
+    paths = _extract_paths_from_command(command_str)
+
+    # Level priority: L0 < L1 < L2 < L3 < L4
+    _LEVEL_ORDER = {"L0": 0, "L1": 1, "L2": 2, "L3": 3, "L4": 4}
+
+    best_match: tuple[str, str, str] | None = None
+    best_level_val = _LEVEL_ORDER.get(current_level, 99)
+
+    for rule_name, rule in demotion_rules.items():
+        matched = False
+
+        # ── Check safe_paths condition ──
+        if rule.safe_paths and paths:
+            # All paths must fall under at least one safe prefix.
+            # Relative paths (not starting with '/') are considered in-workspace.
+            all_safe = True
+            for p in paths:
+                if not p.startswith("/"):
+                    continue  # relative → in-workspace → safe
+                if not any(p.startswith(prefix) for prefix in rule.safe_paths):
+                    all_safe = False
+                    break
+            if all_safe:
+                matched = True
+
+        else:
+            # ── patterns + exclude_patterns are AND logic ──
+            # Step 1: if patterns defined, command MUST match at least one
+            if rule.patterns:
+                pat_matched = False
+                for p in rule.patterns:
+                    try:
+                        if re.search(p, command_str, re.IGNORECASE):
+                            pat_matched = True
+                            break
+                    except re.error:
+                        continue
+                if not pat_matched:
+                    # patterns defined but none matched → skip this rule
+                    pass
+                else:
+                    # Step 2: if exclude_patterns also defined, command must NOT match any
+                    if rule.exclude_patterns:
+                        excluded = False
+                        for ep in rule.exclude_patterns:
+                            try:
+                                if re.search(ep, command_str, re.IGNORECASE):
+                                    excluded = True
+                                    break
+                            except re.error:
+                                continue
+                        if not excluded:
+                            matched = True
+                    else:
+                        matched = True
+
+            elif rule.exclude_patterns:
+                # Only exclude_patterns (no patterns) → demote unless excluded
+                excluded = False
+                for ep in rule.exclude_patterns:
+                    try:
+                        if re.search(ep, command_str, re.IGNORECASE):
+                            excluded = True
+                            break
+                    except re.error:
+                        continue
+                if not excluded:
+                    matched = True
+
+            elif not rule.safe_paths and not rule.patterns and not rule.exclude_patterns:
+                # No conditions → unconditional demotion
+                matched = True
+
+        if matched:
+            rule_level_val = _LEVEL_ORDER.get(rule.level, 99)
+            if rule_level_val < best_level_val:
+                best_level_val = rule_level_val
+                best_match = (rule.level, rule.action, f"demotion:{rule_name} — {rule.desc}")
+
+    if best_match:
+        return best_match
+    return current_level, current_action, ""
+
+
 # ---------------------------------------------------------------------------
 # Result dict
 # ---------------------------------------------------------------------------
@@ -339,6 +527,38 @@ class UnifiedToolGuardEngine:
             return []
 
     # ------------------------------------------------------------------
+    # Audit helper
+    # ------------------------------------------------------------------
+
+    def _audit_log_safely(
+        self,
+        action: str,
+        cmd_name: str | None,
+        command_str: str,
+        level: str,
+        reason: str,
+        matched_rules: list[dict[str, Any]],
+        evasion_flags: list[dict[str, Any]],
+    ) -> None:
+        """Write audit log for audit/confirm/block actions."""
+        if action not in ("audit", "confirm", "block"):
+            return
+        try:
+            from coapis.security.audit_logger import SecurityAuditLogger
+            audit = SecurityAuditLogger.get_instance()
+            if audit:
+                audit.log_command_block(
+                    user="system",
+                    command=cmd_name or command_str,
+                    level=level,
+                    action=action,
+                    reason=reason,
+                    matched_rules=matched_rules,
+                )
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
     # Core: process_command
     # ------------------------------------------------------------------
 
@@ -386,18 +606,59 @@ class UnifiedToolGuardEngine:
 
         # ── Layer 2: Command Classification ──
         level, cmd_name = self.get_command_level(command_str)
+        demotion_reason = ""
+        # effective_action: the action that will actually be used (may be overridden by sub-command/demotion)
+        effective_action: str | None = None
 
-        # L0 → allow immediately (skip rules + evasion)
-        if level == "L0":
+        # ── Layer 2.5: Sub-command Lookup + Demotion ──
+        # Demotion rules take PRIORITY over sub-command lookup because they
+        # match on specific parameters (e.g. `git branch -D` vs `git branch`).
+        # When either matches, the result is FINAL — Pattern Rules (Layer 3)
+        # are skipped because they match on static command names and would
+        # override the context-aware demotion.
+        if cmd_name and cmd_name in self._config.commands:
+            entry = self._config.commands[cmd_name]
+
+            # Demotion rules FIRST: lower level when safe context detected
+            if entry.demotion:
+                new_level, new_action, reason = _apply_demotion_rules(
+                    command_str, cmd_name, level or "L0", entry.action, entry.demotion,
+                )
+                if reason:
+                    level = new_level
+                    effective_action = new_action
+                    demotion_reason = reason
+
+            # Sub-command override (only if no demotion matched)
+            if not demotion_reason:
+                sub_cmd = _extract_sub_command(command_str, cmd_name)
+                if sub_cmd and sub_cmd in entry.sub_commands:
+                    sc = entry.sub_commands[sub_cmd]
+                    level = sc.level
+                    effective_action = sc.action if sc.action else entry.action
+                    demotion_reason = f"sub_command:{sub_cmd}"
+
+        # ── Layer 2.6: Sub-command / demotion fast-path ──
+        # If Layer 2.5 produced a result, return immediately (skip Pattern Rules).
+        if demotion_reason:
+            # L0 after demotion → allow immediately
+            if level == "L0":
+                effective_action = "allow"
+            final_action = effective_action or "allow"
+            if final_action in ("audit", "confirm"):
+                self._audit_log_safely(
+                    final_action, cmd_name, command_str, level or "L0",
+                    demotion_reason, [], [],
+                )
             return _make_result(
-                action="allow",
+                action=final_action,
                 level=level,
                 command=cmd_name or command_str,
-                reason="L0 command — read-only, zero risk",
+                reason=demotion_reason,
                 duration_ms=(time.monotonic() - t0) * 1000,
             )
 
-        # ── Layer 3: Pattern Rules ──
+        # ── Layer 3: Pattern Rules (only for non-demoted commands) ──
         rule_matches = self.match_rules(command_str, cmd_name)
         matched_rules = []
         for rule, match in rule_matches:
@@ -427,32 +688,14 @@ class UnifiedToolGuardEngine:
                 "description": ef.description,
             })
 
-        # ── Decision ──
-        # If evasion detected + L3/L4 → block
-        # If rule matched with action=block → block
-        # If rule matched with action=audit → audit
-        # Otherwise → use command-level default action
-
-        def _audit_log(action: str, reason: str) -> None:
-            """Write audit log for audit/confirm/block actions."""
-            if action in ("audit", "confirm", "block"):
-                try:
-                    from coapis.security.audit_logger import SecurityAuditLogger
-                    audit = SecurityAuditLogger.get_instance()
-                    if audit:
-                        audit.log_command_block(
-                            user="system",
-                            command=cmd_name or command_str,
-                            level=level or "L0",
-                            action=action,
-                            reason=reason,
-                            matched_rules=matched_rules,
-                        )
-                except Exception:
-                    pass
+        # ── Decision (for non-demoted commands) ──
 
         if blocked_rule:
-            _audit_log("block", f"Rule {blocked_rule['id']}: {blocked_rule['description']}")
+            self._audit_log_safely(
+                "block", cmd_name, command_str, level or "L0",
+                f"Rule {blocked_rule['id']}: {blocked_rule['description']}",
+                matched_rules, evasion_flags,
+            )
             return _make_result(
                 action="block",
                 level=level,
@@ -464,7 +707,11 @@ class UnifiedToolGuardEngine:
             )
 
         if evasion_flags and level in ("L3", "L4"):
-            _audit_log("block", f"Evasion detected on {level} command")
+            self._audit_log_safely(
+                "block", cmd_name, command_str, level or "L0",
+                f"Evasion detected on {level} command",
+                matched_rules, evasion_flags,
+            )
             return _make_result(
                 action="block",
                 level=level,
@@ -476,8 +723,11 @@ class UnifiedToolGuardEngine:
             )
 
         if matched_rules or evasion_flags:
-            # Some findings but no block → audit
-            _audit_log("audit", "Findings detected but no block condition met")
+            self._audit_log_safely(
+                "audit", cmd_name, command_str, level or "L0",
+                "Findings detected but no block condition met",
+                matched_rules, evasion_flags,
+            )
             return _make_result(
                 action="audit",
                 level=level,
@@ -492,11 +742,16 @@ class UnifiedToolGuardEngine:
         cmd_entry = self._config.commands.get(cmd_name) if cmd_name else None
         default_action = cmd_entry.action if cmd_entry else "allow"
         if default_action in ("audit", "confirm"):
-            _audit_log(default_action, f"Command-level default: {default_action}")
+            self._audit_log_safely(
+                default_action, cmd_name, command_str, level or "L0",
+                f"Command-level default: {default_action}",
+                [], [],
+            )
         return _make_result(
             action=default_action,
             level=level,
             command=cmd_name or command_str,
+            reason=f"Command-level default: {default_action}",
             duration_ms=(time.monotonic() - t0) * 1000,
         )
 
