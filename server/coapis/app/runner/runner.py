@@ -350,6 +350,10 @@ class AgentRunner(Runner):
         # session_id (e.g. "console:admin") is shared across all chats
         # and would cause messages to overwrite each other.
         # chat_id is unique per chat, stored at agents/{agent_id}/sessions/{chat_id}.json
+        #
+        # IMPORTANT: session file write is in its own try/except so that a
+        # write failure (disk full, permission) does NOT prevent the chat
+        # metadata (rename, etc.) from being committed above.
         try:
             session = self.session  # SafeJSONSession from Runner base
             if session is None:
@@ -1245,28 +1249,56 @@ class AgentRunner(Runner):
             # produced partial output in _evolution_full_response.  We must
             # write that into agent.memory so that save_session_state in
             # the finally block captures the full conversation context.
-            if agent is not None and _evolution_full_response:
-                partial_text = "".join(_evolution_full_response).strip()
-                if partial_text:
+            if agent is not None and agent.memory:
+                # Ensure user message is in memory even on ultra-early cancel
+                # (before agent yields anything). This guarantees the user's
+                # input survives regardless of cancellation timing.
+                _has_user_msg = any(
+                    getattr(m, "role", "") == "user"
+                    for m, _ in agent.memory.content
+                )
+                if not _has_user_msg and query and query.strip():
                     try:
                         await agent.memory.add(
                             Msg(
-                                name="assistant",
-                                content=[TextBlock(text=partial_text)],
-                                role="assistant",
+                                name="user",
+                                content=[TextBlock(text=query)],
+                                role="user",
                             ),
                         )
                         logger.info(
-                            "CancelledError: persisted %d chars of "
-                            "partial assistant response to memory",
-                            len(partial_text),
+                            "CancelledError: added missing user message "
+                            "to memory (%d chars)",
+                            len(query),
                         )
                     except Exception as mem_exc:
                         logger.warning(
-                            "Failed to persist partial assistant "
-                            "response on cancel: %s",
+                            "Failed to add user message on cancel: %s",
                             mem_exc,
                         )
+
+                if _evolution_full_response:
+                    partial_text = "".join(_evolution_full_response).strip()
+                    if partial_text:
+                        try:
+                            await agent.memory.add(
+                                Msg(
+                                    name="assistant",
+                                    content=[TextBlock(text=partial_text)],
+                                    role="assistant",
+                                ),
+                            )
+                            logger.info(
+                                "CancelledError: persisted %d chars of "
+                                "partial assistant response to memory",
+                                len(partial_text),
+                            )
+                        except Exception as mem_exc:
+                            logger.warning(
+                                "Failed to persist partial assistant "
+                                "response on cancel: %s",
+                                mem_exc,
+                            )
 
             if agent is not None:
                 await agent.interrupt()

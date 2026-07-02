@@ -229,7 +229,11 @@ class SafeJSONSession(SessionBase):
         user_id: str = "",
         **state_modules_mapping,
     ) -> None:
-        """Save state modules to a JSON file using async I/O."""
+        """Save state modules to a JSON file using atomic async I/O.
+
+        Writes to a .tmp file first, then renames atomically to prevent
+        corruption on crash/power-loss.
+        """
         state_dicts = {
             name: state_module.state_dict()
             for name, state_module in state_modules_mapping.items()
@@ -237,17 +241,36 @@ class SafeJSONSession(SessionBase):
         # Ensure content blocks always have 'type' for proper history rendering
         _ensure_content_block_types(state_dicts)
         session_save_path = self._get_save_path(session_id, user_id=user_id)
-        with open(
-            session_save_path,
-            "w",
-            encoding="utf-8",
-        ) as f:
-            f.write(json.dumps(state_dicts, ensure_ascii=False))
-
-        logger.info(
-            "Saved session state to %s successfully.",
-            session_save_path,
-        )
+        tmp_path = session_save_path + ".tmp"
+        try:
+            async with aiofiles.open(
+                tmp_path, "w", encoding="utf-8",
+            ) as f:
+                await f.write(json.dumps(state_dicts, ensure_ascii=False))
+                await f.flush()
+                # Force flush to disk before rename
+                try:
+                    os.fsync(f.fileno())
+                except (AttributeError, OSError):
+                    pass  # aiofiles may not expose fileno
+            os.replace(tmp_path, session_save_path)
+            logger.info(
+                "Saved session state to %s successfully.",
+                session_save_path,
+            )
+        except Exception:
+            logger.error(
+                "Failed to save session state to %s",
+                session_save_path,
+                exc_info=True,
+            )
+            # Clean up tmp file on failure
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
 
     async def load_session_state(
         self,
@@ -301,17 +324,30 @@ class SafeJSONSession(SessionBase):
         user_id: str = "",
         create_if_not_exist: bool = True,
     ) -> None:
+        """Update a key in the session state file using atomic async I/O.
+
+        Reads the existing state, merges the new key-value pair, then writes
+        atomically (tmp + rename) to prevent corruption on crash/power-loss.
+        """
         session_save_path = self._get_save_path(session_id, user_id=user_id)
 
         if os.path.exists(session_save_path):
-            async with aiofiles.open(
-                session_save_path,
-                "r",
-                encoding="utf-8",
-                errors="surrogatepass",
-            ) as f:
-                content = await f.read()
-                states = _safe_json_loads(content, session_save_path)
+            try:
+                async with aiofiles.open(
+                    session_save_path,
+                    "r",
+                    encoding="utf-8",
+                    errors="surrogatepass",
+                ) as f:
+                    content = await f.read()
+                    states = _safe_json_loads(content, session_save_path)
+            except Exception:
+                logger.error(
+                    "Failed to read session state from %s, starting fresh",
+                    session_save_path,
+                    exc_info=True,
+                )
+                states = {}
 
         else:
             if not create_if_not_exist:
@@ -338,18 +374,36 @@ class SafeJSONSession(SessionBase):
         # Ensure content blocks always have 'type' for proper history rendering
         _ensure_content_block_types(states)
 
-        with open(
-            session_save_path,
-            "w",
-            encoding="utf-8",
-        ) as f:
-            f.write(json.dumps(states, ensure_ascii=False))
-
-        logger.info(
-            "Updated session state key '%s' in %s successfully.",
-            key,
-            session_save_path,
-        )
+        tmp_path = session_save_path + ".tmp"
+        try:
+            async with aiofiles.open(
+                tmp_path, "w", encoding="utf-8",
+            ) as f:
+                await f.write(json.dumps(states, ensure_ascii=False))
+                await f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except (AttributeError, OSError):
+                    pass
+            os.replace(tmp_path, session_save_path)
+            logger.info(
+                "Updated session state key '%s' in %s successfully.",
+                key,
+                session_save_path,
+            )
+        except Exception:
+            logger.error(
+                "Failed to update session state key '%s' in %s",
+                key,
+                session_save_path,
+                exc_info=True,
+            )
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
 
     async def get_session_state_dict(
         self,
