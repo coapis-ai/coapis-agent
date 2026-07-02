@@ -82,13 +82,6 @@ def _default_ctx() -> dict[str, Any]:
     }
 
 
-@register_tool(
-    name="context_manager",
-    description="工作上下文管理：跟踪当前任务、打开的文件、待办事项、关键决策，帮助 Agent 在多轮对话中保持连贯。",
-    category="builtin",
-    tags=["context", "workflow", "state"],
-    scene="core"
-)
 async def context_manager(
     action: str = "get",
     key: str = "",

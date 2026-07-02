@@ -76,13 +76,6 @@ async def _run_cmd(cmd: list[str], stdin: str = "", timeout: int = _TIMEOUT) -> 
         return {"returncode": -1, "stdout": "", "stderr": str(e)}
 
 
-@register_tool(
-    name="clipboard_ops",
-    description="剪贴板操作：读取/写入系统剪贴板（支持 Linux xclip/xsel 和 Mac pbcopy/pbpaste）。",
-    category="builtin",
-    tags=["clipboard", "system", "utility"],
-    scene="core"
-)
 async def clipboard_ops(
     action: str = "read",
     text: str = "",

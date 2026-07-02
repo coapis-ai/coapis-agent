@@ -104,13 +104,6 @@ def _queue_list() -> dict:
     return {"queues": {k: len(v) for k, v in _queues.items()}, "total": len(_queues)}
 
 
-@register_tool(
-    name="data_store",
-    description="数据存储。三种模式: action=db(sqlite,参数sql='SELECT * FROM t'), action=cache(缓存,参数key/value/ttl), action=queue(队列,参数queue/message)。示例: cache+key='k'+value='v'",
-    category="builtin",
-    tags=["data", "storage", "database", "cache", "queue"],
-    scene="data",
-)
 async def data_store(
     action: str = "db",
     sql: str = "",

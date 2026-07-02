@@ -87,13 +87,6 @@ def _parse_env_file(path: Path) -> list[dict[str, str]]:
     return entries
 
 
-@register_tool(
-    name="env_manager",
-    description="环境变量管理：读取/设置/列出环境变量，管理 .env 文件。",
-    category="builtin",
-    tags=["env", "config", "system"],
-    scene="security"
-)
 async def env_manager(
     action: str = "list",
     key: str = "",

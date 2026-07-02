@@ -199,13 +199,6 @@ def _match_files(
     return results
 
 
-@register_tool(
-    name="data_ops",
-    description="数据操作。action=read(读取csv/json), action=write(写入), action=filter(过滤), action=stats(统计)。参数: file_path, field, op(eq/gt/lt), value。仅支持CSV/JSON格式文件。",
-    category="builtin",
-    tags=["data", "csv", "json", "batch", "file"],
-    scene="data",
-)
 async def data_ops(
     action: str = "read",
     # Data processor params

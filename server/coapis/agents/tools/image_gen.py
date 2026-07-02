@@ -136,13 +136,6 @@ async def _local_fallback(prompt: str, width: int, height: int) -> dict[str, Any
     }
 
 
-@register_tool(
-    name="image_gen",
-    description="文本生成图像。支持 prompt/size/style 参数，优先 FAL API，无 key 时生成占位图。",
-    category="builtin",
-    tags=["image", "generation", "creative"],
-    scene="ai"
-)
 async def image_gen(
     prompt: str = "",
     size: str = "1024x1024",

@@ -108,13 +108,6 @@ def _format_side_by_side(
     return "\n".join(output)
 
 
-@register_tool(
-    name="file_diff",
-    description="文件差异对比。参数: file_a(第一个文件), file_b(第二个文件), context(上下文行数,默认3), mode(unified/side_by_side)。示例: file_a='/path/a.py'+file_b='/path/b.py'",
-    category="builtin",
-    tags=["file", "diff", "comparison"],
-    scene="coding"
-)
 async def file_diff(
     file_a: str = "",
     file_b: str = "",

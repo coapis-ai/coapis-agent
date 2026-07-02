@@ -119,13 +119,6 @@ def _get_workspace() -> Path:
     return Path.cwd()
 
 
-@register_tool(
-    name="security_ops",
-    description="安全操作合并工具：审计日志(SHA-256链式哈希防篡改) + 加密工具(hash/hmac/base64)。",
-    category="builtin",
-    tags=["security", "audit", "crypto", "hash"],
-    scene="security",
-)
 async def security_ops(
     action: str = "log",
     # audit params

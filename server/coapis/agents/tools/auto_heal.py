@@ -212,13 +212,6 @@ async def _apply_fix(fix_action: str) -> dict[str, Any]:
         return {"action": fix_action, "success": False, "error": "不可自动修复"}
 
 
-@register_tool(
-    name="auto_heal",
-    description="自动修复。action: scan(扫描系统问题), fix(修复指定问题,需issue_id), fix_all(修复所有问题), history(查看修复历史)。参数: action, fix, dry_run, issue_id。",
-    category="builtin",
-    tags=["healing", "self-repair", "ops"],
-    scene="ops"
-)
 async def auto_heal(
     action: str = "scan",
     fix: str = "",

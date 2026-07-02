@@ -81,13 +81,6 @@ def _save_index(entries: list[dict[str, Any]]) -> None:
 
 # ── Tool implementation ───────────────────────────────────────────────
 
-@register_tool(
-    name="memory_manager",
-    description="结构化长期记忆管理。支持 add/search/remove/list 操作，JSON 索引存储。支持分类标签(tags)和重要度评分(score)。",
-    category="builtin",
-    tags=["memory", "knowledge"],
-    scene="core"
-)
 async def memory_manager(
     action: str = "list",
     key: str = "",

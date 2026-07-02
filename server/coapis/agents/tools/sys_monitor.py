@@ -85,13 +85,6 @@ def _add_span(trace_id: str, name: str) -> dict:
     return {"trace_id": trace_id, "span_name": name}
 
 
-@register_tool(
-    name="sys_monitor",
-    description="系统监控。action: perf(CPU/内存/磁盘/网络指标), http(HTTP服务探活,需url), trace(分布式追踪,需trace_id)。参数: action, url, host, port。",
-    category="builtin",
-    tags=["ops", "monitoring", "performance", "health", "trace"],
-    scene="ops",
-)
 async def sys_monitor(
     action: str = "perf",
     host: str = "127.0.0.1",

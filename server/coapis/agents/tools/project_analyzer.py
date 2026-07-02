@@ -200,13 +200,6 @@ def _build_tree(root: Path, max_depth: int = _MAX_TREE_DEPTH, prefix: str = "") 
     return lines
 
 
-@register_tool(
-    name="project_analyzer",
-    description="项目结构分析：扫描 workspace 目录结构、统计语言分布、识别项目类型。帮助 Agent 快速了解项目。",
-    category="builtin",
-    tags=["project", "analysis", "structure"],
-    scene="coding"
-)
 async def project_analyzer(
     action: str = "overview",
     path: str = "",

@@ -60,13 +60,6 @@ def _resolve(path_str: str) -> Path | None:
     return resolved if resolved.exists() else None
 
 
-@register_tool(
-    name="archive_ops",
-    description="压缩解压。参数: action(compress/decompress/list), source(源路径), dest(目标路径), format(zip/tar/tar.gz), password(密码,仅zip)。示例: compress+source='/path/to/dir'+dest='/tmp/out.zip'",
-    category="builtin",
-    tags=["archive", "compress", "file"],
-    scene="data"
-)
 async def archive_ops(
     action: str = "list",
     source: str = "",

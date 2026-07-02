@@ -176,13 +176,6 @@ def _check_budgets(state: dict[str, Any], budgets: dict[str, Any]) -> list[dict[
     return violations
 
 
-@register_tool(
-    name="resource_guard",
-    description="资源守卫：Agent 自身资源预算管理（token 限额/调用频率/内存上限），结合 context_manager 跟踪状态 + tool_stats 统计，超限时自动拦截并建议降级。",
-    category="builtin",
-    tags=["guard", "budget", "resource", "safety"],
-    scene="security"
-)
 async def resource_guard(
     action: str = "status",
     budgets: str = "",

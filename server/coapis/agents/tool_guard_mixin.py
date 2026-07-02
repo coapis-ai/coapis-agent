@@ -175,16 +175,24 @@ class ToolGuardMixin:
     # _acting override
     # ------------------------------------------------------------------
 
+    def _get_tool_call_guard(self):
+        """Get or create the per-session ToolCallGuard instance."""
+        if not hasattr(self, "_tool_call_guard"):
+            from .utils.tool_call_guard import ToolCallGuard
+            self._tool_call_guard = ToolCallGuard()
+        return self._tool_call_guard
+
     async def _acting(self, tool_call) -> dict | None:  # noqa: C901
         """Intercept sensitive tool calls before execution.
 
-        1. If tool is in *denied_tools*, auto-deny unconditionally.
-        2. If tool is in the guarded scope, check for a one-shot
+        1. **ToolCallGuard**: dedup and rate-limit check (NEW)
+        2. If tool is in *denied_tools*, auto-deny unconditionally.
+        3. If tool is in the guarded scope, check for a one-shot
            pre-approval, then run all guardians.
-        3. For non-guarded tools, run only ``always_run`` guardians
+        4. For non-guarded tools, run only ``always_run`` guardians
            (e.g. sensitive file path checks).
-        4. If findings exist, enter the approval flow.
-        5. Otherwise, delegate to ``super()._acting``.
+        5. If findings exist, enter the approval flow.
+        6. Otherwise, delegate to ``super()._acting``.
 
         The guard *decision* block is serialised via ``_tool_guard_lock``
         so that ``parallel_tool_calls=True`` does not cause state races
@@ -193,6 +201,23 @@ class ToolGuardMixin:
         true parallelism.
         """
         ctx = getattr(self, "_request_context", None) or {}
+
+        # ── ToolCallGuard: programmatic dedup & rate limiting ──
+        try:
+            tool_name = getattr(tool_call, "name", "") or ""
+            tool_input = getattr(tool_call, "input", {}) or {}
+            guard = self._get_tool_call_guard()
+            dedup_result = guard.check_and_dedup(tool_name, tool_input)
+            if dedup_result is not None:
+                from agentscope.message import TextBlock
+                from agentscope.tool import ToolResponse
+                # Return dedup/warning as tool result directly
+                return {
+                    "content": [TextBlock(type="text", text=dedup_result)],
+                    "metadata": {"tool_call_id": getattr(tool_call, "id", "")},
+                }
+        except Exception:
+            pass  # Non-blocking: if guard unavailable, proceed
         # TODO: remove this
         if ctx.get("_headless_tool_guard", "true").lower() == "false":
             return await super()._acting(tool_call)  # type: ignore[misc]
@@ -244,7 +269,29 @@ class ToolGuardMixin:
         if action is not None:
             return await self._execute_guard_action(action, tool_call)
 
-        return await super()._acting(tool_call)  # type: ignore[misc]
+        result = await super()._acting(tool_call)  # type: ignore[misc]
+
+        # ── Record tool call result for dedup cache ──
+        try:
+            tool_name = getattr(tool_call, "name", "") or ""
+            tool_input = getattr(tool_call, "input", {}) or {}
+            result_text = ""
+            if result and isinstance(result, dict):
+                content = result.get("content", [])
+                if content:
+                    for block in content:
+                        if hasattr(block, "text"):
+                            result_text += block.text
+                        elif isinstance(block, dict):
+                            result_text += block.get("text", "")
+            if tool_name and result_text:
+                self._get_tool_call_guard().record(
+                    tool_name, tool_input, result_text,
+                )
+        except Exception:
+            pass  # Non-blocking
+
+        return result
 
     # pylint: disable=too-many-return-statements
     async def _decide_guard_action(

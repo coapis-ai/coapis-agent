@@ -96,13 +96,6 @@ def _review_code(code: str, language: str = "python") -> dict:
     return {"issues": issues, "total": len(issues), "status": "ok"}
 
 
-@register_tool(
-    name="code_quality",
-    description="代码质量工具：统一格式化(format)、文档生成(docgen)、代码审查(review)。支持 Python/JS/TS。",
-    category="builtin",
-    tags=["code", "quality", "format", "review", "documentation"],
-    scene="coding",
-)
 async def code_quality(
     action: str = "review",
     code: str = "",

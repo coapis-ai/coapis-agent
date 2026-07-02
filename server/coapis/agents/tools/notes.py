@@ -67,13 +67,6 @@ def _save_notes(notes: list[dict[str, Any]]) -> None:
     )
 
 
-@register_tool(
-    name="notes",
-    description="轻量级会话笔记：快速记录/查找/删除临时笔记，与 memory_manager（长期记忆）互补。",
-    category="builtin",
-    tags=["notes", "session", "temporary"],
-    scene="data"
-)
 async def notes(
     action: str = "list",
     content: str = "",

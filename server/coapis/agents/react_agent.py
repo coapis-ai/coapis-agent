@@ -258,6 +258,31 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self.formatter = formatter
         self.max_iters = running_config.max_iters
 
+        # ── ToolSchemaRouter: dynamic schema trimming ──
+        from .utils.tool_schema_router import ToolSchemaRouter
+        self._schema_router = ToolSchemaRouter()
+        self._enable_full_schemas = False  # Toggle via /tools full
+        # Wrap toolkit.get_json_schemas to apply per-turn filtering
+        _original_get_schemas = self.toolkit.get_json_schemas
+
+        def _filtered_get_schemas():
+            all_schemas = _original_get_schemas()
+            if self._enable_full_schemas:
+                return all_schemas
+            try:
+                # Get recent messages for intent detection
+                recent = []
+                if hasattr(self, "memory"):
+                    # memory is async, but get_json_schemas is sync
+                    # Use last cached messages if available
+                    if hasattr(self, "_recent_tool_msgs"):
+                        recent = self._recent_tool_msgs
+                return self._schema_router.route(all_schemas, recent)
+            except Exception:
+                return all_schemas
+
+        self.toolkit.get_json_schemas = _filtered_get_schemas
+
         # Configure agentscope built-in memory compression
         self.compression_config = self._build_compression_config(
             running_config, model
@@ -2030,6 +2055,49 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         Calls ``super()._reasoning`` to keep the ToolGuardMixin
         interception active.
         """
+        # --- Cache recent messages for ToolSchemaRouter ---
+        try:
+            memory_msgs = await self.memory.get_memory()
+            self._recent_tool_msgs = [
+                {"content": m.get("content", ""), "role": m.get("role", "")}
+                for m in memory_msgs[-5:]
+            ]
+        except Exception:
+            self._recent_tool_msgs = []
+
+        # --- Thinking budget control ---
+        try:
+            from .utils.thinking_budget import ThinkingBudgetManager
+            if not hasattr(self, "_thinking_budget_mgr"):
+                self._thinking_budget_mgr = ThinkingBudgetManager()
+            # Classify from the last user message
+            user_query = ""
+            if self._recent_tool_msgs:
+                for m in reversed(self._recent_tool_msgs):
+                    if m.get("role") == "user":
+                        content = m.get("content", "")
+                        if isinstance(content, str):
+                            user_query = content
+                        elif isinstance(content, list):
+                            for block in content:
+                                if isinstance(block, dict) and block.get("type") == "text":
+                                    user_query += block.get("text", "")
+                                elif hasattr(block, "text"):
+                                    user_query += block.text
+                        break
+            complexity = self._thinking_budget_mgr.classify(
+                user_query, self._recent_tool_msgs,
+            )
+            budget_kwargs = self._thinking_budget_mgr.apply_budget(complexity)
+            # Set reasoning_effort on the underlying model for this turn
+            _original_effort = getattr(self.model, "reasoning_effort", None)
+            if "reasoning_effort" in budget_kwargs:
+                self.model.reasoning_effort = budget_kwargs["reasoning_effort"]
+            self._last_complexity = complexity
+        except Exception:
+            complexity = "normal"
+            _original_effort = None
+
         # --- Proactive filtering layer ---
         should_strip = (
             not get_active_model_supports_multimodal()
@@ -2112,6 +2180,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         finally:
             if should_strip and self._uses_request_time_media_normalization():
                 self._set_formatter_media_strip(False)
+            # Restore original reasoning_effort after this turn
+            try:
+                if _original_effort is not None:
+                    self.model.reasoning_effort = _original_effort
+                elif hasattr(self.model, "reasoning_effort"):
+                    self.model.reasoning_effort = None
+            except Exception:
+                pass
 
         return await self._auto_continue_if_text_only(msg, tool_choice)
 

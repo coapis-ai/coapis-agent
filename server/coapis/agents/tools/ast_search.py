@@ -84,13 +84,6 @@ def _check_ast_grep() -> bool:
         return False
 
 
-@register_tool(
-    name="ast_search",
-    description="基于 AST 的语法级代码搜索。比 grep 更精准，能理解代码结构（函数定义、调用、参数等）。需要 ast-grep CLI。",
-    category="builtin",
-    tags=["code", "search", "ast"],
-    scene="coding"
-)
 async def ast_search(
     pattern: str = "",
     language: str = "",

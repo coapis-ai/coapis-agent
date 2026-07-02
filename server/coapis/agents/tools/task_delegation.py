@@ -33,13 +33,6 @@ def _save_tasks(data: dict[str, Any]):
     (TASK_DIR / "tasks.json").write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
 
-@register_tool(
-    name="task_delegation",
-    description="任务分发：创建/分配/追踪任务给其他 Agent，支持优先级/截止时间/依赖关系/状态流转，与 multi_agent_collaboration 联动。",
-    category="builtin",
-    tags=["collab", "task", "delegation", "workflow"],
-    scene="collaboration"
-)
 async def task_delegation(
     action: str = "create",
     task_id: str = "",

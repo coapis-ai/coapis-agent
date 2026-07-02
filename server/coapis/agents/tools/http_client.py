@@ -160,13 +160,6 @@ async def _do_request(
     return {"error": last_error or "请求失败", "attempt": retries}
 
 
-@register_tool(
-    name="http_client",
-    description="HTTP 客户端：发送 GET/POST/PUT/DELETE/PATCH 请求到外部 API，带超时和重试。",
-    category="builtin",
-    tags=["http", "api", "network"],
-    scene="core"
-)
 async def http_client(
     method: str = "GET",
     url: str = "",

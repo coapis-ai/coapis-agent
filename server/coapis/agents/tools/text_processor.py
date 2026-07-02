@@ -56,13 +56,6 @@ def _text_stats(text: str) -> dict[str, Any]:
     }
 
 
-@register_tool(
-    name="text_processor",
-    description="文本处理。action: stats(统计字数/行数), encode/decode(base64/url/html编解码), replace(正则替换,需pattern+replacement), transform(大小写转换)。参数: text, action, pattern, replacement。",
-    category="builtin",
-    tags=["text", "encoding", "processing"],
-    scene="coding"
-)
 async def text_processor(
     action: str = "stats",
     text: str = "",

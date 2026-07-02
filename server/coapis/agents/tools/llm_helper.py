@@ -115,13 +115,6 @@ _LLM_PROMPTS = {
 }
 
 
-@register_tool(
-    name="llm_helper",
-    description="LLM 辅助工具：summarize/translate/classify/extract 操作 + Prompt 模板管理 + Token 成本追踪。llm_ops + prompt_builder 合并。",
-    category="builtin",
-    tags=["ai", "llm", "prompt", "template", "cost"],
-    scene="ai",
-)
 async def llm_helper(
     action: str = "summarize",
     text: str = "",

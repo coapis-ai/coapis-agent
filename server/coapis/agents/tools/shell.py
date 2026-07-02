@@ -18,6 +18,13 @@
 
 """The shell command tool."""
 
+import logging
+
+# _current_tool_name removed — not needed for tool execution
+from ..utils.output_compressor import compress_shell_output
+
+logger = logging.getLogger(__name__)
+
 import asyncio
 import locale
 import os
@@ -485,17 +492,17 @@ async def execute_shell_command(
 
         if returncode == 0:
             if stdout_str:
-                response_text = stdout_str
+                response_text = compress_shell_output(stdout_str)
             else:
                 response_text = "Command executed successfully (no output)."
             if stderr_str:
-                response_text += f"\n[stderr]\n{stderr_str}"
+                response_text += f"\n[stderr]\n{compress_shell_output(stderr_str)}"
         else:
             response_parts = [f"Command failed with exit code {returncode}."]
             if stdout_str:
-                response_parts.append(f"\n[stdout]\n{stdout_str}")
+                response_parts.append(f"\n[stdout]\n{compress_shell_output(stdout_str)}")
             if stderr_str:
-                response_parts.append(f"\n[stderr]\n{stderr_str}")
+                response_parts.append(f"\n[stderr]\n{compress_shell_output(stderr_str)}")
             response_text = "".join(response_parts)
 
         return ToolResponse(

@@ -747,10 +747,12 @@ class AgentsRunningConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     max_iters: int = Field(
-        default=100,
+        default=30,
         ge=1,
         description=(
-            "Maximum number of reasoning-acting iterations for ReAct agent"
+            "Maximum number of reasoning-acting iterations for ReAct agent. "
+            "Most tasks complete in 5-15 iterations. 30 provides ample headroom "
+            "while preventing runaway loops."
         ),
     )
 

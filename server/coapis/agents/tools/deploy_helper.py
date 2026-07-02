@@ -73,13 +73,6 @@ async def _run_cmd(
         return {"returncode": -1, "stdout": "", "stderr": str(e), "elapsed": 0}
 
 
-@register_tool(
-    name="deploy_helper",
-    description="部署助手：Docker 构建/运行/停止/状态查看，docker-compose up/down/ps/logs。",
-    category="builtin",
-    tags=["deploy", "docker", "ops"],
-    scene="ops"
-)
 async def deploy_helper(
     action: str = "status",
     target: str = "",
