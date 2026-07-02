@@ -415,9 +415,12 @@ async def get_chat(
     # Get chat spec
     logger.info(f"get_chat: requested chat_id={chat_id}, repo_path={cm._repo.path}")
     spec = await cm.get_chat(chat_id)
+    if not spec:
+        # Fallback: search across all user's ChatManagers
+        spec, cm = await _find_chat_across_managers(request, chat_id, username)
     logger.info(f"get_chat: found spec={spec.id if spec else None}, requested={chat_id}, match={spec.id == chat_id if spec else False}")
     if not spec:
-        logger.warning(f"get_chat: chat_id={chat_id} not found in {cm._repo.path}")
+        logger.warning(f"get_chat: chat_id={chat_id} not found in any ChatManager")
         raise HTTPException(status_code=404, detail="Chat not found")
     
     # CRITICAL: Verify UUID matches (catch routing bugs)
