@@ -15,7 +15,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI init: interactively create working_dir config.json and HEARTBEAT.md."""
+"""CLI init: interactively create working_dir config.json and HEARTBEAT.md.
+
+初始化流程:
+1. SystemInitializer().initialize() — 统一创建目录、配置、权限、用户
+2. 交互式配置（providers/channels/skills/env）— 仅非 --defaults 模式
+3. 创建 HEARTBEAT.md
+"""
 from __future__ import annotations
 
 import click
@@ -41,6 +47,7 @@ from ..config.config import (
 from ..constant import HEARTBEAT_DEFAULT_EVERY
 from ..providers import ProviderManager
 from ..constant import WORKING_DIR
+from ..system.initializer import SystemInitializer
 
 SECURITY_WARNING = """
 Security warning — please read.

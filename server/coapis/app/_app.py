@@ -342,14 +342,13 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
             exc_info=True,
         )
 
-    logger.debug("Checking for legacy config migration...")
-    migrate_legacy_workspace_to_default_agent()
-    ensure_default_agent_exists()
-    migrate_legacy_skills_to_skill_pool()
-    ensure_qa_agent_exists()
-    ensure_global_templates_exist()
-    ensure_global_agent_roles()
-    ensure_layered_templates()
+    # 统一初始化检查（< 100ms）
+    # 首次启动由 entrypoint.sh → coapis init → SystemInitializer.initialize() 完成
+    # 日常重启只做增量检查：标记文件 + 版本迁移 + 核心文件完整性
+    from ..system.initializer import SystemInitializer
+    _init_ok = SystemInitializer().ensure_ready()
+    if not _init_ok:
+        logger.error("System initialization check failed — some features may not work")
 
     # Create core managers (instant — no I/O)
     logger.debug("Initializing MultiAgentManager...")
@@ -476,6 +475,16 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
 
     async def _background_startup():  # pylint: disable=too-many-statements
         try:
+            # ── 确保默认智能体和模板存在（需要异步 I/O，放后台执行） ──
+            logger.debug("Ensuring default agents and templates exist...")
+            migrate_legacy_workspace_to_default_agent()
+            ensure_default_agent_exists()
+            migrate_legacy_skills_to_skill_pool()
+            ensure_qa_agent_exists()
+            ensure_global_templates_exist()
+            ensure_global_agent_roles()
+            ensure_layered_templates()
+
             # Start all configured agents (truly parallel now)
             await multi_agent_manager.start_all_configured_agents()
 

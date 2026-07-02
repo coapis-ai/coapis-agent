@@ -25,8 +25,12 @@ from typing import Any, Dict, List
 # ═══════════════════════════════════════════════════════════════════
 # 系统版本
 # ═══════════════════════════════════════════════════════════════════
-SYSTEM_VERSION = "0.8.12"
-INIT_SCHEMA_VERSION = 1
+# 版本号从 COAPIS_VERSION 环境变量动态获取（由 __version__.py 读取）
+# Docker 环境由 entrypoint.sh 注入，非 Docker 环境由 pip 安装时生成
+import os as _os
+
+SYSTEM_VERSION = _os.environ.get("COAPIS_VERSION", "0.0.0-dev")
+INIT_SCHEMA_VERSION = 2
 
 # ═══════════════════════════════════════════════════════════════════
 # 目录结构
@@ -38,6 +42,7 @@ DEFAULT_DIRECTORIES: List[str] = [
     "system/templates",
     "system/evolution",
     "system/reviews",
+    "system/skill_evolution",
     # 用户工作区
     "workspaces",
     # 智能体数据
@@ -47,6 +52,7 @@ DEFAULT_DIRECTORIES: List[str] = [
     "skill_pool",
     # 日志
     "logs",
+    "audit_log",
     # 媒体
     "media",
     # 本地模型
@@ -61,6 +67,10 @@ DEFAULT_DIRECTORIES: List[str] = [
     "plugins",
     # 模型配置
     "models",
+    # 临时文件
+    "tmp",
+    # 全局文件
+    "files",
 ]
 
 # ═══════════════════════════════════════════════════════════════════

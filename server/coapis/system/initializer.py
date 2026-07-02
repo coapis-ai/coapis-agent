@@ -15,6 +15,12 @@
 
 """System Initializer — 统一的系统初始化入口.
 
+两种安装方式共享同一个初始化逻辑：
+
+- **Docker 首次启动**：entrypoint.sh → `coapis init --defaults` → `initialize()`
+- **非 Docker 安装**：用户手动 `coapis init` → `initialize()`
+- **日常重启**：`_app.py` lifespan → `ensure_ready()`（增量检查，< 100ms）
+
 负责:
 1. 创建目录结构
 2. 生成默认配置文件
@@ -39,8 +45,6 @@ from .defaults import (
     DEFAULT_DIRECTORIES,
     DEFAULT_PERMISSIONS,
     DEFAULT_ROLES,
-    DEFAULT_WORKSPACE_FILES,
-    DEFAULT_WORKSPACE_TEMPLATE,
     INIT_SCHEMA_VERSION,
     SYSTEM_VERSION,
 )
@@ -49,39 +53,51 @@ logger = logging.getLogger(__name__)
 
 
 class SystemInitializer:
-    """系统初始化器 — 单例模式."""
+    """系统初始化器 — 单例模式.
+
+    使用方式:
+        # 首次初始化（Docker 或 coapis init）
+        result = SystemInitializer().initialize()
+
+        # 日常重启增量检查（_app.py lifespan）
+        SystemInitializer().ensure_ready()
+    """
 
     _instance: Optional["SystemInitializer"] = None
 
     def __new__(cls) -> "SystemInitializer":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            cls._instance._inited = False
         return cls._instance
 
     def __init__(self) -> None:
-        if self._initialized:
+        if self._inited:
             return
         from ..constant import WORKING_DIR
         self.working_dir = Path(WORKING_DIR)
         self.system_dir = self.working_dir / "system"
         self.workspaces_dir = self.working_dir / "workspaces"
-        self._initialized = True
+        self._inited = True
 
     # ═══════════════════════════════════════════════════════════════
-    # 主入口
+    # 公共 API
     # ═══════════════════════════════════════════════════════════════
 
     def initialize(self, force: bool = False) -> Dict[str, Any]:
-        """执行完整的系统初始化.
+        """执行完整的系统初始化（幂等）.
+
+        调用场景:
+        - Docker 首次启动：entrypoint.sh → coapis init --defaults → 此方法
+        - 非 Docker 安装：coapis init → 此方法
 
         Args:
             force: 是否强制重新初始化（覆盖现有配置）
 
         Returns:
-            初始化结果摘要
+            初始化结果摘要 {"success", "version", "actions", "warnings"}
         """
-        result = {
+        result: Dict[str, Any] = {
             "success": True,
             "version": SYSTEM_VERSION,
             "schema_version": INIT_SCHEMA_VERSION,
@@ -90,47 +106,103 @@ class SystemInitializer:
         }
 
         try:
-            # 1. 创建目录结构
-            self._create_directories(result)
+            self._ensure_directories(result)
+            self._ensure_config_files(force, result)
+            self._ensure_permissions(force, result)
+            self._ensure_default_user(force, result)
+            self._ensure_token_usage(result)
+            self._ensure_audit_logs(result)
+            self._run_migrations(result)
+            self._write_init_marker(result)
 
-            # 2. 初始化配置文件
-            self._init_config_files(force, result)
-
-            # 3. 初始化权限系统
-            self._init_permissions(force, result)
-
-            # 4. 初始化用户系统
-            self._init_users(force, result)
-
-            # 5. 初始化 Token 统计文件
-            self._init_token_usage(result)
-
-            # 6. 初始化审计日志文件
-            self._init_audit_logs(result)
-
-            # 7. 版本迁移检查
-            self._check_version_migration(result)
-
-            logger.info("System initialization completed: %d actions", len(result["actions"]))
-
+            logger.info(
+                "System initialization completed: %d actions, %d warnings",
+                len(result["actions"]),
+                len(result["warnings"]),
+            )
         except Exception as e:
             result["success"] = False
             result["error"] = str(e)
-            logger.error("System initialization failed: %s", e)
+            logger.error("System initialization failed: %s", e, exc_info=True)
 
         return result
 
+    def ensure_ready(self) -> bool:
+        """增量检查：确保系统已初始化（用于日常重启，< 100ms）.
+
+        调用场景:
+        - _app.py lifespan 启动时调用
+
+        检查逻辑:
+        1. .initialized 标记文件不存在 → 运行完整 initialize()
+        2. 核心文件缺失 → 运行完整 initialize()
+        3. 版本不一致 → 只运行迁移
+        4. 一切正常 → 跳过
+
+        Returns:
+            True 如果系统已就绪
+        """
+        marker_file = self.working_dir / ".initialized"
+        config_file = self.system_dir / "config.json"
+
+        # 检查 1：标记文件存在且核心文件完整
+        if marker_file.exists() and config_file.exists():
+            # 检查版本是否需要迁移
+            try:
+                with open(marker_file, "r", encoding="utf-8") as f:
+                    marker = json.load(f)
+                marker_version = marker.get("version", "0.0.0")
+                if marker_version == SYSTEM_VERSION:
+                    # 一切正常，跳过
+                    logger.debug("System already initialized (v%s), skipping.", SYSTEM_VERSION)
+                    return True
+
+                # 版本不一致，只需运行迁移
+                logger.info(
+                    "Version changed (%s → %s), running migrations...",
+                    marker_version,
+                    SYSTEM_VERSION,
+                )
+                migrate_result: Dict[str, Any] = {
+                    "success": True,
+                    "actions": [],
+                    "warnings": [],
+                }
+                self._run_migrations(migrate_result)
+                self._write_init_marker(migrate_result)
+                if migrate_result["actions"]:
+                    logger.info("Migrations applied: %s", migrate_result["actions"])
+                return True
+            except Exception as e:
+                logger.warning("Error reading init marker: %s", e)
+
+        # 检查 2：核心文件是否存在（无标记文件或标记读取失败）
+        core_files = [
+            self.system_dir / "config.json",
+            self.system_dir / "permissions.json",
+            self.system_dir / "users.json",
+        ]
+        missing = [str(f.relative_to(self.working_dir)) for f in core_files if not f.exists()]
+        if missing:
+            logger.warning("Core files missing: %s — running full initialization.", missing)
+            result = self.initialize()
+            return result["success"]
+
+        # 核心文件都在但没有标记 → 补写标记
+        logger.info("Core files present but no .initialized marker — writing marker.")
+        self._write_init_marker({"actions": [], "warnings": []})
+        return True
+
     def check_initialization_status(self) -> Dict[str, Any]:
-        """检查系统初始化状态."""
-        status = {
+        """检查系统初始化状态（只读，不修改任何文件）."""
+        status: Dict[str, Any] = {
             "initialized": False,
-            "version": None,
-            "schema_version": None,
+            "version": SYSTEM_VERSION,
+            "schema_version": INIT_SCHEMA_VERSION,
             "missing_files": [],
             "missing_dirs": [],
         }
 
-        # 检查核心文件
         core_files = [
             self.system_dir / "config.json",
             self.system_dir / "permissions.json",
@@ -140,7 +212,6 @@ class SystemInitializer:
             if not f.exists():
                 status["missing_files"].append(str(f.relative_to(self.working_dir)))
 
-        # 检查核心目录
         core_dirs = [
             self.system_dir,
             self.workspaces_dir,
@@ -151,119 +222,77 @@ class SystemInitializer:
             if not d.exists():
                 status["missing_dirs"].append(str(d.relative_to(self.working_dir)))
 
-        # 检查版本
-        config_file = self.system_dir / "config.json"
-        if config_file.exists():
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                status["version"] = config.get("version")
-                status["initialized"] = True
-            except (json.JSONDecodeError, OSError):
-                pass
+        marker_file = self.working_dir / ".initialized"
+        if marker_file.exists() and not status["missing_files"]:
+            status["initialized"] = True
 
         return status
 
     # ═══════════════════════════════════════════════════════════════
-    # 目录创建
+    # 1. 目录创建
     # ═══════════════════════════════════════════════════════════════
 
-    def _create_directories(self, result: Dict[str, Any]) -> None:
-        """创建所有必要的目录结构."""
+    def _ensure_directories(self, result: Dict[str, Any]) -> None:
+        """创建所有必要的目录结构（幂等）."""
         for dir_name in DEFAULT_DIRECTORIES:
             dir_path = self.working_dir / dir_name
             if not dir_path.exists():
                 dir_path.mkdir(parents=True, exist_ok=True)
                 result["actions"].append(f"created_dir:{dir_name}")
+                logger.debug("Created directory: %s", dir_name)
 
     # ═══════════════════════════════════════════════════════════════
-    # 配置文件初始化
+    # 2. 配置文件
     # ═══════════════════════════════════════════════════════════════
 
-    def _init_config_files(self, force: bool, result: Dict[str, Any]) -> None:
-        """初始化配置文件."""
+    def _ensure_config_files(self, force: bool, result: Dict[str, Any]) -> None:
+        """确保配置文件存在且完整（幂等）."""
         config_file = self.system_dir / "config.json"
 
         if config_file.exists() and not force:
-            # 检查是否需要合并新字段
+            # 合并缺失的顶层字段
             try:
                 with open(config_file, "r", encoding="utf-8") as f:
                     existing = json.load(f)
-
-                # 合并缺失的顶层字段
-                merged = self._merge_config(existing, DEFAULT_CONFIG)
+                merged = self._merge_dict(existing, DEFAULT_CONFIG)
                 if merged != existing:
                     self._save_json(config_file, merged)
                     result["actions"].append("merged_config:config.json")
+                    logger.info("Merged missing fields into config.json")
             except (json.JSONDecodeError, OSError) as e:
                 result["warnings"].append(f"config.json merge failed: {e}")
             return
 
         # 创建新配置
-        self._save_json(config_file, DEFAULT_CONFIG)
-        result["actions"].append("created_config:config.json")
-
+        config = DEFAULT_CONFIG.copy()
         # 生成随机 secret_key
-        if DEFAULT_CONFIG["auth"]["secret_key"] == "CHANGE_ME_TO_RANDOM_STRING":
-            config = DEFAULT_CONFIG.copy()
+        if config.get("auth", {}).get("secret_key") == "CHANGE_ME_TO_RANDOM_STRING":
             config["auth"] = config["auth"].copy()
             config["auth"]["secret_key"] = secrets.token_hex(32)
-            self._save_json(config_file, config)
             result["actions"].append("generated_secret_key")
-
-    def _merge_config(self, existing: Dict, defaults: Dict) -> Dict:
-        """合并配置，保留现有值，添加缺失字段."""
-        result = existing.copy()
-        for key, value in defaults.items():
-            if key not in result:
-                result[key] = value
-            elif isinstance(value, dict) and isinstance(result[key], dict):
-                result[key] = self._merge_config(result[key], value)
-        return result
+        self._save_json(config_file, config)
+        result["actions"].append("created:config.json")
 
     # ═══════════════════════════════════════════════════════════════
-    # 权限系统初始化
+    # 3. 权限系统
     # ═══════════════════════════════════════════════════════════════
 
-    def _init_permissions(self, force: bool, result: Dict[str, Any]) -> None:
-        """初始化权限配置."""
+    def _ensure_permissions(self, force: bool, result: Dict[str, Any]) -> None:
+        """确保权限配置存在（幂等）."""
         perm_file = self.system_dir / "permissions.json"
 
         if perm_file.exists() and not force:
-            # 检查版本
-            try:
-                with open(perm_file, "r", encoding="utf-8") as f:
-                    existing = json.load(f)
-
-                if existing.get("version") != "2.0":
-                    # 需要升级到 v2.0
-                    upgraded = self._upgrade_permissions_v2(existing)
-                    self._save_json(perm_file, upgraded)
-                    result["actions"].append("upgraded_permissions:v2.0")
-            except (json.JSONDecodeError, OSError) as e:
-                result["warnings"].append(f"permissions.json check failed: {e}")
             return
 
-        # 创建新权限配置
         self._save_json(perm_file, DEFAULT_PERMISSIONS)
-        result["actions"].append("created_config:permissions.json")
-
-    def _upgrade_permissions_v2(self, old_perms: Dict) -> Dict:
-        """将旧版权限配置升级到 v2.0 格式."""
-        new_perms = DEFAULT_PERMISSIONS.copy()
-
-        # 尝试保留旧的 user_overrides
-        if "user_overrides" in old_perms:
-            new_perms["user_overrides"] = old_perms["user_overrides"]
-
-        return new_perms
+        result["actions"].append("created:permissions.json")
 
     # ═══════════════════════════════════════════════════════════════
-    # 用户系统初始化
+    # 4. 用户系统
     # ═══════════════════════════════════════════════════════════════
 
-    def _init_users(self, force: bool, result: Dict[str, Any]) -> None:
-        """初始化用户数据."""
+    def _ensure_default_user(self, force: bool, result: Dict[str, Any]) -> None:
+        """确保默认管理员用户存在（幂等）."""
         users_file = self.system_dir / "users.json"
 
         if users_file.exists() and not force:
@@ -271,15 +300,10 @@ class SystemInitializer:
             try:
                 with open(users_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-
                 users = data.get("users", {})
-                has_admin = any(
-                    u.get("role") == "admin" for u in users.values()
-                )
-
+                has_admin = any(u.get("role") == "admin" for u in users.values())
                 if not has_admin:
-                    # 添加默认管理员
-                    admin_data = self._create_user_data(DEFAULT_ADMIN_USER)
+                    admin_data = self._build_user_data(DEFAULT_ADMIN_USER)
                     users[admin_data["username"]] = admin_data
                     data["users"] = users
                     self._save_json(users_file, data)
@@ -289,19 +313,23 @@ class SystemInitializer:
             return
 
         # 创建新用户文件
-        admin_data = self._create_user_data(DEFAULT_ADMIN_USER)
+        admin_data = self._build_user_data(DEFAULT_ADMIN_USER)
         users_data = {
             "users": {admin_data["username"]: admin_data},
             "next_id": 2,
         }
         self._save_json(users_file, users_data)
-        result["actions"].append("created_config:users.json")
+        result["actions"].append("created:users.json")
 
-    def _create_user_data(self, user_def: Dict[str, Any]) -> Dict[str, Any]:
-        """创建用户数据（包含密码哈希）."""
+    def _build_user_data(self, user_def: Dict[str, Any]) -> Dict[str, Any]:
+        """构建用户数据（包含密码哈希）."""
         username = user_def.get("username", "user")
         password = user_def.get("password", "admin123")
-        password_hash = self._hash_password(password)
+        try:
+            import bcrypt
+            password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        except ImportError:
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
 
         return {
             "username": username,
@@ -314,56 +342,40 @@ class SystemInitializer:
             "last_login": None,
         }
 
-    def _hash_password(self, password: str) -> str:
-        """生成密码哈希."""
-        try:
-            import bcrypt
-            return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-        except ImportError:
-            # 回退到 SHA256（不推荐，但保证可用）
-            return hashlib.sha256(password.encode()).hexdigest()
-
     # ═══════════════════════════════════════════════════════════════
-    # Token 统计初始化
+    # 5. Token 统计
     # ═══════════════════════════════════════════════════════════════
 
-    def _init_token_usage(self, result: Dict[str, Any]) -> None:
-        """初始化 Token 统计文件."""
+    def _ensure_token_usage(self, result: Dict[str, Any]) -> None:
+        """确保 Token 统计文件存在（幂等）."""
         token_file = self.system_dir / "token_usage.json"
-
         if not token_file.exists():
             self._save_json(token_file, {"version": 1, "daily": {}, "total": 0})
-            result["actions"].append("created_config:token_usage.json")
+            result["actions"].append("created:token_usage.json")
 
-        # 明细文件（JSON 模式）
         details_file = self.system_dir / "token_usage_details.json"
         if not details_file.exists():
             self._save_json(details_file, {"records": []})
-            result["actions"].append("created_config:token_usage_details.json")
+            result["actions"].append("created:token_usage_details.json")
 
     # ═══════════════════════════════════════════════════════════════
-    # 审计日志初始化
+    # 6. 审计日志
     # ═══════════════════════════════════════════════════════════════
 
-    def _init_audit_logs(self, result: Dict[str, Any]) -> None:
-        """初始化审计日志文件."""
-        audit_dir = self.working_dir / "audit_log"
-        if not audit_dir.exists():
-            audit_dir.mkdir(parents=True, exist_ok=True)
-            result["actions"].append("created_dir:audit_log")
-
-        # JSON 模式的审计日志
+    def _ensure_audit_logs(self, result: Dict[str, Any]) -> None:
+        """确保审计日志目录和文件存在（幂等）."""
+        # 目录已在 _ensure_directories 中创建，这里只需确保文件
         audit_file = self.system_dir / "audit_logs.json"
         if not audit_file.exists():
             self._save_json(audit_file, [])
-            result["actions"].append("created_config:audit_logs.json")
+            result["actions"].append("created:audit_logs.json")
 
     # ═══════════════════════════════════════════════════════════════
-    # 版本迁移
+    # 7. 版本迁移
     # ═══════════════════════════════════════════════════════════════
 
-    def _check_version_migration(self, result: Dict[str, Any]) -> None:
-        """检查并执行版本迁移."""
+    def _run_migrations(self, result: Dict[str, Any]) -> None:
+        """运行版本迁移（仅在版本升级时执行）."""
         config_file = self.system_dir / "config.json"
         if not config_file.exists():
             return
@@ -371,18 +383,48 @@ class SystemInitializer:
         try:
             with open(config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
-
-            current_version = config.get("version", "0.0.0")
-            if current_version != SYSTEM_VERSION:
-                result["actions"].append(
-                    f"version_upgrade:{current_version}->{SYSTEM_VERSION}"
-                )
-
-                # 更新版本号
-                config["version"] = SYSTEM_VERSION
-                self._save_json(config_file, config)
         except (json.JSONDecodeError, OSError):
-            pass
+            return
+
+        current_version = config.get("version", "0.0.0")
+        if current_version == SYSTEM_VERSION:
+            return
+
+        logger.info("Migrating config from %s to %s", current_version, SYSTEM_VERSION)
+
+        # 按版本递增执行迁移（在此追加新版本迁移函数）
+        # migrations = [
+        #     ("0.8.50", self._migrate_to_0_8_50),
+        #     ("0.8.55", self._migrate_to_0_8_55),
+        # ]
+        # for version, fn in migrations:
+        #     if _version_lt(current_version, version):
+        #         try:
+        #             fn(result)
+        #             result["actions"].append(f"migration:{version}")
+        #         except Exception as e:
+        #             result["warnings"].append(f"migration:{version} failed: {e}")
+
+        # 更新 config.json 中的版本号
+        config["version"] = SYSTEM_VERSION
+        self._save_json(config_file, config)
+        result["actions"].append(f"version_upgrade:{current_version}->{SYSTEM_VERSION}")
+
+    # ═══════════════════════════════════════════════════════════════
+    # 8. 初始化标记
+    # ═══════════════════════════════════════════════════════════════
+
+    def _write_init_marker(self, result: Dict[str, Any]) -> None:
+        """写入初始化完成标记文件."""
+        marker_file = self.working_dir / ".initialized"
+        marker = {
+            "initialized_at": time.time(),
+            "version": SYSTEM_VERSION,
+            "schema_version": INIT_SCHEMA_VERSION,
+            "actions_count": len(result.get("actions", [])),
+        }
+        self._save_json(marker_file, marker)
+        logger.debug("Wrote init marker: %s", marker_file)
 
     # ═══════════════════════════════════════════════════════════════
     # 工具方法
@@ -396,16 +438,20 @@ class SystemInitializer:
             json.dump(data, f, ensure_ascii=False, indent=2)
         os.replace(tmp_file, file_path)
 
-    def _load_json(self, file_path: Path) -> Any:
-        """加载 JSON 文件."""
-        if not file_path.exists():
-            return None
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+    @staticmethod
+    def _merge_dict(existing: Dict, defaults: Dict) -> Dict:
+        """递归合并字典，保留 existing 的值，补充 defaults 中缺失的 key."""
+        result = existing.copy()
+        for key, value in defaults.items():
+            if key not in result:
+                result[key] = value
+            elif isinstance(value, dict) and isinstance(result.get(key), dict):
+                result[key] = SystemInitializer._merge_dict(result[key], value)
+        return result
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 便捷函数
+# 便捷函数（供外部 import）
 # ═══════════════════════════════════════════════════════════════════
 
 def initialize_system(force: bool = False) -> Dict[str, Any]:
