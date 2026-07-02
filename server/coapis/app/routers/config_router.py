@@ -304,13 +304,11 @@ async def reload_permissions_config(request: Request) -> Dict[str, Any]:
 
     # Return summary
     roles = pm._config.get("roles", {})
-    shell_perms = pm._config.get("shell_permissions", {})
 
     return {
         "status": "reloaded",
         "roles_count": len(roles),
         "roles": list(roles.keys()),
-        "shell_permissions_roles": list(shell_perms.keys()) if shell_perms else [],
         "config_path": str(pm._config_path),
     }
 

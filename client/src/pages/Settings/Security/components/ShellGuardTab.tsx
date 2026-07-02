@@ -3,8 +3,6 @@ import {
   Table,
   Tag,
   Button,
-  Select,
-  Input,
   Tabs,
 } from "@agentscope-ai/design";
 import { message, Spin } from "antd";
@@ -12,11 +10,9 @@ import {
   RefreshCw,
   ShieldCheck,
   AlertTriangle,
-  Settings2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { securityApi } from "../../../../api/modules/security";
-import { permissionsApi } from "../../../../api/modules/permissions";
 import { ShellEvasionSection } from "./ShellEvasionSection";
 
 // ── Types ──
@@ -31,18 +27,6 @@ interface ShellRule {
   exclude_patterns?: string[];
   description: string;
   remediation?: string;
-}
-
-interface ShellPermissionsConfig {
-  roles: Record<string, any>;
-  shell_permissions?: {
-    roles?: Record<string, {
-      whitelist: string[];
-      blacklist: string[];
-      dangerous_patterns: string[];
-    }>;
-  };
-  command_levels?: Record<string, string[]>;
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -216,131 +200,6 @@ function EvasionChecksSection() {
   );
 }
 
-// ── Section 3: Command Execution Policy ──
-
-function CommandPolicySection() {
-  const { t } = useTranslation();
-  const [config, setConfig] = useState<ShellPermissionsConfig | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [selectedRole, setSelectedRole] = useState("user");
-  const [editWhitelist, setEditWhitelist] = useState("");
-  const [editBlacklist, setEditBlacklist] = useState("");
-  const [editDangerous, setEditDangerous] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const loadConfig = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res: any = await permissionsApi.getPermissionsConfig();
-      setConfig(res.config);
-    } catch (e: any) {
-      message.error(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { loadConfig(); }, [loadConfig]);
-
-  // Load shell perms for selected role
-  useEffect(() => {
-    if (!config) return;
-    const sp = config.shell_permissions?.roles?.[selectedRole];
-    setEditWhitelist((sp?.whitelist || []).join("\n"));
-    setEditBlacklist((sp?.blacklist || []).join("\n"));
-    setEditDangerous((sp?.dangerous_patterns || []).join("\n"));
-  }, [config, selectedRole]);
-
-  const handleSave = async () => {
-    if (!selectedRole) return;
-    setSaving(true);
-    try {
-      const whitelist = editWhitelist.split("\n").filter(l => l.trim());
-      const blacklist = editBlacklist.split("\n").filter(l => l.trim());
-      const dangerous = editDangerous.split("\n").filter(l => l.trim());
-      await permissionsApi.updateShellPermissions(selectedRole, whitelist, blacklist, dangerous);
-      message.success(t("admin.shellPermissionsUpdated"));
-      loadConfig();
-    } catch (e: any) {
-      message.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const roles = config?.roles || {};
-  const roleNames = Object.keys(roles);
-
-  if (loading) return <Spin size="small" />;
-
-  return (
-    <div>
-      <p style={{ fontSize: 13, opacity: 0.7, marginBottom: 12 }}>
-        {t("security.shellGuard.policyDesc", { defaultValue: "按角色配置 Shell 命令执行策略：白名单（允许）、黑名单（禁止）、危险模式（需审批）。" })}
-      </p>
-
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
-        <span style={{ fontSize: 13, fontWeight: 500 }}>{t("admin.selectRole", { defaultValue: "选择角色" })}:</span>
-        <Select
-          value={selectedRole}
-          onChange={setSelectedRole}
-          style={{ width: 160 }}
-          size="small"
-          options={roleNames.map(r => ({ value: r, label: roles[r]?.name || r }))}
-        />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6, color: "#52c41a" }}>
-            ✅ {t("admin.shellWhitelist", { defaultValue: "白名单（直接放行）" })}
-          </div>
-          <Input.TextArea
-            value={editWhitelist}
-            onChange={e => setEditWhitelist(e.target.value)}
-            placeholder="每行一条命令\n如: ls\ncat\ngit status"
-            rows={8}
-            style={{ fontFamily: "monospace", fontSize: 12 }}
-          />
-        </div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6, color: "#ff4d4f" }}>
-            🚫 {t("admin.shellBlacklist", { defaultValue: "黑名单（直接禁止）" })}
-          </div>
-          <Input.TextArea
-            value={editBlacklist}
-            onChange={e => setEditBlacklist(e.target.value)}
-            placeholder="每行一条命令\n如: rm -rf\nshutdown\nreboot"
-            rows={8}
-            style={{ fontFamily: "monospace", fontSize: 12 }}
-          />
-        </div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6, color: "#faad14" }}>
-            ⚠️ {t("admin.shellDangerous", { defaultValue: "危险模式（需确认）" })}
-          </div>
-          <Input.TextArea
-            value={editDangerous}
-            onChange={e => setEditDangerous(e.target.value)}
-            placeholder="每行一条命令\n如: sudo\nchmod\nchown"
-            rows={8}
-            style={{ fontFamily: "monospace", fontSize: 12 }}
-          />
-        </div>
-      </div>
-
-      <Button
-        type="primary"
-        onClick={handleSave}
-        loading={saving}
-        style={{ marginTop: 12 }}
-      >
-        {t("common.save")}
-      </Button>
-    </div>
-  );
-}
-
 // ── Main Tab ──
 
 export default function ShellGuardTab() {
@@ -373,16 +232,6 @@ export default function ShellGuardTab() {
               </span>
             ),
             children: <EvasionChecksSection />,
-          },
-          {
-            key: "policy",
-            label: (
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <Settings2 size={14} />
-                {t("security.shellGuard.execPolicy", { defaultValue: "执行策略" })}
-              </span>
-            ),
-            children: <CommandPolicySection />,
           },
         ]}
       />

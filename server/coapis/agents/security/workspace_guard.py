@@ -187,17 +187,6 @@ class WorkspaceGuard:
         self._compiled_dangerous: List[re.Pattern] = []
         self._reload_dangerous_patterns()
 
-    def _get_permission_manager(self) -> Optional["PermissionManager"]:
-        """Try to get PermissionManager instance.
-        
-        Returns None if not initialized (e.g., during early startup).
-        """
-        try:
-            from ...app.permissions.manager import PermissionManager
-            return PermissionManager.get_instance()
-        except (RuntimeError, ImportError):
-            return None
-
     def _reload_dangerous_patterns(self) -> None:
         """Compile dangerous pattern regexes."""
         patterns = self._get_dangerous_pattern_strings()
@@ -209,24 +198,15 @@ class WorkspaceGuard:
                 logger.warning(f"WorkspaceGuard: invalid dangerous pattern '{p}': {e}")
 
     def _get_whitelist(self, role: str) -> List[str]:
-        """Get whitelist for role, from PermissionManager or fallback."""
-        pm = self._get_permission_manager()
-        if pm is not None:
-            return pm.get_shell_whitelist(role)
+        """Get whitelist for role (fallback only)."""
         return FALLBACK_SHELL_WHITELIST.get(role, [])
 
     def _get_blacklist(self) -> List[str]:
-        """Get blacklist, from PermissionManager or fallback."""
-        pm = self._get_permission_manager()
-        if pm is not None:
-            return pm.get_shell_blacklist()
+        """Get blacklist (fallback only)."""
         return list(FALLBACK_SHELL_BLACKLIST)
 
     def _get_dangerous_pattern_strings(self) -> List[str]:
-        """Get dangerous pattern strings, from PermissionManager or fallback."""
-        pm = self._get_permission_manager()
-        if pm is not None:
-            return pm.get_dangerous_patterns()
+        """Get dangerous pattern strings (fallback only)."""
         return list(FALLBACK_DANGEROUS_PATTERNS)
 
     def is_within_workspace(self, target_path: str | Path, username: str | None = None) -> bool:
@@ -340,12 +320,7 @@ class WorkspaceGuard:
         if role is None:
             role = get_current_user_role() or "user"
 
-        # Use PermissionManager if available (supports hot-reload)
-        pm = self._get_permission_manager()
-        if pm is not None:
-            return pm.is_shell_command_allowed(role, command)
-
-        # Fallback: hardcoded rules
+        # Always use fallback (PermissionManager shell methods removed)
         return self._is_command_allowed_fallback(command, role)
 
     # Flags that enable inline code execution in interpreters — always blocked
