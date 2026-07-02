@@ -15,7 +15,7 @@
 
 """MCP router — unified data source for MCP client management.
 
-Design aligned with qwenpaw:
+Design:
 - Single source of truth: agent.json → mcp.clients
 - API operations = read/write agent.json + hot-reload via MCPConfigWatcher
 - Global MCP pool: admin's MCP clients serve as system-wide templates

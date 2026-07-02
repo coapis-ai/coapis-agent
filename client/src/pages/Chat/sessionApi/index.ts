@@ -190,7 +190,7 @@ function normalizeOutputMessageContent(content: unknown): unknown {
 /**
  * Convert a backend message to response output message(s).
  *
- * The backend uses qwenpaw's `agentscope_msg_to_message` to convert AgentScope
+ * The backend uses `agentscope_msg_to_message` to convert AgentScope
  * messages into runtime Messages. Each output message already carries the
  * correct semantic `type` (message / reasoning / plugin_call / plugin_call_output
  * / mcp_call / mcp_call_output / function_call / function_call_output / error /
@@ -975,7 +975,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   }
 
   async updateSession(session: Partial<IAgentScopeRuntimeWebUISession>) {
-    // Always clear messages before updating session list (matches QwenPaw behavior).
+    // Always clear messages before updating session list.
     // Content loss during streaming is prevented by useChatController's
     // useEffect([currentSessionId]) which skips reset when msgStatus === 'generating'.
     session.messages = [];

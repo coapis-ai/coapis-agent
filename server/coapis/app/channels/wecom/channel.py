@@ -1308,7 +1308,7 @@ class WecomChannel(BaseChannel):
             stream_type, stream_id[:20] if stream_id else "?",
         )
 
-    # ── Display helpers (qwenpaw-aligned) ──────────────────────────
+    # ── Display helpers ──────────────────────────
 
     def _build_display_text(
         self,

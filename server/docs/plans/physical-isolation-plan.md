@@ -18,7 +18,7 @@ CoApis 原始设计是**物理隔离**（每个 agent 独立 `chats.json` + `ses
 
 ### 1.2 目标
 
-恢复物理隔离，全面参考 QwenPaw 架构，加上用户 ID 隔离：
+恢复物理隔离，恢复物理隔离，加上用户 ID 隔离：
 
 ```
 coapis/
@@ -47,9 +47,9 @@ coapis/
         └── skills/                      ← 用户技能（共享）
 ```
 
-### 1.3 对标 QwenPaw
+### 1.3 架构对标
 
-| 维度 | QwenPaw | CoApis（修复后） |
+| 维度 | 目标架构 | CoApis（修复后） |
 |------|---------|-----------------|
 | ChatManager 归属 | 每个 agent workspace 独立 | ✅ 相同 |
 | chats.json 位置 | `workspace_dir/chats.json` | `workspace_dir/chat/chats.json`（保持子目录） |

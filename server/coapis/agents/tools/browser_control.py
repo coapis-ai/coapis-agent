@@ -79,7 +79,7 @@ _TRUSTED_BROWSER_KEYWORDS = frozenset(
 
 # ---------------------------------------------------------------------------
 # Self-contained browser path resolution (no dependency on coapis.config.utils
-# or qwenpaw runtime — avoids module-level import conflicts at server startup)
+# avoids module-level import conflicts at server startup)
 # ---------------------------------------------------------------------------
 _COAPIS_PLAYWRIGHT_CHROMIUM_PATH_ENV = "COAPIS_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
 _QWENPAW_PLAYWRIGHT_CHROMIUM_PATH_ENV = "QWENPAW_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
@@ -111,7 +111,7 @@ def _get_chromium_executable_path() -> Optional[str]:
     """Find the Chromium/Chrome executable path.
 
     This is a self-contained implementation that does NOT depend on
-    ``coapis.config.utils`` or any QwenPaw runtime module.  It checks:
+    ``coapis.config.utils`` or any remote runtime module.  It checks:
 
     1. ``COAPIS_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`` env var
     2. ``QWENPAW_PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`` env var (legacy)
@@ -123,7 +123,7 @@ def _get_chromium_executable_path() -> Optional[str]:
     if path and os.path.isfile(path):
         return path
 
-    # 2. Check legacy QwenPaw env var
+    # 2. Check legacy env var
     path = os.environ.get(_QWENPAW_PLAYWRIGHT_CHROMIUM_PATH_ENV)
     if path and os.path.isfile(path):
         return path
@@ -194,7 +194,7 @@ def _get_system_default_browser() -> tuple[Optional[str], Optional[str]]:
 
 # ---------------------------------------------------------------------------
 # Aliases — the rest of this module uses the bare names without underscore
-# prefix (inherited from the original QwenPaw codebase).
+# prefix (inherited from the original codebase).
 # ---------------------------------------------------------------------------
 is_running_in_container = _is_running_in_container
 get_system_default_browser = _get_system_default_browser
@@ -877,7 +877,7 @@ def _chromium_executable_path() -> str | None:
     """Chromium executable path when set (e.g. container); else None.
 
     Uses the self-contained ``_get_chromium_executable_path()`` defined in
-    this module — does NOT depend on ``coapis.config.utils`` or QwenPaw.
+    this module — does NOT depend on ``coapis.config.utils`` .
     """
     return _get_chromium_executable_path()
 

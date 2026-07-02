@@ -364,7 +364,7 @@ class BaseChannel(ABC):
 
         When ``streaming_enabled``, streaming hooks are invoked for
         reasoning / message events alongside the normal path.
-        (aligned with qwenpaw base.py)
+        
         """
         request = self._payload_to_request(payload)
 
@@ -612,7 +612,7 @@ class BaseChannel(ABC):
         """Called when a streaming segment completes.
         accumulated_text is the final full text."""
 
-    # ── Event hooks (qwenpaw-aligned) ──────────────────────────────
+    # ── Event hooks ──────────────────────────────
     # Subclasses override these to react to specific events from
     # _process().  Default implementations are no-ops so existing
     # channels keep working unchanged.
@@ -688,7 +688,7 @@ class BaseChannel(ABC):
         return None
 
     def _format_stream_tool_output_body(self, event: Any) -> Optional[str]:
-        """Format tool output for display. Ported from qwenpaw.
+        """Format tool output for display.
 
         Returns formatted string or None if event is not a tool output.
         """
@@ -850,7 +850,7 @@ class BaseChannel(ABC):
             type(payload).__name__,
         )
 
-        # ── Command routing (reference qwenpaw) ────────────────────
+        # ── Command routing ────────────────────
         if self._workspace is not None and self._command_registry is not None:
             query_text = self._extract_query_from_payload(payload)
             if query_text:

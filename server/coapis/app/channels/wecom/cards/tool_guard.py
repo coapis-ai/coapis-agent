@@ -7,7 +7,7 @@ all live here; the dispatcher reads the module-level metadata
 (``NAME`` / ``MESSAGE_TYPE`` / ``TASK_ID_PREFIX``) plus ``render`` /
 ``handle`` to wire it in.
 
-Ported from qwenpaw and adapted for coapis runtime.
+Adapted for CoApis runtime.
 
 Refs: https://developer.work.weixin.qq.com/document/path/101032
       https://developer.work.weixin.qq.com/document/path/101027

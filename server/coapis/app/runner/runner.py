@@ -687,7 +687,7 @@ class AgentRunner(Runner):
            to convert (msg, last) → proper Event objects (Message, TextContent, DataContent)
         3. Yielding Events with correct lifecycle (InProgress/Completed)
 
-        This matches QwenPaw's pattern: workspace calls stream_query() instead of
+        Workspace calls stream_query() instead of
         query_handler() directly, letting the framework adapter handle all Event
         construction — fixing tool_call rendering, delta duplication, and message
         structure issues.

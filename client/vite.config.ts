@@ -58,9 +58,9 @@ export default defineConfig(({ mode }) => {
       include: ["diff"],
     },
     build: {
-      // Output to QwenPaw's console directory,
+      // Output to the console directory,
       // so we don't need to copy files manually after build.
-      // outDir: path.resolve(__dirname, "../src/qwenpaw/console"),
+      // outDir: path.resolve(__dirname, "../src/console"),
       // emptyOutDir: true,
       cssCodeSplit: true,
       sourcemap: mode !== "production",
