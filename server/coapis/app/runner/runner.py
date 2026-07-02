@@ -1343,7 +1343,12 @@ class AgentRunner(Runner):
                             len(_new_msgs), _memory_snapshot_len, len(_all_content),
                         )
 
-                    await self._persist_chat_messages(
+                    # Shield from CancelledError so partial results are
+                    # persisted even when the user clicks "Stop".
+                    # Without shield(), CancelledError re-fires at the
+                    # await inside _persist_chat_messages, interrupting
+                    # the save and losing all chat content.
+                    await asyncio.shield(self._persist_chat_messages(
                         chat=chat,
                         session_id=session_id,
                         user_id=user_id,
@@ -1354,6 +1359,11 @@ class AgentRunner(Runner):
                         full_reasoning=getattr(self._workspace, 'last_full_reasoning', None),
                         user_text_override=query,
                         agent_messages=_new_msgs,
+                    ))
+                except asyncio.CancelledError:
+                    logger.warning(
+                        "Chat persistence was cancelled (user stopped), "
+                        "data may be incomplete",
                     )
                 except Exception:
                     logger.warning(
