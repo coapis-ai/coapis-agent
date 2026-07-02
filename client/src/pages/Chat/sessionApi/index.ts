@@ -730,6 +730,10 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         const userId = window.currentUserId;
         const channel = window.currentChannel;
         const agentId = useAgentStore.getState().selectedAgent;
+        if (!agentId) {
+          console.warn('[sessionApi] getSessionList: no agent selected, skipping');
+          return [];
+        }
         const params: { user_id?: string; channel?: string; agent_id?: string } = {};
         if (userId) params.user_id = userId;
         if (channel) params.channel = channel;
@@ -1061,12 +1065,15 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     // backend session is created, causing duplicate entries.
     try {
       const agentId = useAgentStore.getState().selectedAgent;
+      if (!agentId) {
+        throw new Error("Cannot create chat: no agent selected");
+      }
       const created = await api.createChat({
         id: undefined,  // let backend generate UUID
         name: sessionName,
         session_id: `console:${userId}`,
         channel: channel,
-        ...(agentId ? { agent_id: agentId } : {}),
+        agent_id: agentId,
       });
 
       if (!created?.id) {

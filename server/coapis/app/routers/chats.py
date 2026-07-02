@@ -132,9 +132,8 @@ def _find_workspace_for_agent(request: Request, agent_id: str, username: str):
 def _get_chat_manager(request: Request, agent_id: str = None):
     """Get the ChatManager for the appropriate agent workspace.
 
-    Uses X-Agent-Id header to find the correct workspace, then returns
-    that workspace's ChatManager. This ensures physical isolation -
-    each agent's chats are stored in its own workspace directory.
+    When agent_id is provided, strictly returns that agent's ChatManager
+    or raises 404. When agent_id is None, falls back to user's default.
     """
     manager = getattr(request.app.state, "multi_agent_manager", None)
     if not manager:
@@ -144,14 +143,18 @@ def _get_chat_manager(request: Request, agent_id: str = None):
         )
 
     username, _ = _get_current_user(request)
-    
-    # Try to find workspace for the specific agent
+
+    # Strict mode: find the exact agent workspace, no fallback
     if agent_id:
         ws = _find_workspace_for_agent(request, agent_id, username)
         if ws and hasattr(ws, 'chat_manager') and ws.chat_manager:
             return ws.chat_manager
-    
-    # Fallback: find user's default workspace (prefer user:xxx agent)
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{agent_id}' not found for user '{username}'",
+        )
+
+    # No agent_id — find user's default workspace (prefer user:xxx agent)
     fallback_ws = None
     for key, ws in getattr(manager, '_workspaces', {}).items():
         ws_username = getattr(ws, 'username', None) or ""
@@ -160,16 +163,14 @@ def _get_chat_manager(request: Request, agent_id: str = None):
         if not (hasattr(ws, 'chat_manager') and ws.chat_manager):
             continue
         ws_agent_id = getattr(ws, 'agent_id', None) or ""
-        # Prefer the user's default agent (user:xxx)
         if ws_agent_id.startswith("user:"):
             return ws.chat_manager
-        # Keep first match as fallback
         if fallback_ws is None:
             fallback_ws = ws.chat_manager
-    
+
     if fallback_ws:
         return fallback_ws
-    
+
     raise HTTPException(
         status_code=503,
         detail="Chat manager not available",
@@ -317,31 +318,40 @@ async def list_chats(
     user_id: Optional[str] = Query(None, alias="user_id"),
     agent_id: Optional[str] = Query(None, alias="agent_id"),
 ) -> List[Dict[str, Any]]:
-    """List chat sessions for the current user.
-
-    ENFORCES USER ISOLATION: Non-admin users can only see their own chats.
-    Admin users can see all chats across all users by aggregating
-    from each user's isolated ChatManager.
+    """List chat sessions for a specific agent, strictly isolated.
 
     Query Parameters:
         channel: Filter by channel name (e.g., "console", "wecom")
         user_id: Filter by specific user ID (admin only, ignored for non-admin)
-        agent_id: Filter by agent ID (for multi-agent isolation)
+        agent_id: Filter by agent ID (required for multi-agent isolation).
+                  Falls back to X-Agent-Id header if not in query param.
     """
     username, is_admin = _get_current_user(request)
 
-    # Use per-user ChatManager — file-level isolation already ensures user isolation.
-    # No need for user_id or agent_id filtering:
-    # - ChatManager is per-user (workspaces/{username}/chat/chats.json)
-    # - External channels (wecom, dingtalk) store sender_id as user_id in ChatSpec,
-    #   so filtering by user_id would exclude them
-    # - agent_id filtering is also unnecessary since all chats in the user's
-    #   ChatManager belong to that user regardless of agent_id value
-    #
     # channel="console" means "default view" — return all channels
-    # (frontend defaults to channel="console" for the chat dropdown)
-    effective_channel = "" if channel == "console" else channel
-    cm = _get_chat_manager(request)
+    effective_channel = "" if (channel == "console" or not channel) else channel
+
+    # Resolve agent_id: query param > header
+    resolved_agent_id = agent_id or request.headers.get("X-Agent-Id", "")
+
+    if not resolved_agent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="agent_id is required (query param or X-Agent-Id header)",
+        )
+
+    try:
+        cm = _get_chat_manager(request, agent_id=resolved_agent_id)
+    except HTTPException:
+        logger.warning(
+            "list_chats: agent_id=%s not found for user=%s",
+            resolved_agent_id, username,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{resolved_agent_id}' not found or access denied",
+        )
+
     chats = await cm.list_chats(channel=effective_channel)
 
     # Ensure browsers never cache chat list responses
@@ -410,11 +420,20 @@ async def get_chat(
         before: Return messages before this message ID (for "load more")
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
+    resolved_agent_id = request.headers.get("X-Agent-Id", "") or ""
+
+    # Try to get the agent's ChatManager; fall back to cross-manager search
+    cm = None
+    try:
+        cm = _get_chat_manager(request, agent_id=resolved_agent_id or None)
+    except HTTPException:
+        pass
 
     # Get chat spec
-    logger.info(f"get_chat: requested chat_id={chat_id}, repo_path={cm._repo.path}")
-    spec = await cm.get_chat(chat_id)
+    spec = None
+    if cm:
+        logger.info(f"get_chat: requested chat_id={chat_id}, repo_path={cm._repo.path}")
+        spec = await cm.get_chat(chat_id)
     if not spec:
         # Fallback: search across all user's ChatManagers
         spec, cm = await _find_chat_across_managers(request, chat_id, username)
