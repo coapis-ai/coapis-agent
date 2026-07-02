@@ -44,7 +44,7 @@ keyring>=25.0.0
 mss>=9.0.0
 pillow>=10.0.0
 psutil>=6.0.0                   # P1: 系统监控，QwenPaw 有
-frontmatter>=2.0.0              # P1: YAML 前处理，QwenPaw 有
+python-frontmatter>=1.3.0       # P1: YAML 前处理，兼容 pyyaml>=6.0（原 frontmatter 锁定 PyYAML==5.1 导致冲突）
 
 # ── 协议/通信（P0 补充） ──
 paho-mqtt>=2.0.0                # MQTT 客户端
