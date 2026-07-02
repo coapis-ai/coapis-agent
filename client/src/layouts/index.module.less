@@ -69,7 +69,7 @@
     padding: 4px;
 
     :global {
-      .qwenpaw-menu {
+      .coapis-menu {
         background: transparent !important;
       }
     }
@@ -121,8 +121,8 @@
 
     :global {
       /* Center icon in collapsed menu items */
-      .qwenpaw-menu-item,
-      .qwenpaw-menu-submenu .qwenpaw-menu-item {
+      .coapis-menu-item,
+      .coapis-menu-submenu .coapis-menu-item {
         padding-left: 0 !important;
         padding-right: 0 !important;
         display: flex !important;
@@ -131,26 +131,26 @@
       }
 
       /* Hide label text in collapsed mode */
-      .qwenpaw-menu-title-content,
-      .qwenpaw-menu-item > span:not([role]),
-      .qwenpaw-menu-item-only-child > span {
+      .coapis-menu-title-content,
+      .coapis-menu-item > span:not([role]),
+      .coapis-menu-item-only-child > span {
         display: none !important;
       }
 
       /* Hide group labels */
-      .qwenpaw-menu-submenu-title {
+      .coapis-menu-submenu-title {
         display: none !important;
       }
     }
   }
 
   :global {
-    .qwenpaw-menu {
+    .coapis-menu {
       border-inline-end: 0 !important;
     }
 
     /* Group title (一级菜单分组) */
-    .qwenpaw-menu-submenu-title {
+    .coapis-menu-submenu-title {
       font-family: "PingFang SC", sans-serif !important;
       font-size: 12px !important;
       font-weight: 500 !important;
@@ -167,43 +167,43 @@
     }
 
     /* Hide submenu arrow */
-    .qwenpaw-menu-submenu-arrow {
+    .coapis-menu-submenu-arrow {
       display: none !important;
     }
 
     /* Always expand submenus */
-    .qwenpaw-menu-submenu {
-      > .qwenpaw-menu {
+    .coapis-menu-submenu {
+      > .coapis-menu {
         display: block !important;
       }
     }
 
     /* Menu item padding - align all items */
-    .qwenpaw-menu-item {
+    .coapis-menu-item {
       padding-left: 8px !important;
     }
 
     /* Remove submenu indent - align with parent */
-    .qwenpaw-menu-submenu .qwenpaw-menu-item {
+    .coapis-menu-submenu .coapis-menu-item {
       padding-left: 8px !important;
     }
 
     /* Selected item */
-    .qwenpaw-menu-item-selected {
+    .coapis-menu-item-selected {
       background: rgba(43, 18, 0, 0.08) !important;
       color: inherit !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
 
-      .qwenpaw-menu-title-content {
+      .coapis-menu-title-content {
         display: flex !important;
         align-items: center !important;
       }
     }
 
     /* Selected submenu item - keep text color unchanged */
-    .qwenpaw-menu-submenu .qwenpaw-menu-item-selected {
+    .coapis-menu-submenu .coapis-menu-item-selected {
       color: inherit !important;
     }
   }
@@ -220,13 +220,13 @@
   }
 
   :global {
-    .qwenpaw-menu {
+    .coapis-menu {
       background: #1a1a1a !important;
       border-inline-end: 0 !important;
     }
 
     /* Group title (sub-menu label) */
-    .qwenpaw-menu-submenu-title {
+    .coapis-menu-submenu-title {
       color: rgba(255, 255, 255, 0.45) !important;
 
       /* No hover effect for group titles in dark mode */
@@ -237,18 +237,18 @@
     }
 
     /* Regular menu item */
-    .qwenpaw-menu-item {
+    .coapis-menu-item {
       color: rgba(255, 255, 255, 0.75) !important;
     }
 
     /* Hover state - only for menu items, not group titles */
-    .qwenpaw-menu-item:hover {
+    .coapis-menu-item:hover {
       background: rgba(255, 255, 255, 0.1) !important;
       color: rgba(255, 255, 255, 0.95) !important;
     }
 
     /* Selected item */
-    .qwenpaw-menu-item-selected {
+    .coapis-menu-item-selected {
       background: rgba(255, 127, 22, 0.5) !important;
       color: #ff7f16 !important;
     }
@@ -410,7 +410,7 @@
 
 // ─── Update Modal ─────────────────────────────────────────────────────────────
 .updateModal {
-  :global(.qwenpaw-modal-content) {
+  :global(.coapis-modal-content) {
     padding: 0 !important;
     border-radius: 12px !important;
     overflow: visible !important;
@@ -418,26 +418,26 @@
     border: none !important;
   }
 
-  :global(.qwenpaw-modal-body) {
+  :global(.coapis-modal-body) {
     padding: 0 !important;
   }
 
-  :global(.qwenpaw-modal-footer) {
+  :global(.coapis-modal-footer) {
     padding: 12px 24px;
     margin-top: 0;
   }
 
-  :global(.qwenpaw-modal-header) {
+  :global(.coapis-modal-header) {
     display: none !important;
   }
 
-  :global(.qwenpaw-modal-close) {
+  :global(.coapis-modal-close) {
     display: none !important;
   }
 }
 
 .updateModalBanner {
-  background: url("/public/qwenpawBack.png") no-repeat center top;
+  background: url("/public/coapisBack.png") no-repeat center top;
   background-size: contain;
   padding: 48px 28px 0px;
   display: flex;
@@ -569,7 +569,7 @@
     color: rgba(255, 255, 255, 0.85);
 
     /* Text buttons (Docs / FAQ / GitHub / Changelog) */
-    :global(.qwenpaw-btn-text),
+    :global(.coapis-btn-text),
     :global(.ant-btn-text) {
       color: rgba(255, 255, 255, 0.75) !important;
 
