@@ -637,9 +637,9 @@ class ReMeLightMemoryManager(BaseMemoryManager):
     async def dream(self, **_kwargs) -> None:
         """Run one dream-based memory optimization pass.
 
-        Reads recent memory/*.md files, uses LLM to extract and
-        consolidate key information into MEMORY.md. Creates backup
-        before overwriting.
+        Two-level dream: for sub-agents, consolidates BOTH agent-level
+        and user-level memory files. For default agents, only processes
+        the single level (user workspace == agent workspace).
         """
         logger.info("[Dream] Starting memory optimization")
 
@@ -648,12 +648,55 @@ class ReMeLightMemoryManager(BaseMemoryManager):
         set_current_workspace_dir(Path(self.working_dir))
 
         language = getattr(agent_config, "language", "zh")
+        has_user_ws = (
+            self._user_workspace is not None
+            and self._user_workspace != self._workspace_dir
+        )
+
+        if has_user_ws:
+            # Sub-agent: dream both levels
+            await self._dream_level(
+                self._workspace_dir, chat_model, formatter,
+                language, level_label="智能体级",
+            )
+            await self._dream_level(
+                self._user_workspace, chat_model, formatter,
+                language, level_label="用户级",
+            )
+        else:
+            # Default agent or global: single level
+            await self._dream_level(
+                self._workspace_dir, chat_model, formatter,
+                language, level_label="",
+            )
+
+    async def _dream_level(
+        self,
+        target_dir: Path,
+        chat_model,
+        formatter,
+        language: str,
+        level_label: str = "",
+    ) -> None:
+        """Run dream consolidation for a single memory level.
+
+        Args:
+            target_dir: The workspace directory containing MEMORY.md
+                and memory/ subdirectory.
+            chat_model: LLM model instance.
+            formatter: LLM formatter instance.
+            language: Language code ("zh" or "en").
+            level_label: Label for logging (e.g. "智能体级", "用户级").
+        """
+        label = f"[{level_label}] " if level_label else ""
+        logger.info("[Dream] %sProcessing: %s", label, target_dir)
+
         current_date = datetime.now().strftime("%Y-%m-%d")
 
         # Step 1: Collect recent memory files (today + last 3 days)
-        memory_dir = Path(self.working_dir) / "memory"
+        memory_dir = target_dir / "memory"
         if not memory_dir.exists():
-            logger.info("[Dream] No memory/ directory, skipping")
+            logger.info("[Dream] %sNo memory/ directory, skipping", label)
             return
 
         recent_files = list(memory_dir.glob(f"{current_date}*.md"))
@@ -662,11 +705,11 @@ class ReMeLightMemoryManager(BaseMemoryManager):
             recent_files.extend(memory_dir.glob(f"{date_str}*.md"))
 
         if not recent_files:
-            logger.info("[Dream] No recent memory files found, skipping")
+            logger.info("[Dream] %sNo recent memory files found, skipping", label)
             return
 
         # Step 2: Read existing MEMORY.md
-        memory_file = Path(self.working_dir) / "MEMORY.md"
+        memory_file = target_dir / "MEMORY.md"
         existing_memory = ""
         if memory_file.exists():
             existing_memory = memory_file.read_text(encoding="utf-8")
@@ -679,25 +722,25 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                 if content:
                     daily_notes.append(f"## {fp.name}\n{content}")
             except Exception as e:
-                logger.warning("[Dream] Failed to read %s: %s", fp, e)
+                logger.warning("[Dream] %sFailed to read %s: %s", label, fp, e)
 
         if not daily_notes:
-            logger.info("[Dream] All recent memory files are empty, skipping")
+            logger.info("[Dream] %sAll recent memory files are empty, skipping", label)
             return
 
         daily_text = "\n\n".join(daily_notes)
 
         # Step 4: Backup MEMORY.md
-        backup_path = Path(self.working_dir).absolute() / "backup"
+        backup_path = target_dir.absolute() / "backup"
         backup_path.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if memory_file.exists():
             backup_file = backup_path / f"memory_backup_{timestamp}.md"
             try:
                 shutil.copyfile(memory_file, backup_file)
-                logger.info("[Dream] Created MEMORY.md backup: %s", backup_file)
+                logger.info("[Dream] %sCreated MEMORY.md backup: %s", label, backup_file)
             except Exception as e:
-                logger.warning("[Dream] Backup failed: %s", e)
+                logger.warning("[Dream] %sBackup failed: %s", label, e)
 
         # Step 5: LLM consolidation
         if language == "zh":
@@ -736,20 +779,20 @@ class ReMeLightMemoryManager(BaseMemoryManager):
             new_memory = (response.get_text_content() or "").strip()
 
             if not new_memory or len(new_memory) < 20:
-                logger.info("[Dream] LLM returned insufficient content, skipping")
+                logger.info("[Dream] %sLLM returned insufficient content, skipping", label)
                 return
 
             with open(memory_file, "w", encoding="utf-8") as f:
                 f.write(new_memory + "\n")
 
-            logger.info("[Dream] Updated MEMORY.md (%d chars)", len(new_memory))
+            logger.info("[Dream] %sUpdated MEMORY.md (%d chars)", label, len(new_memory))
 
         except Exception as e:
-            logger.exception("[Dream] LLM consolidation failed: %s", e)
+            logger.exception("[Dream] %sLLM consolidation failed: %s", label, e)
             backup_file = backup_path / f"memory_backup_{timestamp}.md"
             if backup_file.exists():
                 try:
                     shutil.copyfile(backup_file, memory_file)
-                    logger.info("[Dream] Restored MEMORY.md from backup")
+                    logger.info("[Dream] %sRestored MEMORY.md from backup", label)
                 except Exception:
                     pass

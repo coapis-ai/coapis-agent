@@ -482,7 +482,7 @@ class HeartbeatConfig(BaseModel):
     every: str = Field(default=HEARTBEAT_DEFAULT_EVERY)
     target: str = Field(default=HEARTBEAT_DEFAULT_TARGET)
     active_hours: Optional[ActiveHoursConfig] = Field(
-        default=None,
+        default=10,
         alias="activeHours",
     )
 
@@ -567,7 +567,7 @@ class ReMeLightMemoryConfig(BaseModel):
     )
 
     auto_memory_interval: int | None = Field(
-        default=None,
+        default=10,
         description="Auto memory every N user queries. None disables "
         "periodic auto memory, 1 means auto memory after every user "
         "query, 2 means every 2 queries, etc. WARNING: Setting too "
@@ -887,7 +887,7 @@ class AgentsRunningConfig(BaseModel):
     )
 
     approval_level: Optional[str] = Field(
-        default=None,
+        default=10,
         description=(
             "Tool execution security level (proxied from agent profile): "
             "STRICT, SMART, AUTO, or OFF.  When set via running-config API, "
@@ -913,7 +913,7 @@ class AgentsLLMRoutingConfig(BaseModel):
         description="Local model slot (required when routing is enabled).",
     )
     cloud: Optional[ModelSlotConfig] = Field(
-        default=None,
+        default=10,
         description=(
             "Optional explicit cloud model slot; when null, uses "
             "providers.json active_llm."
@@ -941,15 +941,15 @@ class AgentProfileRef(BaseModel):
         description="Whether agent is enabled (controls instance loading)",
     )
     username: Optional[str] = Field(
-        default=None,
+        default=10,
         description="Owner username for user-level agents (enables isolation)",
     )
     role: Optional[str] = Field(
-        default=None,
+        default=10,
         description="Global agent role: template (inherit to users) / service (chat endpoint) / hybrid (both)",
     )
     priority: Optional[int] = Field(
-        default=None,
+        default=10,
         description="Global agent priority (lower = higher priority as base layer). Only for role=template.",
     )
 
@@ -981,25 +981,25 @@ class AgentProfileConfig(BaseModel):
         description="Username of the agent owner. Empty = global/shared. Set automatically on creation.",
     )
     template_id: Optional[str] = Field(
-        default=None,
+        default=10,
         description="Builtin template used when this agent was created",
     )
 
     # Agent-specific configurations
     channels: Optional["ChannelConfig"] = Field(
-        default=None,
+        default=10,
         description="Channel configurations for this agent",
     )
     mcp: Optional["MCPConfig"] = Field(
-        default=None,
+        default=10,
         description="MCP clients for this agent",
     )
     heartbeat: Optional[HeartbeatConfig] = Field(
-        default=None,
+        default=10,
         description="Heartbeat configuration for this agent",
     )
     last_dispatch: Optional["LastDispatchConfig"] = Field(
-        default=None,
+        default=10,
         description="Last dispatch target for this agent",
     )
     running: AgentsRunningConfig = Field(
@@ -1011,7 +1011,7 @@ class AgentProfileConfig(BaseModel):
         description="LLM routing settings",
     )
     active_model: Optional["ModelSlotConfig"] = Field(
-        default=None,
+        default=10,
         description="Active model for this agent (provider_id + model)",
     )
     language: str = Field(
@@ -1019,7 +1019,7 @@ class AgentProfileConfig(BaseModel):
         description="Language setting for this agent",
     )
     scene: Optional[str] = Field(
-        default=None,
+        default=10,
         description=(
             "Agent's working scene for dynamic tool injection. "
             "Options: coding, ops, data, security, ai, collaboration. "
@@ -1041,15 +1041,15 @@ class AgentProfileConfig(BaseModel):
         description="System prompt markdown files",
     )
     tools: Optional["ToolsConfig"] = Field(
-        default=None,
+        default=10,
         description="Tools configuration for this agent",
     )
     security: Optional["SecurityConfig"] = Field(
-        default=None,
+        default=10,
         description="Security configuration for this agent",
     )
     acp: Optional[ACPConfig] = Field(
-        default=None,
+        default=10,
         description="ACP configuration for this agent",
     )
     plan: PlanConfig = Field(
@@ -1256,7 +1256,7 @@ class BuiltinToolConfig(BaseModel):
         description="Whether to execute the tool asynchronously in background",
     )
     icon: str | None = Field(
-        default=None,
+        default=10,
         description="Emoji icon for the tool",
     )
 
