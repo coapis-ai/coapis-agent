@@ -16,11 +16,12 @@
 """Tool call guard — programmatic dedup and rate limiting.
 
 Replaces the prompt-only "反循环铁律" in AGENTS.md with actual
-programmatic enforcement. Three layers of protection:
+programmatic enforcement. Four layers of protection:
 
 1. Exact dedup: same tool + same params → return cached result
-2. Consecutive warning: same tool 5+ times in a row → inject warning
-3. Session stats: track per-tool call counts for diagnostics
+2. Consecutive block: same tool 3+ times in a row → hard block
+3. Empty-result block: consecutive empty/no-output results → hard block
+4. Session stats: track per-tool call counts for diagnostics
 """
 
 from __future__ import annotations
@@ -36,8 +37,9 @@ logger = logging.getLogger(__name__)
 
 # ── Thresholds ──
 _EXACT_DEDUP_THRESHOLD = 2    # Same call this many times → inject warning
-_CONSECUTIVE_WARN = 5         # Same tool this many times in a row → warn
-_SESSION_WARN = 15            # Same tool this many times per session → warn
+_CONSECUTIVE_BLOCK = 3        # Same tool this many times in a row → hard block
+_EMPTY_RESULT_BLOCK = 2       # Consecutive empty results → hard block
+_SESSION_WARN = 10            # Same tool this many times per session → warn
 
 
 class ToolCallGuard:
@@ -60,6 +62,8 @@ class ToolCallGuard:
         # last tool_name for consecutive detection
         self._last_tool_name: str = ""
         self._consecutive_count: int = 0
+        # consecutive empty-result tracking
+        self._consecutive_empty: int = 0
 
     @staticmethod
     def _params_hash(params: dict[str, Any] | None) -> str:
@@ -105,25 +109,37 @@ class ToolCallGuard:
                 # First re-hit: return cached but don't block
                 return self._result_cache[call_key]
 
-            # ── Layer 2: Consecutive same-tool warning ──
+            # ── Layer 2: Consecutive same-tool hard block ──
             if tool_name != self._last_tool_name:
                 self._consecutive_count = 0
             self._consecutive_count += 1
             self._last_tool_name = tool_name
 
-            if self._consecutive_count >= _CONSECUTIVE_WARN:
-                logger.info(
-                    "ToolCallGuard: consecutive warning for %s "
+            if self._consecutive_count >= _CONSECUTIVE_BLOCK:
+                logger.warning(
+                    "ToolCallGuard: consecutive BLOCK for %s "
                     "(%d consecutive calls)",
                     tool_name, self._consecutive_count,
                 )
                 return (
-                    f"[系统警告] 你已连续 {self._consecutive_count} 次调用 "
-                    f"{tool_name}。请停下来评估：是否真的需要继续？"
-                    f"还是应该换一种方式或直接给出答案？"
+                    f"[系统阻断] 你已连续 {self._consecutive_count} 次调用 "
+                    f"{tool_name}，已触发循环保护。"
+                    f"禁止继续调用此工具，请直接基于已有信息给出结论。"
                 )
 
-            # ── Layer 3: Session-level count warning (non-blocking) ──
+            # ── Layer 2b: Empty-result hard block ──
+            if self._consecutive_empty >= _EMPTY_RESULT_BLOCK:
+                logger.warning(
+                    "ToolCallGuard: empty-result BLOCK for %s "
+                    "(%d consecutive empty results)",
+                    tool_name, self._consecutive_empty,
+                )
+                return (
+                    f"[系统阻断] {tool_name} 已连续 {self._consecutive_empty} 次返回空结果，"
+                    f"已触发空结果保护。禁止继续调用此工具，请直接基于已有信息给出结论。"
+                )
+
+            # ── Layer 4: Session-level count warning (non-blocking) ──
             total = self._call_counts[tool_name]
             if total == _SESSION_WARN:
                 logger.info(
@@ -144,6 +160,8 @@ class ToolCallGuard:
     ) -> None:
         """Record a completed tool call result for future dedup.
 
+        Also tracks consecutive empty results for early loop detection.
+
         Args:
             tool_name: Name of the tool.
             params: Parameters passed to the tool.
@@ -159,6 +177,17 @@ class ToolCallGuard:
             if result_text:
                 self._result_cache[call_key] = result_text[:2048]
 
+            # Track consecutive empty results
+            is_empty = not result_text or not result_text.strip()
+            is_no_output = (
+                "no output" in result_text.lower()
+                if result_text else False
+            )
+            if is_empty or is_no_output:
+                self._consecutive_empty += 1
+            else:
+                self._consecutive_empty = 0
+
     def get_stats(self) -> dict[str, int]:
         """Return per-tool call counts for diagnostics."""
         with self._lock:
@@ -173,3 +202,4 @@ class ToolCallGuard:
             self._dedup_hits.clear()
             self._last_tool_name = ""
             self._consecutive_count = 0
+            self._consecutive_empty = 0

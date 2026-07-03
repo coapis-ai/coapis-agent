@@ -903,6 +903,15 @@ class AgentsRunningConfig(BaseModel):
         ),
     )
 
+    session_execution: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Session Execution Manager (SEM) configuration. "
+            "Controls loop detection, resource budgets, and intervention strategies. "
+            "Default: None (disabled). Set to {} to enable with defaults."
+        ),
+    )
+
 
 class AgentsLLMRoutingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")

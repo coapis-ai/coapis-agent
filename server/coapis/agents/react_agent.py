@@ -308,6 +308,32 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             )
             logger.debug("Context manager configured")
 
+        # Initialize Session Execution Manager (SEM) if configured
+        self._session_execution_manager = None
+        if running_config.session_execution is not None:
+            try:
+                from .session_execution import (
+                    SessionExecutionConfig,
+                    SessionExecutionManager,
+                )
+                sem_config = SessionExecutionConfig(
+                    **running_config.session_execution
+                )
+                if sem_config.enabled:
+                    self._session_execution_manager = (
+                        SessionExecutionManager(sem_config)
+                    )
+                    logger.info(
+                        "Session Execution Manager enabled for agent '%s'",
+                        agent_config.id,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to initialize Session Execution Manager: %s. "
+                    "SEM will be disabled.",
+                    e,
+                )
+
         # Setup command handler
         self.command_handler = CommandHandler(
             agent_name=self.name,
@@ -1637,6 +1663,56 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             )
             logger.debug("Registered context manager hooks")
 
+        # Session Execution Manager hooks
+        if self._session_execution_manager is not None:
+            sem = self._session_execution_manager
+
+            async def _sem_pre_reasoning(_self, *args, **kwargs):
+                """SEM pre-reasoning hook: check and intervene."""
+                try:
+                    session_id = self._request_context.get(
+                        "session_id", "default"
+                    )
+                    sem.record_iteration(session_id)
+                    intervention = sem.check_and_intervene(session_id)
+                    if intervention is not None:
+                        logger.warning(
+                            "SEM intervention: session=%s, level=%s",
+                            session_id,
+                            intervention.value,
+                        )
+                except Exception as e:
+                    logger.error("SEM pre_reasoning hook error: %s", e)
+
+            async def _sem_post_acting(_self, *args, **kwargs):
+                """SEM post-acting hook: record tool call."""
+                try:
+                    session_id = self._request_context.get(
+                        "session_id", "default"
+                    )
+                    # Extract tool call info from kwargs if available
+                    tool_call = kwargs.get("tool_call", {})
+                    tool_name = str(tool_call.get("name", ""))
+                    tool_input = tool_call.get("input", {})
+                    tool_output = kwargs.get("tool_result", "")
+                    sem.record_tool_call(
+                        session_id, tool_name, tool_input, tool_output
+                    )
+                except Exception as e:
+                    logger.error("SEM post_acting hook error: %s", e)
+
+            self.register_instance_hook(
+                hook_type="pre_reasoning",
+                hook_name="sem_pre_reasoning",
+                hook=_sem_pre_reasoning,
+            )
+            self.register_instance_hook(
+                hook_type="post_acting",
+                hook_name="sem_post_acting",
+                hook=_sem_post_acting,
+            )
+            logger.debug("Registered SEM hooks")
+
     def rebuild_sys_prompt(self) -> None:
         """Rebuild and replace the system prompt.
 
@@ -1894,6 +1970,23 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         tool_name = str(tool_call.get("name", ""))
 
+        # ── SEM check: intervene if needed ──
+        if self._session_execution_manager is not None:
+            session_id = self._request_context.get("session_id", "default")
+            intervention = self._session_execution_manager.check_and_intervene(
+                session_id
+            )
+            if intervention is not None:
+                from agentscope.message import TextBlock
+                block_msg = (
+                    f"[SEM 干预] 会话执行已达到 {intervention.value} 级别。"
+                    f"请基于已有信息直接给出结论，不要再调用工具。"
+                )
+                return {
+                    "content": [TextBlock(type="text", text=block_msg)],
+                    "metadata": {"tool_call_id": getattr(tool_call, "id", "")},
+                }
+
         if tool_name in self._PLAN_TOOLS_WITH_JSON_ARGS:
             self._fix_stringified_json_args(tool_call)
 
@@ -1918,6 +2011,35 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 await self.print(tool_res_msg, True)
                 await self.memory.add(tool_res_msg)
                 return None
+
+        # ── Loop-level protection: track consecutive same-tool calls ──
+        if not hasattr(self, "_recent_tool_calls"):
+            self._recent_tool_calls: list[str] = []
+            self._consecutive_same_tool: int = 0
+            self._last_acting_tool: str = ""
+
+        # Track consecutive same-tool calls
+        if tool_name == self._last_acting_tool:
+            self._consecutive_same_tool += 1
+        else:
+            self._consecutive_same_tool = 1
+            self._last_acting_tool = tool_name
+
+        # Check if same tool called 3+ times consecutively
+        if self._consecutive_same_tool >= 3:
+            logger.warning(
+                "Loop-level protection: %s called %d times consecutively",
+                tool_name, self._consecutive_same_tool,
+            )
+            from agentscope.message import TextBlock
+            block_msg = (
+                f"[循环保护] {tool_name} 已连续调用 {self._consecutive_same_tool} 次，"
+                f"已触发循环保护。请基于已有信息直接给出结论。"
+            )
+            return {
+                "content": [TextBlock(type="text", text=block_msg)],
+                "metadata": {"tool_call_id": getattr(tool_call, "id", "")},
+            }
 
         # ── Cache check for idempotent tools ──
         _cache = get_cache() if is_idempotent(tool_name) else None

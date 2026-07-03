@@ -19,6 +19,12 @@ services:
       - ./volume/playwright:/app/volume/playwright:ro
       # MCP包缓存持久化（避免容器重建后重新下载）
       - ./volume/mcp:/root/.cache/pip
+      # SEM 代码挂载（开发测试用）
+      - ../server/coapis/agents/session_execution:/app/coapis/agents/session_execution
+      # SEM 集成到 react_agent.py（开发测试用）
+      - ../server/coapis/agents/react_agent.py:/app/coapis/agents/react_agent.py
+      # workspace_guard.py 技能路径权限修复
+      - ../server/coapis/agents/security/workspace_guard.py:/app/coapis/agents/security/workspace_guard.py
     env_file:
       - .env
     environment:

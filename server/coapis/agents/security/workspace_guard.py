@@ -36,6 +36,7 @@ from ...config.context import (
     get_current_user_role,
     get_current_workspace_dir,
 )
+from ...constant import WORKING_DIR
 from .audit_logger import AuditLogger, create_audit_event
 
 logger = logging.getLogger(__name__)
@@ -217,12 +218,15 @@ class WorkspaceGuard:
         1. The resolved path (following symlinks) is within workspace, OR
         2. The non-resolved path (before following symlinks) is within workspace
 
+        Also allows access to global shared directories:
+        - skill_pool: 全局技能池，所有用户可用
+
         Args:
             target_path: Path to check
             username: Override username (defaults to contextvar)
 
         Returns:
-            True if path is within user's workspace, False otherwise
+            True if path is within user's workspace or global shared dir, False otherwise
         """
         workspace_dir = get_current_workspace_dir()
         if workspace_dir is None:
@@ -234,20 +238,28 @@ class WorkspaceGuard:
 
         try:
             ws = Path(workspace_dir).expanduser().resolve()
+            target_resolved = Path(target_path).expanduser().resolve()
 
-            # Check 1: Resolved path (follows symlinks)
+            # Check 1: Resolved path (follows symlinks) within workspace
             try:
-                target_resolved = Path(target_path).expanduser().resolve()
                 target_resolved.relative_to(ws)
                 return True
             except ValueError:
                 pass
 
-            # Check 2: Non-resolved path (before following symlinks)
-            # This allows symlinked directories within workspace
+            # Check 2: Non-resolved path (before following symlinks) within workspace
             try:
                 target_unresolved = Path(target_path).expanduser()
                 target_unresolved.relative_to(ws)
+                return True
+            except ValueError:
+                pass
+
+            # Check 3: Global shared directories (skill_pool)
+            # 全局技能池对所有用户开放
+            skill_pool_dir = WORKING_DIR / "skill_pool"
+            try:
+                target_resolved.relative_to(skill_pool_dir.resolve())
                 return True
             except ValueError:
                 pass

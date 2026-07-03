@@ -159,6 +159,7 @@ class LazyGroup(click.Group):
         "task": ("coapis.cli.task_cmd", "task_cmd", ".task_cmd"),
         "doctor": ("coapis.cli.doctor_cmd", "doctor_cmd", ".doctor_cmd"),
         "admin": ("coapis.cli.admin_cmd", "admin_group", ".admin_cmd"),
+        "migrate": ("coapis.cli.migrate_cmd", "migrate_cmd", ".migrate_cmd"),
     },
 )
 @click.version_option(version=__version__, prog_name="CoApis")

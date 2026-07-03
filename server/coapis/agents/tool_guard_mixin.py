@@ -211,6 +211,27 @@ class ToolGuardMixin:
             if dedup_result is not None:
                 from agentscope.message import TextBlock
                 from agentscope.tool import ToolResponse
+
+                # If this is a hard block (阻断), inject a strong system
+                # prompt into memory so the LLM sees it in next reasoning
+                if "[系统阻断]" in dedup_result:
+                    try:
+                        from agentscope.message import Msg
+                        block_hint = Msg(
+                            "system",
+                            f"[系统强制] 工具 {tool_name} 已被循环保护封锁，"
+                            f"后续对该工具的调用将被拒绝。"
+                            f"请基于已有信息直接给出结论，不要再尝试调用此工具。",
+                            "system",
+                        )
+                        await self.memory.add(block_hint)
+                        logger.info(
+                            "ToolCallGuard: injected block hint for %s into memory",
+                            tool_name,
+                        )
+                    except Exception:
+                        pass  # Non-blocking
+
                 # Return dedup/warning as tool result directly
                 return {
                     "content": [TextBlock(type="text", text=dedup_result)],
