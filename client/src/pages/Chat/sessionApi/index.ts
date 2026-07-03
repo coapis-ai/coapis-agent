@@ -620,10 +620,11 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         lastMsg?.cards?.[0]?.data?.input?.[0]?.content,
       );
       if (!text) {
-        lastMsg.cards = buildUserCard({
+        // Replace the entire message instead of mutating read-only cards property
+        messages[messages.length - 1] = buildUserCard({
           content: [{ type: "text", text: cachedText }],
           role: ROLE_USER,
-        } as Message).cards;
+        } as Message);
       }
     } else {
       messages.push(

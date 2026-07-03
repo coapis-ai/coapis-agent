@@ -695,7 +695,6 @@ function PermissionsTab() {
   const [activeSubTab, setActiveSubTab] = useState('roles');
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState<any>(null);
-  const [selectedRole, setSelectedRole] = useState('user');
 
   // Edit state
   const [editRole, setEditRole] = useState<string | null>(null);
