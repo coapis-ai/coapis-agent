@@ -265,6 +265,10 @@ class QueryAnalyzer:
             if t not in suggested_tools:
                 suggested_tools.append(t)
 
+        # 需要工具的查询至少 medium，防止模型因 effort=low 跳过工具调用
+        if needs_tools and thinking_effort == "low":
+            thinking_effort = "medium"
+
         # ── Step 5: 工具裁剪（P2）──
         pruned_tools = self._apply_pruning(
             suggested_tools, confidence, needs_tools,
