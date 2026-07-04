@@ -1088,50 +1088,12 @@ class Workspace:
                 # Add user message to context BEFORE streaming
                 context.add_message("user", user_message)
 
-                # ── Search intent pre-fetch (force web_search for search queries) ──
-                _search_card_html = ""
-                _search_cfg_path = Path(__file__).parent / "search_config.json"
-                _search_cfg = {}
-                try:
-                    import json as _json
-                    with open(_search_cfg_path) as _sf:
-                        _search_cfg = _json.load(_sf)
-                except Exception:
-                    pass
-                _search_keywords = set(_search_cfg.get("search_keywords", [
-                    '新闻', '热点', '热搜', '天气', '比分', '赛事', '最新', '今日',
-                    'today', 'news', 'weather', 'score', 'latest', 'current',
-                    '搜索', '查一下', '帮我查', '帮我搜', 'search', 'look up',
-                ]))
-                if user_message and any(kw in user_message.lower() for kw in _search_keywords):
-                    try:
-                        from ..tools.builtin import web_search
-                        _search_result = await web_search(query=user_message, max_results=3)
-                        if _search_result and _search_result.get('results'):
-                            _cards = []
-                            for r in _search_result['results'][:3]:
-                                _title = r.get('title', '')
-                                _url = r.get('url', '')
-                                _snippet = r.get('snippet', '')[:120]
-                                _cards.append(f"<div class='search-result'><a href='{_url}' target='_blank'>{_title}</a><p>{_snippet}</p></div>")
-                            _search_card_html = f"<div class='search-card'><h4>🔍 搜索结果</h4>{''.join(_cards)}</div>"
-                            logger.info("Search pre-fetch: %d results for: %s", len(_search_result['results']), user_message[:50])
-                    except Exception as e:
-                        logger.warning("Search pre-fetch failed: %s", e)
-
                 # ── Core stream: delegate to runner.stream_query() ──
                 # stream_query() calls query_handler() internally, then passes
                 # (msg, last) tuples through adapt_agentscope_message_stream adapter
                 # to produce proper Events (Message, TextContent, DataContent)
                 # with correct lifecycle, delta tracking, and per-type msg_ids.
                 async for event in self.runner.stream_query(request_obj):
-                    # Inject search card HTML into first text content event
-                    if (_search_card_html
-                            and getattr(event, "object", None) == "content"
-                            and getattr(event, "delta", False)
-                            and getattr(event, "text", None)):
-                        event.text = _search_card_html + "\n\n" + event.text
-                        _search_card_html = ""  # Only inject once
                     yield event
 
                 # Post-stream: evolution hooks + cleanup

@@ -64,6 +64,13 @@ _SIMPLE_PATTERNS = [
     r"^(测试|test|ping|echo)$",
     r"^(你是谁|who are you|自我介绍)$",
     r"^[\U0001F600-\U0001F9FF\U00002702-\U000027B0\u2600-\u26FF\u2700-\u27BF]+$",  # emoji only
+    # ── 回忆/上下文类问题：应直接从对话历史回答，不需要工具 ──
+    r"^(刚才|刚刚|之前|上一[次轮]|last|previous).{0,10}(聊|说|讨论|谈|问|回答|做了|干了|说了什么|聊了什么)",
+    r"^(我们|咱|你).{0,5}(刚才|刚刚|之前|上一[次轮]).{0,8}(聊|说|讨论|谈|做了|干了)",
+    r"^(what|where|when|who).{0,15}(did we|was that|were we|just now|earlier|before)",
+    r"^(remind|recall|remember).{0,15}(we|you|I|that|what)",
+    r"^(你?还记得?|你还?记得|想起来了|回忆一?下)",
+    r"^(我刚才说了什么|我说了啥|我问了什么|你回答了什么|你的回答是什么)",
 ]
 
 _COMPLEX_PATTERNS = [

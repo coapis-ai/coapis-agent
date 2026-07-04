@@ -13,6 +13,41 @@ import { useAgentStore } from "../../../stores/agentStore";
 import { toDisplayUrl } from "../utils";
 
 // ---------------------------------------------------------------------------
+// Retry helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Retry an async function with exponential backoff.
+ * @param fn The async function to retry
+ * @param maxRetries Maximum number of retries (default: 3)
+ * @param baseDelay Base delay in ms (default: 1000)
+ * @returns The result of the function
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000,
+): Promise<T> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err as Error;
+      if (attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        console.warn(
+          `[sessionApi] Retry ${attempt + 1}/${maxRetries} after ${delay}ms:`,
+          (err as Error).message,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -839,7 +874,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       // If realId is already resolved, use it directly to fetch history.
       if (fromList?.realId) {
         try {
-          const chatHistory = await api.getChat(fromList.realId);
+          const chatHistory = await withRetry(() => api.getChat(fromList.realId!));
           const generating = isGenerating(chatHistory);
           const messages = convertMessages(chatHistory.messages || []);
           this.patchLastUserMessage(messages, generating, fromList.realId);
@@ -888,7 +923,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         | undefined;
       if (refreshed?.realId) {
         try {
-          const chatHistory = await api.getChat(refreshed.realId);
+          const chatHistory = await withRetry(() => api.getChat(refreshed.realId!));
           const generating = isGenerating(chatHistory);
           const messages = convertMessages(chatHistory.messages || []);
           this.patchLastUserMessage(messages, generating, refreshed.realId);
@@ -948,7 +983,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
 
 
     try {
-      const chatHistory = await api.getChat(effectiveId);
+      const chatHistory = await withRetry(() => api.getChat(effectiveId));
       const generating = isGenerating(chatHistory);
       const messages = convertMessages(chatHistory.messages || []);
       this.patchLastUserMessage(messages, generating, effectiveId);

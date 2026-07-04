@@ -539,10 +539,15 @@ function RuntimeLoadingBridge({
       setLoading,
       getLoading,
     };
+    // Expose on window as fallback for responseParser completion handler
+    (window as any).__chatSetLoading = setLoading;
 
     return () => {
       if (bridgeRef.current?.setLoading === setLoading) {
         bridgeRef.current = null;
+      }
+      if ((window as any).__chatSetLoading === setLoading) {
+        delete (window as any).__chatSetLoading;
       }
     };
   }, [getLoading, setLoading, bridgeRef]);
@@ -1290,9 +1295,27 @@ export default function ChatPage() {
             setTimeout(() => sessionApi.getSessionList(), 500);
 
             // Reset loading state on completion
-            const bridge = runtimeLoadingBridgeRef.current;
-            if (bridge?.setLoading) {
-              bridge.setLoading(false);
+            // Multi-layer fallback: bridge ref → window global → delayed retry
+            const resetLoading = () => {
+              const bridge = runtimeLoadingBridgeRef.current;
+              if (bridge?.setLoading) {
+                bridge.setLoading(false);
+                console.log("[rp] setLoading(false) via bridge ✓");
+                return true;
+              }
+              // Fallback: RuntimeLoadingBridge exposes setLoading on window
+              const fn = (window as any).__chatSetLoading as ((v: boolean) => void) | undefined;
+              if (fn) {
+                fn(false);
+                console.log("[rp] setLoading(false) via window fallback ✓");
+                return true;
+              }
+              return false;
+            };
+            if (!resetLoading()) {
+              console.warn("[rp] setLoading unavailable at completion, scheduling retry");
+              setTimeout(() => { resetLoading(); }, 100);
+              setTimeout(() => { resetLoading(); }, 500);
             }
 
             return {
@@ -1462,6 +1485,14 @@ export default function ChatPage() {
             rootSessionId={request.rootSessionId}
             onApprove={handleApprove}
             onDeny={handleDeny}
+            onTimeout={(requestId) => {
+              console.log("[Chat] Approval timed out, removing:", requestId);
+              setApprovalRequests((prev) => {
+                const next = new Map(prev);
+                next.delete(requestId);
+                return next;
+              });
+            }}
             onCancel={() => {
               console.log("[Chat] onCancel called for approval card");
               const sessionId = window.currentSessionId || "";

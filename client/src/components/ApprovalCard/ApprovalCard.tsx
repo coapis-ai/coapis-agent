@@ -21,6 +21,7 @@ export interface ApprovalCardProps {
   onApprove: (requestId: string) => Promise<void>;
   onDeny: (requestId: string) => Promise<void>;
   onCancel?: () => void;
+  onTimeout?: (requestId: string) => void;
 }
 
 export function ApprovalCard({
@@ -37,6 +38,7 @@ export function ApprovalCard({
   onApprove,
   onDeny,
   onCancel,
+  onTimeout,
 }: ApprovalCardProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState<"approve" | "deny" | null>(null);
@@ -62,6 +64,12 @@ export function ApprovalCard({
     const initialRemaining = Math.max(0, Math.floor(timeoutSeconds - elapsed));
     setRemaining(initialRemaining);
 
+    // If already expired on mount, trigger timeout immediately
+    if (initialRemaining <= 0) {
+      onTimeout?.(requestId);
+      return;
+    }
+
     const timer = setInterval(() => {
       const newElapsed = Date.now() / 1000 - createdAt;
       const newRemaining = Math.max(0, Math.floor(timeoutSeconds - newElapsed));
@@ -69,11 +77,12 @@ export function ApprovalCard({
 
       if (newRemaining <= 0) {
         clearInterval(timer);
+        onTimeout?.(requestId);
       }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [createdAt, timeoutSeconds]);
+  }, [createdAt, timeoutSeconds, requestId, onTimeout]);
 
   const handleApprove = async () => {
     console.log("[ApprovalCard] Approve button clicked:", requestId);

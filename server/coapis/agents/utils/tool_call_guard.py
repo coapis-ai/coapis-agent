@@ -203,3 +203,116 @@ class ToolCallGuard:
             self._last_tool_name = ""
             self._consecutive_count = 0
             self._consecutive_empty = 0
+
+
+# ── Reasoning Loop Detector ──
+# Detects when the model produces nearly identical reasoning output
+# (thinking + tool_use pattern) across consecutive iterations.
+# This catches loops that ToolCallGuard misses because the tool calls
+# may have different params but the overall reasoning is stuck.
+
+_REASONING_SIMILAR_THRESHOLD = 2   # Same reasoning pattern this many times → hint
+_REASONING_FORCE_EXIT = 3          # Same pattern this many times → force text-only
+
+
+class ReasoningLoopDetector:
+    """Detects reasoning-level loops in the ReAct agent.
+
+    While ToolCallGuard catches duplicate *tool calls*, this detector
+    catches the broader pattern where the model produces nearly identical
+    reasoning output (same thinking content + same tool_use names) across
+    consecutive iterations — a sign the model is stuck.
+
+    Lifecycle: one instance per session (created alongside ToolCallGuard).
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        # Hash of the last reasoning output (text + tool_use names)
+        self._last_reasoning_hash: str = ""
+        self._consecutive_same: int = 0
+        # Track the last few reasoning hashes for pattern detection
+        self._recent_hashes: list[str] = []
+        # Total iterations tracked
+        self._total_iterations: int = 0
+
+    @staticmethod
+    def _compute_reasoning_hash(reasoning_content: str, tool_names: list[str]) -> str:
+        """Compute a stable hash of reasoning output.
+
+        Uses the text content (truncated) combined with sorted tool names
+        to create a fingerprint of the reasoning step.
+        """
+        # Truncate text to first 500 chars to focus on the core reasoning
+        text_part = reasoning_content[:500] if reasoning_content else ""
+        tools_part = ",".join(sorted(tool_names)) if tool_names else ""
+        combined = f"{text_part}|||{tools_part}"
+        return hashlib.md5(combined.encode()).hexdigest()[:16]
+
+    def check_and_detect(
+        self,
+        reasoning_content: str,
+        tool_names: list[str],
+    ) -> str | None:
+        """Check if the current reasoning is stuck in a loop.
+
+        Args:
+            reasoning_content: The text/thinking content from _reasoning.
+            tool_names: List of tool names from the reasoning output's tool_use blocks.
+
+        Returns:
+            None → reasoning looks fresh, proceed normally.
+            "hint" → inject a hint to try something different.
+            "force_exit" → force text-only mode (tool_choice="none").
+        """
+        rhash = self._compute_reasoning_hash(reasoning_content, tool_names)
+
+        with self._lock:
+            self._total_iterations += 1
+            self._recent_hashes.append(rhash)
+            # Keep only last 5 hashes
+            if len(self._recent_hashes) > 5:
+                self._recent_hashes = self._recent_hashes[-5:]
+
+            if rhash == self._last_reasoning_hash:
+                self._consecutive_same += 1
+            else:
+                self._consecutive_same = 0
+                self._last_reasoning_hash = rhash
+
+            # ── Check 1: Consecutive identical reasoning ──
+            if self._consecutive_same >= _REASONING_FORCE_EXIT:
+                logger.warning(
+                    "ReasoningLoopDetector: FORCE EXIT — identical reasoning "
+                    "for %d consecutive iterations",
+                    self._consecutive_same,
+                )
+                return "force_exit"
+
+            if self._consecutive_same >= _REASONING_SIMILAR_THRESHOLD:
+                logger.info(
+                    "ReasoningLoopDetector: HINT — identical reasoning "
+                    "for %d consecutive iterations",
+                    self._consecutive_same,
+                )
+                return "hint"
+
+            # ── Check 2: Oscillation pattern (A-B-A-B) ──
+            recent = self._recent_hashes
+            if len(recent) >= 4:
+                if (recent[-1] == recent[-3] and recent[-2] == recent[-4]
+                        and recent[-1] != recent[-2]):
+                    logger.warning(
+                        "ReasoningLoopDetector: oscillation detected (A-B-A-B pattern)"
+                    )
+                    return "force_exit"
+
+        return None
+
+    def reset(self) -> None:
+        """Reset all state."""
+        with self._lock:
+            self._last_reasoning_hash = ""
+            self._consecutive_same = 0
+            self._recent_hashes.clear()
+            self._total_iterations = 0

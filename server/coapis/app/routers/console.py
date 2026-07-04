@@ -69,6 +69,9 @@ async def get_push_messages(
 
     Returns real pending approvals from the global ApprovalService
     so that the frontend can render interactive ApprovalCard widgets.
+
+    Security: Strict session-level isolation. Only returns approvals
+    belonging to the specified session_id. No cross-session leakage.
     """
     from ..approvals import get_approval_service
     from ...security.tool_guard.approval import format_findings_summary
@@ -76,11 +79,12 @@ async def get_push_messages(
     pending_approvals: list[Dict[str, Any]] = []
     try:
         svc = get_approval_service()
-        # If session_id provided, filter by that session; otherwise return all
-        if session_id:
-            pendings = await svc.list_pending_by_session(session_id)
+        # Strict session-level isolation: must have session_id
+        if not session_id:
+            # No session_id = no approvals (security by default)
+            pendings = []
         else:
-            pendings = await svc.get_all_pending_by_session(session_id=None)
+            pendings = await svc.list_pending_by_session(session_id)
 
         for p in pendings:
             guard_result = getattr(p, "extra", {}).get("guard_result")

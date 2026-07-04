@@ -33,8 +33,10 @@ export default function ConsolePollService() {
 
   useEffect(() => {
     const tick = () => {
+      // Pass current session_id for session-level isolation
+      const sessionId = window.currentSessionId || "";
       consoleApi
-        .getPushMessages()
+        .getPushMessages(sessionId || undefined)
         .then((res) => {
           // Update pending approvals (global, will be filtered by Chat component)
           if (res?.pending_approvals) {

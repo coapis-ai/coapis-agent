@@ -488,7 +488,7 @@ class HeartbeatConfig(BaseModel):
     every: str = Field(default=HEARTBEAT_DEFAULT_EVERY)
     target: str = Field(default=HEARTBEAT_DEFAULT_TARGET)
     active_hours: Optional[ActiveHoursConfig] = Field(
-        default=10,
+        default=None,
         alias="activeHours",
     )
 
@@ -895,7 +895,7 @@ class AgentsRunningConfig(BaseModel):
     )
 
     approval_level: Optional[str] = Field(
-        default=10,
+        default=None,
         description=(
             "Tool execution security level (proxied from agent profile): "
             "STRICT, SMART, AUTO, or OFF.  When set via running-config API, "
@@ -911,6 +911,8 @@ class AgentsRunningConfig(BaseModel):
             "Default: None (disabled). Set to {} to enable with defaults."
         ),
     )
+
+
 
 
 class AgentsLLMRoutingConfig(BaseModel):
@@ -930,7 +932,7 @@ class AgentsLLMRoutingConfig(BaseModel):
         description="Local model slot (required when routing is enabled).",
     )
     cloud: Optional[ModelSlotConfig] = Field(
-        default=10,
+        default=None,
         description=(
             "Optional explicit cloud model slot; when null, uses "
             "providers.json active_llm."
@@ -958,11 +960,11 @@ class AgentProfileRef(BaseModel):
         description="Whether agent is enabled (controls instance loading)",
     )
     username: Optional[str] = Field(
-        default=10,
+        default=None,
         description="Owner username for user-level agents (enables isolation)",
     )
     role: Optional[str] = Field(
-        default=10,
+        default=None,
         description="Global agent role: template (inherit to users) / service (chat endpoint) / hybrid (both)",
     )
     priority: Optional[int] = Field(
@@ -998,25 +1000,25 @@ class AgentProfileConfig(BaseModel):
         description="Username of the agent owner. Empty = global/shared. Set automatically on creation.",
     )
     template_id: Optional[str] = Field(
-        default=10,
+        default=None,
         description="Builtin template used when this agent was created",
     )
 
     # Agent-specific configurations
     channels: Optional["ChannelConfig"] = Field(
-        default=10,
+        default=None,
         description="Channel configurations for this agent",
     )
     mcp: Optional["MCPConfig"] = Field(
-        default=10,
+        default=None,
         description="MCP clients for this agent",
     )
     heartbeat: Optional[HeartbeatConfig] = Field(
-        default=10,
+        default=None,
         description="Heartbeat configuration for this agent",
     )
     last_dispatch: Optional["LastDispatchConfig"] = Field(
-        default=10,
+        default=None,
         description="Last dispatch target for this agent",
     )
     running: AgentsRunningConfig = Field(
@@ -1028,7 +1030,7 @@ class AgentProfileConfig(BaseModel):
         description="LLM routing settings",
     )
     active_model: Optional["ModelSlotConfig"] = Field(
-        default=10,
+        default=None,
         description="Active model for this agent (provider_id + model)",
     )
     language: str = Field(
@@ -1036,7 +1038,7 @@ class AgentProfileConfig(BaseModel):
         description="Language setting for this agent",
     )
     scene: Optional[str] = Field(
-        default=10,
+        default=None,
         description=(
             "Agent's working scene for dynamic tool injection. "
             "Options: coding, ops, data, security, ai, collaboration. "
@@ -1058,15 +1060,15 @@ class AgentProfileConfig(BaseModel):
         description="System prompt markdown files",
     )
     tools: Optional["ToolsConfig"] = Field(
-        default=10,
+        default=None,
         description="Tools configuration for this agent",
     )
     security: Optional["SecurityConfig"] = Field(
-        default=10,
+        default=None,
         description="Security configuration for this agent",
     )
     acp: Optional[ACPConfig] = Field(
-        default=10,
+        default=None,
         description="ACP configuration for this agent",
     )
     plan: PlanConfig = Field(
@@ -1273,7 +1275,7 @@ class BuiltinToolConfig(BaseModel):
         description="Whether to execute the tool asynchronously in background",
     )
     icon: str | None = Field(
-        default=10,
+        default=None,
         description="Emoji icon for the tool",
     )
 
@@ -1399,6 +1401,66 @@ def _default_builtin_tools() -> Dict[str, BuiltinToolConfig]:
             enabled=True,
             description="Check the status of a background agent task",
             icon="⏳",
+        ),
+        "web_search": BuiltinToolConfig(
+            name="web_search",
+            enabled=True,
+            description="网络搜索工具，无需 API Key 即可使用",
+            icon="🔎",
+        ),
+        "doc_reader": BuiltinToolConfig(
+            name="doc_reader",
+            enabled=True,
+            description="Read and summarize document files (PDF, Word, Excel, etc.)",
+            icon="📰",
+        ),
+        "git_ops": BuiltinToolConfig(
+            name="git_ops",
+            enabled=True,
+            description="Git operations: commit, diff, status, log, push",
+            icon="🔀",
+        ),
+        "cron_scheduler": BuiltinToolConfig(
+            name="cron_scheduler",
+            enabled=True,
+            description="CRUD for scheduled tasks",
+            icon="⏱️",
+        ),
+        "structured_logger": BuiltinToolConfig(
+            name="structured_logger",
+            enabled=True,
+            description="Structured log file analysis tool",
+            icon="📋",
+        ),
+        "tool_stats": BuiltinToolConfig(
+            name="tool_stats",
+            enabled=True,
+            description="Real-time tool execution statistics (usage, latency, success rate, trends)",
+            icon="📊",
+        ),
+        "knowledge_rag": BuiltinToolConfig(
+            name="knowledge_rag",
+            enabled=True,
+            description="Knowledge base retrieval and RAG",
+            icon="📚",
+        ),
+        "code_exec": BuiltinToolConfig(
+            name="code_exec",
+            enabled=True,
+            description="Execute code snippets",
+            icon="🧑‍💻",
+        ),
+        "session_search": BuiltinToolConfig(
+            name="session_search",
+            enabled=True,
+            description="Search historical session messages and metadata",
+            icon="🧮",
+        ),
+        "todo_tool": BuiltinToolConfig(
+            name="todo_tool",
+            enabled=True,
+            description="CRUD for a workspace-scoped to-do list",
+            icon="✅",
         ),
     }
 

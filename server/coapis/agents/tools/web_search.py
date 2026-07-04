@@ -331,31 +331,81 @@ async def web_search(
     else:
         order = list(_BACKEND_ORDER)
 
-    # Try backends in order
+    # ── 并发竞速 + 总超时 ──
+    import asyncio
+
+    _TOTAL_TIMEOUT = int(os.environ.get("COAPIS_WEB_SEARCH_TOTAL_TIMEOUT", "20"))
     results = None
     used_backend = backend
 
+    # 构建可用 backend 任务
+    available = []
     for b in order:
         search_fn = _BACKENDS.get(b)
         if search_fn is None:
             continue
+        available.append((b, search_fn))
+
+    if len(available) == 1:
+        # 只有一个 backend，直接调用（带单个超时）
+        b, search_fn = available[0]
         try:
-            import asyncio
             if asyncio.iscoroutinefunction(search_fn):
-                results = await search_fn(query, max_results)
+                results = await asyncio.wait_for(
+                    search_fn(query, max_results),
+                    timeout=_TOTAL_TIMEOUT,
+                )
             else:
                 results = search_fn(query, max_results)
-        except Exception as e:
+            if results is not None:
+                used_backend = b
+        except (asyncio.TimeoutError, Exception) as e:
             logger.warning("Backend %s failed: %s", b, e)
-            results = None
+    else:
+        # 多个 backend：并发竞速，返回第一个成功的结果
+        async def _try_backend(b_name, fn):
+            try:
+                if asyncio.iscoroutinefunction(fn):
+                    r = await asyncio.wait_for(fn(query, max_results), timeout=_TIMEOUT)
+                else:
+                    r = fn(query, max_results)
+                return b_name, r
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug("Backend %s failed: %s", b_name, e)
+                return b_name, None
 
-        if results is not None:
-            used_backend = b
-            break
+        tasks = {
+            asyncio.create_task(_try_backend(b, fn)): b
+            for b, fn in available
+        }
+
+        try:
+            done, pending = await asyncio.wait(
+                tasks.keys(),
+                timeout=_TOTAL_TIMEOUT,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except Exception:
+            done, pending = set(), set(tasks.keys())
+
+        # 取第一个成功的结果
+        for t in done:
+            b_name, r = t.result()
+            if r is not None and results is None:
+                results = r
+                used_backend = b_name
+
+        # 取消剩余任务
+        for t in pending:
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
 
     if results is None:
         return {
-            "error": f"所有搜索后端不可用。已尝试: {', '.join(order)}",
+            "error": f"所有搜索后端不可用（{_TOTAL_TIMEOUT}s超时）。已尝试: {', '.join(order)}",
             "query": query,
         }
 

@@ -23,15 +23,34 @@
 2. 长期记忆按需检索注入（基于当前任务相关性）
 3. 短期记忆按对话注入
 4. 总容量受控（16K tokens）
+5. P4: 记忆分段注入 — 核心段落始终注入，其他按查询相关性过滤
 """
 from __future__ import annotations
 
 import logging
+import re as _re
 from dataclasses import dataclass
 from typing import Any
 
 from .memory_entry import MemoryEntry
 from .memory_quota import MemoryQuota
+
+# ── P4: 始终注入的核心段落关键词 ──
+_ALWAYS_INJECT_KEYWORDS = [
+    "基础设定", "身份", "安全", "核心", "准则", "边界", "风格",
+    "profile", "identity", "security", "core",
+]
+
+# ── P4: 意图→关键词映射（用于相关性过滤）──
+_INTENT_KEYWORDS: dict[str, list[str]] = {
+    "recall":    ["记忆", "历史", "记录", "经验", "之前", "memory"],
+    "greeting":  ["身份", "风格", "名字", "profile"],
+    "code":      ["代码", "开发", "工具", "技术", "code", "dev", "tool"],
+    "task":      ["任务", "工具", "技能", "部署", "配置", "task", "tool"],
+    "analysis":  ["分析", "数据", "报告", "分析", "data"],
+    "creative":  ["写作", "创作", "文案", "风格"],
+    "meta":      ["智能体", "agent", "配置", "系统", "config"],
+}
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +148,12 @@ class MemoryInjector:
         self._role = role
 
         # 1. 基础记忆（始终注入，容量限制 2K tokens）
+        # P4: 如果有 query，按相关性过滤记忆段落
+        if query and core_memory:
+            sections = self._parse_memory_sections(core_memory)
+            if sections:
+                core_memory = self._filter_by_relevance(sections, query)
+
         core_tokens = self._count_tokens(core_memory)
         if self._can_inject("core", core_tokens):
             result.core_memory = core_memory
@@ -273,6 +298,120 @@ class MemoryInjector:
                 len(memories), len(kept),
             )
         return kept
+
+    # ── P4: 记忆分段注入 ──
+
+    @staticmethod
+    def _parse_memory_sections(text: str) -> list[dict[str, str]]:
+        """将记忆文本按 ## 标题分段。
+
+        Returns:
+            段落列表，每个段落 {"heading": 标题, "body": 内容}
+        """
+        if not text or not text.strip():
+            return []
+
+        sections: list[dict[str, str]] = []
+        current_heading = ""
+        current_lines: list[str] = []
+
+        for line in text.split("\n"):
+            if line.startswith("## "):
+                # 保存上一个段落
+                if current_lines:
+                    body = "\n".join(current_lines).strip()
+                    if body:
+                        sections.append({
+                            "heading": current_heading,
+                            "body": body,
+                        })
+                current_heading = line[3:].strip()
+                current_lines = [line]
+            else:
+                current_lines.append(line)
+
+        # 最后一个段落
+        if current_lines:
+            body = "\n".join(current_lines).strip()
+            if body:
+                sections.append({
+                    "heading": current_heading,
+                    "body": body,
+                })
+
+        return sections
+
+    @staticmethod
+    def _filter_by_relevance(
+        sections: list[dict[str, str]],
+        query: str,
+    ) -> str:
+        """按查询相关性过滤记忆段落，拼接为文本。
+
+        核心段落（匹配 _ALWAYS_INJECT_KEYWORDS）始终注入。
+        其他段落根据查询意图关键词匹配。
+
+        Args:
+            sections: 段落列表
+            query: 用户查询文本
+
+        Returns:
+            过滤后的记忆文本
+        """
+        if not sections:
+            return ""
+        if not query:
+            # 无查询时注入全部
+            return "\n\n".join(s["body"] for s in sections)
+
+        query_lower = query.lower()
+
+        # 收集匹配的意图类别，扩展为该类别的所有关键词
+        # 例如查询含"代码" → 匹配"code"类别 → 收集 {"代码","开发","工具","技术",...}
+        intent_kws: set[str] = set()
+        matched_categories: set[str] = set()
+        for category, kws in _INTENT_KEYWORDS.items():
+            if any(kw in query_lower for kw in kws):
+                matched_categories.add(category)
+                intent_kws.update(kws)
+
+        always_inject: list[str] = []
+        optional: list[dict[str, str]] = []
+
+        for section in sections:
+            heading_lower = section["heading"].lower()
+            body_lower = section["body"][:200].lower()
+
+            # 检查是否始终注入
+            is_always = any(
+                kw in heading_lower or kw in body_lower
+                for kw in _ALWAYS_INJECT_KEYWORDS
+            )
+            if is_always:
+                always_inject.append(section["body"])
+                continue
+
+            # 检查相关性：段落标题/内容是否包含匹配意图类别的任何关键词
+            section_text = heading_lower + " " + body_lower
+            is_relevant = any(kw in section_text for kw in intent_kws)
+
+            if is_relevant:
+                optional.append(section)
+
+        # 如果没有匹配到任何可选段落，回退到注入全部
+        if not optional and not always_inject:
+            return "\n\n".join(s["body"] for s in sections)
+
+        result_parts = always_inject + [s["body"] for s in optional]
+        filtered = "\n\n".join(result_parts)
+
+        if len(result_parts) < len(sections):
+            logger.info(
+                "[MemoryInjector] P4: %d/%d sections selected by relevance",
+                len(result_parts), len(sections),
+            )
+
+        return filtered
 
     def get_usage(self) -> dict[str, Any]:
         """获取当前注入使用情况。"""

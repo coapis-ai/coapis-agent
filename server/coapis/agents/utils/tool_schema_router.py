@@ -39,12 +39,16 @@ logger = logging.getLogger(__name__)
 TOOL_GROUPS: dict[str, set[str]] = {
     # Always loaded — core conversation tools
     "core": {
-        "file_read",
-        "list_files",
-        "file_write",
+        "read_file",
+        "write_file",
         "edit_file",
+        "grep_search",
+        "glob_search",
         "memory_search",
-        "memory_save",
+        "execute_shell_command",
+        "get_current_time",
+        "set_user_timezone",
+        "send_file_to_user",
     },
     # Web tools
     "web": {
@@ -60,9 +64,8 @@ TOOL_GROUPS: dict[str, set[str]] = {
     },
     # Code / execution tools
     "code": {
-        "execute_shell_command",
-        "python_execute",
-        "code_execute",
+        "code_exec",
+        "git_ops",
     },
     # Agent collaboration tools
     "agent": {
@@ -74,31 +77,20 @@ TOOL_GROUPS: dict[str, set[str]] = {
     },
     # Data / file format tools
     "data": {
-        "xlsx_read",
-        "xlsx_write",
-        "csv_read",
-        "csv_write",
-        "json_read",
-        "json_write",
-        "pdf_read",
-        "docx_read",
-        "pptx_read",
-        "image_to_text",
+        "doc_reader",
     },
     # System / admin tools
     "system": {
-        "system_info",
-        "process_list",
-        "file_upload",
-        "file_download",
-        "send_file_to_user",
+        "delegate_external_agent",
+        "browser_use",
+        "desktop_screenshot",
+        "view_image",
+        "view_video",
     },
     # Memory / knowledge tools
     "memory": {
-        "memory_list",
-        "memory_delete",
-        "knowledge_search",
-        "knowledge_add",
+        "knowledge_rag",
+        "session_search",
     },
     # Media tools
     "media": {
@@ -109,16 +101,13 @@ TOOL_GROUPS: dict[str, set[str]] = {
     },
     # Rarely used tools — only loaded on explicit match
     "rarely": {
-        "cron_create",
-        "cron_list",
-        "cron_delete",
-        "desktop_screenshot",
-        "view_image",
-        "view_video",
-        "himalaya_send",
-        "himalaya_list",
-        "himalaya_read",
-        "channel_send",
+        "cron_scheduler",
+        "structured_logger",
+        "tool_stats",
+        "chat_with_agent",
+        "submit_to_agent",
+        "check_agent_task",
+        "list_agents",
     },
 }
 
@@ -131,6 +120,10 @@ INTENT_KEYWORDS: dict[str, list[str]] = {
         r"搜[索一下]", r"打开.*网站", r"浏览", r"网页", r"网页",
         r"search", r"browse", r"website", r"url", r"http", r"fetch",
         r"查找.*资料", r"google", r"百度", r"上网",
+        r"新闻", r"news", r"头条", r"热点", r"最新消息",
+        r"天气", r"weather", r"温度",
+        r"查[一]?下", r"查一下", r"lookup", r"find\sinfo",
+        r"今天.*什么", r"最近.*发生",
     ],
     "code": [
         r"运行", r"执行.*代码", r"python", r"shell", r"bash",

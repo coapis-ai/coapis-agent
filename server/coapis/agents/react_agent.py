@@ -266,20 +266,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         _original_get_schemas = self.toolkit.get_json_schemas
 
         def _filtered_get_schemas():
-            all_schemas = _original_get_schemas()
-            if self._enable_full_schemas:
-                return all_schemas
-            try:
-                # Get recent messages for intent detection
-                recent = []
-                if hasattr(self, "memory"):
-                    # memory is async, but get_json_schemas is sync
-                    # Use last cached messages if available
-                    if hasattr(self, "_recent_tool_msgs"):
-                        recent = self._recent_tool_msgs
-                return self._schema_router.route(all_schemas, recent)
-            except Exception:
-                return all_schemas
+            """Tool schema filtering — DISABLED for now.
+
+            ToolSchemaRouter + QRR filtering was causing important tools
+            (web_search, browser_use etc.) to be silently dropped from LLM
+            context, making the agent unable to use them.
+            Returning all schemas until the routing logic is more robust.
+            """
+            return _original_get_schemas()
 
         self.toolkit.get_json_schemas = _filtered_get_schemas
 
@@ -617,7 +611,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 self._register_skill_summary(toolkit, skill_dir)
                 logger.debug(
                     "Deferred on-demand skill: %s (triggers=%s, pool=%s)",
-                    skill_name, triggers, skill_dir == (skill_pool_dir / skill_name),
+                    skill_name, legacy_triggers, skill_dir == (skill_pool_dir / skill_name),
                 )
 
         # ── Build SkillSelector index for fast keyword matching ──
@@ -1519,6 +1513,36 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     _experiences.sort(key=lambda x: x.get("confidence", 0), reverse=True)
                     _top_exps = _experiences[:15]
 
+                    # P5: 按查询意图过滤经验
+                    _query = getattr(self, "_current_query", "") or ""
+                    if _query and _top_exps:
+                        _query_lower = _query.lower()
+                        # 意图→经验类型映射
+                        _EXP_TYPE_MAP = {
+                            "code": ["tool_usage", "code_debugging", "code_review",
+                                     "coding", "bug_fix", "debugging"],
+                            "deploy": ["deployment", "deploy", "devops", "docker",
+                                       "nginx", "ci_cd"],
+                            "config": ["configuration", "config", "setup"],
+                            "general": ["general", "conversation", "workflow"],
+                        }
+                        # 收集匹配的经验类型
+                        _matched_types: set[str] = set()
+                        for _hint, _types in _EXP_TYPE_MAP.items():
+                            if _hint in _query_lower:
+                                _matched_types.update(_types)
+                        if _matched_types:
+                            _filtered = [
+                                e for e in _top_exps
+                                if e.get("experience_type", "") in _matched_types
+                            ]
+                            if _filtered:
+                                _top_exps = _filtered[:10]
+                                logger.info(
+                                    "[P5] Filtered experiences: %d → %d by intent %s",
+                                    len(_experiences), len(_top_exps), _matched_types,
+                                )
+
                     if _top_exps:
                         _exp_text = "以下是从过往对话中提炼的经验教训，在回答时参考：\n"
                         for _i, _exp in enumerate(_top_exps, 1):
@@ -1571,7 +1595,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 core_memory=core_memory,
                 long_term_memories=long_term_memories,
                 short_term_memory="",
-                query="",
+                query=getattr(self, "_current_query", "") or "",
                 role=_role,
             )
 
@@ -2078,6 +2102,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     logger.debug("Cache invalidated after %s", tool_name)
                 except Exception:
                     pass
+            # P0: Record to ProgressTracker
+            try:
+                if hasattr(self, "_progress_tracker"):
+                    self._progress_tracker.record(tool_name, _tool_params, result)
+            except Exception:
+                pass
             return result
         except Exception as exc:
             _success = False
@@ -2306,7 +2336,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             memory_msgs = await self.memory.get_memory()
             self._recent_tool_msgs = [
                 {"content": m.get("content", ""), "role": m.get("role", "")}
-                for m in memory_msgs[-5:]
+                for m in memory_msgs[-10:]  # 扩大到10条，避免 user message 被挤出
             ]
         except Exception:
             self._recent_tool_msgs = []
@@ -2318,7 +2348,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 self._thinking_budget_mgr = ThinkingBudgetManager()
             # Classify from the last user message
             user_query = ""
-            if self._recent_tool_msgs:
+            # 优先从 memory.content 中直接提取（最可靠）
+            if self.memory is not None:
+                for _m, _marks in reversed(self.memory.content):
+                    if hasattr(_m, "role") and _m.role == "user":
+                        if hasattr(_m, "get_text_content"):
+                            user_query = _m.get_text_content() or ""
+                        elif isinstance(_m.content, str):
+                            user_query = _m.content
+                        break
+            # Fallback: 从 _recent_tool_msgs 提取
+            if not user_query and self._recent_tool_msgs:
                 for m in reversed(self._recent_tool_msgs):
                     if m.get("role") == "user":
                         content = m.get("content", "")
@@ -2343,6 +2383,68 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception:
             complexity = "normal"
             _original_effort = None
+
+        # --- P0: ProgressTracker — 注入进度摘要 ---
+        _progress_summary = None
+        try:
+            if hasattr(self, "_progress_tracker") and self._progress_tracker.should_inject():
+                _progress_summary = self._progress_tracker.build_summary()
+                if _progress_summary:
+                    from agentscope.message import Msg as _ProgMsg
+                    _prog_msg = _ProgMsg("system", _progress_summary, "system")
+                    await self.memory.add(_prog_msg)
+                    logger.info(
+                        "[P0] Progress injected: %d calls, summary=%d chars",
+                        len(self._progress_tracker.records),
+                        len(_progress_summary),
+                    )
+        except Exception as _prog_err:
+            logger.debug("[P0] Progress injection failed: %s", _prog_err)
+
+        # --- P1: QueryAnalyzer — 统一查询分析 ---
+        _query_analysis = None
+        try:
+            if hasattr(self, "_query_analyzer") and self._query_analyzer.is_enabled:
+                _query_analysis = self._query_analyzer.analyze(
+                    user_query or "", self._recent_tool_msgs,
+                )
+                logger.info(
+                    "[P1] QueryAnalyzer: intent=%s complexity=%s effort=%s conf=%.2f pruned=%s latency=%.1fms",
+                    _query_analysis.intent,
+                    _query_analysis.complexity,
+                    _query_analysis.thinking_effort,
+                    _query_analysis.confidence,
+                    "yes" if _query_analysis.pruned_tools is not None else "no",
+                    _query_analysis.latency_ms,
+                )
+                # 用 QueryAnalyzer 结果设置 thinking_effort
+                if _query_analysis.thinking_effort:
+                    self.model.reasoning_effort = _query_analysis.thinking_effort
+        except Exception as _qa_err:
+            logger.debug("[P1] QueryAnalyzer failed: %s", _qa_err)
+
+        # --- P2: 工具 Schema 按需裁剪 ---
+        _pruned_schemas_orig = None  # 用于恢复
+        try:
+            if (_query_analysis is not None
+                    and _query_analysis.pruned_tools is not None
+                    and self.toolkit is not None):
+                _pruned = _query_analysis.pruned_tools
+                _pruned_set = set(_pruned)
+                _orig_get_schemas = self.toolkit.get_json_schemas
+                def _filtered_get_schemas():
+                    return [
+                        s for s in _orig_get_schemas()
+                        if s.get("function", {}).get("name", "") in _pruned_set
+                    ]
+                self.toolkit.get_json_schemas = _filtered_get_schemas
+                _pruned_schemas_orig = _orig_get_schemas
+                logger.info(
+                    "[P2] Tool schema pruned to %d tools: %s",
+                    len(_pruned), _pruned[:5],
+                )
+        except Exception as _prune_err:
+            logger.debug("[P2] Tool pruning failed: %s", _prune_err)
 
         # --- Proactive filtering layer ---
         should_strip = (
@@ -2434,6 +2536,74 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     self.model.reasoning_effort = None
             except Exception:
                 pass
+            # P2: Restore tool schema pruning
+            if _pruned_schemas_orig is not None:
+                try:
+                    self.toolkit.get_json_schemas = _pruned_schemas_orig
+                    logger.debug("[P2] Tool schema pruning restored")
+                except Exception:
+                    pass
+
+        # --- Reasoning loop detection (safety net) ---
+        try:
+            from .utils.tool_call_guard import ReasoningLoopDetector
+            if not hasattr(self, "_reasoning_loop_detector"):
+                self._reasoning_loop_detector = ReasoningLoopDetector()
+
+            # Extract reasoning content and tool names
+            reasoning_text = ""
+            tool_names = []
+            if msg and hasattr(msg, "get_content_blocks"):
+                for block in msg.get_content_blocks("text"):
+                    if hasattr(block, "text"):
+                        reasoning_text += block.text
+                    elif isinstance(block, dict):
+                        reasoning_text += block.get("text", "")
+                for block in msg.get_content_blocks("tool_use"):
+                    if hasattr(block, "name"):
+                        tool_names.append(block.name)
+                    elif isinstance(block, dict):
+                        tool_names.append(block.get("name", ""))
+
+            detection = self._reasoning_loop_detector.check_and_detect(
+                reasoning_text, tool_names,
+            )
+
+            if detection == "force_exit":
+                logger.warning(
+                    "ReasoningLoopDetector: forcing text-only mode "
+                    "after %d identical reasoning iterations",
+                    self._reasoning_loop_detector._consecutive_same,
+                )
+                # Strip all tool_use blocks to force text-only exit
+                if msg and hasattr(msg, "content") and isinstance(msg.content, list):
+                    msg.content = [
+                        b for b in msg.content
+                        if not (isinstance(b, dict) and b.get("type") == "tool_use")
+                        and not (hasattr(b, "__class__") and "ToolUse" in type(b).__name__)
+                    ]
+                # Inject a system hint to guide the model
+                hint = Msg(
+                    "user",
+                    "[系统提示] 你已陷入推理循环，禁止调用任何工具。"
+                    "请直接根据已有信息给出回答。",
+                    "user",
+                )
+                await self.memory.add(hint, marks=_MemoryMark.HINT)
+                # Force text-only for the remaining loop
+                tool_choice = "none"
+
+            elif detection == "hint":
+                hint = Msg(
+                    "user",
+                    "[系统提示] 检测到重复推理模式，请换一种方式回答，"
+                    "或直接基于已有信息给出结论。",
+                    "user",
+                )
+                await self.memory.add(hint, marks=_MemoryMark.HINT)
+
+        except Exception:
+            pass  # Never let loop detection break the main flow
 
         return await self._auto_continue_if_text_only(msg, tool_choice)
 
@@ -2767,9 +2937,34 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # Normal message processing
         logger.info("CoApisAgent.reply: max_iters=%s", self.max_iters)
 
+        # Reset reasoning loop detector for new turn
+        if hasattr(self, "_reasoning_loop_detector"):
+            self._reasoning_loop_detector.reset()
+
+        # P0: Initialize ProgressTracker for this turn
+        try:
+            from .utils.progress_tracker import ProgressTracker, ProgressTrackerConfig
+            pt_cfg = ProgressTrackerConfig(enabled=True)
+            if not hasattr(self, "_progress_tracker"):
+                self._progress_tracker = ProgressTracker(pt_cfg)
+            self._progress_tracker.reset()
+        except Exception:
+            pass
+
+        # P1: Initialize QueryAnalyzer (lazy)
+        try:
+            from .utils.query_analyzer import QueryAnalyzer
+            if not hasattr(self, "_query_analyzer"):
+                self._query_analyzer = QueryAnalyzer(enabled=True)
+        except Exception:
+            pass
+
         # Intent-based skill loading: load on-demand skills matching user message
         if query:
             self._load_on_demand_skills(query)
+
+        # P5: Store current query for _build_sys_prompt experience filtering
+        self._current_query = query or ""
 
         # ── Semantic search: pre-fetch long-term memories ──
         semantic_memories: list[str] = []

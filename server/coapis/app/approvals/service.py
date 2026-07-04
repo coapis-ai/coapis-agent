@@ -234,14 +234,28 @@ class ApprovalService:
             include_subagents: If False, exclude sub-agent approvals (future)
 
         Returns:
-            List of pending approvals sorted by creation time
+            List of pending approvals sorted by creation time.
+            Expired approvals (past timeout) are automatically filtered out
+            and marked as timeout.
         """
+        now = time.time()
         async with self._lock:
-            result = [
-                p
-                for p in self._pending.values()
-                if p.session_id == session_id and p.status == "pending"
-            ]
+            result = []
+            for p in self._pending.values():
+                if p.session_id == session_id and p.status == "pending":
+                    # Check if approval has expired
+                    if now - p.created_at > p.timeout_seconds:
+                        # Auto-timeout: mark as timeout and resolve future
+                        if not p.future.done():
+                            p.future.set_result(ApprovalDecision.TIMEOUT)
+                        p.status = "timeout"
+                        p.resolved_at = now
+                        logger.info(
+                            "Approval %s auto-timed out (age=%.0fs, timeout=%.0fs)",
+                            p.request_id[:8], now - p.created_at, p.timeout_seconds,
+                        )
+                        continue
+                    result.append(p)
             return sorted(result, key=lambda p: p.created_at)
 
     async def get_pending_by_root_session(
@@ -284,6 +298,29 @@ class ApprovalService:
                 p
                 for p in self._pending.values()
                 if p.agent_id == agent_id and p.status == "pending"
+            ]
+            return sorted(result, key=lambda p: p.created_at)
+
+    async def get_pending_by_user(
+        self,
+        user_id: str,
+    ) -> list[PendingApproval]:
+        """Get all pending approvals for a user (across all sessions and agents).
+
+        Used by /console/push-messages to ensure user-level isolation.
+        Only returns approvals belonging to the specified user.
+
+        Args:
+            user_id: User ID (from authentication context)
+
+        Returns:
+            List of pending approvals sorted by creation time (FIFO)
+        """
+        async with self._lock:
+            result = [
+                p
+                for p in self._pending.values()
+                if p.user_id == user_id and p.status == "pending"
             ]
             return sorted(result, key=lambda p: p.created_at)
 
