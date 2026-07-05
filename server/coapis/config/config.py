@@ -1059,10 +1059,6 @@ class AgentProfileConfig(BaseModel):
         default_factory=lambda: ["AGENTS.md", "SOUL.md", "PROFILE.md"],
         description="System prompt markdown files",
     )
-    tools: Optional["ToolsConfig"] = Field(
-        default=None,
-        description="Tools configuration for this agent",
-    )
     security: Optional["SecurityConfig"] = Field(
         default=None,
         description="Security configuration for this agent",
@@ -1474,11 +1470,11 @@ class ToolsConfig(BaseModel):
 
     @model_validator(mode="after")
     def _merge_default_tools(self):
-        """Ensure new code-defined tools are present in saved configs.
+        """Merge code-defined tools into saved config.
 
-        Also normalises legacy entries whose ``icon`` is ``None`` so that
-        downstream serialisation (e.g. ``ToolInfo``) never receives a null
-        icon value.
+        When the codebase adds new tools, they won't exist in the saved
+        config.json. This validator injects them so the tool list stays
+        complete. It also normalises legacy entries with null icons.
         """
         defaults = _default_builtin_tools()
         for name, tc in defaults.items():
@@ -1486,60 +1482,10 @@ class ToolsConfig(BaseModel):
                 self.builtin_tools[name] = tc
             elif self.builtin_tools[name].icon is None:
                 self.builtin_tools[name].icon = tc.icon
-        # Normalise legacy/stale entries not in the current defaults
         for name, tc in self.builtin_tools.items():
             if name not in defaults and tc.icon is None:
                 tc.icon = ""
         return self
-
-
-def build_qa_agent_tools_config() -> ToolsConfig:
-    """Tools preset for builtin ``default_qa_agent`` (first workspace init).
-
-    Only these are enabled: execute_shell_command, read_file, edit_file,
-    write_file, view_image. All other built-ins are disabled.
-    """
-    allow = frozenset(
-        {
-            "execute_shell_command",
-            "read_file",
-            "write_file",
-            "edit_file",
-            "view_image",
-        },
-    )
-    builtin_tools = {
-        name: tc.model_copy(update={"enabled": name in allow})
-        for name, tc in _default_builtin_tools().items()
-    }
-    return ToolsConfig(builtin_tools=builtin_tools)
-
-
-def build_local_agent_tools_config() -> ToolsConfig:
-    """Tools preset for local collaborative agents.
-
-    Inter-agent coordination tools are enabled by default, along with
-    execute_shell_command and file read/write/edit tools, so a local small
-    model can escalate planning work while still handling basic workspace
-    actions. All other built-ins are disabled.
-    """
-    allow = frozenset(
-        {
-            "list_agents",
-            "chat_with_agent",
-            "submit_to_agent",
-            "check_agent_task",
-            "execute_shell_command",
-            "read_file",
-            "write_file",
-            "edit_file",
-        },
-    )
-    builtin_tools = {
-        name: tc.model_copy(update={"enabled": name in allow})
-        for name, tc in _default_builtin_tools().items()
-    }
-    return ToolsConfig(builtin_tools=builtin_tools)
 
 
 class ToolGuardRuleConfig(BaseModel):
@@ -1745,9 +1691,6 @@ def build_fallback_agent_profile_config(
         workspace_dir=str(workspace_dir),
         channels=None,  # Do NOT inherit system-level channels; each agent must configure its own channels in agent.json
         mcp=config.mcp if hasattr(config, "mcp") and config.mcp else None,
-        tools=(
-            config.tools if hasattr(config, "tools") and config.tools else None
-        ),
         security=(
             config.security
             if hasattr(config, "security") and config.security
@@ -1946,7 +1889,10 @@ def save_agent_config(
             existing_data = {}
 
     # Merge: start with existing data, overlay with new config data
-    new_data = agent_config.model_dump(exclude_none=True)
+    new_data = agent_config.model_dump(
+        exclude_none=True,
+        exclude={"builtin_tools"},
+    )
 
     # Deep-merge 'channels' to preserve per-channel configs (e.g. wecom bot_id)
     # that are NOT part of the Pydantic model but stored in agent.json.
@@ -1964,6 +1910,9 @@ def save_agent_config(
         new_data["channels"] = merged_channels
 
     merged_data = {**existing_data, **new_data}
+    # builtin_tools is managed by global config; don't persist per-agent copy
+    merged_data.pop("tools", None)
+    merged_data.pop("builtin_tools", None)
 
     # Sync active_model <-> model/provider for compatibility:
     # workspace.py reads model/provider, PUT /models/active writes active_model.

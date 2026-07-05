@@ -419,31 +419,19 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         """
         toolkit = Toolkit()
 
-        # Check which tools are enabled from agent config
+        # Tools enabled/disabled are managed ONLY at global config.tools level.
         enabled_tools = {}
         async_execution_tools = {}
         try:
-            if hasattr(self._agent_config, "tools") and hasattr(
-                self._agent_config.tools,
-                "builtin_tools",
-            ):
-                builtin_tools = self._agent_config.tools.builtin_tools
-                enabled_tools = {
-                    name: tool.enabled for name, tool in builtin_tools.items()
-                }
-                # Only execute_shell_command supports async_execution
-                async_execution_tools = {
-                    "execute_shell_command": builtin_tools.get(
-                        "execute_shell_command",
-                    ).async_execution
-                    if "execute_shell_command" in builtin_tools
-                    else False,
-                }
+            from coapis.config.config import load_config as _load_global_config
+            _gcfg = _load_global_config()
+            if _gcfg and _gcfg.tools and _gcfg.tools.builtin_tools:
+                for name, tc in _gcfg.tools.builtin_tools.items():
+                    enabled_tools[name] = tc.enabled
+                    if name == "execute_shell_command":
+                        async_execution_tools[name] = tc.async_execution
         except Exception as e:
-            logger.warning(
-                f"Failed to load agent tools config: {e}, "
-                "all tools will be disabled",
-            )
+            logger.warning("Failed to load global tools config: %s", e)
 
         # ── Discover tools from plugin registry ──
         from .tools.registry import get_registered_tools

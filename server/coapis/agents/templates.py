@@ -26,9 +26,6 @@ from ..config.config import (
     ChannelConfig,
     HeartbeatConfig,
     MCPConfig,
-    ToolsConfig,
-    build_local_agent_tools_config,
-    build_qa_agent_tools_config,
 )
 from ..constant import BUILTIN_QA_AGENT_NAME, BUILTIN_QA_AGENT_SKILL_NAMES
 
@@ -97,7 +94,6 @@ def build_agent_template(
             channels=ChannelConfig(),
             mcp=MCPConfig(),
             heartbeat=HeartbeatConfig(),
-            tools=ToolsConfig(),
         )
         return AgentTemplateBuildResult(
             agent_config=agent_config,
@@ -118,7 +114,6 @@ def build_agent_template(
             channels=ChannelConfig(),
             mcp=MCPConfig(),
             heartbeat=HeartbeatConfig(),
-            tools=build_local_agent_tools_config(),
         )
         return AgentTemplateBuildResult(
             agent_config=agent_config,
@@ -137,7 +132,6 @@ def build_agent_template(
             channels=ChannelConfig(),
             mcp=MCPConfig(),
             heartbeat=HeartbeatConfig(),
-            tools=build_qa_agent_tools_config(),
         )
         return AgentTemplateBuildResult(
             agent_config=agent_config,

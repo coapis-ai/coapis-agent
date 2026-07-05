@@ -749,16 +749,18 @@ class Workspace:
                         parameters=parameters_schema,
                     )
 
-                # Apply agent config: deny disabled tools
+                # Apply global tool config: deny disabled tools
+                # Tool enabled/disabled is managed ONLY at global config.tools level,
+                # not per-agent in agent.json.
                 try:
-                    agent_config = getattr(ws, '_config', None)
-                    if agent_config and 'tools' in agent_config:
-                        builtin_tools = agent_config['tools'].get('builtin_tools', {})
-                        for tool_name, tool_cfg in builtin_tools.items():
-                            if isinstance(tool_cfg, dict) and tool_cfg.get('enabled') is False:
+                    from ..config import load_config as _load_global_config
+                    global_cfg = _load_global_config()
+                    if global_cfg.tools and global_cfg.tools.builtin_tools:
+                        for tool_name, tool_cfg in global_cfg.tools.builtin_tools.items():
+                            if not tool_cfg.enabled:
                                 if tool_name not in registry._denied_tools:
                                     registry._denied_tools.append(tool_name)
-                                    logger.info("Denied tool (disabled in config): %s", tool_name)
+                                    logger.info("Denied tool (disabled in global config): %s", tool_name)
                 except Exception as e:
                     logger.debug("Failed to apply tool deny list: %s", e)
 

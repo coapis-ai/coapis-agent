@@ -420,7 +420,10 @@ def _plan_fixes(
                 continue
 
             profile = build_fallback_agent_profile_config(agent_id, cfg)
-            payload = profile.model_dump(exclude_none=True)
+            payload = profile.model_dump(
+                exclude_none=True,
+                exclude={"builtin_tools"},
+            )
             text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
             AgentProfileConfig.model_validate(json.loads(text))
 
@@ -458,7 +461,10 @@ def _plan_fixes(
             if _workspace_agent_json_valid(agent_json):
                 continue
             profile = build_fallback_agent_profile_config(agent_id, cfg)
-            payload = profile.model_dump(exclude_none=True)
+            payload = profile.model_dump(
+                exclude_none=True,
+                exclude={"builtin_tools"},
+            )
             text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
             AgentProfileConfig.model_validate(json.loads(text))
 
