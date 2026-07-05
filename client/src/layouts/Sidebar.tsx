@@ -270,12 +270,12 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       path: "/models",
       label: t("nav.models"),
     },
-    {
-      key: "environments",
-      icon: <SparkInternetLine size={18} />,
-      path: "/environments",
-      label: t("nav.environments"),
-    },
+    // {
+    //   key: "environments",
+    //   icon: <SparkInternetLine size={18} />,
+    //   path: "/environments",
+    //   label: t("nav.environments"),
+    // },
     {
       key: "security",
       icon: <SparkBrowseLine size={18} />,
@@ -311,12 +311,6 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       icon: <ThunderboltOutlined />,
       path: "/evolution",
       label: t("nav.evolution", "Evolution"),
-    },
-    {
-      key: "knowledge",
-      icon: <SparkDataLine size={18} />,
-      path: "/knowledge",
-      label: t("nav.knowledge", "知识库"),
     },
     // P2 Enterprise Features
     {
@@ -447,11 +441,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           label: collapsed ? null : t("nav.models"),
           icon: <SparkModePlazaLine size={16} />,
         },
-        {
-          key: "environments",
-          label: collapsed ? null : t("nav.environments"),
-          icon: <SparkInternetLine size={16} />,
-        },
+        // {
+        //   key: "environments",
+        //   label: collapsed ? null : t("nav.environments"),
+        //   icon: <SparkInternetLine size={16} />,
+        // },
         {
           key: "security",
           label: collapsed ? null : t("nav.security"),
@@ -476,11 +470,6 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: "evolution",
           label: collapsed ? null : t("nav.evolution", "进化"),
           icon: <ThunderboltOutlined />,
-        },
-        {
-          key: "knowledge",
-          label: collapsed ? null : t("nav.knowledge", "知识库"),
-          icon: <SparkDataLine size={16} />,
         },
         {
           key: "admin",
