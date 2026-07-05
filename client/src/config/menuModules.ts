@@ -39,13 +39,13 @@ export const MENU_MODULES: MenuModuleConfig[] = [
   { key: 'agents',            name: 'agents',            group: 'settings', permission: true,  order: 1 },
   { key: 'models',            name: 'models',            group: 'settings', permission: true,  order: 2 },
   { key: 'skill-pool',        name: 'skillPool',         group: 'settings', permission: true,  order: 3 },
-  { key: 'environments',      name: 'environments',      group: 'settings', permission: true,  order: 4 },
+  // { key: 'environments',      name: 'environments',      group: 'settings', permission: true,  order: 4 },
   { key: 'security',          name: 'security',          group: 'settings', permission: true,  order: 5 },
   { key: 'token-usage',       name: 'tokenUsage',        group: 'settings', permission: true,  order: 6 },
   { key: 'backups',           name: 'backupCleanup',     group: 'settings', permission: true,  order: 7 },
   { key: 'voice-transcription', name: 'voiceTranscription', group: 'settings', permission: true,  order: 8 },
   { key: 'evolution',         name: 'evolution',         group: 'settings', permission: true,  order: 9 },
-  { key: 'knowledge',         name: 'knowledge',         group: 'settings', permission: true,  order: 9 },
+  // { key: 'knowledge',         name: 'knowledge',         group: 'settings', permission: true,  order: 9 },  // 知识库功能暂时隐藏
   { key: 'admin',             name: 'adminPanel',        group: 'settings', permission: true,  order: 10 },
 ];
 

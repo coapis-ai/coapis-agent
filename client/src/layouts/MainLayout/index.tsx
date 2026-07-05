@@ -30,9 +30,10 @@ const MCPPage = lazyImportWithRetry("../../pages/Agent/MCP");
 // ACP 模块已隐藏 — 2026-06-28
 // const ACPPage = lazyImportWithRetry("../../pages/Agent/ACP");
 const ModelsPage = lazyImportWithRetry("../../pages/Settings/Models");
-const EnvironmentsPage = lazyImportWithRetry(
-  "../../pages/Settings/Environments",
-);
+// 环境变量功能已隐藏 — 2026-07-05
+// const EnvironmentsPage = lazyImportWithRetry(
+//   "../../pages/Settings/Environments",
+// );
 const SecurityPage = lazyImportWithRetry("../../pages/Settings/Security");
 const TokenUsagePage = lazyImportWithRetry("../../pages/Settings/TokenUsage");
 const AgentStatsPage = lazyImportWithRetry("../../pages/Settings/AgentStats");
@@ -47,7 +48,8 @@ const UserSystemPage = lazyImportWithRetry("../../pages/UserSystem/index");
 const UserProfilePage = lazyImportWithRetry("../../pages/UserProfile/index");
 const AdminPage = lazyImportWithRetry("../../pages/Admin/index");
 const MultiLayerEvolutionPage = lazyImportWithRetry("../../pages/MultiLayerEvolution/index");
-const KnowledgeBasePage = lazyImportWithRetry("../../pages/KnowledgeBase/index");
+// 知识库功能暂时隐藏
+// const KnowledgeBasePage = lazyImportWithRetry("../../pages/KnowledgeBase/index");
 
 // P2 Enterprise Features
 const MonitoringPage = lazyImportWithRetry("../../pages/Monitoring/index");
@@ -69,7 +71,7 @@ const pathToKey: Record<string, string> = {
   "/workspace": "workspace",
   "/agents": "agents",
   "/models": "models",
-  "/environments": "environments",
+  // "/environments": "environments",
   "/agent-config": "agent-config",
   "/security": "security",
   "/token-usage": "token-usage",
@@ -80,7 +82,7 @@ const pathToKey: Record<string, string> = {
   "/workspace/myspace": "myspace",
   "/user-system": "user-system",
   "/evolution": "evolution",
-  "/knowledge": "knowledge",
+  // "/knowledge": "knowledge",
   // P2 Enterprise Features
   "/monitoring": "monitoring",
   "/sso": "sso",
@@ -177,7 +179,7 @@ export default function MainLayout() {
                   <Route path="/workspace" element={<WorkspacePage />} />
                   <Route path="/agents" element={<AgentsPage />} />
                   <Route path="/models" element={<ModelsPage />} />
-                  <Route path="/environments" element={<EnvironmentsPage />} />
+                  {/* <Route path="/environments" element={<EnvironmentsPage />} /> */}
                   <Route path="/agent-config" element={<AgentConfigPage />} />
                   <Route path="/security" element={<SecurityPage />} />
                   <Route path="/token-usage" element={<TokenUsagePage />} />
@@ -193,7 +195,7 @@ export default function MainLayout() {
                   <Route path="/user/profile" element={<UserProfilePage />} />
                   <Route path="/admin" element={<AdminPage />} />
                   <Route path="/evolution" element={<MultiLayerEvolutionPage />} />
-                  <Route path="/knowledge" element={<KnowledgeBasePage />} />
+                  {/* <Route path="/knowledge" element={<KnowledgeBasePage />} /> */}
                   <Route path="/cross-agent" element={<Navigate to="/evolution" replace />} />
 
                   {/* P2 Enterprise Features */}
