@@ -46,8 +46,8 @@ services:
       - ../server/deploy/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
     environment:
       - PYTHONPATH=/app
-      # 共享生产 Playwright（通过宿主机 4201 端口，browserless 认证）
-      - BROWSER_CDP_URL=http://172.17.0.1:4201?token=coapis
+      # 共享生产 Playwright（通过宿主机 4201 端口）
+      - BROWSER_CDP_URL=http://172.17.0.1:4201
       # 文件上传限制（与 .env.dev 同步）
       - COAPIS_UPLOAD_MAX_FILES=${COAPIS_UPLOAD_MAX_FILES:-10}
       - COAPIS_UPLOAD_MAX_FILE_SIZE_MB=${COAPIS_UPLOAD_MAX_FILE_SIZE_MB:-20}

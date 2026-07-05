@@ -111,35 +111,83 @@ async def _search_browser(query: str, max_results: int = 5) -> list[dict] | None
             results = []
 
             if search_engine == "bing":
-                # Bing: multiple patterns to handle different HTML structures
-                patterns = [
-                    r'<li class="b_algo">\s*<h2><a[^>]*href="([^"]*)"[^>]*>(.*?)</a></h2>(?:\s*<p[^>]*>(.*?)</p>)?',
-                    r'<h2><a[^>]*href="(https?://[^"]*)"[^>]*>(.*?)</a></h2>',
-                    r'<a[^>]*href="(https?://[^"]*)"[^>]*class="[^"]*"[^>]*>(.*?)</a>',
-                ]
-                for pattern in patterns:
-                    matches = re.findall(pattern, html, re.DOTALL)
-                    for m in matches[:max_results]:
-                        title = re.sub(r'<[^>]+>', '', m[1]).strip()
-                        snippet = re.sub(r'<[^>]+>', '', m[2]).strip() if len(m) > 2 and m[2] else ""
-                        if title and len(title) > 5 and not title.startswith("http"):
-                            results.append({"title": title, "url": m[0], "snippet": snippet})
-                    if results:
-                        break
+                # Bing: split by result blocks, then extract title + snippet per block
+                blocks = re.split(r'(?=<li class="b_algo")', html)
+                for block in blocks[1:max_results + 1]:
+                    # Title + URL from <h2><a>
+                    title_m = re.search(
+                        r'<h2>\s*<a[^>]*href="(https?://[^"]*)"[^>]*>(.*?)</a>', block, re.DOTALL
+                    )
+                    if not title_m:
+                        continue
+                    url, title_html = title_m.group(1), title_m.group(2)
+                    title = re.sub(r'<[^>]+>', '', title_html).strip()
+                    if not title or len(title) <= 5:
+                        continue
+                    # Snippet: try multiple Bing DOM patterns
+                    snippet = ""
+                    for sp in [
+                        r'<p[^>]*>(.*?)</p>',
+                        r'<div[^>]*class="[^"]*b_caption[^"]*"[^>]*>.*?<p[^>]*>(.*?)</p>',
+                    ]:
+                        sm = re.search(sp, block, re.DOTALL)
+                        if sm:
+                            snippet = re.sub(r'<[^>]+>', '', sm.group(1)).strip()
+                            if len(snippet) > 10:
+                                break
+                            snippet = ""
+                    results.append({"title": title, "url": url, "snippet": snippet})
 
             elif search_engine == "baidu":
-                pattern = r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
-                for m in re.findall(pattern, html, re.DOTALL)[:max_results]:
-                    title = re.sub(r'<[^>]+>', '', m[1]).strip()
-                    if title and len(title) > 2:
-                        results.append({"title": title, "url": m[0], "snippet": ""})
+                # Extract title + snippet pairs: title from <h3><a>, snippet from nearby <span>/<div>
+                # Baidu wraps each result in <div class="result ..."> or <div class="c-container">
+                blocks = re.split(r'(?=<h3[^>]*>)', html)
+                for block in blocks[1:max_results + 1]:
+                    title_m = re.search(r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', block, re.DOTALL)
+                    if not title_m:
+                        continue
+                    title = re.sub(r'<[^>]+>', '', title_m.group(2)).strip()
+                    if not title or len(title) <= 2:
+                        continue
+                    # Snippet: try multiple Baidu DOM patterns
+                    snippet = ""
+                    for sp in [
+                        r'<span[^>]*class="[^"]*content-right[^"]*"[^>]*>(.*?)</span>',
+                        r'<div[^>]*class="[^"]*c-abstract[^"]*"[^>]*>(.*?)</div>',
+                        r'<span[^>]*class="[^"]*c-color-text[^"]*"[^>]*>(.*?)</span>',
+                        r'<div[^>]*class="[^"]*c-span-last[^"]*"[^>]*>(.*?)</div>',
+                    ]:
+                        sm = re.search(sp, block, re.DOTALL)
+                        if sm:
+                            snippet = re.sub(r'<[^>]+>', '', sm.group(1)).strip()
+                            if len(snippet) > 10:
+                                break
+                            snippet = ""
+                    results.append({"title": title, "url": title_m.group(1), "snippet": snippet})
 
             elif search_engine == "google":
-                pattern = r'<a[^>]*href="/url\?q=([^&"]*)"[^>]*><[^>]*>(.*?)</[^>]*></a>'
-                for m in re.findall(pattern, html, re.DOTALL)[:max_results]:
-                    title = re.sub(r'<[^>]+>', '', m[1]).strip()
-                    if title and len(title) > 2:
-                        results.append({"title": title, "url": m[0], "snippet": ""})
+                # Google: split by result blocks, extract title + snippet
+                blocks = re.split(r'(?=<a[^>]*href="/url\?q=)', html)
+                for block in blocks[1:max_results + 1]:
+                    title_m = re.search(r'<a[^>]*href="/url\?q=([^&"]*)"[^>]*><[^>]*>(.*?)</[^>]*></a>', block, re.DOTALL)
+                    if not title_m:
+                        continue
+                    title = re.sub(r'<[^>]+>', '', title_m.group(2)).strip()
+                    if not title or len(title) <= 2:
+                        continue
+                    # Snippet: look for <span> or <div> with text content
+                    snippet = ""
+                    for sp in [
+                        r'<span[^>]*>(.*?)</span>',
+                        r'<div[^>]*>(.*?)</div>',
+                    ]:
+                        sm = re.search(sp, block, re.DOTALL)
+                        if sm:
+                            snippet = re.sub(r'<[^>]+>', '', sm.group(1)).strip()
+                            if len(snippet) > 20:
+                                break
+                            snippet = ""
+                    results.append({"title": title, "url": title_m.group(1), "snippet": snippet})
 
             if results:
                 logger.info("Browser search (%s) returned %d results for: %s", search_engine, len(results), query)
@@ -205,12 +253,32 @@ def _search_sogou(query: str, max_results: int = 5) -> list[dict] | None:
         if len(html) < 5000:
             return None
         results = []
-        pattern = r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
-        for href, title_html in re.findall(pattern, html, re.DOTALL)[:max_results]:
+        # Sogou wraps each result in a block; split by <h3> to get per-result chunks
+        blocks = re.split(r'(?=<h3[^>]*>)', html)
+        for block in blocks[1:max_results + 1]:
+            title_m = re.search(r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', block, re.DOTALL)
+            if not title_m:
+                continue
+            href, title_html = title_m.group(1), title_m.group(2)
             title = re.sub(r'<[^>]+>', '', title_html).strip()
-            if title and len(title) > 2:
-                full_url = href if href.startswith("http") else f"https://www.sogou.com{href}"
-                results.append({"title": title, "url": full_url, "snippet": ""})
+            if not title or len(title) <= 2:
+                continue
+            full_url = href if href.startswith("http") else f"https://www.sogou.com{href}"
+            # Snippet: try multiple Sogou DOM patterns
+            snippet = ""
+            for sp in [
+                r'<p[^>]*class="[^"]*str_info[^"]*"[^>]*>(.*?)</p>',
+                r'<p[^>]*class="[^"]*str-text[^"]*"[^>]*>(.*?)</p>',
+                r'<div[^>]*class="[^"]*space-txt[^"]*"[^>]*>(.*?)</div>',
+                r'<div[^>]*class="[^"]*rb[^"]*"[^>]*>(.*?)</div>',
+            ]:
+                sm = re.search(sp, block, re.DOTALL)
+                if sm:
+                    snippet = re.sub(r'<[^>]+>', '', sm.group(1)).strip()
+                    if len(snippet) > 10:
+                        break
+                    snippet = ""
+            results.append({"title": title, "url": full_url, "snippet": snippet})
         if results:
             logger.info("Sogou search returned %d results for: %s", len(results), query)
             return results

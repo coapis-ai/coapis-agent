@@ -24,7 +24,7 @@ services:
     environment:
       - COAPIS_WORKING_DIR=${COAPIS_WORKING_DIR:-/apps/ai/coapis}
       - COAPIS_WORKSPACES_DIR=${COAPIS_WORKSPACES_DIR:-${COAPIS_WORKING_DIR}/workspaces}
-      - BROWSER_CDP_URL=http://playwright:9223
+      - BROWSER_CDP_URL=http://playwright:3000
       # MCP包缓存目录（持久化到宿主机）
       - PIP_CACHE_DIR=/root/.cache/pip
     restart: unless-stopped
@@ -61,26 +61,31 @@ services:
       retries: 3
       start_period: 10s
 
-  # ── 浏览器服务（CDP 协议）──
-  # chromedp/headless-shell 内部：9223(socat) → 9222(Chrome CDP)
+  # ── 浏览器服务（CDP 协议，内部端口 3000）──
+  # browserless/chrome 提供完整 HTTP API + CDP 支持
   # shm_size: Chrome 必需，低于 512M 会崩溃
+  # 注意：internal 网络已隔离外部访问，无需 TOKEN 认证
   playwright:
-    image: chromedp/headless-shell:latest
+    image: browserless/chrome:latest
     container_name: coapis-playwright
     expose:
-      - "9223"
+      - "3000"
     ports:
-      - "${COAPIS_PLAYWRIGHT_PORT:-4201}:9223"
+      - "${COAPIS_PLAYWRIGHT_PORT:-4201}:3000"
     shm_size: "2g"
+    environment:
+      - MAX_CONCURRENT_SESSIONS=5
+      - MAX_QUEUE_LENGTH=10
     restart: unless-stopped
     networks:
       - internal
+      - frontend
     healthcheck:
-      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/9223' 2>/dev/null"]
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/json/version"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
 
 networks:
   frontend:

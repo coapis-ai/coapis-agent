@@ -1347,6 +1347,48 @@ async def _ensure_browser(
             _touch_activity(state)
             return True
 
+    # ── BROWSER_CDP_URL fallback: connect to external CDP endpoint ──
+    # When no local Chromium is available (e.g. dev container), check if
+    # BROWSER_CDP_URL is set and try to connect to the external browser.
+    env_cdp_url = os.environ.get("BROWSER_CDP_URL", "").strip()
+    if env_cdp_url and not state.get("connected_via_cdp"):
+        try:
+            async_playwright = _ensure_playwright_async()
+            pw = await async_playwright().start()
+            browser = await pw.chromium.connect_over_cdp(env_cdp_url)
+            contexts = browser.contexts
+            if contexts:
+                context = contexts[0]
+            else:
+                context = await browser.new_context()
+            _attach_context_listeners(state, context)
+            state["playwright"] = pw
+            state["browser"] = browser
+            state["context"] = context
+            state["connected_via_cdp"] = True
+            state["cdp_url"] = env_cdp_url
+            state["launch_mode"] = "external_cdp"
+            state["owned_browser_process"] = False
+            state["browser_pid"] = None
+            state["browser_process"] = None
+            for page in context.pages:
+                page_id = _next_page_id(state)
+                _register_page(state, page, page_id)
+                if state["current_page_id"] is None:
+                    state["current_page_id"] = page_id
+            if not state["pages"]:
+                page = await context.new_page()
+                page_id = _next_page_id(state)
+                _register_page(state, page, page_id)
+                state["current_page_id"] = page_id
+            state["_last_browser_error"] = None
+            _touch_activity(state)
+            _start_idle_watchdog(state)
+            logger.info("Connected to external CDP via BROWSER_CDP_URL: %s", env_cdp_url)
+            return True
+        except Exception as e:
+            logger.debug("BROWSER_CDP_URL connection failed (%s), falling back to local launch", e)
+
     try:
         if _USE_SYNC_PLAYWRIGHT:
             # Hybrid mode: use sync Playwright in thread pool
