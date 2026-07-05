@@ -156,11 +156,18 @@ DEFAULT_HEARTBEAT_MDS = {
     is_flag=True,
     help="Skip security confirmation (use with --defaults for scripts/Docker).",
 )
+@click.option(
+    "--skip-providers",
+    "skip_providers",
+    is_flag=True,
+    help="Skip LLM provider configuration (for environments without LLM).",
+)
 # pylint: disable=too-many-branches,too-many-statements
 def init_cmd(
     force: bool,
     use_defaults: bool,
     accept_security: bool,
+    skip_providers: bool,
 ) -> None:
     """Create working dir with config.json and HEARTBEAT.md (interactive)."""
     from pathlib import Path
@@ -355,30 +362,33 @@ def init_cmd(
         click.echo(f"\n✓ Configuration saved to {config_path}")
 
     # --- LLM provider and model configuration ---
-    provider_manager = ProviderManager.get_instance()
-    activate_llm = provider_manager.get_active_model()
-
-    if (
-        activate_llm is not None
-        and activate_llm.provider_id
-        and activate_llm.model
-    ):
-        click.echo(
-            f"\n✓ LLM already configured: "
-            f"{activate_llm.provider_id} / {activate_llm.model}",
-        )
-        if not use_defaults and prompt_confirm(
-            "Reconfigure LLM provider?",
-            default=False,
-        ):
-            click.echo("\n=== LLM Provider Configuration ===")
-            configure_providers_interactive(use_defaults=False)
-        else:
-            click.echo("Skipped LLM configuration.")
+    if skip_providers:
+        click.echo("\n⏭️  Skipped LLM provider configuration (--skip-providers).")
     else:
-        # No active LLM — must configure, cannot skip
-        click.echo("\n=== LLM Provider Configuration (required) ===")
-        configure_providers_interactive(use_defaults=use_defaults)
+        provider_manager = ProviderManager.get_instance()
+        activate_llm = provider_manager.get_active_model()
+
+        if (
+            activate_llm is not None
+            and activate_llm.provider_id
+            and activate_llm.model
+        ):
+            click.echo(
+                f"\n✓ LLM already configured: "
+                f"{activate_llm.provider_id} / {activate_llm.model}",
+            )
+            if not use_defaults and prompt_confirm(
+                "Reconfigure LLM provider?",
+                default=False,
+            ):
+                click.echo("\n=== LLM Provider Configuration ===")
+                configure_providers_interactive(use_defaults=False)
+            else:
+                click.echo("Skipped LLM configuration.")
+        else:
+            # No active LLM — must configure, cannot skip
+            click.echo("\n=== LLM Provider Configuration (required) ===")
+            configure_providers_interactive(use_defaults=use_defaults)
 
     # --- skills (prompt if needed) ---
     if use_defaults:

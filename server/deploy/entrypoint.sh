@@ -32,7 +32,11 @@ echo "✓ Version: ${COAPIS_VER}"
 # 统一走 coapis init，由 SystemInitializer 处理目录/配置/权限/用户
 if [ ! -f "${SYSTEM_DIR}/config.json" ]; then
     echo "📦 First startup detected, running initialization..."
-    coapis init --defaults --accept-security
+    INIT_ARGS="--defaults --accept-security"
+    if [ "${COAPIS_SKIP_PROVIDERS}" = "1" ]; then
+        INIT_ARGS="${INIT_ARGS} --skip-providers"
+    fi
+    coapis init ${INIT_ARGS}
     echo "✅ Initialization complete!"
 else
     echo "✓ System already initialized."
