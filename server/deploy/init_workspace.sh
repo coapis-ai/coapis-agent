@@ -8,7 +8,7 @@
 # ═══════════════════════════════════════════════════════════════════
 set -e
 
-WORKING_DIR="${COAPIS_WORKING_DIR:-/apps/ai/coapis}"
+WORKING_DIR="${COAPIS_WORKING_DIR:-/opt/coapis}"
 SYSTEM_DIR="${WORKING_DIR}/system"
 
 echo "=========================================="

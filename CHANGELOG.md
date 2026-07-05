@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.9.3] - 2026-07-05
+
+### 开源准备
+- **全面安全审计** — 扫描敏感信息、硬编码路径、内网 IP，修复 18 个文件中的敏感信息泄露
+- **清理历史遗留** — 删除所有 `_bak`/`.bak` 备份文件（10 个）、`security/security/` 嵌套目录（23 个）、`_backup_20260627/` 目录
+- **路径标准化** — 将 16+ 个文件中的硬编码内部路径 `/apps/ai/coapis` 替换为环境变量链式读取，默认 `~/.coapis`
+- **品牌统一** — 清理所有 `EaterClaw`/`eater-claw` 旧品牌残留（supervisord、Dockerfile、permissions.json、vectors.jsonl 等）
+- **工具配置架构优化** — 恢复 `_merge_default_tools` validator，确保代码新增工具自动注入已保存配置；序列化时排除 `builtin_tools`
+- **配置模板审计** — 清理 14 个 agent.json 中的冗余字段（`tools`、空 `owner`、`None` priority、重复 `running`、过时 `plan`）
+- **更新 .gitignore** — 移除旧品牌引用，增加临时文件、备份文件和本地配置排除项
+- **更新文档** — README.md 版本号同步至 0.9.3，SECURITY.md 更新版本支持表
+
+### 修复
+- `core.py` — 将 `eaterclaw` 路径引用替换为 `AGENTS_DIR`/`WORKSPACES_DIR` 常量
+- `builtin.py` — 3 处 `eaterclaw` 品牌引用替换为 `coapis`
+- `constant.py` — 默认 `WORKING_DIR` 从 `/apps/ai/coapis` 改为 `~/.coapis`，支持 `COAPIS_WORKING_DIR` 环境变量覆盖
+- `system/defaults.py` — 移除 `DEFAULT_ENV_VARS` 中的硬编码路径默认值
+- `migrate_cmd.py`、`migrate_memory.py`、`system/migrate.py` — 迁移工具默认路径改用环境变量
+
+## [v0.8.60] - 2026-07-01
+
+### 新增
+- **品牌升级** — 项目从 EaterClaw 正式更名为 CoApis（蜂巢）
+- **配置管理** — 新增 `ToolsConfig` 全局工具配置，统一管理内置工具启用状态
+- **多智能体协作** — 新增 `multi_agent_manager.py`，支持智能体间通信与协作
+- **记忆系统升级** — 新增 `reme_light_memory_manager.py`，支持轻量级记忆管理与压缩
+
+## [v0.8.0] - 2026-06-20
+
+### 新增
+- **企业级特性** — 新增 license 管理、权限矩阵、审计日志等企业级功能
+- **安全框架** — 新增 `security/` 模块，包含沙箱执行器、审计链、技能扫描器
+- **数据迁移** — 新增版本化数据迁移系统，支持按版本递增、幂等、可重入
+- **CLI 工具** — 新增 `coapis` CLI，支持 serve、migrate、doctor 等命令
+
 ## [v0.7.18] - 2026-06-12
 
 ### 新增工具

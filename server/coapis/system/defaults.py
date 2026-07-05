@@ -239,5 +239,4 @@ DEFAULT_WORKSPACE_FILES: List[str] = [
 # ═══════════════════════════════════════════════════════════════════
 DEFAULT_ENV_VARS: Dict[str, str] = {
     "COAPIS_PORT": "8000",
-    "COAPIS_WORKING_DIR": "/apps/ai/coapis",
 }

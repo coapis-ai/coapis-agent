@@ -1,5 +1,5 @@
 # ============================================================
-# EaterClaw .gitignore
+# CoApis .gitignore
 # ============================================================
 
 # --- Python ---
@@ -38,6 +38,7 @@ node_modules/
 
 # --- Docker ---
 docker/.env
+docker/.env.dev
 *.log
 
 # --- OS ---
@@ -46,17 +47,14 @@ Thumbs.db
 
 # --- Backup / Temp ---
 *.bak
+*.bak*
 *.tmp
 ~$*
+*_bak_*
 
 # --- Local config (use *.example as template) ---
 docker/config/config.json
 docker/config/providers.json
-
-# --- Tokenizer files (large, fetched by pip) ---
-server/eaterclaw/tokenizer/merges.txt
-server/eaterclaw/tokenizer/tokenizer.json
-server/eaterclaw/tokenizer/vocab.json
 
 # --- Runtime data (bind mounted from host) ---
 workspaces/
@@ -65,17 +63,28 @@ MEMORY.md
 PROFILE.md
 SOUL.md
 AGENTS.md
+HEARTBEAT.md
+*.json.lock
+.reme_store_v1
+.bootstrap_completed
+
+# --- Debug / temp scripts (root directory) ---
+debug_config*.py
+fix_*.py
+find_bad_jobs.py
+test_*.py
+verify_*.py
+
+# --- Screenshot / verify images ---
+*.png
+
+# --- One-time docs ---
+PROJECT_REORGANIZATION_COMPLETE.md
 
 # --- Reports (generated / internal) ---
 docs/*.docx
 docs/*.js
 docs/package*.json
-
-# --- Technical docs (local reference) ---
-tech_docs/
-
-# --- PageIndex local copy ---
-PageIndex/
 
 # --- Scripts (local dev only) ---
 scripts/
@@ -84,10 +93,14 @@ scripts/
 client/node_modules/.tmp
 client/dist/
 
-# --- Enterprise build ---
-enterprise/eaterclaw_enterprise.egg-info/
-
 # --- Playwright browser binaries (too large for git) ---
 docker/volume/
 server/deploy/chromium-cache/
-*.bak*
+
+# --- Dev-only docker compose ---
+docker/docker-compose.dev.yaml
+docker/dev-overrides/
+
+# --- Standalone dev/ops scripts (not part of coapis package) ---
+server/configure_llm.py
+server/restart_backend.py

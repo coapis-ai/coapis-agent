@@ -4,8 +4,9 @@
 
 | Version | Supported          |
 |---------|-------------------|
-| 0.1.x   | ✅ Active         |
-| < 0.1   | ❌ Not supported  |
+| 0.9.x   | ✅ Active         |
+| 0.8.x   | ✅ Active         |
+| < 0.8   | ❌ Not supported  |
 
 ## Reporting a Vulnerability / 报告安全漏洞
 

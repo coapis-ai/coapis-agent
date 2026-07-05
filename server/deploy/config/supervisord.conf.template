@@ -12,7 +12,7 @@ stderr_logfile=/var/log/dbus.err.log
 stdout_logfile=/var/log/dbus.out.log
 
 [program:app]
-command=eaterclaw app --host 0.0.0.0 --port ${QWENPAW_PORT}
+command=coapis app --host 0.0.0.0 --port ${COAPIS_PORT}
 autostart=true
 autorestart=true
 priority=30

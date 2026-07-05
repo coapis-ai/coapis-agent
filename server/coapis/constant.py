@@ -102,15 +102,14 @@ class EnvVarLoader:
 
 # WORKING_DIR priority:
 # 1. COAPIS_WORKING_DIR env var is set → use it (fully configurable)
-# 2. Default → /apps/ai/coapis (standard deployment path)
+# 2. Default → ~/.coapis (user home directory)
 #
 # ⚠️ WORKING_DIR must be explicitly configured via COAPIS_WORKING_DIR env var.
-# No implicit fallback to ~/.coapis.
 _explicit_working_dir = _get_env("COAPIS_WORKING_DIR")
 if _explicit_working_dir:
     WORKING_DIR = Path(_explicit_working_dir).expanduser().resolve()
 else:
-    WORKING_DIR = Path("/apps/ai/coapis").resolve()
+    WORKING_DIR = Path.home() / ".coapis"
 
 # System directory - all system-level configs and data
 # Contains: config.json, users.json, auth.json, permissions.json,

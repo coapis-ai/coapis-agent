@@ -33,7 +33,8 @@ class SecurityAuditLogger:
         if log_dir is None:
             log_dir = os.environ.get(
                 "COAPIS_SECURITY_AUDIT_LOG_DIR",
-                os.environ.get("COAPIS_SYSTEM_DIR", "/apps/ai/coapis/system"),
+                os.environ.get("COAPIS_SYSTEM_DIR",
+                    os.path.join(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis")), "system")),
             )
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)

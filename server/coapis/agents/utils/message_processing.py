@@ -185,7 +185,7 @@ def _resolve_media_url(url: str) -> str:
     username = get_current_username()
     
     # 从 workspace_dir 提取用户名（如果 username 未设置）
-    # workspace_dir 格式: /apps/ai/coapis-dev/workspaces/{username}
+    # workspace_dir 格式: {WORKSPACES_DIR}/{username}
     if workspace_dir and not username:
         username = Path(workspace_dir).name
     

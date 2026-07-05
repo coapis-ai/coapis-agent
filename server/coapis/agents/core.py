@@ -681,11 +681,12 @@ class AgentCore:
             agent_id = self.config.get("agent_id", self.config.get("id", ""))
             logger.info("Workspace MD loader: agent_id=%s, config_keys=%s", agent_id, list(self.config.keys())[:15])
             # Try common workspace paths
+            from ..constant import AGENTS_DIR, WORKSPACES_DIR
             possible_paths = [
-                Path(f"/apps/ai/eaterclaw/workspaces/{agent_id.split(':')[-1]}"),
-                Path(f"/apps/ai/eaterclaw/workspaces/global_default"),
-                Path(f"/apps/ai/coapis/workspaces/{agent_id.split(':')[-1]}"),
-                Path(f"/apps/ai/coapis/workspaces/global_default"),
+                AGENTS_DIR / agent_id.split(':')[-1],
+                AGENTS_DIR / "global_default",
+                WORKSPACES_DIR / agent_id.split(':')[-1],
+                WORKSPACES_DIR / "global_default",
             ]
             for p in possible_paths:
                 if (p / "agent.json").exists():

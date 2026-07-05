@@ -23,7 +23,7 @@ attachments in chat messages.
 
 The frontend constructs URLs like:
     /api/files/preview/media/xxx.ppm?token=xxx
-    /api/files/preview/apps/ai/coapis/workspaces/admin/files/media/xxx.ppm?token=xxx
+    /api/files/preview/{WORKSPACES_DIR}/admin/files/media/xxx.ppm?token=xxx
 
 This endpoint resolves the path and serves the file directly.
 """
@@ -49,7 +49,7 @@ async def preview_file(filepath: str):
     """Preview a file by its path.
 
     Accepts both absolute and relative paths:
-    - Absolute: /apps/ai/coapis/workspaces/admin/files/media/xxx.ppm
+    - Absolute: /opt/coapis/workspaces/admin/files/media/xxx.ppm
     - Relative: media/xxx.ppm (resolved as /media/xxx.ppm)
 
     Serves file preview with auth token support.

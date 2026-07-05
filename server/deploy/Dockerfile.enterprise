@@ -1,6 +1,6 @@
 # -----------------------------------------------------------------------------
 # Enterprise Dockerfile for CoApis
-# Build context: /apps/ai/tool-dev/devs/eater-claw (project root)
+# Build context: .. (project root)
 # Usage: docker build -f server/deploy/Dockerfile.enterprise -t coapis-server:enterprise .
 # -----------------------------------------------------------------------------
 

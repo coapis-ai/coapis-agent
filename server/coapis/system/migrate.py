@@ -485,7 +485,7 @@ def main():
     parser = argparse.ArgumentParser(description="CoApis 数据迁移工具")
     parser.add_argument("--from", dest="from_version", help="当前版本（默认自动检测）")
     parser.add_argument("--to", dest="to_version", required=True, help="目标版本")
-    parser.add_argument("--working-dir", default=os.environ.get("COAPIS_WORKING_DIR", "/apps/ai/coapis"),
+    parser.add_argument("--working-dir", default=os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis")),
                         help="数据目录路径")
     parser.add_argument("--dry-run", action="store_true", help="只显示要执行的迁移，不实际执行")
     parser.add_argument("--verbose", "-v", action="store_true", help="详细输出")

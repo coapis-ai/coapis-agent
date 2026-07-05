@@ -10,7 +10,7 @@
 # ═══════════════════════════════════════════════════════════════════
 set -e
 
-WORKING_DIR="${COAPIS_WORKING_DIR:-/apps/ai/coapis}"
+WORKING_DIR="${COAPIS_WORKING_DIR:-/opt/coapis}"
 SYSTEM_DIR="${WORKING_DIR}/system"
 
 echo "=========================================="
@@ -67,7 +67,7 @@ echo "Checking MCP package installations..."
 python3 -c "
 import json, subprocess, os, glob
 
-working_dir = os.environ.get('COAPIS_WORKING_DIR', '/apps/ai/coapis')
+working_dir = os.environ.get('COAPIS_WORKING_DIR', '/opt/coapis')
 patterns = [
     os.path.join(working_dir, 'workspaces/*/mcp_installed.json'),
 ]

@@ -227,7 +227,7 @@ def main():
     parser.add_argument(
         "--working-dir",
         type=str,
-        default="/apps/ai/coapis",
+        default=os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis")),
         help="CoApis working directory",
     )
     parser.add_argument(

@@ -646,7 +646,7 @@ commands:
         safe_paths:
           - "/tmp/"
           - "/var/tmp/"
-          - "/apps/ai/"
+          - "/opt/"
           - "/home/"
 
   rmdir:
@@ -661,7 +661,7 @@ commands:
         safe_paths:
           - "/tmp/"
           - "/var/tmp/"
-          - "/apps/ai/"
+          - "/opt/"
           - "/home/"
 
   tar:
@@ -676,7 +676,7 @@ commands:
         safe_paths:
           - "/tmp/"
           - "/var/tmp/"
-          - "/apps/ai/"
+          - "/opt/"
           - "/home/"
       list_only:
         level: L0
@@ -698,7 +698,7 @@ commands:
         safe_paths:
           - "/tmp/"
           - "/var/tmp/"
-          - "/apps/ai/"
+          - "/opt/"
           - "/home/"
 
   unzip:
@@ -713,7 +713,7 @@ commands:
         safe_paths:
           - "/tmp/"
           - "/var/tmp/"
-          - "/apps/ai/"
+          - "/opt/"
           - "/home/"
       list_only:
         level: L0
@@ -734,7 +734,7 @@ commands:
         safe_paths:
           - "/tmp/"
           - "/var/tmp/"
-          - "/apps/ai/"
+          - "/opt/"
           - "/home/"
 
   gunzip:
@@ -749,7 +749,7 @@ commands:
         safe_paths:
           - "/tmp/"
           - "/var/tmp/"
-          - "/apps/ai/"
+          - "/opt/"
           - "/home/"
 
   kill:

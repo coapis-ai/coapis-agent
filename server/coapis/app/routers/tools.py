@@ -57,7 +57,7 @@ def _get_workspace(request: Request) -> Path:
         return ws
     except Exception:
         # Fallback: use workspace/files/tmp instead of shared /tmp
-        fallback = Path("/apps/ai/coapis/workspaces") / username / "files" / "tmp"
+        fallback = Path(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis"))) / "workspaces" / username / "files" / "tmp"
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
 

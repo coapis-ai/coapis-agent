@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════
 # CoApis Dockerfile — 源码构建版
-# Build context: /apps/ai/tool-dev/devs/eater-claw (项目根目录)
+# Build context: .. (项目根目录)
 # Usage: cd docker && docker compose -f docker-compose.playwright.yml up -d --build
 # ═══════════════════════════════════════════════════════════════════
 

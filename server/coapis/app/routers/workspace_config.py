@@ -64,15 +64,16 @@ class MdFileContent(BaseModel):
 
 def _get_workspace_dir(request: Request) -> Path:
     """Get the workspace directory for the selected agent."""
+    from ...constant import AGENTS_DIR
     manager = getattr(request.app.state, 'multi_agent_manager', None)
     if not manager:
-        return Path("/apps/ai/coapis/workspaces/global_default")
+        return AGENTS_DIR / "global_default"
 
     # Get first agent's workspace (or default)
     for agent_id, workspace in manager._workspaces.items():
         return workspace.workspace_dir
 
-    return Path("/apps/ai/coapis/workspaces/global_default")
+    return AGENTS_DIR / "global_default"
 
 
 # ── Workspace Info ──────────────────────────────────────────────────────

@@ -371,7 +371,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                     "每条信息一行，格式：[类型] 内容\n"
                     "示例：\n"
                     "[USER] 用户喜欢用 pytest 而不是 unittest\n"
-                    "[USER] 用户的项目代码在 /apps/ai/tool-dev/dev-coapis\n"
+                    "[USER] 用户的项目代码在 ~/projects/myapp\n"
                     "[AGENT] 处理 Django ORM 时要注意 N+1 查询\n"
                     "[AGENT] 代码审查时先检查 imports 再检查逻辑\n"
                     "[SKIP] 无\n\n"

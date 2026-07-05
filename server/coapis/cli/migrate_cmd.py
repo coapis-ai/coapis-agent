@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 @click.option(
     "--working-dir",
     default=None,
-    help="数据目录路径（默认 COAPIS_WORKING_DIR 环境变量或 /apps/ai/coapis）",
+    help="数据目录路径（默认 COAPIS_WORKING_DIR 环境变量或 ~/.coapis）",
 )
 @click.option("--dry-run", is_flag=True, help="只显示要执行的迁移，不实际执行")
 @click.option("--verbose", "-v", is_flag=True, help="详细输出")
@@ -45,7 +45,7 @@ def migrate_cmd(
     )
 
     # 确定数据目录
-    wd = Path(working_dir or os.environ.get("COAPIS_WORKING_DIR", "/apps/ai/coapis"))
+    wd = Path(working_dir or os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis")))
     if not wd.exists():
         click.echo(f"❌ 数据目录不存在: {wd}", err=True)
         sys.exit(1)

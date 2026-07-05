@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "description": "EaterClaw permission system — CRUD matrix format. Each module has {read, create, update, delete} booleans.",
+  "description": "CoApis permission system — CRUD matrix format. Each module has {read, create, update, delete} booleans.",
   "roles": {
     "user": {
       "name": "用户",

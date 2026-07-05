@@ -100,7 +100,8 @@ class SandboxedExecutor:
         """Get ToolSandbox for a user."""
         try:
             workspaces_dir = os.environ.get(
-                "COAPIS_WORKSPACES_DIR", "/apps/ai/coapis/workspaces"
+                "COAPIS_WORKSPACES_DIR",
+                os.path.join(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis")), "workspaces")
             )
             workspace_dir = f"{workspaces_dir}/{username}"
             return ToolSandbox(username=username, workspace_dir=workspace_dir)

@@ -39,7 +39,7 @@ def _get_sandbox(username: str = None):
             username = os.environ.get("COAPIS_USER", "default")
         workspace_dir = os.environ.get(
             "COAPIS_WORKSPACES_DIR",
-            "/apps/ai/coapis/workspaces"
+            os.path.join(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis")), "workspaces")
         )
         return ToolSandbox(username=username, workspace_dir=f"{workspace_dir}/{username}")
     except Exception as e:
@@ -70,7 +70,8 @@ def _resolve_user_path(path: str) -> Path:
     # Get current user's workspace files directory
     username = os.environ.get("COAPIS_USER", "default")
     workspaces_dir = os.environ.get(
-        "COAPIS_WORKSPACES_DIR", "/apps/ai/coapis/workspaces"
+        "COAPIS_WORKSPACES_DIR",
+        os.path.join(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis")), "workspaces")
     )
     user_files_root = Path(workspaces_dir) / username / "files"
     
@@ -247,7 +248,8 @@ async def shell_execute(command: str, timeout: float = 60.0) -> str:
     # Unified with file_write/file_read: all file operations default to files/ subdirectory.
     # This avoids user confusion about where files are created.
     username = os.environ.get("COAPIS_USER", "default")
-    workspaces_dir = os.environ.get("COAPIS_WORKSPACES_DIR", "/apps/ai/coapis/workspaces")
+    workspaces_dir = os.environ.get("COAPIS_WORKSPACES_DIR",
+        os.path.join(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis")), "workspaces"))
     user_cwd = f"{workspaces_dir}/{username}/files"
     # Ensure the files directory exists
     os.makedirs(user_cwd, exist_ok=True)

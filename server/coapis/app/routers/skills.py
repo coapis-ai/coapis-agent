@@ -23,6 +23,7 @@ import copy
 import io
 import json
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -1733,7 +1734,7 @@ async def delete_skill_config_endpoint(
 
 # ─── Skill Categories CRUD ──────────────────────────────────────────────────
 
-_CATEGORIES_PATH = Path("/apps/ai/coapis/system/skill_categories.json")
+_CATEGORIES_PATH = Path(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis"))) / "system" / "skill_categories.json"
 
 
 def _read_categories() -> dict[str, Any]:
@@ -2321,7 +2322,7 @@ async def get_trigger_aggregation(
     """获取跨用户的触发词优化聚合结果。"""
     from coapis.evolution.cross_agent_evolution import CrossAgentEvolution
 
-    cae = CrossAgentEvolution(data_dir=Path("/apps/ai/coapis/system"))
+    cae = CrossAgentEvolution(data_dir=Path(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis"))) / "system")
     aggregated = cae.aggregate_trigger_enhancements(skill_name, signal_type)
 
     return {
@@ -2635,7 +2636,7 @@ async def get_trigger_aggregation(
     """获取跨用户的触发词优化聚合结果。"""
     from coapis.evolution.cross_agent_evolution import CrossAgentEvolution
 
-    cae = CrossAgentEvolution(data_dir=Path("/apps/ai/coapis/system"))
+    cae = CrossAgentEvolution(data_dir=Path(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis"))) / "system")
     aggregated = cae.aggregate_trigger_enhancements(skill_name, signal_type)
 
     return {
