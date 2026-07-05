@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import logging
 import threading
 from collections import defaultdict
@@ -211,8 +212,8 @@ class ToolCallGuard:
 # This catches loops that ToolCallGuard misses because the tool calls
 # may have different params but the overall reasoning is stuck.
 
-_REASONING_SIMILAR_THRESHOLD = 2   # Same reasoning pattern this many times → hint
-_REASONING_FORCE_EXIT = 3          # Same pattern this many times → force text-only
+_REASONING_SIMILAR_THRESHOLD = int(os.environ.get("REASONING_SIMILAR_THRESHOLD", "3"))
+_REASONING_FORCE_EXIT = int(os.environ.get("REASONING_FORCE_EXIT", "5"))
 
 
 class ReasoningLoopDetector:

@@ -549,6 +549,19 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   preferredChatId: string | null = null;
 
   /**
+   * Polling timers for sessions that are still generating when loaded.
+   * Key: realId (backend chat UUID), Value: timer reference.
+   *
+   * When a user navigates away during generation and comes back, the SSE
+   * stream is gone but the backend task is still running.  This timer polls
+   * the chat status until generation completes, then updates the session
+   * messages so the UI shows the final result instead of a stuck state.
+   */
+  private _generatingPolls: Map<string, ReturnType<typeof setInterval>> = new Map();
+  private static readonly POLL_INTERVAL_MS = 3000;
+  private static readonly POLL_MAX_ATTEMPTS = 60; // 3min max (60 × 3s)
+
+  /**
    * Cache the latest user message for a chat so it can be patched into
    * history during reconnect (the backend only persists it after generation
    * completes). Persisted to sessionStorage so it survives page refresh.
@@ -895,6 +908,11 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
           };
           this.updateWindowVariables(session);
           this._upsertSession(session);
+          // Start polling + SSE reconnect if still generating
+          if (generating) {
+            this._startGeneratingPoll(fromList.realId);
+            this._emitReconnectEvent(fromList.realId);
+          }
           return session;
         } catch {
           // Chat may have been deleted or not yet persisted; fall through to return local session
@@ -942,6 +960,11 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
           };
           this.updateWindowVariables(session);
           this._upsertSession(session);
+          // Start polling + SSE reconnect if still generating
+          if (generating) {
+            this._startGeneratingPoll(refreshed.realId);
+            this._emitReconnectEvent(refreshed.realId);
+          }
           return session;
         } catch {
         }
@@ -1008,6 +1031,12 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       // applyChatsToSessionList (from getSessionList) won't overwrite
       // them with stale/empty data from the list endpoint.
       this._upsertSession(session);
+      // Start polling if still generating (no active SSE stream on reconnect)
+      // Start polling + SSE reconnect if still generating
+      if (generating) {
+        this._startGeneratingPoll(effectiveId);
+        this._emitReconnectEvent(effectiveId);
+      }
       return session;
     } catch {
       return this.getLocalSession(sessionId);
@@ -1160,6 +1189,96 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   }
 
   /**
+   * Emit a 'handleReconnect' CustomEvent to trigger the @agentscope-ai/chat
+   * library's SSE reconnect flow.  The library listens for this event via
+   * useChatAnywhereEventEmitter and will establish an SSE stream to show
+   * real-time generation progress (tool calls, thinking, assistant output).
+   *
+   * Called alongside _startGeneratingPoll so that:
+   * - SSE provides real-time visibility during generation
+   * - Polling acts as a fallback if SSE fails or is not supported
+   */
+  private _emitReconnectEvent(sessionId: string): void {
+    // Defer to next tick so the library has time to finish session switching
+    // (setCurrentSessionId → useEffect abort → render) before we trigger reconnect.
+    setTimeout(() => {
+      console.log(`[sessionApi] Emitting handleReconnect for ${sessionId}`);
+      document.dispatchEvent(
+        new CustomEvent("handleReconnect", {
+          detail: { session_id: sessionId },
+        }),
+      );
+    }, 50);
+  }
+
+  /**
+   * Start polling for a session that is still generating on load.
+   * Called from _doGetSession when isGenerating returns true but there is
+   * no active SSE stream (user navigated away and came back).
+   */
+  private _startGeneratingPoll(realId: string): void {
+    // Don't start duplicate polls
+    if (this._generatingPolls.has(realId)) return;
+
+    let attempts = 0;
+    console.log(`[sessionApi] Starting generating poll for ${realId}`);
+
+    const timer = setInterval(async () => {
+      attempts++;
+      if (attempts > SessionApi.POLL_MAX_ATTEMPTS) {
+        console.warn(`[sessionApi] Poll timeout for ${realId} after ${attempts} attempts`);
+        this._stopGeneratingPoll(realId);
+        return;
+      }
+
+      try {
+        const chatHistory = await api.getChat(realId);
+        const stillGenerating = isGenerating(chatHistory);
+
+        if (!stillGenerating) {
+          console.log(`[sessionApi] Generation complete for ${realId}, updating session`);
+          this._stopGeneratingPoll(realId);
+
+          // Update the session with final messages
+          const messages = convertMessages(chatHistory.messages || []);
+          const existingSession = this._sessions.find(
+            (s) => (s as ExtendedSession).realId === realId || s.id === realId,
+          ) as ExtendedSession | undefined;
+
+          if (existingSession) {
+            existingSession.messages = messages;
+            existingSession.generating = false;
+            const backendName = (chatHistory as any).spec?.name;
+            if (backendName) existingSession.name = backendName;
+            existingSession.hasMore = chatHistory.has_more ?? false;
+            existingSession.totalCount = chatHistory.total_count;
+            clearPendingUserMessage(existingSession.realId || existingSession.id);
+          }
+
+          // Trigger UI refresh via callbacks
+          this.onSessionListUpdated?.(this._sessions);
+        }
+      } catch (err) {
+        // Transient errors are expected (network blips); just log and retry
+        console.debug(`[sessionApi] Poll error for ${realId}:`, (err as Error).message);
+      }
+    }, SessionApi.POLL_INTERVAL_MS);
+
+    this._generatingPolls.set(realId, timer);
+  }
+
+  /**
+   * Stop polling for a session.
+   */
+  private _stopGeneratingPoll(realId: string): void {
+    const timer = this._generatingPolls.get(realId);
+    if (timer) {
+      clearInterval(timer);
+      this._generatingPolls.delete(realId);
+    }
+  }
+
+  /**
    * Schedule a delayed refresh of the session list.
    * Called after each SSE response completes to pick up backend-side changes
    * (e.g. auto-rename from first user message, status updates).
@@ -1201,6 +1320,9 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     const existing = this._sessions.find((s) => s.id === sessionId) as
       | ExtendedSession
       | undefined;
+
+    // Stop any active generating poll for this session
+    if (existing?.realId) this._stopGeneratingPoll(existing.realId);
 
     const deleteId =
       existing?.realId ?? (isLocalTimestamp(sessionId) ? null : sessionId);
