@@ -71,6 +71,7 @@ class LoginResponse(BaseModel):
     token: str
     username: str
     first_login: bool = False
+    default_agent_id: str = ""
 
 
 class AuthStatusResponse(BaseModel):
@@ -143,7 +144,12 @@ async def login(req: LoginRequest):
     except Exception:
         pass
 
-    return LoginResponse(token=token, username=req.username, first_login=is_first_login)
+    return LoginResponse(
+        token=token,
+        username=req.username,
+        first_login=is_first_login,
+        default_agent_id=f"user:{req.username}",
+    )
 
 
 @router.post("/register")
@@ -192,9 +198,11 @@ async def register(req: RegisterRequest, request: Request):
         # But log the error for debugging
 
     # Initialize user workspace (agent, skills, workflows, etc.) — pass request for runtime registration
+    default_agent_id = f"user:{username}"
     try:
         from ..user_provisioning import init_user_workspace
         agent_id = init_user_workspace(username, display_name=username, request=request)
+        default_agent_id = agent_id
         logger.info(f"User {username} workspace initialized (agent: {agent_id})")
     except Exception as e:
         logger.error(
@@ -206,7 +214,12 @@ async def register(req: RegisterRequest, request: Request):
 
     token = create_token_with_expiry(username, req.expires_in)
     # New registration is always first login
-    return LoginResponse(token=token, username=username, first_login=True)
+    return LoginResponse(
+        token=token,
+        username=username,
+        first_login=True,
+        default_agent_id=default_agent_id,
+    )
 
 
 def create_token_with_expiry(username: str, expires_in: Optional[int] = None) -> str:

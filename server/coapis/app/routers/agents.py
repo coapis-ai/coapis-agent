@@ -476,9 +476,19 @@ async def create_agent(
     if not manager:
         raise HTTPException(status_code=503, detail="Agent manager not initialized")
 
-    agent_id = payload.id or payload.name
+    import re, uuid
+
+    # Auto-generate ID if not provided
+    agent_id = payload.id or ""
     if not agent_id:
-        raise HTTPException(status_code=400, detail="agent id or name is required")
+        agent_id = f"user_{uuid.uuid4().hex[:6]}"
+
+    # Validate ID: ASCII-only (letters, digits, underscore, hyphen, colon, dot)
+    if not re.match(r'^[a-zA-Z0-9_:.\-]+$', agent_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent ID must be ASCII-only (letters, digits, _ - : .), got: {agent_id!r}",
+        )
 
     # Build config from request
     username = getattr(request.state, "username", "")

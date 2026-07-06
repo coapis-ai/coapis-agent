@@ -193,6 +193,7 @@ class WecomChannel(BaseChannel):
         show_tool_details: bool = True,
         filter_tool_messages: bool = False,
         filter_thinking: bool = False,
+        thinking_preview_len: int = 120,
         dm_policy: str = "open",
         group_policy: str = "open",
         allow_from: Optional[List[str]] = None,
@@ -216,6 +217,7 @@ class WecomChannel(BaseChannel):
                 "show_tool_details": show_tool_details,
             },
         )
+        self._thinking_preview_len = thinking_preview_len or 120
         self.enabled = enabled
         self.bot_id = bot_id
         self.secret = secret
@@ -340,6 +342,7 @@ class WecomChannel(BaseChannel):
             show_tool_details=show_tool_details,
             filter_tool_messages=filter_tool_messages,
             filter_thinking=filter_thinking,
+            thinking_preview_len=getattr(config, "thinking_preview_len", 120) or 120,
             dm_policy=getattr(config, "dm_policy", "open") or "open",
             group_policy=getattr(config, "group_policy", "open") or "open",
             allow_from=getattr(config, "allow_from", []) or [],
@@ -1344,10 +1347,15 @@ class WecomChannel(BaseChannel):
     ) -> str:
         """Format display text with appropriate prefix.
 
-        reasoning gets 💭 prefix; message gets bot_prefix if configured.
+        reasoning gets 💭 prefix + preview truncation; message gets bot_prefix if configured.
         """
         if stream_type == "reasoning":
-            return f"💭 {text}" if text else ""
+            if not text:
+                return ""
+            preview_len = getattr(self, "_thinking_preview_len", 120) or 120
+            if len(text) > preview_len:
+                return f"💭 {text[:preview_len]}…"
+            return f"💭 {text}"
         prefix = send_meta.get("bot_prefix", "") or self.bot_prefix or ""
         if prefix and text:
             return f"{prefix}  {text}"
@@ -1378,9 +1386,23 @@ class WecomChannel(BaseChannel):
     ) -> None:
         """Hook: message completed. Try cards first, then fallback.
 
-        If cards/ subsystem is available and can handle this event,
-        let it send a card. Otherwise fall back to default text send.
+        If streaming already delivered the final message via
+        on_streaming_end (reply_stream finish=True), skip sending
+        again to avoid duplicate messages.
         """
+        # If streaming already sent the final assistant reply, skip duplicate
+        # but still allow tool_call/tool_output messages through
+        msg = getattr(event, "message", None) or event
+        msg_role = getattr(msg, "role", "") or ""
+        final_sent = getattr(request, "_wecom_streaming_sent_final", False)
+        if final_sent and msg_role == "assistant":
+            return
+
+        # For non-assistant messages (tool_call, tool_output, etc.),
+        # reset streaming flag so send_content_parts doesn't skip text
+        if msg_role != "assistant":
+            self._streaming_text_sent = False
+
         # Inject processing stream id for card context
         self._inject_processing_sid(request, send_meta)
 
@@ -1471,6 +1493,10 @@ class WecomChannel(BaseChannel):
                 content=display_text,
                 finish=True,
             )
+            # Mark that streaming already sent the final reply
+            # Use request attribute to persist across event boundaries
+            if request:
+                setattr(request, "_wecom_streaming_sent_final", True)
         except Exception:
             logger.warning(
                 "wecom streaming end failed stream_id=%s",

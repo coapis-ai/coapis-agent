@@ -394,13 +394,18 @@ async def create_global_agent(
       - role:      角色 — template / service / hybrid（默认 template）
       - priority:  优先级，数字越小越优先（默认 100）
     """
+    import re, uuid as _uuid
+
     agent_id = body.get("id", "").strip()
     if not agent_id:
-        raise HTTPException(status_code=400, detail="缺少 id")
+        agent_id = f"global_{_uuid.uuid4().hex[:6]}"
 
-    # 安全校验：ID 格式
-    if not agent_id.replace("-", "").replace("_", "").isalnum():
-        raise HTTPException(status_code=400, detail="id 只能包含字母、数字、短横线和下划线")
+    # 安全校验：ID 必须为 ASCII（字母、数字、短横线、下划线、冒号、点）
+    if not re.match(r'^[a-zA-Z0-9_:.\-]+$', agent_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent ID must be ASCII-only (letters, digits, _ - : .), got: {agent_id!r}",
+        )
     if agent_id.startswith("user:"):
         raise HTTPException(status_code=400, detail="id 不能以 user: 开头")
 

@@ -2573,8 +2573,8 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 # Inject a system hint to guide the model
                 hint = Msg(
                     "user",
-                    "[系统提示] 你已陷入推理循环，禁止调用任何工具。"
-                    "请直接根据已有信息给出回答。",
+                    "[系统提示] 检测到重复推理模式，请尝试换一种工具或方法，"
+                    "或直接根据已有信息给出回答。",
                     "user",
                 )
                 await self.memory.add(hint, marks=_MemoryMark.HINT)

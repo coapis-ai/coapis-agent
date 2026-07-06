@@ -39,3 +39,35 @@ export function setAuthToken(token: string): void {
 export function clearAuthToken(): void {
   localStorage.removeItem(AUTH_TOKEN_KEY);
 }
+
+/**
+ * Get the current username from the JWT auth token.
+ * Returns empty string if not available.
+ */
+export function getCurrentUsername(): string {
+  try {
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (token) {
+      const payload = JSON.parse(atob(token.split(".")[1] || ""));
+      return payload?.sub || payload?.username || "";
+    }
+  } catch { /* ignore */ }
+  return "";
+}
+
+/**
+ * User-scoped localStorage key for agent store.
+ * Prevents agent leakage between different users sharing the same browser.
+ */
+export function getAgentStorageKey(): string {
+  const username = getCurrentUsername();
+  return username ? `coapis-agent-storage-${username}` : "coapis-agent-storage";
+}
+
+/**
+ * User-scoped localStorage key for last-used agent.
+ */
+export function getLastUsedAgentKey(): string {
+  const username = getCurrentUsername();
+  return username ? `coapis-last-used-agent-${username}` : "coapis-last-used-agent";
+}

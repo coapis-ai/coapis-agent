@@ -18,6 +18,12 @@ import GlobalAgentDetail from './GlobalAgentDetail';
 
 const PROTECTED_AGENTS = ['global_default', 'global_qa_agent'];
 
+/** Generate a short ASCII-safe global agent ID: global_{6-char hex} */
+function generateGlobalAgentId(): string {
+  const hex = crypto.randomUUID().replace(/-/g, "").slice(0, 6);
+  return `global_${hex}`;
+}
+
 const ROLE_OPTIONS = [
   { value: 'template', label: 'Template（模板继承）' },
   { value: 'service', label: 'Service（系统服务）' },
@@ -100,10 +106,6 @@ export default function GlobalAgentsTab() {
 
   // ── 新增 ──
   const handleCreate = async () => {
-    if (!createData.id.trim()) {
-      message.warning('请输入智能体 ID');
-      return;
-    }
     setCreating(true);
     try {
       await adminApi.createGlobalAgent(createData);
@@ -266,7 +268,7 @@ export default function GlobalAgentsTab() {
         }
         extra={
           <Space>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => { setCreateData({ id: generateGlobalAgentId(), name: '', description: '', role: 'template', priority: 100 }); setCreateModal(true); }}>
               新增全局智能体
             </Button>
             <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
@@ -298,12 +300,11 @@ export default function GlobalAgentsTab() {
             <strong>ID *</strong>
             <Input
               value={createData.id}
-              onChange={(e) => setCreateData({ ...createData, id: e.target.value })}
-              placeholder="例如: global_helper"
+              disabled
               style={{ marginTop: 4 }}
             />
             <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>
-              只能包含字母、数字、短横线和下划线
+              自动生成，不可修改
             </div>
           </div>
           <div>

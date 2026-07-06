@@ -718,6 +718,29 @@ app = FastAPI(
     openapi_url="/openapi.json" if DOCS_ENABLED else None,
 )
 
+# ── X-Agent-Id decode middleware (runs before all others) ──
+# Frontend encodes X-Agent-Id with encodeURIComponent() for ISO-8859-1 safety.
+# This middleware decodes it in-place so ALL downstream code (including
+# request.headers.get("X-Agent-Id")) sees the original value.
+import urllib.parse as _urlparse
+
+@app.middleware("http")
+async def _decode_agent_id_middleware(request: Request, call_next):
+    raw = request.headers.get("X-Agent-Id")
+    if raw:
+        decoded = _urlparse.unquote(raw)
+        if decoded != raw:
+            # Replace in scope headers so request.headers.get() returns decoded value
+            request.scope["headers"] = [
+                (k, decoded.encode("utf-8") if k == b"x-agent-id" else v)
+                for k, v in request.scope["headers"]
+            ]
+        # Also store on request.state for explicit access
+        request.state.decoded_agent_id = decoded
+    return await call_next(request)
+
+logger.info("X-Agent-Id decode middleware enabled")
+
 # User system middleware
 # NOTE: FastAPI middleware is LIFO (last added = first executed)
 # Execution order must be: Auth → RateLimit → QuotaCheck → UserIsolation → UserContext
