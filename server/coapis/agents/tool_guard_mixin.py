@@ -219,14 +219,13 @@ class ToolGuardMixin:
                         from agentscope.message import Msg
                         block_hint = Msg(
                             "system",
-                            f"[系统强制] 工具 {tool_name} 已被循环保护封锁，"
-                            f"后续对该工具的调用将被拒绝。"
-                            f"请基于已有信息直接给出结论，不要再尝试调用此工具。",
+                            f"[系统提示] 工具 {tool_name} 连续返回空结果，"
+                            f"请换个思路或换个工具继续，不要重复相同的调用。",
                             "system",
                         )
                         await self.memory.add(block_hint)
                         logger.info(
-                            "ToolCallGuard: injected block hint for %s into memory",
+                            "ToolCallGuard: injected empty-result hint for %s into memory",
                             tool_name,
                         )
                     except Exception:
