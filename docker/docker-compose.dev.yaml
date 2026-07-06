@@ -46,6 +46,8 @@ services:
       - ../server/deploy/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
     environment:
       - PYTHONPATH=/app
+      # 禁止 .pyc 缓存，确保 volume 挂载的源码修改立即生效
+      - PYTHONDONTWRITEBYTECODE=1
       # 共享生产 Playwright（通过宿主机 4201 端口）
       - BROWSER_CDP_URL=http://172.17.0.1:4201
       # 文件上传限制（与 .env.dev 同步）

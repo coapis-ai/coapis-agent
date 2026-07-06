@@ -385,8 +385,21 @@ async def set_system_prompt_files(
     # Write directly to agent.json to preserve all fields
     try:
         config = load_config()
-        agent_ref = config.agents.profiles.get(resolved_agent_id)
-        workspace_dir = derive_workspace_dir(resolved_agent_id, agent_ref.username if agent_ref else None)
+        # Resolve workspace_dir from disk (no profiles dependency)
+        from ..user_store import get_user_workspace_dir, get_user_agents_dir
+        caller = ""  # caller not available here, derive from agent_id
+        if resolved_agent_id.startswith("user:") and ":" in resolved_agent_id:
+            caller = resolved_agent_id.split(":", 1)[1]
+        if caller:
+            user_ws = get_user_workspace_dir(caller)
+            user_agents = get_user_agents_dir(caller)
+            if (user_ws / "agent.json").exists():
+                workspace_dir = user_ws
+            else:
+                workspace_dir = user_agents / resolved_agent_id.split(":", 1)[1]
+        else:
+            from ...constant import AGENTS_DIR
+            workspace_dir = AGENTS_DIR / resolved_agent_id
         agent_json_path = workspace_dir / "agent.json"
 
         if agent_json_path.exists():

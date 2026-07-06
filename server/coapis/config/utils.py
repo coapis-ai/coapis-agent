@@ -653,88 +653,15 @@ def save_config(config: Config, config_path: Optional[Path] = None) -> None:
 
 
 def register_dynamic_agent(agent_id: str, workspace_dir: str = "", username: str = None) -> bool:
-    """Register a dynamically-created agent into config.agents.profiles.
+    """No-op: profiles registration table has been removed.
 
-    This allows dynamic agents to pass agentscope_runtime A2A validation
-    and enables load_agent_config/save_agent_config to work with them.
-
-    ⚠️ workspace_dir is NOT persisted to config.json — it is derived at
-    runtime from WORKING_DIR.  The parameter is kept for backward compat
-    but ignored when writing profiles.
-
-    Args:
-        agent_id: The agent ID to register
-        workspace_dir: (deprecated, unused) workspace path — now derived at runtime
-        username: Owner username for user-level agents (enables isolation)
-
-    Returns:
-        True if registered successfully, False if already existed
+    Agents now live only in workspaces/{username}/agent.json or
+    agents/{agent_id}/agent.json on disk. This function is kept
+    for backward compatibility (called by load_agent_config) but
+    does nothing — agent discovery is fully disk-based.
     """
-    config_path = get_config_path()
-    try:
-        data = _read_config_data(config_path)
-        if data is None:
-            logger.error("Cannot register dynamic agent: config file unreadable")
-            return False
-
-        # Ensure agents.profiles exists
-        if "agents" not in data:
-            data["agents"] = {}
-        if "profiles" not in data["agents"]:
-            data["agents"]["profiles"] = {}
-
-        # Check if already registered — if so, update missing fields (e.g., username)
-        if agent_id in data["agents"]["profiles"]:
-            existing = data["agents"]["profiles"][agent_id]
-            updated = False
-            # Ensure 'id' field exists (required by Pydantic validation)
-            if not existing.get("id"):
-                existing["id"] = agent_id
-                updated = True
-            if username is not None and (existing.get("username") is None or existing.get("username") == ""):
-                existing["username"] = username
-                updated = True
-            # Remove stale workspace_dir from existing profiles (migration)
-            if "workspace_dir" in existing:
-                del existing["workspace_dir"]
-                updated = True
-            if updated:
-                # Write back updated profile
-                with open(config_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-                with _config_lock:
-                    _config_cache = None
-                    _config_mtime = None
-                logger.info(f"Updated existing agent '{agent_id}' in config.json")
-            else:
-                logger.debug(f"Agent '{agent_id}' already registered in config")
-            return False
-
-        # Register the agent (must include 'id' field for Pydantic validation)
-        # NOTE: workspace_dir is NOT stored — derived at runtime from WORKING_DIR
-        profile = {
-            "id": agent_id,
-            "enabled": True,
-        }
-        if username is not None:
-            profile["username"] = username
-        data["agents"]["profiles"][agent_id] = profile
-
-        # Write back to config file
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-
-        # Invalidate cache so next load_config() picks up changes
-        with _config_lock:
-            _config_cache = None
-            _config_mtime = None
-
-        logger.info(f"Registered dynamic agent '{agent_id}' in config.json")
-        return True
-
-    except Exception as e:
-        logger.error(f"Failed to register dynamic agent '{agent_id}': {e}")
-        return False
+    logger.debug(f"register_dynamic_agent({agent_id}): no-op (profiles removed)")
+    return True
 
 
 def get_heartbeat_config(agent_id: Optional[str] = None) -> HeartbeatConfig:

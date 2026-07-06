@@ -40,8 +40,9 @@ from ..agents.templates import (
 )
 from ..config.config import (
     AgentProfileConfig,
-    AgentProfileRef,
+    UserProfileConfig,
     save_agent_config,
+    save_user_config,
 )
 from ..config.utils import load_config, save_config
 from ..constant import WORKING_DIR, WORKSPACES_DIR
@@ -86,14 +87,22 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
     workspace_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Created workspace directory for {username}: {workspace_dir}")
 
+    # 1b. Create user-level config.json (user identity and preferences)
+    from datetime import datetime, timezone
+    user_cfg = UserProfileConfig(
+        username=username,
+        display_name=display_name or "",
+        default_agent_id=f"user:{username}",
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    save_user_config(username, user_cfg)
+    logger.info(f"Created config.json for {username}")
+
     # 2. Create essential JSON files (empty — no shared data!)
     _create_workspace_json_files(workspace_dir, username)
 
     # 3. Build and save agent config
     _create_agent_config(username, agent_id, agent_name, workspace_dir)
-
-    # 3b. Register agent in config.json with username (critical for user isolation)
-    _register_agent_in_config(username, agent_id, workspace_dir)
 
     # 4. Create ALL user data directories (isolated per user)
     # v0.5.1: Simplified structure — no evolution/ directory.
@@ -210,34 +219,6 @@ def _create_agent_config(
     # Save agent.json (pass workspace_dir for dynamic agent support)
     save_agent_config(agent_id, template_result.agent_config, workspace_dir=workspace_dir)
     logger.info(f"Created agent.json for {username} (agent: {agent_id})")
-
-
-def _register_agent_in_config(
-    username: str,
-    agent_id: str,
-    workspace_dir: Path,
-) -> None:
-    """Register user's agent in config.json agents.profiles.
-
-    Note: workspace_dir is NOT persisted — it is derived at runtime
-    from WORKING_DIR.  The parameter is kept for signature compat.
-    """
-    config = load_config()
-
-    # Check if already registered
-    if agent_id in config.agents.profiles:
-        logger.info(f"Agent {agent_id} already registered in config.json")
-        return
-
-    # Add agent profile (include username for user isolation)
-    # NOTE: workspace_dir is NOT stored — derived at runtime
-    config.agents.profiles[agent_id] = AgentProfileRef(
-        id=agent_id,
-        username=username,
-    )
-
-    save_config(config)
-    logger.info(f"Registered agent {agent_id} in config.json for user {username}")
 
 
 def ensure_user_workspace_exists(username: str) -> bool:

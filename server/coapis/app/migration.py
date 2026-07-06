@@ -143,7 +143,7 @@ def _do_migrate_legacy_workspace() -> bool:
         name="Default Agent",
         description="Default CoApis agent (migrated from legacy config)",
         workspace_dir=str(default_workspace),
-        channels=config.channels if hasattr(config, "channels") else None,
+        channels=None,  # channels only in agent.json, not in global config
         mcp=config.mcp if hasattr(config, "mcp") else None,
         heartbeat=(
             legacy_agents.defaults.heartbeat

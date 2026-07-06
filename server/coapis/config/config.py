@@ -984,6 +984,73 @@ class PlanConfig(BaseModel):
     )
 
 
+# ============================================================================
+# User-level config (workspaces/{username}/config.json)
+# ============================================================================
+
+
+class UserProfileConfig(BaseModel):
+    """User-level configuration (stored in workspaces/{username}/config.json).
+
+    Separated from agent config: this file holds user identity and
+    preferences; agent-specific settings live in agent.json.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    username: str = Field(
+        ...,
+        description="Unique username",
+    )
+    display_name: str = Field(
+        default="",
+        description="Human-readable display name",
+    )
+    language: str = Field(
+        default="zh",
+        description="Preferred UI language (zh / en)",
+    )
+    timezone: str = Field(
+        default="Asia/Shanghai",
+        description="IANA timezone name",
+    )
+    default_agent_id: str = Field(
+        default="",
+        description="Default agent ID for this user (e.g. 'user:alice')",
+    )
+    created_at: str = Field(
+        default="",
+        description="ISO-8601 timestamp when user was created",
+    )
+
+
+def load_user_config(username: str) -> UserProfileConfig:
+    """Load user-level config from workspaces/{username}/config.json.
+
+    Returns a default UserProfileConfig if the file does not exist.
+    """
+    from ..constant import WORKSPACES_DIR
+    cfg_path = WORKSPACES_DIR / username / "config.json"
+    if not cfg_path.is_file():
+        return UserProfileConfig(username=username)
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        return UserProfileConfig(**data)
+    except Exception:
+        return UserProfileConfig(username=username)
+
+
+def save_user_config(username: str, config: UserProfileConfig) -> None:
+    """Save user-level config to workspaces/{username}/config.json."""
+    from ..constant import WORKSPACES_DIR
+    cfg_path = WORKSPACES_DIR / username / "config.json"
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(
+        json.dumps(config.model_dump(), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 class AgentProfileConfig(BaseModel):
     """Complete Agent Profile configuration (stored in workspace/agent.json).
 
@@ -1078,6 +1145,8 @@ class AgentProfileConfig(BaseModel):
 class AgentsConfig(BaseModel):
     """Agents configuration (root config.json only contains references)."""
 
+    model_config = {"extra": "allow"}  # tolerate old profiles field in config.json
+
     active_agent: str = Field(
         default="",
         description="Currently active agent ID",
@@ -1086,15 +1155,16 @@ class AgentsConfig(BaseModel):
         default_factory=list,
         description="Persisted UI order for configured agents",
     )
-    profiles: Dict[str, AgentProfileRef] = Field(
-        default_factory=lambda: {
-            "global_default": AgentProfileRef(
-                id="global_default",
-                workspace_dir=f"{WORKING_DIR}/agents/global_default",
-            ),
-        },
-        description="Agent profile references (ID and workspace path only)",
-    )
+
+    @property
+    def profiles(self) -> dict:
+        """Deprecated: return empty dict so all legacy code safely degrades."""
+        return {}
+
+    @profiles.setter
+    def profiles(self, value):
+        """Ignore writes — profiles storage is no longer used."""
+        pass
 
     # Legacy fields for backward compatibility (deprecated)
     # These fields MUST have default values (not None) to support downgrade
@@ -1603,7 +1673,6 @@ class SecurityConfig(BaseModel):
 class Config(BaseModel):
     """Root config (config.json)."""
 
-    channels: ChannelConfig = ChannelConfig()
     mcp: MCPConfig = MCPConfig()
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     last_api: LastApiConfig = LastApiConfig()
@@ -1675,17 +1744,13 @@ def build_fallback_agent_profile_config(
     agent_id: str,
     config: "Config",
 ) -> AgentProfileConfig:
-    """Build the same profile as when ``agent.json``
-    is missing (no disk read/write).
+    """Build a fallback agent profile when agent.json is missing (no disk I/O).
 
     Used by :func:`load_agent_config` and ``coapis doctor fix``
-    so defaults stay in sync.
+    so defaults stay in sync. Workspace is derived from agent_id
+    via derive_workspace_dir (no profiles dependency).
     """
-    if agent_id not in config.agents.profiles:
-        raise ValueError(f"Agent '{agent_id}' not found in config")
-
-    agent_ref = config.agents.profiles[agent_id]
-    workspace_dir = derive_workspace_dir(agent_id, agent_ref.username)
+    workspace_dir = derive_workspace_dir(agent_id)
     return AgentProfileConfig(
         id=agent_id,
         name=agent_id.title(),
@@ -1730,16 +1795,12 @@ def load_agent_config(agent_id: str, workspace_dir: Path = None) -> AgentProfile
     """Load agent's complete configuration from workspace/agent.json with
     mtime-based caching.
 
-    Supports dynamic agents not registered in config.agents.profiles:
-    - If workspace_dir is provided, uses it directly (bypasses config.json check)
-    - If agent_id is in config.agents.profiles, uses the profile's workspace_dir
-    - Auto-registers dynamic agents into config.agents.profiles on first load
-
-    Uses file modification time to avoid unnecessary disk reads.
+    Workspace is resolved by derive_workspace_dir (disk-based discovery).
+    No config.agents.profiles dependency.
 
     Args:
         agent_id: Agent ID to load
-        workspace_dir: Optional workspace directory (for dynamic agents)
+        workspace_dir: Optional explicit workspace directory (overrides auto-detection)
 
     Returns:
         AgentProfileConfig: Complete agent configuration
@@ -1748,26 +1809,16 @@ def load_agent_config(agent_id: str, workspace_dir: Path = None) -> AgentProfile
         load_config,
         _agent_config_cache,
         _agent_config_lock,
-        register_dynamic_agent,
     )
 
     config = load_config()
 
-    # Check if agent is registered in config.agents.profiles
-    if agent_id not in config.agents.profiles:
-        # Dynamic agent: register it if workspace_dir is provided
-        if workspace_dir is not None:
-            register_dynamic_agent(agent_id, str(workspace_dir))
-            config = load_config()  # Reload to get updated config
-        else:
-            # Cannot resolve workspace_dir without config entry or explicit path
-            raise _get_configuration_exception()(
-                config_key="agent",
-                message=f"Agent '{agent_id}' not found in config",
-            )
+    # Resolve workspace: explicit param > derive from agent_id
+    if workspace_dir is not None:
+        resolved_workspace_dir = Path(workspace_dir)
+    else:
+        resolved_workspace_dir = derive_workspace_dir(agent_id)
 
-    agent_ref = config.agents.profiles[agent_id]
-    resolved_workspace_dir = derive_workspace_dir(agent_id, agent_ref.username)
     agent_config_path = resolved_workspace_dir / "agent.json"
 
     if not agent_config_path.exists():
@@ -1832,9 +1883,8 @@ def save_agent_config(
 ) -> None:
     """Save agent configuration to workspace/agent.json and invalidate cache.
 
-    Supports dynamic agents not registered in config.agents.profiles:
-    - If workspace_dir is provided, auto-registers the agent first
-    - If agent_id is in config.agents.profiles, uses the profile's workspace_dir
+    Workspace is resolved by derive_workspace_dir (disk-based discovery).
+    No config.agents.profiles dependency.
 
     Preserves top-level fields (e.g., model, provider) that are not part of
     AgentProfileConfig to avoid overwriting them during partial updates.
@@ -1842,40 +1892,21 @@ def save_agent_config(
     Args:
         agent_id: Agent ID
         agent_config: Complete agent configuration to save
-        workspace_dir: Optional workspace directory (for dynamic agents)
-
-    Raises:
-        ConfigurationException: If agent ID not found and no workspace_dir provided
+        workspace_dir: Optional explicit workspace directory (overrides auto-detection)
     """
     from .utils import (
         load_config,
         _agent_config_cache,
         _agent_config_lock,
-        register_dynamic_agent,
     )
 
     config = load_config()
 
-    # Check if agent is registered in config.agents.profiles
-    if agent_id not in config.agents.profiles:
-        # Dynamic agent: register it if workspace_dir is provided
-        if workspace_dir is not None:
-            registered = register_dynamic_agent(agent_id, str(workspace_dir))
-            if not registered:
-                raise _get_configuration_exception()(
-                    config_key="agent",
-                    message=f"Failed to register dynamic agent '{agent_id}'",
-                )
-            config = load_config()  # Reload to get updated config
-        else:
-            # Cannot resolve workspace_dir without config entry or explicit path
-            raise _get_configuration_exception()(
-                config_key="agent",
-                message=f"Agent '{agent_id}' not found in config",
-            )
-
-    agent_ref = config.agents.profiles[agent_id]
-    resolved_workspace_dir = derive_workspace_dir(agent_id, agent_ref.username)
+    # Resolve workspace: explicit param > derive from agent_id
+    if workspace_dir is not None:
+        resolved_workspace_dir = Path(workspace_dir)
+    else:
+        resolved_workspace_dir = derive_workspace_dir(agent_id)
     resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
 
     agent_config_path = resolved_workspace_dir / "agent.json"
@@ -1952,16 +1983,11 @@ def migrate_legacy_config_to_multi_agent() -> bool:
 
     config = load_config()
 
-    # Check if already migrated (new structure has only AgentProfileRef)
-    if "global_default" in config.agents.profiles:
-        agent_ref = config.agents.profiles["global_default"]
-        # If it's already a AgentProfileRef, migration done
-        if isinstance(agent_ref, AgentProfileRef):
-            # Check if default agent config exists
-            workspace_dir = derive_workspace_dir("global_default", agent_ref.username)
-            agent_config_path = workspace_dir / "agent.json"
-            if agent_config_path.exists():
-                return False  # Already migrated
+    # Check if already migrated: global_default agent.json exists on disk
+    workspace_dir = derive_workspace_dir("global_default")
+    agent_config_path = workspace_dir / "agent.json"
+    if agent_config_path.exists():
+        return False  # Already migrated
 
     # Perform migration
     print("Migrating legacy config to multi-agent structure...")
@@ -1979,7 +2005,7 @@ def migrate_legacy_config_to_multi_agent() -> bool:
         name="Default Agent",
         description="Default CoApis agent",
         workspace_dir=str(default_workspace),
-        channels=config.channels if config.channels else None,
+        channels=None,  # channels only in agent.json, not in global config
         mcp=config.mcp if config.mcp else None,
         heartbeat=(
             legacy_agents.defaults.heartbeat

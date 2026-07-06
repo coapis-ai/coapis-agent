@@ -104,11 +104,6 @@ class CreateAgentRequest(BaseModel):
     is_global: Optional[bool] = None  # None=auto (admin=True, user=False)
 
 
-class AgentProfileRef(BaseModel):
-    id: str
-    workspace_dir: str
-
-
 class ReorderAgentsRequest(BaseModel):
     agent_ids: List[str]
 
@@ -329,141 +324,62 @@ async def reorder_agents(
 @router.get("/agents")
 @require_permission("agents:read")
 async def list_agents(request: Request) -> Dict[str, Any]:
-    """List the current user's agents (returns AgentSummary format).
+    """List the current user's agents by scanning their workspace directory.
 
-    Returns only agents owned by the requesting user.  Global agents are
-    managed through a separate endpoint (GlobalAgentsTab) and are NOT
-    included here — the frontend "我的智能体" tab filters by username
-    anyway, so returning them would be wasted work.
-
-    Falls back to config-based listing when MultiAgentManager is not available
-    (e.g., TestClient mode or during startup).
+    Discovery (no config.agents.profiles dependency):
+    1. workspaces/{username}/agent.json          -- default agent
+    2. workspaces/{username}/agents/*/agent.json  -- sub-agents
     """
-    manager = get_manager(request)
-    
-    username = getattr(request.state, "username", None)
-    
-    if manager is not None:
-        # Use per-user index + _workspaces composite-key lookup.
-        # Never iterate all workspaces — that would expose other users' agents.
-        filtered = []
-        seen_ids = set()
-        candidate_ids = set(manager._user_agents.get(username, []))
-        # Safety net: also scan _workspaces for keys starting with "{username}:"
-        for cache_key in manager._workspaces:
-            if cache_key.startswith(f"{username}:"):
-                agent_id = cache_key.split(":", 1)[1]
-                candidate_ids.add(agent_id)
-        # Fallback: scan user's agents directory on disk for agents not yet in cache
+    username = getattr(request.state, 'username', None)
+    if not username:
+        return {'agents': []}
+
+    from ...app.user_store import get_user_agents_dir, get_user_workspace_dir
+
+    agents = []
+    seen_ids = set()
+
+    def _load_summary(agent_json_path, agent_id_hint=''):
         try:
-            from ...app.user_store import get_user_agents_dir, get_user_workspace_dir
-            user_agents_dir = get_user_agents_dir(username)
-            user_ws_dir = get_user_workspace_dir(username)
-            # Check top-level agent.json (user's default agent)
-            if (user_ws_dir / "agent.json").exists():
-                try:
-                    with open(user_ws_dir / "agent.json") as f:
-                        meta = json.load(f)
-                    aid = meta.get("id", "")
-                    if aid:
-                        candidate_ids.add(aid)
-                except Exception:
-                    pass
-            # Check agents subdirectories
-            if user_agents_dir.exists():
-                for item in user_agents_dir.iterdir():
-                    if item.is_dir() and (item / "agent.json").exists():
-                        candidate_ids.add(item.name)
-        except Exception:
-            pass
-        for agent_id in candidate_ids:
-            cache_key = f"{username}:{agent_id}"
-            ws = manager._workspaces.get(cache_key)
-            # Lazy-load: if not in cache, try get_workspace to trigger loading
-            if ws is None:
-                try:
-                    ws = manager.get_workspace(agent_id, username)
-                except Exception:
-                    pass
-            # Final fallback: create minimal workspace from disk if still not in cache
-            if ws is None:
-                try:
-                    from ...app.user_store import get_user_agents_dir, get_user_workspace_dir
-                    user_ws_dir = get_user_workspace_dir(username)
-                    # Check if agent.json exists in user workspace dir (default agent)
-                    agent_json = user_ws_dir / "agent.json"
-                    if agent_json.exists():
-                        meta = json.loads(agent_json.read_text(encoding="utf-8"))
-                        if meta.get("id") == agent_id:
-                            class _DiskWs:
-                                workspace_dir = str(user_ws_dir)
-                                username = username
-                                is_global = False
-                            ws = _DiskWs()
-                    # Check agents subdirectory
-                    if ws is None:
-                        agent_subdir = get_user_agents_dir(username) / agent_id
-                        if (agent_subdir / "agent.json").exists():
-                            class _DiskWs2:
-                                workspace_dir = str(agent_subdir)
-                                username = username
-                                is_global = False
-                            ws = _DiskWs2()
-                except Exception:
-                    pass
-            if ws is None:
-                continue
-            if agent_id in seen_ids:
-                continue
+            if not agent_json_path.exists():
+                return None
+            meta = json.loads(agent_json_path.read_text(encoding='utf-8'))
+            agent_id = meta.get('id') or agent_id_hint
+            if not agent_id or agent_id in seen_ids:
+                return None
             seen_ids.add(agent_id)
-            ws_dir = getattr(ws, "workspace_dir", None)
-            if ws_dir and not Path(ws_dir).exists():
+            ws_dir = str(agent_json_path.parent)
+            return {
+                'id': agent_id,
+                'name': meta.get('name', agent_id),
+                'description': meta.get('description', ''),
+                'workspace_dir': ws_dir,
+                'owner': meta.get('owner', '') or username,
+                'username': username,
+                'is_global': False,
+                'enabled': meta.get('enabled', True),
+                'channels': list(meta.get('channels', {}).keys()) if isinstance(meta.get('channels'), dict) else [],
+            }
+        except Exception:
+            return None
+
+    # 1. Default agent: workspaces/{username}/agent.json
+    user_ws_dir = get_user_workspace_dir(username)
+    default_summary = _load_summary(user_ws_dir / 'agent.json')
+    if default_summary:
+        agents.append(default_summary)
+
+    # 2. Sub-agents: workspaces/{username}/agents/*/agent.json
+    user_agents_dir = get_user_agents_dir(username)
+    if user_agents_dir.exists():
+        for item in sorted(user_agents_dir.iterdir()):
+            if not item.is_dir():
                 continue
-            filtered.append((agent_id, ws))
-        
-        agents = []
-        for real_id, ws in filtered:
-            agent = _agent_to_summary(real_id, ws, request)
-            if not agent.get('username') and real_id.startswith('user:'):
-                agent['username'] = real_id.split(':', 1)[1]
-            agents.append(agent)
-    else:
-        # Fallback mode: read from config profiles
-        from ...config import load_config
-        config = load_config()
-        profiles = getattr(config, "agents", {}).profiles if hasattr(config, "agents") else {}
-        
-        agents = []
-        for agent_id, profile in profiles.items():
-            profile_username = getattr(profile, "username", "")
-            profile_role = getattr(profile, "role", None)
-            profile_enabled = getattr(profile, "enabled", True)
-            profile_is_global = getattr(profile, "is_global", True)
+            sub_summary = _load_summary(item / 'agent.json', agent_id_hint=item.name)
+            if sub_summary:
+                agents.append(sub_summary)
 
-            # Skip global agents — users only see their own user-specific agents
-            if profile_is_global:
-                continue
-
-            # Users can only see their own user-specific agents
-            if profile_username != username:
-                continue
-            
-            # Create a minimal workspace for the summary
-            class MinimalWorkspace:
-                def __init__(self, aid: str, p):
-                    self.agent_id = aid
-                    self.workspace_dir = Path(getattr(p, "workspace_dir",
-                        f"{Path.cwd().parent.parent}/workspaces/{profile_username}/agents/{aid}"))
-                    self.username = profile_username
-                    self.is_global = getattr(p, "is_global", True)
-                    self.config = {}
-            
-            agents.append(_agent_to_summary(agent_id, MinimalWorkspace(agent_id, profile), request))
-
-    return {
-        "agents": agents,
-    }
-
+    return {'agents': agents}
 
 @router.post("/agents")
 @require_permission("agents:write")
@@ -590,17 +506,45 @@ async def get_agent(
     request: Request,
     agent_id: str,
 ) -> Dict[str, Any]:
-    """Get agent details (returns AgentProfileConfig format)."""
-    manager = get_manager(request)
-    if not manager:
-        raise HTTPException(status_code=503, detail="Agent manager not initialized")
+    """Get agent details by loading from user workspace directory."""
+    username = getattr(request.state, 'username', None)
+    if not username:
+        raise HTTPException(status_code=401, detail='Not authenticated')
 
-    username = getattr(request.state, "username", None)
-    workspace = manager.get_workspace(agent_id, username=username)
-    if not workspace:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    from ...app.user_store import get_user_workspace_dir, get_user_agents_dir
+
+    # Resolve agent.json path under user workspace
+    user_ws_dir = get_user_workspace_dir(username)
+    agent_json = None
+
+    # Try default agent first
+    default_json = user_ws_dir / 'agent.json'
+    if default_json.exists():
+        meta = json.loads(default_json.read_text(encoding='utf-8'))
+        if meta.get('id') == agent_id or (not meta.get('id') and agent_id == f'user:{username}'):
+            agent_json = default_json
+
+    # Try sub-agent
+    if agent_json is None:
+        sub_json = get_user_agents_dir(username) / agent_id / 'agent.json'
+        if sub_json.exists():
+            agent_json = sub_json
+
+    if agent_json is None:
+        raise HTTPException(status_code=404, detail='Agent not found')
+
+    meta = json.loads(agent_json.read_text(encoding='utf-8'))
+
+    # Build workspace-like object for _agent_to_profile
+    class _DiskWs:
+        def __init__(self, ws_dir):
+            self.workspace_dir = str(ws_dir)
+            self.username = username
+            self.is_global = False
+    workspace = _DiskWs(agent_json.parent)
 
     return _agent_to_profile(agent_id, workspace, request)
+
 
 
 @router.put("/agents/{agent_id}")

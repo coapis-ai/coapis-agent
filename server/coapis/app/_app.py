@@ -38,7 +38,7 @@ import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -486,7 +486,7 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
             ensure_layered_templates()
 
             # Start all configured agents (truly parallel now)
-            await multi_agent_manager.start_all_configured_agents()
+            await multi_agent_manager.load_default_agents()
 
             provider_manager.start_local_model_resume(local_model_manager)
 
