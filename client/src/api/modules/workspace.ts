@@ -1,14 +1,16 @@
 import { request } from "../request";
-import { getApiUrl } from "../config";
+import { getApiUrl, getAgentStorageKey } from "../config";
 import { buildAuthHeaders } from "../authHeaders";
 import type { MdFileInfo, MdFileContent, DailyMemoryFile } from "../types";
 
 function getSelectedAgentId(): string {
   try {
     // Read from sessionStorage first (per-tab agent), fall back to localStorage
+    // Use user-scoped key to prevent agent leakage between users
+    const storageKey = getAgentStorageKey();
     const agentStorage =
-      sessionStorage.getItem("coapis-agent-storage") ||
-      localStorage.getItem("coapis-agent-storage");
+      sessionStorage.getItem(storageKey) ||
+      localStorage.getItem(storageKey);
     if (agentStorage) {
       const parsed = JSON.parse(agentStorage);
       const selectedAgent = parsed?.state?.selectedAgent;

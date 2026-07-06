@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { getApiToken, clearAuthToken, getApiUrl } from '../api/config';
+import { getApiToken, clearAuthToken, getApiUrl, getAgentStorageKey, getLastUsedAgentKey } from '../api/config';
 import { updateUserPreferences } from '../api/modules/user_me';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -112,6 +112,9 @@ export default function UserProvider({ children }: UserProviderProps) {
   }, []);
 
   const logout = useCallback(() => {
+    // Read keys BEFORE clearing token (keys depend on JWT username)
+    const agentKey = getAgentStorageKey();
+    const lastUsedKey = getLastUsedAgentKey();
     clearAuthToken();
     setUser(null);
     setPreferences({});
@@ -119,8 +122,8 @@ export default function UserProvider({ children }: UserProviderProps) {
     // between sessions (e.g. agentStore in sessionStorage/localStorage)
     try {
       sessionStorage.clear();
-      localStorage.removeItem('coapis-agent-storage');
-      localStorage.removeItem('coapis-last-used-agent');
+      localStorage.removeItem(agentKey);
+      localStorage.removeItem(lastUsedKey);
     } catch { /* ignore */ }
     window.location.href = '/login';
   }, []);

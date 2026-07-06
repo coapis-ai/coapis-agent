@@ -87,6 +87,7 @@ class RenderStyle:
             ),
             "wecom": cls(
                 show_thinking=False,
+                thinking_preview_len=120,
                 show_tool_details=False,
                 show_newlines=False,
                 show_progress=True,

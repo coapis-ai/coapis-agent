@@ -526,20 +526,29 @@ class MultiAgentManager:
         Raises:
             ConfigurationException: If agent ID not found in configuration
         """
-        # For global agents, always use the global cache key
-        # Check if this agent_id exists as a global agent
-        global_cache_key = f"global:{agent_id}"
-        
-        # If user requests an agent and global version exists, return it
-        # (global agents are shared across all users)
-        if username and global_cache_key in self.agents:
-            global_ws = self.agents[global_cache_key]
-            if global_ws.is_global:
-                logger.debug(f"Returning global agent for user: {global_cache_key}")
-                return global_ws
-        
         # Composite key for user isolation: "{username}:{agent_id}" or "global:{agent_id}"
-        cache_key = f"{username}:{agent_id}" if username else global_cache_key
+        cache_key = f"{username}:{agent_id}" if username else f"global:{agent_id}"
+
+        # ── Strict ownership check (applies to ALL paths including cache hit) ──
+        config = load_config()
+        profile = config.agents.profiles.get(agent_id)
+        if profile is None:
+            raise ConfigurationException(
+                config_key="agent",
+                message=f"Agent '{agent_id}' not found in configuration.",
+            )
+        profile_owner = getattr(profile, "username", "") or ""
+        logger.warning(f"[OWNERSHIP-CHECK] agent_id={agent_id} caller={username} owner={profile_owner}")
+        # Reject if agent has no owner (global) or caller is not the owner
+        if not profile_owner or profile_owner != (username or ""):
+            raise ConfigurationException(
+                config_key="agent",
+                message=(
+                    f"Access denied: agent '{agent_id}' "
+                    + (f"belongs to '{profile_owner}'" if profile_owner else "is a global agent")
+                    + f", not accessible by '{username or '(anonymous)'}'"
+                ),
+            )
 
         # Fast path: already loaded (no lock)
         if cache_key in self.agents:
@@ -551,17 +560,10 @@ class MultiAgentManager:
         agent_ref = None
 
         async with self._lock:
-            # Re-check under lock - also check for global version
+            # Re-check under lock
             if cache_key in self.agents:
                 logger.debug(f"Returning cached agent: {cache_key}")
                 return self.agents[cache_key]
-            
-            # If user requests an agent and global version exists, return it
-            if username and global_cache_key in self.agents:
-                global_ws = self.agents[global_cache_key]
-                if global_ws.is_global:
-                    logger.debug(f"Returning global agent for user (locked): {global_cache_key}")
-                    return global_ws
 
             if cache_key in self._pending_starts:
                 # Another task is already starting this agent; wait for it
@@ -589,11 +591,6 @@ class MultiAgentManager:
             if cache_key in self.agents:
                 logger.debug(f"Returning cached agent: {cache_key}")
                 return self.agents[cache_key]
-            # Also check global version after waiting
-            if username and global_cache_key in self.agents:
-                global_ws = self.agents[global_cache_key]
-                if global_ws.is_global:
-                    return global_ws
             raise ConfigurationException(
                 config_key="agent",
                 message=f"Agent '{agent_id}' failed to initialize",

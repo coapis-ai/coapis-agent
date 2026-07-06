@@ -27,6 +27,20 @@ from ..config.utils import load_config
 if TYPE_CHECKING:
     from .workspace import Workspace
 
+
+def get_decoded_agent_id(request: Request) -> Optional[str]:
+    """Get the decoded X-Agent-Id from request.
+
+    Priority: request.state.decoded_agent_id (set by middleware) → header raw.
+    The middleware decodes encodeURIComponent()-encoded values, so downstream
+    code should always use this helper instead of reading the header directly.
+    """
+    decoded = getattr(request.state, "decoded_agent_id", None)
+    if decoded:
+        return decoded
+    raw = request.headers.get("X-Agent-Id")
+    return raw
+
 # Context variable to store current agent ID across async calls
 _current_agent_id: ContextVar[Optional[str]] = ContextVar(
     "current_agent_id",
@@ -77,9 +91,9 @@ async def get_agent_for_request(
     if not target_agent_id and hasattr(request.state, "agent_id"):
         target_agent_id = request.state.agent_id
 
-    # Check X-Agent-Id header
+    # Check X-Agent-Id header (decoded by middleware)
     if not target_agent_id:
-        target_agent_id = request.headers.get("X-Agent-Id")
+        target_agent_id = get_decoded_agent_id(request)
 
     # Resolve legacy "default" agent_id to user:{username}
     if target_agent_id == "default":
@@ -116,6 +130,20 @@ async def get_agent_for_request(
         raise HTTPException(
             status_code=403,
             detail=f"Agent '{target_agent_id}' is disabled",
+        )
+
+    # ── Strict ownership check: user can only access their own agents ──
+    caller = getattr(request.state, "username", None)
+    profile_owner = getattr(agent_ref, "username", "") or ""
+    # Reject if: agent is global (no owner) OR agent belongs to someone else
+    if not profile_owner or profile_owner != (caller or ""):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Access denied: agent '{target_agent_id}' "
+                + (f"belongs to '{profile_owner}'" if profile_owner else "is a global agent")
+                + f", not accessible by '{caller or '(anonymous)'}'"
+            ),
         )
 
     # Get MultiAgentManager (use _state dict to avoid Starlette State __getattr__ issues)

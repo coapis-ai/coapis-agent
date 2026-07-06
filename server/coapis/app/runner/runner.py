@@ -378,6 +378,50 @@ class AgentRunner(Runner):
                 _existing_blocks,
             )
 
+            # ── Migration: session_id file → chat_id (UUID) file ──
+            # When the session key format changed from session_id to chat_id
+            # (UUID), old messages remain in the session_id file. Merge
+            # them into the UUID file so Console can display full history.
+            # Only merge when old file has more batches (one-time migration).
+            # Note: old format used "{user}:{channel}:{ext_id}" as session_id,
+            # new format uses "{channel}:{ext_id}". Try both.
+            if session_id and session_id != user_chat.id:
+                _candidates = [session_id]
+                if effective_user_id and not session_id.startswith(effective_user_id + ":"):
+                    _candidates.append(f"{effective_user_id}:{session_id}")
+                old_memory = {}
+                old_batches = []
+                for _sid in _candidates:
+                    old_state = await session.get_session_state_dict(
+                        _sid, effective_user_id, allow_not_exist=True,
+                    )
+                    old_memory = (old_state or {}).get("agent", {}).get("memory", {})
+                    old_batches = old_memory.get("content", [])
+                    if old_batches:
+                        break
+                cur_batches = memory_state.get("content", [])
+                if old_batches and len(old_batches) > len(cur_batches):
+                    logger.info(
+                        "_persist_chat_messages: merging %d old batches "
+                        "(session_id=%s) into %d batches (chat_id=%s)",
+                        len(old_batches), session_id,
+                        len(cur_batches), user_chat.id,
+                    )
+                    # Prepend old batches before current ones
+                    merged = list(old_batches) + [
+                        b for b in cur_batches
+                        if b not in old_batches
+                    ]
+                    merged_memory = dict(old_memory)
+                    merged_memory["content"] = merged
+                    await session.update_session_state(
+                        session_id=user_chat.id,
+                        key="agent.memory",
+                        value=merged_memory,
+                        user_id=effective_user_id,
+                    )
+                    memory_state = merged_memory
+
             # Use a FRESH InMemoryMemory to avoid cross-chat contamination.
             # self.memory_manager is shared across all chats and accumulates
             # messages from every request — using it would leak messages

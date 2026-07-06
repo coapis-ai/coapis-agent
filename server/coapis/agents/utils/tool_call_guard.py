@@ -190,8 +190,8 @@ class ToolCallGuard:
 # This catches loops that ToolCallGuard misses because the tool calls
 # may have different params but the overall reasoning is stuck.
 
-_REASONING_SIMILAR_THRESHOLD = int(os.environ.get("REASONING_SIMILAR_THRESHOLD", "3"))
-_REASONING_FORCE_EXIT = int(os.environ.get("REASONING_FORCE_EXIT", "5"))
+_REASONING_SIMILAR_THRESHOLD = int(os.environ.get("REASONING_SIMILAR_THRESHOLD", "60"))
+_REASONING_FORCE_EXIT = int(os.environ.get("REASONING_FORCE_EXIT", "100"))
 
 
 class ReasoningLoopDetector:

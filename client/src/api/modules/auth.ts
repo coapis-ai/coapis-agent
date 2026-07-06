@@ -5,6 +5,7 @@ export interface LoginResponse {
   username: string;
   message?: string;
   first_login?: boolean;
+  default_agent_id?: string;
 }
 
 export interface AuthStatusResponse {

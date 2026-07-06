@@ -6,6 +6,7 @@ import { useAppMessage } from "../../hooks/useAppMessage";
 import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import { authApi } from "../../api/modules/auth";
 import { setAuthToken } from "../../api/config";
+import { useAgentStore } from "../../stores/agentStore";
 import { useTheme } from "../../contexts/ThemeContext";
 
 export default function LoginPage() {
@@ -34,6 +35,7 @@ export default function LoginPage() {
       .catch(() => {});
   }, [navigate]);
 
+  const { setSelectedAgent } = useAgentStore();
   const onFinish = async (values: { username: string; password: string; remember_me?: boolean }) => {
     setLoading(true);
     try {
@@ -50,6 +52,10 @@ export default function LoginPage() {
           setAuthToken(res.token);
           window.currentUserId = values.username;
           window.currentChannel = "";  // 控制台不设 channel，显示所有来源聊天
+          // 用后端返回的 default_agent_id 重设 selectedAgent，断开旧 localStorage 污染链
+          if (res.default_agent_id) {
+            setSelectedAgent(res.default_agent_id);
+          }
           // Store first_login flag for onboarding
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");
@@ -63,6 +69,10 @@ export default function LoginPage() {
           setAuthToken(res.token);
           window.currentUserId = values.username;
           window.currentChannel = "";  // 控制台不设 channel，显示所有来源聊天
+          // 用后端返回的 default_agent_id 重设 selectedAgent，断开旧 localStorage 污染链
+          if (res.default_agent_id) {
+            setSelectedAgent(res.default_agent_id);
+          }
           // Store first_login flag for onboarding
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");

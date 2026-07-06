@@ -331,8 +331,8 @@ class WecomConfig(BaseChannelConfig):
     media_dir: Optional[str] = None
     welcome_text: str = ""
     max_reconnect_attempts: int = -1
-    # WeCom: filter thinking by default (aligned with QwenPaw)
-    filter_thinking: bool = True
+    # WeCom: let thinking through so renderer can show preview
+    filter_thinking: bool = False
 
 
 class MatrixConfig(BaseChannelConfig):

@@ -1,18 +1,21 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { AgentSummary } from "../api/types/agents";
+import { getAgentStorageKey, getLastUsedAgentKey } from "../api/config";
 
 /**
  * Storage key used by both sessionStorage (per-tab state) and localStorage
  * (cross-tab shared state).
+ *
+ * IMPORTANT: The key is user-scoped to prevent agent leakage between users.
  */
-const STORAGE_KEY = "coapis-agent-storage";
+const STORAGE_KEY = getAgentStorageKey();
 
 /**
  * localStorage key that remembers the last-used agent across browser sessions.
  * New tabs read this to set their initial selectedAgent.
  */
-const LAST_USED_AGENT_KEY = "coapis-last-used-agent";
+const LAST_USED_AGENT_KEY = getLastUsedAgentKey();
 
 interface AgentStore {
   selectedAgent: string;

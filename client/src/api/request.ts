@@ -54,6 +54,27 @@ function buildHeaders(method?: string, extra?: HeadersInit): Headers {
     }
   }
 
+  // ── Centralized X-Agent-Id encoding ──
+  // Callers may pass raw (possibly non-ASCII) agent IDs in options.headers.
+  // Ensure the final header value is always ASCII-safe for HTTP transport.
+  const rawAgentId = headers.get("X-Agent-Id");
+  if (rawAgentId) {
+    try {
+      // Check if it's already encoded (contains only ASCII safe chars)
+      // If decoding changes the value, it was already encoded → keep it
+      // If decoding doesn't change, it's raw → encode it
+      const decoded = decodeURIComponent(rawAgentId);
+      if (decoded === rawAgentId) {
+        // Raw value, needs encoding
+        headers.set("X-Agent-Id", encodeURIComponent(rawAgentId));
+      }
+      // else: already encoded, keep as-is
+    } catch {
+      // decodeURIComponent failed → value has % sequences but malformed
+      // It's likely already encoded, keep as-is
+    }
+  }
+
   return headers;
 }
 

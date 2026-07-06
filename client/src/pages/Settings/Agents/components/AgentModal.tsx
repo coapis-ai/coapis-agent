@@ -7,6 +7,12 @@ import {
   Space,
   Spin,
 } from "antd";
+
+/** Generate a short ASCII-safe agent ID: user_{6-char hex} */
+function generateAgentId(): string {
+  const hex = crypto.randomUUID().replace(/-/g, "").slice(0, 6);
+  return `user_${hex}`;
+}
 import { useTranslation } from "react-i18next";
 import type { AgentSummary } from "@/api/types/agents";
 import type { ProviderInfo } from "@/api/types/provider";
@@ -67,6 +73,13 @@ export function AgentModal({
     const provider = eligibleProviders.find((p) => p.id === selectedProviderId);
     return provider?.models ?? [];
   }, [selectedProviderId, eligibleProviders]);
+  // Auto-generate ID when creating a new agent
+  useEffect(() => {
+    if (open && !editingAgent) {
+      form.setFieldsValue({ id: generateAgentId() });
+    }
+  }, [open, editingAgent, form]);
+
   useEffect(() => {
     if (!open) return;
 
@@ -118,26 +131,13 @@ export function AgentModal({
           <Input />
         </Form.Item>
 
-        {editingAgent && (
-          <Form.Item name="id" label={t("agent.id")}>
-            <Input disabled />
-          </Form.Item>
-        )}
-        {!editingAgent && (
-          <Form.Item
-            name="id"
-            label={t("agent.idLabel")}
-            help={t("agent.idHelp")}
-            rules={[
-              {
-                pattern: /^[a-zA-Z0-9][a-zA-Z0-9_-]*[a-zA-Z0-9]$/,
-                message: t("agent.idPattern"),
-              },
-            ]}
-          >
-            <Input placeholder={t("agent.idPlaceholder")} />
-          </Form.Item>
-        )}
+        <Form.Item
+          name="id"
+          label={t("agent.idLabel")}
+          help={editingAgent ? undefined : t("agent.idHelp")}
+        >
+          <Input disabled />
+        </Form.Item>
         <Form.Item
           name="name"
           label={t("agent.name")}

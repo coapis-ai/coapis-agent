@@ -344,6 +344,10 @@ def agentscope_msg_to_message(
 
     for msg in msgs:
         role = msg.role or "assistant"
+
+        # Skip internal system messages (e.g. progress summaries injected into memory)
+        if role == "system":
+            continue
         metadata = {
             "original_id": msg.id,
             "original_name": msg.name,
