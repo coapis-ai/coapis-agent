@@ -145,17 +145,16 @@ async def system_diagnose(request: Request) -> Dict[str, Any]:
     # 5. 检查 config.json 一致性
     config_path = SYSTEM_DIR / "config.json"
     if config_path.exists():
-        with open(config_path, encoding="utf-8") as f:
-            config = json.load(f)
-        profiles = config.get("agents", {}).get("profiles", {})
-        for agent_id, profile in profiles.items():
-            ws_dir = profile.get("workspace_dir", "")
-            # 检查全局智能体是否在正确路径
-            if "user:" not in agent_id and agent_id not in {"global_default", "global_qa_agent"}:
-                # 外部智能体，跳过
-                continue
-            if "user:" not in agent_id and WORKSPACES_DIR in Path(ws_dir).parents:
-                issues.append(f"全局智能体 {agent_id} 路径错误: {ws_dir}（应在 agents/ 下）")
+        # Scan agents/ directory instead of profiles
+        from ....constant import AGENTS_DIR
+        if AGENTS_DIR.exists():
+            for item in AGENTS_DIR.iterdir():
+                if not item.is_dir() or not (item / "agent.json").exists():
+                    continue
+                agent_id = item.name
+                ws_dir = str(item)
+                if WORKSPACES_DIR in Path(ws_dir).parents:
+                    issues.append(f"全局智能体 {agent_id} 路径错误: {ws_dir}（应在 agents/ 下）")
 
     overall_ok = len(issues) == 0
 
@@ -179,30 +178,23 @@ async def list_external_agents(request: Request) -> Dict[str, Any]:
 
     with open(config_path, encoding="utf-8") as f:
         config = json.load(f)
-
-    profiles = config.get("agents", {}).get("profiles", {})
+    # Scan agents/ directory for external agents
+    from ....constant import AGENTS_DIR
     external = []
-
-    for agent_id, profile in profiles.items():
-        # 外部智能体：不是 user: 前缀，也不是已知全局智能体
-        if (
-            "user:" not in agent_id
-            and agent_id not in {"global_default", "global_qa_agent"}
-        ):
-            ws_dir = profile.get("workspace_dir", "")
-            # Extract username from workspace path: .../workspaces/{username}
-            ws_username = ""
-            if "/workspaces/" in ws_dir:
-                ws_username = ws_dir.split("/workspaces/")[-1].split("/")[0]
+    if AGENTS_DIR.exists():
+        for item in sorted(AGENTS_DIR.iterdir()):
+            if not item.is_dir() or not (item / "agent.json").exists():
+                continue
+            meta = json.loads((item / "agent.json").read_text(encoding="utf-8"))
+            agent_id = meta.get("id", item.name)
             external.append({
                 "id": agent_id,
-                "name": profile.get("name", agent_id),
-                "workspace_dir": ws_dir,
-                "enabled": profile.get("enabled", True),
-                "username": profile.get("username") or ws_username,
+                "name": meta.get("name", agent_id),
+                "workspace_dir": str(item),
+                "enabled": meta.get("enabled", True),
+                "username": meta.get("owner", ""),
                 "is_external": True,
             })
-
     return {"agents": external}
 
 
@@ -222,13 +214,15 @@ async def toggle_external_agent(
 
     with open(config_path, encoding="utf-8") as f:
         config = json.load(f)
-
-    profiles = config.get("agents", {}).get("profiles", {})
-    if agent_id not in profiles:
+    # Find agent in agents/ directory
+    from ....constant import AGENTS_DIR
+    agent_dir = AGENTS_DIR / agent_id
+    agent_json = agent_dir / "agent.json"
+    if not agent_json.exists():
         raise HTTPException(status_code=404, detail=f"智能体 {agent_id} 不存在")
-
-    profiles[agent_id]["enabled"] = enabled
-
+    meta = json.loads(agent_json.read_text(encoding="utf-8"))
+    meta["enabled"] = enabled
+    agent_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
 

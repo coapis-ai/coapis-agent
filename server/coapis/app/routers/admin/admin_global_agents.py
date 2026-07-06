@@ -443,18 +443,6 @@ async def create_global_agent(
                 shutil.copy2(template_path, dest)
                 inherited.append(filename)
 
-    # 注册到 config.json（username=None 表示全局）
-    from ....config.utils import load_config, save_config
-    from ....config.config import AgentProfileRef
-
-    config = load_config()
-    if agent_id not in config.agents.profiles:
-        config.agents.profiles[agent_id] = AgentProfileRef(
-            id=agent_id,
-            workspace_dir=str(agent_dir),
-        )
-        save_config(config)
-
     return {
         "success": True,
         "agent_id": agent_id,
@@ -494,13 +482,6 @@ async def delete_global_agent(
 
     # 删除目录
     shutil.rmtree(agent_dir)
-
-    # 从 config.json 移除
-    from ....config.utils import load_config, save_config
-    config = load_config()
-    if agent_id in config.agents.profiles:
-        del config.agents.profiles[agent_id]
-        save_config(config)
 
     # 尝试从 MultiAgentManager 注销
     try:

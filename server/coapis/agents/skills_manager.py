@@ -1635,28 +1635,39 @@ def list_workspaces() -> list[dict[str, str]]:
     """List configured workspaces with agent names."""
     workspaces: list[dict[str, str]] = []
     try:
-        from ..config.utils import load_config
-        from ..config.config import load_agent_config, derive_workspace_dir
-
-        config = load_config()
-        # Only return agents that are still in the configuration
-        # This ensures deleted agents are not included
-        for agent_id, profile in sorted(config.agents.profiles.items()):
-            agent_name = agent_id
-            try:
-                agent_name = load_agent_config(agent_id).name or agent_id
-            except Exception:
-                pass
-            workspaces.append(
-                {
-                    "agent_id": agent_id,
-                    "agent_name": agent_name,
-                    "workspace_dir": str(
-                        derive_workspace_dir(agent_id, profile.username),
-                    ),
-                    "username": str(profile.username) if profile.username else "",
-                },
-            )
+        from ..constant import AGENTS_DIR, WORKSPACES_DIR
+        # Scan global agents
+        if AGENTS_DIR.exists():
+            for item in sorted(AGENTS_DIR.iterdir()):
+                if not item.is_dir() or not (item / "agent.json").exists():
+                    continue
+                try:
+                    meta = json.loads((item / "agent.json").read_text(encoding="utf-8"))
+                    workspaces.append({
+                        "agent_id": meta.get("id", item.name),
+                        "agent_name": meta.get("name", item.name),
+                        "workspace_dir": str(item),
+                        "username": "",
+                    })
+                except Exception:
+                    pass
+        # Scan user agents
+        if WORKSPACES_DIR.exists():
+            for user_dir in sorted(WORKSPACES_DIR.iterdir()):
+                if not user_dir.is_dir():
+                    continue
+                ws_json = user_dir / "agent.json"
+                if ws_json.exists():
+                    try:
+                        meta = json.loads(ws_json.read_text(encoding="utf-8"))
+                        workspaces.append({
+                            "agent_id": meta.get("id", f"user:{user_dir.name}"),
+                            "agent_name": meta.get("name", user_dir.name),
+                            "workspace_dir": str(user_dir),
+                            "username": user_dir.name,
+                        })
+                    except Exception:
+                        pass
     except Exception as exc:
         logger.warning("Failed to load configured workspaces: %s", exc)
 

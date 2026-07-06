@@ -226,15 +226,13 @@ def _resolve_effective_mcp(
 
 
 def _get_agent_id_for_user(user_id: str) -> str:
-    """Get the agent_id for a given user."""
+    """Get the agent_id for a given user by checking workspace directory."""
+    from ...constant import WORKSPACES_DIR
+    ws_json = WORKSPACES_DIR / user_id / "agent.json"
+    if ws_json.exists():
+        return f"user:{user_id}"
     from ...config.utils import load_config
-
     config = load_config()
-    # Check if user has a registered agent profile
-    user_agent_id = f"user:{user_id}"
-    if user_agent_id in config.agents.profiles:
-        return user_agent_id
-    # Fallback to active agent
     return config.agents.active_agent or "user:admin"
 
 

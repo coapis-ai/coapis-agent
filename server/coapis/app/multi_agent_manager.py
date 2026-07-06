@@ -157,11 +157,6 @@ class MultiAgentManager:
             # access per-user ChatManagers for message persistence
             workspace._manager = self
 
-            # Register dynamic agent in config.json BEFORE starting workspace
-            # This ensures agentscope_runtime A2A validation passes
-            from ..config.utils import register_dynamic_agent
-            register_dynamic_agent(agent_id, str(workspace.workspace_dir), username=username)
-
             # Register workspace BEFORE start() so it appears in list_agents
             # even if start() fails (e.g. no provider configured).
             # This ensures the agent dropdown is always populated.
@@ -225,17 +220,6 @@ class MultiAgentManager:
                 import shutil
                 shutil.rmtree(agent_dir)
                 logger.info(f"Cleaned up agent directory: {agent_dir}")
-
-            # Remove from config.json to prevent stale entries on restart
-            try:
-                from ..config.utils import load_config, save_config
-                cfg = load_config()
-                if agent_id in cfg.agents.profiles:
-                    del cfg.agents.profiles[agent_id]
-                    save_config(cfg)
-                    logger.info(f"Removed {agent_id} from config.json")
-            except Exception as e:
-                logger.warning(f"Failed to clean config.json for {agent_id}: {e}")
 
             logger.info(f"Destroyed agent: {agent_id}")
             return True
@@ -438,66 +422,89 @@ class MultiAgentManager:
                 await workspace.stop()
 
     async def load_default_agents(self):
-        """Load default agents from config AND recover persisted agents from disk.
-        
-        Determines username from:
-        1. agent_config.get("username") — explicit username in config (highest priority)
-        2. _infer_username_from_workspace_dir(workspace_dir) — path-based inference
-        3. None (global agent) — fallback
+        """Load all agents by scanning the filesystem (no config.agents.profiles).
+
+        Discovery order:
+        1. Global agents: AGENTS_DIR/*/agent.json
+        2. User default agents: WORKSPACES_DIR/*/agent.json
+        3. User sub-agents: WORKSPACES_DIR/*/agents/*/agent.json
         """
-        config = load_config()
-        profiles = config.agents.profiles
+        from ..config.config import load_user_config, derive_workspace_dir
 
-        # Load agents from config profiles only (not other agents.* keys)
-        for agent_id, agent_ref in profiles.items():
-            if not agent_ref.enabled:
-                continue
-            # Priority: explicit username > agent_id prefix > None (global)
-            username = agent_ref.username
-            if not username and agent_id.startswith("user:"):
-                username = agent_id.split(":", 1)[1]
-            is_global = (username is None)
-            # Derive workspace_dir at runtime (no longer read from config)
-            from ..config.config import derive_workspace_dir
-            workspace_dir = str(derive_workspace_dir(agent_id, username))
-            agent_config = {
-                "id": agent_ref.id,
-                "workspace_dir": workspace_dir,
-                "enabled": agent_ref.enabled,
-                "username": username,
-            }
-            await self.create_agent(
-                agent_id, agent_config,
-                username=username,
-                is_global=is_global,
-            )
+        seen_cache_keys: set[str] = set()
 
-        # Recover persisted global agents from AGENTS_DIR
+        # ── 1. Global agents (AGENTS_DIR) ──
         if AGENTS_DIR.exists():
             for agent_dir in AGENTS_DIR.iterdir():
-                if agent_dir.is_dir() and agent_dir.name not in self._workspaces:
-                    # Skip user-specific agents (e.g. "user:admin") —
-                    # they should be created by user provisioning, not recovered as global
-                    if agent_dir.name.startswith("user:"):
-                        continue
-                    logger.info(f"Recovering persisted global agent: {agent_dir.name}")
-                    await self.create_agent(agent_dir.name, is_global=True)
+                if not agent_dir.is_dir():
+                    continue
+                agent_json = agent_dir / "agent.json"
+                if not agent_json.exists():
+                    continue
+                agent_id = agent_dir.name
+                cache_key = f"global:{agent_id}"
+                if cache_key in self._workspaces:
+                    seen_cache_keys.add(cache_key)
+                    continue
+                logger.info(f"Loading global agent: {agent_id}")
+                await self.create_agent(agent_id, is_global=True)
+                seen_cache_keys.add(cache_key)
 
-        # Recover user agents from user directories
+        # ── 2. User default agents (WORKSPACES_DIR/*) ──
         if WORKSPACES_DIR.exists():
             for user_dir in WORKSPACES_DIR.iterdir():
-                if user_dir.is_dir():
-                    username = user_dir.name
-                    user_agents_dir = get_user_agents_dir(username)
-                    if user_agents_dir.exists():
-                        for agent_dir in user_agents_dir.iterdir():
-                            if agent_dir.is_dir() and agent_dir.name not in self._workspaces:
-                                logger.info(f"Recovering user agent: {agent_dir.name} (user: {username})")
-                                await self.create_agent(
-                                    agent_dir.name,
-                                    username=username,
-                                    is_global=False,
-                                )
+                if not user_dir.is_dir() or user_dir.name.startswith("."):
+                    continue
+                username = user_dir.name
+                agent_json = user_dir / "agent.json"
+                if not agent_json.exists():
+                    continue
+                # Read agent_id from agent.json (fallback to convention)
+                try:
+                    with open(agent_json, encoding="utf-8") as f:
+                        meta = json.load(f)
+                    agent_id = meta.get("id", f"user:{username}")
+                except Exception:
+                    agent_id = f"user:{username}"
+                cache_key = f"{username}:{agent_id}"
+                if cache_key in self._workspaces:
+                    seen_cache_keys.add(cache_key)
+                    continue
+                logger.info(f"Loading user default agent: {agent_id} (user: {username})")
+                await self.create_agent(
+                    agent_id,
+                    username=username,
+                    is_global=False,
+                )
+                seen_cache_keys.add(cache_key)
+
+                # ── 3. User sub-agents (WORKSPACES_DIR/*/agents/*) ──
+                user_agents_dir = user_dir / "agents"
+                if user_agents_dir.exists():
+                    for agent_dir in user_agents_dir.iterdir():
+                        if not agent_dir.is_dir():
+                            continue
+                        sub_agent_json = agent_dir / "agent.json"
+                        if not sub_agent_json.exists():
+                            continue
+                        sub_agent_id = agent_dir.name
+                        sub_cache_key = f"{username}:{sub_agent_id}"
+                        if sub_cache_key in self._workspaces:
+                            seen_cache_keys.add(sub_cache_key)
+                            continue
+                        logger.info(f"Loading user agent: {sub_agent_id} (user: {username})")
+                        await self.create_agent(
+                            sub_agent_id,
+                            username=username,
+                            is_global=False,
+                        )
+                        seen_cache_keys.add(sub_cache_key)
+
+        logger.info(
+            f"Agent discovery complete: {len(self._workspaces)} agents loaded "
+            f"({sum(1 for k in self._workspaces if k.startswith('global:'))} global, "
+            f"{sum(1 for k in self._workspaces if not k.startswith('global:'))} user)"
+        )
 
     async def get_agent(self, agent_id: str, username: str = None) -> Workspace:
         """Get agent workspace by ID (lazy loading with dedup).
@@ -529,24 +536,45 @@ class MultiAgentManager:
         # Composite key for user isolation: "{username}:{agent_id}" or "global:{agent_id}"
         cache_key = f"{username}:{agent_id}" if username else f"global:{agent_id}"
 
-        # ── Strict ownership check (applies to ALL paths including cache hit) ──
-        config = load_config()
-        profile = config.agents.profiles.get(agent_id)
-        if profile is None:
+        # ── Strict ownership check via disk (no profiles dependency) ──
+        from ..config.config import derive_workspace_dir, load_user_config
+        workspace_dir = derive_workspace_dir(agent_id, username)
+        agent_json_path = workspace_dir / "agent.json"
+        if not agent_json_path.exists():
             raise ConfigurationException(
                 config_key="agent",
-                message=f"Agent '{agent_id}' not found in configuration.",
+                message=f"Agent '{agent_id}' not found (no agent.json at {workspace_dir}).",
             )
-        profile_owner = getattr(profile, "username", "") or ""
-        logger.warning(f"[OWNERSHIP-CHECK] agent_id={agent_id} caller={username} owner={profile_owner}")
-        # Reject if agent has no owner (global) or caller is not the owner
-        if not profile_owner or profile_owner != (username or ""):
+        # Read owner from agent.json
+        try:
+            with open(agent_json_path, encoding="utf-8") as f:
+                agent_meta = json.load(f)
+            profile_owner = agent_meta.get("owner", "") or ""
+            if not profile_owner and agent_meta.get("username"):
+                profile_owner = agent_meta["username"]
+        except Exception:
+            profile_owner = ""
+        # Infer owner from agent_id for user agents (user:X → owner is X)
+        if not profile_owner and agent_id.startswith("user:"):
+            profile_owner = agent_id.split(":", 1)[1]
+        # Reject if: user trying to access global agent, or accessing someone else's agent
+        # Allow: system-level access (username=None) to global agents
+        if profile_owner and username and profile_owner != username:
+            # User trying to access another user's agent
             raise ConfigurationException(
                 config_key="agent",
                 message=(
-                    f"Access denied: agent '{agent_id}' "
-                    + (f"belongs to '{profile_owner}'" if profile_owner else "is a global agent")
-                    + f", not accessible by '{username or '(anonymous)'}'"
+                    f"Access denied: agent '{agent_id}' belongs to "
+                    f"'{profile_owner}', not '{username}'"
+                ),
+            )
+        if not profile_owner and username:
+            # User trying to access a global agent — reject
+            raise ConfigurationException(
+                config_key="agent",
+                message=(
+                    f"Access denied: agent '{agent_id}' is a global agent, "
+                    f"not accessible by user '{username}'"
                 ),
             )
 
@@ -569,18 +597,7 @@ class MultiAgentManager:
                 # Another task is already starting this agent; wait for it
                 event = self._pending_starts[cache_key]
             else:
-                # We are the first caller — validate config and claim startup
-                config = load_config()
-                if agent_id not in config.agents.profiles:
-                    raise ConfigurationException(
-                        config_key="agent",
-                        message=(
-                            f"Agent '{agent_id}' not found in configuration. "
-                            f"Available agents: "
-                            f"{list(config.agents.profiles.keys())}"
-                        ),
-                    )
-                agent_ref = config.agents.profiles[agent_id]
+                # We are the first caller — claim startup
                 event = asyncio.Event()
                 self._pending_starts[cache_key] = event
                 should_start = True
@@ -692,36 +709,33 @@ class MultiAgentManager:
             dict[str, bool]: Mapping of agent_id to success status
         """
         config = load_config()
-        # Filter only enabled agents
-        enabled_agents = {
-            agent_id: ref
-            for agent_id, ref in config.agents.profiles.items()
-            if getattr(ref, "enabled", True)
-        }
-        agent_ids = list(enabled_agents.keys())
+
+        # Discover enabled agents from disk (no profiles dependency)
+        agent_ids = []
+        for cache_key, ws in self._workspaces.items():
+            agent_ids.append(ws.agent_id)
 
         if not agent_ids:
-            logger.warning("No enabled agents configured in config")
+            logger.warning("No agents discovered on disk")
             return {}
 
-        total_agents = len(config.agents.profiles)
-        disabled_count = total_agents - len(agent_ids)
-        logger.debug(
-            f"Starting {len(agent_ids)} enabled agent(s) "
-            f"({disabled_count} disabled)",
-        )
+        total_agents = len(agent_ids)
+        logger.debug(f"Starting {len(agent_ids)} discovered agent(s)")
 
         async def start_single_agent(agent_id: str) -> tuple[str, bool]:
             """Start a single agent with error handling."""
             try:
-                # Priority: explicit username in config > path inference > None (global)
-                ref = enabled_agents[agent_id]
-                username = getattr(ref, "username", None)
-                if not username and agent_id.startswith("user:"):
-                    username = agent_id.split(":", 1)[1]
-                if not username:
-                    workspace_dir = getattr(ref, "workspace_dir", None)
-                    username = self._infer_username_from_workspace_dir(workspace_dir)
+                # Infer username from cache key
+                cache_key_match = None
+                for ck in self._workspaces:
+                    if self._workspaces[ck].agent_id == agent_id:
+                        cache_key_match = ck
+                        break
+                username = None
+                if cache_key_match and ":" in cache_key_match:
+                    prefix = cache_key_match.split(":", 1)[0]
+                    if prefix != "global":
+                        username = prefix
 
                 logger.debug(f"Starting agent: {agent_id}" + (f" (user: {username})" if username else ""))
                 ws = await self.get_agent(agent_id, username=username)

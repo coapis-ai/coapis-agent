@@ -75,29 +75,33 @@ def _save_config(request: Request, config: Dict[str, Any]) -> None:
 
 
 def _resolve_agent_workspace(request: Request) -> Optional[Path]:
-    """Resolve agent's workspace directory from X-Agent-Id header.
-
-    - If X-Agent-Id is set: look up workspace_dir in config.json profiles
-    - Otherwise: fall back to username-based default agent workspace
-    """
+    """Resolve agent workspace from disk (no profiles dependency)."""
     agent_id = request.headers.get("X-Agent-Id")
     username = getattr(request.state, "username", None)
 
-    if agent_id:
-        config = _load_config(request)
-        profiles = config.get("agents", {}).get("profiles", {})
-        if agent_id in profiles:
-            ws = profiles[agent_id].get("workspace_dir")
-            if ws:
-                return Path(ws).expanduser()
+    if agent_id and username:
+        from ...constant import WORKSPACES_DIR, AGENTS_DIR
+        # Default agent
+        default_ws = WORKSPACES_DIR / username
+        if (default_ws / "agent.json").exists():
+            meta = json.loads((default_ws / "agent.json").read_text(encoding="utf-8"))
+            if meta.get("id") == agent_id:
+                return default_ws
+        # Sub-agent
+        sub_ws = WORKSPACES_DIR / username / "agents" / agent_id
+        if (sub_ws / "agent.json").exists():
+            return sub_ws
+        # Global agent
+        global_ws = AGENTS_DIR / agent_id
+        if (global_ws / "agent.json").exists():
+            return global_ws
 
     # Fallback: username-based default agent
     if username:
-        from ...constant import WORKING_DIR
-        return Path(WORKING_DIR) / "workspaces" / username
+        from ...constant import WORKSPACES_DIR
+        return WORKSPACES_DIR / username
 
     return None
-
 
 def _load_channel_configs(request: Request) -> Dict[str, Any]:
     """Load channel configs with strict per-agent isolation.

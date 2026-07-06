@@ -61,20 +61,39 @@ def _resolve_agent_id(request: Request, agent_id: str) -> str:
 
 
 def _get_config_profiles(request: Request) -> Dict[str, Any]:
-    """Get agent profiles from config."""
-    from ...config import load_config
-    config = load_config()
-    return config.agents.profiles
-
-
-def _get_user_agents(request: Request) -> List[str]:
-    """Get list of agent IDs for the current user."""
-    username = _get_username(request)
-    profiles = _get_config_profiles(request)
-    return [
-        agent_id for agent_id, profile in profiles.items()
-        if getattr(profile, "username", None) == username
-    ]
+    """Scan disk for all agents (no profiles dependency)."""
+    from ...constant import AGENTS_DIR, WORKSPACES_DIR
+    result = {}
+    # Global agents
+    if AGENTS_DIR.exists():
+        for item in AGENTS_DIR.iterdir():
+            if not item.is_dir() or not (item / "agent.json").exists():
+                continue
+            meta = json.loads((item / "agent.json").read_text(encoding="utf-8"))
+            class _Ref:
+                pass
+            r = _Ref()
+            r.id = meta.get("id", item.name)
+            r.username = ""
+            r.name = meta.get("name", r.id)
+            result[r.id] = r
+    # User agents
+    if WORKSPACES_DIR.exists():
+        for user_dir in WORKSPACES_DIR.iterdir():
+            if not user_dir.is_dir():
+                continue
+            ws_json = user_dir / "agent.json"
+            if ws_json.exists():
+                meta = json.loads(ws_json.read_text(encoding="utf-8"))
+                aid = meta.get("id", f"user:{user_dir.name}")
+                class _URef:
+                    pass
+                r = _URef()
+                r.id = aid
+                r.username = user_dir.name
+                r.name = meta.get("name", aid)
+                result[aid] = r
+    return result
 
 
 # =========================================================================

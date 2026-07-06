@@ -18,6 +18,7 @@
 
 Provides utilities to get the correct agent instance for each request.
 """
+import json
 from contextvars import ContextVar
 from typing import Optional, TYPE_CHECKING
 from fastapi import Request
@@ -117,32 +118,56 @@ async def get_agent_for_request(
         target_agent_id = config.agents.active_agent or "global_default"
 
     # Check if agent exists and is enabled
+    # Check if agent exists by scanning workspace directories
     if config is None:
         config = load_config()
-    if target_agent_id not in config.agents.profiles:
+    agent_found = False
+    agent_meta = {}
+    caller = getattr(request.state, "username", None)
+    from ..constant import AGENTS_DIR, WORKSPACES_DIR
+    # 1. Check user workspace: workspaces/{caller}/agent.json
+    if caller:
+        ws_json = WORKSPACES_DIR / caller / "agent.json"
+        if ws_json.exists():
+            meta = json.loads(ws_json.read_text(encoding="utf-8"))
+            if meta.get("id") == target_agent_id:
+                agent_found = True
+                agent_meta = meta
+                if not agent_meta.get("owner"):
+                    agent_meta["owner"] = caller  # auto-infer from workspace
+    # 2. Check user sub-agent: workspaces/{caller}/agents/{agent_id}/agent.json
+    if not agent_found and caller:
+        sub_json = WORKSPACES_DIR / caller / "agents" / target_agent_id / "agent.json"
+        if sub_json.exists():
+            agent_meta = json.loads(sub_json.read_text(encoding="utf-8"))
+            agent_found = True
+            if not agent_meta.get("owner"):
+                agent_meta["owner"] = caller
+    # 3. Check global agent: agents/{agent_id}/agent.json
+    if not agent_found:
+        global_json = AGENTS_DIR / target_agent_id / "agent.json"
+        if global_json.exists():
+            agent_meta = json.loads(global_json.read_text(encoding="utf-8"))
+            agent_found = True
+    if not agent_found:
         raise HTTPException(
             status_code=404,
             detail=f"Agent '{target_agent_id}' not found",
         )
-
-    agent_ref = config.agents.profiles[target_agent_id]
-    if not getattr(agent_ref, "enabled", True):
+    if not agent_meta.get("enabled", True):
         raise HTTPException(
             status_code=403,
             detail=f"Agent '{target_agent_id}' is disabled",
         )
-
-    # ── Strict ownership check: user can only access their own agents ──
-    caller = getattr(request.state, "username", None)
-    profile_owner = getattr(agent_ref, "username", "") or ""
-    # Reject if: agent is global (no owner) OR agent belongs to someone else
-    if not profile_owner or profile_owner != (caller or ""):
+    # Ownership check: user agents must belong to caller
+    agent_owner = agent_meta.get("owner", "") or ""
+    if not agent_owner or agent_owner != (caller or ""):
         raise HTTPException(
             status_code=403,
             detail=(
                 f"Access denied: agent '{target_agent_id}' "
-                + (f"belongs to '{profile_owner}'" if profile_owner else "is a global agent")
-                + f", not accessible by '{caller or '(anonymous)'}'"
+                + (f"belongs to '{agent_owner}'" if agent_owner else "is a global agent")
+                + f", not accessible by '{caller or 'anonymous'}'"
             ),
         )
 
@@ -159,7 +184,6 @@ async def get_agent_for_request(
             # Try to load agent config directly from system/
             agent_config_path = AGENTS_DIR.parent / "system" / f"agent_{target_agent_id}.json"
             if agent_config_path.exists():
-                import json
                 with open(agent_config_path, "r") as f:
                     agent_data = json.load(f)
                 

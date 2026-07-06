@@ -811,12 +811,8 @@ def get_channel_configurators() -> dict:
 
 
 def _get_channel_config(config: Config, key: str):
-    """Get channel config for key (from attr or extra)."""
-    ch = getattr(config.channels, key, None)
-    if ch is not None:
-        return ch
-    extra = getattr(config.channels, "__pydantic_extra__", None) or {}
-    return extra.get(key)
+    """Get channel config for key — no longer available in global config."""
+    return None
 
 
 def configure_channels_interactive(config: Config) -> None:
@@ -862,7 +858,9 @@ def configure_channels_interactive(config: Config) -> None:
             )
             current_config = default or {"enabled": False, "bot_prefix": ""}
         updated_config = configure_func(current_config)
-        setattr(config.channels, choice, updated_config)
+        # channels only in agent.json now, not in global config
+        if hasattr(config, "channels"):
+            setattr(config.channels, choice, updated_config)
 
     # Show enabled channels summary
     enabled_channels = [
