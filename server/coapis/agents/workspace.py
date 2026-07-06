@@ -544,9 +544,17 @@ class Workspace:
             except Exception as e:
                 raise RuntimeError(f"Failed to resolve provider '{provider_id}': {e}") from e
         else:
-            raise ValueError("No provider configured for agent. "
-                           f"Please set 'active_model.provider_id' or 'provider' in agent.json, "
-                           f"or create system-level active_model.json")
+            import os as _os
+            if _os.environ.get("COAPIS_SKIP_PROVIDERS", "").strip() in ("1", "true", "yes"):
+                logger.warning(f"No provider for agent {self.agent_id} (COAPIS_SKIP_PROVIDERS=1). "
+                               "LLM features will be unavailable until a provider is configured.")
+                core_config["model"] = core_config.get("model") or "placeholder"
+                core_config["base_url"] = core_config.get("base_url") or "http://localhost:1"
+                core_config["api_key"] = core_config.get("api_key") or "EMPTY"
+            else:
+                raise ValueError("No provider configured for agent. "
+                               f"Please set 'active_model.provider_id' or 'provider' in agent.json, "
+                               f"or create system-level active_model.json")
 
         # Merge core_config into config
         config = {**config, **core_config}
