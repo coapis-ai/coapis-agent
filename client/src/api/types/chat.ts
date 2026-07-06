@@ -12,6 +12,7 @@ export interface ChatSpec {
   status?: ChatStatus; // Conversation status: idle or running
   pinned?: boolean; // Whether the chat is pinned to the top
   agent_id?: string; // Agent ID for multi-agent isolation
+  generating?: boolean; // Whether this chat is currently being processed (e.g. from another channel)
 }
 
 export interface Message {

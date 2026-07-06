@@ -128,6 +128,16 @@ class BaseChannel(ABC):
         self._filter_tool_messages = filter_tool_messages
         self._filter_thinking = filter_thinking
         self.streaming_enabled = streaming_enabled
+
+        # ── Renderer integration (aligned with QwenPaw) ──
+        from .renderer import RenderStyle, MessageRenderer
+        _channel_name = getattr(self, "channel", "base")
+        _channel_cfg = kwargs.get("channel_cfg") or {}
+        self._render_style = RenderStyle.from_channel(
+            _channel_name,
+            channel_config=_channel_cfg,
+        )
+        self._renderer = MessageRenderer(self._render_style)
         self._enqueue: EnqueueCallback = None
         self._workspace = None
         # Allowlist / denylist support (used by all channels)
@@ -511,7 +521,12 @@ class BaseChannel(ABC):
         msg_id = getattr(event, "id", None)
         if msg_id:
             msg_id_to_stream_type[msg_id] = stream_type
+        logger.info(
+            "_on_stream_msg_start stream_type=%s _filter_thinking=%s channel=%s",
+            stream_type, self._filter_thinking, self.channel,
+        )
         if stream_type == "reasoning" and self._filter_thinking:
+            logger.info("_on_stream_msg_start: FILTERED reasoning (filter_thinking=True)")
             return True
         streaming_buffers[stream_type] = ""
         await self.on_streaming_start(
@@ -640,17 +655,14 @@ class BaseChannel(ABC):
     ) -> None:
         """Hook: message completed event.
 
-        Called when a message finishes.  Default implementation sends
-        the final message content as a plain text message.
+        Uses renderer to format message content (tool calls, thinking
+        blocks, etc.) and sends via send_content_parts.
         """
-        # Default: send the final message content via the channel's
-        # send function.  We extract the full text from the event.
         try:
-            full_text = self._extract_final_text(event)
-            if full_text:
-                send_fn = self._resolve_send_fn()
-                if send_fn:
-                    await send_fn(to_handle, full_text, send_meta)
+            msg = getattr(event, "message", None) or event
+            parts = self._message_to_content_parts(msg)
+            if parts:
+                await self.send_content_parts(to_handle, parts, send_meta)
         except Exception:
             logger.debug(
                 "on_event_message_completed default handler failed",
@@ -679,6 +691,17 @@ class BaseChannel(ABC):
                 parts.append(c.get("text", ""))
         return "\n".join(p for p in parts if p)
 
+    def _message_to_content_parts(
+        self,
+        message: Any,
+    ) -> List[OutgoingContentPart]:
+        """Convert a Message into sendable parts via renderer.
+
+        Delegates to self._renderer for channel-specific formatting
+        (tool calls, thinking blocks, etc.).
+        """
+        return self._renderer.message_to_parts(message)
+
     def _resolve_send_fn(self) -> Any:
         """Resolve the best available send function for this channel."""
         for name in ("send_text", "send", "send_message"):
@@ -686,6 +709,31 @@ class BaseChannel(ABC):
             if fn:
                 return fn
         return None
+
+    async def send_content_parts(
+        self,
+        to_handle: str,
+        parts: List[OutgoingContentPart],
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Send a list of content parts.
+
+        Default: merge text/refusal into one text message, send via
+        the channel's send function.  Subclasses (e.g. WeCom) override
+        for channel-specific multi-part sending.
+        """
+        text_parts: List[str] = []
+        for p in parts:
+            t = getattr(p, "type", None)
+            if t == ContentType.TEXT and getattr(p, "text", None):
+                text_parts.append(p.text or "")
+            elif t == ContentType.REFUSAL and getattr(p, "refusal", None):
+                text_parts.append(p.refusal or "")
+        body = "\n".join(text_parts).strip()
+        if body:
+            send_fn = self._resolve_send_fn()
+            if send_fn:
+                await send_fn(to_handle, body, meta)
 
     def _format_stream_tool_output_body(self, event: Any) -> Optional[str]:
         """Format tool output for display.

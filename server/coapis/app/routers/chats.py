@@ -354,10 +354,26 @@ async def list_chats(
 
     chats = await cm.list_chats(channel=effective_channel)
 
+    # Check TaskTracker for generating status of each chat
+    generating_chat_ids: set = set()
+    try:
+        ws = _find_workspace_for_agent(request, resolved_agent_id, username)
+        tracker = getattr(ws, "task_tracker", None) if ws else None
+        if tracker:
+            active_tasks = await tracker.list_active_tasks()
+            generating_chat_ids = set(active_tasks)
+    except Exception:
+        pass  # Non-critical: generating status is best-effort
+
     # Ensure browsers never cache chat list responses
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
-    return [_normalize_chat_spec(c) for c in chats]
+    result = []
+    for c in chats:
+        entry = _normalize_chat_spec(c)
+        entry["generating"] = entry["id"] in generating_chat_ids
+        result.append(entry)
+    return result
 
 
 @router.post("/chats")

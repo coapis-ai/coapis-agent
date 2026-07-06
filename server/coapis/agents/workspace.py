@@ -1116,7 +1116,7 @@ class Workspace:
             process=_process_handler,
             show_tool_details=True,
             filter_tool_messages=False,
-            filter_thinking=True,  # Hide LLM reasoning from user-facing channels
+            filter_thinking=False,
         )
         console_channel._workspace = self
 
@@ -1171,7 +1171,7 @@ class Workspace:
                         config=channel_config_obj,
                         show_tool_details=channel_cfg.get("show_tool_details", True),
                         filter_tool_messages=channel_cfg.get("filter_tool_messages", False),
-                        filter_thinking=channel_cfg.get("filter_thinking", True),
+                        filter_thinking=channel_cfg.get("filter_thinking", False),
                         workspace_dir=self.workspace_dir,
                     )
                     ch._workspace = self
@@ -1358,7 +1358,7 @@ class Workspace:
             process=None,
             show_tool_details=True,
             filter_tool_messages=False,
-            filter_thinking=True,
+            filter_thinking=False,
         )
         console_channel._workspace = self
         channels_list = [console_channel]
@@ -1379,7 +1379,7 @@ class Workspace:
                     config=channel_config_obj,
                     show_tool_details=channel_cfg.get("show_tool_details", True),
                     filter_tool_messages=channel_cfg.get("filter_tool_messages", False),
-                    filter_thinking=channel_cfg.get("filter_thinking", True),
+                    filter_thinking=channel_cfg.get("filter_thinking", False),
                     workspace_dir=self.workspace_dir,
                 )
                 ch._workspace = self

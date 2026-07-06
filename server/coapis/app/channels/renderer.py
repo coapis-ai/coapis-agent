@@ -68,6 +68,12 @@ class RenderStyle:
     # Custom emoji mapping (tool_name -> emoji)
     tool_emoji_map: Dict[str, str] = field(default_factory=dict)
 
+    # Filter tool call/output messages (only show media outputs)
+    filter_tool_messages: bool = False
+
+    # Internal tool names to skip in output display
+    internal_tools: set = field(default_factory=set)
+
     @classmethod
     def from_channel(cls, channel_name: str, channel_config: dict = None) -> "RenderStyle":
         """Create a RenderStyle from channel name + optional config overrides."""
@@ -200,6 +206,7 @@ class RenderStyle:
                 style.show_thinking = not channel_config["filter_thinking"]
             if "filter_tool_messages" in channel_config:
                 style.show_tool_details = not channel_config["filter_tool_messages"]
+                style.filter_tool_messages = channel_config["filter_tool_messages"]
             # Direct show_* overrides
             for key, value in channel_config.items():
                 if key.startswith("filter_"):
@@ -441,3 +448,185 @@ class MessageRenderer:
         if self.style.show_newlines:
             return "\n"
         return ""
+
+    # ── message_to_parts: aligned with QwenPaw ──────────────────────
+
+    def message_to_parts(self, message: Any) -> List[Any]:
+        """Convert a Message object into sendable OutgoingContentPart list.
+
+        Handles: text, tool_call, tool_output, reasoning, media.
+        Uses RenderStyle policy to decide visibility.
+        """
+        from agentscope_runtime.engine.schemas.agent_schemas import (
+            MessageType,
+            TextContent,
+            ImageContent,
+            VideoContent,
+            AudioContent,
+            FileContent,
+            ContentType,
+        )
+
+        msg_type = getattr(message, "type", None)
+        content = getattr(message, "content", None) or []
+        s = self.style
+
+        # Filter reasoning messages if configured
+        if not s.show_thinking and msg_type == MessageType.REASONING:
+            return []
+
+        logger.debug(
+            "renderer message_to_parts: msg_type=%s content_len=%s",
+            msg_type, len(content),
+        )
+
+        # ── Tool call messages ──
+        if msg_type in (
+            MessageType.FUNCTION_CALL,
+            MessageType.PLUGIN_CALL,
+            MessageType.MCP_TOOL_CALL,
+        ):
+            if s.filter_tool_messages:
+                return []
+            parts = []
+            for c in content:
+                if getattr(c, "type", None) != ContentType.DATA:
+                    continue
+                data = getattr(c, "data", None) or {}
+                name = data.get("name") or "tool"
+                args = data.get("arguments") or "{}"
+                if s.show_tool_details:
+                    args_preview = args[:200] + "..." if len(args) > 200 else args
+                else:
+                    args_preview = "..."
+                emoji = s.tool_emoji_map.get(name, s.tool_emoji)
+                friendly = _TOOL_FRIENDLY_NAMES.get(name, name)
+                text = f"{emoji} **{friendly}**\n```\n{args_preview}\n```"
+                parts.append(TextContent(text=text))
+            return parts or [TextContent(text=f"[{msg_type}]")]
+
+        # ── Tool output messages ──
+        if msg_type in (
+            MessageType.FUNCTION_CALL_OUTPUT,
+            MessageType.PLUGIN_CALL_OUTPUT,
+            MessageType.MCP_TOOL_CALL_OUTPUT,
+        ):
+            if s.filter_tool_messages:
+                # Still pass through media parts
+                media_types = (ContentType.IMAGE, ContentType.AUDIO, ContentType.VIDEO, ContentType.FILE)
+                media_parts = []
+                for c in content:
+                    if getattr(c, "type", None) != ContentType.DATA:
+                        continue
+                    data = getattr(c, "data", None) or {}
+                    name = data.get("name") or "tool"
+                    if name in s.internal_tools:
+                        continue
+                    output = data.get("output")
+                    block_parts = self._extract_parts_from_output(output)
+                    for p in block_parts:
+                        if getattr(p, "type", None) in media_types:
+                            media_parts.append(p)
+                return media_parts
+
+            parts = []
+            for c in content:
+                if getattr(c, "type", None) != ContentType.DATA:
+                    continue
+                data = getattr(c, "data", None) or {}
+                name = data.get("name") or "tool"
+                if name in s.internal_tools:
+                    continue
+                output = data.get("output")
+                emoji = s.tool_emoji_map.get(name, s.tool_emoji)
+                label = f"{emoji} **{_TOOL_FRIENDLY_NAMES.get(name, name)}**:"
+
+                if isinstance(output, list):
+                    # Structured output blocks (text, image, etc.)
+                    block_parts = self._extract_parts_from_output(output)
+                    if block_parts:
+                        parts.append(TextContent(text=label))
+                        parts.extend(block_parts)
+                    else:
+                        parts.append(TextContent(text=f"{label}\n`...`"))
+                elif isinstance(output, str):
+                    preview = output[:500] + "..." if len(output) > 500 else output
+                    parts.append(TextContent(text=f"{label}\n```\n{preview}\n```"))
+                elif output is not None:
+                    raw = str(output)
+                    preview = raw[:500] + "..." if len(raw) > 500 else raw
+                    parts.append(TextContent(text=f"{label}\n```\n{preview}\n```"))
+            return parts
+
+        # ── Regular text/content message ──
+        parts = []
+        for c in content:
+            ctype = getattr(c, "type", None)
+            if ctype == ContentType.TEXT:
+                text = getattr(c, "text", "")
+                if text:
+                    parts.append(TextContent(text=text))
+            elif ctype == ContentType.REFUSAL:
+                refusal = getattr(c, "refusal", "")
+                if refusal:
+                    parts.append(TextContent(text=refusal))
+            elif ctype == ContentType.IMAGE:
+                url = getattr(c, "image_url", None)
+                if url:
+                    parts.append(ImageContent(image_url=url))
+            elif ctype == ContentType.VIDEO:
+                url = getattr(c, "video_url", None)
+                if url:
+                    parts.append(VideoContent(video_url=url))
+            elif ctype == ContentType.AUDIO:
+                data = getattr(c, "data", None)
+                if data:
+                    parts.append(AudioContent(data=data))
+            elif ctype == ContentType.FILE:
+                url = getattr(c, "file_url", None) or getattr(c, "file_id", None)
+                if url:
+                    parts.append(FileContent(file_url=url))
+        return parts
+
+    def _extract_parts_from_output(self, output: Any) -> List[Any]:
+        """Extract parts from structured tool output (list of blocks)."""
+        from agentscope_runtime.engine.schemas.agent_schemas import (
+            TextContent,
+            ImageContent,
+            VideoContent,
+            AudioContent,
+            FileContent,
+        )
+
+        if not isinstance(output, list):
+            return []
+        parts = []
+        for block in output:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text" and block.get("text"):
+                parts.append(TextContent(text=block["text"]))
+            elif btype == "thinking":
+                # Only show thinking if style allows
+                if self.style.show_thinking and block.get("thinking"):
+                    parts.append(TextContent(text=f"🤔 {block['thinking']}"))
+            elif btype in ("image", "audio", "video", "file"):
+                src = block.get("source") or {}
+                stype = src.get("type")
+                url = None
+                if stype == "url" and src.get("url"):
+                    url = src["url"]
+                elif stype == "base64" and src.get("data"):
+                    mt = src.get("media_type") or "application/octet-stream"
+                    url = f"data:{mt};base64,{src['data']}"
+                if url:
+                    if btype == "image":
+                        parts.append(ImageContent(image_url=url))
+                    elif btype == "video":
+                        parts.append(VideoContent(video_url=url))
+                    elif btype == "audio":
+                        parts.append(AudioContent(data=url))
+                    else:
+                        parts.append(FileContent(file_url=url))
+        return parts
