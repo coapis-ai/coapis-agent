@@ -18,7 +18,7 @@ import {
   SparkMagicWandLine,
   SparkLocalFileLine,
   SparkModePlazaLine,
-  SparkInternetLine,
+  // SparkInternetLine,  // unused — 2026-07-06
   SparkModifyLine,
   SparkBrowseLine,
   SparkMcpMcpLine,

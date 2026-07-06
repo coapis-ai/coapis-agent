@@ -16,12 +16,14 @@
 """Tool call guard — programmatic dedup and rate limiting.
 
 Replaces the prompt-only "反循环铁律" in AGENTS.md with actual
-programmatic enforcement. Four layers of protection:
+programmatic enforcement. Three layers of protection:
 
 1. Exact dedup: same tool + same params → return cached result
-2. Consecutive block: same tool 3+ times in a row → hard block
-3. Empty-result block: consecutive empty/no-output results → hard block
-4. Session stats: track per-tool call counts for diagnostics
+2. Empty-result block: consecutive empty/no-output results → hard block
+3. Session stats: track per-tool call counts for diagnostics
+
+Note: reasoning-level loops (same reasoning pattern, different params)
+are handled by ReasoningLoopDetector, not here.
 """
 
 from __future__ import annotations
@@ -38,7 +40,6 @@ logger = logging.getLogger(__name__)
 
 # ── Thresholds ──
 _EXACT_DEDUP_THRESHOLD = 2    # Same call this many times → inject warning
-_CONSECUTIVE_BLOCK = 3        # Same tool this many times in a row → hard block
 _EMPTY_RESULT_BLOCK = 2       # Consecutive empty results → hard block
 _SESSION_WARN = 10            # Same tool this many times per session → warn
 
@@ -60,9 +61,6 @@ class ToolCallGuard:
         self._call_counts: dict[str, int] = defaultdict(int)
         # (tool_name, params_hash) → number of times check_and_dedup returned cached
         self._dedup_hits: dict[str, int] = defaultdict(int)
-        # last tool_name for consecutive detection
-        self._last_tool_name: str = ""
-        self._consecutive_count: int = 0
         # consecutive empty-result tracking
         self._consecutive_empty: int = 0
 
@@ -110,25 +108,7 @@ class ToolCallGuard:
                 # First re-hit: return cached but don't block
                 return self._result_cache[call_key]
 
-            # ── Layer 2: Consecutive same-tool hard block ──
-            if tool_name != self._last_tool_name:
-                self._consecutive_count = 0
-            self._consecutive_count += 1
-            self._last_tool_name = tool_name
-
-            if self._consecutive_count >= _CONSECUTIVE_BLOCK:
-                logger.warning(
-                    "ToolCallGuard: consecutive BLOCK for %s "
-                    "(%d consecutive calls)",
-                    tool_name, self._consecutive_count,
-                )
-                return (
-                    f"[系统阻断] 你已连续 {self._consecutive_count} 次调用 "
-                    f"{tool_name}，已触发循环保护。"
-                    f"禁止继续调用此工具，请直接基于已有信息给出结论。"
-                )
-
-            # ── Layer 2b: Empty-result hard block ──
+            # ── Layer 2: Empty-result hard block ──
             if self._consecutive_empty >= _EMPTY_RESULT_BLOCK:
                 logger.warning(
                     "ToolCallGuard: empty-result BLOCK for %s "
@@ -201,8 +181,6 @@ class ToolCallGuard:
             self._call_history.clear()
             self._call_counts.clear()
             self._dedup_hits.clear()
-            self._last_tool_name = ""
-            self._consecutive_count = 0
             self._consecutive_empty = 0
 
 
