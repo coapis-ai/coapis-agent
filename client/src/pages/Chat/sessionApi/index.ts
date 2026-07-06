@@ -449,6 +449,7 @@ const chatSpecToSession = (chat: ChatSpec): ExtendedSession =>
     createdAt: chat.created_at ?? null,
     updatedAt: chat.updated_at ?? chat.created_at ?? null,
     pinned: chat.pinned ?? false,
+    generating: chat.generating ?? false,
   }) as ExtendedSession;
 
 /** Returns true when id is a pure numeric local timestamp (not a backend UUID). */
@@ -820,6 +821,15 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         });
 
         this._sessions = result;
+
+        // Trigger generating-poll for sessions actively processed by other channels
+        // so sidebar shows "Live" and messages appear once processing completes.
+        for (const session of result) {
+          const ext = session as ExtendedSession;
+          if (ext.generating && ext.realId) {
+            this._startGeneratingPoll(ext.realId);
+          }
+        }
 
         // Handle preferredChatId (move preferred session to front)
         if (this.preferredChatId) {

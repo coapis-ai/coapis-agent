@@ -81,6 +81,13 @@ _WECOM_BOT_OWNER: dict = {}
 _UPLOAD_CMDS = (_UPLOAD_CMD_INIT, _UPLOAD_CMD_CHUNK, _UPLOAD_CMD_FINISH)
 _UPLOAD_ACK_TIMEOUT = 30.0  # seconds to wait for each upload ack
 
+# Keepalive for "🤔 Thinking..." stream: refresh to avoid WeCom
+# server-side timeout; force-finish before the limit so later replies
+# can start a fresh stream_id.
+_PROCESSING_REFRESH_INTERVAL = 20.0
+_PROCESSING_MAX_DURATION = 180.0
+_PROCESSING_TEXT = "🤔 Thinking..."
+
 # Map ContentType → wecom msgtype used in send_message.
 _MEDIA_MSGTYPE: Dict[str, str] = {
     "image": "image",
@@ -203,6 +210,11 @@ class WecomChannel(BaseChannel):
             group_policy=group_policy,
             allow_from=allow_from,
             deny_message=deny_message,
+            channel_cfg={
+                "filter_thinking": filter_thinking,
+                "filter_tool_messages": filter_tool_messages,
+                "show_tool_details": show_tool_details,
+            },
         )
         self.enabled = enabled
         self.bot_id = bot_id
@@ -1155,6 +1167,8 @@ class WecomChannel(BaseChannel):
         self,
         frame: Any,
         stream_id: str,
+        interval: float = _PROCESSING_REFRESH_INTERVAL,
+        max_duration: float = _PROCESSING_MAX_DURATION,
     ) -> None:
         """Periodically refresh the 'thinking' stream to prevent timeout.
 
@@ -1168,13 +1182,13 @@ class WecomChannel(BaseChannel):
         start = asyncio.get_event_loop().time()
         try:
             while True:
-                await asyncio.sleep(self._KEEPALIVE_INTERVAL)
+                await asyncio.sleep(interval)
                 elapsed = asyncio.get_event_loop().time() - start
-                if elapsed >= self._KEEPALIVE_TIMEOUT:
+                if elapsed >= max_duration:
                     # Safety timeout: just stop refreshing, leave stream open
                     logger.warning(
                         "wecom: keepalive safety timeout after %ds, stream_id=%s",
-                        self._KEEPALIVE_TIMEOUT, stream_id[:20],
+                        max_duration, stream_id[:20],
                     )
                     break
                 # Refresh with same content (SDK overwrite)
@@ -1182,7 +1196,7 @@ class WecomChannel(BaseChannel):
                     await self._client.reply_stream(
                         frame,
                         stream_id=stream_id,
-                        content="🤔 Thinking...",
+                        content=_PROCESSING_TEXT,
                         finish=False,
                     )
                 except Exception:
@@ -1200,8 +1214,20 @@ class WecomChannel(BaseChannel):
     async def _before_consume_process(
         self, request: "AgentRequest"
     ) -> None:
-        """Send 'Thinking…' placeholder stream with keepalive."""
+        """Send 'Thinking…' placeholder stream with keepalive.
+
+        Guard: if a processing_stream_id already exists on the request
+        (set by the first call), skip to avoid sending duplicate
+        "🤔 Thinking…" indicators.
+        """
         self._streaming_text_sent = False
+        # ── Re-entrance guard ──
+        # consume_one calls _before_consume_process, then passes the
+        # request to _consume_with_tracker which calls it again via
+        # _stream_with_tracker.  The second call must be a no-op.
+        if getattr(request, "_wecom_processing_stream_id", ""):
+            return
+
         meta = getattr(request, "channel_meta", None) or {}
         frame = meta.get("wecom_frame")
         has_text = bool(getattr(request, "input", None))
@@ -1322,7 +1348,7 @@ class WecomChannel(BaseChannel):
         """
         if stream_type == "reasoning":
             return f"💭 {text}" if text else ""
-        prefix = self.bot_prefix or ""
+        prefix = send_meta.get("bot_prefix", "") or self.bot_prefix or ""
         if prefix and text:
             return f"{prefix}  {text}"
         return text
