@@ -758,6 +758,60 @@ _FILE_OPERATION_DIRECTIVE_RU = (
 )
 
 
+_BOOTSTRAP_GUIDANCE_TAG = "__COAPIS_BOOTSTRAP_GUIDANCE__"
+
+
+def build_bootstrap_guidance_v2(
+    language: str = "zh",
+    attempt: int = 1,
+    max_attempts: int = 3,
+) -> str:
+    """Build concise bootstrap guidance for first-time user setup.
+
+    v2: Injected as an independent system message.  The agent answers
+    the user's question first, then appends a brief setup prompt.
+
+    Args:
+        language: Language code (zh/en).
+        attempt: Current attempt number (1-based).
+        max_attempts: Maximum allowed attempts.
+
+    Returns:
+        System-message text with the guidance tag prefix.
+    """
+    remaining = max_attempts - attempt
+    if language == "zh":
+        if attempt == 1:
+            tail = "回答末尾问一句用户怎么称呼、喜欢什么风格。"
+        elif attempt == 2:
+            tail = "回答末尾轻提一句上次的问题，换个说法。"
+        else:
+            tail = "最后一次，简短提一句，用户不答就不再问。"
+
+        return (
+            f"{_BOOTSTRAP_GUIDANCE_TAG}\n"
+            f"[内部指令 — 禁止展示给用户] 首次引导({attempt}/{max_attempts})\n"
+            f"规则：先完整回答问题。{tail}"
+            "用户给了名字/偏好就更新PROFILE.md。"
+            "用户明确拒绝或引导完成就创建`.bootstrap_completed`。"
+        )
+    # English
+    if attempt == 1:
+        tail_en = "At the end, casually ask what to call them and preferred style."
+    elif attempt == 2:
+        tail_en = "Drop a brief, differently-worded reminder at the end."
+    else:
+        tail_en = "Last attempt — very brief. If user doesn't engage, never ask again."
+
+    return (
+        f"{_BOOTSTRAP_GUIDANCE_TAG}\n"
+        f"[Internal — do NOT show to user] Bootstrap ({attempt}/{max_attempts})\n"
+        f"Rules: Answer fully first. {tail_en} "
+        "Update PROFILE.md if user shares info. "
+        "Create `.bootstrap_completed` when done or if user declines."
+    )
+
+
 def _get_file_operation_directive(language: str = "zh") -> str:
     """Return the system-level file operation directive for the given language."""
     if language == "ru":
@@ -770,6 +824,8 @@ def _get_file_operation_directive(language: str = "zh") -> str:
 __all__ = [
     "build_system_prompt_from_working_dir",
     "build_bootstrap_guidance",
+    "build_bootstrap_guidance_v2",
+    "_BOOTSTRAP_GUIDANCE_TAG",
     "build_multimodal_hint",
     "format_multimodal_hint",
     "get_active_model_supports_multimodal",

@@ -159,21 +159,26 @@ async def _get_chat_manager(request: Request, agent_id: str = None):
         )
 
     # No agent_id — find user's default workspace (prefer user:xxx agent)
-    fallback_ws = None
+    # Try to find and lazy-start a workspace for this user
+    fallback_agent = None
     for key, ws in getattr(manager, '_workspaces', {}).items():
         ws_username = getattr(ws, 'username', None) or ""
         if ws_username != username:
             continue
-        if not (hasattr(ws, 'chat_manager') and ws.chat_manager):
-            continue
         ws_agent_id = getattr(ws, 'agent_id', None) or ""
         if ws_agent_id.startswith("user:"):
-            return ws.chat_manager
-        if fallback_ws is None:
-            fallback_ws = ws.chat_manager
+            fallback_agent = ws_agent_id
+            break
+        if fallback_agent is None:
+            fallback_agent = ws_agent_id
 
-    if fallback_ws:
-        return fallback_ws
+    if fallback_agent:
+        try:
+            ws = await manager.get_agent(fallback_agent, username=username)
+            if ws and hasattr(ws, 'chat_manager') and ws.chat_manager:
+                return ws.chat_manager
+        except Exception as exc:
+            logger.warning("_get_chat_manager: fallback get_agent(%s) failed: %s", fallback_agent, exc)
 
     raise HTTPException(
         status_code=503,

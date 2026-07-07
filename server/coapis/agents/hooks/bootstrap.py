@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,104 +15,131 @@
 
 """Bootstrap hook for first-time user interaction guidance.
 
-This hook checks for BOOTSTRAP.md on the first user interaction and
-prepends guidance to help set up the agent's identity and preferences.
+v2: Injects guidance as an independent system message instead of
+mutating the user's message.  Tracks attempts via ``.bootstrap_state``
+and auto-completes after ``max_attempts`` (default 3).
 """
+import json
 import logging
 from pathlib import Path
 from typing import Any
 
-from ..prompt import build_bootstrap_guidance
-from ..utils import (
-    is_first_user_interaction,
-    prepend_to_message_content,
+from agentscope.message import Msg
+
+from ..prompt import (
+    _BOOTSTRAP_GUIDANCE_TAG,
+    build_bootstrap_guidance_v2,
 )
+from ..utils import has_pending_bootstrap
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_MAX_ATTEMPTS = 3
+
 
 class BootstrapHook:
-    """Hook for bootstrap guidance on first user interaction.
+    """Hook for soft bootstrap guidance on first user interactions.
 
-    This hook looks for a BOOTSTRAP.md file in the working directory
-    and if found, prepends guidance to the first user message to help
-    establish the agent's identity and user preferences.
+    Unlike v1 which prepends guidance into the user message (destroying
+    the original input), v2:
+    * keeps the user message intact
+    * injects a separate ``system`` message into agent memory
+    * tracks attempts in ``.bootstrap_state`` (JSON)
+    * auto-stops after *max_attempts* non-cooperative rounds
     """
 
     def __init__(
         self,
         working_dir: Path,
         language: str = "zh",
+        max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
     ):
-        """Initialize bootstrap hook.
-
-        Args:
-            working_dir: Working directory containing BOOTSTRAP.md
-            language: Language code for bootstrap guidance (en/zh)
-        """
         self.working_dir = working_dir
         self.language = language
+        self.max_attempts = max_attempts
 
     async def __call__(
         self,
         agent,
         kwargs: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Check and load BOOTSTRAP.md on first user interaction.
+        """Pre-reasoning hook: inject bootstrap guidance system message.
 
-        Args:
-            agent: The agent instance
-            kwargs: Input arguments to the _reasoning method
-
-        Returns:
-            None (hook doesn't modify kwargs)
+        Returns None (does not modify kwargs).
         """
         try:
-            bootstrap_path = self.working_dir / "BOOTSTRAP.md"
-            bootstrap_completed_flag = (
-                self.working_dir / ".bootstrap_completed"
-            )
-
-            # Check if bootstrap has already been triggered before
-            if bootstrap_completed_flag.exists():
+            if not has_pending_bootstrap(self.working_dir):
                 return None
 
-            if not bootstrap_path.exists():
+            # Only trigger on actual first interaction — skip if there
+            # are already assistant messages in memory (i.e., returning user)
+            try:
+                memory_content = getattr(agent.memory, "content", [])
+                has_assistant = any(
+                    isinstance(m, (list, tuple))
+                    and len(m) >= 1
+                    and isinstance(m[0], dict)
+                    and m[0].get("role") == "assistant"
+                    for m in memory_content
+                )
+                if has_assistant:
+                    return None
+            except Exception:
+                pass  # if memory inspection fails, proceed with bootstrap
+
+            state_file = self.working_dir / ".bootstrap_state"
+            state = {"attempts": 0, "max_attempts": self.max_attempts}
+            if state_file.exists():
+                try:
+                    state = json.loads(
+                        state_file.read_text(encoding="utf-8"),
+                    )
+                except Exception:
+                    pass  # corrupt file → reset
+
+            current_attempt = state.get("attempts", 0) + 1
+            max_att = state.get("max_attempts", self.max_attempts)
+
+            # If we've already exhausted attempts, mark completed and stop
+            if current_attempt > max_att:
+                (self.working_dir / ".bootstrap_completed").write_text(
+                    "", encoding="utf-8",
+                )
+                logger.info(
+                    "Bootstrap auto-completed after %d attempts", max_att,
+                )
                 return None
 
-            messages = await agent.memory.get_memory()
-            if not is_first_user_interaction(messages):
-                return None
-
-            bootstrap_guidance = build_bootstrap_guidance(
-                self.language,
+            # Persist updated state
+            state["attempts"] = current_attempt
+            state["max_attempts"] = max_att
+            state_file.write_text(
+                json.dumps(state, ensure_ascii=False, indent=2),
+                encoding="utf-8",
             )
 
-            logger.debug(
-                "Found BOOTSTRAP.md [%s], prepending guidance",
-                self.language,
+            guidance = build_bootstrap_guidance_v2(
+                language=self.language,
+                attempt=current_attempt,
+                max_attempts=max_att,
             )
 
-            system_prompt_count = sum(
-                1 for msg in messages if msg.role == "system"
+            logger.info(
+                "Bootstrap guidance injected (attempt %d/%d, lang=%s)",
+                current_attempt, max_att, self.language,
             )
-            for msg in messages[system_prompt_count:]:
-                if msg.role == "user":
-                    prepend_to_message_content(msg, bootstrap_guidance)
-                    break
 
-            logger.debug("Bootstrap guidance prepended to first user message")
-
-            # NOTE: Do NOT create completion flag here.
-            # The agent will create .bootstrap_completed after it finishes
-            # the multi-turn bootstrap conversation. This allows the
-            # bootstrap to span multiple messages (Q&A → update files → done).
+            # Inject as independent system message into agent memory.
+            # This runs in pre_reasoning, so the user message has already
+            # been added to memory.  We append the guidance AFTER it.
+            guidance_msg = Msg(
+                name="system",
+                role="system",
+                content=guidance,
+            )
+            await agent.memory.add(guidance_msg)
 
         except Exception as e:
-            logger.error(
-                "Failed to process bootstrap: %s",
-                e,
-                exc_info=True,
-            )
+            logger.error("Bootstrap hook failed: %s", e, exc_info=True)
 
         return None

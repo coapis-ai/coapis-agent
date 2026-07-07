@@ -603,6 +603,11 @@ def is_first_user_interaction(messages: list) -> bool:
 def prepend_to_message_content(msg, guidance: str) -> None:
     """Prepend guidance text to message content.
 
+    .. deprecated::
+        Kept for backward-compatibility only.  New bootstrap flow uses
+        ``build_bootstrap_guidance_v2`` which injects an independent
+        system message instead of mutating the user message.
+
     Args:
         msg: Msg object to modify.
         guidance: Text to prepend to the message content.
@@ -620,3 +625,40 @@ def prepend_to_message_content(msg, guidance: str) -> None:
             return
 
     msg.content.insert(0, {"type": "text", "text": guidance})
+
+
+def has_pending_bootstrap(working_dir) -> bool:
+    """Check whether bootstrap is still pending (not completed).
+
+    This replaces ``is_first_user_interaction`` for bootstrap flow
+    decisions.  It checks for the ``.bootstrap_completed`` flag file
+    and the attempt counter in ``.bootstrap_state``.
+
+    Args:
+        working_dir: Path-like to the agent's working directory.
+
+    Returns:
+        True if bootstrap should still be triggered.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    wd = _Path(working_dir)
+    completed_flag = wd / ".bootstrap_completed"
+    if completed_flag.exists():
+        return False
+
+    state_file = wd / ".bootstrap_state"
+    if state_file.exists():
+        try:
+            state = _json.loads(state_file.read_text(encoding="utf-8"))
+            if state.get("attempts", 0) >= state.get("max_attempts", 3):
+                return False
+        except Exception:
+            pass
+
+    # Also check BOOTSTRAP.md existence
+    if not (wd / "BOOTSTRAP.md").exists():
+        return False
+
+    return True

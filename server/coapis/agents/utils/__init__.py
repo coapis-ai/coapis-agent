@@ -47,6 +47,7 @@ from .file_handling import (
 
 # Message processing
 from .message_processing import (
+    has_pending_bootstrap,
     is_first_user_interaction,
     prepend_to_message_content,
     process_file_and_media_blocks_in_message,
@@ -94,6 +95,7 @@ __all__ = [
     "download_file_from_url",
     # Message processing
     "process_file_and_media_blocks_in_message",
+    "has_pending_bootstrap",
     "is_first_user_interaction",
     "prepend_to_message_content",
     # Message request normalizer

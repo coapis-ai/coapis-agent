@@ -274,8 +274,8 @@ async def console_chat(
         agent_id = f"user:{username}"
         logger.info(f"agent_id not provided, falling back to {agent_id}")
 
-    # ── Get workspace ──
-    workspace = manager.get_workspace(agent_id, username=username)
+    # ── Get workspace (get_agent starts workspace if needed, get_workspace is cache-only) ──
+    workspace = await manager.get_agent(agent_id, username=username)
     if not workspace:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
