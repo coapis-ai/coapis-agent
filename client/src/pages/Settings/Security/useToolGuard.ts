@@ -1,19 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import api from "../../../api";
-import type {
-  ToolGuardConfig,
-  ToolGuardRule,
-} from "../../../api/modules/security";
-
-export interface MergedRule extends ToolGuardRule {
-  source: "builtin" | "custom";
-  disabled: boolean;
-}
+import type { ToolGuardConfig } from "../../../api/modules/security";
+import type { ShellRule } from "../../../api/modules/security";
 
 export function useToolGuard() {
   const [config, setConfig] = useState<ToolGuardConfig | null>(null);
-  const [builtinRules, setBuiltinRules] = useState<ToolGuardRule[]>([]);
-  const [customRules, setCustomRules] = useState<ToolGuardRule[]>([]);
+  const [globalRules, setGlobalRules] = useState<ShellRule[]>([]);
+  const [customRules, setCustomRules] = useState<ShellRule[]>([]);
   const [disabledRules, setDisabledRules] = useState<Set<string>>(new Set());
   const [shellEvasionChecks, setShellEvasionChecks] = useState<
     Record<string, boolean>
@@ -26,13 +19,13 @@ export function useToolGuard() {
     setLoading(true);
     setError(null);
     try {
-      const [cfg, builtin] = await Promise.all([
+      const [cfg, rules] = await Promise.all([
         api.getToolGuard(),
-        api.getBuiltinRules(),
+        api.getGlobalRules(),
       ]);
       setConfig(cfg);
       setEnabled(cfg.enabled);
-      setBuiltinRules(builtin);
+      setGlobalRules(rules);
       setCustomRules(cfg.custom_rules ?? []);
       setDisabledRules(new Set(cfg.disabled_rules ?? []));
       setShellEvasionChecks(cfg.shell_evasion_checks ?? {});
@@ -74,29 +67,16 @@ export function useToolGuard() {
     });
   }, []);
 
-  const addCustomRule = useCallback((rule: ToolGuardRule) => {
+  const addCustomRule = useCallback((rule: ShellRule) => {
     setCustomRules((prev) => [...prev, rule]);
   }, []);
 
   const updateCustomRule = useCallback(
-    (ruleId: string, rule: ToolGuardRule) => {
+    (ruleId: string, rule: ShellRule) => {
       setCustomRules((prev) => prev.map((r) => (r.id === ruleId ? rule : r)));
     },
     [],
   );
-
-  const mergedRules: MergedRule[] = [
-    ...builtinRules.map((r) => ({
-      ...r,
-      source: "builtin" as const,
-      disabled: disabledRules.has(r.id),
-    })),
-    ...customRules.map((r) => ({
-      ...r,
-      source: "custom" as const,
-      disabled: disabledRules.has(r.id),
-    })),
-  ];
 
   const toggleShellEvasionCheck = useCallback(
     (checkName: string, checked: boolean) => {
@@ -118,12 +98,11 @@ export function useToolGuard() {
 
   return {
     config,
-    builtinRules,
+    globalRules,
     customRules,
     disabledRules,
     enabled,
     setEnabled,
-    mergedRules,
     shellEvasionChecks,
     toggleShellEvasionCheck,
     loading,

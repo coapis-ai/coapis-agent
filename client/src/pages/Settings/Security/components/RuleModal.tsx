@@ -56,7 +56,7 @@ export function RuleModal({
         form.setFieldsValue({
           ...editingRule,
           patterns: editingRule.patterns.join("\n"),
-          exclude_patterns: editingRule.exclude_patterns.join("\n"),
+          exclude_patterns: editingRule.exclude_patterns?.join("\n") ?? "",
         });
       } else {
         form.resetFields();

@@ -2,14 +2,14 @@ import { request } from "../request";
 
 export interface ToolGuardRule {
   id: string;
-  tools: string[];
-  params: string[];
+  tools?: string[];
+  params?: string[];
   category: string;
   severity: string;
   patterns: string[];
-  exclude_patterns: string[];
+  exclude_patterns?: string[];
   description: string;
-  remediation: string;
+  remediation?: string;
 }
 
 export interface ToolGuardConfig {
@@ -124,6 +124,9 @@ export interface ShellRule {
   exclude_patterns?: string[];
   description: string;
   remediation?: string;
+  // UI extension fields (used by RuleTable)
+  disabled?: boolean;
+  source?: "builtin" | "custom";
 }
 
 export const securityApi = {
@@ -278,7 +281,7 @@ export const securityApi = {
       description: string;
       access_control: Record<string, any>;
       commands_count: number;
-      rules_count: number;
+      global_rules_count: number;
       evasion_checks: Record<string, boolean>;
     }>("/config/security/tool-guard/config"),
 
@@ -287,8 +290,8 @@ export const securityApi = {
       "/config/security/tool-guard/commands",
     ),
 
-  getUnifiedRules: () =>
-    request<ShellRule[]>("/config/security/tool-guard/rules"),
+  getGlobalRules: () =>
+    request<ShellRule[]>("/config/security/tool-guard/global-rules"),
 
   getUnifiedEvasionChecks: () =>
     request<{ evasion_checks: Record<string, boolean> }>(

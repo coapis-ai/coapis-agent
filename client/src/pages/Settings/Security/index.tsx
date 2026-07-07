@@ -3,14 +3,15 @@ import { useTranslation } from "react-i18next";
 import { useSecurityPage } from "./useSecurityPage";
 import { PermissionGuard } from "@/components/PermissionGuard";
 import {
-  ToolGuardTab,
   RuleModal,
   PreviewModal,
   SkillScannerSection,
   FileGuardSection,
   AllowNoAuthHostsTab,
   InputGuardTab,
+  AdvancedRulesTab,
 } from "./components";
+import { CommandClassificationSection } from "./components/ToolGuardTab";
 import { PageHeader } from "@/components/PageHeader";
 import styles from "./index.module.less";
 
@@ -20,23 +21,12 @@ function SecurityPage() {
   const {
     activeTab,
     setActiveTab,
-    form: _unusedForm,
-    config: _unusedConfig,
-    enabled: _unusedEnabled,
-    setEnabled: _unusedSetEnabled,
-    toolOptions: _unusedToolOptions,
-    saving: _unusedSaving,
-    handleSave: _unusedHandleSave,
-    handleReset: _unusedHandleReset,
-    mergedRules,
-    builtinRules,
+    globalRules: _unusedGlobalRules,
     customRules,
-    toggleRule,
-    deleteCustomRule,
-    openAddRule,
-    openEditRule,
-    shellEvasionChecks: _unused1,
-    toggleShellEvasionCheck: _unused2,
+    toggleRule: _unusedToggleRule,
+    deleteCustomRule: _unusedDeleteCustomRule,
+    shellEvasionChecks,
+    toggleShellEvasionCheck,
     editModal,
     setEditModal,
     editingRule,
@@ -92,20 +82,25 @@ function SecurityPage() {
           onChange={setActiveTab}
           items={[
             {
-              key: "toolGuard",
+              key: "commandClassification",
               label: (
                 <span className={styles.tabLabel}>
-                  {t("security.toolDetection.title", "工具检测规则")}
+                  {t("security.commandClassification.title", "命令分级")}
+                </span>
+              ),
+              children: <CommandClassificationSection />,
+            },
+            {
+              key: "advancedRules",
+              label: (
+                <span className={styles.tabLabel}>
+                  {t("security.advancedRules.title", "高级检查规则")}
                 </span>
               ),
               children: (
-                <ToolGuardTab
-                  mergedRules={mergedRules}
-                  toggleRule={toggleRule}
-                  onPreviewRule={setPreviewRule}
-                  onEditRule={openEditRule}
-                  onDeleteRule={deleteCustomRule}
-                  openAddRule={openAddRule}
+                <AdvancedRulesTab
+                  shellEvasionChecks={shellEvasionChecks}
+                  toggleShellEvasionCheck={toggleShellEvasionCheck}
                 />
               ),
             },
@@ -212,10 +207,7 @@ function SecurityPage() {
       <RuleModal
         open={editModal}
         editingRule={editingRule}
-        existingRuleIds={[
-          ...builtinRules.map((r) => r.id),
-          ...customRules.map((r) => r.id),
-        ]}
+        existingRuleIds={customRules.map((r) => r.id)}
         onOk={handleEditSave}
         onCancel={() => setEditModal(false)}
         form={editForm}

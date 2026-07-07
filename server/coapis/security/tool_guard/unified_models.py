@@ -3,9 +3,9 @@
 
 Merges three data sources into one YAML config:
   1. access_control — tool guarding (guarded/denied tools + custom rules)
-  2. commands — L0-L4 command classification (109 commands)
-  3. rules — pattern-based detection (29 rules, command-specific + cross-command)
-  4. evasion_checks — evasion detection toggles (7 checks)
+  2. commands — L0-L4 command classification (124 commands with sub_commands + demotion)
+  3. global_rules — cross-command pattern detection (10 rules)
+  4. evasion_checks — evasion detection toggles (11 checks)
 
 Config file: system/tool_guard.yaml
 """
@@ -61,30 +61,48 @@ class SubCommandEntry(BaseModel):
     desc: str = ""
 
 
-class DemotionRule(BaseModel):
-    """Context-aware demotion rule.
+class CommandRule(BaseModel):
+    """Context-aware command rule (replaces DemotionRule).
 
-    When conditions are met (safe path, read-only params, etc.),
-    the command's risk level is automatically lowered.
+    Supports both promotion and demotion of risk levels.
+    Rules are evaluated in order; first match wins.
+    """
+
+    id: str = Field(description="Rule unique identifier, e.g. 'rm_system_critical'")
+    desc: str = ""
+    level: str = Field(description="Target level when matched: L0/L1/L2/L3/L4")
+    action: str = Field(description="Target action when matched: allow / audit / confirm / block")
+    # ── Match conditions (all optional, AND logic between groups) ──
+    patterns: list[str] = Field(
+        default_factory=list,
+        description="Regex: command must match at least one (OR logic)",
+    )
+    exclude_patterns: list[str] = Field(
+        default_factory=list,
+        description="Regex: command must NOT match any (OR logic)",
+    )
+    safe_paths: list[str] = Field(
+        default_factory=list,
+        description="Path prefixes: all absolute paths must fall under these",
+    )
+    scope: str | None = Field(
+        default=None,
+        description="Special scope: 'workspace' = only match paths within user workspace",
+    )
+
+
+class DemotionRule(BaseModel):
+    """[DEPRECATED] Use CommandRule via 'rules' field instead.
+
+    Kept for backward compatibility. Engine prefers 'rules' over 'demotion'.
     """
 
     level: str = Field(description="Demoted level: L0/L1/L2/L3/L4")
     action: str = Field(description="Demoted action: allow / audit / confirm / block")
     desc: str = ""
-    # ── Condition: pattern matching ──
-    patterns: list[str] = Field(
-        default_factory=list,
-        description="Demote when command matches ANY of these patterns (OR logic)",
-    )
-    exclude_patterns: list[str] = Field(
-        default_factory=list,
-        description="Do NOT demote when command matches ANY of these (overrides patterns)",
-    )
-    # ── Condition: path safety ──
-    safe_paths: list[str] = Field(
-        default_factory=list,
-        description="Demote when all paths in command fall under these prefixes",
-    )
+    patterns: list[str] = Field(default_factory=list)
+    exclude_patterns: list[str] = Field(default_factory=list)
+    safe_paths: list[str] = Field(default_factory=list)
 
 
 class CommandEntry(BaseModel):
@@ -102,10 +120,28 @@ class CommandEntry(BaseModel):
         default_factory=dict,
         description="Sub-command level overrides, e.g. git.status → L0",
     )
-    # ── Demotion rules ──
+    # ── Exceptions: rules stricter than default action (↑ upgrade) ──
+    exceptions: list[CommandRule] = Field(
+        default_factory=list,
+        description="Rules that upgrade action (e.g. confirm→block for dangerous params). "
+                    "First-match-wins. Only used when matched rule is stricter than default.",
+    )
+    # ── Demotion rules: rules more lenient than default action (↓ downgrade) ──
+    demotion_rules: list[CommandRule] = Field(
+        default_factory=list,
+        description="Rules that downgrade action (e.g. confirm→allow for safe paths). "
+                    "First-match-wins. Only used when matched rule is more lenient than default.",
+    )
+    # ── Deprecated: old 'rules' field, migrated to exceptions/demotion_rules ──
+    rules: list[CommandRule] = Field(
+        default_factory=list,
+        description="[DEPRECATED] Migrate to exceptions + demotion_rules. "
+                    "Kept for backward compat; engine reads exceptions/demotion_rules first.",
+    )
+    # ── Deprecated: old demotion dict ──
     demotion: dict[str, DemotionRule] = Field(
         default_factory=dict,
-        description="Demotion rules that lower risk when conditions are met",
+        description="[DEPRECATED] Use demotion_rules instead.",
     )
 
 
@@ -115,19 +151,16 @@ class CommandEntry(BaseModel):
 
 
 class PatternRule(BaseModel):
-    """A detection rule with regex patterns.
+    """A cross-command detection rule with regex patterns.
 
-    ``commands`` links the rule to specific L0-L4 command entries.
-    When empty, the rule is a cross-command pattern that applies globally.
+    These rules apply globally across all commands and detect
+    dangerous patterns that command-level classification cannot express
+    (e.g., fork bombs, reverse shells, pipe-to-shell).
     """
 
     id: str
     severity: str = Field(description="CRITICAL / HIGH / MEDIUM / LOW")
     category: str = ""
-    commands: list[str] = Field(
-        default_factory=list,
-        description="Linked command names ([] = cross-command rule)",
-    )
     patterns: list[str] = Field(default_factory=list)
     exclude_patterns: list[str] = Field(default_factory=list)
     description: str = ""
@@ -164,7 +197,7 @@ class ToolGuardConfig(BaseModel):
         },
     )
     commands: dict[str, CommandEntry] = Field(default_factory=dict)
-    rules: list[PatternRule] = Field(default_factory=list)
+    global_rules: list[PatternRule] = Field(default_factory=list)
 
     # ------------------------------------------------------------------
     # Convenience helpers
@@ -175,21 +208,9 @@ class ToolGuardConfig(BaseModel):
         entry = self.commands.get(cmd_name)
         return entry.level if entry else None
 
-    def get_rules_for_command(self, cmd_name: str) -> list[PatternRule]:
-        """Return rules linked to *cmd_name* **plus** all cross-command rules."""
-        result: list[PatternRule] = []
-        for rule in self.rules:
-            if not rule.commands or cmd_name in rule.commands:
-                result.append(rule)
-        return result
-
-    def get_command_specific_rules(self, cmd_name: str) -> list[PatternRule]:
-        """Return only rules explicitly linked to *cmd_name*."""
-        return [r for r in self.rules if cmd_name in r.commands]
-
     def get_cross_command_rules(self) -> list[PatternRule]:
-        """Return rules that apply globally (commands list is empty)."""
-        return [r for r in self.rules if not r.commands]
+        """Return all global cross-command rules."""
+        return list(self.global_rules)
 
     def get_commands_by_level(self, level: str) -> dict[str, CommandEntry]:
         """Return all commands at the given level."""

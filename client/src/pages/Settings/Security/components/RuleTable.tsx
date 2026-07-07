@@ -10,7 +10,7 @@ import {
 import { Space } from "antd";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { MergedRule } from "../useToolGuard";
+import type { ShellRule } from "../../../../api/modules/security";
 import { useTheme } from "../../../../contexts/ThemeContext";
 import styles from "../index.module.less";
 
@@ -23,18 +23,18 @@ const SEVERITY_COLORS: Record<string, string> = {
 };
 
 interface RuleTableProps {
-  rules: MergedRule[];
+  rules: ShellRule[];
   enabled: boolean;
   onToggleRule: (ruleId: string, currentlyDisabled: boolean) => void;
-  onPreviewRule: (rule: MergedRule) => void;
-  onEditRule: (rule: MergedRule) => void;
+  onPreviewRule: (rule: ShellRule) => void;
+  onEditRule: (rule: ShellRule) => void;
   onDeleteRule: (ruleId: string) => void;
 }
 
 function groupRulesByCategory(
-  rules: MergedRule[],
-): Record<string, MergedRule[]> {
-  const groups: Record<string, MergedRule[]> = {};
+  rules: ShellRule[],
+): Record<string, ShellRule[]> {
+  const groups: Record<string, ShellRule[]> = {};
   for (const rule of rules) {
     const category = rule.category || "other";
     if (!groups[category]) {
@@ -65,7 +65,7 @@ export function RuleTable({
       dataIndex: "id",
       key: "id",
       width: 220,
-      render: (id: string, record: MergedRule) => (
+      render: (id: string, record: ShellRule) => (
         <span style={{ opacity: record.disabled ? 0.4 : 1 }}>{id}</span>
       ),
     },
@@ -74,7 +74,7 @@ export function RuleTable({
       dataIndex: "severity",
       key: "severity",
       width: 100,
-      render: (sev: string, record: MergedRule) => (
+      render: (sev: string, record: ShellRule) => (
         <Tag
           color={SEVERITY_COLORS[sev] ?? "default"}
           style={{ opacity: record.disabled ? 0.4 : 1 }}
@@ -88,7 +88,7 @@ export function RuleTable({
       dataIndex: "description",
       key: "description",
       ellipsis: true,
-      render: (_text: string, record: MergedRule) => {
+      render: (_text: string, record: ShellRule) => {
         const i18nKey = `security.rules.descriptions.${record.id}`;
         const translated = t(i18nKey, { defaultValue: "" });
         const display = translated || record.description;
@@ -114,7 +114,7 @@ export function RuleTable({
       dataIndex: "source",
       key: "source",
       width: 100,
-      render: (source: string, record: MergedRule) => (
+      render: (source: string, record: ShellRule) => (
         <Tag
           color={source === "builtin" ? "rgba(142, 140, 153, 1)" : "green"}
           style={{ opacity: record.disabled ? 0.4 : 1 }}
@@ -129,7 +129,7 @@ export function RuleTable({
       title: t("security.rules.actions"),
       key: "actions",
       width: 160,
-      render: (_: unknown, record: MergedRule) => (
+      render: (_: unknown, record: ShellRule) => (
         <Space size="small">
           <Tooltip
             title={
@@ -141,7 +141,7 @@ export function RuleTable({
             <Switch
               size="small"
               checked={!record.disabled}
-              onChange={() => onToggleRule(record.id, record.disabled)}
+              onChange={() => onToggleRule(record.id, !!record.disabled)}
               disabled={!enabled}
             />
           </Tooltip>

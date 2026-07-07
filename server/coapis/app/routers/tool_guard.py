@@ -7,7 +7,7 @@ single unified API backed by ``system/tool_guard.yaml``.
 Endpoints:
   GET/PUT /tool-guard/access-control   — guarded/denied tools + custom rules
   GET/PUT /tool-guard/commands         — L0-L4 command classification
-  GET/PUT /tool-guard/rules            — pattern-based detection rules
+  GET/PUT /tool-guard/global-rules     — cross-command pattern detection rules
   GET/PUT /tool-guard/evasion-checks   — evasion detection toggles
   GET      /tool-guard/config          — full unified config
   POST     /tool-guard/test            — test a command against the engine
@@ -84,7 +84,7 @@ async def get_full_config(request: Request) -> Dict[str, Any]:
         "description": data.get("description", ""),
         "access_control": data.get("access_control", {}),
         "commands_count": len(data.get("commands", {})),
-        "rules_count": len(data.get("rules", [])),
+        "global_rules_count": len(data.get("global_rules", [])),
         "evasion_checks": data.get("evasion_checks", {}),
     }
 
@@ -152,7 +152,7 @@ async def update_single_command(
     if cmd_name not in cmds:
         raise HTTPException(status_code=404, detail=f"Command '{cmd_name}' not found")
     entry = cmds[cmd_name]
-    for key in ("level", "desc", "action"):
+    for key in ("level", "desc", "action", "exceptions", "demotion_rules"):
         if key in body:
             entry[key] = body[key]
     cmds[cmd_name] = entry
@@ -161,47 +161,47 @@ async def update_single_command(
     return entry
 
 
-# ── GET/PUT /tool-guard/rules ───────────────────────────────────────
+# ── GET/PUT /tool-guard/global-rules ─────────────────────────────────
 
-@router.get("/config/security/tool-guard/rules")
+@router.get("/config/security/tool-guard/global-rules")
 @require_permission("security:read")
-async def get_rules(request: Request) -> List[Dict[str, Any]]:
-    """Get all pattern-based detection rules."""
+async def get_global_rules(request: Request) -> List[Dict[str, Any]]:
+    """Get all cross-command pattern detection rules."""
     data = _load_yaml_config()
-    return data.get("rules", [])
+    return data.get("global_rules", [])
 
 
-@router.put("/config/security/tool-guard/rules")
+@router.put("/config/security/tool-guard/global-rules")
 @require_permission("security:write")
-async def update_rules(
+async def update_global_rules(
     request: Request,
     body: List[Dict[str, Any]] = Body(...),
 ) -> Dict[str, Any]:
-    """Replace all detection rules (full list)."""
+    """Replace all global rules (full list)."""
     data = _load_yaml_config()
-    data["rules"] = body
+    data["global_rules"] = body
     _save_yaml_config(data)
     return {"status": "saved", "count": len(body)}
 
 
-@router.put("/config/security/tool-guard/rules/{rule_id}")
+@router.put("/config/security/tool-guard/global-rules/{rule_id}")
 @require_permission("security:write")
-async def update_single_rule(
+async def update_single_global_rule(
     request: Request,
     rule_id: str,
     body: Dict[str, Any] = Body(...),
 ) -> Dict[str, Any]:
-    """Update a single rule."""
+    """Update a single global rule."""
     data = _load_yaml_config()
-    rules = data.get("rules", [])
+    rules = data.get("global_rules", [])
     for i, rule in enumerate(rules):
         if rule.get("id") == rule_id:
-            for key in ("severity", "category", "commands", "patterns",
+            for key in ("severity", "category", "patterns",
                         "exclude_patterns", "description", "remediation", "action"):
                 if key in body:
                     rule[key] = body[key]
             rules[i] = rule
-            data["rules"] = rules
+            data["global_rules"] = rules
             _save_yaml_config(data)
             return rule
     raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
@@ -249,6 +249,37 @@ async def test_command(
 
     engine = get_unified_engine()
     result = engine.process_command("execute_shell_command", {"command": command})
+
+    # ── Enrich: identify rule source ──
+    reason = result.get("reason", "")
+    rule_source = "default"
+    if "global_rule_override" in reason:
+        rule_source = "global"
+    elif "rule:" in reason:
+        rule_id = reason.split("rule:")[1].split(" —")[0].split(" ")[0].strip()
+        # Check which field the matched rule came from
+        cmd_name = result.get("command")
+        if cmd_name and cmd_name in engine._config.commands:
+            entry = engine._config.commands[cmd_name]
+            exc_ids = {r.id for r in entry.exceptions}
+            dem_ids = {r.id for r in entry.demotion_rules}
+            legacy_ids = {r.id for r in entry.rules}
+            if rule_id in exc_ids:
+                rule_source = "exception"
+            elif rule_id in dem_ids:
+                rule_source = "demotion"
+            elif rule_id in legacy_ids:
+                rule_source = "exception"  # backward compat: old rules treated as exceptions
+            else:
+                rule_source = "exception"  # fallback
+    elif "sub_command:" in reason:
+        rule_source = "sub_command"
+    elif "Command-level default" in reason:
+        rule_source = "default"
+    elif "Evasion" in reason:
+        rule_source = "evasion"
+
+    result["rule_source"] = rule_source
     return result
 
 
@@ -348,6 +379,6 @@ async def get_shell_guard_config_legacy(request: Request) -> Dict[str, Any]:
     """Legacy: Get shell guard summary config."""
     data = _load_yaml_config()
     return {
-        "rules_count": len(data.get("rules", [])),
+        "global_rules_count": len(data.get("global_rules", [])),
         "evasion_checks": data.get("evasion_checks", {}),
     }
