@@ -58,12 +58,12 @@ docker/config/providers.json
 
 # --- Runtime data (bind mounted from host) ---
 workspaces/
-memory/
-MEMORY.md
-PROFILE.md
-SOUL.md
-AGENTS.md
-HEARTBEAT.md
+/memory/
+/MEMORY.md
+/PROFILE.md
+/SOUL.md
+/AGENTS.md
+/HEARTBEAT.md
 *.json.lock
 .reme_store_v1
 .bootstrap_completed
@@ -87,7 +87,7 @@ docs/*.js
 docs/package*.json
 
 # --- Scripts (local dev only) ---
-scripts/
+/scripts/
 
 # --- Client build artifacts ---
 client/node_modules/.tmp
