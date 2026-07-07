@@ -141,9 +141,15 @@ class Workspace:
                 self.skills_dir = AGENTS_DIR / agent_id / "skills"
         elif username and not is_global:
             # User-level workspace (unified under workspaces/{username}/)
+            from ..config.config import derive_workspace_dir
             user_workspace = _get_user_workspace_dir(username)
-            self.data_dir = user_workspace / "agents" / agent_id
-            self.workspace_dir = _get_user_agents_dir(username) / agent_id
+            if agent_id.startswith("user:"):
+                # Default user agent: workspace = workspaces/{username}/
+                self.workspace_dir = derive_workspace_dir(agent_id, username)
+            else:
+                # Sub-agent: workspace = workspaces/{username}/agents/{agent_id}/
+                self.workspace_dir = _get_user_agents_dir(username) / agent_id
+            self.data_dir = self.workspace_dir / "agents" / agent_id
             self.skills_dir = _get_user_skills_dir(username) / agent_id
         else:
             # Global workspace: runtime data in agents/{id}/data/, never in system/
@@ -238,8 +244,9 @@ class Workspace:
     def _ensure_identity_files(self) -> None:
         """Copy identity template files to workspace if missing.
 
-        Ensures every agent workspace has AGENTS.md, SOUL.md, PROFILE.md,
-        MEMORY.md, BOOTSTRAP.md, HEARTBEAT.md — copied from system/templates/.
+        Sub-agents (non-user, non-global) get a slim set:
+        only SOUL.md, PROFILE.md, AGENTS.md (from agent_level/ if available).
+        User default agents and global agents get the full set.
         """
         try:
             from coapis.constant import TEMPLATES_DIR
@@ -249,16 +256,33 @@ class Workspace:
                 logger.warning("TEMPLATES_DIR not found: %s", TEMPLATES_DIR)
                 return
 
-            identity_files = [
-                "AGENTS.md", "SOUL.md", "PROFILE.md",
-                "MEMORY.md", "BOOTSTRAP.md", "HEARTBEAT.md",
-            ]
+            # Determine if this is a sub-agent (not a user default or global agent)
+            aid = self.agent_id
+            is_sub_agent = (
+                not aid.startswith("user:")
+                and not aid.startswith("global_")
+                and not self.is_global
+            )
+
+            if is_sub_agent:
+                identity_files = ["AGENTS.md", "SOUL.md", "PROFILE.md", "MEMORY.md"]
+                layer_dir = TEMPLATES_DIR / "agent_level"
+            else:
+                identity_files = [
+                    "AGENTS.md", "SOUL.md", "PROFILE.md",
+                    "MEMORY.md", "BOOTSTRAP.md", "HEARTBEAT.md",
+                ]
+                layer_dir = TEMPLATES_DIR / "user_level"
+
             copied = 0
             for fname in identity_files:
                 dst = self.workspace_dir / fname
                 if dst.exists():
                     continue
-                src = TEMPLATES_DIR / fname
+                # Layer-specific template first, then global fallback
+                src = layer_dir / fname if layer_dir.exists() else TEMPLATES_DIR / fname
+                if not src.exists():
+                    src = TEMPLATES_DIR / fname
                 if src.exists():
                     shutil.copy2(src, dst)
                     copied += 1
@@ -452,24 +476,43 @@ class Workspace:
         else:
             # File-based agent: load from config.json + agent.json
             root_config = load_config()
+
+            # Global-inherited defaults (mcp/security/running/etc.)
+            # These are NOT in agent.json or fallback — loaded from global config
+            global_inherited = {}
             try:
-                default_config = build_fallback_agent_profile_config(self.agent_id, root_config).model_dump()
+                from ..config.config import AgentsRunningConfig, AgentsLLMRoutingConfig
+                global_inherited = {
+                    "mcp": getattr(root_config, "mcp", None),
+                    "security": getattr(root_config, "security", None),
+                    "acp": getattr(root_config, "acp", None),
+                    "running": getattr(root_config.agents, "running", None) or AgentsRunningConfig(),
+                    "llm_routing": getattr(root_config.agents, "llm_routing", None) or AgentsLLMRoutingConfig(),
+                    "heartbeat": getattr(getattr(root_config.agents, "defaults", None), "heartbeat", None),
+                    "channels": None,  # Do NOT inherit system-level channels
+                }
+            except Exception:
+                pass
+
+            try:
+                default_config = build_fallback_agent_profile_config(self.agent_id, root_config, username=self.username).model_dump()
             except Exception:
                 # Agent not in config.json - use minimal defaults
                 default_config = {
                     "id": self.agent_id,
                     "name": self.agent_id,
                     "description": "",
-                    "workspace_dir": str(self.workspace_dir),
+                    "workspace_dir": ".",
                 }
 
             try:
-                file_config = load_agent_config(self.agent_id, workspace_dir=self.workspace_dir)
-                file_config_dict = file_config.model_dump() if hasattr(file_config, 'model_dump') else file_config
-                config = {**default_config, **file_config_dict, **raw_agent_config}
+                file_config = load_agent_config(self.agent_id, workspace_dir=self.workspace_dir, username=self.username)
+                # exclude_unset=True: only overlay fields explicitly set in agent.json,
+                # don't let Pydantic defaults overwrite global-inherited values.
+                file_config_dict = file_config.model_dump(exclude_unset=True) if hasattr(file_config, 'model_dump') else file_config
+                config = {**global_inherited, **default_config, **file_config_dict, **raw_agent_config}
             except Exception:
-                # Agent not in config.json - use defaults + raw agent.json
-                config = {**default_config, **raw_agent_config}
+                config = {**global_inherited, **default_config, **raw_agent_config}
             logger.info(f"Loaded config for agent: {self.agent_id}")
 
         # Store config for later use (channel creation, etc.)

@@ -28,8 +28,16 @@ from .config import (
     ActiveModelsInfo,
     ACPConfig,
     ACPAgentConfig,
+    AgentRegistryEntry,
+    UserProfileConfig,
     load_agent_config,
     save_agent_config,
+    load_user_config,
+    save_user_config,
+    load_agents_registry,
+    add_agent_to_registry,
+    remove_agent_from_registry,
+    update_agent_in_registry,
 )
 from .utils import (
     get_available_channels,

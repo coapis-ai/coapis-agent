@@ -61,11 +61,11 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
 
     Creates:
     1. Workspace directory: workspaces/{username}/
-    2. Agent config: agent.json (based on DEFAULT_AGENT_TEMPLATE)
-    3. Essential JSON files: jobs.json, skill.json
-    4. Registers agent in config.json agents.profiles
-    5. User data directories: workspaces/{username}/agents, skills, workflows, chat, files, files/media, crons, backups
-    6. Base template files: SOUL.md, MEMORY.md, PROFILE.md (copied from global templates)
+    2. User-level config.json (user identity and preferences)
+    3. Agent config: workspaces/{username}/agent.json (based on DEFAULT_AGENT_TEMPLATE)
+    4. Essential JSON files: jobs.json, skill.json
+    5. User data directories: memory, agents, skills, chat, files, crons, backups
+    6. Base template files: SOUL.md, PROFILE.md, AGENTS.md (copied from system templates)
     7. Registers agent in MultiAgentManager (if request provided) — critical for runtime visibility
 
     ⚠️ CRITICAL: All user data MUST be in workspaces/{username}/. Never use data/{username}/.
@@ -103,6 +103,17 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
 
     # 3. Build and save agent config
     _create_agent_config(username, agent_id, agent_name, workspace_dir)
+
+    # 3b. Register default agent in user's config.json agents registry
+    from coapis.config.config import add_agent_to_registry
+    add_agent_to_registry(
+        username=username,
+        agent_id=agent_id,
+        name=agent_name,
+        description="默认智能体",
+        workspace_dir="",
+        is_default=True,
+    )
 
     # 4. Create ALL user data directories (isolated per user)
     # v0.5.1: Simplified structure — no evolution/ directory.
@@ -259,9 +270,9 @@ def _copy_base_templates(workspace_dir: Path, username: str, level: str = "user"
 
     # Files to copy for each level
     if level == "agent":
-        files_to_copy = ("SOUL.md", "PROFILE.md", "AGENTS.md")
+        files_to_copy = ("SOUL.md", "PROFILE.md", "AGENTS.md", "MEMORY.md")
     else:
-        files_to_copy = ("SOUL.md", "PROFILE.md", "AGENTS.md", "BOOTSTRAP.md", "HEARTBEAT.md")
+        files_to_copy = ("SOUL.md", "PROFILE.md", "AGENTS.md", "MEMORY.md", "BOOTSTRAP.md", "HEARTBEAT.md")
 
     # Fallback templates
     _FALLBACK_TEMPLATES = {

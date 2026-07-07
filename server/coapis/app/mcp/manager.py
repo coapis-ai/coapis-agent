@@ -106,7 +106,7 @@ class MCPClientManager:
         self,
         key: str,
         client_config: "MCPClientConfig",
-        timeout: float = 60.0,
+        timeout: float = 5.0,
     ) -> None:
         """Replace or add a client with new configuration.
 
@@ -116,7 +116,7 @@ class MCPClientManager:
         Args:
             key: Client identifier (from config)
             client_config: New client configuration
-            timeout: Connection timeout in seconds (default 60s)
+            timeout: Connection timeout in seconds (default 5s)
         """
         # 1. Create and connect new client outside lock (may be slow)
         logger.debug(f"Connecting new MCP client: {key}")
@@ -182,14 +182,14 @@ class MCPClientManager:
         self,
         key: str,
         client_config: "MCPClientConfig",
-        timeout: float = 60.0,
+        timeout: float = 5.0,
     ) -> None:
         """Add a new client (used during initial setup).
 
         Args:
             key: Client identifier
             client_config: Client configuration
-            timeout: Connection timeout in seconds (default 60s)
+            timeout: Connection timeout in seconds (default 5s)
         """
         client = self._build_client(client_config)
 

@@ -321,7 +321,7 @@ class DingTalkChannel(BaseChannel):
             robot_code=(
                 getattr(config, "robot_code", "") or config.client_id or ""
             ),
-            media_dir=config.media_dir or "",
+            media_dir=getattr(config, "media_dir", "") or "",
             workspace_dir=workspace_dir,
             on_reply_sent=on_reply_sent,
             show_tool_details=show_tool_details,

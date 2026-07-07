@@ -56,16 +56,10 @@ dependencies = [
     "jieba>=0.42.0",
     "segno>=1.6.6",
 
-    # ── 渠道（核心） ──
-    "discord-py>=2.3",
-    "dingtalk-stream>=0.24.3",
-    "alibabacloud-dingtalk>=2.2.42",
-    "alibabacloud-tea-openapi>=0.4.4",
-    "alibabacloud-tea-util>=0.3.0",
-    "lark-oapi>=1.5.3",
-    "python-telegram-bot>=20.0",
-    "twilio>=9.10.2",
-    "matrix-nio>=0.24.0",
+    # ── 渠道（可选，按需安装） ──
+    # 注意：渠道 SDK 已移至 [project.optional-dependencies] 的 channels extras
+    # 全量镜像通过 pip install ".[channels]" 安装，最小镜像运行时按需安装
+    # 保留企微、Telegram、QQ 作为核心渠道（体积小、用户多）
     "pywebview>=4.0",
 
     # ── AI 提供商 ──
@@ -116,6 +110,18 @@ coapis = "coapis.cli.main:cli"
 # Legacy group "copaw.doctor" is still loaded when present (backward compat).
 
 [project.optional-dependencies]
+# ── 渠道 SDK（体积较大，按需安装） ──
+channels = [
+    "discord-py>=2.3",
+    "dingtalk-stream>=0.24.3",
+    "alibabacloud-dingtalk>=2.2.42",
+    "alibabacloud-tea-openapi>=0.4.4",
+    "alibabacloud-tea-util>=0.3.0",
+    "lark-oapi>=1.5.3",
+    "python-telegram-bot>=20.0",
+    "twilio>=9.10.2",
+    "matrix-nio>=0.24.0",
+]
 wecom = [
     # 企业微信 SDK（私有包，不在公共 PyPI，需从私有源或本地安装）
     "wecom-aibot-python-sdk>=1.0.0",
