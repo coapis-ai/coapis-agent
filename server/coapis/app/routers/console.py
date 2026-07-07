@@ -84,7 +84,13 @@ async def get_push_messages(
             # No session_id = no approvals (security by default)
             pendings = []
         else:
+            # Query by both session_id and root_session_id to handle
+            # format differences: chat UUID vs "console:{username}".
+            # list_pending_by_session filters by p.session_id (exact match),
+            # get_pending_by_root_session filters by p.root_session_id.
             pendings = await svc.list_pending_by_session(session_id)
+            if not pendings:
+                pendings = await svc.get_pending_by_root_session(session_id)
 
         for p in pendings:
             guard_result = getattr(p, "extra", {}).get("guard_result")

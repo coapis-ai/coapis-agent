@@ -6,3 +6,6 @@ export * from "./FileGuardSection";
 export * from "./ToolGuardTab";
 export * from "./AllowNoAuthHostsTab";
 export { default as InputGuardTab } from "./InputGuardTab";
+export { default as AdvancedRulesTab } from "./AdvancedRulesTab";
+export { CommandRuleModal } from "./CommandRuleModal";
+export type { CommandRule } from "./CommandRuleModal";

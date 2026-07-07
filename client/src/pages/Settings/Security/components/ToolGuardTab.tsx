@@ -5,25 +5,16 @@ import {
   Button,
   Select,
   Input,
-  Switch,
   Card,
-  Tabs,
   Tooltip,
 } from "@agentscope-ai/design";
 import { message } from "antd";
-import {
-  RefreshCw,
-  ShieldCheck,
-  Settings2,
-  Search,
-  Play,
-} from "lucide-react";
-import { PlusCircleOutlined } from "@ant-design/icons";
+import { Search, Play } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { securityApi } from "../../../../api/modules/security";
-import type { MergedRule } from "../useToolGuard";
-import { RuleTable } from "./index";
-import styles from "../index.module.less";
+import { CommandRuleModal } from "./CommandRuleModal";
+import type { CommandRule } from "./CommandRuleModal";
+import { EditOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 
 // ── Types ──
 
@@ -31,6 +22,8 @@ interface CommandEntry {
   level: string;
   desc: string;
   action: string;
+  exceptions?: CommandRule[];
+  demotion_rules?: CommandRule[];
 }
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -56,60 +49,6 @@ const SEVERITY_COLORS: Record<string, string> = {
   LOW: "blue",
 };
 
-// ── Props ──
-
-interface ToolDetectionTabProps {
-  mergedRules: MergedRule[];
-  toggleRule: (ruleId: string, currentlyDisabled: boolean) => void;
-  onPreviewRule: (rule: MergedRule) => void;
-  onEditRule: (rule: MergedRule) => void;
-  onDeleteRule: (ruleId: string) => void;
-  openAddRule: () => void;
-}
-
-// ── Section 1: Detection Rules (RuleTable) ──
-
-function DetectionRuleSection({
-  mergedRules,
-  toggleRule,
-  onPreviewRule,
-  onEditRule,
-  onDeleteRule,
-  openAddRule,
-}: ToolDetectionTabProps) {
-  const { t } = useTranslation();
-
-  return (
-    <div className={styles.tabContent}>
-      <div className={styles.sectionContainer}>
-        <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>{t("security.rules.title")}</h2>
-          <Button
-            type="primary"
-            icon={<PlusCircleOutlined />}
-            onClick={openAddRule}
-            size="middle"
-          >
-            {t("security.rules.add")}
-          </Button>
-        </div>
-        <Card className={styles.tableCard}>
-          <RuleTable
-            rules={mergedRules}
-            enabled={true}
-            onToggleRule={toggleRule}
-            onPreviewRule={onPreviewRule}
-            onEditRule={onEditRule}
-            onDeleteRule={onDeleteRule}
-          />
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-// ── Section 2: Command Classification (L0-L4) ──
-
 const ACTION_CONFIG: Record<string, { color: string; labelKey: string; tooltipKey: string }> = {
   allow:   { color: "green",  labelKey: "security.toolGuard.actions.allow",   tooltipKey: "security.toolGuard.actions.allowTooltip" },
   audit:   { color: "blue",   labelKey: "security.toolGuard.actions.audit",   tooltipKey: "security.toolGuard.actions.auditTooltip" },
@@ -117,7 +56,9 @@ const ACTION_CONFIG: Record<string, { color: string; labelKey: string; tooltipKe
   block:   { color: "red",    labelKey: "security.toolGuard.actions.block",   tooltipKey: "security.toolGuard.actions.blockTooltip" },
 };
 
-function CommandClassificationSection() {
+// ── Command Classification Section (L0-L4) ──
+
+export function CommandClassificationSection() {
   const { t } = useTranslation();
   const [commands, setCommands] = useState<Record<string, CommandEntry>>({});
   const [loading, setLoading] = useState(false);
@@ -127,6 +68,61 @@ function CommandClassificationSection() {
   const [testResult, setTestResult] = useState<any>(null);
   const [testing, setTesting] = useState(false);
   const [savingAction, setSavingAction] = useState<string | null>(null);
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const [ruleModalType, setRuleModalType] = useState<"exception" | "demotion">("exception");
+  const [ruleModalCmd, setRuleModalCmd] = useState("");
+  const [ruleModalRule, setRuleModalRule] = useState<CommandRule | null>(null);
+
+  const handleAddRule = (cmdName: string, type: "exception" | "demotion") => {
+    setRuleModalCmd(cmdName);
+    setRuleModalType(type);
+    setRuleModalRule(null);
+    setRuleModalOpen(true);
+  };
+
+  const handleEditRule = (cmdName: string, type: "exception" | "demotion", rule: CommandRule) => {
+    setRuleModalCmd(cmdName);
+    setRuleModalType(type);
+    setRuleModalRule(rule);
+    setRuleModalOpen(true);
+  };
+
+  const handleDeleteRule = async (cmdName: string, type: "exception" | "demotion", ruleId: string) => {
+    const entry = commands[cmdName];
+    const field = type === "exception" ? "exceptions" : "demotion_rules";
+    const updated = (entry[field] || []).filter((r: CommandRule) => r.id !== ruleId);
+    try {
+      await securityApi.updateSingleCommand(cmdName, { [field]: updated });
+      setCommands((prev) => ({
+        ...prev,
+        [cmdName]: { ...prev[cmdName], [field]: updated },
+      }));
+      message.success(ruleId + " deleted");
+    } catch (e: any) {
+      message.error(e.message || "Delete failed");
+    }
+  };
+
+  const handleRuleModalOk = async (rule: CommandRule) => {
+    const entry = commands[ruleModalCmd];
+    const field = ruleModalType === "exception" ? "exceptions" : "demotion_rules";
+    const existing = entry[field] || [];
+    const idx = existing.findIndex((r: CommandRule) => r.id === rule.id);
+    const updated = idx >= 0
+      ? existing.map((r: CommandRule, i: number) => (i === idx ? rule : r))
+      : [...existing, rule];
+    try {
+      await securityApi.updateSingleCommand(ruleModalCmd, { [field]: updated });
+      setCommands((prev) => ({
+        ...prev,
+        [ruleModalCmd]: { ...prev[ruleModalCmd], [field]: updated },
+      }));
+      message.success(rule.id + " saved");
+      setRuleModalOpen(false);
+    } catch (e: any) {
+      message.error(e.message || "Save failed");
+    }
+  };
 
   const fetchCommands = useCallback(async () => {
     setLoading(true);
@@ -383,6 +379,13 @@ function CommandClassificationSection() {
           {testResult.reason && (
             <div style={{ fontSize: 13, marginBottom: 8 }}>{testResult.reason}</div>
           )}
+          {testResult.rule_source && (
+            <div style={{ marginBottom: 8 }}>
+              <Tag color={testResult.rule_source === "exception" ? "orange" : testResult.rule_source === "demotion" ? "green" : testResult.rule_source === "global" ? "red" : "default"}>
+                {testResult.rule_source}
+              </Tag>
+            </div>
+          )}
           {testResult.matched_rules?.length > 0 && (
             <div>
               <span style={{ fontSize: 12, opacity: 0.7 }}>{t("security.toolGuard.commands.matchedRules", "匹配规则：")}</span>
@@ -423,131 +426,61 @@ function CommandClassificationSection() {
           loading={loading}
           pagination={{ pageSize: 30, showSizeChanger: true, showTotal: (total: number) => `${total} ${t("security.toolGuard.commands.commands", "个命令")}` }}
           locale={{ emptyText: t("security.toolGuard.commands.empty", "无命令数据") }}
+          expandable={{
+            expandedRowRender: (record: any) => {
+              const exc: CommandRule[] = record.exceptions || [];
+              const dem: CommandRule[] = record.demotion_rules || [];
+              if (exc.length === 0 && dem.length === 0) {
+                return <span style={{ opacity: 0.5, fontSize: 12 }}>无例外或降级规则</span>;
+              }
+              const ruleRow = (r: CommandRule, color: string, type: "exception" | "demotion") => (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, fontSize: 12 }}>
+                  <Tag color={color} style={{ fontSize: 11 }}>{r.id}</Tag>
+                  <span style={{ opacity: 0.8 }}>{r.desc}</span>
+                  <Tag color={LEVEL_COLORS[r.level] || "default"} style={{ fontSize: 10 }}>{r.level}</Tag>
+                  <Tag color={ACTION_CONFIG[r.action]?.color || "default"} style={{ fontSize: 10 }}>{r.action}</Tag>
+                  {r.patterns && r.patterns.length > 0 && (
+                    <span style={{ opacity: 0.5, fontFamily: "monospace", fontSize: 10 }}>[{r.patterns.length}p]</span>
+                  )}
+                  {r.safe_paths && r.safe_paths.length > 0 && (
+                    <span style={{ opacity: 0.5, fontFamily: "monospace", fontSize: 10 }}>safe:{r.safe_paths.join(",")}</span>
+                  )}
+                  {r.scope && <Tag color="cyan" style={{ fontSize: 10 }}>{r.scope}</Tag>}
+                  <EditOutlined style={{ fontSize: 12, color: "#1677ff", cursor: "pointer", marginLeft: 4 }} onClick={() => handleEditRule(record.name, type, r)} />
+                  <DeleteOutlined style={{ fontSize: 12, color: "#ff4d4f", cursor: "pointer" }} onClick={() => handleDeleteRule(record.name, type, r.id)} />
+                </div>
+              );
+              return (
+                <div style={{ padding: "4px 0" }}>
+                  {exc.length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#d46b08", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>⬆ 例外 ({exc.length}) <PlusOutlined style={{ fontSize: 11, color: "#d46b08", cursor: "pointer" }} onClick={() => handleAddRule(record.name, "exception")} /></div>
+                      {exc.map(r => ruleRow(r, "orange", "exception"))}
+                    </div>
+                  )}
+                  {dem.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#389e0d", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>⬇ 降级 ({dem.length}) <PlusOutlined style={{ fontSize: 11, color: "#389e0d", cursor: "pointer" }} onClick={() => handleAddRule(record.name, "demotion")} /></div>
+                      {dem.map(r => ruleRow(r, "green", "demotion"))}
+                    </div>
+                  )}
+                </div>
+              );
+            },
+            rowExpandable: (record: any) => (record.exceptions?.length > 0 || record.demotion_rules?.length > 0),
+          }}
         />
       </Card>
+
+      <CommandRuleModal
+        open={ruleModalOpen}
+        ruleType={ruleModalType}
+        editingRule={ruleModalRule}
+        cmdName={ruleModalCmd}
+        cmdDefaultAction={commands[ruleModalCmd]?.action || "confirm"}
+        onOk={handleRuleModalOk}
+        onCancel={() => setRuleModalOpen(false)}
+      />
     </div>
-  );
-}
-
-// ── Section 3: Evasion Detection ──
-
-function EvasionDetectionSection() {
-  const [checks, setChecks] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(false);
-
-  const fetchChecks = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await securityApi.getUnifiedEvasionChecks();
-      setChecks(data.evasion_checks || {});
-    } catch (e: any) {
-      message.error(e.message || "Failed to load evasion checks");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchChecks();
-  }, [fetchChecks]);
-
-  const handleToggle = async (key: string, val: boolean) => {
-    const updated = { ...checks, [key]: val };
-    setChecks(updated);
-    try {
-      await securityApi.updateUnifiedEvasionChecks(updated);
-      message.success(`${key}: ${val ? "开启" : "关闭"}`);
-    } catch (e: any) {
-      setChecks(checks);
-      message.error(e.message || "更新失败");
-    }
-  };
-
-  const CHECK_LABELS: Record<string, string> = {
-    command_substitution: "命令替换 ($(), ``)",
-    obfuscated_flags: "混淆标志 (ANSI-C, locale quoting)",
-    backslash_escaped_whitespace: "反斜杠转义空白符",
-    backslash_escaped_operators: "反斜杠转义操作符 (;|&<>)",
-    newlines: "换行符/回车分割",
-    comment_quote_desync: "注释-引号失同步攻击",
-    quoted_newline: "引号内换行 + 注释行剥离",
-  };
-
-  return (
-    <div style={{ padding: "0 4px" }}>
-      <p style={{ marginBottom: 16, opacity: 0.7 }}>
-        逃逸检测用于识别攻击者通过混淆/编码手法绕过规则检测的行为。
-        每个检测项独立开关，修改后即时生效。
-      </p>
-      <Card loading={loading}>
-        {Object.entries(checks).map(([key, val]) => (
-          <div
-            key={key}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "10px 0",
-              borderBottom: "1px solid var(--color-border-secondary, #f0f0f0)",
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>
-                {CHECK_LABELS[key] || key}
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.5, fontFamily: "monospace" }}>
-                {key}
-              </div>
-            </div>
-            <Switch checked={val} onChange={(v) => handleToggle(key, v)} />
-          </div>
-        ))}
-      </Card>
-    </div>
-  );
-}
-
-// ── Main: Unified ToolGuardTab ──
-
-export function ToolGuardTab(props: ToolDetectionTabProps) {
-  const { t } = useTranslation();
-
-  return (
-    <Tabs
-      defaultActiveKey="detectionRules"
-      type="card"
-      items={[
-        {
-          key: "detectionRules",
-          label: (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <ShieldCheck size={14} />
-              {t("security.toolGuard.tabs.detectionRules", "检测规则")}
-            </span>
-          ),
-          children: <DetectionRuleSection {...props} />,
-        },
-        {
-          key: "commands",
-          label: (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <Settings2 size={14} />
-              {t("security.toolGuard.tabs.commands", "命令分级")}
-            </span>
-          ),
-          children: <CommandClassificationSection />,
-        },
-        {
-          key: "evasion",
-          label: (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <RefreshCw size={14} />
-              {t("security.toolGuard.tabs.evasion", "逃逸检测")}
-            </span>
-          ),
-          children: <EvasionDetectionSection />,
-        },
-      ]}
-    />
   );
 }

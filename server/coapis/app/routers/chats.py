@@ -410,7 +410,7 @@ async def create_chat(
     
     spec = RunnerChatSpec(
         id=chat_id,
-        session_id=payload.get("session_id", f"console:{username}"),
+        session_id=payload.get("session_id", chat_id),
         user_id=forced_user_id,
         channel=payload.get("channel", "console"),
         name=payload.get("name", "New Chat"),
@@ -503,6 +503,16 @@ async def get_chat(
             if _session_file.exists():
                 state = _json.loads(_session_file.read_text(encoding="utf-8"))
                 logger.info(f"get_chat: loaded session from disk fallback: {_session_file}")
+            # Legacy fallback: messages may still be in the old session_id format
+            # (e.g. "admin_console--admin.json") because _persist_chat_messages
+            # only migrates when a NEW message is sent.  If the new-format file
+            # is empty or missing, try the legacy key so refresh always works.
+            if not state and spec.session_id:
+                _legacy_key = f"{session_user_id}--{spec.session_id}".replace(":", "--")
+                _legacy_file = _WS_DIR / session_user_id / "sessions" / f"{_legacy_key}.json"
+                if _legacy_file.exists():
+                    state = _json.loads(_legacy_file.read_text(encoding="utf-8"))
+                    logger.info(f"get_chat: loaded legacy session fallback: {_legacy_file}")
         memory_state = (state or {}).get("agent", {}).get("memory", {})
         if memory_state:
             from agentscope.memory import InMemoryMemory

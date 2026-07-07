@@ -31,6 +31,7 @@ import yaml
 from .unified_models import (
     AccessControlConfig,
     CommandEntry,
+    CommandRule,
     PatternRule,
     ToolGuardConfig,
 )
@@ -238,6 +239,87 @@ def _extract_paths_from_command(command_str: str) -> list[str]:
     return paths
 
 
+def _match_rule(
+    command_str: str,
+    paths: list[str],
+    rule: CommandRule,
+    workspace_dir: str | None,
+) -> bool:
+    """Check if a single CommandRule matches the command.
+
+    Conditions are AND logic:
+      1. scope=workspace → all absolute paths must be within workspace
+      2. safe_paths → all absolute paths must match at least one prefix
+      3. patterns → command must match at least one regex (OR)
+      4. exclude_patterns → command must NOT match any regex (OR)
+    """
+    # 1. scope: workspace
+    if rule.scope == "workspace":
+        if not workspace_dir:
+            return False
+        for p in paths:
+            if p.startswith("/") and not p.startswith(workspace_dir):
+                return False
+        # If no paths found, still match (relative commands are in-workspace)
+
+    # 2. safe_paths — must have at least one absolute path that matches
+    if rule.safe_paths:
+        abs_paths = [p for p in paths if p.startswith("/")]
+        if not abs_paths:
+            return False  # No absolute paths → can't verify safety → don't match
+        for p in abs_paths:
+            if not any(p.startswith(sp) for sp in rule.safe_paths):
+                return False
+
+    # 3. patterns (OR: at least one must match)
+    if rule.patterns:
+        pat_matched = False
+        for pat in rule.patterns:
+            try:
+                if re.search(pat, command_str, re.IGNORECASE):
+                    pat_matched = True
+                    break
+            except re.error:
+                continue
+        if not pat_matched:
+            return False
+
+    # 4. exclude_patterns (OR: none must match)
+    if rule.exclude_patterns:
+        for ep in rule.exclude_patterns:
+            try:
+                if re.search(ep, command_str, re.IGNORECASE):
+                    return False
+            except re.error:
+                continue
+
+    return True
+
+
+def _apply_command_rules(
+    command_str: str,
+    cmd_name: str | None,
+    current_level: str,
+    current_action: str,
+    command_rules: list[CommandRule],
+    workspace_dir: str | None = None,
+) -> tuple[str, str, str]:
+    """Apply command rules (exceptions or demotion_rules) with first-match-wins semantics.
+
+    Returns (new_level, new_action, reason).
+    """
+    if not command_rules:
+        return current_level, current_action, ""
+
+    paths = _extract_paths_from_command(command_str)
+
+    for rule in command_rules:
+        if _match_rule(command_str, paths, rule, workspace_dir):
+            return rule.level, rule.action, f"rule:{rule.id} — {rule.desc}"
+
+    return current_level, current_action, ""
+
+
 def _apply_demotion_rules(
     command_str: str,
     cmd_name: str | None,
@@ -384,9 +466,9 @@ class UnifiedToolGuardEngine:
         self._compile_rules()
         self._load_evasion_guardian()
         logger.info(
-            "UnifiedToolGuardEngine loaded: %d commands, %d rules, %d evasion checks",
+            "UnifiedToolGuardEngine loaded: %d commands, %d global_rules, %d evasion checks",
             len(self._config.commands),
-            len(self._config.rules),
+            len(self._config.global_rules),
             len(self._config.evasion_checks),
         )
 
@@ -408,7 +490,7 @@ class UnifiedToolGuardEngine:
     def _compile_rules(self) -> None:
         """Pre-compile all regex patterns for fast matching."""
         self._compiled_rules = []
-        for rule in self._config.rules:
+        for rule in self._config.global_rules:
             compiled_includes = []
             compiled_excludes = []
             for p in rule.patterns:
@@ -479,6 +561,12 @@ class UnifiedToolGuardEngine:
             entry = self._config.commands.get(cmd_name)
             if entry and entry.level == "L0":
                 return []
+        # Fallback: if _extract_command_name returned None (e.g. bare "env"),
+        # check if the raw command string itself is a known L0 command.
+        if not cmd_name:
+            entry = self._config.commands.get(command_str.strip())
+            if entry and entry.level == "L0":
+                return []
 
         # Also skip if command is disabled
         disabled = set(self._config.access_control.disabled_rules)
@@ -488,9 +576,7 @@ class UnifiedToolGuardEngine:
             if rule.id in disabled:
                 continue
 
-            # Check rule scope: command-specific or cross-command
-            if rule.commands and cmd_name and cmd_name not in rule.commands:
-                continue
+            # Global rules apply to all commands (no command-specific filter)
 
             # Try each include pattern
             for pat in compiled_in:
@@ -610,26 +696,51 @@ class UnifiedToolGuardEngine:
         # effective_action: the action that will actually be used (may be overridden by sub-command/demotion)
         effective_action: str | None = None
 
-        # ── Layer 2.5: Sub-command Lookup + Demotion ──
-        # Demotion rules take PRIORITY over sub-command lookup because they
+        # ── Layer 2.5: Sub-command Lookup + Rules/Demotion ──
+        # Command rules (new) take PRIORITY over demotion (deprecated).
+        # Both take PRIORITY over sub-command lookup because they
         # match on specific parameters (e.g. `git branch -D` vs `git branch`).
-        # When either matches, the result is FINAL — Pattern Rules (Layer 3)
-        # are skipped because they match on static command names and would
-        # override the context-aware demotion.
         if cmd_name and cmd_name in self._config.commands:
             entry = self._config.commands[cmd_name]
 
-            # Demotion rules FIRST: lower level when safe context detected
-            if entry.demotion:
-                new_level, new_action, reason = _apply_demotion_rules(
-                    command_str, cmd_name, level or "L0", entry.action, entry.demotion,
+            # ── Build workspace_dir once for scope:workspace rules ──
+            ws_dir = None
+            owner = self._context.get("owner") if hasattr(self, "_context") else None
+            if owner:
+                from coapis.agents.config import derive_workspace_dir
+                ws_dir = str(derive_workspace_dir(owner))
+
+            # ── Merge all rule sources into one list (priority: exceptions > demotion_rules > deprecated) ──
+            # New fields take precedence; fall back to deprecated 'rules' for backward compat.
+            all_exceptions = entry.exceptions if entry.exceptions else []
+            all_demotion = entry.demotion_rules if entry.demotion_rules else []
+            if not all_exceptions and not all_demotion and entry.rules:
+                # Backward compat: old 'rules' field treated as exceptions (strict-first)
+                all_exceptions = entry.rules
+
+            # Step 1: Try demotion_rules first (↓ more lenient)
+            if all_demotion:
+                new_level, new_action, reason = _apply_command_rules(
+                    command_str, cmd_name, level or "L0", entry.action,
+                    all_demotion, workspace_dir=ws_dir,
                 )
                 if reason:
                     level = new_level
                     effective_action = new_action
                     demotion_reason = reason
 
-            # Sub-command override (only if no demotion matched)
+            # Step 2: Try exceptions (↑ stricter) — overrides demotion
+            if all_exceptions:
+                new_level, new_action, reason = _apply_command_rules(
+                    command_str, cmd_name, level or "L0", entry.action,
+                    all_exceptions, workspace_dir=ws_dir,
+                )
+                if reason:
+                    level = new_level
+                    effective_action = new_action
+                    demotion_reason = reason
+
+            # Step 3: Sub-command override (only if no exceptions/demotion matched)
             if not demotion_reason:
                 sub_cmd = _extract_sub_command(command_str, cmd_name)
                 if sub_cmd and sub_cmd in entry.sub_commands:
@@ -639,11 +750,49 @@ class UnifiedToolGuardEngine:
                     demotion_reason = f"sub_command:{sub_cmd}"
 
         # ── Layer 2.6: Sub-command / demotion fast-path ──
-        # If Layer 2.5 produced a result, return immediately (skip Pattern Rules).
+        # If Layer 2.5 produced a result, still run global_rules (Layer 3)
+        # before returning — dangerous patterns like curl|bash must not be
+        # skipped by demotion.
         if demotion_reason:
-            # L0 after demotion → allow immediately
-            if level == "L0":
-                effective_action = "allow"
+            # Always check global_rules first — dangerous patterns like
+            # curl|bash must not be skipped by demotion, even L0.
+            # Non-L0 demotion: check global rules first
+            rule_matches = self.match_rules(command_str, cmd_name)
+            if rule_matches:
+                # Global rule matched → override demotion
+                matched_rules = []
+                findings = []
+                for rule, match in rule_matches:
+                    matched_rules.append({"rule_id": rule.id, "match": match.group()})
+                    findings.append(GuardFinding(
+                        id=rule.id,
+                        rule_id=rule.id,
+                        category=_CATEGORY_MAP.get(rule.category, GuardThreatCategory.SENSITIVE_FILE_ACCESS),
+                        severity=_SEVERITY_MAP.get(rule.severity.upper(), GuardSeverity.MEDIUM),
+                        title=rule.description,
+                        description=rule.description,
+                        tool_name="execute_shell_command",
+                        param_name="command",
+                        matched_value=command_str[:200],
+                        matched_pattern=match.group(),
+                        remediation=rule.remediation,
+                        guardian="global_rule",
+                    ))
+                final_action = "block"
+                self._audit_log_safely(
+                    final_action, cmd_name, command_str, level or "L0",
+                    "global_rule_override", matched_rules, findings,
+                )
+                return _make_result(
+                    action=final_action,
+                    level=level,
+                    command=cmd_name or command_str,
+                    reason="global_rule_override",
+                    matched_rules=matched_rules,
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                )
+
+            # No global rule matched → safe to return demoted result
             final_action = effective_action or "allow"
             if final_action in ("audit", "confirm"):
                 self._audit_log_safely(

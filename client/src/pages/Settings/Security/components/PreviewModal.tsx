@@ -51,13 +51,13 @@ export function PreviewModal({ rule, onClose }: PreviewModalProps) {
         </p>
         <p>
           <strong>{t("security.rules.tools")}:</strong>{" "}
-          {rule.tools.length > 0
+          {rule.tools && rule.tools.length > 0
             ? rule.tools.join(", ")
             : t("security.rules.allTools")}
         </p>
         <p>
           <strong>{t("security.rules.params")}:</strong>{" "}
-          {rule.params.length > 0
+          {rule.params && rule.params.length > 0
             ? rule.params.join(", ")
             : t("security.rules.allParams")}
         </p>
@@ -75,12 +75,12 @@ export function PreviewModal({ rule, onClose }: PreviewModalProps) {
           <strong>{t("security.rules.patterns")}:</strong>
         </p>
         <pre style={preStyle}>{rule.patterns.join("\n")}</pre>
-        {rule.exclude_patterns.length > 0 && (
+        {rule.exclude_patterns && rule.exclude_patterns.length > 0 && (
           <>
             <p>
               <strong>{t("security.rules.excludePatterns")}:</strong>
             </p>
-            <pre style={preStyle}>{rule.exclude_patterns.join("\n")}</pre>
+            <pre style={preStyle}>{rule.exclude_patterns?.join("\n")}</pre>
           </>
         )}
       </div>

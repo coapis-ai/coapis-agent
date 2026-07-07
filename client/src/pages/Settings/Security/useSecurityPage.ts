@@ -3,7 +3,8 @@ import { Form } from "@agentscope-ai/design";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import { useTranslation } from "react-i18next";
 import api from "../../../api";
-import { useToolGuard, type MergedRule } from "./useToolGuard";
+import type { ShellRule } from "../../../api/modules/security";
+import { useToolGuard } from "./useToolGuard";
 
 const BUILTIN_TOOLS = [
   "execute_shell_command",
@@ -66,10 +67,9 @@ export function useSecurityPage() {
   const {
     config,
     customRules,
-    builtinRules,
+    globalRules,
     enabled,
     setEnabled,
-    mergedRules,
     shellEvasionChecks,
     toggleShellEvasionCheck,
     loading,
@@ -84,8 +84,8 @@ export function useSecurityPage() {
 
   // Modal states
   const [editModal, setEditModal] = useState(false);
-  const [editingRule, setEditingRule] = useState<MergedRule | null>(null);
-  const [previewRule, setPreviewRule] = useState<MergedRule | null>(null);
+  const [editingRule, setEditingRule] = useState<ShellRule | null>(null);
+  const [previewRule, setPreviewRule] = useState<ShellRule | null>(null);
 
   const { message } = useAppMessage();
 
@@ -140,12 +140,12 @@ export function useSecurityPage() {
   }, [editForm]);
 
   const openEditRule = useCallback(
-    (rule: MergedRule) => {
+    (rule: ShellRule) => {
       setEditingRule(rule);
       editForm.setFieldsValue({
         ...rule,
         patterns: rule.patterns.join("\n"),
-        exclude_patterns: rule.exclude_patterns.join("\n"),
+        exclude_patterns: rule.exclude_patterns?.join("\n") ?? "",
       });
       setEditModal(true);
     },
@@ -180,7 +180,7 @@ export function useSecurityPage() {
         updateCustomRule(editingRule.id, rule);
       } else {
         const allIds = [
-          ...builtinRules.map((r) => r.id),
+          ...globalRules.map((r) => r.id),
           ...customRules.map((r) => r.id),
         ];
         if (allIds.includes(rule.id)) {
@@ -195,7 +195,7 @@ export function useSecurityPage() {
     }
   }, [
     editingRule,
-    builtinRules,
+    globalRules,
     customRules,
     updateCustomRule,
     addCustomRule,
@@ -224,8 +224,7 @@ export function useSecurityPage() {
     handleReset,
 
     // Rules
-    mergedRules,
-    builtinRules,
+    globalRules,
     customRules,
     toggleRule,
     deleteCustomRule,
