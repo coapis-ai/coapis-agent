@@ -1867,11 +1867,14 @@ def resolve_effective_skills(
 def ensure_skills_initialized(workspace_dir: Path) -> None:
     """Ensure workspace manifests exist before runtime use.
 
-    After reconciling with filesystem, sync global defaults into the
-    manifest so that new users automatically inherit global skills.
+    Reconciles workspace manifest with on-disk skills only.
+    Global defaults are NOT injected into user manifests — they are
+    resolved at runtime via resolve_effective_skills() which merges
+    global_defaults.json → user manifest → agent manifest.
     """
     reconcile_workspace_manifest(workspace_dir)
-    _sync_global_defaults(workspace_dir)
+    # _sync_global_defaults removed: global skills are resolved at runtime
+    # from global_defaults.json, no need to persist them in user skill.json.
 
 
 def _sync_global_defaults(workspace_dir: Path) -> None:
