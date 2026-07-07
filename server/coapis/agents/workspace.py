@@ -123,6 +123,7 @@ class Workspace:
         self.role = role
         self.status = "stopped"
         self.config: Optional[Dict[str, Any]] = None
+        self._config: Dict[str, Any] = {}
         # Last streaming reasoning/response for persistence
         self.last_full_reasoning: list[str] = []
         self.last_full_response: list[str] = []
@@ -1175,7 +1176,12 @@ class Workspace:
         from ..app.channels.manager import ChannelManager
         channels_list = [console_channel]
 
-        agent_channels = self._config.get("channels", {}) if isinstance(self._config, dict) else {}
+        _cfg = getattr(self, "_config", None) or self.config
+        agent_channels = (
+            _cfg.get("channels", {})
+            if isinstance(_cfg, dict)
+            else {}
+        )
         logger.info(f"Agent {self.agent_id} channels config: {list(agent_channels.keys()) if agent_channels else 'empty'}")
         if agent_channels:
             from ..app.channels.registry import get_channel_registry
@@ -1413,7 +1419,12 @@ class Workspace:
         )
         console_channel._workspace = self
         channels_list = [console_channel]
-        agent_channels = self._config.get("channels", {}) if isinstance(self._config, dict) else {}
+        _cfg = getattr(self, "_config", None) or self.config
+        agent_channels = (
+            _cfg.get("channels", {})
+            if isinstance(_cfg, dict)
+            else {}
+        )
         for channel_key, channel_cfg in agent_channels.items():
             if channel_key == "console" or not isinstance(channel_cfg, dict):
                 continue

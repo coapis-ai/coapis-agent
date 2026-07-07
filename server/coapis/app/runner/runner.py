@@ -456,6 +456,29 @@ class AgentRunner(Runner):
                             logger.info("_persist_chat_messages: skipped duplicate user message")
 
                 _msgs_to_add = agent_messages[1:] if _skip_first else agent_messages
+
+                # Filter out ephemeral bootstrap guidance system messages
+                # to prevent them from being persisted into session history.
+                from ..agents.prompt import _BOOTSTRAP_GUIDANCE_TAG
+                _before_filter = len(_msgs_to_add)
+                _msgs_to_add = [
+                    m for m in _msgs_to_add
+                    if not (
+                        getattr(m, "role", "") == "system"
+                        and _BOOTSTRAP_GUIDANCE_TAG in (
+                            m.get_text_content()
+                            if hasattr(m, "get_text_content")
+                            else str(getattr(m, "content", ""))
+                        )
+                    )
+                ]
+                _filtered = _before_filter - len(_msgs_to_add)
+                if _filtered:
+                    logger.info(
+                        "_persist_chat_messages: filtered %d bootstrap "
+                        "guidance system messages", _filtered,
+                    )
+
                 for msg in _msgs_to_add:
                     await isolated_mem.add(msg)
                 logger.info(

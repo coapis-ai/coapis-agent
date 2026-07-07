@@ -1146,7 +1146,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       const created = await api.createChat({
         id: undefined,  // let backend generate UUID
         name: sessionName,
-        session_id: `console:${userId}`,
+        session_id: undefined,  // let backend use chat_id (UUID) for per-chat isolation
         channel: channel,
         agent_id: agentId,
       });
@@ -1159,7 +1159,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       const newSession: ExtendedSession = {
         id: created.id,  // Use backend UUID directly
         name: sessionName,
-        sessionId: `console:${userId}`,
+        sessionId: created.session_id || created.id,  // Use backend session_id (UUID-based)
         userId: userId,
         channel: channel,
         messages: session?.messages || [],
@@ -1179,7 +1179,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       // Write the backend UUID back to the input object for the caller
       if (session) {
         (session as any).id = created.id;
-        (session as any).sessionId = `console:${userId}`;
+        (session as any).sessionId = created.session_id || created.id;
         (session as any).realId = created.id;
       }
 
