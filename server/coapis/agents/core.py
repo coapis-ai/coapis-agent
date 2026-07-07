@@ -330,6 +330,8 @@ class AgentCore:
             request_params["tools"] = openai_tools
 
         # Tool-calling loop: keep calling LLM until no more tool calls
+        tool_call_rounds = 0
+        any_text_yielded = False
         try:
             for _tool_round in range(self.max_tool_calls):
                 # Debug: dump messages for JSON issue diagnosis
@@ -375,6 +377,7 @@ class AgentCore:
                         yield ResponseBlock(type="thinking", content=reasoning_content)
                     elif content:
                         full_content.append(content)
+                        any_text_yielded = True
                         yield ResponseBlock(type="text", content=content)
 
                 # If no tool calls, we're done
@@ -382,6 +385,7 @@ class AgentCore:
                     break
 
                 # Execute tool calls and build next round messages
+                tool_call_rounds += 1
                 assistant_tool_msg = {
                     "role": "assistant",
                     "tool_calls": [
@@ -495,6 +499,37 @@ class AgentCore:
         except Exception as e:
             logger.error(f"stream_chat LLM call failed: {e}", exc_info=True)
             yield ResponseBlock(type="text", content=f"\n\n❌ 抱歉，LLM 调用失败：{e}\n")
+
+        # ──────────────────────────────────────────────────────────────
+        # Final-answer fallback: if tool calls were made but no text
+        # content was produced, force one more LLM round to summarize.
+        # ──────────────────────────────────────────────────────────────
+        if tool_call_rounds > 0 and not any_text_yielded:
+            logger.info("No text content after tool calls — requesting final summary")
+            messages.append({
+                "role": "user",
+                "content": "请根据上面的工具调用结果，直接给出最终回答。不要调用任何工具。",
+            })
+            request_params["messages"] = [{"role": "system", "content": system}, *messages]
+            request_params.pop("tools", None)  # disable tools for this round
+            try:
+                summary_stream = await self.client.chat.completions.create(**request_params)
+                async for chunk in summary_stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    reasoning_content = getattr(delta, "reasoning_content", None) or ""
+                    if not reasoning_content:
+                        reasoning_content = getattr(delta, "reasoning", None) or ""
+                    content = getattr(delta, "content", None) or ""
+                    if reasoning_content:
+                        full_reasoning.append(reasoning_content)
+                        yield ResponseBlock(type="thinking", content=reasoning_content)
+                    elif content:
+                        full_content.append(content)
+                        yield ResponseBlock(type="text", content=content)
+            except Exception as e:
+                logger.warning(f"Final summary round failed: {e}")
 
         # Evolution: record trajectory (combine both reasoning and content)
         if self.evolution_engine:
