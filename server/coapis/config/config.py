@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Optional, Union, Dict, List, Literal, Any, Set
@@ -40,6 +41,9 @@ def _get_configuration_exception():
         return Exception
 
 from .timezone import detect_system_timezone
+
+logger = logging.getLogger(__name__)
+
 from ..constant import (
     HEARTBEAT_DEFAULT_EVERY,
     HEARTBEAT_DEFAULT_TARGET,
@@ -989,11 +993,38 @@ class PlanConfig(BaseModel):
 # ============================================================================
 
 
+class AgentRegistryEntry(BaseModel):
+    """One entry in the user's agents registry (stored in config.json agents[]).
+
+    This is a lightweight summary; full config lives in agent.json.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(..., description="Unique agent ID")
+    name: str = Field(default="", description="Human-readable agent name")
+    description: str = Field(default="", description="Short description")
+    workspace_dir: str = Field(
+        default="",
+        description="Relative workspace dir (relative to workspaces/{username}/)",
+    )
+    created_at: str = Field(
+        default="",
+        description="ISO-8601 creation timestamp",
+    )
+    enabled: bool = Field(default=True, description="Whether agent is active")
+    is_default: bool = Field(
+        default=False,
+        description="True for default agents (e.g. user:{username}), cannot be deleted/disabled",
+    )
+
+
 class UserProfileConfig(BaseModel):
     """User-level configuration (stored in workspaces/{username}/config.json).
 
-    Separated from agent config: this file holds user identity and
-    preferences; agent-specific settings live in agent.json.
+    Separated from agent config: this file holds user identity,
+    preferences, and the agents registry (which agents this user owns).
+    Agent-specific settings live in each agent's own agent.json.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -1022,6 +1053,10 @@ class UserProfileConfig(BaseModel):
         default="",
         description="ISO-8601 timestamp when user was created",
     )
+    agents: List[AgentRegistryEntry] = Field(
+        default_factory=list,
+        description="Registry of agents owned by this user",
+    )
 
 
 def load_user_config(username: str) -> UserProfileConfig:
@@ -1049,6 +1084,103 @@ def save_user_config(username: str, config: UserProfileConfig) -> None:
         json.dumps(config.model_dump(), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+# ---------------------------------------------------------------------------
+# Agent registry helpers (operate on workspaces/{username}/config.json agents[])
+# ---------------------------------------------------------------------------
+
+def load_agents_registry(username: str) -> List[AgentRegistryEntry]:
+    """Load the agents registry for a user from config.json."""
+    cfg = load_user_config(username)
+    return cfg.agents
+
+
+def add_agent_to_registry(
+    username: str,
+    agent_id: str,
+    name: str = "",
+    description: str = "",
+    workspace_dir: str = "",
+    created_at: str = "",
+    is_default: bool = False,
+) -> None:
+    """Add an agent entry to the user's config.json agents registry.
+
+    Args:
+        username: Owner username
+        agent_id: Unique agent ID
+        name: Human-readable name
+        description: Short description
+        workspace_dir: Relative path (relative to workspaces/{username}/)
+        created_at: ISO-8601 creation timestamp (auto-generated if empty)
+        is_default: Whether this is the user's default agent (protected)
+    """
+    from datetime import datetime, timezone
+
+    cfg = load_user_config(username)
+
+    # Prevent duplicates
+    for entry in cfg.agents:
+        if entry.id == agent_id:
+            logger.warning(f"Agent {agent_id} already in registry for {username}")
+            return
+
+    entry = AgentRegistryEntry(
+        id=agent_id,
+        name=name or agent_id,
+        description=description,
+        workspace_dir=workspace_dir,
+        created_at=created_at or datetime.now(timezone.utc).isoformat(),
+        enabled=True,
+        is_default=is_default,
+    )
+    cfg.agents.append(entry)
+    save_user_config(username, cfg)
+    logger.info(f"Added agent {agent_id} to registry for {username}")
+
+
+def remove_agent_from_registry(username: str, agent_id: str) -> bool:
+    """Remove an agent entry from the user's config.json agents registry.
+
+    Returns True if found and removed, False if not found.
+    Raises ValueError if the agent is a default agent (is_default=True).
+    """
+    cfg = load_user_config(username)
+    for entry in cfg.agents:
+        if entry.id == agent_id and entry.is_default:
+            raise ValueError(f"Cannot remove default agent {agent_id} from registry")
+    original_len = len(cfg.agents)
+    cfg.agents = [e for e in cfg.agents if e.id != agent_id]
+    if len(cfg.agents) == original_len:
+        logger.warning(f"Agent {agent_id} not found in registry for {username}")
+        return False
+    save_user_config(username, cfg)
+    logger.info(f"Removed agent {agent_id} from registry for {username}")
+    return True
+
+
+def update_agent_in_registry(
+    username: str,
+    agent_id: str,
+    **kwargs,
+) -> bool:
+    """Update fields of an agent entry in the user's config.json agents registry.
+
+    Supported kwargs: name, description, workspace_dir, enabled.
+    Returns True if found and updated, False if not found.
+    """
+    cfg = load_user_config(username)
+    for entry in cfg.agents:
+        if entry.id == agent_id:
+            for key, value in kwargs.items():
+                if hasattr(entry, key):
+                    setattr(entry, key, value)
+            save_user_config(username, cfg)
+            logger.info(f"Updated agent {agent_id} in registry for {username}")
+            return True
+    logger.warning(f"Agent {agent_id} not found in registry for {username}")
+    return False
 
 
 class AgentProfileConfig(BaseModel):
@@ -1743,55 +1875,38 @@ def derive_workspace_dir(agent_id: str, username: str = None) -> Path:
 def build_fallback_agent_profile_config(
     agent_id: str,
     config: "Config",
+    username: str = None,
 ) -> AgentProfileConfig:
-    """Build a fallback agent profile when agent.json is missing (no disk I/O).
+    """Build a minimal fallback agent profile when agent.json is missing.
 
-    Used by :func:`load_agent_config` and ``coapis doctor fix``
-    so defaults stay in sync. Workspace is derived from agent_id
-    via derive_workspace_dir (no profiles dependency).
+    Returns only agent-identity fields (id, name, description, owner,
+    workspace_dir).  Global-inherited fields (mcp, acp, security, running,
+    llm_routing, heartbeat) are intentionally NOT included — they are
+    merged at runtime by workspace.py so that agent.json stays slim.
+
+    Args:
+        agent_id: Agent ID
+        config: Global Config object (used for system_prompt_files default only)
+        username: Owner username (required for user sub-agents)
     """
-    workspace_dir = derive_workspace_dir(agent_id)
+    # Infer owner: explicit username > "user:xxx" prefix
+    owner = username or ""
+    if not owner and agent_id.startswith("user:"):
+        owner = agent_id.split(":", 1)[1]
+
     return AgentProfileConfig(
         id=agent_id,
         name=agent_id.title(),
-        description=f"{agent_id} agent",
-        workspace_dir=str(workspace_dir),
-        channels=None,  # Do NOT inherit system-level channels; each agent must configure its own channels in agent.json
-        mcp=config.mcp if hasattr(config, "mcp") and config.mcp else None,
-        security=(
-            config.security
-            if hasattr(config, "security") and config.security
-            else None
-        ),
-        running=(
-            config.agents.running
-            if hasattr(config.agents, "running") and config.agents.running
-            else AgentsRunningConfig()
-        ),
-        llm_routing=(
-            config.agents.llm_routing
-            if hasattr(config.agents, "llm_routing")
-            and config.agents.llm_routing
-            else AgentsLLMRoutingConfig()
-        ),
-        system_prompt_files=(
-            config.agents.system_prompt_files
-            if hasattr(config.agents, "system_prompt_files")
-            and config.agents.system_prompt_files
-            else ["AGENTS.md", "SOUL.md", "PROFILE.md"]
-        ),
-        acp=(config.acp if hasattr(config, "acp") and config.acp else None),
-        heartbeat=(
-            config.agents.defaults.heartbeat
-            if hasattr(config.agents, "defaults")
-            and config.agents.defaults
-            and config.agents.defaults.heartbeat
-            else None
-        ),
+        description="",
+        owner=owner,
+        workspace_dir=".",  # Relative: agent.json is always at workspace root
+        # Global-inherited fields (mcp/acp/security/running/llm_routing/heartbeat)
+        # are NOT set here — they are inherited at runtime from global config.
+        channels=None,
     )
 
 
-def load_agent_config(agent_id: str, workspace_dir: Path = None) -> AgentProfileConfig:
+def load_agent_config(agent_id: str, workspace_dir: Path = None, username: str = None) -> AgentProfileConfig:
     """Load agent's complete configuration from workspace/agent.json with
     mtime-based caching.
 
@@ -1801,6 +1916,7 @@ def load_agent_config(agent_id: str, workspace_dir: Path = None) -> AgentProfile
     Args:
         agent_id: Agent ID to load
         workspace_dir: Optional explicit workspace directory (overrides auto-detection)
+        username: Owner username (passed to build_fallback for correct owner/workspace_dir)
 
     Returns:
         AgentProfileConfig: Complete agent configuration
@@ -1822,17 +1938,17 @@ def load_agent_config(agent_id: str, workspace_dir: Path = None) -> AgentProfile
     agent_config_path = resolved_workspace_dir / "agent.json"
 
     if not agent_config_path.exists():
-        fallback_config = build_fallback_agent_profile_config(agent_id, config)
-        # Save for future use
-        save_agent_config(agent_id, fallback_config)
+        fallback_config = build_fallback_agent_profile_config(agent_id, config, username=username)
+        # NOTE: Do NOT auto-save fallback to disk — it's a runtime computed
+        # minimal config, not meant for persistence.  agent.json should only
+        # be created explicitly (e.g. by create_agent router or init_user_workspace).
         return fallback_config
 
     # Check mtime to see if we can use cached config
     try:
         current_mtime = agent_config_path.stat().st_mtime
     except OSError:
-        fallback_config = build_fallback_agent_profile_config(agent_id, config)
-        save_agent_config(agent_id, fallback_config)
+        fallback_config = build_fallback_agent_profile_config(agent_id, config, username=username)
         return fallback_config
 
     with _agent_config_lock:
@@ -1876,22 +1992,40 @@ def load_agent_config(agent_id: str, workspace_dir: Path = None) -> AgentProfile
         return agent_config
 
 
+_AGENT_GLOBAL_INHERITED_FIELDS = frozenset({
+    "mcp",
+    "acp",
+    "security",
+    "running",
+    "llm_routing",
+    "heartbeat",
+    "plan",
+})
+
+_AGENT_DEFAULT_ONLY_FIELDS = frozenset({
+    "builtin_tools",
+    "tools",
+    # language/approval_level/system_prompt_files only written when non-default
+    # but we handle them via exclude_defaults in model_dump.
+})
+
+
 def save_agent_config(
     agent_id: str,
     agent_config: AgentProfileConfig,
     workspace_dir: Path = None,
 ) -> None:
-    """Save agent configuration to workspace/agent.json and invalidate cache.
+    """Save agent configuration to workspace/agent.json (slim format).
 
-    Workspace is resolved by derive_workspace_dir (disk-based discovery).
-    No config.agents.profiles dependency.
+    Only writes agent-identity fields + explicit overrides.
+    Global-inherited fields (mcp, acp, security, running, llm_routing,
+    heartbeat, plan) are NEVER persisted — they are inherited at runtime.
 
-    Preserves top-level fields (e.g., model, provider) that are not part of
-    AgentProfileConfig to avoid overwriting them during partial updates.
+    Workspace_dir is always stored as "." (relative to agent.json).
 
     Args:
         agent_id: Agent ID
-        agent_config: Complete agent configuration to save
+        agent_config: Agent configuration to save
         workspace_dir: Optional explicit workspace directory (overrides auto-detection)
     """
     from .utils import (
@@ -1899,8 +2033,6 @@ def save_agent_config(
         _agent_config_cache,
         _agent_config_lock,
     )
-
-    config = load_config()
 
     # Resolve workspace: explicit param > derive from agent_id
     if workspace_dir is not None:
@@ -1921,16 +2053,18 @@ def save_agent_config(
         except (json.JSONDecodeError, OSError):
             existing_data = {}
 
-    # Merge: start with existing data, overlay with new config data
+    # --- Slim serialization: exclude global-inherited + default-only fields ---
+    exclude_keys = _AGENT_GLOBAL_INHERITED_FIELDS | _AGENT_DEFAULT_ONLY_FIELDS
     new_data = agent_config.model_dump(
         exclude_none=True,
-        exclude={"builtin_tools"},
+        exclude=exclude_keys,
     )
+
+    # Force workspace_dir to relative path
+    new_data["workspace_dir"] = "."
 
     # Deep-merge 'channels' to preserve per-channel configs (e.g. wecom bot_id)
     # that are NOT part of the Pydantic model but stored in agent.json.
-    # Without this, model_dump() serializes ALL channels with defaults,
-    # and the shallow merge overwrites existing user-configured channels.
     new_channels = new_data.get("channels") or {}
     existing_channels = existing_data.get("channels") or {}
     if new_channels or existing_channels:
@@ -1943,19 +2077,18 @@ def save_agent_config(
         new_data["channels"] = merged_channels
 
     merged_data = {**existing_data, **new_data}
-    # builtin_tools is managed by global config; don't persist per-agent copy
-    merged_data.pop("tools", None)
-    merged_data.pop("builtin_tools", None)
+
+    # Remove any stale global-inherited fields from existing data
+    for field in _AGENT_GLOBAL_INHERITED_FIELDS:
+        merged_data.pop(field, None)
 
     # Sync active_model <-> model/provider for compatibility:
     # workspace.py reads model/provider, PUT /models/active writes active_model.
-    # Keep both in sync so both paths work correctly.
     active_model = agent_config.active_model
     if active_model is not None:
         merged_data["model"] = active_model.model
         merged_data["provider"] = active_model.provider_id
     elif "model" in existing_data and "provider" in existing_data:
-        # Preserve legacy model/provider if active_model is not set
         merged_data.setdefault("model", existing_data["model"])
         merged_data.setdefault("provider", existing_data["provider"])
 

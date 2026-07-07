@@ -9,8 +9,11 @@ name: coapis-prod
 
 services:
   # ── 后端 API 服务 ──
+  # 镜像选择（在 .env 中设置 COAPIS_IMAGE）：
+  #   coapis-agent:VERSION      — 全量镜像（离线可用，~2GB）
+  #   coapis-agent_min:VERSION  — 最小镜像（快速安装，~1GB，首次启动联网装渠道包）
   server:
-    image: coapis-server:latest
+    image: ${COAPIS_IMAGE:-coapis-agent:latest}
     container_name: coapis-server
     ports:
       - "${COAPIS_SERVER_PORT:-4208}:8000"

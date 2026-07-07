@@ -324,60 +324,50 @@ async def reorder_agents(
 @router.get("/agents")
 @require_permission("agents:read")
 async def list_agents(request: Request) -> Dict[str, Any]:
-    """List the current user's agents by scanning their workspace directory.
+    """List the current user's agents from the registry in config.json.
 
-    Discovery (no config.agents.profiles dependency):
-    1. workspaces/{username}/agent.json          -- default agent
-    2. workspaces/{username}/agents/*/agent.json  -- sub-agents
+    The registry is the single source of truth for agent ownership.
+    Each entry has id, name, description, workspace_dir, created_at, enabled.
     """
     username = getattr(request.state, 'username', None)
     if not username:
         return {'agents': []}
 
-    from ...app.user_store import get_user_agents_dir, get_user_workspace_dir
+    from ...config.config import load_agents_registry
+    from ...constant import WORKSPACES_DIR
+    from pathlib import Path
+
+    registry = load_agents_registry(username)
+    user_ws_base = WORKSPACES_DIR / username
 
     agents = []
-    seen_ids = set()
+    for entry in registry:
+        # Resolve absolute workspace_dir from relative path
+        ws_abs = str((user_ws_base / entry.workspace_dir).resolve()) if entry.workspace_dir else ""
 
-    def _load_summary(agent_json_path, agent_id_hint=''):
-        try:
-            if not agent_json_path.exists():
-                return None
-            meta = json.loads(agent_json_path.read_text(encoding='utf-8'))
-            agent_id = meta.get('id') or agent_id_hint
-            if not agent_id or agent_id in seen_ids:
-                return None
-            seen_ids.add(agent_id)
-            ws_dir = str(agent_json_path.parent)
-            return {
-                'id': agent_id,
-                'name': meta.get('name', agent_id),
-                'description': meta.get('description', ''),
-                'workspace_dir': ws_dir,
-                'owner': meta.get('owner', '') or username,
-                'username': username,
-                'is_global': False,
-                'enabled': meta.get('enabled', True),
-                'channels': list(meta.get('channels', {}).keys()) if isinstance(meta.get('channels'), dict) else [],
-            }
-        except Exception:
-            return None
+        # Load channels from agent.json if it exists (for display purposes)
+        channels = []
+        agent_json = Path(ws_abs) / "agent.json" if ws_abs else None
+        if agent_json and agent_json.exists():
+            try:
+                meta = json.loads(agent_json.read_text(encoding='utf-8'))
+                if isinstance(meta.get('channels'), dict):
+                    channels = list(meta['channels'].keys())
+            except Exception:
+                pass
 
-    # 1. Default agent: workspaces/{username}/agent.json
-    user_ws_dir = get_user_workspace_dir(username)
-    default_summary = _load_summary(user_ws_dir / 'agent.json')
-    if default_summary:
-        agents.append(default_summary)
-
-    # 2. Sub-agents: workspaces/{username}/agents/*/agent.json
-    user_agents_dir = get_user_agents_dir(username)
-    if user_agents_dir.exists():
-        for item in sorted(user_agents_dir.iterdir()):
-            if not item.is_dir():
-                continue
-            sub_summary = _load_summary(item / 'agent.json', agent_id_hint=item.name)
-            if sub_summary:
-                agents.append(sub_summary)
+        agents.append({
+            'id': entry.id,
+            'name': entry.name,
+            'description': entry.description,
+            'workspace_dir': ws_abs,
+            'owner': username,
+            'username': username,
+            'is_global': False,
+            'enabled': entry.enabled,
+            'is_default': entry.is_default,
+            'channels': channels,
+        })
 
     return {'agents': agents}
 
@@ -467,6 +457,31 @@ async def create_agent(
             agent_id, config, username=username, is_global=is_global
         )
 
+        # Persist agent.json to disk (slim format, required for get_agent_for_request lookup)
+        ws_dir = Path(workspace.workspace_dir) if hasattr(workspace, "workspace_dir") else None
+        if ws_dir:
+            ws_dir.mkdir(parents=True, exist_ok=True)
+            agent_json_path = ws_dir / "agent.json"
+            if not agent_json_path.exists():
+                agent_data = {
+                    "id": agent_id,
+                    "name": payload.name or agent_id,
+                    "description": payload.description or "",
+                    "owner": username or "",
+                    "workspace_dir": ".",
+                }
+                # active_model is an optional override — only write if explicitly set
+                if payload.active_model:
+                    agent_data["active_model"] = {
+                        "provider_id": payload.active_model.provider_id,
+                        "model": payload.active_model.model,
+                    }
+                agent_json_path.write_text(
+                    json.dumps(agent_data, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                logger.info(f"Wrote agent.json for new agent: {agent_id}")
+
         # For user sub-agents: apply agent-level templates and slim system_prompt_files
         if not is_global and username and workspace.workspace_dir:
             from ..user_provisioning import _copy_base_templates
@@ -479,7 +494,6 @@ async def create_agent(
                 # Persist slim config to agent.json
                 agent_json = ws_path / "agent.json"
                 if agent_json.exists():
-                    import json
                     agent_data = json.loads(agent_json.read_text(encoding="utf-8"))
                     agent_data["system_prompt_files"] = config["system_prompt_files"]
                     agent_json.write_text(
@@ -487,6 +501,17 @@ async def create_agent(
                         encoding="utf-8",
                     )
                     logger.info(f"Applied agent-level templates to sub-agent {agent_id}")
+
+            # Register agent in user's config.json agents registry
+            from ...config.config import add_agent_to_registry
+            rel_ws = str(ws_path.relative_to(WORKSPACES_DIR / username))
+            add_agent_to_registry(
+                username=username,
+                agent_id=agent_id,
+                name=payload.name or agent_id,
+                description=payload.description or "",
+                workspace_dir=rel_ws,
+            )
 
         return {
             "id": agent_id,
@@ -612,16 +637,20 @@ async def delete_agent(
     user_role = getattr(request.state, "role", "user")
     
     # ┌──────────────────────────────────────────────────────────────────┐
-    # │ Prevent deletion of default agents (global or user-level)       │
+    # │ Prevent deletion of default agents (registry-based check)       │
     # └──────────────────────────────────────────────────────────────────┘
-    if agent_id == "global_default":
-        raise HTTPException(status_code=403, detail="Cannot delete the default agent (global_default)")
-    # Also protect user default agents: "user:{username}" format
-    if agent_id.startswith("user:"):
-        raise HTTPException(status_code=403, detail=f"Cannot delete the user's default agent ({agent_id})")
+    from ...config.config import load_agents_registry
+    registry = load_agents_registry(username or "")
+    for entry in registry:
+        if entry.id == agent_id and entry.is_default:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Cannot delete the default agent ({agent_id})",
+            )
     
     try:
         # Admin can delete any agent
+        owner_username = username  # default: current user
         if user_role in ("admin", "superadmin"):
             # Try to find the agent owner by iterating all workspaces
             success = False
@@ -640,6 +669,12 @@ async def delete_agent(
         
         if not success:
             raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Remove agent from user's config.json agents registry
+        if owner_username:
+            from ...config.config import remove_agent_from_registry
+            remove_agent_from_registry(owner_username, agent_id)
+
         return {
             "success": True,
             "agent_id": agent_id,
@@ -663,12 +698,17 @@ async def toggle_agent_enabled(
         raise HTTPException(status_code=503, detail="Agent manager not initialized")
 
     # ┌──────────────────────────────────────────────────────────────────┐
-    # │ Prevent toggling default agents (global or user-level)          │
+    # │ Prevent toggling default agents (registry-based check)          │
     # └──────────────────────────────────────────────────────────────────┘
-    if agent_id == "global_default":
-        raise HTTPException(status_code=403, detail="Cannot disable the default agent (global_default)")
-    if agent_id.startswith("user:"):
-        raise HTTPException(status_code=403, detail=f"Cannot disable the user's default agent ({agent_id})")
+    from ...config.config import load_agents_registry
+    username_for_check = getattr(request.state, "username", "")
+    registry = load_agents_registry(username_for_check or "")
+    for entry in registry:
+        if entry.id == agent_id and entry.is_default:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Cannot disable the default agent ({agent_id})",
+            )
 
     username = getattr(request.state, "username", None)
     user_role = getattr(request.state, "role", "user")

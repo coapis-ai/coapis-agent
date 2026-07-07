@@ -20,7 +20,15 @@ const PROTECTED_AGENTS = ['global_default', 'global_qa_agent'];
 
 /** Generate a short ASCII-safe global agent ID: global_{6-char hex} */
 function generateGlobalAgentId(): string {
-  const hex = crypto.randomUUID().replace(/-/g, "").slice(0, 6);
+  // crypto.randomUUID() only works in secure contexts (HTTPS);
+  // use Math.random fallback for HTTP environments.
+  const uuid = typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+      });
+  const hex = uuid.replace(/-/g, "").slice(0, 6);
   return `global_${hex}`;
 }
 

@@ -35,6 +35,7 @@ Directory structure:
 """
 
 import asyncio
+import json
 import time
 
 from agentscope_runtime.engine.schemas.exception import ConfigurationException
@@ -117,7 +118,11 @@ class MultiAgentManager:
         username: str = None,
         is_global: bool = True,
     ) -> Workspace:
-        """Create and start a new agent workspace.
+        """Create a new agent workspace (lightweight registration only).
+
+        Registers the workspace in memory and user registry but does NOT
+        start runtime services (MCP, channels, cron). Those are started
+        lazily on first use via get_agent().
 
         Uses composite cache key "{username}:{agent_id}" for user isolation.
 
@@ -128,7 +133,7 @@ class MultiAgentManager:
             is_global: If True, agent is shared by all users
 
         Returns:
-            Workspace instance
+            Workspace instance (not yet started)
         """
         # Composite key for user isolation
         cache_key = f"{username}:{agent_id}" if username else f"global:{agent_id}"
@@ -167,13 +172,9 @@ class MultiAgentManager:
                 if agent_id not in self._user_agents[username]:
                     self._user_agents[username].append(agent_id)
 
-            try:
-                await workspace.start()
-            except Exception:
-                # Workspace registered but not started — still visible in dropdown
-                # Will be retried when user opens chat (get_agent lazy-loads)
-                pass
-
+            # NOTE: Do NOT call workspace.start() here.
+            # Runtime services (MCP, channels, cron) are started lazily
+            # on first use via get_agent(). This keeps create_agent fast (<1s).
             scope = "user" if (username and not is_global) else "global"
             logger.info(f"Created {scope} agent: {cache_key}" + (f" (user: {username})" if username else ""))
             return workspace
@@ -199,7 +200,9 @@ class MultiAgentManager:
                     return False
 
             workspace = self._workspaces[cache_key]
-            await workspace.stop()
+            # Skip stop() if workspace was never started (lazy-init optimization)
+            if getattr(workspace, "status", "stopped") == "running":
+                await workspace.stop()
             del self._workspaces[cache_key]
 
             # Clean up from user tracking
@@ -422,7 +425,11 @@ class MultiAgentManager:
                 await workspace.stop()
 
     async def load_default_agents(self):
-        """Load all agents by scanning the filesystem (no config.agents.profiles).
+        """Discover agents from filesystem and register them (no startup).
+
+        Only scans disk and creates lightweight Workspace objects in
+        _workspaces. Runtime services (MCP, channels, cron) are NOT started
+        here — they start lazily on first use via get_agent().
 
         Discovery order:
         1. Global agents: AGENTS_DIR/*/agent.json
@@ -552,7 +559,7 @@ class MultiAgentManager:
             profile_owner = agent_meta.get("owner", "") or ""
             if not profile_owner and agent_meta.get("username"):
                 profile_owner = agent_meta["username"]
-        except Exception:
+        except Exception as _exc:
             profile_owner = ""
         # Infer owner from agent_id for user agents (user:X → owner is X)
         if not profile_owner and agent_id.startswith("user:"):
@@ -580,8 +587,16 @@ class MultiAgentManager:
 
         # Fast path: already loaded (no lock)
         if cache_key in self.agents:
-            logger.debug(f"Returning cached agent: {cache_key}")
-            return self.agents[cache_key]
+            ws = self.agents[cache_key]
+            # Lazy-start: workspace registered by create_agent() but not yet started
+            if getattr(ws, "status", "running") != "running":
+                logger.info(f"Lazy-starting workspace: {cache_key}")
+                try:
+                    await ws.start()
+                    ws.set_manager(self)
+                except Exception as e:
+                    logger.error(f"Lazy-start failed for {cache_key}: {e}")
+            return ws
 
         should_start = False
         event = None

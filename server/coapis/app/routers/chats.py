@@ -129,11 +129,11 @@ def _find_workspace_for_agent(request: Request, agent_id: str, username: str):
     return None
 
 
-def _get_chat_manager(request: Request, agent_id: str = None):
+async def _get_chat_manager(request: Request, agent_id: str = None):
     """Get the ChatManager for the appropriate agent workspace.
 
-    When agent_id is provided, strictly returns that agent's ChatManager
-    or raises 404. When agent_id is None, falls back to user's default.
+    Uses get_agent() to trigger lazy-start for unstarted workspaces.
+    When agent_id is None, falls back to user's default.
     """
     manager = getattr(request.app.state, "multi_agent_manager", None)
     if not manager:
@@ -144,9 +144,13 @@ def _get_chat_manager(request: Request, agent_id: str = None):
 
     username, _ = _get_current_user(request)
 
-    # Strict mode: find the exact agent workspace, no fallback
+    # Strict mode: use get_agent() which triggers lazy-start
     if agent_id:
-        ws = _find_workspace_for_agent(request, agent_id, username)
+        try:
+            ws = await manager.get_agent(agent_id, username=username)
+        except Exception as exc:
+            logger.warning("_get_chat_manager: get_agent(%s) failed: %s", agent_id, exc)
+            ws = None
         if ws and hasattr(ws, 'chat_manager') and ws.chat_manager:
             return ws.chat_manager
         raise HTTPException(
@@ -341,7 +345,7 @@ async def list_chats(
         )
 
     try:
-        cm = _get_chat_manager(request, agent_id=resolved_agent_id)
+        cm = await _get_chat_manager(request, agent_id=resolved_agent_id)
     except HTTPException:
         logger.warning(
             "list_chats: agent_id=%s not found for user=%s",
@@ -388,7 +392,7 @@ async def create_chat(
     username, ignoring any user_id in the payload.
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
+    cm = await _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
     
     from ..runner.models import ChatSpec as RunnerChatSpec
     
@@ -441,7 +445,7 @@ async def get_chat(
     # Try to get the agent's ChatManager; fall back to cross-manager search
     cm = None
     try:
-        cm = _get_chat_manager(request, agent_id=resolved_agent_id or None)
+        cm = await _get_chat_manager(request, agent_id=resolved_agent_id or None)
     except HTTPException:
         pass
 
@@ -552,7 +556,7 @@ async def get_archived_messages(
     Returns older messages that have been rotated out of the hot JSON store.
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
+    cm = await _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
 
     # Verify chat exists and user has access
     spec = await cm.get_chat(chat_id)
@@ -595,7 +599,7 @@ async def update_chat(
     ENFORCES USER ISOLATION: Non-admin users can only update their own chats.
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
+    cm = await _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
     
     # Verify ownership first
     spec = await cm.get_chat(chat_id)
@@ -632,7 +636,7 @@ async def delete_chat(
     Searches across all of the user's ChatManagers (user-level + agent-level).
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
+    cm = await _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
     
     # Try primary ChatManager first
     spec = await cm.get_chat(chat_id)
@@ -665,7 +669,7 @@ async def batch_delete_chats(
     Searches across all of the user's ChatManagers (user-level + agent-level).
     """
     username, is_admin = _get_current_user(request)
-    cm = _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
+    cm = await _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
 
     # For each chat_id, find the ChatManager that owns it
     # Group by ChatManager for efficient batch deletion

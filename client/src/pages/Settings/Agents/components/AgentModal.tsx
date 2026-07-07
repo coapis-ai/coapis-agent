@@ -10,7 +10,15 @@ import {
 
 /** Generate a short ASCII-safe agent ID: user_{6-char hex} */
 function generateAgentId(): string {
-  const hex = crypto.randomUUID().replace(/-/g, "").slice(0, 6);
+  // crypto.randomUUID() only works in secure contexts (HTTPS);
+  // use Math.random fallback for HTTP environments.
+  const uuid = typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+      });
+  const hex = uuid.replace(/-/g, "").slice(0, 6);
   return `user_${hex}`;
 }
 import { useTranslation } from "react-i18next";
@@ -46,6 +54,7 @@ export function AgentModal({
   const { user } = useUser();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const selectedProviderId = Form.useWatch("active_model_provider", form);
   const selectedModelId = Form.useWatch("active_model_model", form);
@@ -107,6 +116,15 @@ export function AgentModal({
     });
   };
 
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Modal
       title={
@@ -117,8 +135,9 @@ export function AgentModal({
           : t("agent.createTitle")
       }
       open={open}
-      onOk={onSave}
+      onOk={handleSave}
       onCancel={onCancel}
+      confirmLoading={saving}
       width={640}
       okText={t("common.save")}
       cancelText={t("common.cancel")}

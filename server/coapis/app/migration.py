@@ -102,28 +102,15 @@ def _do_migrate_legacy_workspace() -> bool:
         logger.error(f"Failed to load config: {e}")
         return False
 
-    # Check if already migrated
-    # Skip if:
-    # 1. Multiple agents already exist (multi-agent config), OR
-    # 2. Default agent has agent.json (already migrated)
-    if len(config.agents.profiles) > 1:
+    # Check if already migrated — use disk-based check
+    # Skip if global_default agent.json already exists
+    from ..constant import AGENTS_DIR
+    default_agent_json = AGENTS_DIR / "global_default" / "agent.json"
+    if default_agent_json.exists():
         logger.debug(
-            f"Multi-agent config already exists "
-            f"({len(config.agents.profiles)} agents), skipping migration",
+            "Default agent already exists on disk, skipping migration",
         )
         return False
-
-    if "global_default" in config.agents.profiles:
-        agent_ref = config.agents.profiles["global_default"]
-        if isinstance(agent_ref, AgentProfileRef):
-            from ..config.config import derive_workspace_dir
-            workspace_dir = derive_workspace_dir("global_default", agent_ref.username)
-            agent_config_path = workspace_dir / "agent.json"
-            if agent_config_path.exists():
-                logger.debug(
-                    "Default agent already migrated, skipping migration",
-                )
-                return False
 
     logger.info("=" * 60)
     logger.info("Migrating legacy config to multi-agent structure...")
@@ -678,7 +665,7 @@ def ensure_default_agent_exists() -> None:
 
 def _do_ensure_default_agent() -> None:
     """Internal implementation of default agent initialization.
-    
+
     Global agents (like 'default') must use AGENTS_DIR, not WORKSPACES_DIR.
     WORKSPACES_DIR is strictly for user-owned workspaces.
     """
@@ -686,16 +673,10 @@ def _do_ensure_default_agent() -> None:
 
     config = load_config()
 
-    # Get or determine default workspace path
-    if "global_default" in config.agents.profiles:
-        agent_ref = config.agents.profiles["global_default"]
-        from ..config.config import derive_workspace_dir
-        default_workspace = derive_workspace_dir("global_default", agent_ref.username)
-        agent_existed = True
-    else:
-        # Global agent -> use AGENTS_DIR, not WORKSPACES_DIR
-        default_workspace = AGENTS_DIR / "global_default"
-        agent_existed = False
+    # Global agent -> use AGENTS_DIR
+    default_workspace = AGENTS_DIR / "global_default"
+    agent_json = default_workspace / "agent.json"
+    agent_existed = agent_json.exists()
 
     # Ensure workspace directory exists
     default_workspace.mkdir(parents=True, exist_ok=True)
@@ -712,12 +693,6 @@ def _do_ensure_default_agent() -> None:
             workspace_dir=default_workspace,
             fallback_language=config.agents.language or "zh",
             description=_DEFAULT_AGENT_DESCRIPTION,
-        )
-
-        # Add default agent reference to config
-        config.agents.profiles["global_default"] = AgentProfileRef(
-            id="global_default",
-            workspace_dir=str(default_workspace),
         )
 
         # Set as active if no active agent
@@ -856,38 +831,16 @@ def _do_ensure_qa_agent() -> None:
     config = load_config()
     qa_id = BUILTIN_QA_AGENT_ID
 
-    if qa_id in config.agents.profiles:
-        agent_ref = config.agents.profiles[qa_id]
-        from ..config.config import derive_workspace_dir
-        qa_workspace = derive_workspace_dir(qa_id, agent_ref.username)
-        agent_existed = True
-    else:
-        # Global agent -> use AGENTS_DIR, not WORKSPACES_DIR
-        qa_workspace = AGENTS_DIR / qa_id
-        agent_existed = False
+    # Global agent -> use AGENTS_DIR, check existence on disk
+    qa_workspace = AGENTS_DIR / qa_id
+    agent_json = qa_workspace / "agent.json"
+    agent_existed = agent_json.exists()
 
     qa_workspace.mkdir(parents=True, exist_ok=True)
 
     _ensure_workspace_json_files(qa_workspace, "QA agent")
 
     if agent_existed:
-        return
-
-    other_id = _other_agent_owns_workspace(
-        config.agents.profiles,
-        qa_workspace,
-        qa_id,
-    )
-    if other_id is not None:
-        logger.warning(
-            "Skipping builtin QA profile %r: workspace %s is already "
-            "used by agent %r. Point that agent to another directory "
-            "or remove it from config before the builtin QA slot can "
-            "be created.",
-            qa_id,
-            qa_workspace,
-            other_id,
-        )
         return
 
     logger.info("Creating builtin QA agent...")
@@ -904,12 +857,6 @@ def _do_ensure_qa_agent() -> None:
         md_template_id=template_result.md_template_id,
     )
 
-    config.agents.profiles[qa_id] = AgentProfileRef(
-        id=qa_id,
-        workspace_dir=str(qa_workspace),
-    )
-    _apply_legacy_qa_disable_for_migration(config)
-    save_config(config)
     save_agent_config(qa_id, template_result.agent_config)
     logger.info(
         "Created builtin QA agent with workspace: %s",
@@ -1048,12 +995,7 @@ def ensure_global_agent_roles() -> None:
         with open(agent_json, "w", encoding="utf-8") as f:
             json.dump(agent_config, f, ensure_ascii=False, indent=2)
 
-        # Also update config.json profile
-        if agent_id in config.agents.profiles:
-            config.agents.profiles[agent_id].role = role
-            config.agents.profiles[agent_id].priority = priority
-            changed = True
-
+        changed = True
         logger.info(f"Set global agent '{agent_id}' role={role}, priority={priority}")
 
     if changed:

@@ -425,14 +425,106 @@ class MessageRenderer:
         else:
             return ""
 
+    @staticmethod
+    def _filter_tool_noise(content: str) -> str:
+        """Remove tool execution noise from thinking content.
+
+        Filters out paragraphs that are primarily about tool execution
+        internals (e.g., "XX不可用", "XX大多数为空", tool call analysis)
+        while preserving valuable reasoning content.
+        """
+        import re
+
+        if not content or not content.strip():
+            return content
+
+        # Split into paragraphs (double newline or single newline for short lines)
+        paragraphs = re.split(r'\n{2,}', content)
+        if len(paragraphs) <= 1:
+            # Single block — try splitting by single newline
+            paragraphs = [p.strip() for p in content.split('\n') if p.strip()]
+            if not paragraphs:
+                return content
+
+        # Tool noise patterns — lines/paragraphs matching these are filtered.
+        # Only matches short paragraphs (<=100 chars) to avoid filtering
+        # valuable reasoning that happens to mention tools.
+        _NOISE_PATTERNS = [
+            # Tool availability/result judgments (tool-centric phrases)
+            r'工具.{0,5}不可用',
+            r'工具.{0,5}失败',
+            r'工具.{0,5}错误',
+            r'工具.{0,5}返回.*?空',
+            r'工具.{0,5}结果.*?空',
+            r'工具.*?无法',
+            r'调用.{0,5}工具.*?失败',
+            r'执行.{0,5}工具.*?失败',
+            r'尝试.{0,5}工具.*?失败',
+            r'使用.{0,5}工具.*?失败',
+            # Tool result summaries (short noise lines)
+            r'^.{0,5}不可用。?$',
+            r'^.{0,5}没有结果。?$',
+            r'^.{0,5}大多数为空。?$',
+            r'^.{0,5}返回空。?$',
+            r'^.{0,5}返回了空。?$',
+            r'^.{0,5}结果为空。?$',
+            r'^.{0,5}调用失败。?$',
+            r'^.{0,5}执行失败。?$',
+            r'^.{0,5}获取失败。?$',
+            r'^.{0,5}搜索.*?没有结果。?$',
+            r'^.{0,5}搜索.*?为空。?$',
+            r'^.{0,5}没有找到.*?结果。?$',
+            r'^.{0,5}未找到.*?结果。?$',
+            # Search/browse specific
+            r'搜索.{0,10}没有结果',
+            r'搜索.{0,10}失败',
+            r'网页.{0,5}不可用',
+            r'浏览器.{0,5}不可用',
+            r'访问.{0,10}失败',
+            r'打开.{0,10}失败',
+            # Error descriptions (tool-context only)
+            r'error.{0,5}tool',
+            r'tool.{0,5}error',
+            r'failed.{0,5}tool',
+            r'tool.{0,5}failed',
+            r'调用出错',
+            r'执行出错',
+            # Generic tool noise markers
+            r'^\s*🔧',
+            r'^\s*❌.*工具',
+        ]
+        _NOISE_RE = re.compile('|'.join(_NOISE_PATTERNS), re.IGNORECASE)
+
+        filtered = []
+        for para in paragraphs:
+            para_stripped = para.strip()
+            if not para_stripped:
+                continue
+
+            # Keep long paragraphs — they likely contain real reasoning
+            if len(para_stripped) > 100:
+                filtered.append(para_stripped)
+                continue
+
+            # Filter short paragraphs that match noise patterns
+            if _NOISE_RE.search(para_stripped):
+                continue
+
+            filtered.append(para_stripped)
+
+        return '\n\n'.join(filtered) if filtered else ''
+
     def render_thinking(self, content: str) -> str:
         """Render a thinking block based on style."""
         action = self.get_thinking_action()
         if action == BlockRenderAction.SHOW:
-            return content
+            return self._filter_tool_noise(content)
         elif action == BlockRenderAction.SUMMARIZE:
-            preview = content[:self.style.thinking_preview_len]
-            if len(content) > self.style.thinking_preview_len:
+            filtered = self._filter_tool_noise(content)
+            if not filtered:
+                return ""
+            preview = filtered[:self.style.thinking_preview_len]
+            if len(filtered) > self.style.thinking_preview_len:
                 preview += "…"
             return f"{self.style.thinking_emoji} {preview}"
         else:

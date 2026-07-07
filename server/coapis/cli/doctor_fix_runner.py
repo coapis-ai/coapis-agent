@@ -419,7 +419,18 @@ def _plan_fixes(
             if not wsp.is_dir():
                 continue
 
-            profile = build_fallback_agent_profile_config(agent_id, cfg)
+            # Derive username from agent_id or workspace path
+            _uname = ""
+            if agent_id.startswith("user:"):
+                _uname = agent_id.split(":", 1)[1]
+            elif "workspaces" in str(wsp):
+                _parts = str(wsp).split("/")
+                if "workspaces" in _parts:
+                    _idx = _parts.index("workspaces")
+                    if _idx + 1 < len(_parts):
+                        _uname = _parts[_idx + 1]
+
+            profile = build_fallback_agent_profile_config(agent_id, cfg, username=_uname)
             payload = profile.model_dump(
                 exclude_none=True,
                 exclude={"builtin_tools"},
@@ -460,7 +471,17 @@ def _plan_fixes(
                 continue
             if _workspace_agent_json_valid(agent_json):
                 continue
-            profile = build_fallback_agent_profile_config(agent_id, cfg)
+            # Derive username from agent_id or workspace path
+            _uname = ""
+            if agent_id.startswith("user:"):
+                _uname = agent_id.split(":", 1)[1]
+            elif "workspaces" in str(wsp):
+                _parts = str(wsp).split("/")
+                if "workspaces" in _parts:
+                    _idx = _parts.index("workspaces")
+                    if _idx + 1 < len(_parts):
+                        _uname = _parts[_idx + 1]
+            profile = build_fallback_agent_profile_config(agent_id, cfg, username=_uname)
             payload = profile.model_dump(
                 exclude_none=True,
                 exclude={"builtin_tools"},

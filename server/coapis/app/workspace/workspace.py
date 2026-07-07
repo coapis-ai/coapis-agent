@@ -86,23 +86,6 @@ class Workspace:
         self.is_global = is_global
         self._owner_role = owner_role  # Permission role (admin/user)
 
-    @property
-    def resolved_role(self) -> str:
-        """Resolve the owner's permission role.
-
-        Priority: explicit owner_role → user_store lookup via username → 'user'
-        """
-        if self._owner_role:
-            return self._owner_role
-        if self.username:
-            try:
-                from ..user_store import get_user
-                user_info = get_user(self.username)
-                if user_info:
-                    return user_info.get("role", "user")
-            except Exception:
-                pass
-        return "user"
         self._ensure_identity_files()
 
         # Link user's "My Space" files into workspace so agent tools can access them
@@ -128,6 +111,24 @@ class Workspace:
         logger.debug(
             f"Created Workspace: {agent_id} at {self.workspace_dir}",
         )
+
+    @property
+    def resolved_role(self) -> str:
+        """Resolve the owner's permission role.
+
+        Priority: explicit owner_role → user_store lookup via username → 'user'
+        """
+        if self._owner_role:
+            return self._owner_role
+        if self.username:
+            try:
+                from ..user_store import get_user
+                user_info = get_user(self.username)
+                if user_info:
+                    return user_info.get("role", "user")
+            except Exception:
+                pass
+        return "user"
 
     def _link_user_files(self):
         """Create symlink from workspace/files -> workspaces/{username}/files/.
@@ -181,7 +182,12 @@ class Workspace:
             )
 
     def _ensure_identity_files(self) -> None:
-        """Copy identity template files to workspace if missing."""
+        """Copy identity template files to workspace if missing.
+
+        Sub-agents (non-user, non-global) get a slim set:
+        only SOUL.md, PROFILE.md, AGENTS.md (from agent_level/ if available).
+        User default agents and global agents get the full set.
+        """
         try:
             from ...constant import TEMPLATES_DIR
             import shutil
@@ -189,16 +195,33 @@ class Workspace:
             if not TEMPLATES_DIR.exists():
                 return
 
-            identity_files = [
-                "AGENTS.md", "SOUL.md", "PROFILE.md",
-                "MEMORY.md", "BOOTSTRAP.md", "HEARTBEAT.md",
-            ]
+            # Determine if this is a sub-agent (not a user default or global agent)
+            aid = self.agent_id
+            is_sub_agent = (
+                not aid.startswith("user:")
+                and not aid.startswith("global_")
+                and not self.is_global
+            )
+
+            if is_sub_agent:
+                identity_files = ["AGENTS.md", "SOUL.md", "PROFILE.md", "MEMORY.md"]
+                layer_dir = TEMPLATES_DIR / "agent_level"
+            else:
+                identity_files = [
+                    "AGENTS.md", "SOUL.md", "PROFILE.md",
+                    "MEMORY.md", "BOOTSTRAP.md", "HEARTBEAT.md",
+                ]
+                layer_dir = TEMPLATES_DIR / "user_level"
+
             copied = 0
             for fname in identity_files:
                 dst = self.workspace_dir / fname
                 if dst.exists():
                     continue
-                src = TEMPLATES_DIR / fname
+                # Layer-specific template first, then global fallback
+                src = layer_dir / fname if layer_dir.exists() else TEMPLATES_DIR / fname
+                if not src.exists():
+                    src = TEMPLATES_DIR / fname
                 if src.exists():
                     shutil.copy2(src, dst)
                     copied += 1
