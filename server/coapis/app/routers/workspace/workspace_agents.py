@@ -358,7 +358,21 @@ async def delete_my_agent(
         raise HTTPException(status_code=503, detail="Agent manager not initialized")
     
     workspace = manager.get_workspace(agent_id, username=username)
+
+    # ┌──────────────────────────────────────────────────────────────┐
+    # │ Fallback: disk-level cleanup when workspace not in memory   │
+    # └──────────────────────────────────────────────────────────────┘
     if not workspace:
+        import shutil
+        from ....constant import WORKSPACES_DIR
+        agent_dir = WORKSPACES_DIR / username / "agents" / agent_id
+        if agent_dir.exists():
+            shutil.rmtree(agent_dir)
+            logger.info(f"Cleaned up orphan agent directory: {agent_dir}")
+            # Remove from registry
+            from ....config.config import remove_agent_from_registry
+            remove_agent_from_registry(username, agent_id)
+            return {"success": True, "agent_id": agent_id}
         raise HTTPException(status_code=404, detail="智能体不存在")
     
     # 只能删除自己的智能体
@@ -367,9 +381,17 @@ async def delete_my_agent(
     if workspace.username != username:
         raise HTTPException(status_code=403, detail="无权删除此智能体")
     
-    success = await manager.destroy_agent(agent_id)
+    success = await manager.destroy_agent(agent_id, username=username)
     if not success:
-        raise HTTPException(status_code=500, detail="删除失败")
+        # Fallback: direct disk cleanup
+        import shutil
+        from ....constant import WORKSPACES_DIR
+        agent_dir = WORKSPACES_DIR / username / "agents" / agent_id
+        if agent_dir.exists():
+            shutil.rmtree(agent_dir)
+            logger.info(f"Cleaned up agent directory after destroy failure: {agent_dir}")
+        else:
+            raise HTTPException(status_code=500, detail="删除失败")
     
     # Record audit log
     from ....user_system.database import UserSystemDB

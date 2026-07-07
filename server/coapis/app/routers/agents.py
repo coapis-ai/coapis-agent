@@ -651,24 +651,63 @@ async def delete_agent(
     try:
         # Admin can delete any agent
         owner_username = username  # default: current user
+        success = False
+
         if user_role in ("admin", "superadmin"):
             # Try to find the agent owner by iterating all workspaces
-            success = False
             for cache_key, workspace in list(manager._workspaces.items()):
                 if _extract_agent_id(cache_key) == agent_id:
                     owner_username = workspace.username
                     success = await manager.destroy_agent(agent_id, username=owner_username)
                     break
-            
+
             # Fallback: try global agent
             if not success:
                 success = await manager.destroy_agent(agent_id, username=None)
         else:
             # Regular users can only delete their own agents
             success = await manager.destroy_agent(agent_id, username=username)
-        
+
+        # ┌──────────────────────────────────────────────────────────────┐
+        # │ Fallback: disk-level cleanup when workspace not in memory   │
+        # │ (e.g. directory exists but agent.json is missing/invalid)   │
+        # └──────────────────────────────────────────────────────────────┘
         if not success:
-            raise HTTPException(status_code=404, detail="Agent not found")
+            import shutil
+            from ...constant import WORKSPACES_DIR, AGENTS_DIR
+
+            cleaned = False
+            # Try user-level directory first
+            search_usernames = [username] if username else []
+            if user_role in ("admin", "superadmin"):
+                # Admin: scan all user workspaces
+                if WORKSPACES_DIR.exists():
+                    for d in WORKSPACES_DIR.iterdir():
+                        if d.is_dir() and d.name not in search_usernames:
+                            search_usernames.append(d.name)
+
+            for uname in search_usernames:
+                agent_dir = WORKSPACES_DIR / uname / "agents" / agent_id
+                if agent_dir.exists():
+                    shutil.rmtree(agent_dir)
+                    logger.info(f"Cleaned up orphan agent directory: {agent_dir}")
+                    owner_username = uname
+                    cleaned = True
+                    break
+
+            # Try global agents directory
+            if not cleaned:
+                global_dir = AGENTS_DIR / agent_id
+                if global_dir.exists():
+                    shutil.rmtree(global_dir)
+                    logger.info(f"Cleaned up orphan global agent directory: {global_dir}")
+                    owner_username = None
+                    cleaned = True
+
+            if not cleaned:
+                raise HTTPException(status_code=404, detail="Agent not found")
+
+            success = True
 
         # Remove agent from user's config.json agents registry
         if owner_username:
