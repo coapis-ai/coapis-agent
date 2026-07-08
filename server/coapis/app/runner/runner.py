@@ -459,16 +459,16 @@ class AgentRunner(Runner):
 
                 # Filter out ephemeral bootstrap guidance system messages
                 # to prevent them from being persisted into session history.
-                from ..agents.prompt import _BOOTSTRAP_GUIDANCE_TAG
+                from ...agents.prompt import _BOOTSTRAP_GUIDANCE_TAG
                 _before_filter = len(_msgs_to_add)
                 _msgs_to_add = [
                     m for m in _msgs_to_add
                     if not (
                         getattr(m, "role", "") == "system"
                         and _BOOTSTRAP_GUIDANCE_TAG in (
-                            m.get_text_content()
+                            (m.get_text_content() or "")
                             if hasattr(m, "get_text_content")
-                            else str(getattr(m, "content", ""))
+                            else str(getattr(m, "content", "") or "")
                         )
                     )
                 ]
