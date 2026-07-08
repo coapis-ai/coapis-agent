@@ -106,6 +106,54 @@ async def get_recommendations_endpoint(
             limit=limit,
             context=context,
         )
+        
+        # If bootstrap is pending, replace recommendations with remaining bootstrap questions
+        if scene == "chat_welcome":
+            from ..agents.utils import has_pending_bootstrap
+            from ..agents.hooks.bootstrap import BOOTSTRAP_PROMPTS_ZH
+            from ..constant import WORKSPACES_DIR
+            
+            # Check if bootstrap is pending for this user
+            user_workspace = WORKSPACES_DIR / user_id
+            if has_pending_bootstrap(user_workspace):
+                # Read state to find which prompts have been sent
+                import json as _json
+                state_file = user_workspace / ".bootstrap_state"
+                prompts_sent = 0
+                if state_file.exists():
+                    try:
+                        state = _json.loads(state_file.read_text(encoding="utf-8"))
+                        prompts_sent = state.get("attempts", 0)
+                    except Exception:
+                        pass
+                
+                # Show only the NEXT unanswered bootstrap prompt
+                prompts = BOOTSTRAP_PROMPTS_ZH
+                if prompts_sent < len(prompts):
+                    clean_prompt = prompts[prompts_sent].strip()
+                    bootstrap_items = [{
+                        "id": f"bootstrap_q{prompts_sent+1}",
+                        "title": "帮助我了解您",
+                        "description": "点击开始对话",
+                        "prompt": clean_prompt,
+                        "category": "context",
+                        "icon": "🐝",
+                        "score": 100,
+                        "metadata": {"is_bootstrap": True},
+                    }]
+                    
+                    from .models import RecommendationResponse, RecommendationItem
+                    items = [RecommendationItem(**item) for item in bootstrap_items]
+                    response = RecommendationResponse(
+                        recommendations=items,
+                        meta={
+                            "count": len(items),
+                            "generated_at": "",
+                            "scene": scene,
+                            "strategies_used": ["bootstrap"],
+                        }
+                    )
+        
         return response.to_dict()
     except Exception as e:
         logger.error(f"Failed to get recommendations: {e}")

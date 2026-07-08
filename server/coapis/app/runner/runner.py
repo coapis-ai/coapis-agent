@@ -1278,6 +1278,39 @@ class AgentRunner(Runner):
                     _evolution_collect_text(msg, _evolution_full_response)
                     yield msg, last
 
+            # --- Bootstrap: Append guidance after streaming ends ---
+            # If bootstrap is pending, read current attempt count from state
+            # file, append the corresponding prompt, and increment counter.
+            from ...agents.utils import has_pending_bootstrap
+            from ...agents.hooks.bootstrap import get_bootstrap_prompt
+            if self.workspace_dir and has_pending_bootstrap(self.workspace_dir):
+                state_file = self.workspace_dir / ".bootstrap_state"
+                state = {"attempts": 0}
+                if state_file.exists():
+                    try:
+                        state = json.loads(state_file.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+                prompts_sent = state.get("attempts", 0)
+                max_att = state.get("max_attempts", 3)
+                if prompts_sent < max_att:
+                    next_attempt = prompts_sent + 1
+                    bootstrap_text = get_bootstrap_prompt(
+                        attempt=next_attempt,
+                        language="zh",
+                    )
+                    _evolution_full_response.append(bootstrap_text)
+                    # Increment counter for next time
+                    state["attempts"] = next_attempt
+                    state_file.write_text(
+                        json.dumps(state, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    logger.info(
+                        "Bootstrap prompt %d appended", next_attempt,
+                    )
+            # -------------------------------------------------------
+
             # --- Evolution Engine Hooks (Phase 2: Turn End) ---
             if engine:
                 _evolution_trigger_turn_end(
