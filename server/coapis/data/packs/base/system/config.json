@@ -18,6 +18,8 @@
   "providers": {},
   "workspace": {
     "default_agent_name": "CoApis",
-    "default_skills": ["guidance"]
+    "default_skills": [
+      "coapis_qa_guidance"
+    ]
   }
 }

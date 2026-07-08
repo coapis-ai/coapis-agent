@@ -1,7 +1,5 @@
 {
-  "QA_source_index": "将用户问题中的主题、关键词映射到 QwenPaw 官方文档路径与常见源码入口，减少盲目搜索。",
   "aux-agent-growing": "智能体成长系统 - 从经验中学习，自动进化能力，沉淀知识与技能。",
-  "axu-code-checked": "代码审查与问题定位 — 像架构师一样审视代码，精准定位问题根因。",
   "axu-data-analysis": "数据分析 — 整理数据、找规律、做图表。",
   "axu-policy-interpretation": "政策解读 — 把官话翻译成人话，提炼可落地的要点。",
   "axu-report-writing": "报告编制 — 写材料、理思路、出框架。",
@@ -13,12 +11,10 @@
   "browser_visible": "控制 browser_use 的浏览器启动方式：headed/private_mode/browser_args。",
   "channel_message": "主动向用户、会话或频道单向发送消息。",
   "chat_with_agent": "咨询其他 agent、寻求帮助，或用户明确要求某个 agent 参与时使用。",
-  "coapis_source_index": "将用户问题中的主题、关键词映射到 CoApis 官方文档路径与常见源码入口。",
   "cron": "定时任务管理：创建/列表/暂停/恢复/删除定时任务。",
   "dingtalk_channel": "使用可视浏览器自动完成钉钉频道接入配置。",
   "docx": "创建、读取、编辑 Word 文档（.docx 文件）。",
   "file_reader": "读取和摘要文本类文件。",
-  "guidance": "回答用户关于 QwenPaw 安装与配置的问题。",
   "himalaya": "通过 IMAP/SMTP 管理邮件：列表、读取、撰写、回复、搜索。",
   "humanizer-academic-zh": "中文学术版 Humanizer —— 润色论文、去除AI味、降低AIGC检测率。",
   "long-running-agent-harness": "跨会话大规模 AI Agent 工作的规划与结构化。",
@@ -34,5 +30,7 @@
   "superpowers-factory-bridge": "统一开发编排器：将 Superpowers 方法论与 AI 代码工厂深度整合。",
   "using-superpowers": "建立如何查找和使用技能的规范流程。",
   "web-search": "Web 搜索和内容提取（Tavily/Exa）。",
-  "xlsx": "电子表格文件（.xlsx/.csv）的创建、编辑、数据分析。"
+  "xlsx": "电子表格文件（.xlsx/.csv）的创建、编辑、数据分析。",
+  "coapis_qa_guidance": "回答用户关于 CoApis 安装与配置的问题。",
+  "coapis_code_checked": "代码审查与问题定位 — 像架构师一样审视代码，精准定位问题根因。"
 }
