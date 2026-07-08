@@ -172,6 +172,24 @@ def load_workspace_dirs() -> List[str]:
     return load_pack_json("workspace/file_list.json") or []
 
 
+def load_tool_descriptions(language: str = "zh") -> Dict[str, str]:
+    """加载工具描述数据包.
+
+    Returns:
+        工具名 -> 描述文本的字典
+    """
+    return load_pack_json("tools.json", language=language) or {}
+
+
+def load_skill_descriptions(language: str = "zh") -> Dict[str, str]:
+    """加载技能描述数据包.
+
+    Returns:
+        技能名 -> 描述文本的字典
+    """
+    return load_pack_json("skills.json", language=language) or {}
+
+
 def load_memory_init(language: str = "zh", username: str = "") -> str:
     """加载 MEMORY.md 初始内容.
 

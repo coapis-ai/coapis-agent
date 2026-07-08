@@ -67,6 +67,12 @@ class SkillManager:
 
         logger.info(f"Discovered {len(self._skills)} skills")
 
+        # Apply skill descriptions from data pack (language-aware override)
+        try:
+            self.apply_descriptions_from_pack("zh")
+        except Exception:
+            pass
+
     def _load_skill(self, skill_dir: Path) -> Optional[dict]:
         """Load a single skill from directory."""
         skill_md = skill_dir / "SKILL.md"
@@ -112,6 +118,32 @@ class SkillManager:
                         description = line.split(":", 1)[1].strip().strip('"').strip("'")
 
         return name, description
+
+    def apply_descriptions_from_pack(self, language: str = "zh") -> int:
+        """从数据包加载技能描述并覆盖 YAML frontmatter 中的描述.
+
+        Args:
+            language: 语言代码
+
+        Returns:
+            覆盖的技能数量
+        """
+        try:
+            from coapis.system.data_loader import load_skill_descriptions
+            descriptions = load_skill_descriptions(language)
+        except Exception:
+            return 0
+
+        count = 0
+        for name, desc in descriptions.items():
+            if name in self._skills and desc:
+                self._skills[name]["description"] = desc
+                count += 1
+        if count:
+            logger.info("Applied %d skill descriptions from data pack (lang=%s)", count, language)
+            # Invalidate cache after description changes
+            self.invalidate_index_cache()
+        return count
 
     def get_skill(self, name: str) -> Optional[dict]:
         """Get skill by name."""
