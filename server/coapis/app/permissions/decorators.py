@@ -41,12 +41,69 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, Optional
 
 from fastapi import HTTPException, Request
 from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _is_user_workspace_resource(request: Request, username: str) -> bool:
+    """Check if the request targets a resource within the user's own workspace.
+
+    Users have full CRUD权限 on resources under their workspace path
+    (workspaces/{username}/). This enables "ownership fast track" — bypass
+    the permission matrix when the user is operating on their own data.
+
+    Args:
+        request: FastAPI request object
+        username: Current authenticated username
+
+    Returns:
+        True if the resource belongs to the user's workspace
+    """
+    if not username or username == "anonymous":
+        return False
+
+    # Get agent_id from X-Agent-Id header
+    try:
+        from ..agent_context import get_decoded_agent_id
+        agent_id = get_decoded_agent_id(request)
+    except Exception:
+        agent_id = None
+
+    # Case 1: User's default agent (user:{username})
+    if agent_id == f"user:{username}":
+        logger.debug(f"[PERM] Ownership fast track: {username} → default agent")
+        return True
+
+    # Case 2: User's sub-agent (any non-global agent_id)
+    # Sub-agents live at workspaces/{username}/agents/{agent_id}/
+    if agent_id and not agent_id.startswith("global_"):
+        try:
+            from ...constant import WORKSPACES_DIR
+            agent_path = WORKSPACES_DIR / username / "agents" / agent_id
+            if agent_path.exists() and agent_path.is_dir():
+                logger.debug(f"[PERM] Ownership fast track: {username} → sub-agent {agent_id}")
+                return True
+        except Exception:
+            pass
+
+    # Case 3: Check request path for workspace-scoped endpoints
+    # /api/workspace/*, /api/myspace/* etc. are always user-scoped
+    path = request.url.path
+    workspace_scoped_prefixes = [
+        "/api/workspace/",
+        "/api/myspace/",
+    ]
+    for prefix in workspace_scoped_prefixes:
+        if path.startswith(prefix):
+            logger.debug(f"[PERM] Ownership fast track: {username} → workspace path {path}")
+            return True
+
+    return False
 
 
 def require_permission(permission: str):
@@ -112,6 +169,16 @@ def require_permission(permission: str):
 
             role = getattr(request.state, "role", "user")
 
+            # ── Ownership fast track ────────────────────────────────────
+            # Users have full CRUD on resources within their own workspace
+            # (workspaces/{username}/). No permission matrix check needed.
+            if _is_user_workspace_resource(request, username):
+                logger.info(
+                    f"[PERM] {func.__name__}: user={username}, ownership fast track → ALLOW"
+                )
+                return await func(*args, **kwargs)
+
+            # ── Permission matrix check ─────────────────────────────────
             try:
                 from .manager import PermissionManager
                 pm = PermissionManager.get_instance()
