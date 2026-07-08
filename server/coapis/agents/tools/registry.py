@@ -87,6 +87,31 @@ def register_tool(
     return decorator
 
 
+def apply_tool_descriptions(language: str = "zh") -> int:
+    """从数据包加载工具描述并覆盖注册表中的硬编码描述.
+
+    Args:
+        language: 语言代码
+
+    Returns:
+        覆盖的工具数量
+    """
+    try:
+        from coapis.system.data_loader import load_tool_descriptions
+        descriptions = load_tool_descriptions(language)
+    except Exception:
+        return 0
+
+    count = 0
+    for name, desc in descriptions.items():
+        if name in _registry and desc:
+            _registry[name].description = desc
+            count += 1
+    if count:
+        logger.info("Applied %d tool descriptions from data pack (lang=%s)", count, language)
+    return count
+
+
 def get_registered_tools(
     category: str | None = None,
     tags: list[str] | None = None,

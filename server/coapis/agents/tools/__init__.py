@@ -17,9 +17,15 @@ from agentscope.tool import (
 )
 
 # ── Plugin registry: auto-register all builtin tools ──
-from .registry import register_tool, get_registered_tools, get_tool_names
+from .registry import register_tool, get_registered_tools, get_tool_names, apply_tool_descriptions
 from ._auto_register import register_all_builtin_tools
 register_all_builtin_tools()
+
+# ── Apply tool descriptions from data pack (language-aware) ──
+try:
+    apply_tool_descriptions("zh")
+except Exception:
+    pass
 
 __all__ = [
     "execute_python_code",
