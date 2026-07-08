@@ -15,101 +15,94 @@
 
 """Default data definitions for system initialization.
 
+数据来源优先级:
+1. data/packs/{lang}/ — 语言感知的数据包文件
+2. data/packs/base/   — 语言无关的基础数据
+3. 本文件硬编码兜底    — 最后防线
+
 All default configurations, roles, permissions, and templates are defined here.
 This is the single source of truth for initial system state.
 """
 from __future__ import annotations
 
+import logging
+import os as _os
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════════
 # 系统版本
 # ═══════════════════════════════════════════════════════════════════
-# 版本号从 COAPIS_VERSION 环境变量动态获取（由 __version__.py 读取）
-# Docker 环境由 entrypoint.sh 注入，非 Docker 环境由 pip 安装时生成
-import os as _os
-
 SYSTEM_VERSION = _os.environ.get("COAPIS_VERSION", "0.0.0-dev")
 INIT_SCHEMA_VERSION = 2
 
 # ═══════════════════════════════════════════════════════════════════
+# 数据包加载器
+# ═══════════════════════════════════════════════════════════════════
+
+def _load_from_pack(loader_func, fallback):
+    """从数据包加载，失败则用硬编码兜底。"""
+    try:
+        result = loader_func()
+        if result is not None:
+            return result
+    except Exception as e:
+        logger.debug("Data pack load failed, using fallback: %s", e)
+    return fallback
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 目录结构
 # ═══════════════════════════════════════════════════════════════════
-DEFAULT_DIRECTORIES: List[str] = [
-    # 系统目录
-    "system",
-    "system/.secret",
-    "system/templates",
-    "system/evolution",
-    "system/reviews",
-    "system/skill_evolution",
-    # 用户工作区
-    "workspaces",
-    # 智能体数据
-    "agents",
-    # 技能
-    "skills",
-    "skill_pool",
-    # 日志
-    "logs",
-    "audit_log",
-    # 媒体
-    "media",
-    # 本地模型
-    "local_models",
-    # 记忆
-    "memory",
-    # 备份
-    ".backups",
-    # 自定义频道
-    "custom_channels",
-    # 插件
-    "plugins",
-    # 模型配置
-    "models",
-    # 临时文件
-    "tmp",
-    # 全局文件
-    "files",
+
+_DEFAULT_DIRECTORIES_FALLBACK: List[str] = [
+    "system", "system/.secret", "system/templates", "system/evolution",
+    "system/reviews", "system/skill_evolution",
+    "workspaces", "agents", "skills", "skill_pool",
+    "logs", "audit_log", "media", "local_models", "memory",
+    ".backups", "custom_channels", "plugins", "models", "tmp", "files",
 ]
+
+
+def _load_directories() -> List[str]:
+    from .data_loader import load_directories
+    return load_directories() or []
+
+
+DEFAULT_DIRECTORIES: List[str] = _load_from_pack(_load_directories, _DEFAULT_DIRECTORIES_FALLBACK)
 
 # ═══════════════════════════════════════════════════════════════════
 # 默认配置文件
 # ═══════════════════════════════════════════════════════════════════
-DEFAULT_CONFIG: Dict[str, Any] = {
-    "version": SYSTEM_VERSION,
+
+_DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
     "channels": {},
-    "heartbeat": {
-        "enabled": True,
-        "every": 60,
-        "query": "What should I work on next?",
-    },
+    "heartbeat": {"enabled": True, "every": 60, "query": "What should I work on next?"},
     "active_hours": {},
-    "auth": {
-        "enabled": False,
-        "secret_key": "CHANGE_ME_TO_RANDOM_STRING",
-    },
-    "user_system": {
-        "enabled": False,
-        "default_token_quota": 1_000_000,
-        "token_quota_hard_limit": False,
-    },
+    "auth": {"enabled": False, "secret_key": "CHANGE_ME_TO_RANDOM_STRING"},
+    "user_system": {"enabled": False, "default_token_quota": 1_000_000, "token_quota_hard_limit": False},
     "providers": {},
-    "workspace": {
-        "default_agent_name": "CoApis",
-        "default_skills": ["guidance"],
-    },
+    "workspace": {"default_agent_name": "CoApis", "default_skills": ["guidance"]},
 }
+
+
+def _load_config() -> Dict[str, Any]:
+    from .data_loader import load_system_config
+    return load_system_config() or {}
+
+
+DEFAULT_CONFIG: Dict[str, Any] = _load_from_pack(_load_config, _DEFAULT_CONFIG_FALLBACK)
+DEFAULT_CONFIG["version"] = SYSTEM_VERSION  # 版本号始终动态注入
 
 # ═══════════════════════════════════════════════════════════════════
 # 默认角色定义
 # ═══════════════════════════════════════════════════════════════════
-DEFAULT_ROLES: Dict[str, Dict[str, Any]] = {
+
+_DEFAULT_ROLES_FALLBACK: Dict[str, Dict[str, Any]] = {
     "user": {
-        "name": "用户",
-        "description": "标准用户，可通过权限矩阵配置",
-        "level": 0,
-        "is_default": True,
+        "name": "用户", "description": "标准用户，可通过权限矩阵配置",
+        "level": 0, "is_default": True,
         "modules": {
             "chat": {"read": True, "create": True, "update": True, "delete": False},
             "skills": {"read": True, "create": True, "update": True, "delete": False},
@@ -136,10 +129,8 @@ DEFAULT_ROLES: Dict[str, Dict[str, Any]] = {
         },
     },
     "advanced": {
-        "name": "高级用户",
-        "description": "高级用户，拥有更多权限",
-        "level": 1,
-        "is_default": False,
+        "name": "高级用户", "description": "高级用户，拥有更多权限",
+        "level": 1, "is_default": False,
         "modules": {
             "chat": {"read": True, "create": True, "update": True, "delete": True},
             "skills": {"read": True, "create": True, "update": True, "delete": True},
@@ -166,18 +157,24 @@ DEFAULT_ROLES: Dict[str, Dict[str, Any]] = {
         },
     },
     "admin": {
-        "name": "管理员",
-        "description": "拥有所有权限",
-        "level": 2,
-        "is_default": False,
-        "modules": "*",
+        "name": "管理员", "description": "拥有所有权限",
+        "level": 2, "is_default": False, "modules": "*",
     },
 }
+
+
+def _load_roles() -> Dict[str, Dict[str, Any]]:
+    from .data_loader import load_roles
+    return load_roles("zh") or {}
+
+
+DEFAULT_ROLES: Dict[str, Dict[str, Any]] = _load_from_pack(_load_roles, _DEFAULT_ROLES_FALLBACK)
 
 # ═══════════════════════════════════════════════════════════════════
 # 默认权限配置 (v2.0 格式)
 # ═══════════════════════════════════════════════════════════════════
-DEFAULT_PERMISSIONS: Dict[str, Any] = {
+
+_DEFAULT_PERMISSIONS_FALLBACK: Dict[str, Any] = {
     "version": "2.0",
     "description": "CoApis permission system — CRUD matrix format.",
     "roles": DEFAULT_ROLES,
@@ -208,35 +205,53 @@ DEFAULT_PERMISSIONS: Dict[str, Any] = {
     },
 }
 
+
+def _load_permissions() -> Dict[str, Any]:
+    from .data_loader import load_permissions
+    return load_permissions("zh") or {}
+
+
+DEFAULT_PERMISSIONS: Dict[str, Any] = _load_from_pack(_load_permissions, _DEFAULT_PERMISSIONS_FALLBACK)
+
 # ═══════════════════════════════════════════════════════════════════
 # 默认管理员用户
 # ═══════════════════════════════════════════════════════════════════
-DEFAULT_ADMIN_USER: Dict[str, Any] = {
+
+_DEFAULT_ADMIN_FALLBACK: Dict[str, Any] = {
     "username": "admin",
     "display_name": "管理员",
-    "password": "admin123",  # 首次登录后应修改
+    "password": "admin123",
     "role": "admin",
     "is_active": True,
 }
+
+
+def _load_admin() -> Dict[str, Any]:
+    from .data_loader import load_admin_user
+    return load_admin_user() or {}
+
+
+DEFAULT_ADMIN_USER: Dict[str, Any] = _load_from_pack(_load_admin, _DEFAULT_ADMIN_FALLBACK)
 
 # ═══════════════════════════════════════════════════════════════════
 # 默认用户工作区模板
 # ═══════════════════════════════════════════════════════════════════
 DEFAULT_WORKSPACE_TEMPLATE: Dict[str, Any] = {
     "chats.json": {"version": 1, "chats": []},
-    # jobs.json 已移至 crons/jobs.json，不再在 workspace 根目录创建
 }
 
-DEFAULT_WORKSPACE_FILES: List[str] = [
-    "AGENTS.md",
-    "SOUL.md",
-    "PROFILE.md",
-    "HEARTBEAT.md",
-]
+DEFAULT_WORKSPACE_FILES: List[str] = ["AGENTS.md", "SOUL.md", "PROFILE.md", "HEARTBEAT.md"]
 
 # ═══════════════════════════════════════════════════════════════════
 # 环境变量默认值
 # ═══════════════════════════════════════════════════════════════════
-DEFAULT_ENV_VARS: Dict[str, str] = {
-    "COAPIS_PORT": "8000",
-}
+
+_DEFAULT_ENV_VARS_FALLBACK: Dict[str, str] = {"COAPIS_PORT": "8000"}
+
+
+def _load_env_vars() -> Dict[str, str]:
+    from .data_loader import load_pack_json
+    return load_pack_json("system/env_vars.json") or {}
+
+
+DEFAULT_ENV_VARS: Dict[str, str] = _load_from_pack(_load_env_vars, _DEFAULT_ENV_VARS_FALLBACK)

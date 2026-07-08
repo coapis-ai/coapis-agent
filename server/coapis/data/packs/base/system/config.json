@@ -1,0 +1,23 @@
+{
+  "channels": {},
+  "heartbeat": {
+    "enabled": true,
+    "every": 60,
+    "query": "What should I work on next?"
+  },
+  "active_hours": {},
+  "auth": {
+    "enabled": false,
+    "secret_key": "CHANGE_ME_TO_RANDOM_STRING"
+  },
+  "user_system": {
+    "enabled": false,
+    "default_token_quota": 1000000,
+    "token_quota_hard_limit": false
+  },
+  "providers": {},
+  "workspace": {
+    "default_agent_name": "CoApis",
+    "default_skills": ["guidance"]
+  }
+}

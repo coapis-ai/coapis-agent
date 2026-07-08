@@ -1,0 +1,10 @@
+[
+  {
+    "filename": "skill.json",
+    "default": {
+      "version": 0,
+      "schema_version": "workspace-skill-manifest.v1",
+      "skills": {}
+    }
+  }
+]

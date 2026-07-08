@@ -1,0 +1,10 @@
+{
+  "user": {
+    "name": "User",
+    "description": "Standard user, configurable via permission matrix"
+  },
+  "admin": {
+    "name": "Admin",
+    "description": "Full access to all permissions"
+  }
+}

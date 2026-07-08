@@ -56,7 +56,7 @@ _WORKSPACE_JSON_DEFAULTS: list[tuple[str, dict]] = [
 ]
 
 
-def init_user_workspace(username: str, display_name: Optional[str] = None, request: Any = None) -> str:
+def init_user_workspace(username: str, display_name: Optional[str] = None, request: Any = None, language: str = "zh") -> str:
     """Initialize a complete workspace for a new user.
 
     Creates:
@@ -122,17 +122,16 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
         dir_path = workspace_dir / subdir
         dir_path.mkdir(parents=True, exist_ok=True)
 
-    # 4b. Create MEMORY.md for user's default agent
+    # 4b. Create MEMORY.md for user's default agent (language-aware)
     memory_md = workspace_dir / "MEMORY.md"
     if not memory_md.exists():
-        memory_md.write_text(
-            f"# {username} 的记忆\n\n> 由系统自动创建于初始化。\n",
-            encoding="utf-8",
-        )
+        from ..system.data_loader import load_memory_init
+        memory_content = load_memory_init(language=language, username=username)
+        memory_md.write_text(memory_content, encoding="utf-8")
     logger.info(f"User data directories created for {username}")
 
     # 5. Copy user-level templates (SOUL.md, PROFILE.md, AGENTS.md, etc.)
-    _copy_base_templates(workspace_dir, username, level="user")
+    _copy_base_templates(workspace_dir, username, level="user", language=language)
 
     # 6. Register agent in MultiAgentManager (if request provided) — critical for runtime visibility
     if request is not None:
@@ -256,20 +255,22 @@ def ensure_user_workspace_exists(username: str) -> bool:
     return True
 
 
-def _copy_base_templates(workspace_dir: Path, username: str, level: str = "user") -> None:
+def _copy_base_templates(workspace_dir: Path, username: str, level: str = "user", language: str = "zh") -> None:
     """Copy template files to workspace from the appropriate layer.
 
-    Template resolution order:
-    1. system/templates/{level}/{filename} — layer-specific template
-    2. system/templates/{filename} — global fallback
-    3. Inline fallback — minimal default
+    Template resolution order (language-aware):
+    1. data/packs/{lang}/templates/{level}/{filename} — language + layer specific
+    2. data/packs/zh/templates/{level}/{filename} — Chinese fallback
+    3. data/packs/base/... — base fallback
+    4. Inline fallback — minimal default
 
     Args:
         workspace_dir: Target workspace directory
         username: Username (for logging)
         level: Template layer — "user" for default agent, "agent" for sub-agent
+        language: Language code (e.g., "zh", "en")
     """
-    from ..constant import TEMPLATES_DIR
+    from ..system.data_loader import load_pack_template
 
     # Files to copy for each level
     if level == "agent":
@@ -277,14 +278,13 @@ def _copy_base_templates(workspace_dir: Path, username: str, level: str = "user"
     else:
         files_to_copy = ("SOUL.md", "PROFILE.md", "AGENTS.md", "MEMORY.md", "BOOTSTRAP.md", "HEARTBEAT.md")
 
-    # Fallback templates
+    # Inline fallback templates (last resort)
     _FALLBACK_TEMPLATES = {
         "SOUL.md": "# Agent Soul\n\n## Core Principles\n\n**Help genuinely.** Just help.\n",
         "PROFILE.md": "## Identity\n\n- **Name:** \n- **Role:** AI Assistant\n",
         "AGENTS.md": "# AGENTS.md\n\n## Security\n\n- Never leak private data.\n",
+        "MEMORY.md": f"# {username}'s Memory\n\n> Auto-created during initialization.\n",
     }
-
-    layer_dir = TEMPLATES_DIR / f"{level}_level"
 
     for filename in files_to_copy:
         file_path = workspace_dir / filename
@@ -292,22 +292,18 @@ def _copy_base_templates(workspace_dir: Path, username: str, level: str = "user"
             logger.debug(f"{filename} already exists for {username}")
             continue
 
-        # 1. Try layer-specific template (user_level/ or agent_level/)
-        template_path = layer_dir / filename
-        if template_path.exists():
-            content = template_path.read_text(encoding="utf-8")
-            source = f"layer template ({level}_level/)"
+        # Load from data packs (language-aware, with fallback chain)
+        content = load_pack_template(filename, level=level, language=language)
+        if content:
+            source = f"data_pack({language})"
         else:
-            # 2. Try global fallback
-            template_path = TEMPLATES_DIR / filename
-            if template_path.exists():
-                content = template_path.read_text(encoding="utf-8")
-                source = "global template"
-            else:
-                # 3. Inline fallback
-                content = _FALLBACK_TEMPLATES.get(filename, f"# {filename}\n")
-                source = "inline fallback"
-                logger.warning(f"Template {filename} not found, using fallback")
+            content = _FALLBACK_TEMPLATES.get(filename, f"# {filename}\n")
+            source = "inline fallback"
+            logger.warning(f"Template {filename} not found in data packs, using fallback")
+
+        # Replace {username} placeholder in MEMORY.md
+        if filename == "MEMORY.md" and "{username}" in content:
+            content = content.replace("{username}", username)
 
         file_path.write_text(content, encoding="utf-8")
         logger.info(f"Created {filename} for {username} (from {source})")

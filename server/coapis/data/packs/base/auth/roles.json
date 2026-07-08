@@ -1,0 +1,35 @@
+{
+  "user": {
+    "level": 0,
+    "is_default": true,
+    "modules": {
+      "chat": {"read": true, "create": true, "update": true, "delete": false},
+      "skills": {"read": true, "create": true, "update": true, "delete": false},
+      "models": {"read": true, "create": true, "update": true, "delete": true},
+      "agents": {"read": true, "create": true, "update": false, "delete": false},
+      "admin": {"read": false, "create": false, "update": false, "delete": false},
+      "system": {"read": false, "create": false, "update": false, "delete": false},
+      "audit": {"read": true, "create": false, "update": false, "delete": false},
+      "token_usage": {"read": true, "create": false, "update": false, "delete": false},
+      "cron": {"read": true, "create": true, "update": true, "delete": true},
+      "heartbeat": {"read": true, "create": true, "update": true, "delete": false},
+      "channels": {"read": true, "create": true, "update": true, "delete": false},
+      "config": {"read": true, "create": false, "update": false, "delete": false},
+      "workspace": {"read": true, "create": true, "update": true, "delete": true},
+      "myspace": {"read": true, "create": true, "update": true, "delete": true},
+      "security": {"read": true, "create": false, "update": false, "delete": false},
+      "backups": {"read": true, "create": true, "update": false, "delete": false},
+      "debug": {"read": true, "create": false, "update": false, "delete": false},
+      "evolution": {"read": true, "create": true, "update": true, "delete": false},
+      "knowledge": {"read": true, "create": true, "update": true, "delete": false},
+      "user_system": {"read": true, "create": false, "update": false, "delete": false},
+      "sessions": {"read": true, "create": true, "update": true, "delete": true},
+      "files": {"read": true, "create": true, "update": true, "delete": true}
+    }
+  },
+  "admin": {
+    "level": 2,
+    "is_default": false,
+    "modules": "*"
+  }
+}
