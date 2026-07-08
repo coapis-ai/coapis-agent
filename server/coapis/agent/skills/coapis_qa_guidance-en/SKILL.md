@@ -1,5 +1,5 @@
 ---
-name: guidance
+name: coapis_qa_guidance
 description: "Answer user questions about CoApis installation and configuration: first locate and read local documentation, then distill the answer; if local information is insufficient, fall back to the official website documentation."
 metadata:
   builtin_skill_version: "1.2"

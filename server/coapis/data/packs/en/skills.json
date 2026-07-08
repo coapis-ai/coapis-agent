@@ -1,7 +1,5 @@
 {
-  "QA_source_index": "Map user questions to QwenPaw documentation paths and source code entry points, reducing blind searches.",
   "aux-agent-growing": "Agent growth system - learn from experience, auto-evolve capabilities, accumulate knowledge and skills.",
-  "axu-code-checked": "Code review and problem diagnosis - review code like an architect, pinpoint root causes precisely.",
   "axu-data-analysis": "Data analysis - organize data, find patterns, create charts.",
   "axu-policy-interpretation": "Policy interpretation - translate official language into actionable insights.",
   "axu-report-writing": "Report writing - draft materials, organize ideas, build frameworks.",
@@ -13,12 +11,10 @@
   "browser_visible": "Control browser_use launch options: headed/private_mode/browser_args.",
   "channel_message": "Proactively send one-way messages to users, sessions, or channels.",
   "chat_with_agent": "Consult other agents for help, or when user explicitly requests agent involvement.",
-  "coapis_source_index": "Map user questions to CoApis documentation paths and source code entry points.",
   "cron": "Scheduled task management: create/list/pause/resume/delete scheduled tasks.",
   "dingtalk_channel": "Auto-configure DingTalk channel integration using visible browser.",
   "docx": "Create, read, and edit Word documents (.docx files).",
   "file_reader": "Read and summarize text-based files.",
-  "guidance": "Answer user questions about QwenPaw installation and configuration.",
   "himalaya": "Manage emails via IMAP/SMTP: list, read, write, reply, search.",
   "humanizer-academic-zh": "Academic Chinese Humanizer - polish papers, remove AI patterns, reduce AIGC detection.",
   "long-running-agent-harness": "Plan and structure large-scale AI agent work across multiple sessions.",
@@ -34,5 +30,7 @@
   "superpowers-factory-bridge": "Unified development orchestrator: integrate Superpowers methodology with AI code factory.",
   "using-superpowers": "Establish how to find and use skills in any conversation.",
   "web-search": "Web search and content extraction (Tavily/Exa).",
-  "xlsx": "Spreadsheet operations (.xlsx/.csv): create, edit, analyze data."
+  "xlsx": "Spreadsheet operations (.xlsx/.csv): create, edit, analyze data.",
+  "coapis_qa_guidance": "Answer user questions about CoApis installation and configuration.",
+  "coapis_code_checked": "Code review and problem diagnosis - review code like an architect, pinpoint root causes precisely."
 }

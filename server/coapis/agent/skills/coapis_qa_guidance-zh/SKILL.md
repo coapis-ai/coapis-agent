@@ -1,5 +1,5 @@
 ---
-name: guidance
+name: coapis_qa_guidance
 description: "回答用户关于 CoApis 安装与配置的问题：优先定位并阅读本地文档，再提炼答案；若本地信息不足，兜底访问官网文档。"
 metadata:
   builtin_skill_version: "1.2"
