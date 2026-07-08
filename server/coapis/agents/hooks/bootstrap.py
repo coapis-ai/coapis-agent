@@ -15,37 +15,56 @@
 
 """Bootstrap hook for first-time user interaction guidance.
 
-v2: Injects guidance as an independent system message instead of
-mutating the user's message.  Tracks attempts via ``.bootstrap_state``
-and auto-completes after ``max_attempts`` (default 3).
+v3: No longer injects any message into agent memory during reasoning.
+Instead, the runner appends a conversational prompt to the assistant's
+final response after streaming ends.  This hook only tracks attempt
+counters and auto-completes after ``max_attempts`` (default 3) non-
+cooperative rounds.
+
+The actual guidance text is appended in runner.py's query_handler
+finally block, ensuring:
+1. LLM answers the user's question without interference
+2. Guidance appears naturally after the answer
+3. No internal directives leak to the user
 """
 import json
 import logging
 from pathlib import Path
 from typing import Any
 
-from agentscope.message import Msg
-
-from ..prompt import (
-    _BOOTSTRAP_GUIDANCE_TAG,
-    build_bootstrap_guidance_v2,
-)
 from ..utils import has_pending_bootstrap
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_ATTEMPTS = 3
 
+# Conversational prompts appended to assistant response after streaming.
+# Indexed by attempt number (0-based).
+BOOTSTRAP_PROMPTS_ZH = [
+    "\n\n对了，怎么称呼您比较合适？",
+    "\n\n对了，您希望我平时用什么样的风格跟您交流？",
+    "\n\n有什么我可以帮您定制的吗？比如称呼或者交流风格。",
+]
+
+BOOTSTRAP_PROMPTS_EN = [
+    "\n\nBy the way, what should I call you?",
+    "\n\nBy the way, what communication style do you prefer?",
+    "\n\nIs there anything I can customize for you? Like how to address you or my tone.",
+]
+
+
+def get_bootstrap_prompt(attempt: int, language: str = "zh") -> str:
+    """Get the conversational prompt for the given attempt."""
+    prompts = BOOTSTRAP_PROMPTS_ZH if language == "zh" else BOOTSTRAP_PROMPTS_EN
+    idx = min(attempt - 1, len(prompts) - 1)
+    return prompts[idx]
+
 
 class BootstrapHook:
-    """Hook for soft bootstrap guidance on first user interactions.
+    """Hook for first-time user interaction guidance.
 
-    Unlike v1 which prepends guidance into the user message (destroying
-    the original input), v2:
-    * keeps the user message intact
-    * injects a separate ``system`` message into agent memory
-    * tracks attempts in ``.bootstrap_state`` (JSON)
-    * auto-stops after *max_attempts* non-cooperative rounds
+    v3: Only tracks attempt counters.  Guidance text is appended
+    by the runner after streaming ends.
     """
 
     def __init__(
@@ -63,9 +82,14 @@ class BootstrapHook:
         agent,
         kwargs: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Pre-reasoning hook: inject bootstrap guidance system message.
+        """Pre-reasoning hook: check if bootstrap should auto-complete.
 
-        Returns None (does not modify kwargs).
+        v3: This hook does NOT inject any message into memory.
+        It only checks if we've exceeded max attempts and marks
+        bootstrap as completed if so.  The runner handles appending
+        guidance text and incrementing the attempt counter.
+
+        Returns {"bootstrap_pending": bool} for runner reference.
         """
         try:
             if not has_pending_bootstrap(self.working_dir):
@@ -85,8 +109,9 @@ class BootstrapHook:
                 if has_assistant:
                     return None
             except Exception:
-                pass  # if memory inspection fails, proceed with bootstrap
+                pass  # if memory inspection fails, proceed
 
+            # Check if we've already sent all prompts — if so, complete
             state_file = self.working_dir / ".bootstrap_state"
             state = {"attempts": 0, "max_attempts": self.max_attempts}
             if state_file.exists():
@@ -97,47 +122,17 @@ class BootstrapHook:
                 except Exception:
                     pass  # corrupt file → reset
 
-            current_attempt = state.get("attempts", 0) + 1
+            prompts_sent = state.get("attempts", 0)
             max_att = state.get("max_attempts", self.max_attempts)
 
-            # If we've already exhausted attempts, mark completed and stop
-            if current_attempt > max_att:
+            # If all prompts have been sent, mark completed
+            if prompts_sent >= max_att:
                 (self.working_dir / ".bootstrap_completed").write_text(
                     "", encoding="utf-8",
                 )
                 logger.info(
-                    "Bootstrap auto-completed after %d attempts", max_att,
+                    "Bootstrap auto-completed after %d prompts sent", max_att,
                 )
-                return None
-
-            # Persist updated state
-            state["attempts"] = current_attempt
-            state["max_attempts"] = max_att
-            state_file.write_text(
-                json.dumps(state, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-
-            guidance = build_bootstrap_guidance_v2(
-                language=self.language,
-                attempt=current_attempt,
-                max_attempts=max_att,
-            )
-
-            logger.info(
-                "Bootstrap guidance injected (attempt %d/%d, lang=%s)",
-                current_attempt, max_att, self.language,
-            )
-
-            # Inject as independent system message into agent memory.
-            # This runs in pre_reasoning, so the user message has already
-            # been added to memory.  We append the guidance AFTER it.
-            guidance_msg = Msg(
-                name="system",
-                role="system",
-                content=guidance,
-            )
-            await agent.memory.add(guidance_msg)
 
         except Exception as e:
             logger.error("Bootstrap hook failed: %s", e, exc_info=True)
