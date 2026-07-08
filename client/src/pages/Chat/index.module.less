@@ -22,12 +22,25 @@
   cursor: not-allowed !important;
 }
 
-/* Remove the library's built-in header backdrop-filter overlay */
+/* Hide the library's built-in right-header entirely.
+   It contains ChatSessionInitializer + RuntimeLoadingBridge which need to
+   render for side-effects, so we use visibility:hidden + height:0 instead
+   of display:none to keep them in the DOM.
+   Note: class prefix is project-specific (coapis-), not ant-. */
 .chatMessagesArea {
-  :global(.ant-chat-anywhere-layout-right-header) {
+  :global([class$="-chat-anywhere-layout-right-header"]) {
+    height: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     background: transparent !important;
+    visibility: hidden !important;
+  }
+  /* Also remove the top padding that the library adds when header exists */
+  :global([class$="-chat-anywhere-bubble-list-scroll"]::before) {
+    height: 0 !important;
+    flex: 0 0 0 !important;
   }
 }
 
