@@ -121,6 +121,10 @@ SYSTEM_DIR = WORKING_DIR / "system"
 # New users inherit from these templates; global agents can override individually
 TEMPLATES_DIR = SYSTEM_DIR / "templates"
 
+# Data packs directory - language-aware initialization data
+# Structure: data/packs/{base,zh,en,...}/
+DATA_PACKS_DIR = Path(__file__).resolve().parent.parent / "data" / "packs"
+
 # Workspaces directory - user-level data (isolated per user)
 # Each user has: workspaces/{username}/ (agents, skills, files, crons, backups, etc.)
 # Configurable via COAPIS_WORKSPACES_DIR (e.g. for NFS/separate storage)

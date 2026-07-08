@@ -1,0 +1,10 @@
+{
+  "user": {
+    "name": "用户",
+    "description": "标准用户，可通过权限矩阵配置"
+  },
+  "admin": {
+    "name": "管理员",
+    "description": "拥有所有权限"
+  }
+}

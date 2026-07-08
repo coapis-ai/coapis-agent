@@ -1,0 +1,23 @@
+[
+  "system",
+  "system/.secret",
+  "system/templates",
+  "system/evolution",
+  "system/reviews",
+  "system/skill_evolution",
+  "workspaces",
+  "agents",
+  "skills",
+  "skill_pool",
+  "logs",
+  "audit_log",
+  "media",
+  "local_models",
+  "memory",
+  ".backups",
+  "custom_channels",
+  "plugins",
+  "models",
+  "tmp",
+  "files"
+]

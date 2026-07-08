@@ -1,0 +1,30 @@
+{
+  "version": "2.0",
+  "description": "CoApis permission system — CRUD matrix format.",
+  "user_overrides": {},
+  "modules": {
+    "chat": {"description": "AI chat functionality"},
+    "skills": {"description": "Skill management"},
+    "models": {"description": "Model configuration"},
+    "agents": {"description": "Agent management"},
+    "admin": {"description": "System administration"},
+    "system": {"description": "System configuration"},
+    "audit": {"description": "Audit logs"},
+    "token_usage": {"description": "Token usage statistics"},
+    "cron": {"description": "Scheduled tasks"},
+    "heartbeat": {"description": "Heartbeat configuration"},
+    "channels": {"description": "Channel management"},
+    "config": {"description": "Configuration management"},
+    "workspace": {"description": "Workspace management"},
+    "myspace": {"description": "Personal space"},
+    "security": {"description": "Security settings"},
+    "backups": {"description": "Backup management"},
+    "debug": {"description": "Debug tools"},
+    "evolution": {"description": "Agent evolution"},
+    "knowledge": {"description": "Knowledge base"},
+    "user_system": {"description": "User system management"},
+    "sessions": {"description": "Session management"},
+    "files": {"description": "File management"},
+    "settings": {"description": "Settings management"}
+  }
+}
