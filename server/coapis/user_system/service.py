@@ -100,6 +100,37 @@ def _user_row_to_response(row: Any) -> UserResponse:
 # User CRUD
 # ---------------------------------------------------------------------------
 
+def _create_default_workspace(username: str) -> None:
+    """Create default workspace and agent.json for a new user.
+
+    This ensures every user has a working agent from the start.
+    The workspace is at workspaces/{username}/ with a minimal agent.json.
+    """
+    import json
+    from pathlib import Path
+    from ..constant import WORKSPACES_DIR
+
+    ws_dir = WORKSPACES_DIR / username
+    ws_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create minimal agent.json
+    agent_config = {
+        "id": f"user:{username}",
+        "name": f"User:{username}",
+        "description": "",
+        "workspace_dir": ".",
+        "owner": username,
+        "template_id": "default",
+        "enabled": True,
+        "is_default": True,
+        "channels": {},
+    }
+    agent_file = ws_dir / "agent.json"
+    if not agent_file.exists():
+        agent_file.write_text(json.dumps(agent_config, indent=2, ensure_ascii=False), encoding="utf-8")
+        logger.info(f"Created default agent.json for user {username}")
+
+
 def create_user(req: UserCreate) -> UserResponse:
     """Create a new user. Raises ValueError if username exists."""
     db = get_db()
@@ -134,6 +165,13 @@ def create_user(req: UserCreate) -> UserResponse:
     }
     user_id = db.insert_user(user_data)
     user_data["id"] = user_id
+
+    # Auto-create default agent workspace for new user
+    try:
+        _create_default_workspace(req.username)
+    except Exception as e:
+        logger.warning(f"Failed to create default workspace for {req.username}: {e}")
+
     return _user_row_to_response(user_data)
 
 

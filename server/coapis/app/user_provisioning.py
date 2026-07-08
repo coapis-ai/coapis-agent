@@ -227,9 +227,12 @@ def _create_agent_config(
         description=f"Default agent for user {username}",
     )
 
+    # Set owner field — critical for ownership-based permission checks
+    template_result.agent_config.owner = username
+
     # Save agent.json (pass workspace_dir for dynamic agent support)
     save_agent_config(agent_id, template_result.agent_config, workspace_dir=workspace_dir)
-    logger.info(f"Created agent.json for {username} (agent: {agent_id})")
+    logger.info(f"Created agent.json for {username} (agent: {agent_id}, owner: {username})")
 
 
 def ensure_user_workspace_exists(username: str) -> bool:
