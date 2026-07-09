@@ -496,11 +496,11 @@ def _walk_and_glob(
     description="按模式搜索文件内容",
     category="builtin",
     tags=['file', 'search'],
-    scene="core",
+    scene="search",
 )
 async def grep_search(
     pattern: str,
-    path: Optional[str] = None,
+    root_path: Optional[str] = None,
     is_regex: bool = False,
     case_sensitive: bool = True,
     context_lines: int = 0,
@@ -512,7 +512,7 @@ async def grep_search(
     Args:
         pattern (`str`):
             Search string (or regex when *is_regex* is True).
-        path (`str`, optional):
+        root_path (`str`, optional):
             File or directory to search in.  Defaults to WORKING_DIR.
         is_regex (`bool`, optional):
             Treat *pattern* as a regular expression.  Defaults to False.
@@ -528,7 +528,7 @@ async def grep_search(
     if not pattern:
         return _make_response("Error: No search `pattern` provided.")
 
-    root_or_err = _resolve_search_root(path)
+    root_or_err = _resolve_search_root(root_path)
     if isinstance(root_or_err, ToolResponse):
         return root_or_err
     search_root: Path = root_or_err
@@ -611,11 +611,11 @@ async def grep_search(
     description="按 glob 模式搜索文件",
     category="builtin",
     tags=['file', 'search'],
-    scene="core",
+    scene="search",
 )
 async def glob_search(
     pattern: str,
-    path: Optional[str] = None,
+    root_path: Optional[str] = None,
 ) -> ToolResponse:
     """Find files matching a glob pattern (e.g. ``"*.py"``, ``"**/*.json"``).
     Relative paths resolve from WORKING_DIR.
@@ -623,13 +623,13 @@ async def glob_search(
     Args:
         pattern (`str`):
             Glob pattern to match.
-        path (`str`, optional):
+        root_path (`str`, optional):
             Root directory to search from.  Defaults to WORKING_DIR.
     """
     if not pattern:
         return _make_response("Error: No glob `pattern` provided.")
 
-    root_or_err = _resolve_search_root(path, require_dir=True)
+    root_or_err = _resolve_search_root(root_path, require_dir=True)
     if isinstance(root_or_err, ToolResponse):
         return root_or_err
     search_root: Path = root_or_err

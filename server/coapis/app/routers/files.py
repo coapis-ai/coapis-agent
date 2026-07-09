@@ -137,6 +137,11 @@ class MkdirRequest(BaseModel):
     name: str
 
 
+class MkdirBatchRequest(BaseModel):
+    """批量创建目录请求"""
+    paths: List[str]
+
+
 class MoveRequest(BaseModel):
     source: str
     target: str
@@ -394,6 +399,43 @@ async def mkdir(req: MkdirRequest, category: str = "files", request: Request = N
         raise HTTPException(status_code=500, detail=f"创建目录失败: {e}")
 
     return FileOperationResponse(success=True, message="目录创建成功")
+
+
+@router.post("/mkdir-batch")
+@require_permission("chat:read")
+async def mkdir_batch(req: MkdirBatchRequest, category: str = "files", request: Request = None):
+    """批量创建目录（用于上传文件夹时预建目录结构）"""
+    username = get_current_user(request)["username"]
+
+    if not req.paths or len(req.paths) == 0:
+        raise HTTPException(status_code=400, detail="路径列表不能为空")
+
+    file_service = FileServiceFactory.get_service()
+    created = 0
+    skipped = 0
+    errors = []
+
+    for path in req.paths:
+        try:
+            await file_service.mkdir(
+                username=username,
+                path=path,
+                category=category,
+            )
+            created += 1
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                skipped += 1
+            else:
+                errors.append({"path": path, "error": str(e)})
+
+    return {
+        "success": True,
+        "message": f"批量创建目录完成",
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 
 @router.post("/move")

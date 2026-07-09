@@ -3833,7 +3833,7 @@ async def _action_connect_cdp(state: dict, cdp_url: str) -> ToolResponse:
     description="浏览器自动化：网页浏览、信息检索、网页搜索、填表、截图、数据抓取。当需要搜索网页、获取网页内容、浏览网站时使用此工具。",
     category="builtin",
     tags=['browser', 'web'],
-    scene="core",
+    scene="browser",
 )
 async def browser_use(  # pylint: disable=R0911,R0912
     action: str,
@@ -3842,7 +3842,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
     selector: str = "",
     text: str = "",
     code: str = "",
-    path: str = "",
+    output_path: str = "",
     wait: int = 0,
     full_page: bool = False,
     width: int = 0,
@@ -3927,7 +3927,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
             Text to type. Required for action=type.
         code (str):
             JavaScript code. Required for action=eval, evaluate, or run_code.
-        path (str):
+        output_path (str):
             File path for screenshot save or PDF export.
         wait (int):
             Milliseconds to wait after click. Used with action=click.
@@ -4230,7 +4230,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 text_gone,
             )
         if action == "pdf":
-            return await _action_pdf(state, page_id, path)
+            return await _action_pdf(state, page_id, output_path)
         if action == "close":
             return await _action_close(state, page_id)
         if action == "cookies_get":

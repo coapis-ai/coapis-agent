@@ -7,6 +7,15 @@ import {
 import { useAgentStore } from "../../../../stores/agentStore";
 import sessionApi from "../../sessionApi";
 
+interface ChatSessionInitializerProps {
+  /**
+   * When ChatSessionInitializer sets currentSessionId, it sets this ref to true
+   * first. onSessionSelected checks this ref and skips navigation when true,
+   * breaking the URL ↔ session sync loop.
+   */
+  skipNextSessionSelectedRef: React.MutableRefObject<boolean>;
+}
+
 /**
  * URL chatId → context currentSessionId (one direction of bidirectional sync).
  *
@@ -19,7 +28,9 @@ import sessionApi from "../../sessionApi";
  * user message is cleared by the session loader that runs when currentSessionId
  * changes from undefined to a new id during handleSubmit.
  */
-const ChatSessionInitializer: React.FC = () => {
+const ChatSessionInitializer: React.FC<ChatSessionInitializerProps> = ({
+  skipNextSessionSelectedRef,
+}) => {
   const location = useLocation();
   const chatId = useMemo(() => {
     const match = location.pathname.match(/^\/chat\/(.+)$/);
@@ -71,6 +82,7 @@ const ChatSessionInitializer: React.FC = () => {
         const latest = sessions[0]; // sessions are sorted newest-first
         const targetId = (latest as any).realId || latest.id;
         console.log(`[ChatSessionInitializer] no chatId, auto-selecting latest: id=${targetId}`);
+        skipNextSessionSelectedRef.current = true;
         setCurrentSessionId(targetId);
       } else if (
         sessions.length === 0 &&
@@ -99,6 +111,7 @@ const ChatSessionInitializer: React.FC = () => {
         console.log(`[ChatSessionInitializer] matched session: id=${matching.id}, realId=${(matching as any).realId}`);
         const targetId = (matching as any).realId || matching.id;
         if (currentSessionIdRef.current !== targetId) {
+          skipNextSessionSelectedRef.current = true;
           setCurrentSessionId(targetId);
           return;
         }
@@ -113,6 +126,7 @@ const ChatSessionInitializer: React.FC = () => {
     // using the real UUID directly.
     if (currentSessionIdRef.current !== chatId) {
       console.log(`[ChatSessionInitializer] chatId=${chatId} not matched in ${sessions.length} sessions, setting as current`);
+      skipNextSessionSelectedRef.current = true;
       setCurrentSessionId(chatId);
     }
     // Intentionally exclude currentSessionId from deps: only react to URL / session list changes.
