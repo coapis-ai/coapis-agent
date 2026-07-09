@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { useChatAnywhereSessionsState } from "@agentscope-ai/chat";
+import {
+  useChatAnywhereSessions,
+  useChatAnywhereSessionsState,
+} from "@agentscope-ai/chat";
+import { useAgentStore } from "../../../../stores/agentStore";
+import sessionApi from "../../sessionApi";
 
 /**
  * URL chatId → context currentSessionId (one direction of bidirectional sync).
@@ -8,6 +13,11 @@ import { useChatAnywhereSessionsState } from "@agentscope-ai/chat";
  * Only reacts to URL or session list changes. currentSessionId is read via ref
  * to avoid triggering the effect when the context changes from the other direction
  * (context → URL via onSessionSelected), which would cause circular re-loads.
+ *
+ * COAPIS FIX: For brand-new agents with no existing sessions, we create a fresh
+ * session up-front. This avoids the race in @agentscope-ai/chat where the first
+ * user message is cleared by the session loader that runs when currentSessionId
+ * changes from undefined to a new id during handleSubmit.
  */
 const ChatSessionInitializer: React.FC = () => {
   const location = useLocation();
@@ -18,12 +28,43 @@ const ChatSessionInitializer: React.FC = () => {
 
   const { sessions, currentSessionId, setCurrentSessionId } =
     useChatAnywhereSessionsState();
+  const { createSession } = useChatAnywhereSessions();
+  const selectedAgent = useAgentStore((s) => s.selectedAgent);
 
   const currentSessionIdRef = useRef(currentSessionId);
   currentSessionIdRef.current = currentSessionId;
 
+  const createSessionRef = useRef(createSession);
+  createSessionRef.current = createSession;
+
+  const selectedAgentRef = useRef(selectedAgent);
+  selectedAgentRef.current = selectedAgent;
+
+  const creatingRef = useRef(false);
+
+  // Keep sessionApi in sync with the library context so external guards can
+  // create a session before the first message is sent.
   useEffect(() => {
-    // ── No chatId in URL: auto-select latest session ──
+    sessionApi.libraryCurrentSessionId = currentSessionIdRef.current ?? undefined;
+    sessionApi.createSessionIfNeeded = async () => {
+      if (currentSessionIdRef.current) return currentSessionIdRef.current;
+      // Wait for an in-flight auto-create to finish.
+      while (creatingRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (currentSessionIdRef.current) return currentSessionIdRef.current;
+      creatingRef.current = true;
+      try {
+        const newId = await createSessionRef.current({ name: "" });
+        return newId;
+      } finally {
+        creatingRef.current = false;
+      }
+    };
+  }, [currentSessionId, createSession]);
+
+  useEffect(() => {
+    // ── No chatId in URL: auto-select latest session or create a fresh one ──
     // This handles first load (/chat) and agent switch (navigates to /chat).
     if (!chatId) {
       if (sessions.length > 0 && !currentSessionIdRef.current) {
@@ -31,6 +72,18 @@ const ChatSessionInitializer: React.FC = () => {
         const targetId = (latest as any).realId || latest.id;
         console.log(`[ChatSessionInitializer] no chatId, auto-selecting latest: id=${targetId}`);
         setCurrentSessionId(targetId);
+      } else if (
+        sessions.length === 0 &&
+        !currentSessionIdRef.current &&
+        !creatingRef.current &&
+        sessionApi._sessionListLoaded
+      ) {
+        // Brand-new agent with no sessions: create one up-front so the first
+        // message is sent in a stable session context.
+        creatingRef.current = true;
+        createSessionRef.current({ name: "" }).finally(() => {
+          creatingRef.current = false;
+        });
       }
       return;
     }
@@ -64,6 +117,7 @@ const ChatSessionInitializer: React.FC = () => {
     }
     // Intentionally exclude currentSessionId from deps: only react to URL / session list changes.
     // currentSessionId is read via ref to avoid circular triggers.
+    // selectedAgent is read via ref because agent changes already trigger remount of this component.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, sessions, setCurrentSessionId]);
 
