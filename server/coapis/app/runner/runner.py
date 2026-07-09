@@ -1287,6 +1287,14 @@ class AgentRunner(Runner):
                         _evolution_collect_text(msg, _evolution_full_response)
                         yield msg, last
             else:
+                # DEBUG: log messages passed to agent
+                logger.info(
+                    "[DEBUG] runner.query_handler calling agent(msgs): "
+                    "msgs_count=%s, last_msg_role=%s, last_msg_content=%s",
+                    len(msgs) if msgs else 0,
+                    getattr(msgs[-1], "role", None) if msgs else None,
+                    str(getattr(msgs[-1], "content", None))[:200] if msgs else None,
+                )
                 async for msg, last in _stream_printing_messages_interruptible(
                     agents=[agent],
                     coroutine_task=agent(msgs),

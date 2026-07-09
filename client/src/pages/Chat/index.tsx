@@ -1160,6 +1160,12 @@ export default function ChatPage() {
 
     const handleBeforeSubmit = async () => {
       if (isComposingRef.current) return false;
+      // COAPIS FIX: ensure a session exists before the library's handleSubmit
+      // runs. For new agents we now create the session up-front in
+      // ChatSessionInitializer; this guard is a safety net for very fast submits.
+      if (sessionApi.createSessionIfNeeded) {
+        await sessionApi.createSessionIfNeeded();
+      }
       return true;
     };
 
