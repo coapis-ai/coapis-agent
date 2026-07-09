@@ -41,8 +41,9 @@ class BaseChatRepository(ABC):
         session_id: str,
         user_id: str,
         channel: str = "console",
+        agent_id: str = "",
     ) -> Optional[ChatSpec]:
-        """Get chat spec by session_id and user_id."""
+        """Get chat spec by session_id, user_id, channel, and optionally agent_id."""
         import logging
 
         logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class BaseChatRepository(ABC):
         logger.debug(
             f"get_chat_by_id: Searching in {len(cf.chats)} chats for "
             f"session_id={session_id}, user_id={user_id}, "
-            f"channel={channel}",
+            f"channel={channel}, agent_id={agent_id}",
         )
 
         for chat in cf.chats:
@@ -61,6 +62,9 @@ class BaseChatRepository(ABC):
                 and chat.user_id == user_id
                 and chat.channel == channel
             ):
+                # If agent_id is specified, enforce agent-level isolation
+                if agent_id and agent_id != (getattr(chat, "agent_id", None) or ""):
+                    continue
                 logger.debug(f"get_chat_by_id: Found match: {chat.id}")
                 return chat
 

@@ -109,6 +109,7 @@ class ChatManager:
                 session_id,
                 user_id,
                 channel,
+                agent_id=agent_id,
             )
             if existing:
                 # Backfill agent_id on old chats that lack it

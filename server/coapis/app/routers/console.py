@@ -482,6 +482,13 @@ async def get_console_sessions(
         channel=effective_channel,
     )
 
+    # Filter by agent_id if provided (frontend per-agent isolation)
+    if agent_id:
+        chats = [
+            chat for chat in chats
+            if (getattr(chat, "agent_id", None) or "default") == agent_id
+        ]
+
 
     sessions = []
     for chat in chats:
