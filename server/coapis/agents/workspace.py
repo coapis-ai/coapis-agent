@@ -354,13 +354,17 @@ class Workspace:
             except Exception as _cm_err:
                 logger.warning("Failed to init context/memory manager for runner: %s", _cm_err)
             # Manually initialize session (sync) and mark as healthy.
-            # Session messages are stored under workspaces/{username}/sessions/
-            # to ensure user-level isolation. Falls back to workspace_dir/sessions/
-            # for global agents without a username.
+            # Session messages are stored under workspace_dir/sessions/ by default.
+            # For the default user agent (user:{username}), store sessions under
+            # workspaces/{username}/sessions/ for backward compatibility.
+            # For user sub-agents, store sessions under their own workspace
+            # (workspaces/{username}/agents/{id}/sessions/) to keep messages isolated.
             try:
                 from ..app.runner.session import SafeJSONSession
-                if self.username:
+                if self.username and self.agent_id == f"user:{self.username}":
                     session_dir = str(_get_user_workspace_dir(self.username) / "sessions")
+                elif self.username:
+                    session_dir = str(self.workspace_dir / "sessions")
                 else:
                     session_dir = str(self.workspace_dir / "sessions")
                 r.session = SafeJSONSession(save_dir=session_dir)
