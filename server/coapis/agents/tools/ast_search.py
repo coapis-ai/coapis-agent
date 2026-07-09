@@ -84,10 +84,17 @@ def _check_ast_grep() -> bool:
         return False
 
 
+@register_tool(
+    name="ast_search",
+    description="基于 AST 的语法级代码搜索",
+    category="builtin",
+    tags=["code", "search", "ast"],
+    scene="dev",
+)
 async def ast_search(
     pattern: str = "",
     language: str = "",
-    path: str = "",
+    root_path: str = "",
     max_matches: int = 30,
 ) -> dict[str, Any]:
     """基于 AST 的语法级代码搜索。
@@ -104,7 +111,7 @@ async def ast_search(
     Args:
         pattern: ast-grep 搜索模式
         language: 语言（python/javascript/go 等，留空自动检测）
-        path: 搜索目录或文件（默认当前工作区）
+        root_path: 搜索目录或文件（默认当前工作区）
         max_matches: 最大匹配数，默认 30
 
     Returns:
@@ -117,7 +124,7 @@ async def ast_search(
         return {"error": "ast-grep CLI 未安装。请运行 pip install ast-grep 或参考 https://ast-grep.github.io 安装。"}
 
     # Resolve search path
-    search_path = path.strip() if path.strip() else "."
+    search_path = root_path.strip() if root_path.strip() else "."
     search_p = Path(search_path)
     if not search_p.exists():
         return {"error": f"搜索路径不存在: {search_path}"}
