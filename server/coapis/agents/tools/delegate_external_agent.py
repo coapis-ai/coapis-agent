@@ -450,7 +450,7 @@ async def _stream_action_responses(
     description="委派任务给外部 ACP Agent 运行器：start/stop/send/permissions/status",
     category="builtin",
     tags=["agent", "delegate", "acp"],
-    scene="core",
+    scene="agent",
 )
 async def delegate_external_agent(
     action: str,

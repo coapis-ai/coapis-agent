@@ -430,7 +430,7 @@ def format_background_status_text(
     description="列出所有已配置的 Agent",
     category="builtin",
     tags=['agent'],
-    scene="core",
+    scene="agent",
 )
 async def list_agents(
     base_url: Optional[str] = None,
@@ -451,7 +451,7 @@ async def list_agents(
     description="向其他 Agent 发送消息并等待回复",
     category="builtin",
     tags=['agent', 'chat'],
-    scene="core",
+    scene="agent",
 )
 async def chat_with_agent(
     to_agent: str,
@@ -541,7 +541,7 @@ async def chat_with_agent(
     description="向其他 Agent 发送后台任务",
     category="builtin",
     tags=['agent', 'task'],
-    scene="core",
+    scene="agent",
 )
 async def submit_to_agent(
     to_agent: str,
@@ -626,7 +626,7 @@ async def submit_to_agent(
     description="查询后台任务状态",
     category="builtin",
     tags=['agent', 'task'],
-    scene="core",
+    scene="agent",
 )
 async def check_agent_task(
     task_id: str,
