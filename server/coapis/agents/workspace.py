@@ -31,6 +31,7 @@ Supports:
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -197,30 +198,40 @@ class Workspace:
 
         User files are now stored at workspaces/{username}/files/ (unified path).
         Create symlink so agent tools (read_file, write_file, etc.) can access them.
+
+        IMPORTANT: Uses RELATIVE paths for symlinks to ensure they work correctly
+        across Docker volume mounts. Absolute paths would point to wrong locations
+        when the host path differs from the container path.
         """
         files_link = self.workspace_dir / "files"
         user_files_dir = WORKSPACES_DIR / self.username / "files"
 
-        # Normalize: strip trailing slash to avoid symlink target mismatch
-        user_files_dir = Path(str(user_files_dir).rstrip("/"))
-
         # Create target directory if it doesn't exist
         user_files_dir.mkdir(parents=True, exist_ok=True)
+
+        # Calculate RELATIVE path from files_link to user_files_dir
+        # This ensures the symlink works correctly regardless of volume mount paths
+        try:
+            rel_target = os.path.relpath(user_files_dir, files_link.parent)
+        except ValueError:
+            # On Windows, relpath fails for different drives - fallback to absolute
+            rel_target = str(user_files_dir)
 
         # Handle different states of the symlink
         if files_link.is_symlink():
             # Existing symlink - verify it points to the correct location
-            target = files_link.resolve()
-            if target != user_files_dir.resolve():
+            current_target = files_link.resolve()
+            expected_target = user_files_dir.resolve()
+            if current_target != expected_target:
                 logger.warning(
                     f"Workspace files symlink points to wrong location. "
-                    f"Removing and recreating: {target} -> {user_files_dir}"
+                    f"Removing and recreating: {current_target} -> {expected_target}"
                 )
                 files_link.unlink()
-                files_link.symlink_to(user_files_dir)
+                files_link.symlink_to(rel_target)
                 logger.info(
                     f"Recreated files symlink for user {self.username}: "
-                    f"{files_link} -> {user_files_dir}"
+                    f"{files_link} -> {rel_target} (relative)"
                 )
             # else: symlink is correct, no action needed
         elif files_link.exists():
@@ -231,11 +242,11 @@ class Workspace:
                 f"Please remove it manually."
             )
         else:
-            # Create the symlink
-            files_link.symlink_to(user_files_dir)
+            # Create the symlink with RELATIVE path
+            files_link.symlink_to(rel_target)
             logger.info(
                 f"Created files symlink for user {self.username}: "
-                f"{files_link} -> {user_files_dir}"
+                f"{files_link} -> {rel_target} (relative)"
             )
 
     def set_manager(self, manager: Any) -> None:

@@ -217,7 +217,62 @@ async def create_my_agent(
             username=username,
             is_global=False,
         )
-        
+
+        # ── Persist agent.json to disk (required for get_agent_for_request lookup) ──
+        ws_dir = Path(workspace.workspace_dir) if hasattr(workspace, "workspace_dir") else None
+        if ws_dir:
+            ws_dir.mkdir(parents=True, exist_ok=True)
+            agent_json_path = ws_dir / "agent.json"
+            if not agent_json_path.exists():
+                agent_data = {
+                    "id": agent_id,
+                    "name": payload.name or agent_id,
+                    "description": payload.description or "",
+                    "owner": username or "",
+                    "workspace_dir": ".",
+                }
+                if payload.active_model:
+                    agent_data["active_model"] = {
+                        "provider_id": payload.active_model.provider_id,
+                        "model": payload.active_model.model,
+                    }
+                if payload.language:
+                    agent_data["language"] = payload.language
+                agent_json_path.write_text(
+                    json.dumps(agent_data, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                logger.info(f"Wrote agent.json for new agent: {agent_id}")
+
+            # ── Apply agent-level templates (SOUL.md, PROFILE.md, AGENTS.md, MEMORY.md) ──
+            from ...user_provisioning import _copy_base_templates
+            if ws_dir.parent.name == "agents":
+                # This is a sub-agent under workspaces/{username}/agents/{id}/
+                _copy_base_templates(ws_dir, username, level="agent")
+                # Set slim system_prompt_files for sub-agents
+                if agent_json_path.exists():
+                    agent_data = json.loads(agent_json_path.read_text(encoding="utf-8"))
+                    agent_data["system_prompt_files"] = ["AGENTS.md", "SOUL.md", "PROFILE.md"]
+                    agent_json_path.write_text(
+                        json.dumps(agent_data, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    logger.info(f"Applied agent-level templates to sub-agent {agent_id}")
+
+            # ── Register agent in user's config.json agents registry ──
+            from ....config.config import add_agent_to_registry
+            rel_ws = str(ws_dir.relative_to(WORKSPACES_DIR / username))
+            add_agent_to_registry(username, agent_id, rel_ws)
+            logger.info(f"Registered agent {agent_id} in user {username}'s registry")
+
+            # ── Create files symlink and sessions directory ──
+            # These are normally created when workspace.start() is called,
+            # but we need them ready for first chat to work correctly.
+            workspace._link_user_files()
+            (ws_dir / "sessions").mkdir(parents=True, exist_ok=True)
+            (ws_dir / "chat").mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created files symlink and sessions/chat dirs for {agent_id}")
+
         # Record audit log
         from ....user_system.database import UserSystemDB
         db = UserSystemDB()
@@ -231,7 +286,7 @@ async def create_my_agent(
                 resource_id=agent_id,
                 details={"name": payload.name},
             )
-        
+
         return _agent_to_summary(agent_id, "user")
         
     except Exception as e:
