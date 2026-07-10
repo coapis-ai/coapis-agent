@@ -9,7 +9,7 @@
 
 **中文** | [English](./README_en.md)
 
-<img src="https://img.icons8.com/color/96/crab.png" alt="CoApis Logo" width="120">
+<img src="https://img.icons8.com/color/96/bee.png" alt="CoApis Logo" width="120">
 
 # 你的团队，值得拥有自己的 AI 助手
 

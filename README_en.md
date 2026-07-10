@@ -9,7 +9,7 @@
 
 [中文](./README.md) | **English**
 
-<img src="https://img.icons8.com/color/96/crab.png" alt="CoApis Logo" width="120">
+<img src="https://img.icons8.com/color/96/bee.png" alt="CoApis Logo" width="120">
 
 # Your Team Deserves Its Own AI Assistant
 
