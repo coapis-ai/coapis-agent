@@ -15,7 +15,7 @@
 
 > CoApis is a self-hosted AI collaboration platform. It runs on your own server, shared by your team, with data that never leaves your hands — and gets smarter over time.
 
-[What It Does](#-what-does-it-do) · [Why Choose It](#-why-choose-it) · [Get Started](#-get-started)
+[Website](https://coapis.cn) · [What It Does](#-what-does-it-do) · [Get Started](#-get-started)
 
 </div>
 
@@ -56,19 +56,6 @@ Supports Chinese, English, Japanese, and Russian interface languages.
 
 ---
 
-## 💡 Why Choose It?
-
-| | ChatGPT / Claude (Personal Tools) | CoApis |
-|--|-----------------------------------|--------|
-| **Data** | On someone else's server | On your own server |
-| **Users** | One person | Your whole team |
-| **Close browser** | Conversation ends | Agent keeps working |
-| **Memory** | Starts fresh every time | Learns about you over time |
-| **Security** | Basic protection | Seven-layer defense + audit trail |
-| **Enterprise** | None | Permissions + usage quotas |
-
----
-
 ## 🚀 Get Started
 
 ### Docker Deploy
@@ -84,8 +71,8 @@ docker compose up -d
 ### From Source
 
 ```bash
-git clone https://github.com/coapis/coapis.git
-cd coapis
+git clone https://github.com/coapis-ai/coapis-agent.git
+cd coapis-agent
 cd client && npm ci && npm run build && cd ..
 cp docker/.env.example docker/.env
 docker compose -f docker/docker-compose.build.yml up -d --build
@@ -97,22 +84,20 @@ docker compose -f docker/docker-compose.build.yml up -d --build
 - Account: `admin` / `admin123`
 - ⚠️ Change the default password immediately
 
-> 📖 Docs: [Help Center](./docs/help-html/) · [Source Install Manual](./docs/SOURCE_INSTALL_MANUAL.md)
-
 ---
 
 ## 📚 Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Product Overview](./docs/marketing/01-产品介绍.md) | What this product is |
-| [Quick Start](./docs/help-html/01-快速入门.html) | 30-second guide |
-| [Installation](./docs/help-html/02-安装部署.html) | How to install and run |
-| [Configuration](./docs/help-html/03-配置指南.html) | Models, channels, permissions |
-| [Source Install Manual](./docs/SOURCE_INSTALL_MANUAL.md) | Build from source |
+| [Website](https://coapis.cn) | Product overview, edition comparison, online demo |
+| [Quick Start](https://coapis.cn/docs/#/help/guide) | 30-second guide |
+| [Installation](https://coapis.cn/docs/#/help/install) | Docker, manual, and source installation |
+| [Configuration](https://coapis.cn/docs/#/help/config) | Environment variables, Agent & Provider settings |
+| [User Guide](https://coapis.cn/docs/#/help/direction) | Chat, channels, workspace, settings |
+| [FAQ](https://coapis.cn/docs/#/help/faq) | Installation, configuration, usage FAQ |
+| [Source Install Manual](./docs/SOURCE_INSTALL_MANUAL.md) | Build from source details |
 | [Developer Guide](./docs/developer/二次开发指南.md) | For developers |
-| [API Reference](./docs/developer/API参考.md) | API documentation |
-| [Security](./docs/security/sandbox-security-plan.md) | Security architecture |
 
 ---
 
@@ -133,6 +118,7 @@ Contributions welcome — code, docs, bug reports. See [CONTRIBUTING.md](CONTRIB
 
 | Channel | Link |
 |---------|------|
+| Website | [coapis.cn](https://coapis.cn) |
 | Gitee | [ouerlai/coapis-agent](https://gitee.com/ouerlai/coapis-agent) |
 | GitHub | [coapis-ai/coapis-agent](https://github.com/coapis-ai/coapis-agent) |
 | Security | [SECURITY.md](SECURITY.md) |
