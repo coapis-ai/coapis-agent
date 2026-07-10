@@ -10,33 +10,47 @@
 
 <img src="https://img.icons8.com/color/96/bee.png" alt="CoApis Logo" width="120">
 
-# Enterprise AI Collaboration Platform
+# Enterprise AI Agent Harness Platform
 
-> Let enterprises empower their entire team with powerful AI assistants — no AI expertise required
+> Deploy and manage AI agents securely for your entire team
 
-[Website](https://coapis.cn) · [Core Value](#-core-value) · [Quick Start](#-quick-start)
+[Website](https://coapis.cn) · [What is Harness](#-what-is-ai-agent-harness) · [Quick Start](#-quick-start)
 
 ---
 
 </div>
 
-## 🎯 Core Value
+## 🎯 What is AI Agent Harness?
+
+**Harness** is a framework that provides runtime infrastructure for AI agents:
+
+- **Runtime Environment** — Keep agents running continuously on the server
+- **Tool Capabilities** — Shell, browser, document processing, and more
+- **Memory System** — Manage context, accumulate experience
+- **Security Boundaries** — Constrain agent behavior, prevent dangerous operations
+- **Monitoring & Audit** — Track all operations, ensure compliance
+
+**CoApis is Enterprise-Grade Harness** — Deploy once, entire team uses it, each person has isolated space.
+
+---
+
+## 🏆 Core Value
 
 ### One Deployment, Team-Wide Access
 
-No need for everyone to understand AI, deployment, or configuration. IT deploys once, the entire team starts using immediately.
+IT deploys once, the entire team starts using immediately. No need for everyone to understand AI or deployment.
 
 ### Server-Side Resident Operation
 
-Agents run 7×24 on the server. Close your browser, tasks continue executing; scheduled tasks trigger automatically.
+Agents run 7×24 on the server. Close your browser, tasks continue executing.
 
 ### Multi-User Collaboration, Independent Spaces
 
-Team members share AI agents, but each person has their own workspace — conversations, files, and memory are isolated.
+Team members share agent infrastructure, but each person has their own workspace — conversations, files, and memory are isolated.
 
 ### Continuous Agent Evolution
 
-Agents remember your preferences and habits, automatically identify reusable patterns, and crystallize them into skills. The more you use it, the better it understands you.
+Agents remember your preferences, automatically identify reusable patterns, and crystallize them into skills. The more you use it, the better it understands you.
 
 ### Enterprise-Grade Security & Audit
 
@@ -48,10 +62,10 @@ Complete data isolation, permission control, dangerous operation approval, and a
 
 | Scenario | Description |
 |----------|-------------|
-| **R&D Teams** | Code review, documentation generation, technical research |
-| **Operations Teams** | Data analysis, content creation, automated workflows |
-| **Customer Service Teams** | Knowledge base Q&A, ticket processing, response suggestions |
-| **Administrative Teams** | Meeting notes, email drafting, schedule management |
+| **R&D Teams** | Code review, documentation, technical research, automated testing |
+| **Operations Teams** | Data analysis, content creation, automated workflows, report generation |
+| **Customer Service Teams** | Knowledge base Q&A, ticket processing, response suggestions, sentiment analysis |
+| **Administrative Teams** | Meeting notes, email drafting, schedule management, contract review |
 
 ---
 
@@ -75,13 +89,7 @@ docker compose up -d
 
 ### Install from Source
 
-```bash
-git clone https://github.com/coapis-ai/coapis-agent.git
-cd coapis-agent
-cd client && npm ci && npm run build && cd ..
-cp docker/.env.example docker/.env
-docker compose -f docker/docker-compose.build.yml up -d --build
-```
+See [Source Install Manual](./docs/SOURCE_INSTALL_MANUAL.md)
 
 ---
 
@@ -104,6 +112,18 @@ docker compose -f docker/docker-compose.build.yml up -d --build
 - **Ready to Use** — No client installation, access directly via browser
 - **Personal Space** — Independent conversations, files, and memory for each person
 - **Continuous Evolution** — Agents get better the more you use them
+
+---
+
+## 🔧 Harness Capabilities
+
+| Capability | Description |
+|------------|-------------|
+| **Tool System** | Shell execution, browser automation, document processing, web search, and 29 built-in tools |
+| **Memory Management** | Multi-layer memory system, semantic retrieval, automatic experience accumulation |
+| **Security Boundaries** | Command risk classification, dangerous operation blocking, sandbox isolation |
+| **Constraint Mechanism** | RBAC permissions, token quotas, operation approval |
+| **Monitoring & Audit** | Complete audit trail, behavior monitoring, log export |
 
 ---
 
