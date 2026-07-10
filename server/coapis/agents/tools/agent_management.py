@@ -430,7 +430,7 @@ def format_background_status_text(
     description="列出所有已配置的 Agent",
     category="builtin",
     tags=['agent'],
-    scene="core",
+    scene="agent",
 )
 async def list_agents(
     base_url: Optional[str] = None,
@@ -451,7 +451,7 @@ async def list_agents(
     description="向其他 Agent 发送消息并等待回复",
     category="builtin",
     tags=['agent', 'chat'],
-    scene="core",
+    scene="agent",
 )
 async def chat_with_agent(
     to_agent: str,
@@ -541,7 +541,7 @@ async def chat_with_agent(
     description="向其他 Agent 发送后台任务",
     category="builtin",
     tags=['agent', 'task'],
-    scene="core",
+    scene="agent",
 )
 async def submit_to_agent(
     to_agent: str,
@@ -626,7 +626,7 @@ async def submit_to_agent(
     description="查询后台任务状态",
     category="builtin",
     tags=['agent', 'task'],
-    scene="core",
+    scene="agent",
 )
 async def check_agent_task(
     task_id: str,
@@ -663,4 +663,105 @@ async def check_agent_task(
     )
     return _tool_text_response(
         format_background_status_text(normalized_task_id, result),
+    )
+
+
+def _generate_subagent_session_id() -> str:
+    """Generate a short session ID for a spawned subagent."""
+    return f"sub-{str(uuid4())[:8]}"
+
+
+@register_tool(
+    name="spawn_subagent",
+    description="在当前位置生成一个临时子智能体执行一次性任务",
+    category="builtin",
+    tags=["agent", "spawn", "subtask"],
+    scene="agent",
+)
+async def spawn_subagent(
+    task: str,
+    fork: bool = False,
+    background: bool = False,
+    timeout: int = 600,
+) -> ToolResponse:
+    """Spawn an ephemeral subagent within the CURRENT workspace.
+
+    The subagent runs as a one-shot task and cannot be resumed.
+    Results flow back as text summary; file changes (fork mode)
+    are isolated in a git branch.
+
+    Unlike ``chat_with_agent`` (which calls a *different* agent),
+    this tool targets the same agent identity and workspace.
+
+    Args:
+        task: Description of the sub-task to perform.
+        fork: If True, the subagent inherits parent session state.
+        background: If True, submit as background task and return
+            immediately with a task_id.
+        timeout: Foreground wait timeout in seconds (default 600).
+
+    Returns:
+        Foreground: subagent result text with [SESSION: <id>].
+        Background: [TASK_ID: <id>] + [SESSION: <id>].
+    """
+    if not task or not task.strip():
+        return _tool_text_response(
+            "ERROR: 'task' is required for spawn_subagent",
+        )
+
+    from ...app.agent_context import get_current_agent_id
+
+    current_agent_id = get_current_agent_id()
+    if not current_agent_id:
+        return _tool_text_response(
+            "ERROR: unable to resolve current agent ID",
+        )
+
+    subagent_session_id = _generate_subagent_session_id()
+
+    if fork:
+        return _tool_text_response(
+            "Fork mode is not supported in CoApis. "
+            "Use background mode or direct execution instead.",
+        )
+
+    request_payload = {
+        "session_id": subagent_session_id,
+        "input": [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": task}],
+            },
+        ],
+        "request_context": {},
+    }
+
+    if background:
+        result = await asyncio.to_thread(
+            submit_agent_chat_task,
+            None,
+            request_payload,
+            current_agent_id,
+            int(DEFAULT_AGENT_API_TIMEOUT),
+        )
+        return _tool_text_response(
+            format_background_submission_text(
+                result,
+                subagent_session_id,
+            ),
+        )
+
+    response_data = await asyncio.to_thread(
+        collect_final_agent_chat_response,
+        None,
+        request_payload,
+        current_agent_id,
+        timeout,
+    )
+    if response_data is None:
+        return _tool_text_response(
+            "ERROR: No response from subagent",
+        )
+    return _tool_text_response(
+        format_agent_chat_text(response_data, session_id=subagent_session_id),
     )

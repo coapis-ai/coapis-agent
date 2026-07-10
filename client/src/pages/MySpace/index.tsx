@@ -15,6 +15,8 @@ import {
   Typography,
   Divider,
   Tabs,
+  Drawer,
+  Dropdown,
 } from 'antd';
 import type { InputRef } from 'antd';
 import {
@@ -36,6 +38,9 @@ import {
   CloudUploadOutlined,
   LoadingOutlined,
   RobotOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  MinusCircleOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { api, getApiUrl } from '@/api';
@@ -116,8 +121,23 @@ const MySpacePage: React.FC = () => {
   // MySpace 配置（文件大小限制等）
   const [myspaceConfig, setMySpaceConfig] = useState<{ max_file_size: number; max_file_size_mb: number; max_upload_files: number } | null>(null);
   
+  // 上传进度状态
+  const [uploadDrawerVisible, setUploadDrawerVisible] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState<Array<{
+    id: string;
+    name: string;
+    path: string;
+    size: number;
+    status: 'pending' | 'uploading' | 'success' | 'skipped' | 'error';
+    progress: number;
+    error?: string;
+  }>>([]);
+  const [uploading, setUploading] = useState(false);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  
   const searchInputRef = useRef<InputRef>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const uploadDirRef = useRef<HTMLInputElement>(null);
 
   // 判断当前类别是否只读
   const isReadOnly = activeCategory !== 'files';
@@ -302,69 +322,197 @@ const MySpacePage: React.FC = () => {
     }
   };
 
-  // 上传单个文件（支持 409 覆盖确认）
-  const uploadFile = async (file: File, path: string, category: string): Promise<boolean> => {
+  // 生成唯一ID
+  const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // 上传单个文件（带进度 + 支持 409 自动跳过 + AbortController）
+  const uploadFileWithProgress = async (
+    file: File,
+    path: string,
+    category: string,
+    queueId: string,
+    signal?: AbortSignal,
+  ): Promise<'success' | 'skipped' | 'error'> => {
+    const updateProgress = (pct: number) => {
+      setUploadQueue(prev =>
+        prev.map(q => (q.id === queueId ? { ...q, progress: pct } : q)),
+      );
+    };
+    const updateStatus = (status: 'success' | 'skipped' | 'error', error?: string) => {
+      setUploadQueue(prev =>
+        prev.map(q => (q.id === queueId ? { ...q, status, progress: 100, error } : q)),
+      );
+    };
+
+    const url = getApiUrl(`${FILES_API}/upload`);
     const formData = new FormData();
     formData.append('file', file);
     formData.append('path', path);
     formData.append('category', category);
-    
-    const url = getApiUrl(`${FILES_API}/upload`);
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { ...buildAuthHeaders() },
-      body: formData,
+
+    return new Promise((resolve) => {
+      if (signal?.aborted) {
+        updateStatus('skipped', '已取消');
+        resolve('skipped');
+        return;
+      }
+
+      const xhr = new XMLHttpRequest();
+      signal?.addEventListener('abort', () => xhr.abort());
+
+      xhr.upload.onprogress = (e: ProgressEvent) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          updateProgress(pct);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 409) {
+          updateStatus('skipped', '文件已存在，已跳过');
+          resolve('skipped');
+        } else if (xhr.status >= 200 && xhr.status < 300) {
+          updateStatus('success');
+          resolve('success');
+        } else {
+          try {
+            const err = JSON.parse(xhr.responseText);
+            updateStatus('error', err.detail || err.message || `HTTP ${xhr.status}`);
+          } catch {
+            updateStatus('error', `HTTP ${xhr.status}`);
+          }
+          resolve('error');
+        }
+      };
+
+      xhr.onerror = () => {
+        updateStatus('error', '网络错误');
+        resolve('error');
+      };
+
+      xhr.onabort = () => {
+        updateStatus('skipped', '已取消');
+        resolve('skipped');
+      };
+
+      xhr.open('POST', url);
+      Object.entries(buildAuthHeaders()).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+      xhr.send(formData);
     });
-    
-    // 409 Conflict - 文件已存在，询问是否覆盖
-    if (response.status === 409) {
-      const err = await response.json().catch(() => ({}));
-      // Use Promise without explicit type annotation to avoid TSX parsing issues
-      const confirmed = await new Promise((resolve) => {
-        Modal.confirm({
-          title: '覆盖确认',
-          content: (
-            <div>
-              <p><strong>{file.name}</strong> 已存在，是否覆盖？</p>
-              <p>当前大小: {formatSize(err.existing_size || 0)}</p>
-              <p>新文件大小: {formatSize(file.size)}</p>
-            </div>
-          ),
-          okText: '覆盖',
-          cancelText: '跳过',
-          okButtonProps: { danger: true },
-          onOk: () => resolve(true),
-          onCancel: () => resolve(false),
-        });
+  };
+
+  // 批量创建目录
+  const createDirectoriesBatch = async (
+    dirPaths: string[],
+    category: string,
+  ) => {
+    if (dirPaths.length === 0) return;
+    try {
+      await api.post(`${FILES_API}/mkdir-batch?category=${category}`, {
+        paths: dirPaths,
       });
-      if (!confirmed) {
-        return false; // 用户选择跳过
-      }
-      
-      // 重新上传，携带 overwrite=true
-      const overwriteFormData = new FormData();
-      overwriteFormData.append('file', file);
-      overwriteFormData.append('path', path);
-      overwriteFormData.append('category', category);
-      overwriteFormData.append('overwrite', 'true');
-      
-      const overwriteResponse = await fetch(url, {
-        method: 'POST',
-        headers: { ...buildAuthHeaders() },
-        body: overwriteFormData,
-      });
-      
-      if (!overwriteResponse.ok) {
-        const err2 = await overwriteResponse.json().catch(() => ({}));
-        throw new Error(err2.detail || err2.message || 'Overwrite failed');
-      }
-      message.warning(`${file.name} 已覆盖`);
-      return true;
+    } catch (e: any) {
+      console.warn('[MySpace] mkdir-batch failed:', e);
     }
-    
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || err.message || 'Upload failed');
+  };
+
+  // 处理上传队列（并发3个）
+  const processUploadQueue = async (
+    files: Array<{ file: File; path: string }>,
+    category: string,
+  ) => {
+    setUploading(true);
+    uploadAbortRef.current = new AbortController();
+
+    // 先提取所有目录路径并批量创建
+    const dirPaths = new Set<string>();
+    for (const { file, path } of files) {
+      // 从 webkitRelativePath 提取目录部分
+      const relPath = (file as any).webkitRelativePath || '';
+      if (relPath) {
+        const parts = relPath.split('/');
+        const dirParts = parts.slice(0, -1); // 去掉文件名
+        if (dirParts.length > 0) {
+          const dirPath = path + '/' + dirParts.join('/');
+          dirPaths.add(dirPath);
+        }
+      }
+    }
+    if (dirPaths.size > 0) {
+      await createDirectoriesBatch(Array.from(dirPaths), category);
+    }
+
+    // 创建队列项
+    const queue: typeof uploadQueue = files.map(({ file, path }) => ({
+      id: genId(),
+      name: (file as any).webkitRelativePath || file.name,
+      path,
+      size: file.size,
+      status: 'pending' as const,
+      progress: 0,
+    }));
+    setUploadQueue(queue);
+    setUploadDrawerVisible(true);
+
+    // 并发上传（最多3个并行）
+    const concurrency = 3;
+    const signal = uploadAbortRef.current.signal;
+    let completed = 0;
+
+    const runNext = async (idx: number) => {
+      for (let i = idx; i < queue.length; i += concurrency) {
+        if (signal.aborted) break;
+        const item = queue[i];
+        const { file, path: targetPath } = files[i];
+
+        setUploadQueue(prev =>
+          prev.map(q => (q.id === item.id ? { ...q, status: 'uploading' as const } : q)),
+        );
+
+        await uploadFileWithProgress(file, targetPath, category, item.id, signal);
+        completed++;
+      }
+    };
+
+    // 启动并发任务
+    const tasks = [];
+    for (let i = 0; i < Math.min(concurrency, queue.length); i++) {
+      tasks.push(runNext(i));
+    }
+    await Promise.all(tasks);
+
+    setUploading(false);
+    uploadAbortRef.current = null;
+
+    // 汇总（用本地 queue 副本，避免 React state 延迟）
+    const results = queue.reduce((acc, q) => {
+      // Read latest status from React state
+      const latest = uploadQueue.find(lq => lq.id === q.id);
+      if (latest) acc[latest.status] = (acc[latest.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const parts: string[] = [];
+    if (results.success) parts.push(`${results.success} 个成功`);
+    if (results.skipped) parts.push(`${results.skipped} 个跳过`);
+    if (results.error) parts.push(`${results.error} 个失败`);
+    if (parts.length > 0) {
+      message.info(`上传完成: ${parts.join(', ')}`);
+    }
+
+    loadFiles();
+    loadUsage();
+  };
+
+  // 预检查文件大小
+  const checkFilesSize = (files: FileList | File[]): boolean => {
+    const maxBytes = myspaceConfig?.max_file_size ?? 20 * 1024 * 1024;
+    const maxMB = (maxBytes / 1024 / 1024).toFixed(0);
+    for (const file of Array.from(files)) {
+      if (file.size > maxBytes) {
+        message.error(`${file.name}: 文件过大（${formatSize(file.size)}），最大允许 ${maxMB}MB`);
+        return false;
+      }
     }
     return true;
   };
@@ -375,53 +523,23 @@ const MySpacePage: React.FC = () => {
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files);
     if (!files.length) return;
-    
-    // 预检查上传数量
-    const maxFiles = myspaceConfig?.max_upload_files ?? 10;
-    if (files.length > maxFiles) {
-      message.error(`单次最多上传 ${maxFiles} 个文件，当前 ${files.length} 个`);
-      return;
-    }
-    
-    // 预检查文件大小
-    const maxBytes = myspaceConfig?.max_file_size ?? 20 * 1024 * 1024;
-    const maxMB = (maxBytes / 1024 / 1024).toFixed(0);
-    for (const file of files) {
-      if (file.size > maxBytes) {
-        message.error(`${file.name}: 文件过大（${formatSize(file.size)}），最大允许 ${maxMB}MB`);
-        return;
+
+    if (!checkFilesSize(files)) return;
+
+    // 处理 webkitRelativePath：有路径说明是目录上传
+    const uploadItems: Array<{ file: File; path: string }> = files.map((file) => {
+      const relPath = (file as any).webkitRelativePath || '';
+      if (relPath) {
+        // 目录上传：保持目录结构
+        const targetPath = currentPath + '/' + relPath;
+        // 取父目录作为上传路径
+        const parentDir = targetPath.substring(0, targetPath.lastIndexOf('/')) || currentPath;
+        return { file, path: parentDir };
       }
-    }
-    
-    let successCount = 0;
-    let skipCount = 0;
-    let errorCount = 0;
-    
-    for (const file of files) {
-      try {
-        const success = await uploadFile(file, currentPath, activeCategory);
-        if (success) {
-          successCount++;
-        } else {
-          skipCount++;
-        }
-      } catch (e: any) {
-        message.error(`${file.name}: ${e.message}`);
-        errorCount++;
-      }
-    }
-    
-    // 显示汇总消息
-    const parts = [];
-    if (successCount > 0) parts.push(`${successCount} 个成功`);
-    if (skipCount > 0) parts.push(`${skipCount} 个跳过`);
-    if (errorCount > 0) parts.push(`${errorCount} 个失败`);
-    if (parts.length > 0) {
-      message.info(`上传完成: ${parts.join(', ')}`);
-    }
-    
-    loadFiles();
-    loadUsage();
+      return { file, path: currentPath };
+    });
+
+    await processUploadQueue(uploadItems, activeCategory);
   };
 
   // 过滤后的列表
@@ -579,14 +697,32 @@ const MySpacePage: React.FC = () => {
           <>
             <Divider type="vertical" style={{ margin: '0 8px' }} />
             <Space>
-              <Button
-                type="primary"
-                icon={<UploadOutlined />}
-                size="small"
-                onClick={() => uploadRef.current?.click()}
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'upload',
+                      icon: <UploadOutlined />,
+                      label: '上传文件',
+                      onClick: () => uploadRef.current?.click(),
+                    },
+                    {
+                      key: 'upload-dir',
+                      icon: <FolderOutlined />,
+                      label: '上传文件夹',
+                      onClick: () => uploadDirRef.current?.click(),
+                    },
+                  ],
+                }}
               >
-                {t('myspace.upload')}
-              </Button>
+                <Button
+                  type="primary"
+                  icon={<CloudUploadOutlined />}
+                  size="small"
+                >
+                  {t('myspace.upload')}
+                </Button>
+              </Dropdown>
               <Button
                 icon={<FolderAddOutlined />}
                 size="small"
@@ -599,7 +735,7 @@ const MySpacePage: React.FC = () => {
             {/* 文件大小限制提示 */}
             {myspaceConfig && (
               <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
-                单次最多 {myspaceConfig.max_upload_files} 个，单文件最大 {myspaceConfig.max_file_size_mb.toFixed(0)}MB
+                单文件最大 {myspaceConfig.max_file_size_mb.toFixed(0)}MB
               </Text>
             )}
             
@@ -615,55 +751,42 @@ const MySpacePage: React.FC = () => {
                   e.target.value = '';
                   return;
                 }
-                
-                // 预检查上传数量
-                const maxFiles = myspaceConfig?.max_upload_files ?? 10;
-                if (files.length > maxFiles) {
-                  message.error(`单次最多上传 ${maxFiles} 个文件，当前 ${files.length} 个`);
+                if (!checkFilesSize(files)) {
                   e.target.value = '';
                   return;
                 }
-                
-                // 预检查文件大小
-                const maxBytes = myspaceConfig?.max_file_size ?? 20 * 1024 * 1024;
-                const maxMB = (maxBytes / 1024 / 1024).toFixed(0);
-                for (const file of files) {
-                  if (file.size > maxBytes) {
-                    message.error(`${file.name}: 文件过大（${formatSize(file.size)}），最大允许 ${maxMB}MB`);
-                    e.target.value = '';
-                    return;
+                const uploadItems = files.map((file) => ({ file, path: currentPath }));
+                await processUploadQueue(uploadItems, activeCategory);
+                e.target.value = '';
+              }}
+            />
+            {/* 隐藏的目录输入 */}
+            <input
+              ref={uploadDirRef}
+              type="file"
+              multiple
+              {...({ webkitdirectory: "" } as any)}
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const files = Array.from(e.target.files || []);
+                if (!files.length) {
+                  e.target.value = '';
+                  return;
+                }
+                if (!checkFilesSize(files)) {
+                  e.target.value = '';
+                  return;
+                }
+                const uploadItems: Array<{ file: File; path: string }> = files.map((file) => {
+                  const relPath = (file as any).webkitRelativePath || '';
+                  if (relPath) {
+                    const targetPath = currentPath + '/' + relPath;
+                    const parentDir = targetPath.substring(0, targetPath.lastIndexOf('/')) || currentPath;
+                    return { file, path: parentDir };
                   }
-                }
-                
-                let successCount = 0;
-                let skipCount = 0;
-                let errorCount = 0;
-                
-                for (const file of files) {
-                  try {
-                    const success = await uploadFile(file, currentPath, activeCategory);
-                    if (success) {
-                      successCount++;
-                    } else {
-                      skipCount++;
-                    }
-                  } catch (err: any) {
-                    message.error(`${file.name}: ${err.message}`);
-                    errorCount++;
-                  }
-                }
-                
-                // 显示汇总消息
-                const parts = [];
-                if (successCount > 0) parts.push(`${successCount} 个成功`);
-                if (skipCount > 0) parts.push(`${skipCount} 个跳过`);
-                if (errorCount > 0) parts.push(`${errorCount} 个失败`);
-                if (parts.length > 0) {
-                  message.info(`上传完成: ${parts.join(', ')}`);
-                }
-                
-                loadFiles();
-                loadUsage();
+                  return { file, path: currentPath };
+                });
+                await processUploadQueue(uploadItems, activeCategory);
                 e.target.value = '';
               }}
             />
@@ -877,6 +1000,133 @@ const MySpacePage: React.FC = () => {
           </div>
         </Modal>
       )}
+
+      {/* 上传进度 Drawer */}
+      <Drawer
+        title="上传进度"
+        open={uploadDrawerVisible}
+        onClose={() => !uploading && setUploadDrawerVisible(false)}
+        width={420}
+        extra={
+          <Space>
+            {uploading && (
+              <Button danger size="small" onClick={() => uploadAbortRef.current?.abort()}>
+                取消上传
+              </Button>
+            )}
+            <Button
+              size="small"
+              disabled={uploading}
+              onClick={() => {
+                setUploadDrawerVisible(false);
+                setUploadQueue([]);
+              }}
+            >
+              关闭
+            </Button>
+          </Space>
+        }
+      >
+        {/* 整体进度 */}
+        {uploadQueue.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            {(() => {
+              const total = uploadQueue.length;
+              const done = uploadQueue.filter(q => q.status !== 'pending' && q.status !== 'uploading').length;
+              const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+              return (
+                <div>
+                  <Progress
+                    percent={pct}
+                    status={uploading ? 'active' : done === total ? 'success' : 'normal'}
+                    strokeColor={{
+                      '0%': '#108ee9',
+                      '100%': '#87d068',
+                    }}
+                  />
+                  <Space style={{ marginTop: 4 }}>
+                    {uploadQueue.some(q => q.status === 'success') && (
+                      <Tag icon={<CheckCircleOutlined />} color="success">
+                        {uploadQueue.filter(q => q.status === 'success').length} 成功
+                      </Tag>
+                    )}
+                    {uploadQueue.some(q => q.status === 'skipped') && (
+                      <Tag icon={<MinusCircleOutlined />} color="default">
+                        {uploadQueue.filter(q => q.status === 'skipped').length} 跳过
+                      </Tag>
+                    )}
+                    {uploadQueue.some(q => q.status === 'error') && (
+                      <Tag icon={<CloseCircleOutlined />} color="error">
+                        {uploadQueue.filter(q => q.status === 'error').length} 失败
+                      </Tag>
+                    )}
+                    {uploadQueue.some(q => q.status === 'uploading') && (
+                      <Tag icon={<LoadingOutlined />} color="processing">
+                        {uploadQueue.filter(q => q.status === 'uploading').length} 上传中...
+                      </Tag>
+                    )}
+                  </Space>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* 文件列表 */}
+        <List
+          size="small"
+          dataSource={uploadQueue}
+          renderItem={(item) => (
+            <List.Item style={{ padding: '8px 0' }}>
+              <div style={{ width: '100%' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text
+                    ellipsis
+                    style={{ maxWidth: '60%', fontSize: 13 }}
+                  >
+                    {item.name}
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {formatSize(item.size)}
+                  </Text>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {item.status === 'uploading' && (
+                    <Progress
+                      percent={item.progress}
+                      size="small"
+                      style={{ flex: 1 }}
+                      strokeColor="#108ee9"
+                    />
+                  )}
+                  {item.status === 'success' && (
+                    <Tag icon={<CheckCircleOutlined />} color="success" style={{ flex: 1 }}>
+                      完成
+                    </Tag>
+                  )}
+                  {item.status === 'skipped' && (
+                    <Tag icon={<MinusCircleOutlined />} color="default" style={{ flex: 1 }}>
+                      {item.error || '已跳过'}
+                    </Tag>
+                  )}
+                  {item.status === 'error' && (
+                    <Tag icon={<CloseCircleOutlined />} color="error" style={{ flex: 1 }}>
+                      {item.error || '失败'}
+                    </Tag>
+                  )}
+                  {item.status === 'pending' && (
+                    <Tag color="default" style={{ flex: 1 }}>等待中</Tag>
+                  )}
+                </div>
+              </div>
+            </List.Item>
+          )}
+        />
+
+        {uploadQueue.length === 0 && !uploading && (
+          <Empty description="暂无上传任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </Drawer>
 
       {/* 预览弹窗已移除 — 2026-06-28 */}
     </div>

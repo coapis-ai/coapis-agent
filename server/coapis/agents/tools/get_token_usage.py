@@ -31,7 +31,7 @@ from .registry import register_tool
     description="查询 LLM token 用量",
     category="builtin",
     tags=['token', 'usage'],
-    scene="core",
+    scene="system",
 )
 async def get_token_usage(
     days: int = 30,

@@ -236,6 +236,11 @@ async def console_chat(
     request_chat_id = None  # Initialize before any conditional use
     if payload is None:
         payload = {}
+    import json as _json
+    logger.warning(
+        "CONSOLE_CHAT_PAYLOAD: %s",
+        _json.dumps(payload, ensure_ascii=False),
+    )
     """Console chat endpoint - SSE streaming response using CoApis component chain.
 
     Component chain:
@@ -481,6 +486,13 @@ async def get_console_sessions(
     chats = await user_cm.list_chats(
         channel=effective_channel,
     )
+
+    # Filter by agent_id if provided (frontend per-agent isolation)
+    if agent_id:
+        chats = [
+            chat for chat in chats
+            if (getattr(chat, "agent_id", None) or "default") == agent_id
+        ]
 
 
     sessions = []

@@ -803,6 +803,8 @@ export default function ChatPage() {
   const lastSessionIdRef = useRef<string | null>(null);
   /** Tracks the stale auto-selected session ID that was skipped on init, so we can suppress its late-arriving onSessionSelected callback. */
   const staleAutoSelectedIdRef = useRef<string | null>(null);
+  /** When true, skip the next onSessionSelected callback — set by ChatSessionInitializer to break the URL↔session sync loop. */
+  const skipNextSessionSelectedRef = useRef(false);
   const chatIdRef = useRef(chatId);
   const navigateRef = useRef(navigate);
   const chatRef = useRef<IAgentScopeRuntimeWebUIRef>(null);
@@ -860,6 +862,13 @@ export default function ChatPage() {
       realId: string | null,
     ) => {
       if (!isChatActiveRef.current) return;
+
+      // Skip when ChatSessionInitializer set currentSessionId — breaks the URL↔session loop.
+      if (skipNextSessionSelectedRef.current) {
+        skipNextSessionSelectedRef.current = false;
+        return;
+      }
+
       // Update URL when session is selected and different from current
       const targetId = realId || sessionId;
       if (!targetId) return;
@@ -1160,6 +1169,12 @@ export default function ChatPage() {
 
     const handleBeforeSubmit = async () => {
       if (isComposingRef.current) return false;
+      // COAPIS FIX: ensure a session exists before the library's handleSubmit
+      // runs. For new agents we now create the session up-front in
+      // ChatSessionInitializer; this guard is a safety net for very fast submits.
+      if (sessionApi.createSessionIfNeeded) {
+        await sessionApi.createSessionIfNeeded();
+      }
       return true;
     };
 
@@ -1174,7 +1189,7 @@ export default function ChatPage() {
         },
         rightHeader: (
           <>
-            <ChatSessionInitializer />
+            <ChatSessionInitializer skipNextSessionSelectedRef={skipNextSessionSelectedRef} />
             <RuntimeLoadingBridge bridgeRef={runtimeLoadingBridgeRef} />
           </>
         ),
