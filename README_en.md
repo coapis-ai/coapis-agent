@@ -12,9 +12,9 @@
 
 # Enterprise AI Agent Harness Platform
 
-> Deploy and manage AI agents securely for your entire team
+> **Agent = Model + Harness**<br>Deploy and manage AI agents securely for your entire team
 
-[Website](https://coapis.cn) · [What is Harness](#-what-is-ai-agent-harness) · [Quick Start](#-quick-start)
+[Website](https://coapis.cn) · [Harness 4-Layer Architecture](#-harness-4-layer-architecture) · [Quick Start](#-quick-start)
 
 ---
 
@@ -22,15 +22,67 @@
 
 ## 🎯 What is AI Agent Harness?
 
-**Harness** is a framework that provides runtime infrastructure for AI agents:
+**Harness = Everything Outside the Model**
 
-- **Runtime Environment** — Keep agents running continuously on the server
-- **Tool Capabilities** — Shell, browser, document processing, and more
-- **Memory System** — Manage context, accumulate experience
-- **Security Boundaries** — Constrain agent behavior, prevent dangerous operations
-- **Monitoring & Audit** — Track all operations, ensure compliance
+Equip the AI model "wild horse" with a complete set of gear — tools, connections, environment, control — to make it controllable, usable, and productive.
 
-**CoApis is Enterprise-Grade Harness** — Deploy once, entire team uses it, each person has isolated space.
+### Why Does Harness Matter?
+
+**80% of the performance gap is in the Harness, not the model**
+
+The same model with good vs. poor Harness implementation can mean:
+- "Stalls after 3 steps" vs. "Runs continuously for 8 hours completing a feature module"
+- "Frequently erratic" vs. "Smooth and reliable"
+
+---
+
+## 🏗️ Harness 4-Layer Architecture
+
+### Layer 1: Capability Layer (Skills / Tools)
+
+**Solves "What can the agent do?"**
+
+| Capability | Description |
+|------------|-------------|
+| File Operations | Read/write, edit, search |
+| Shell Execution | Command execution, environment management |
+| Browser Automation | Web scraping, form filling |
+| Document Processing | PDF, Word, Excel, PPT |
+| Web Search | Tavily, Exa search engines |
+| Email Management | IMAP/SMTP send/receive |
+
+**CoApis provides 29 built-in tools + custom skill system**
+
+### Layer 2: Connection Layer (API / MCP)
+
+**Solves "How does the agent talk to the outside world?"**
+
+- Multi-channel integration (WeCom, DingTalk, Feishu, Telegram, Discord, QQ)
+- API interface standards
+- MCP (Model Context Protocol) support
+
+### Layer 3: Build Layer (Prompt / SDK / Framework)
+
+**Solves "How is the agent built and organized?"**
+
+- Agent configuration system (roles, styles, security boundaries)
+- Prompt template management
+- Task orchestration logic
+- Multi-agent collaboration framework
+
+### Layer 4: Runtime Control Layer ⭐
+
+**Solves "How does the agent run stably, long-term, and controllably?"**
+
+| Capability | Description |
+|------------|-------------|
+| **Execution Environment** | Docker sandbox isolation, secure runtime |
+| **State & Memory** | Multi-layer memory system, automatic experience accumulation |
+| **Execution Control** | Retry, throttling, monitoring, auto-evaluation |
+| **Security Boundaries** | Seven-layer defense, command classification |
+| **Observability** | Complete audit trail, trace recording, replay debugging |
+
+**This layer is the core of Harness, and CoApis' strength**
 
 ---
 
@@ -38,23 +90,19 @@
 
 ### One Deployment, Team-Wide Access
 
-IT deploys once, the entire team starts using immediately. No need for everyone to understand AI or deployment.
+IT deploys once, the entire team starts using immediately. No need for everyone to understand AI, deployment, or configuration.
 
 ### Server-Side Resident Operation
 
-Agents run 7×24 on the server. Close your browser, tasks continue executing.
+Agents run 7×24 on the server. Close your browser, tasks continue executing; scheduled tasks trigger automatically.
 
 ### Multi-User Collaboration, Independent Spaces
 
 Team members share agent infrastructure, but each person has their own workspace — conversations, files, and memory are isolated.
 
-### Continuous Agent Evolution
+### Enterprise-Grade Harness Engineering
 
-Agents remember your preferences, automatically identify reusable patterns, and crystallize them into skills. The more you use it, the better it understands you.
-
-### Enterprise-Grade Security & Audit
-
-Complete data isolation, permission control, dangerous operation approval, and audit trail.
+Complete runtime control layer: execution environment, state memory, security boundaries, observability — enabling agents to run stably, long-term, and controllably.
 
 ---
 
@@ -112,18 +160,6 @@ See [Source Install Manual](./docs/SOURCE_INSTALL_MANUAL.md)
 - **Ready to Use** — No client installation, access directly via browser
 - **Personal Space** — Independent conversations, files, and memory for each person
 - **Continuous Evolution** — Agents get better the more you use them
-
----
-
-## 🔧 Harness Capabilities
-
-| Capability | Description |
-|------------|-------------|
-| **Tool System** | Shell execution, browser automation, document processing, web search, and 29 built-in tools |
-| **Memory Management** | Multi-layer memory system, semantic retrieval, automatic experience accumulation |
-| **Security Boundaries** | Command risk classification, dangerous operation blocking, sandbox isolation |
-| **Constraint Mechanism** | RBAC permissions, token quotas, operation approval |
-| **Monitoring & Audit** | Complete audit trail, behavior monitoring, log export |
 
 ---
 
