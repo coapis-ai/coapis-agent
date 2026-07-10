@@ -27,7 +27,6 @@
 
 **CoApis = Your Team's Private AI Assistant Team**
 
-Unlike personal tools like ChatGPT / Claude, CoApis gives you:
 - 🔒 **Data Never Leaves** — Fully self-hosted, data stays on your own server
 - 👥 **Team Sharing** — Team members share AI agents, each with independent workspace
 - 🧠 **Gets Smarter** — Four-layer memory + skill evolution, agents continuously improve
@@ -123,18 +122,6 @@ Refined from 108+ tools to 29 high-frequency practical tools covering:
 | Backend | Python 3.11+ + FastAPI + SQLite/JSON |
 | Deployment | Docker + Docker Compose + Nginx |
 | LLM | Any OpenAI-compatible API (OpenAI / Ollama / vLLM / LM Studio etc.) |
-
-### Comparison with Similar Products
-
-| Dimension | Personal AI Assistant (ChatGPT/Claude) | CoApis |
-|-----------|----------------------------------------|--------|
-| 🏠 **Deployment** | Local client, tied to personal computer | Server-side resident, team sharing |
-| 👥 **Users** | 1 person exclusive | Multiple users simultaneously, data isolated |
-| 🧠 **Memory** | Valid within session, lost when closed | Four-layer memory, permanent across sessions |
-| 🤖 **Agents** | Single assistant | Three-tier system (global/user/agent), skill evolution |
-| 🛡️ **Security** | Basic filtering | Seven-layer defense, complete audit trail |
-| 🏢 **Compliance** | None | RBAC permissions + audit logs + token quotas |
-| 🔧 **Extensibility** | Plugin marketplace | Custom skills + multi-channel integration |
 
 ---
 
