@@ -22,21 +22,29 @@
 
 ## 🎯 Core Value
 
-### One Deployment, Team-Wide Access
+### Install Once, Everyone Uses
 
-IT deploys once, the entire team starts using immediately. No need for everyone to understand configuration or deployment.
+Deploy once for the entire company, and everyone can start immediately. Zero technical barrier — no need to understand configuration, install environments, or buy accounts. Just open your browser and start working, as simple as using any enterprise tool.
 
-### Server-Side Resident Operation
+### Team Collaboration, Individual Privacy
 
-Agents run 7×24 on the server. Close your browser, tasks continue executing; scheduled tasks trigger automatically.
+Everyone shares the same system, but each person has their own private workspace. Your conversations, files, and accumulated experience are invisible to others. Share resources while protecting privacy.
 
-### Multi-User Collaboration, Independent Spaces
+### Smarter Over Time
 
-Team members share agents, but each person has their own workspace — conversations, files, and memory are isolated.
+The system remembers your habits and preferences, automatically learning your common workflows. The more you use it, the better it understands you. Good methods you discover can be shared with colleagues; their experience can be inherited by you. The team's collective wisdom flows and grows.
 
-### Auto-Learning, Continuous Evolution
+### Fortress-Grade Security
 
-Agents remember your preferences and habits, automatically identify reusable patterns, and crystallize them into skills. The more you use it, the better it understands you.
+Seven layers of defense: dangerous operations are automatically blocked, sensitive files are protected, abnormal behaviors are monitored in real-time, all actions are fully logged. Like installing a safe for your enterprise — enabling productivity while preventing chaos.
+
+### Remembers What Matters
+
+The system remembers key information, extracts valuable knowledge, and accumulates reusable experience. Project context, customer preferences, operational tips — no need to worry about forgetting, everything is retrievable. Like having an assistant who never tires of organizing your notes.
+
+### Integrates Into Daily Work
+
+Connect to WeCom, DingTalk, Feishu — use it where you already work. Link to existing enterprise systems, bridge data and workflows. Not a separate tool, but an enhancement to what you already use, making AI part of your daily routine.
 
 ---
 
