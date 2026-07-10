@@ -44,7 +44,7 @@ The system remembers key information, extracts valuable knowledge, and accumulat
 
 ### Office & Business System Integration Empowerment
 
-Connect to WeCom, DingTalk, Feishu — use it where you already work. Link to existing enterprise systems, bridge data and workflows. Not a separate tool, but an enhancement to what you already use, making AI part of your daily routine, building true enterprise-grade Agent Harness.
+Link to existing enterprise systems, bridge data and workflows. Not a separate tool, but an enhancement to what you already use, making AI part of your daily routine, building true enterprise-grade Agent Harness.
 
 ---
 
