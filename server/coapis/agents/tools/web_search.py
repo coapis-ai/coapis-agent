@@ -353,7 +353,7 @@ _BACKENDS = {
 
 @register_tool(
     name="web_search",
-    description="网络搜索工具，无需 API Key 即可使用。默认通过浏览器（Bing）搜索，自动 fallback 到其他后端。返回 results 数组含 title/url/snippet。",
+    description="网络搜索工具，无需 API Key 即可使用。默认通过浏览器（Bing）搜索，自动 fallback 到其他后端。返回 results 数组含 title/url/snippet。参数 query 为必填项。",
     category="builtin",
     tags=["search", "web"],
     scene="general"
@@ -366,15 +366,20 @@ async def web_search(
     """网络搜索，无需 API Key。默认通过浏览器访问 Bing 搜索。
 
     Args:
-        query: 搜索关键词
+        query: 搜索关键词（必填）
         backend: 搜索后端（browser/baidu/sogou/tavily/ddgs），默认 browser
         max_results: 最大返回结果数，默认 5
 
     Returns:
         搜索结果列表 + 使用的后端
     """
-    if not query.strip():
-        return {"error": "搜索关键词不能为空"}
+    # 快速失败：参数为空时立即返回
+    if not query or not query.strip():
+        return {
+            "error": "搜索关键词不能为空",
+            "hint": "请提供搜索关键词。示例: web_search(query='Python教程')",
+            "usage": "web_search(query='搜索词', backend='browser', max_results=5)",
+        }
 
     query = query.strip()
     try:
