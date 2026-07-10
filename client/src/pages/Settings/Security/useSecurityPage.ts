@@ -26,7 +26,7 @@ export function useSecurityPage() {
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState("toolGuard");
+  const [activeTab, setActiveTab] = useState("commandClassification");
 
   // FileGuard handlers exposed from child component
   const [fileGuardHandlers, setFileGuardHandlers] = useState<{

@@ -1,10 +1,41 @@
 import { useEffect, useState } from 'react';
-import { Card, Button, Space, Tag, message, Modal, Alert, Table, Switch, Typography } from 'antd';
-import { ToolOutlined, WarningOutlined, ScanOutlined, DeleteOutlined, CloudServerOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  Card, Button, Space, Tag, message, Modal, Alert, Table, Switch, Typography,
+  Input, Select, Row, Col, Statistic
+} from 'antd';
+import {
+  ToolOutlined, WarningOutlined, ScanOutlined, DeleteOutlined,
+  CloudServerOutlined, ReloadOutlined, SearchOutlined, CheckCircleOutlined,
+  StopOutlined
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { adminApi } from '@/api/modules/admin';
+import toolsApi from '@/api/modules/tools';
 
 const { Paragraph } = Typography;
+
+interface ToolInfo {
+  name: string;
+  enabled: boolean;
+  description: string;
+  category: string;
+  group: string;
+  tags: string[];
+  scene: string;
+  async_execution: boolean;
+  icon: string;
+  builtin: boolean;
+}
+
+interface ToolStats {
+  total: number;
+  enabled: number;
+  disabled: number;
+  groups: Record<string, number>;
+  categories: Record<string, number>;
+  builtin_count: number;
+  plugin_count: number;
+}
 
 export default function ToolsTab() {
   const { t } = useTranslation();
@@ -15,6 +46,139 @@ export default function ToolsTab() {
   const [diagnoseResults, setDiagnoseResults] = useState<any>(null);
   const [externalAgents, setExternalAgents] = useState<any[]>([]);
   const [loadingExternal, setLoadingExternal] = useState(false);
+
+  // ── Built-in tools management ─────────────────────────────────────
+  const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [toolStats, setToolStats] = useState<ToolStats | null>(null);
+  const [loadingTools, setLoadingTools] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [filterGroup, setFilterGroup] = useState<string | undefined>(undefined);
+  const [filterEnabled, setFilterEnabled] = useState<string | undefined>(undefined);
+  const [toolGroups, setToolGroups] = useState<{ group: string; count: number }[]>([]);
+
+  const loadTools = async () => {
+    setLoadingTools(true);
+    try {
+      const [list, stats, groups] = await Promise.all([
+        toolsApi.list({ search: searchText || undefined, group: filterGroup }),
+        toolsApi.stats(),
+        toolsApi.listGroups(),
+      ]);
+      setTools(list || []);
+      setToolStats(stats || null);
+      setToolGroups(groups || []);
+    } catch (e: any) {
+      message.error(e?.message || t('admin.toolsLoadFailed'));
+    } finally {
+      setLoadingTools(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTools();
+  }, [searchText, filterGroup]);
+
+  const handleToggleTool = async (toolName: string, enabled: boolean) => {
+    try {
+      await toolsApi.toggle(toolName, enabled);
+      message.success(t('admin.toolUpdated'));
+      setTools((prev) =>
+        prev.map((tool) => (tool.name === toolName ? { ...tool, enabled } : tool))
+      );
+      if (toolStats) {
+        setToolStats({
+          ...toolStats,
+          enabled: toolStats.enabled + (enabled ? 1 : -1),
+          disabled: toolStats.disabled + (enabled ? -1 : 1),
+        });
+      }
+    } catch (e: any) {
+      message.error(e?.message || t('admin.toolUpdateFailed'));
+    }
+  };
+
+  const handleEnableAll = async () => {
+    Modal.confirm({
+      title: t('admin.confirmEnableAllTools'),
+      content: t('admin.enableAllToolsDesc'),
+      onOk: async () => {
+        try {
+          await toolsApi.enableAll();
+          message.success(t('admin.allToolsEnabled'));
+          loadTools();
+        } catch (e: any) {
+          message.error(e?.message || t('admin.toolUpdateFailed'));
+        }
+      },
+    });
+  };
+
+  const handleDisableAll = async () => {
+    Modal.confirm({
+      title: t('admin.confirmDisableAllTools'),
+      content: t('admin.disableAllToolsDesc'),
+      onOk: async () => {
+        try {
+          await toolsApi.disableAll();
+          message.success(t('admin.allToolsDisabled'));
+          loadTools();
+        } catch (e: any) {
+          message.error(e?.message || t('admin.toolUpdateFailed'));
+        }
+      },
+    });
+  };
+
+  // Apply client-side enabled filter
+  const displayedTools = tools.filter((tool) => {
+    if (filterEnabled === 'enabled') return tool.enabled;
+    if (filterEnabled === 'disabled') return !tool.enabled;
+    return true;
+  });
+
+  const toolColumns = [
+    {
+      title: t('admin.toolName'),
+      dataIndex: 'name',
+      key: 'name',
+      width: 220,
+      render: (_: string, record: ToolInfo) => (
+        <Space>
+          <span>{record.icon || '🔧'}</span>
+          <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{record.name}</span>
+        </Space>
+      ),
+    },
+    {
+      title: t('admin.toolDescription'),
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+    },
+    {
+      title: t('admin.group'),
+      dataIndex: 'group',
+      key: 'group',
+      width: 120,
+      render: (v: string) => <Tag color={groupColor(v)}>{v}</Tag>,
+    },
+    {
+      title: t('admin.enabled'),
+      dataIndex: 'enabled',
+      key: 'enabled',
+      width: 100,
+      fixed: 'right' as const,
+      render: (v: boolean, record: ToolInfo) => (
+        <Switch
+          size="small"
+          checked={v}
+          checkedChildren={<CheckCircleOutlined />}
+          unCheckedChildren={<StopOutlined />}
+          onChange={(checked: boolean) => handleToggleTool(record.name, checked)}
+        />
+      ),
+    },
+  ];
 
   // ── Scan & Cleanup ────────────────────────────────────────────────
   const handleScan = async () => {
@@ -141,6 +305,18 @@ export default function ToolsTab() {
     },
   ];
 
+  const groupColor = (g: string) => {
+    const map: Record<string, string> = {
+      basic: 'blue',
+      web: 'cyan',
+      media: 'purple',
+      agent: 'geekblue',
+      data: 'green',
+      other: 'default',
+    };
+    return map[g] || 'default';
+  };
+
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="large">
       <Alert
@@ -150,6 +326,80 @@ export default function ToolsTab() {
         showIcon
         icon={<WarningOutlined />}
       />
+
+      {/* ── Built-in Tools Management ─────────────────────────── */}
+      <Card
+        title={
+          <Space>
+            <ToolOutlined />
+            {t('admin.toolsManagement')}
+          </Space>
+        }
+        extra={
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={loadTools} loading={loadingTools}>
+              {t('common.reload')}
+            </Button>
+            <Button icon={<CheckCircleOutlined />} onClick={handleEnableAll}>
+              {t('admin.enableAll')}
+            </Button>
+            <Button icon={<StopOutlined />} onClick={handleDisableAll}>
+              {t('admin.disableAll')}
+            </Button>
+          </Space>
+        }
+      >
+        <Paragraph>
+          {t('admin.toolsManagementDesc')}
+        </Paragraph>
+        {toolStats && (
+          <Row gutter={16} style={{ marginBottom: 16 }}>
+            <Col span={4}><Statistic title={t('admin.total')} value={toolStats.total} /></Col>
+            <Col span={4}><Statistic title={t('admin.enabled')} value={toolStats.enabled} /></Col>
+            <Col span={4}><Statistic title={t('admin.disabled')} value={toolStats.disabled} /></Col>
+            <Col span={4}><Statistic title={t('admin.builtin')} value={toolStats.builtin_count} /></Col>
+            <Col span={4}><Statistic title={t('admin.plugin')} value={toolStats.plugin_count} /></Col>
+          </Row>
+        )}
+        <Space style={{ marginBottom: 16 }} wrap>
+          <Input
+            placeholder={t('admin.searchTools')}
+            prefix={<SearchOutlined />}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            allowClear
+            style={{ width: 240 }}
+          />
+          <Select
+            placeholder={t('admin.filterByGroup')}
+            allowClear
+            style={{ width: 160 }}
+            value={filterGroup}
+            onChange={setFilterGroup}
+            options={toolGroups.map((g) => ({ label: `${g.group} (${g.count})`, value: g.group }))}
+          />
+          <Select
+            placeholder={t('admin.filterByStatus')}
+            allowClear
+            style={{ width: 160 }}
+            value={filterEnabled}
+            onChange={setFilterEnabled}
+            options={[
+              { label: t('admin.enabled'), value: 'enabled' },
+              { label: t('admin.disabled'), value: 'disabled' },
+            ]}
+          />
+        </Space>
+        <Table
+          columns={toolColumns}
+          dataSource={displayedTools}
+          rowKey="name"
+          loading={loadingTools}
+          size="small"
+          scroll={{ x: 1100 }}
+          pagination={{ pageSize: 20, showSizeChanger: true }}
+        />
+      </Card>
 
       {/* ── System Cleanup ──────────────────────────────────────── */}
       <Card

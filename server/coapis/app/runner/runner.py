@@ -465,8 +465,8 @@ class AgentRunner(Runner):
                     # Check if they're the same user message
                     if (getattr(_last_existing, "role", "") == "user"
                             and getattr(_first_new, "role", "") == "user"):
-                        _last_text = getattr(_last_existing, "get_text_content", lambda: "")()
-                        _first_text = getattr(_first_new, "get_text_content", lambda: "")()
+                        _last_text = getattr(_last_existing, "get_text_content", lambda: "")() or ""
+                        _first_text = getattr(_first_new, "get_text_content", lambda: "")() or ""
                         if _last_text.strip() == _first_text.strip():
                             _skip_first = True
                             logger.info("_persist_chat_messages: skipped duplicate user message")

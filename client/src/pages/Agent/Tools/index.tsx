@@ -51,18 +51,15 @@ function ToolIcon({ icon, name }: { icon: string; name: string }) {
   );
 }
 
-/* ── Category color map ──────────────────────────────────────────────── */
+/* ── Group color map ──────────────────────────────────────────────── */
 
-const CATEGORY_COLOR: Record<string, string> = {
-  builtin: "blue",
-  plugin: "purple",
-  custom: "green",
-  builtin_system: "orange",
-  builtin_file: "cyan",
-  builtin_code: "geekblue",
-  builtin_network: "magenta",
-  builtin_ai: "volcano",
-  builtin_ops: "lime",
+const GROUP_COLOR: Record<string, string> = {
+  basic: "blue",
+  web: "cyan",
+  media: "purple",
+  agent: "geekblue",
+  data: "green",
+  other: "default",
 };
 
 /* ── Tool Card ─────────────────────────────────────────────────────────── */
@@ -100,10 +97,10 @@ function ToolCard({
         <div className={styles.toolCardTitleBlock}>
           <span className={styles.toolCardName}>{tool.name}</span>
           <Tag
-            color={CATEGORY_COLOR[tool.category] || "default"}
+            color={GROUP_COLOR[tool.group] || "default"}
             className={styles.toolCardCategory}
           >
-            {tool.category}
+            {tool.group}
           </Tag>
         </div>
         {canWrite && (
@@ -178,7 +175,7 @@ export default function ToolsPage() {
   const {
     tools, loading,
     search, setSearch,
-    selectedScene, setSelectedScene,
+    selectedGroup, setSelectedGroup,
     toggleEnabled, deleteTool,
     selectedTool, drawerOpen,
     openDetail, closeDetail,
@@ -214,40 +211,39 @@ export default function ToolsPage() {
       <div className={styles.tagBar}>
         <span className={styles.tagBarLabel}>分类:</span>
         {(() => {
-          const sceneLabels: Record<string, string> = {
-            general: "📋 通用工具",
-            coding: "💻 编程开发",
-            ops: "🚀 运维部署",
-            data: "📊 数据处理",
-            security: "🔒 安全审计",
-            ai: "🤖 AI/LLM",
-            collaboration: "🤝 协作通信",
+          const groupLabels: Record<string, string> = {
+            basic: "🔧 基础",
+            web: "🌐 网络",
+            media: "🖼️ 媒体",
+            agent: "🤖 智能体",
+            data: "📊 数据",
+            other: "📦 其他",
           };
-          const sceneCount: Record<string, number> = {};
+          const groupCount: Record<string, number> = {};
           tools.forEach((t) => {
-            const s = t.scene || "general";
-            sceneCount[s] = (sceneCount[s] || 0) + 1;
+            const g = t.group || "other";
+            groupCount[g] = (groupCount[g] || 0) + 1;
           });
           const total = tools.length;
-          const activeScenes = ["general", "coding", "ops", "data", "security", "ai", "collaboration"]
-            .filter((s) => (sceneCount[s] || 0) > 0);
+          const activeGroups = ["basic", "web", "media", "agent", "data", "other"]
+            .filter((g) => (groupCount[g] || 0) > 0);
           return [
             <span
               key="all"
-              className={`${styles.tagItem} ${selectedScene === null ? styles.tagItemSelected : ""}`}
-              onClick={() => setSelectedScene(null)}
+              className={`${styles.tagItem} ${selectedGroup === null ? styles.tagItemSelected : ""}`}
+              onClick={() => setSelectedGroup(null)}
             >
               📁 全部
               <span className={styles.tagCount}>{total}</span>
             </span>,
-            ...activeScenes.map((s) => (
+            ...activeGroups.map((g) => (
               <span
-                key={s}
-                className={`${styles.tagItem} ${selectedScene === s ? styles.tagItemSelected : ""}`}
-                onClick={() => setSelectedScene(selectedScene === s ? null : s)}
+                key={g}
+                className={`${styles.tagItem} ${selectedGroup === g ? styles.tagItemSelected : ""}`}
+                onClick={() => setSelectedGroup(selectedGroup === g ? null : g)}
               >
-                {sceneLabels[s] || s}
-                <span className={styles.tagCount}>{sceneCount[s] || 0}</span>
+                {groupLabels[g] || g}
+                <span className={styles.tagCount}>{groupCount[g] || 0}</span>
               </span>
             )),
           ];
@@ -311,9 +307,9 @@ export default function ToolsPage() {
               <Tag color="blue">{selectedTool.scene || "general"}</Tag>
             </div>
             <div>
-              <strong>分类：</strong>
-              <Tag color={CATEGORY_COLOR[selectedTool.category] || "default"}>
-                {selectedTool.category}
+              <strong>分组：</strong>
+              <Tag color={GROUP_COLOR[selectedTool.group] || "default"}>
+                {selectedTool.group}
               </Tag>
             </div>
             <div>

@@ -1,16 +1,4 @@
-import { request } from "../request";
-
-export interface ToolInfo {
-  name: string;
-  enabled: boolean;
-  description: string;
-  category: string;
-  tags: string[];
-  scene: string;
-  async_execution: boolean;
-  icon: string;
-  builtin: boolean;
-}
+import api from '@/api';
 
 export interface ToolTag {
   tag: string;
@@ -22,85 +10,111 @@ export interface ToolCategory {
   count: number;
 }
 
-export interface ToolStats {
+export interface ToolScene {
+  scene: string;
+  count: number;
+}
+
+export interface ToolGroup {
+  group: string;
+  count: number;
+}
+
+export interface ToolInfo {
+  name: string;
+  enabled: boolean;
+  description: string;
+  category: string;
+  group: string;
+  tags: string[];
+  scene: string;
+  async_execution: boolean;
+  icon: string;
+  builtin: boolean;
+}
+
+export interface ToolStatsSummary {
   total: number;
   enabled: number;
   disabled: number;
+  groups: Record<string, number>;
   categories: Record<string, number>;
   builtin_count: number;
   plugin_count: number;
 }
 
-export const toolsApi = {
-  /** List all tools with optional filters */
-  listTools: (params?: {
+export default {
+  /** List all tools */
+  list: (params?: {
     tag?: string;
     category?: string;
     scene?: string;
+    group?: string;
     search?: string;
     enabled_only?: boolean;
   }) => {
     const query = new URLSearchParams();
-    if (params?.tag) query.set("tag", params.tag);
-    if (params?.category) query.set("category", params.category);
-    if (params?.scene) query.set("scene", params.scene);
-    if (params?.search) query.set("search", params.search);
-    if (params?.enabled_only !== undefined)
-      query.set("enabled_only", String(params.enabled_only));
-    const qs = query.toString();
-    return request<ToolInfo[]>(`/tools${qs ? `?${qs}` : ""}`);
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          query.append(key, String(value));
+        }
+      });
+    }
+    const queryString = query.toString();
+    return api.get(`/tools${queryString ? `?${queryString}` : ''}`).then((res: any) => res.data || res);
   },
 
-  /** Get tool detail */
-  getTool: (toolName: string) =>
-    request<ToolInfo>(`/tools/${encodeURIComponent(toolName)}`),
+  /** Alias for Agent/Tools page compatibility */
+  listTools: function (params?: {
+    tag?: string;
+    category?: string;
+    scene?: string;
+    group?: string;
+    search?: string;
+    enabled_only?: boolean;
+  }) {
+    return this.list(params);
+  },
 
-  /** Toggle tool enabled status */
-  toggleTool: (toolName: string) =>
-    request<ToolInfo>(`/tools/${encodeURIComponent(toolName)}/toggle`, {
-      method: "PATCH",
-    }),
+  /** List tool tags */
+  listTags: () =>
+    api.get('/tools/tags').then((res: any) => res.data || res),
 
-  /** Enable a tool */
-  enableTool: (toolName: string) =>
-    request<ToolInfo>(`/tools/${encodeURIComponent(toolName)}/enable`, {
-      method: "PATCH",
-    }),
+  /** List tool categories */
+  listCategories: () =>
+    api.get('/tools/categories').then((res: any) => res.data || res),
 
-  /** Disable a tool */
-  disableTool: (toolName: string) =>
-    request<ToolInfo>(`/tools/${encodeURIComponent(toolName)}/disable`, {
-      method: "PATCH",
-    }),
+  /** List tool groups (functional TOOL_GROUPS) */
+  listGroups: () =>
+    api.get('/tools/groups').then((res: any) => res.data || res),
 
-  /** Update async execution */
-  updateAsyncExecution: (toolName: string, asyncExecution: boolean) =>
-    request<ToolInfo>(
-      `/tools/${encodeURIComponent(toolName)}/async-execution`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({ async_execution: asyncExecution }),
-      },
-    ),
-
-  /** Enable all tools */
-  enableAll: () => request<{ enabled: number; total: number }>("/tools/enable-all", { method: "POST" }),
-
-  /** Disable all tools */
-  disableAll: () => request<{ disabled: number; total: number }>("/tools/disable-all", { method: "POST" }),
-
-  /** List all tags with counts */
-  listTags: () => request<ToolTag[]>("/tools/tags"),
-
-  /** List all categories with counts */
-  listCategories: () => request<ToolCategory[]>("/tools/categories"),
+  /** List tool scenes */
+  listScenes: () =>
+    api.get('/tools/scenes').then((res: any) => res.data || res),
 
   /** Get tool stats summary */
-  getStats: () => request<ToolStats>("/tools/stats"),
+  stats: () =>
+    api.get('/tools/stats').then((res: any) => res.data || res),
 
-  /** Delete a custom/plugin tool */
+  /** Toggle tool enabled/disabled */
+  toggle: (toolName: string, enabled?: boolean) =>
+    api.patch(`/tools/${toolName}/toggle`, enabled !== undefined ? { enabled } : undefined).then((res: any) => res.data || res),
+
+  /** Alias for Agent/Tools page compatibility */
+  toggleTool: function (toolName: string, enabled?: boolean) {
+    return this.toggle(toolName, enabled);
+  },
+
+  /** Enable all tools */
+  enableAll: () =>
+    api.post('/tools/enable-all').then((res: any) => res.data || res),
+
+  /** Disable all tools */
+  disableAll: () =>
+    api.post('/tools/disable-all').then((res: any) => res.data || res),
+
+  /** Delete a custom tool (built-in tools cannot be deleted) */
   deleteTool: (toolName: string) =>
-    request<{ deleted: string }>(`/tools/${encodeURIComponent(toolName)}`, {
-      method: "DELETE",
-    }),
+    api.delete(`/tools/${toolName}`).then((res: any) => res.data || res),
 };

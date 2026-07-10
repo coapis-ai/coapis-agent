@@ -462,6 +462,7 @@ class UnifiedToolGuardEngine:
 
     def __init__(self, config: ToolGuardConfig | None = None) -> None:
         self._config = config or _load_config()
+        self._context: dict[str, Any] = {}  # Runtime context (owner, etc.)
         self._compiled_rules: list[tuple[PatternRule, list[re.Pattern], list[re.Pattern]]] = []
         self._compile_rules()
         self._load_evasion_guardian()
@@ -707,8 +708,8 @@ class UnifiedToolGuardEngine:
             ws_dir = None
             owner = self._context.get("owner") if hasattr(self, "_context") else None
             if owner:
-                from coapis.agents.config import derive_workspace_dir
-                ws_dir = str(derive_workspace_dir(owner))
+                from coapis.config.config import derive_workspace_dir
+                ws_dir = str(derive_workspace_dir(f"user:{owner}"))
 
             # ── Merge all rule sources into one list (priority: exceptions > demotion_rules > deprecated) ──
             # New fields take precedence; fall back to deprecated 'rules' for backward compat.
@@ -720,11 +721,19 @@ class UnifiedToolGuardEngine:
 
             # Step 1: Try demotion_rules first (↓ more lenient)
             if all_demotion:
+                logger.info(
+                    "[ToolGuard] Checking demotion_rules for %s: %d rules, workspace_dir=%s",
+                    cmd_name, len(all_demotion), ws_dir,
+                )
                 new_level, new_action, reason = _apply_command_rules(
                     command_str, cmd_name, level or "L0", entry.action,
                     all_demotion, workspace_dir=ws_dir,
                 )
                 if reason:
+                    logger.info(
+                        "[ToolGuard] Demotion matched: %s → %s/%s",
+                        cmd_name, new_level, new_action,
+                    )
                     level = new_level
                     effective_action = new_action
                     demotion_reason = reason

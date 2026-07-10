@@ -21,7 +21,7 @@ import { localModelApi } from "./modules/localModel";
 import { mcpApi } from "./modules/mcp";
 import { tokenUsageApi } from "./modules/tokenUsage";
 import { agentStatsApi } from "./modules/agentStats";
-import { toolsApi } from "./modules/tools";
+import toolsApi from "./modules/tools";
 import { securityApi } from "./modules/security";
 import { userTimezoneApi } from "./modules/userTimezone";
 import { languageApi } from "./modules/language";
@@ -35,6 +35,7 @@ export const api = {
   get: <T = unknown>(path: string, options?: RequestInit) => _request<T>(path, { ...options, method: "GET" }),
   post: <T = unknown>(path: string, data?: unknown, options?: RequestInit) => _request<T>(path, { ...options, method: "POST", body: data ? JSON.stringify(data) : undefined }),
   put: <T = unknown>(path: string, data?: unknown, options?: RequestInit) => _request<T>(path, { ...options, method: "PUT", body: data ? JSON.stringify(data) : undefined }),
+  patch: <T = unknown>(path: string, data?: unknown, options?: RequestInit) => _request<T>(path, { ...options, method: "PATCH", body: data ? JSON.stringify(data) : undefined }),
   delete: <T = unknown>(path: string, options?: RequestInit) => _request<T>(path, { ...options, method: "DELETE" }),
 
   // Root

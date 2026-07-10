@@ -17,21 +17,17 @@ from . import get_current_time
 from . import get_token_usage
 from . import agent_management
 
-# ── Agent management ──
-from . import delegate_external_agent
-
-# ── Skill / memory / knowledge ──
+# ── Skill / memory ──
 from . import todo_tool
 from . import web_search
 from . import session_search
 from . import doc_reader
+from . import skill_manager
 
 # ── Code tools ──
 from . import git_ops
 from . import cron_scheduler
 from . import tool_stats
-from . import structured_logger
-from . import knowledge_rag
 
 # ── Code execution ──
 from . import code_exec

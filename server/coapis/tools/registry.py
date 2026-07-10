@@ -70,7 +70,7 @@ TOOL_GROUPS = {
     "agent": {
         "description": "多智能体协作",
         "tools": {"list_agents", "chat_with_agent", "submit_to_agent",
-                   "check_agent_task", "spawn_subagent", "delegate_external_agent"},
+                   "check_agent_task", "spawn_subagent"},
         "keywords": {"agent", "智能体", "代理", "delegate", "spawn", "协作",
                       "background", "task"},
     },
@@ -465,7 +465,6 @@ class ToolRegistry:
             "usage": ["get_token_usage"],
             # Agent management
             "agent": ["list_agents", "chat_with_agent"],
-            "delegate": ["delegate_external_agent"],
             "background": ["submit_to_agent"],
             "task": ["check_agent_task"],
             # Web search tools

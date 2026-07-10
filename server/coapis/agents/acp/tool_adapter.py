@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ACP to ToolResponse adapter helpers for delegate_external_agent."""
+"""ACP to ToolResponse adapter helpers for external agent delegation."""
 
 from pathlib import Path
 from typing import Any, Optional, Tuple

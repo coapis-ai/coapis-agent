@@ -286,7 +286,7 @@ export const securityApi = {
     }>("/config/security/tool-guard/config"),
 
   getUnifiedCommands: () =>
-    request<Record<string, { level: string; desc: string; action: string }>>(
+    request<Record<string, { level: string; desc: string; action: string; exceptions?: any[]; demotion_rules?: any[]; rules?: any[]; sub_commands?: Record<string, any> }>>(
       "/config/security/tool-guard/commands",
     ),
 

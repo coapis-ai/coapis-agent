@@ -419,6 +419,11 @@ class ToolGuardMixin:
                         UnifiedToolGuardEngine,
                     )
                     self._unified_guard_engine = UnifiedToolGuardEngine()
+                # Set owner context for workspace-scoped demotion rules
+                _ug_ctx = getattr(self, "_request_context", None) or {}
+                _ug_owner = _ug_ctx.get("user_id") or _ug_ctx.get("username", "")
+                if _ug_owner:
+                    self._unified_guard_engine._context["owner"] = _ug_owner
                 _ue = self._unified_guard_engine.process_command(
                     tool_name, tool_input,
                 )
@@ -817,6 +822,7 @@ class ToolGuardMixin:
         approvals and renders interactive ApprovalCard widgets.
         """
         from coapis.security.tool_guard.approval import ApprovalDecision
+        from coapis.config.session_context import get_current_chat_id
 
         session_id = str(self._request_context.get("session_id") or "")
         user_id = str(self._request_context.get("user_id") or "")
@@ -834,9 +840,20 @@ class ToolGuardMixin:
             str(tool_call.get("input", {}))[:200],
         )
 
-        # Get root_session_id for cross-session approval routing
+        # Get root_session_id for cross-session approval routing.
+        # For console web chat, the actual chat UUID is stored in the
+        # session context via set_current_chat_id(); the agent's
+        # request_context only sees the channel-level session_id
+        # (e.g. console:admin). The frontend polls by chat UUID, so we
+        # must use that as the root_session_id for the ApprovalCard to
+        # be discoverable. For other channels where current_chat_id is
+        # not set, fall back to request_context.root_session_id or
+        # session_id.
+        current_chat_id = get_current_chat_id()
         root_session_id = str(
-            self._request_context.get("root_session_id") or session_id,
+            current_chat_id
+            or self._request_context.get("root_session_id")
+            or session_id,
         )
 
         svc = self._tool_guard_approval_service
