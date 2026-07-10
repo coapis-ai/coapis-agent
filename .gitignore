@@ -37,8 +37,12 @@ node_modules/
 *.pfx
 
 # --- Docker ---
-docker/.env
 docker/.env.dev
+docker/docker-compose.build.yml
+docker/docker-compose.playwright.yml
+docker/test_cron.py
+docker/volume/
+docker/dev-overrides/
 *.log
 
 # --- OS ---
