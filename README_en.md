@@ -40,25 +40,25 @@ Agents remember your preferences and habits, automatically identify reusable pat
 
 ---
 
-## 🏗️ Four-Layer Capabilities
+## 🏗️ Core Capability Architecture
 
-### Layer 1: Tool Capabilities
+### Tool Capabilities
 
-29 built-in tools for file operations, shell execution, browser automation, document processing, web search, and more.
+What agents can do. Tools for file operations, shell execution, browser automation, document processing, web search; automatically identify reusable patterns and crystallize into skills.
 
-### Layer 2: Connection Capabilities
+### Integration Capabilities
 
-Integrate with WeCom, DingTalk, Feishu, Telegram, Discord, QQ, and more — chat directly in your daily tools.
+How agents connect to external systems. Integrate existing enterprise systems through API, MCP (Model Context Protocol), and other standard protocols to bridge data and workflows.
 
-### Layer 3: Build Capabilities
+### Orchestration Capabilities
 
-Configure agent roles, styles, and security boundaries; manage prompt templates; orchestrate multi-agent workflows.
+How agents organize and collaborate. Configure roles, styles, and security boundaries; orchestrate multi-agent workflows; accumulate knowledge, continuously evolve, and share experience across agents.
 
-### Layer 4: Control Capabilities
+### Control Capabilities
 
-Complete execution environment, multi-layer memory system, security boundaries, audit trails — enabling agents to run stably, long-term, and controllably.
+How agents run stably. Complete execution environment, multi-layer memory system, security boundaries, audit trails — enabling long-term, controllable operation.
 
-**This layer is the core capability**
+**This is the core capability**
 
 ---
 
