@@ -16,6 +16,5 @@
 """Tools module - Async tool registry with security sandboxing."""
 
 from .registry import ToolRegistry
-from .builtin import register_builtin_tools
 
-__all__ = ["ToolRegistry", "register_builtin_tools"]
+__all__ = ["ToolRegistry"]

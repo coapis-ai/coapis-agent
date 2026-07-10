@@ -250,7 +250,6 @@ _TOOL_FRIENDLY_NAMES: Dict[str, str] = {
     "submit_to_agent": "提交任务",
     "check_agent_task": "查看任务状态",
     "spawn_subagent": "创建子任务",
-    "delegate_external_agent": "委派任务",
     "data_store": "数据存储",
     "data_ops": "数据操作",
     "text_processor": "文本处理",

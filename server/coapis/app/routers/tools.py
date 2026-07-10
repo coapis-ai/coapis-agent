@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 # Licensed under the Apache License, Version 2.0
-"""Tools router — per-user dynamic registry-based tool management.
+"""Tools router — global registry-based tool management.
 
 All tools come from the live registry (coapis.agents.tools.registry).
-State (enabled/disabled, async_execution) is per-user: stored in
-{workspace}/tool_state.json.
-Audit log is per-user: stored in {workspace}/tool_audit.json.
+State (enabled/disabled) is managed in the global config.json under
+``tools.builtin_tools`` so that administrators have a single source of
+truth and every user sees the same tool set.
+
+Audit log is written per user for traceability but does not affect
+tool availability.
 """
 from __future__ import annotations
-import hashlib
 import json
 import logging
 import os
@@ -20,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from ..permissions.decorators import require_permission
+from coapis.tools.registry import TOOL_GROUPS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["tools"])
@@ -31,20 +34,68 @@ class ToolInfo(BaseModel):
     enabled: bool = True
     description: str = ""
     category: str = "builtin"
+    group: str = "rarely"
     tags: list[str] = []
     scene: str = "general"
     async_execution: bool = False
     icon: str = ""
     builtin: bool = True
 
+
 class ToolToggleRequest(BaseModel):
     enabled: Optional[bool] = None
+
 
 class ToolAsyncRequest(BaseModel):
     async_execution: bool
 
 
-# ── Per-user helpers ───────────────────────────────────────────────────────
+# ── Global config helpers ────────────────────────────────────────────────
+
+def _load_global_config() -> "Config":
+    """Load the global Config model."""
+    try:
+        from coapis.config.utils import load_config
+        return load_config()
+    except Exception as e:
+        logger.warning("Failed to load global config: %s", e)
+        from coapis.config.config import Config
+        return Config()
+
+
+def _save_global_config(config: "Config") -> None:
+    """Persist the global config."""
+    try:
+        from coapis.config.utils import save_config
+        save_config(config)
+    except Exception as e:
+        logger.warning("Failed to save global config: %s", e)
+        raise
+
+
+def _get_default_tool_states() -> Dict[str, bool]:
+    """Return the canonical default enabled state from code (config.py)."""
+    try:
+        from coapis.config.config import _default_builtin_tools
+        defaults = _default_builtin_tools()
+        return {name: tc.enabled for name, tc in defaults.items()}
+    except Exception as e:
+        logger.warning("Failed to load default tool states: %s", e)
+        return {}
+
+
+def _get_current_tool_states() -> Dict[str, bool]:
+    """Return current enabled state merging global config over code defaults."""
+    defaults = _get_default_tool_states()
+    config = _load_global_config()
+    current = dict(defaults)
+    if config.tools and config.tools.builtin_tools:
+        for name, tc in config.tools.builtin_tools.items():
+            current[name] = bool(tc.enabled)
+    return current
+
+
+# ── Per-user audit helpers ─────────────────────────────────────────────────
 
 def _get_workspace(request: Request) -> Path:
     """Get current user's workspace directory from request state."""
@@ -57,30 +108,16 @@ def _get_workspace(request: Request) -> Path:
         ws.mkdir(parents=True, exist_ok=True)
         return ws
     except Exception:
-        # Fallback: use workspace/files/tmp instead of shared /tmp
-        fallback = Path(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis"))) / "workspaces" / username / "files" / "tmp"
+        fallback = Path(
+            os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis"))
+        ) / "workspaces" / username / "files" / "tmp"
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
 
-def _get_tool_state_path(ws: Path) -> Path:
-    return ws / "tool_state.json"
 
 def _get_audit_path(ws: Path) -> Path:
     return ws / "tool_audit.json"
 
-def _load_user_tool_state(ws: Path) -> Dict[str, Any]:
-    p = _get_tool_state_path(ws)
-    if p.exists():
-        try:
-            return json.loads(p.read_text())
-        except Exception:
-            pass
-    return {}
-
-def _save_user_tool_state(ws: Path, state: Dict[str, Any]):
-    p = _get_tool_state_path(ws)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(state, indent=2, ensure_ascii=False))
 
 def _load_user_audit(ws: Path) -> list[dict[str, Any]]:
     p = _get_audit_path(ws)
@@ -91,10 +128,12 @@ def _load_user_audit(ws: Path) -> list[dict[str, Any]]:
             pass
     return []
 
+
 def _save_user_audit(ws: Path, log: list[dict[str, Any]]):
     p = _get_audit_path(ws)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(log[-500:], indent=2, ensure_ascii=False))
+
 
 def _add_user_audit(ws: Path, action: str, tool_name: str,
                     detail: str = "", user: str = "system"):
@@ -112,6 +151,14 @@ def _add_user_audit(ws: Path, action: str, tool_name: str,
 
 
 # ── Registry integration ──────────────────────────────────────────────────
+
+def _tool_group(name: str) -> str:
+    """Return TOOL_GROUPS group for a tool name; default to 'other'."""
+    for group, spec in TOOL_GROUPS.items():
+        if name in spec.get("tools", set()):
+            return group
+    return "other"
+
 
 def _get_registry_tools() -> Dict[str, Dict[str, Any]]:
     try:
@@ -131,9 +178,10 @@ def _get_registry_tools() -> Dict[str, Dict[str, Any]]:
         logger.warning("Failed to read registry: %s", e)
         return {}
 
+
 def _tool_icon(name: str, category: str) -> str:
     icon_map = {
-        "file": "📄", "read": "📖", "write": "✏️", "edit": "🔨",
+        "file": "📄", "read": "📖", "write": "✏️", "edit": "🔨", "append": "📝",
         "search": "🔍", "grep": "🔍", "glob": "📁", "shell": "💻",
         "browser": "🌐", "screenshot": "📸", "image": "🖼️", "video": "🎬",
         "send": "📤", "time": "🕐", "memory": "🧠", "todo": "📋",
@@ -158,18 +206,21 @@ def _tool_icon(name: str, category: str) -> str:
         return "🔧"
     return "🧩"
 
-def _merge_user_state(registry_tools: Dict, user_state: Dict) -> list[dict]:
+
+def _merge_state(registry_tools: Dict[str, Dict[str, Any]]) -> list[dict]:
+    """Merge registry tools with global enabled state."""
+    states = _get_current_tool_states()
     result = []
     for name, info in sorted(registry_tools.items()):
-        state = user_state.get(name, {})
         result.append({
             "name": name,
-            "enabled": state.get("enabled", True),
+            "enabled": states.get(name, True),
             "description": info["description"],
             "category": info["category"],
+            "group": _tool_group(name),
             "tags": info["tags"],
             "scene": info.get("scene", "general"),
-            "async_execution": state.get("async_execution", info.get("async_execution", False)),
+            "async_execution": info.get("async_execution", False),
             "icon": _tool_icon(name, info["category"]),
             "builtin": info["category"] == "builtin",
         })
@@ -180,10 +231,8 @@ def _merge_user_state(registry_tools: Dict, user_state: Dict) -> list[dict]:
 
 @router.get("/tools/scenes")
 async def list_scenes(request: Request):
-    ws = _get_workspace(request)
     registry = _get_registry_tools()
-    user_state = _load_user_tool_state(ws)
-    tools = _merge_user_state(registry, user_state)
+    tools = _merge_state(registry)
     scene_counts: Dict[str, int] = {}
     for t in tools:
         s = t.get("scene", "general")
@@ -197,13 +246,12 @@ async def list_tools(
     tag: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     scene: Optional[str] = Query(None),
+    group: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     enabled_only: Optional[bool] = Query(None),
 ):
-    ws = _get_workspace(request)
     registry = _get_registry_tools()
-    user_state = _load_user_tool_state(ws)
-    tools = _merge_user_state(registry, user_state)
+    tools = _merge_state(registry)
 
     if tag:
         tools = [t for t in tools if tag in t["tags"]]
@@ -211,6 +259,8 @@ async def list_tools(
         tools = [t for t in tools if t["category"] == category]
     if scene:
         tools = [t for t in tools if t.get("scene", "general") == scene]
+    if group:
+        tools = [t for t in tools if t.get("group", "rarely") == group]
     if search:
         q = search.lower()
         tools = [t for t in tools if q in t["name"].lower() or q in t["description"].lower()]
@@ -219,12 +269,11 @@ async def list_tools(
 
     return tools
 
+
 @router.get("/tools/tags")
 async def list_tags(request: Request):
-    ws = _get_workspace(request)
     registry = _get_registry_tools()
-    user_state = _load_user_tool_state(ws)
-    tools = _merge_user_state(registry, user_state)
+    tools = _merge_state(registry)
     tag_counts: Dict[str, int] = {}
     for t in tools:
         for tag in t["tags"]:
@@ -232,197 +281,240 @@ async def list_tags(request: Request):
     return [{"tag": tag, "count": count}
             for tag, count in sorted(tag_counts.items(), key=lambda x: -x[1])]
 
+
 @router.get("/tools/categories")
 async def list_categories(request: Request):
-    ws = _get_workspace(request)
     registry = _get_registry_tools()
-    user_state = _load_user_tool_state(ws)
-    tools = _merge_user_state(registry, user_state)
+    tools = _merge_state(registry)
     cat_counts: Dict[str, int] = {}
     for t in tools:
         cat_counts[t["category"]] = cat_counts.get(t["category"], 0) + 1
     return [{"category": c, "count": cnt}
             for c, cnt in sorted(cat_counts.items(), key=lambda x: -x[1])]
 
+
+@router.get("/tools/groups")
+async def list_groups(request: Request):
+    registry = _get_registry_tools()
+    tools = _merge_state(registry)
+    group_counts: Dict[str, int] = {}
+    for t in tools:
+        g = t.get("group", "rarely")
+        group_counts[g] = group_counts.get(g, 0) + 1
+    return [{"group": g, "count": c} for g, c in sorted(group_counts.items(), key=lambda x: -x[1])]
+
+
 @router.get("/tools/stats")
 async def tool_stats_summary(request: Request):
-    ws = _get_workspace(request)
     registry = _get_registry_tools()
-    user_state = _load_user_tool_state(ws)
-    tools = _merge_user_state(registry, user_state)
+    tools = _merge_state(registry)
     enabled = sum(1 for t in tools if t["enabled"])
-    cats: Dict[str, int] = {}
+    groups: Dict[str, int] = {}
     for t in tools:
-        cats[t["category"]] = cats.get(t["category"], 0) + 1
+        g = t.get("group", "rarely")
+        groups[g] = groups.get(g, 0) + 1
     builtin = sum(1 for t in tools if t["builtin"])
     return {
         "total": len(tools), "enabled": enabled,
         "disabled": len(tools) - enabled,
-        "categories": cats,
+        "groups": groups,
+        "categories": {t["category"]: groups.get(t.get("group", "rarely"), 0) for t in tools},
         "builtin_count": builtin,
         "plugin_count": len(tools) - builtin,
     }
 
+
 @router.get("/tools/{tool_name}")
 async def get_tool(request: Request, tool_name: str):
-    ws = _get_workspace(request)
     registry = _get_registry_tools()
-    user_state = _load_user_tool_state(ws)
-    tools = _merge_user_state(registry, user_state)
+    tools = _merge_state(registry)
     for t in tools:
         if t["name"] == tool_name:
             return t
     raise HTTPException(404, f"Tool not found: {tool_name}")
 
+
 @router.patch("/tools/{tool_name}/toggle")
 @require_permission("tools:write")
 async def toggle_tool(request: Request, tool_name: str):
     username = getattr(request.state, "username", "system")
+    config = _load_global_config()
+
+    if config.tools is None:
+        from coapis.config.config import ToolsConfig
+        config.tools = ToolsConfig()
+    if config.tools.builtin_tools is None:
+        config.tools.builtin_tools = {}
+
+    current = _get_current_tool_states().get(tool_name, True)
+    new_enabled = not current
+
+    from coapis.config.config import BuiltinToolConfig
+    config.tools.builtin_tools[tool_name] = BuiltinToolConfig(
+        name=tool_name,
+        enabled=new_enabled,
+        description="",
+        icon="",
+    )
+
+    _save_global_config(config)
+
     ws = _get_workspace(request)
-    registry = _get_registry_tools()
-    if tool_name not in registry:
-        raise HTTPException(404, f"Tool not found: {tool_name}")
-    state = _load_user_tool_state(ws)
-    current = state.get(tool_name, {}).get("enabled", True)
-    state.setdefault(tool_name, {})["enabled"] = not current
-    _save_user_tool_state(ws, state)
-    action = "enable" if not current else "disable"
-    _add_user_audit(ws, action, tool_name, user=username)
-    info = registry[tool_name]
-    s = state.get(tool_name, {})
-    return {
-        "name": tool_name, "enabled": s.get("enabled", True),
-        "description": info["description"], "category": info["category"],
-        "tags": info["tags"], "async_execution": s.get("async_execution", False),
-        "icon": _tool_icon(tool_name, info["category"]),
-        "builtin": info["category"] == "builtin",
-    }
+    _add_user_audit(ws, "toggle", tool_name, f"enabled={new_enabled}", user=username)
+
+    return {"name": tool_name, "enabled": new_enabled}
+
 
 @router.patch("/tools/{tool_name}/enable")
 @require_permission("tools:write")
 async def enable_tool(request: Request, tool_name: str):
     username = getattr(request.state, "username", "system")
+    config = _load_global_config()
+
+    if config.tools is None:
+        from coapis.config.config import ToolsConfig
+        config.tools = ToolsConfig()
+    if config.tools.builtin_tools is None:
+        config.tools.builtin_tools = {}
+
+    from coapis.config.config import BuiltinToolConfig
+    config.tools.builtin_tools[tool_name] = BuiltinToolConfig(
+        name=tool_name,
+        enabled=True,
+        description="",
+        icon="",
+    )
+    _save_global_config(config)
+
     ws = _get_workspace(request)
-    registry = _get_registry_tools()
-    if tool_name not in registry:
-        raise HTTPException(404, f"Tool not found: {tool_name}")
-    state = _load_user_tool_state(ws)
-    state.setdefault(tool_name, {})["enabled"] = True
-    _save_user_tool_state(ws, state)
-    _add_user_audit(ws, "enable", tool_name, user=username)
-    info = registry[tool_name]
-    s = state.get(tool_name, {})
-    return {
-        "name": tool_name, "enabled": True,
-        "description": info["description"], "category": info["category"],
-        "tags": info["tags"], "async_execution": s.get("async_execution", False),
-        "icon": _tool_icon(tool_name, info["category"]),
-        "builtin": info["category"] == "builtin",
-    }
+    _add_user_audit(ws, "enable", tool_name, "enabled=True", user=username)
+    return {"name": tool_name, "enabled": True}
+
 
 @router.patch("/tools/{tool_name}/disable")
 @require_permission("tools:write")
 async def disable_tool(request: Request, tool_name: str):
     username = getattr(request.state, "username", "system")
+    config = _load_global_config()
+
+    if config.tools is None:
+        from coapis.config.config import ToolsConfig
+        config.tools = ToolsConfig()
+    if config.tools.builtin_tools is None:
+        config.tools.builtin_tools = {}
+
+    from coapis.config.config import BuiltinToolConfig
+    config.tools.builtin_tools[tool_name] = BuiltinToolConfig(
+        name=tool_name,
+        enabled=False,
+        description="",
+        icon="",
+    )
+    _save_global_config(config)
+
     ws = _get_workspace(request)
-    registry = _get_registry_tools()
-    if tool_name not in registry:
-        raise HTTPException(404, f"Tool not found: {tool_name}")
-    state = _load_user_tool_state(ws)
-    state.setdefault(tool_name, {})["enabled"] = False
-    _save_user_tool_state(ws, state)
-    _add_user_audit(ws, "disable", tool_name, user=username)
-    info = registry[tool_name]
-    s = state.get(tool_name, {})
-    return {
-        "name": tool_name, "enabled": False,
-        "description": info["description"], "category": info["category"],
-        "tags": info["tags"], "async_execution": s.get("async_execution", False),
-        "icon": _tool_icon(tool_name, info["category"]),
-        "builtin": info["category"] == "builtin",
-    }
+    _add_user_audit(ws, "disable", tool_name, "enabled=False", user=username)
+    return {"name": tool_name, "enabled": False}
+
 
 @router.patch("/tools/{tool_name}/async-execution")
 @require_permission("tools:write")
-async def update_async_execution(
-    request: Request, tool_name: str, body: ToolAsyncRequest
-):
-    ws = _get_workspace(request)
-    registry = _get_registry_tools()
-    if tool_name not in registry:
-        raise HTTPException(404, f"Tool not found: {tool_name}")
-    state = _load_user_tool_state(ws)
-    state.setdefault(tool_name, {})["async_execution"] = body.async_execution
-    _save_user_tool_state(ws, state)
-    info = registry[tool_name]
-    s = state.get(tool_name, {})
-    return {
-        "name": tool_name, "enabled": s.get("enabled", True),
-        "description": info["description"], "category": info["category"],
-        "tags": info["tags"], "async_execution": body.async_execution,
-        "icon": _tool_icon(tool_name, info["category"]),
-        "builtin": info["category"] == "builtin",
-    }
+async def set_async_execution(request: Request, tool_name: str, body: ToolAsyncRequest):
+    """Set async execution flag for a tool (global)."""
+    config = _load_global_config()
+
+    if config.tools is None:
+        from coapis.config.config import ToolsConfig
+        config.tools = ToolsConfig()
+    if config.tools.builtin_tools is None:
+        config.tools.builtin_tools = {}
+
+    from coapis.config.config import BuiltinToolConfig
+    existing = config.tools.builtin_tools.get(tool_name)
+    enabled = existing.enabled if existing else _get_default_tool_states().get(tool_name, True)
+    config.tools.builtin_tools[tool_name] = BuiltinToolConfig(
+        name=tool_name,
+        enabled=enabled,
+        async_execution=body.async_execution,
+        description="",
+        icon="",
+    )
+    _save_global_config(config)
+    return {"name": tool_name, "async_execution": body.async_execution}
+
 
 @router.post("/tools/enable-all")
 @require_permission("tools:write")
-async def enable_all(request: Request):
+async def enable_all_tools(request: Request):
     username = getattr(request.state, "username", "system")
-    ws = _get_workspace(request)
+    config = _load_global_config()
+
+    if config.tools is None:
+        from coapis.config.config import ToolsConfig
+        config.tools = ToolsConfig()
+    if config.tools.builtin_tools is None:
+        config.tools.builtin_tools = {}
+
     registry = _get_registry_tools()
-    state = _load_user_tool_state(ws)
-    count = 0
+    from coapis.config.config import BuiltinToolConfig
     for name in registry:
-        if not state.get(name, {}).get("enabled", True):
-            count += 1
-        state.setdefault(name, {})["enabled"] = True
-    _save_user_tool_state(ws, state)
-    _add_user_audit(ws, "enable_all", "*", detail=f"启用了 {count} 个工具", user=username)
-    return {"enabled": count, "total": len(registry)}
+        existing = config.tools.builtin_tools.get(name)
+        config.tools.builtin_tools[name] = BuiltinToolConfig(
+            name=name,
+            enabled=True,
+            async_execution=getattr(existing, "async_execution", False) if existing else False,
+            description="",
+            icon="",
+        )
+    _save_global_config(config)
+
+    ws = _get_workspace(request)
+    _add_user_audit(ws, "enable_all", "ALL", "enabled=True", user=username)
+    return {"ok": True, "enabled": list(registry.keys())}
+
 
 @router.post("/tools/disable-all")
 @require_permission("tools:write")
-async def disable_all(request: Request):
+async def disable_all_tools(request: Request):
     username = getattr(request.state, "username", "system")
-    ws = _get_workspace(request)
+    config = _load_global_config()
+
+    if config.tools is None:
+        from coapis.config.config import ToolsConfig
+        config.tools = ToolsConfig()
+    if config.tools.builtin_tools is None:
+        config.tools.builtin_tools = {}
+
     registry = _get_registry_tools()
-    state = _load_user_tool_state(ws)
-    count = 0
+    from coapis.config.config import BuiltinToolConfig
     for name in registry:
-        if state.get(name, {}).get("enabled", True):
-            count += 1
-        state.setdefault(name, {})["enabled"] = False
-    _save_user_tool_state(ws, state)
-    _add_user_audit(ws, "disable_all", "*", detail=f"禁用了 {count} 个工具", user=username)
-    return {"disabled": count, "total": len(registry)}
+        existing = config.tools.builtin_tools.get(name)
+        config.tools.builtin_tools[name] = BuiltinToolConfig(
+            name=name,
+            enabled=False,
+            async_execution=getattr(existing, "async_execution", False) if existing else False,
+            description="",
+            icon="",
+        )
+    _save_global_config(config)
+
+    ws = _get_workspace(request)
+    _add_user_audit(ws, "disable_all", "ALL", "enabled=False", user=username)
+    return {"ok": True, "disabled": list(registry.keys())}
+
 
 @router.get("/tools/audit/log")
-async def get_audit_log(
-    request: Request,
-    limit: int = Query(50),
-    tool_name: Optional[str] = Query(None),
-    action: Optional[str] = Query(None),
-):
+async def list_audit_log(request: Request, limit: int = Query(100, ge=1, le=500)):
     ws = _get_workspace(request)
     log = _load_user_audit(ws)
-    if tool_name:
-        log = [e for e in log if e.get("tool_name") == tool_name]
-    if action:
-        log = [e for e in log if e.get("action") == action]
     return log[-limit:]
+
 
 @router.delete("/tools/{tool_name}")
 @require_permission("tools:write")
-async def delete_custom_tool(request: Request, tool_name: str):
-    username = getattr(request.state, "username", "system")
-    ws = _get_workspace(request)
+async def delete_tool(request: Request, tool_name: str):
+    """Built-in tools cannot be deleted. Only custom plugins can be removed."""
     registry = _get_registry_tools()
-    if tool_name not in registry:
-        raise HTTPException(404, f"Tool not found: {tool_name}")
-    if registry[tool_name]["category"] == "builtin":
-        raise HTTPException(400, "Cannot delete builtin tools")
-    state = _load_user_tool_state(ws)
-    state.pop(tool_name, None)
-    _save_user_tool_state(ws, state)
-    _add_user_audit(ws, "delete", tool_name, user=username)
-    return {"deleted": tool_name}
+    if tool_name in registry and registry[tool_name]["category"] == "builtin":
+        raise HTTPException(400, "Cannot delete built-in tools")
+    raise HTTPException(404, f"Tool not found: {tool_name}")

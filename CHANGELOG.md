@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.9.11] - 2026-07-10
+
+### 工具系统统一
+- **删除冗余工具** — 移除 8 个低价值工具（agent_optimizer, ast_search, delegate_external_agent, knowledge_rag, materialize_skill, security_scan, structured_logger, workflow_engine）
+- **删除旧版 builtin.py** — 统一使用 tools/*.py 注册表
+- **工具分组分类** — 新增 basic/web/media/agent/data/other 六大分组，替换原有 scene 分类
+- **工具管理重构** — 从用户级 tool_state.json 改为全局 config.json 控制
+
+### 命令分级优化
+- **新增降级规则** — 为 17 个命令添加 `scope: workspace` 降级规则（jq, yq, bash, curl, wget, git, python, pip, npm, rsync 等）
+- **修复复合命令解析** — 支持 `&&`, `||`, `|`, `;` 分隔符的正确拆分
+- **修复降级规则匹配** — 修复 `_context` 属性未初始化和 `_request_context` 字段名问题
+- **例外规则优化** — 修复 curl/wget POST 请求检测 pattern，新增系统目录输出拦截
+
+### 核心修复
+- **进度摘要消息** — 修复 role=system 导致 OpenAI API 报错（改为 role=user）
+- **AttributeError 修复** — 修复 `get_text_content()` 返回 None 导致的字符串操作错误
+- **审批 session 对齐** — 修复 console 审批 ApprovalCard 不显示问题
+- **react-syntax-highlighter** — 统一版本为 15.6.6，解决 CodeHighlighter 加载失败
+
+### 清理优化
+- **删除备份目录** — 移除 `_archive/` 和 `_backup/` 目录（46 个文件）
+- **删除临时脚本** — 移除 analyze_homogeneity.py, assign_scenes.py, fix_*.py 等临时修复脚本
+- **删除临时文档** — 移除 PATH_ANALYSIS_REPORT.md 等临时分析文档
+
 ## [v0.9.3] - 2026-07-05
 
 ### 开源准备

@@ -2379,7 +2379,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 _progress_summary = self._progress_tracker.build_summary()
                 if _progress_summary:
                     from agentscope.message import Msg as _ProgMsg
-                    _prog_msg = _ProgMsg("system", _progress_summary, "system")
+                    # Use "user" role instead of "system" - OpenAI API requires
+                    # system messages to be at the beginning, but progress summaries
+                    # are injected mid-conversation. Using "user" role ensures
+                    # compatibility with all LLM providers.
+                    _prog_msg = _ProgMsg("user", _progress_summary, "user")
                     await self.memory.add(_prog_msg)
                     logger.info(
                         "[P0] Progress injected: %d calls, summary=%d chars",

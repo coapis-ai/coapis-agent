@@ -3,7 +3,7 @@
 # CoApis
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.9.9-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-0.9.11-green.svg)](CHANGELOG.md)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/r/coapis/server)
 [![i18n](https://img.shields.io/badge/i18n-EN%20%7C%20ZH%20%7C%20JA%20%7C%20RU-orange.svg)](./docs/help/)
 

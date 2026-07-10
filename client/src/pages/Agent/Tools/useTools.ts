@@ -4,6 +4,7 @@ import api from "../../../api";
 import type {
   ToolInfo,
   ToolTag,
+  ToolGroup,
 } from "../../../api/modules/tools";
 import { useTranslation } from "react-i18next";
 import { useAgentStore } from "../../../stores/agentStore";
@@ -15,13 +16,14 @@ export function useTools() {
   // ── Core state ──
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [tags, setTags] = useState<ToolTag[]>([]);
+  const [groups, setGroups] = useState<ToolGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
 
   // ── Filter state ──
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [selectedScene, setSelectedScene] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
 
   // ── Detail drawer ──
   const [selectedTool, setSelectedTool] = useState<ToolInfo | null>(null);
@@ -35,7 +37,7 @@ export function useTools() {
     try {
       const data = await api.tools.listTools({
         tag: selectedTag ?? undefined,
-        scene: selectedScene ?? undefined,
+        group: selectedGroup ?? undefined,
         search: search || undefined,
       });
       setTools(data);
@@ -49,12 +51,21 @@ export function useTools() {
     } finally {
       setLoading(false);
     }
-  }, [t, selectedTag, selectedScene, search]);
+  }, [t, selectedTag, selectedGroup, search]);
 
   const loadTags = useCallback(async () => {
     try {
       const data = await api.tools.listTags();
       setTags(data);
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const loadGroups = useCallback(async () => {
+    try {
+      const data = await api.tools.listGroups();
+      setGroups(data || []);
     } catch {
       // silent
     }
@@ -66,7 +77,8 @@ export function useTools() {
 
   useEffect(() => {
     loadTags();
-  }, [loadTags]);
+    loadGroups();
+  }, [loadTags, loadGroups]);
 
   // ── Toggle ──
   const toggleEnabled = useCallback(
@@ -102,29 +114,31 @@ export function useTools() {
     setBatchLoading(true);
     try {
       const result = await api.tools.enableAll();
-      message.success(`已启用 ${result.enabled} 个工具`);
+      message.success(`已启用 ${result.enabled.length} 个工具`);
       loadTools();
       loadTags();
+      loadGroups();
     } catch {
       message.error("批量启用失败");
     } finally {
       setBatchLoading(false);
     }
-  }, [loadTools, loadTags]);
+  }, [loadTools, loadTags, loadGroups]);
 
   const disableAll = useCallback(async () => {
     setBatchLoading(true);
     try {
       const result = await api.tools.disableAll();
-      message.success(`已禁用 ${result.disabled} 个工具`);
+      message.success(`已禁用 ${result.enabled.length} 个工具`);
       loadTools();
       loadTags();
+      loadGroups();
     } catch {
       message.error("批量禁用失败");
     } finally {
       setBatchLoading(false);
     }
-  }, [loadTools, loadTags]);
+  }, [loadTools, loadTags, loadGroups]);
 
   // ── Delete ──
   const deleteTool = useCallback(
@@ -155,14 +169,15 @@ export function useTools() {
   return {
     tools,
     tags,
+    groups,
     loading,
     batchLoading,
     search,
     setSearch,
     selectedTag,
     setSelectedTag,
-    selectedScene,
-    setSelectedScene,
+    selectedGroup,
+    setSelectedGroup,
     toggleEnabled,
     enableAll,
     disableAll,

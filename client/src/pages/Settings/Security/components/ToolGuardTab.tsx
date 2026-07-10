@@ -430,9 +430,6 @@ export function CommandClassificationSection() {
             expandedRowRender: (record: any) => {
               const exc: CommandRule[] = record.exceptions || [];
               const dem: CommandRule[] = record.demotion_rules || [];
-              if (exc.length === 0 && dem.length === 0) {
-                return <span style={{ opacity: 0.5, fontSize: 12 }}>无例外或降级规则</span>;
-              }
               const ruleRow = (r: CommandRule, color: string, type: "exception" | "demotion") => (
                 <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, fontSize: 12 }}>
                   <Tag color={color} style={{ fontSize: 11 }}>{r.id}</Tag>
@@ -452,22 +449,29 @@ export function CommandClassificationSection() {
               );
               return (
                 <div style={{ padding: "4px 0" }}>
-                  {exc.length > 0 && (
-                    <div style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#d46b08", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>⬆ 例外 ({exc.length}) <PlusOutlined style={{ fontSize: 11, color: "#d46b08", cursor: "pointer" }} onClick={() => handleAddRule(record.name, "exception")} /></div>
-                      {exc.map(r => ruleRow(r, "orange", "exception"))}
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#d46b08", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                      ⬆ 例外规则 ({exc.length})
+                      <PlusOutlined style={{ fontSize: 11, color: "#d46b08", cursor: "pointer" }} onClick={() => handleAddRule(record.name, "exception")} />
                     </div>
-                  )}
-                  {dem.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#389e0d", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>⬇ 降级 ({dem.length}) <PlusOutlined style={{ fontSize: 11, color: "#389e0d", cursor: "pointer" }} onClick={() => handleAddRule(record.name, "demotion")} /></div>
-                      {dem.map(r => ruleRow(r, "green", "demotion"))}
+                    {exc.length > 0
+                      ? exc.map(r => ruleRow(r, "orange", "exception"))
+                      : <span style={{ opacity: 0.4, fontSize: 11 }}>暂无例外规则</span>
+                    }
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#389e0d", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                      ⬇ 降级规则 ({dem.length})
+                      <PlusOutlined style={{ fontSize: 11, color: "#389e0d", cursor: "pointer" }} onClick={() => handleAddRule(record.name, "demotion")} />
                     </div>
-                  )}
+                    {dem.length > 0
+                      ? dem.map(r => ruleRow(r, "green", "demotion"))
+                      : <span style={{ opacity: 0.4, fontSize: 11 }}>暂无降级规则</span>
+                    }
+                  </div>
                 </div>
               );
             },
-            rowExpandable: (record: any) => (record.exceptions?.length > 0 || record.demotion_rules?.length > 0),
           }}
         />
       </Card>

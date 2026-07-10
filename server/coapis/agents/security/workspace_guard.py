@@ -28,6 +28,7 @@ from __future__ import annotations
 import fnmatch
 import logging
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -341,8 +342,83 @@ class WorkspaceGuard:
         "--command", "--eval", "--execute", "--interactive",
     })
 
+    def _split_compound_command(self, command: str) -> List[str]:
+        """Split a compound shell command into individual commands.
+
+        Recognizes shell separators: ``&&``, ``||``, ``|``, ``;``.
+        Respects quoting so that ``echo "a && b"`` is not split.
+        Returns a list of non-empty sub-commands.
+        """
+        separators = {"&&", "||", "|", ";"}
+        try:
+            tokens = shlex.split(command, posix=True)
+        except ValueError:
+            tokens = command.split()
+
+        sub_commands: List[str] = []
+        current: List[str] = []
+        for token in tokens:
+            if token in separators:
+                if current:
+                    sub_commands.append(" ".join(current))
+                    current = []
+            else:
+                current.append(token)
+        if current:
+            sub_commands.append(" ".join(current))
+        return sub_commands
+
     def _is_command_allowed_fallback(self, command: str, role: str) -> bool:
-        """Fallback command check using prefix+args semantic matching.
+        """Check a (possibly compound) shell command against the role whitelist.
+
+        Compound commands using ``&&``, ``||``, ``|`` or ``;`` are split and each
+        sub-command is checked independently. All sub-commands must be allowed.
+        """
+        cmd_stripped = command.strip()
+        if not cmd_stripped:
+            return False
+
+        # Blacklist and dangerous patterns are checked against the whole command
+        # so that evasion tactics like ``ls && rm -rf /`` are still caught.
+        for blacklist_pattern in self._get_blacklist():
+            if fnmatch.fnmatch(cmd_stripped, blacklist_pattern):
+                logger.warning(
+                    "WorkspaceGuard: blacklisted command blocked. "
+                    "role=%s, command=%s",
+                    role, command[:100],
+                )
+                return False
+
+        for pattern in self._compiled_dangerous:
+            if pattern.search(cmd_stripped):
+                logger.warning(
+                    "WorkspaceGuard: dangerous pattern detected. "
+                    "role=%s, command=%s",
+                    role, command[:100],
+                )
+                return False
+
+        # If command contains shell separators, split and check each part
+        if any(op in cmd_stripped for op in ("&&", "||", "|", ";")):
+            sub_commands = self._split_compound_command(cmd_stripped)
+            if not sub_commands:
+                return False
+            for sub in sub_commands:
+                if not sub.strip():
+                    continue
+                if not self._is_command_allowed_single(sub, role):
+                    logger.warning(
+                        "WorkspaceGuard: compound command sub-command blocked. "
+                        "role=%s, sub=%s, full=%s",
+                        role, sub[:100], command[:100],
+                    )
+                    return False
+            return True
+
+        return self._is_command_allowed_single(cmd_stripped, role)
+
+    def _is_command_allowed_single(self, command: str, role: str) -> bool:
+        """Check a single (non-compound) shell command against the role whitelist.
 
         Whitelist entries follow these conventions:
         - ``"ls"``        → base command only, no args
@@ -363,27 +439,6 @@ class WorkspaceGuard:
         if not cmd_stripped:
             return False
 
-        # ── 1. Check blacklist first ──
-        for blacklist_pattern in self._get_blacklist():
-            if fnmatch.fnmatch(cmd_stripped, blacklist_pattern):
-                logger.warning(
-                    "WorkspaceGuard: blacklisted command blocked. "
-                    "role=%s, command=%s",
-                    role, command[:100],
-                )
-                return False
-
-        # ── 2. Check dangerous patterns (regex-based) ──
-        for pattern in self._compiled_dangerous:
-            if pattern.search(cmd_stripped):
-                logger.warning(
-                    "WorkspaceGuard: dangerous pattern detected. "
-                    "role=%s, command=%s",
-                    role, command[:100],
-                )
-                return False
-
-        # ── 3. Whitelist matching (prefix + args) ──
         tokens = cmd_stripped.split()
         base_cmd = tokens[0] if tokens else ""
         args = tokens[1:] if len(tokens) > 1 else []

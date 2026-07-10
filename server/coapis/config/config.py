@@ -1507,6 +1507,12 @@ def _default_builtin_tools() -> Dict[str, BuiltinToolConfig]:
             description="Edit file using find-and-replace",
             icon="🖊️",
         ),
+        "append_file": BuiltinToolConfig(
+            name="append_file",
+            enabled=True,
+            description="Append content to file",
+            icon="📝",
+        ),
         "grep_search": BuiltinToolConfig(
             name="grep_search",
             enabled=True,
@@ -1569,12 +1575,6 @@ def _default_builtin_tools() -> Dict[str, BuiltinToolConfig]:
             description="Get llm token usage",
             icon="📊",
         ),
-        "delegate_external_agent": BuiltinToolConfig(
-            name="delegate_external_agent",
-            enabled=False,
-            description="Delegate work to an external ACP agent runner",
-            icon="📡",
-        ),
         "list_agents": BuiltinToolConfig(
             name="list_agents",
             enabled=True,
@@ -1626,23 +1626,11 @@ def _default_builtin_tools() -> Dict[str, BuiltinToolConfig]:
             description="CRUD for scheduled tasks",
             icon="⏱️",
         ),
-        "structured_logger": BuiltinToolConfig(
-            name="structured_logger",
-            enabled=True,
-            description="Structured log file analysis tool",
-            icon="📋",
-        ),
         "tool_stats": BuiltinToolConfig(
             name="tool_stats",
             enabled=True,
             description="Real-time tool execution statistics (usage, latency, success rate, trends)",
             icon="📊",
-        ),
-        "knowledge_rag": BuiltinToolConfig(
-            name="knowledge_rag",
-            enabled=True,
-            description="Knowledge base retrieval and RAG",
-            icon="📚",
         ),
         "code_exec": BuiltinToolConfig(
             name="code_exec",
@@ -1661,6 +1649,18 @@ def _default_builtin_tools() -> Dict[str, BuiltinToolConfig]:
             enabled=True,
             description="CRUD for a workspace-scoped to-do list",
             icon="✅",
+        ),
+        "skill_manager": BuiltinToolConfig(
+            name="skill_manager",
+            enabled=True,
+            description="Manage agent skills: list, enable, disable, configure",
+            icon="🧩",
+        ),
+        "spawn_subagent": BuiltinToolConfig(
+            name="spawn_subagent",
+            enabled=True,
+            description="Spawn a sub-agent for parallel task execution",
+            icon="🔀",
         ),
     }
 

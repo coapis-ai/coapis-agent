@@ -42,9 +42,9 @@ TOOL_GROUPS: dict[str, set[str]] = {
         "read_file",
         "write_file",
         "edit_file",
+        "append_file",
         "grep_search",
         "glob_search",
-        "memory_search",
         "execute_shell_command",
         "get_current_time",
         "set_user_timezone",
@@ -54,13 +54,6 @@ TOOL_GROUPS: dict[str, set[str]] = {
     "web": {
         "browser_use",
         "web_search",
-        "tavily_search",
-        "tavily_extract",
-        "exa_search",
-        "exa_answer",
-        "exa_extract",
-        "jina_reader",
-        "fetch_url",
     },
     # Code / execution tools
     "code": {
@@ -81,7 +74,6 @@ TOOL_GROUPS: dict[str, set[str]] = {
     },
     # System / admin tools
     "system": {
-        "delegate_external_agent",
         "browser_use",
         "desktop_screenshot",
         "view_image",
@@ -89,25 +81,16 @@ TOOL_GROUPS: dict[str, set[str]] = {
     },
     # Memory / knowledge tools
     "memory": {
-        "knowledge_rag",
         "session_search",
     },
-    # Media tools
-    "media": {
-        "image_generate",
-        "image_edit",
-        "audio_transcribe",
-        "tts_speak",
+    # Skill tools
+    "skill": {
+        "skill_manager",
     },
     # Rarely used tools — only loaded on explicit match
     "rarely": {
         "cron_scheduler",
-        "structured_logger",
         "tool_stats",
-        "chat_with_agent",
-        "submit_to_agent",
-        "check_agent_task",
-        "list_agents",
     },
 }
 
