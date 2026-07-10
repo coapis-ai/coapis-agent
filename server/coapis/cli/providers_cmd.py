@@ -281,8 +281,8 @@ def _add_models_interactive(provider_id: str) -> None:
     if provider_id == "ollama":
         return
 
-    extra = list(defn.extra_models)
-    all_models = list(defn.models) + extra
+    # Use models directly (extra_models has been migrated into models)
+    all_models = list(defn.models)
 
     if all_models:
         click.echo(f"\nCurrent models for {defn.name}:")
@@ -351,8 +351,8 @@ def _select_llm_model(defn, pid, current_slot, *, use_defaults):
         else ""
     )
 
-    extra = list(defn.extra_models)
-    all_models = list(defn.models) + extra
+    # Use models directly (extra_models has been migrated into models)
+    all_models = list(defn.models)
 
     if use_defaults:
         return cur or (all_models[0].id if all_models else "")
@@ -537,13 +537,13 @@ def list_cmd() -> None:
                     f"  {'api_key_prefix':16s}: {defn.api_key_prefix}",
                 )
 
-            extra = list(defn.extra_models)
-            all_models = list(defn.models) + extra
+            # Use models directly (extra_models has been migrated into models)
+            all_models = list(defn.models)
             if all_models:
                 click.echo(f"  {'models':16s}:")
-                extra_ids = {m.id for m in extra}
+                # Distinguish user-added models by source field
                 for m in all_models:
-                    label = " [user-added]" if m.id in extra_ids else ""
+                    label = " [user-added]" if getattr(m, 'source', None == 'user') else ""
                     click.echo(f"    - {m.name} ({m.id}){label}")
 
     click.echo(f"\n{'═' * 44}")
