@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.9.11-green.svg)](CHANGELOG.md)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/r/coapis/server)
-[![i18n](https://img.shields.io/badge/i18n-EN%20%7C%20ZH%20%7C%20JA%20%7C%20RU-orange.svg)](./docs/help/)
+[![i18n](https://img.shields.io/badge/i18n-ZH%20%7C%20EN%20%7C%20JA%20%7C%20RU-orange.svg)](#)
 
 [中文](./README.md) | **English**
 
@@ -46,13 +46,13 @@ When an agent notices you doing the same thing repeatedly, it **automatically cr
 
 Your data stays **completely on your own server** — nothing gets sent to any third party. Built-in seven-layer security: dangerous operations require confirmation, unusual behavior gets auto-banned, and every action has an audit trail.
 
-### Works Where You Work
+### Multi-Channel Integration
 
-Not just a web interface. CoApis connects to **WeCom, DingTalk, Slack, and Telegram** — so you can chat with AI right in the tools you already use.
+Not just a web interface. CoApis supports **WeCom, DingTalk, Feishu, Telegram, Discord, QQ** and more — so you can chat with AI right in the tools you already use.
 
-### Four Languages
+### Multi-Language UI
 
-Switch instantly: 中文 · English · 日本語 · Русский
+Supports Chinese, English, Japanese, and Russian interface languages.
 
 ---
 
@@ -97,7 +97,7 @@ docker compose -f docker/docker-compose.build.yml up -d --build
 - Account: `admin` / `admin123`
 - ⚠️ Change the default password immediately
 
-> 📖 Docs: [Installation](./docs/help/02-安装部署_zh.md) · [Configuration](./docs/help/03-配置指南_zh.md)
+> 📖 Docs: [Help Center](./docs/help-html/) · [Source Install Manual](./docs/SOURCE_INSTALL_MANUAL.md)
 
 ---
 
@@ -105,12 +105,14 @@ docker compose -f docker/docker-compose.build.yml up -d --build
 
 | Document | Description |
 |----------|-------------|
-| [Product Overview](./docs/help/01-产品概述_zh.md) | What this product is |
-| [Installation Guide](./docs/help/02-安装部署_zh.md) | How to install and run |
-| [Configuration Guide](./docs/help/03-配置指南_zh.md) | Models, channels, permissions |
-| [CLI Reference](./docs/CLI-REFERENCE_zh.md) | Command-line tools |
-| [API Reference](./docs/API-REFERENCE_zh.md) | API documentation |
-| [Security Guide](./docs/security-hardening-guide.md) | Security architecture |
+| [Product Overview](./docs/marketing/01-产品介绍.md) | What this product is |
+| [Quick Start](./docs/help-html/01-快速入门.html) | 30-second guide |
+| [Installation](./docs/help-html/02-安装部署.html) | How to install and run |
+| [Configuration](./docs/help-html/03-配置指南.html) | Models, channels, permissions |
+| [Source Install Manual](./docs/SOURCE_INSTALL_MANUAL.md) | Build from source |
+| [Developer Guide](./docs/developer/二次开发指南.md) | For developers |
+| [API Reference](./docs/developer/API参考.md) | API documentation |
+| [Security](./docs/security/sandbox-security-plan.md) | Security architecture |
 
 ---
 
@@ -120,7 +122,6 @@ docker compose -f docker/docker-compose.build.yml up -d --build
 - 💬 Group chat mode
 - 🧠 Smart context compression
 - 🛒 Skill marketplace
-- 📱 Feishu & QQ channel integration
 
 ---
 
@@ -133,7 +134,7 @@ Contributions welcome — code, docs, bug reports. See [CONTRIBUTING.md](CONTRIB
 | Channel | Link |
 |---------|------|
 | Gitee | [ouerlai/coapis-agent](https://gitee.com/ouerlai/coapis-agent) |
-| GitHub | [coapis/coapis-agent](https://github.com/coapis/coapis-agent) |
+| GitHub | [coapis-ai/coapis-agent](https://github.com/coapis-ai/coapis-agent) |
 | Security | [SECURITY.md](SECURITY.md) |
 
 ---
