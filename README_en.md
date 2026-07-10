@@ -10,7 +10,7 @@
 
 <img src="https://img.icons8.com/color/96/bee.png" alt="CoApis Logo" width="120">
 
-# Enterprise Agent Harness Platform
+# Enterprise Agent Harness
 
 > Deploy once, entire team uses
 
