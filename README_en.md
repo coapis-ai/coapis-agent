@@ -15,22 +15,9 @@
 
 > CoApis is a self-hosted AI collaboration platform. It runs on your own server, shared by your team, with data that never leaves your hands — and gets smarter over time.
 
-[30-Second Experience](#-30-second-experience) · [What It Does](#-what-does-it-do) · [Why Choose It](#-why-choose-it) · [Get Started](#-get-started)
+[What It Does](#-what-does-it-do) · [Why Choose It](#-why-choose-it) · [Get Started](#-get-started)
 
 </div>
-
----
-
-## ⚡ 30-Second Experience
-
-```bash
-mkdir -p /opt/coapis && cd /opt/coapis
-wget -qO- https://raw.githubusercontent.com/coapis/coapis/main/install.sh | bash
-```
-
-Then open your browser at `http://your-server-ip:4200` and log in with `admin / admin123`.
-
-**That's it.** Docker handles everything — no need to install anything.
 
 ---
 

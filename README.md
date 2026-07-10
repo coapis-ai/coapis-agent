@@ -15,22 +15,9 @@
 
 > CoApis 是一个私有化部署的 AI 协作平台。它跑在你自己的服务器上，团队多人共享，数据不出门，越用越聪明。
 
-[30 秒体验](#-30-秒体验) · [它能做什么](#-它能做什么) · [为什么选它](#-为什么选它) · [开始使用](#-开始使用)
+[它能做什么](#-它能做什么) · [为什么选它](#-为什么选它) · [开始使用](#-开始使用)
 
 </div>
-
----
-
-## ⚡ 30 秒体验
-
-```bash
-mkdir -p /opt/coapis && cd /opt/coapis
-wget -qO- https://raw.githubusercontent.com/coapis/coapis/main/install.sh | bash
-```
-
-然后打开浏览器访问 `http://你的服务器IP:4200`，用 `admin / admin123` 登录。
-
-**就这样。** 不用装任何东西，Docker 帮你搞定一切。
 
 ---
 
