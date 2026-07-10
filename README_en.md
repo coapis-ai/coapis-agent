@@ -22,29 +22,29 @@
 
 ## 🎯 Core Value
 
-### Install Once, Everyone Uses
+### Install Once, Entire Company Uses
 
-Deploy once for the entire company, and everyone can start immediately. Zero technical barrier — no need to understand configuration, install environments, or buy accounts. Just open your browser and start working, as simple as using any enterprise tool.
+Deploy once for the entire enterprise, and everyone can start immediately. Zero technical barrier — no need to understand configuration, install environments, or buy accounts. Just open your browser and start working, as simple as using any enterprise tool.
 
-### Team Collaboration, Individual Privacy
+### Multi-User Collaboration, Independent Spaces
 
 Everyone shares the same system, but each person has their own private workspace. Your conversations, files, and accumulated experience are invisible to others. Share resources while protecting privacy.
 
-### Smarter Over Time
+### Multi-Layer Autonomous Evolution
 
-The system remembers your habits and preferences, automatically learning your common workflows. The more you use it, the better it understands you. Good methods you discover can be shared with colleagues; their experience can be inherited by you. The team's collective wisdom flows and grows.
+The system remembers your habits and preferences, automatically learning your common workflows. Agents continuously grow through interactions, skills constantly improve through reuse. Good methods you discover can crystallize into reusable skill templates; colleagues' experience can be inherited with one click. The team's collective wisdom flows, accumulates, and evolves.
 
-### Fortress-Grade Security
+### Enterprise-Grade Seven-Layer Security Defense
 
-Seven layers of defense: dangerous operations are automatically blocked, sensitive files are protected, abnormal behaviors are monitored in real-time, all actions are fully logged. Like installing a safe for your enterprise — enabling productivity while preventing chaos.
+Seven layers of defense: command risk classification, dangerous operation blocking, real-time behavior monitoring, sensitive file protection, sandbox isolation, resource quota control, full operation audit. Like installing a vault for your enterprise — enabling productivity while preventing chaos.
 
-### Remembers What Matters
+### Multi-Layer Memory & Knowledge Extraction
 
-The system remembers key information, extracts valuable knowledge, and accumulates reusable experience. Project context, customer preferences, operational tips — no need to worry about forgetting, everything is retrievable. Like having an assistant who never tires of organizing your notes.
+The system remembers key information, extracts valuable knowledge, and accumulates reusable experience. Short-term conversation context, long-term preference accumulation, core work philosophy — project context, customer preferences, operational tips are all properly stored and retrievable. Like having an assistant who never tires of organizing your notes, turning scattered information into a searchable knowledge base.
 
-### Integrates Into Daily Work
+### Office & Business System Integration Empowerment
 
-Connect to WeCom, DingTalk, Feishu — use it where you already work. Link to existing enterprise systems, bridge data and workflows. Not a separate tool, but an enhancement to what you already use, making AI part of your daily routine.
+Connect to WeCom, DingTalk, Feishu — use it where you already work. Link to existing enterprise systems, bridge data and workflows. Not a separate tool, but an enhancement to what you already use, making AI part of your daily routine, building true enterprise-grade Agent Harness.
 
 ---
 
