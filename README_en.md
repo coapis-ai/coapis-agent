@@ -11,78 +11,176 @@
 
 <img src="https://img.icons8.com/color/96/bee.png" alt="CoApis Logo" width="120">
 
-# Your Team Deserves Its Own AI Assistant
+# Enterprise Multi-User AI Collaboration Platform
 
-> CoApis is a self-hosted AI collaboration platform. It runs on your own server, shared by your team, with data that never leaves your hands — and gets smarter over time.
+> 🚀 **Server-side Resident · Multi-user Sharing · Multi-agent Collaboration · Gets Smarter Over Time**
+>
+> Run and manage multiple AI agents on your server, providing a secure, controllable, and continuously evolving AI workspace for your organization.
 
-[Website](https://coapis.cn) · [What It Does](#-what-does-it-do) · [Get Started](#-get-started)
+[Website](https://coapis.cn) · [Core Advantages](#-core-advantages) · [Architecture](#-architecture-design) · [Quick Start](#-quick-start)
+
+---
 
 </div>
 
----
+## 🎯 In One Sentence
 
-## 🤔 What Does It Do?
+**CoApis = Your Team's Private AI Assistant Team**
 
-### A Shared AI Assistant for Your Team
-
-Instead of everyone having their own ChatGPT account, CoApis runs on your company server. **The whole team shares one AI assistant**, but each person has their own workspace — your conversations, your files, your memory. No one else can see them.
-
-The agent runs 24/7. Close your browser, it keeps working. Scheduled tasks trigger automatically — no babysitting required.
-
-### It Actually Gets Smarter
-
-Regular AI assistants forget everything after each conversation. CoApis agents have **four layers of memory**:
-
-- It remembers what you talked about last time
-- It knows your work habits and preferences
-- It learns from every interaction, automatically
-- The longer you use it, the better it understands you
-
-### It Creates Its Own Skills
-
-When an agent notices you doing the same thing repeatedly, it **automatically creates a new skill** to handle it. Good skills get promoted, bad ones get retired. What one agent learns can be shared with others.
-
-### Enterprise-Grade Security
-
-Your data stays **completely on your own server** — nothing gets sent to any third party. Built-in seven-layer security: dangerous operations require confirmation, unusual behavior gets auto-banned, and every action has an audit trail.
-
-### Multi-Channel Integration
-
-Not just a web interface. CoApis supports **WeCom, DingTalk, Feishu, Telegram, Discord, QQ** and more — so you can chat with AI right in the tools you already use.
-
-### Multi-Language UI
-
-Supports Chinese, English, Japanese, and Russian interface languages.
+Unlike personal tools like ChatGPT / Claude, CoApis gives you:
+- 🔒 **Data Never Leaves** — Fully self-hosted, data stays on your own server
+- 👥 **Team Sharing** — Team members share AI agents, each with independent workspace
+- 🧠 **Gets Smarter** — Four-layer memory + skill evolution, agents continuously improve
+- 🛡️ **Enterprise Security** — Seven-layer defense + complete audit trail
 
 ---
 
-## 🚀 Get Started
+## 🏆 Core Advantages
 
-### Docker Deploy
+### 1. 🏢 Enterprise Multi-User Architecture
+
+| Capability | Description |
+|------------|-------------|
+| **Server-side Resident** | Agents online 7×24, tasks continue even when browser is closed |
+| **Multi-user Sharing** | Team members share AI agents with independent workspaces |
+| **Data Isolation** | Each user has independent agent, files, and memory space |
+| **RBAC Permissions** | Four-level roles (guest/user/advanced/admin), fine-grained control |
+| **Token Quota** | Monthly usage allocation by role, cost controllable |
+
+### 2. 🧠 Four-Layer Memory System — Truly "Gets Smarter"
+
+| Memory Layer | Purpose | Lifecycle |
+|--------------|---------|-----------|
+| `short_term` | Current conversation context | Within session |
+| `long_term` | Cross-session preferences, experience沉淀 | Permanent |
+| `core` | Agent's core values and thinking patterns | Permanent |
+| `ephemeral` | Temporary data, intermediate reasoning | Temporary |
+
+**Key Advantages:**
+- ✅ Agent **automatically extracts valuable information** into long-term memory
+- ✅ Semantic retrieval, **precisely recalls** relevant information from history
+- ✅ User preferences, work habits, project context — **never forgets**
+
+### 3. 🌱 Skill Evolution Engine — Self-Learning Agents
+
+```
+User Need → Auto-create Skill → Five-dimensional Assessment → Promote/Retire
+    ↑                                        ↓
+    └──── Continuous Optimization ←────── Feedback ←───────┘
+```
+
+**Evolution Mechanism:**
+- 🔄 **Auto-generate** — Agent creates new skills based on user needs
+- 📊 **Five-dimensional Assessment** — Precision, reliability, efficiency, satisfaction, robustness
+- ⬆️ **Auto-promote** — High-performing skills upgrade to higher levels
+- ⬇️ **Auto-retire** — Low-performing skills downgrade or remove
+- 🌐 **Cross-Agent Spread** — Proven skills can propagate to other agents
+
+### 4. 🛡️ Seven-Layer Security Defense — Enterprise-Grade Protection
+
+```
+┌─────────────────────────────────────────────────┐
+│  Layer 7: Audit Compliance  All operations traceable, exportable │
+│  Layer 6: Docker Hardening  Resource limits + network isolation  │
+│  Layer 5: Environment Minimal  Only 4 necessary variables exposed│
+│  Layer 4: Tool Guard  29 rules + 65 sensitive path protections   │
+│  Layer 3: Sandbox Isolation  Process isolation + namespace mount │
+│  Layer 2: Behavior Monitoring  Dangerous ops auto-banned        │
+│  Layer 1: Command Risk Classification  17 categories × 4 levels │
+└─────────────────────────────────────────────────┘
+```
+
+### 5. 🌐 Multi-Language & Multi-Channel
+
+**Interface Languages:** 中文 · English · 日本語 · Русский (toggle in top-right corner)
+
+**Integration Channels:** WeCom · DingTalk · Feishu · Telegram · Discord · QQ · WeChat
+
+### 6. 🛠️ 29 Refined Tools
+
+Refined from 108+ tools to 29 high-frequency practical tools covering:
+
+| Scenario | Tools |
+|----------|-------|
+| 📁 File Operations | Read/write, edit, search, version management |
+| 💻 Shell Execution | Command execution, environment management |
+| 🌐 Browser Automation | Playwright integration, web scraping |
+| 📄 Document Processing | PDF, Word, Excel, PPT generation and parsing |
+| 🔍 Web Search | Tavily, Exa search engines |
+| 📧 Email Management | IMAP/SMTP send/receive |
+| 🧠 Memory Retrieval | Semantic search through historical memory |
+| 🤖 Agent Collaboration | Cross-agent communication, task distribution |
+
+---
+
+## 🏗️ Architecture Design
+
+### Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18 + TypeScript + Ant Design 5 + Vite 5 |
+| Backend | Python 3.11+ + FastAPI + SQLite/JSON |
+| Deployment | Docker + Docker Compose + Nginx |
+| LLM | Any OpenAI-compatible API (OpenAI / Ollama / vLLM / LM Studio etc.) |
+
+### Comparison with Similar Products
+
+| Dimension | Personal AI Assistant (ChatGPT/Claude) | CoApis |
+|-----------|----------------------------------------|--------|
+| 🏠 **Deployment** | Local client, tied to personal computer | Server-side resident, team sharing |
+| 👥 **Users** | 1 person exclusive | Multiple users simultaneously, data isolated |
+| 🧠 **Memory** | Valid within session, lost when closed | Four-layer memory, permanent across sessions |
+| 🤖 **Agents** | Single assistant | Three-tier system (global/user/agent), skill evolution |
+| 🛡️ **Security** | Basic filtering | Seven-layer defense, complete audit trail |
+| 🏢 **Compliance** | None | RBAC permissions + audit logs + token quotas |
+| 🔧 **Extensibility** | Plugin marketplace | Custom skills + multi-channel integration |
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Docker & Docker Compose
+- Any OpenAI-compatible LLM API (OpenAI / Ollama / vLLM / LM Studio etc.)
+
+### Option 1: Docker Deploy (Recommended)
 
 ```bash
 mkdir -p /opt/coapis && cd /opt/coapis
+
 wget https://raw.githubusercontent.com/coapis/coapis/main/docker-compose.yml
 wget https://raw.githubusercontent.com/coapis/coapis/main/.env.example -O .env
-nano .env  # Set your LLM API Key
+
+nano .env  # Fill in your LLM API Key
+
 docker compose up -d
 ```
 
-### From Source
+### Option 2: Install from Source
 
 ```bash
 git clone https://github.com/coapis-ai/coapis-agent.git
 cd coapis-agent
+
+# Install frontend dependencies and build
 cd client && npm ci && npm run build && cd ..
+
+# Configure environment variables
 cp docker/.env.example docker/.env
+# Edit docker/.env to fill in API Key
+
+# Build from source and start
 docker compose -f docker/docker-compose.build.yml up -d --build
 ```
 
-### Log In
+### Access the Service
 
-- URL: `http://your-server-ip:4200`
-- Account: `admin` / `admin123`
-- ⚠️ Change the default password immediately
+Open your browser at `http://<server-ip>:4200`
+
+- Default admin: `admin` / `admin123`
+- ⚠️ Change the default password immediately after first login
 
 ---
 
