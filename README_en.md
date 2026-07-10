@@ -84,13 +84,7 @@ Switch instantly: 中文 · English · 日本語 · Русский
 
 ## 🚀 Get Started
 
-### One-Click Install (Recommended)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/coapis/coapis/main/install.sh | bash
-```
-
-### Manual Deploy
+### Docker Deploy
 
 ```bash
 mkdir -p /opt/coapis && cd /opt/coapis
@@ -154,6 +148,12 @@ Contributions welcome — code, docs, bug reports. See [CONTRIBUTING.md](CONTRIB
 | Gitee | [ouerlai/coapis-agent](https://gitee.com/ouerlai/coapis-agent) |
 | GitHub | [coapis/coapis-agent](https://github.com/coapis/coapis-agent) |
 | Security | [SECURITY.md](SECURITY.md) |
+
+---
+
+## 🙏 Acknowledgments
+
+CoApis frontend chat components are built on [agentscope-ai](https://github.com/modelscope/agentscope). Special thanks to the Alibaba DAMO Academy ModelScope team for their open-source contribution.
 
 ---
 
