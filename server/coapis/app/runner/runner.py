@@ -440,12 +440,28 @@ class AgentRunner(Runner):
             # This preserves ALL message types: tool_call, tool_output, mcp_call,
             # mcp_call_output, reasoning, assistant — not just user + assistant.
             if agent_messages:
+                # CRITICAL: Replace user message in agent_messages with user_text_override
+                # when user_text is available. agent_messages comes from agent.memory
+                # which may have been modified by hooks (e.g. bootstrap), so we must
+                # use the original user input for persistence.
+                _agent_msgs = list(agent_messages)
+                if user_text and user_text.strip() and _agent_msgs:
+                    _first_msg = _agent_msgs[0]
+                    if getattr(_first_msg, "role", "") == "user":
+                        # Replace the first user message content with original user text
+                        _first_msg.content = [TextBlock(text=user_text)]
+                        _first_msg._content = [TextBlock(text=user_text)]
+                        logger.info(
+                            "_persist_chat_messages: replaced user message content "
+                            "with original text (%d chars)", len(user_text),
+                        )
+
                 # Dedup: skip if first new message is already the last in session
                 _existing_count = len(isolated_mem.content)
                 _skip_first = False
-                if _existing_count > 0 and agent_messages:
+                if _existing_count > 0 and _agent_msgs:
                     _last_existing, _ = isolated_mem.content[-1]
-                    _first_new = agent_messages[0]
+                    _first_new = _agent_msgs[0]
                     # Check if they're the same user message
                     if (getattr(_last_existing, "role", "") == "user"
                             and getattr(_first_new, "role", "") == "user"):
@@ -455,7 +471,7 @@ class AgentRunner(Runner):
                             _skip_first = True
                             logger.info("_persist_chat_messages: skipped duplicate user message")
 
-                _msgs_to_add = agent_messages[1:] if _skip_first else agent_messages
+                _msgs_to_add = _agent_msgs[1:] if _skip_first else _agent_msgs
 
                 # Filter out ephemeral bootstrap guidance system messages
                 # to prevent them from being persisted into session history.
@@ -1271,6 +1287,14 @@ class AgentRunner(Runner):
                         _evolution_collect_text(msg, _evolution_full_response)
                         yield msg, last
             else:
+                # DEBUG: log messages passed to agent
+                logger.info(
+                    "[DEBUG] runner.query_handler calling agent(msgs): "
+                    "msgs_count=%s, last_msg_role=%s, last_msg_content=%s",
+                    len(msgs) if msgs else 0,
+                    getattr(msgs[-1], "role", None) if msgs else None,
+                    str(getattr(msgs[-1], "content", None))[:200] if msgs else None,
+                )
                 async for msg, last in _stream_printing_messages_interruptible(
                     agents=[agent],
                     coroutine_task=agent(msgs),

@@ -316,9 +316,9 @@ def _get_multimodal_fallback_hint(media_type: str, path: str) -> str:
     description="查看图片文件",
     category="builtin",
     tags=['media', 'image'],
-    scene="core",
+    scene="media",
 )
-async def view_image(image_path: str) -> ToolResponse:
+async def view_image(file_path: str) -> ToolResponse:
     """Load an image file into the LLM context so the model can see it.
 
     Use this after desktop_screenshot, browser_use, or any tool that
@@ -333,7 +333,7 @@ async def view_image(image_path: str) -> ToolResponse:
     to the model.
 
     Args:
-        image_path (`str`):
+        file_path (`str`):
             Local path or HTTP(S) URL of the image to view.
 
     Returns:
@@ -345,11 +345,11 @@ async def view_image(image_path: str) -> ToolResponse:
     if not _check_multimodal_support("image"):
         probe_result = await _probe_multimodal_if_needed("image")
         if probe_result is not True:
-            fallback_hint = _get_multimodal_fallback_hint("image", image_path)
+            fallback_hint = _get_multimodal_fallback_hint("image", file_path)
 
-    if _is_url(image_path):
+    if _is_url(file_path):
         err = _validate_url_extension(
-            image_path,
+            file_path,
             _IMAGE_EXTENSIONS,
             "image",
         )
@@ -358,20 +358,20 @@ async def view_image(image_path: str) -> ToolResponse:
         text_msg = (
             fallback_hint
             if fallback_hint
-            else f"Image loaded from URL: {image_path}"
+            else f"Image loaded from URL: {file_path}"
         )
         return ToolResponse(
             content=[
                 ImageBlock(
                     type="image",
-                    source={"type": "url", "url": image_path},
+                    source={"type": "url", "url": file_path},
                 ),
                 TextBlock(type="text", text=text_msg),
             ],
         )
 
     resolved, err = _validate_media_path(
-        image_path,
+        file_path,
         _IMAGE_EXTENSIONS,
         "image",
     )
@@ -397,9 +397,9 @@ async def view_image(image_path: str) -> ToolResponse:
     description="查看视频文件",
     category="builtin",
     tags=['media', 'video'],
-    scene="core",
+    scene="media",
 )
-async def view_video(video_path: str) -> ToolResponse:
+async def view_video(file_path: str) -> ToolResponse:
     """Load a video file into the LLM context so the model can see it.
 
     Use this when the user asks about a video file or when another
@@ -411,7 +411,7 @@ async def view_video(video_path: str) -> ToolResponse:
     telling the agent it cannot perceive the video.
 
     Args:
-        video_path (`str`):
+        file_path (`str`):
             Local path or HTTP(S) URL of the video to view.
 
     Returns:
@@ -422,11 +422,11 @@ async def view_video(video_path: str) -> ToolResponse:
     if not _check_multimodal_support("video"):
         probe_result = await _probe_multimodal_if_needed("video")
         if probe_result is not True:
-            fallback_hint = _get_multimodal_fallback_hint("video", video_path)
+            fallback_hint = _get_multimodal_fallback_hint("video", file_path)
 
-    if _is_url(video_path):
+    if _is_url(file_path):
         err = _validate_url_extension(
-            video_path,
+            file_path,
             _VIDEO_EXTENSIONS,
             "video",
         )
@@ -435,20 +435,20 @@ async def view_video(video_path: str) -> ToolResponse:
         text_msg = (
             fallback_hint
             if fallback_hint
-            else f"Video loaded from URL: {video_path}"
+            else f"Video loaded from URL: {file_path}"
         )
         return ToolResponse(
             content=[
                 VideoBlock(
                     type="video",
-                    source={"type": "url", "url": video_path},
+                    source={"type": "url", "url": file_path},
                 ),
                 TextBlock(type="text", text=text_msg),
             ],
         )
 
     resolved, err = _validate_media_path(
-        video_path,
+        file_path,
         _VIDEO_EXTENSIONS,
         "video",
     )

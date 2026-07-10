@@ -543,6 +543,34 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   private _currentSessionId: string | null = null;
 
   /**
+   * Current session id in the library context. Set by ChatSessionInitializer so
+   * that external guards (e.g. the sender beforeSubmit hook) can tell whether a
+   * session has already been established.
+   */
+  libraryCurrentSessionId?: string;
+
+  /**
+   * Injected by ChatSessionInitializer. Creates a fresh session when the user
+   * is about to send the first message and no session exists yet. This splits
+   * session creation and message sending into two distinct steps, avoiding the
+   * race where the library's session loader clears the first user message.
+   */
+  createSessionIfNeeded?: () => Promise<string>;
+
+  /**
+   * Whether the library has finished loading the session list for the current
+   * agent. Used by ChatSessionInitializer to decide when it is safe to auto-
+   * create a session for a brand-new agent.
+   */
+  _sessionListLoaded = false;
+  private _lastSessionListAgentId: string | null = null;
+
+  /**
+   * Guard to prevent concurrent auto-created sessions.
+   */
+  _autoCreatingSession = false;
+
+  /**
    * When set, getSessionList will move the matching session to the front on the first call,
    * so the library's useMount auto-selects it instead of always defaulting to sessions[0].
    * Cleared after first use.
@@ -766,12 +794,22 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     this.sessionListRequest = null;
     this._sessions = [];
     this.lastSelectedSessionId = null;
+    this._sessionListLoaded = false;
+    this._lastSessionListAgentId = null;
     // Clear in-flight session requests to prevent stale data after agent switch
     this.sessionRequests.clear();
   }
 
   async getSessionList() {
     if (this.sessionListRequest) return this.sessionListRequest;
+
+    // Reset the loaded flag when the agent changes, so callers can tell the
+    // difference between "not loaded yet" and "no sessions exist".
+    const currentAgent = useAgentStore.getState().selectedAgent;
+    if (this._lastSessionListAgentId !== currentAgent) {
+      this._lastSessionListAgentId = currentAgent;
+      this._sessionListLoaded = false;
+    }
 
     this.sessionListRequest = (async () => {
       try {
@@ -782,6 +820,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         const agentId = useAgentStore.getState().selectedAgent;
         if (!agentId) {
           console.warn('[sessionApi] getSessionList: no agent selected, skipping');
+          this._sessionListLoaded = true;
           return [];
         }
         const params: { user_id?: string; channel?: string; agent_id?: string } = {};
@@ -846,9 +885,11 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
 
         // Notify React so the sidebar re-renders with updated names
         this.onSessionListUpdated?.(result);
+        this._sessionListLoaded = true;
         return result;
       } catch (err) {
         console.error(`[sessionApi] getSessionList error:`, err);
+        this._sessionListLoaded = false;
         throw err;
       } finally {
         this.sessionListRequest = null;
@@ -1053,11 +1094,9 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     }
   }
 
-  async updateSession(session: Partial<IAgentScopeRuntimeWebUISession>) {
-    // Always clear messages before updating session list.
-    // Content loss during streaming is prevented by useChatController's
-    // useEffect([currentSessionId]) which skips reset when msgStatus === 'generating'.
-    session.messages = [];
+  async updateSession(
+    session: Partial<IAgentScopeRuntimeWebUISession>,
+  ): Promise<IAgentScopeRuntimeWebUISession[]> {
     // FIX Issue 1: Try to find session by id, then by realId.
     // When currentSessionId is set to a backend UUID, session.id is the UUID,
     // but _sessions entries may have local timestamp IDs in .id field.
@@ -1124,12 +1163,9 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     return [...this._sessions];
   }
 
-  async createSession(session?: Partial<IAgentScopeRuntimeWebUISession>) {
-    // COAPIS FIX: Set a flag so useChatAnywhereSessionLoader skips its
-    // clear+fetch cycle. Without this, the session loader fires during
-    // handleSubmit's sleep(100) and wipes the user message just added.
-    (window as any)._coapisSkipSessionLoadUntil = Date.now() + 2000;
-
+  async createSession(
+    session?: Partial<IAgentScopeRuntimeWebUISession>,
+  ): Promise<IAgentScopeRuntimeWebUISession[]> {
     const extended = session as ExtendedSession | undefined;
     const sessionName = session?.name || DEFAULT_SESSION_NAME;
     const channel = extended?.channel || DEFAULT_CHANNEL;
@@ -1190,7 +1226,12 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       this.onSessionCreated?.(created.id);
 
       console.log(`[sessionApi] Created session: id=${created.id}, name=${sessionName}`);
-      return this._sessions;
+
+      // COAPIS FIX: Return a copy of the session list so the library can update
+      // its session list (setSessions). Also write the backend UUID back to the
+      // input object so the library's createSession gets a valid id for
+      // setCurrentSessionId and the message loader can identify the session.
+      return [...this._sessions];
 
     } catch (err) {
       console.error("[sessionApi] Failed to create session:", err);

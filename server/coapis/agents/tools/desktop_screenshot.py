@@ -121,10 +121,10 @@ def _capture_macos_screencapture(
     description="截取桌面截图",
     category="builtin",
     tags=['screenshot'],
-    scene="core",
+    scene="system",
 )
 async def desktop_screenshot(
-    path: str = "",
+    output_path: str = "",
     capture_window: bool = False,
 ) -> ToolResponse:
     """Capture a screenshot of the entire desktop (all monitors)
@@ -136,7 +136,7 @@ async def desktop_screenshot(
     tool to let the user click a window to capture.
 
     Args:
-        path (`str`):
+        output_path (`str`):
             Optional path to save the screenshot. If empty, saves under
             the current workspace directory. Should end in .png for PNG output.
         capture_window (`bool`):
@@ -149,20 +149,20 @@ async def desktop_screenshot(
             JSON with "ok", "path" (saved file path), and optional "message"
             or "error".
     """
-    path = (path or "").strip()
-    if not path:
+    output_path = (output_path or "").strip()
+    if not output_path:
         base_dir = get_current_workspace_dir() or WORKING_DIR
         screenshots_dir = base_dir / "files" / "screenshots"
         screenshots_dir.mkdir(parents=True, exist_ok=True)
-        path = str(screenshots_dir / f"desktop_screenshot_{int(time.time())}.png")
-    if not path.lower().endswith(".png"):
-        path = path.rstrip("/\\") + ".png"
+        output_path = str(screenshots_dir / f"desktop_screenshot_{int(time.time())}.png")
+    if not output_path.lower().endswith(".png"):
+        output_path = output_path.rstrip("/\\") + ".png"
 
     system = platform.system()
 
     # macOS: optional window selection via screencapture -w
     if system == "Darwin" and capture_window:
-        return _capture_macos_screencapture(path, capture_window=True)
+        return _capture_macos_screencapture(output_path, capture_window=True)
 
     # Full-screen on all platforms (macOS, Linux, Windows) via mss
-    return _capture_mss(path)
+    return _capture_mss(output_path)

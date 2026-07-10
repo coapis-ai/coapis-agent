@@ -2910,6 +2910,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         if msg is not None:
             await process_file_and_media_blocks_in_message(msg)
 
+        # DEBUG: log msg content after media processing
+        _debug_last = msg[-1] if isinstance(msg, list) else msg
+        if isinstance(_debug_last, Msg):
+            logger.info(
+                "[DEBUG] CoApisAgent.reply after media processing: "
+                "role=%s, content=%s, text=%s",
+                _debug_last.role,
+                str(_debug_last.content)[:200],
+                repr(_debug_last.get_text_content()[:100]),
+            )
+
         # Check if message is a system command
         last_msg = msg[-1] if isinstance(msg, list) else msg
         query = (
@@ -2967,6 +2978,21 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # Check if this is a global agent (skip auto-assist for global agents)
         is_global = getattr(self._agent_config, 'is_global', False)
+
+        # DEBUG: log msg and memory before super().reply
+        _debug_last = msg[-1] if isinstance(msg, list) else msg
+        if isinstance(_debug_last, Msg):
+            logger.info(
+                "[DEBUG] CoApisAgent.reply before super().reply: "
+                "query=%r, last_msg.role=%s, last_msg.content=%s",
+                self._current_query,
+                _debug_last.role,
+                str(_debug_last.content)[:200],
+            )
+        logger.info(
+            "[DEBUG] CoApisAgent.reply memory size before super().reply: %s",
+            len(self.memory.content) if self.memory else 0,
+        )
 
         with apply_skill_config_env_overrides(workspace_dir, channel_name):
             response = await super().reply(

@@ -344,7 +344,7 @@ def _execute_subprocess_sync(
     description="执行 shell 命令",
     category="builtin",
     tags=['shell', 'exec'],
-    scene="core",
+    scene="dev",
 )
 async def execute_shell_command(
     command: str,

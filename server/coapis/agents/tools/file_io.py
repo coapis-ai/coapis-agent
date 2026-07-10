@@ -454,6 +454,13 @@ async def edit_file(
     )
 
 
+@register_tool(
+    name="append_file",
+    description="追加内容到文件末尾",
+    category="builtin",
+    tags=["file", "append"],
+    scene="core",
+)
 async def append_file(
     file_path: str,
     content: str,
