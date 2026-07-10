@@ -2,7 +2,7 @@
 
 # CoApis
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL%203.0-red.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.9.11-green.svg)](CHANGELOG.md)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/r/coapis/server)
 
@@ -146,7 +146,7 @@ GitHub：[coapis-ai/coapis-agent](https://github.com/coapis-ai/coapis-agent)
 
 ## 许可证
 
-Apache License 2.0 · Copyright 2026 蜜蜂 & CoApis Contributors
+GNU Affero General Public License v3.0 · Copyright 2026 蜜蜂 & CoApis Contributors
 
 ---
 

@@ -69,7 +69,7 @@ cd client && npm run dev
 
 - 遵循 [PEP 8](https://peps.python.org/pep-0008/) 风格指南
 - 使用类型注解（Type Hints）
-- 所有 Python 文件需包含 Apache 2.0 License Header
+- 所有 Python 文件需包含 AGPL-3.0 License Header
 - 使用 `black` 格式化代码
 - 使用 `ruff` 进行 linting
 
