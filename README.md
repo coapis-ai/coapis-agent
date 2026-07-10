@@ -134,7 +134,7 @@ docker compose -f docker/docker-compose.build.yml up -d --build
 | 渠道 | 链接 |
 |------|------|
 | Gitee | [ouerlai/coapis-agent](https://gitee.com/ouerlai/coapis-agent) |
-| GitHub | [coapis/coapis-agent](https://github.com/coapis-ai/coapis-agent) |
+| GitHub | [coapis-ai/coapis-agent](https://github.com/coapis-ai/coapis-agent) |
 | 安全漏洞报告 | [SECURITY.md](SECURITY.md) |
 
 ---
