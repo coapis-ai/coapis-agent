@@ -67,10 +67,18 @@ How agents run stably. Complete execution environment, multi-layer memory system
 ### Docker Deploy
 
 ```bash
-git clone --depth 1 https://github.com/coapis-ai/coapis-agent.git
-cd coapis-agent/docker
+# Download only docker directory
+git clone --depth 1 --filter=blob:none --sparse \
+  https://github.com/coapis-ai/coapis-agent.git && \
+  cd coapis-agent && \
+  git sparse-checkout set docker && \
+  cd docker
+
+# Configure environment variables
 cp .env.example .env
 nano .env  # Fill in API Key
+
+# Start service
 docker compose up -d
 ```
 
