@@ -158,4 +158,4 @@ GNU Affero General Public License v3.0 · Copyright 2026 蜜蜂 & CoApis Contrib
 
 ---
 
-**为什么叫 CoApis？** — Eater（探索者）+ Claw（爪子）。一只什么都想试、什么都能抓的蜜蜂。🐝
+**为什么叫 CoApis？** — Co（协作）-Apis（拉丁语"蜜蜂"）组合，寓意蜂群式的团队协作，构建企业级 AI Agent Harness，体现"企业协作、群体智能、分工进化、全链管控"的理念。🐝

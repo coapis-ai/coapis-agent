@@ -158,4 +158,4 @@ GNU Affero General Public License v3.0 · Copyright 2026 蜜蜂 & CoApis Contrib
 
 ---
 
-**Why "CoApis"?** — Eater (explorer) + Claw (grip). A bee that tries everything and grabs anything. 🐝
+**Why "CoApis"?** — Co (Collaboration) + Apis (Latin for "bee"), symbolizing swarm-style team collaboration, building enterprise-grade AI Agent Harness, embodying the philosophy of "enterprise collaboration, collective intelligence, division of labor evolution, full-chain control". 🐝
