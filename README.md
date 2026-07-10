@@ -10,7 +10,7 @@
 
 <img src="https://img.icons8.com/color/96/bee.png" alt="CoApis Logo" width="120">
 
-# 企业级智能体平台
+# 企业级 Agent Harness 平台
 
 > 一套部署，全团队可用
 
