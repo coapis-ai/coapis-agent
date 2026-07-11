@@ -599,7 +599,12 @@ class MessageRenderer:
                     args_preview = "..."
                 emoji = s.tool_emoji_map.get(name, s.tool_emoji)
                 friendly = _TOOL_FRIENDLY_NAMES.get(name, name)
-                text = f"{emoji} **{friendly}**\n```\n{args_preview}\n```"
+                # Use inline code format to reduce height (especially for mobile apps)
+                if s.show_tool_details:
+                    args_preview = args[:200] + "..." if len(args) > 200 else args
+                    text = f"{emoji} **{friendly}**: `{args_preview}`"
+                else:
+                    text = f"{emoji} **{friendly}** …"
                 parts.append(TextContent(text=text))
             return parts or [TextContent(text=f"[{msg_type}]")]
 

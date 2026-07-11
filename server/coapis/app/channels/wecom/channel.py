@@ -1325,7 +1325,9 @@ class WecomChannel(BaseChannel):
 
         sids = self._get_streaming_sids(send_meta)
 
-        if not sids:
+        # Always reuse processing_stream_id if available to avoid duplicate thinking indicators
+        processing_sid = send_meta.get("wecom_processing_stream_id", "")
+        if processing_sid:
             stream_id = await self._cancel_keepalive_and_get_stream_id(
                 send_meta,
             )
