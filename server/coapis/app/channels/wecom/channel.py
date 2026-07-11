@@ -1325,14 +1325,20 @@ class WecomChannel(BaseChannel):
 
         sids = self._get_streaming_sids(send_meta)
 
-        # Always reuse processing_stream_id if available to avoid duplicate thinking indicators
-        processing_sid = send_meta.get("wecom_processing_stream_id", "")
-        if processing_sid:
-            stream_id = await self._cancel_keepalive_and_get_stream_id(
-                send_meta,
-            )
+        # Reuse existing stream_id to avoid duplicate thinking indicators
+        # All stream_types (reasoning, message) should use the same stream_id
+        if sids:
+            # Already have a stream_id from previous stream_type, reuse it
+            stream_id = next(iter(sids.values()))
         else:
-            stream_id = generate_req_id("stream")
+            # First stream_type: get processing_stream_id
+            processing_sid = send_meta.get("wecom_processing_stream_id", "")
+            if processing_sid:
+                stream_id = await self._cancel_keepalive_and_get_stream_id(
+                    send_meta,
+                )
+            else:
+                stream_id = generate_req_id("stream")
 
         sids[stream_type] = stream_id
         logger.info(
