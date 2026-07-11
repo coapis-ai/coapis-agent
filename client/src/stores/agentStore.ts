@@ -12,12 +12,6 @@ import { getAgentStorageKey, getLastUsedAgentKey } from "../api/config";
  */
 const STORAGE_KEY = "coapis-agent-storage";  // Placeholder, actual key is dynamic
 
-/**
- * localStorage key that remembers the last-used agent across browser sessions.
- * New tabs read this to set their initial selectedAgent.
- */
-const LAST_USED_AGENT_KEY = getLastUsedAgentKey();
-
 interface AgentStore {
   selectedAgent: string;
   agents: AgentSummary[];
@@ -131,7 +125,7 @@ export const useAgentStore = create<AgentStore>()(
     {
       name: STORAGE_KEY,
       storage: {
-        getItem: (name) => {
+        getItem: (_name) => {
           // Use dynamic key for current user
           const dynamicKey = getAgentStorageKey();
           try {
@@ -151,7 +145,7 @@ export const useAgentStore = create<AgentStore>()(
             return null;
           }
         },
-        setItem: (name, value) => {
+        setItem: (_name, value) => {
           // Use dynamic key for current user
           const dynamicKey = getAgentStorageKey();
           try {
@@ -167,7 +161,7 @@ export const useAgentStore = create<AgentStore>()(
             console.error(`Failed to save agent storage "${dynamicKey}":`, error);
           }
         },
-        removeItem: (name) => {
+        removeItem: (_name) => {
           // Use dynamic key for current user
           const dynamicKey = getAgentStorageKey();
           sessionStorage.removeItem(dynamicKey);

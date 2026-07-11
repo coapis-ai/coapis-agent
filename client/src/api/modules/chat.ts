@@ -93,7 +93,7 @@ export const chatApi = {
     const headers: Record<string, string> | undefined = opts?.agent_id 
       ? { "X-Agent-Id": opts.agent_id } 
       : undefined;
-    return request<ChatHistory & { total_count?: number; has_more?: boolean }>(
+    return request<ChatHistory & ChatSpec & { total_count?: number; has_more?: boolean }>(
       `/chats/${encodeURIComponent(chatId)}${qs ? `?${qs}` : ""}`,
       { headers }
     );

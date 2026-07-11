@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { getApiToken, clearAuthToken, getApiUrl, getAgentStorageKey, getLastUsedAgentKey } from '../api/config';
+import { getApiToken, clearAuthToken, getApiUrl, getAgentStorageKey, getLastUsedAgentKey, getCurrentUsername } from '../api/config';
 import { updateUserPreferences } from '../api/modules/user_me';
 
 // ── Types ─────────────────────────────────────────────────────────────────
