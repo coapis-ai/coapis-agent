@@ -191,6 +191,24 @@ def _register_with_multi_agent_manager(request: Any, agent_id: str, username: st
                 is_global=False,  # User agent — not shared
             )
             logger.info(f"Registered agent {agent_id} with MultiAgentManager (user: {username})")
+
+            # ✅ 创建用户后立即启动智能体（如果有启用的外部渠道）
+            # 只检查外部渠道（wecom, discord, telegram 等），不包括 console（被动渠道）
+            external_channels = ["wecom", "discord", "telegram", "dingtalk", "feishu", "qq", "mattermost", "matrix", "xiaoyi", "weixin", "onebot"]
+            channels = config_dict.get("channels", {})
+            has_enabled_channels = any(
+                ch_name in external_channels and ch_cfg.get("enabled", False)
+                for ch_name, ch_cfg in channels.items()
+                if isinstance(ch_cfg, dict)
+            )
+
+            if has_enabled_channels:
+                logger.info(f"Starting agent {agent_id} (has enabled channels)")
+                try:
+                    await manager.get_agent(agent_id, username=username)
+                    logger.info(f"✓ Agent {agent_id} started successfully")
+                except Exception as e:
+                    logger.error(f"✗ Failed to start agent {agent_id}: {e}")
         except Exception as e:
             logger.error(f"Failed to register agent {agent_id} with MultiAgentManager: {e}")
 

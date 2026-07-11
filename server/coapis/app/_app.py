@@ -599,6 +599,62 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
             except Exception as e:
                 logger.warning(f"Approval service setup skipped: {e}")
 
+            # ---- Startup agents with enabled channels (e.g., wecom) ----
+            # Auto-start user agents that have enabled channels (wecom, discord, etc.)
+            # This ensures channel listeners are active to receive messages
+            try:
+                logger.info("Starting agents with enabled channels...")
+                from pathlib import Path
+                import json as _json
+                
+                workspaces_dir = Path(WORKING_DIR) / "workspaces"
+                if workspaces_dir.exists():
+                    for user_dir in workspaces_dir.iterdir():
+                        if not user_dir.is_dir():
+                            continue
+                        username = user_dir.name
+                        # Skip global_default (already started)
+                        if username == "global_default":
+                            continue
+                        
+                        # Check if user has agent.json with enabled channels
+                        agent_json = user_dir / "agent.json"
+                        if not agent_json.exists():
+                            continue
+                        
+                        try:
+                            with open(agent_json) as f:
+                                agent_config = _json.load(f)
+                            
+                            channels = agent_config.get("channels", {})
+                            # 只检查外部渠道，不包括 console（被动渠道）
+                            external_channels = ["wecom", "discord", "telegram", "dingtalk", "feishu", "qq", "mattermost", "matrix", "xiaoyi", "weixin", "onebot"]
+                            has_enabled_channels = any(
+                                ch_name in external_channels and ch_cfg.get("enabled", False)
+                                for ch_name, ch_cfg in channels.items()
+                                if isinstance(ch_cfg, dict)
+                            )
+                            
+                            if has_enabled_channels:
+                                agent_id = agent_config.get("id", f"user:{username}")
+                                logger.info(f"Starting agent {agent_id} (has enabled channels)")
+                                await multi_agent_manager.get_agent(agent_id, username=username)
+                        except Exception as e:
+                            logger.debug(f"Failed to check agent {username}: {e}")
+                            
+            except Exception as e:
+                logger.warning(f"Failed to start agents with enabled channels: {e}")
+
+            # ---- Workspace Monitor (auto-recovery) ----
+            try:
+                from .workspace_monitor import WorkspaceMonitor
+                monitor = WorkspaceMonitor(multi_agent_manager, check_interval=300)
+                await monitor.start()
+                app.state.workspace_monitor = monitor
+                logger.info("WorkspaceMonitor started (auto-recovery enabled)")
+            except Exception as e:
+                logger.warning(f"Failed to start WorkspaceMonitor: {e}")
+
             startup_elapsed = time.time() - startup_start_time
             logger.info(
                 "Background startup completed in "
@@ -686,6 +742,15 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
                 await multi_agent_mgr.stop_all()
             except Exception as e:
                 logger.error(f"Error stopping MultiAgentManager: {e}")
+
+        # Stop workspace monitor
+        workspace_monitor = getattr(app.state, "workspace_monitor", None)
+        if workspace_monitor is not None:
+            logger.info("Stopping WorkspaceMonitor...")
+            try:
+                await workspace_monitor.stop()
+            except Exception as e:
+                logger.error(f"Error stopping WorkspaceMonitor: {e}")
 
         # Stop token usage manager (drain queue and final flush)
         logger.info("Stopping TokenUsageManager...")
