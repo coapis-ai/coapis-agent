@@ -2948,7 +2948,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # P0: Initialize ProgressTracker for this turn
         try:
             from .utils.progress_tracker import ProgressTracker, ProgressTrackerConfig
-            pt_cfg = ProgressTrackerConfig(enabled=True)
+            pt_cfg = ProgressTrackerConfig(enabled=False)  # Disabled: progress summary interferes with user experience
             if not hasattr(self, "_progress_tracker"):
                 self._progress_tracker = ProgressTracker(pt_cfg)
             self._progress_tracker.reset()
