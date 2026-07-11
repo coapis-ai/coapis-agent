@@ -1224,12 +1224,15 @@ class WecomChannel(BaseChannel):
         (set by the first call), skip to avoid sending duplicate
         "🤔 Thinking…" indicators.
         """
+        logger.info("🔍 _before_consume_process called, has_text=%s", bool(getattr(request, "input", None)))
+        
         self._streaming_text_sent = False
         # ── Re-entrance guard ──
         # consume_one calls _before_consume_process, then passes the
         # request to _consume_with_tracker which calls it again via
         # _stream_with_tracker.  The second call must be a no-op.
         if getattr(request, "_wecom_processing_stream_id", ""):
+            logger.info("🔍 _before_consume_process: already has processing_stream_id, skip")
             return
 
         meta = getattr(request, "channel_meta", None) or {}
@@ -1325,11 +1328,18 @@ class WecomChannel(BaseChannel):
 
         sids = self._get_streaming_sids(send_meta)
 
+        # DEBUG: Log stream_id tracking
+        logger.info(
+            "🔍 on_streaming_start: stream_type=%s sids=%s processing_sid=%s",
+            stream_type, sids, send_meta.get("wecom_processing_stream_id", "None"),
+        )
+
         # Reuse existing stream_id to avoid duplicate thinking indicators
         # All stream_types (reasoning, message) should use the same stream_id
         if sids:
             # Already have a stream_id from previous stream_type, reuse it
             stream_id = next(iter(sids.values()))
+            logger.info("🔍 Reusing existing stream_id: %s", stream_id[:20])
         else:
             # First stream_type: get processing_stream_id
             processing_sid = send_meta.get("wecom_processing_stream_id", "")
@@ -1342,8 +1352,8 @@ class WecomChannel(BaseChannel):
 
         sids[stream_type] = stream_id
         logger.info(
-            "on_streaming_start stream_type=%s stream_id=%s",
-            stream_type, stream_id[:20] if stream_id else "?",
+            "on_streaming_start stream_type=%s stream_id=%s (full=%s)",
+            stream_type, stream_id[:20] if stream_id else "?", stream_id,
         )
 
     # ── Display helpers ──────────────────────────

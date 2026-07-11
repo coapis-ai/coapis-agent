@@ -913,7 +913,7 @@ class BaseChannel(ABC):
                 if not is_control:
                     # Non-control: route through TaskTracker
                     request = self._payload_to_request(payload)
-                    await self._before_consume_process(request)
+                    # _before_consume_process is called in _stream_with_tracker
                     await self._consume_with_tracker(request, payload)
                     return
                 # Control commands fall through to direct _process
