@@ -83,6 +83,24 @@ export default function UserProvider({ children }: UserProviderProps) {
       return;
     }
 
+    // Detect user change and clear old data to prevent cross-user data leakage
+    const oldUsername = localStorage.getItem('coapis-current-username');
+    const newUsername = getCurrentUsername();
+
+    if (oldUsername && oldUsername !== newUsername) {
+      console.log(`User changed: ${oldUsername} -> ${newUsername}, clearing old data`);
+      // Clear old user's agent store data
+      const oldKey = `coapis-agent-storage-${oldUsername}`;
+      const oldLastUsedKey = `coapis-last-used-agent-${oldUsername}`;
+      localStorage.removeItem(oldKey);
+      localStorage.removeItem(oldLastUsedKey);
+      // Clear sessionStorage (may contain old user's selectedAgent)
+      sessionStorage.clear();
+    }
+
+    // Save current username for next login detection
+    localStorage.setItem('coapis-current-username', newUsername || '');
+
     // Use direct fetch to bypass the global 401 handler in request.ts
     // which would clearAuthToken() and redirect to /login on any 401
     const authHeaders = { Authorization: `Bearer ${token}` };

@@ -79,6 +79,9 @@ find_bad_jobs.py
 test_*.py
 verify_*.py
 
+# --- Dev test scripts ---
+tests/dev/
+
 # --- Screenshot / verify images ---
 *.png
 

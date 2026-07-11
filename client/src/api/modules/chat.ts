@@ -85,13 +85,17 @@ export const chatApi = {
       headers: chat.agent_id ? { "X-Agent-Id": chat.agent_id } : undefined,
     }),
 
-  getChat: (chatId: string, opts?: { limit?: number; before?: string }) => {
+  getChat: (chatId: string, opts?: { limit?: number; before?: string; agent_id?: string }) => {
     const params = new URLSearchParams();
     if (opts?.limit) params.append("limit", String(opts.limit));
     if (opts?.before) params.append("before", opts.before);
     const qs = params.toString();
+    const headers: Record<string, string> | undefined = opts?.agent_id 
+      ? { "X-Agent-Id": opts.agent_id } 
+      : undefined;
     return request<ChatHistory & { total_count?: number; has_more?: boolean }>(
-      `/chats/${encodeURIComponent(chatId)}${qs ? `?${qs}` : ""}`
+      `/chats/${encodeURIComponent(chatId)}${qs ? `?${qs}` : ""}`,
+      { headers }
     );
   },
 

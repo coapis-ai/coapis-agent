@@ -957,8 +957,36 @@ export default function ChatPage() {
       // Restore last chat ID for the agent we're switching to
       const restored = getLastChatId(selectedAgent);
       if (restored) {
-        navigateRef.current(`/chat/${restored}`, { replace: true });
-        sessionApi.preferredChatId = restored;
+        // Validate that this chat belongs to the current user AND agent before restoring
+        // This prevents cross-user and cross-agent data leakage from stale localStorage data
+        (async () => {
+          try {
+            const chatSpec = await chatApi.getChat(restored, { agent_id: selectedAgent });
+            // Import getCurrentUsername dynamically to avoid circular deps
+            const { getCurrentUsername } = await import("../../api/config");
+            const currentUser = getCurrentUsername();
+            const chatAgentId = chatSpec.agent_id || "";
+            
+            // Validate both user_id and agent_id
+            if (chatSpec.user_id !== currentUser || chatAgentId !== selectedAgent) {
+              console.warn(
+                `Chat ${restored} belongs to user=${chatSpec.user_id}/agent=${chatAgentId}, ` +
+                `not user=${currentUser}/agent=${selectedAgent}, clearing`
+              );
+              setLastChatId(selectedAgent, "");
+              navigateRef.current("/chat", { replace: true });
+            } else {
+              // Valid chat, proceed with restore
+              navigateRef.current(`/chat/${restored}`, { replace: true });
+              sessionApi.preferredChatId = restored;
+            }
+          } catch (error) {
+            // Chat not found or access denied, clear stale data
+            console.warn(`Failed to verify chat ${restored}, clearing:`, error);
+            setLastChatId(selectedAgent, "");
+            navigateRef.current("/chat", { replace: true });
+          }
+        })();
       } else {
         navigateRef.current("/chat", { replace: true });
       }

@@ -93,6 +93,18 @@ class BootstrapHook:
         Returns {"bootstrap_pending": bool} for runner reference.
         """
         try:
+            # Double-check: Only guide default agents (global_default or user:xxx)
+            # Sub-agents should NOT trigger bootstrap
+            agent_config = getattr(agent, "_agent_config", None)
+            if agent_config:
+                agent_id = getattr(agent_config, "id", "")
+                # Skip bootstrap for non-default agents
+                if not (agent_id == "global_default" or agent_id.startswith("user:")):
+                    logger.debug(
+                        "Skipping bootstrap for non-default agent: %s", agent_id,
+                    )
+                    return None
+            
             if not has_pending_bootstrap(self.working_dir):
                 return None
 

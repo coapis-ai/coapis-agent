@@ -36,6 +36,9 @@ from .registry import register_tool
 
 logger = logging.getLogger(__name__)
 
+# Sentinel value for required parameters
+_REQUIRED = object()
+
 # ── Config (env-driven) ─────────────────────────────────────────────
 _DEFAULT_BACKEND = os.environ.get("COAPIS_WEB_SEARCH_DEFAULT_BACKEND", "auto")
 _BACKEND_ORDER = [
@@ -359,7 +362,7 @@ _BACKENDS = {
     scene="general"
 )
 async def web_search(
-    query: str = "",
+    query: str = _REQUIRED,    # Sentinel 标记必填
     backend: str = "",
     max_results: int = 5,
 ) -> dict[str, Any]:
@@ -373,11 +376,17 @@ async def web_search(
     Returns:
         搜索结果列表 + 使用的后端
     """
-    # 快速失败：参数为空时立即返回
+    # 快速失败：参数检查
+    if query is _REQUIRED:
+        return {
+            "error": "query 是必填参数",
+            "hint": "请提供搜索关键词。示例: web_search(query='Python教程')",
+            "usage": "web_search(query='搜索词', backend='browser', max_results=5)",
+        }
     if not query or not query.strip():
         return {
             "error": "搜索关键词不能为空",
-            "hint": "请提供搜索关键词。示例: web_search(query='Python教程')",
+            "hint": "请提供有效的搜索关键词",
             "usage": "web_search(query='搜索词', backend='browser', max_results=5)",
         }
 

@@ -8,8 +8,9 @@ import { getAgentStorageKey, getLastUsedAgentKey } from "../api/config";
  * (cross-tab shared state).
  *
  * IMPORTANT: The key is user-scoped to prevent agent leakage between users.
+ * NOTE: We use a placeholder here; actual key is resolved dynamically in storage methods.
  */
-const STORAGE_KEY = getAgentStorageKey();
+const STORAGE_KEY = "coapis-agent-storage";  // Placeholder, actual key is dynamic
 
 /**
  * localStorage key that remembers the last-used agent across browser sessions.
@@ -40,9 +41,13 @@ interface AgentStore {
  *  3. "" (empty — Sidebar will resolve the user's default agent)
  */
 function getInitialSelectedAgent(): string {
+  // Get dynamic storage key for current user
+  const dynamicKey = getAgentStorageKey();
+  const dynamicLastUsedKey = getLastUsedAgentKey();
+
   // 1. sessionStorage: returning to a tab that already picked an agent
   try {
-    const sessionValue = sessionStorage.getItem(STORAGE_KEY);
+    const sessionValue = sessionStorage.getItem(dynamicKey);
     if (sessionValue) {
       const parsed = JSON.parse(sessionValue);
       const agent = parsed?.state?.selectedAgent;
@@ -53,14 +58,14 @@ function getInitialSelectedAgent(): string {
   }
   // 2. Dedicated localStorage key (written by setSelectedAgent)
   try {
-    const lastUsed = localStorage.getItem(LAST_USED_AGENT_KEY);
+    const lastUsed = localStorage.getItem(dynamicLastUsedKey);
     if (lastUsed) return lastUsed;
   } catch {
     /* ignore */
   }
   // 3. Shared localStorage state (written by persist middleware)
   try {
-    const shared = localStorage.getItem(STORAGE_KEY);
+    const shared = localStorage.getItem(dynamicKey);
     if (shared) {
       const parsed = JSON.parse(shared);
       const agent = parsed?.state?.selectedAgent;
@@ -82,8 +87,9 @@ export const useAgentStore = create<AgentStore>()(
       setSelectedAgent: (agentId) => {
         set({ selectedAgent: agentId });
         // Persist to localStorage so new tabs inherit this choice
+        // Use dynamic key for current user
         try {
-          localStorage.setItem(LAST_USED_AGENT_KEY, agentId);
+          localStorage.setItem(getLastUsedAgentKey(), agentId);
         } catch {
           /* ignore */
         }
@@ -126,40 +132,46 @@ export const useAgentStore = create<AgentStore>()(
       name: STORAGE_KEY,
       storage: {
         getItem: (name) => {
+          // Use dynamic key for current user
+          const dynamicKey = getAgentStorageKey();
           try {
             // Read per-tab state from sessionStorage
-            const value = sessionStorage.getItem(name);
+            const value = sessionStorage.getItem(dynamicKey);
             if (value) return JSON.parse(value);
           } catch {
             /* ignore */
           }
           // Fall back to localStorage for shared data (agents list, etc.)
           try {
-            const shared = localStorage.getItem(name);
+            const shared = localStorage.getItem(dynamicKey);
             return shared ? JSON.parse(shared) : null;
           } catch (error) {
-            console.error(`Failed to parse agent storage "${name}":`, error);
-            localStorage.removeItem(name);
+            console.error(`Failed to parse agent storage "${dynamicKey}":`, error);
+            localStorage.removeItem(dynamicKey);
             return null;
           }
         },
         setItem: (name, value) => {
+          // Use dynamic key for current user
+          const dynamicKey = getAgentStorageKey();
           try {
             // Per-tab state (includes selectedAgent)
-            sessionStorage.setItem(name, JSON.stringify(value));
+            sessionStorage.setItem(dynamicKey, JSON.stringify(value));
           } catch {
             /* ignore */
           }
           try {
             // Shared state (agents list, lastChatIdByAgent)
-            localStorage.setItem(name, JSON.stringify(value));
+            localStorage.setItem(dynamicKey, JSON.stringify(value));
           } catch (error) {
-            console.error(`Failed to save agent storage "${name}":`, error);
+            console.error(`Failed to save agent storage "${dynamicKey}":`, error);
           }
         },
         removeItem: (name) => {
-          sessionStorage.removeItem(name);
-          localStorage.removeItem(name);
+          // Use dynamic key for current user
+          const dynamicKey = getAgentStorageKey();
+          sessionStorage.removeItem(dynamicKey);
+          localStorage.removeItem(dynamicKey);
         },
       },
     },

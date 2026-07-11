@@ -1308,7 +1308,30 @@ class AgentRunner(Runner):
             # file, append the corresponding prompt, and increment counter.
             from ...agents.utils import has_pending_bootstrap
             from ...agents.hooks.bootstrap import get_bootstrap_prompt
+            
+            # Check if this is a default agent (global_default or user:xxx)
+            # Sub-agents should NOT trigger bootstrap
+            _should_bootstrap = False
             if self.workspace_dir and has_pending_bootstrap(self.workspace_dir):
+                try:
+                    # Use agent._agent_config directly (already loaded with user preference)
+                    agent_cfg = getattr(agent, "_agent_config", None)
+                    if agent_cfg:
+                        agent_id_value = agent_cfg.id
+                        # Only bootstrap default agents
+                        if agent_id_value == "global_default" or agent_id_value.startswith("user:"):
+                            _should_bootstrap = True
+                        else:
+                            logger.debug(
+                                "Skipping bootstrap for non-default agent: %s",
+                                agent_id_value,
+                            )
+                except Exception as e:
+                    logger.warning("Failed to check agent ID for bootstrap: %s", e)
+                    # Fallback: if check fails, proceed with bootstrap
+                    _should_bootstrap = True
+            
+            if _should_bootstrap:
                 state_file = self.workspace_dir / ".bootstrap_state"
                 state = {"attempts": 0}
                 if state_file.exists():
@@ -1320,11 +1343,25 @@ class AgentRunner(Runner):
                 max_att = state.get("max_attempts", 3)
                 if prompts_sent < max_att:
                     next_attempt = prompts_sent + 1
+                    # Get language from agent config (already overridden by user preference)
+                    # Do NOT reload agent_config as it would lose user language preference
+                    try:
+                        language = getattr(agent, "_agent_config", None)
+                        language = getattr(language, "language", "zh") if language else "zh"
+                    except Exception:
+                        language = "zh"
                     bootstrap_text = get_bootstrap_prompt(
                         attempt=next_attempt,
-                        language="zh",
+                        language=language,
                     )
                     _evolution_full_response.append(bootstrap_text)
+                    # Send bootstrap message to user
+                    bootstrap_msg = Msg(
+                        name="assistant",
+                        content=[TextBlock(type="text", text=bootstrap_text)],
+                        role="assistant",
+                    )
+                    yield bootstrap_msg, True
                     # Increment counter for next time
                     state["attempts"] = next_attempt
                     state_file.write_text(
@@ -1332,7 +1369,7 @@ class AgentRunner(Runner):
                         encoding="utf-8",
                     )
                     logger.info(
-                        "Bootstrap prompt %d appended", next_attempt,
+                        "Bootstrap prompt %d sent", next_attempt,
                     )
             # -------------------------------------------------------
 

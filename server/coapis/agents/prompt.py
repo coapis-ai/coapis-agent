@@ -748,8 +748,14 @@ def build_bootstrap_guidance_v2(
 ) -> str:
     """Build concise bootstrap guidance for first-time user setup.
 
-    v2: Injected as an independent system message.  The agent answers
-    the user's question first, then appends a brief setup prompt.
+    .. deprecated::
+        This function injects tool-call directives and is no longer used.
+        Use `get_bootstrap_prompt` from hooks.bootstrap instead.
+        The v3 implementation (see bootstrap.py) no longer injects any
+        message into agent memory. Instead, runner.py appends simple
+        conversational prompts after streaming ends.
+        
+        Do NOT use this function as it may trigger unwanted tool calls.
 
     Args:
         language: Language code (zh/en).
@@ -759,6 +765,14 @@ def build_bootstrap_guidance_v2(
     Returns:
         System-message text with the guidance tag prefix.
     """
+    import warnings
+    warnings.warn(
+        "build_bootstrap_guidance_v2 is deprecated and should not be used. "
+        "Use get_bootstrap_prompt from hooks.bootstrap instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    
     remaining = max_attempts - attempt
     if language == "zh":
         if attempt == 1:
