@@ -41,16 +41,17 @@ _DEFAULT_MAX_ATTEMPTS = 3
 
 # Conversational prompts appended to assistant response after streaming.
 # Indexed by attempt number (0-based).
+# Using Markdown for better visibility.
 BOOTSTRAP_PROMPTS_ZH = [
-    "\n\n对了，怎么称呼您比较合适？",
-    "\n\n对了，您希望我平时用什么样的风格跟您交流？",
-    "\n\n有什么我可以帮您定制的吗？比如称呼或者交流风格。",
+    "\n\n---\n\n**初次见面，让我先自我介绍一下** 👋\n\n我是 CoApis 智能助手，很高兴认识你！我可以帮你处理各种任务、回答问题、管理日程，甚至帮你写代码。\n\n**请问我该怎么称呼你呢？**",
+    "\n\n---\n\n**想更好地为你服务** 💡\n\n了解你的偏好能让我更好地协助你。**你希望我用什么样的风格跟你交流？** 比如：\n- 简洁高效 vs 详细解释\n- 正式专业 vs 轻松友好\n- 或者你有其他想法？",
+    "\n\n---\n\n**让我更懂你** 🎯\n\n每个人都有独特的工作方式和偏好。**有什么我可以为你定制的吗？** 比如称呼、交流风格、或者你希望我优先关注的事情？",
 ]
 
 BOOTSTRAP_PROMPTS_EN = [
-    "\n\nBy the way, what should I call you?",
-    "\n\nBy the way, what communication style do you prefer?",
-    "\n\nIs there anything I can customize for you? Like how to address you or my tone.",
+    "\n\n---\n\n**Let me introduce myself first** 👋\n\nI'm your CoApis assistant, nice to meet you! I can help with tasks, answer questions, manage schedules, and even write code for you.\n\n**What should I call you?**",
+    "\n\n---\n\n**Let me serve you better** 💡\n\nUnderstanding your preferences helps me assist you better. **What communication style do you prefer?** For example:\n- Concise & efficient vs Detailed explanations\n- Formal & professional vs Casual & friendly\n- Or do you have other ideas?",
+    "\n\n---\n\n**Making it about you** 🎯\n\nEveryone has unique work styles and preferences. **Is there anything I can customize for you?** Like how to address you, communication style, or things you'd like me to prioritize?",
 ]
 
 
