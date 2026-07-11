@@ -65,6 +65,10 @@ class ChatUpdate(BaseModel):
         default=False,
         description="Whether the chat is pinned to the top",
     )
+    status: str | None = Field(
+        default=None,
+        description="Conversation status: idle or running",
+    )
 
 
 class ChatHistory(BaseModel):

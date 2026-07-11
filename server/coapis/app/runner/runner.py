@@ -1573,6 +1573,16 @@ class AgentRunner(Runner):
                         "Failed to persist chat messages",
                         exc_info=True,
                     )
+                
+                # Update chat status to "idle" when task ends
+                try:
+                    cm = self._chat_manager
+                    if cm is not None:
+                        from .models import ChatUpdate
+                        await cm.patch_chat(chat.id, ChatUpdate(status="idle"))
+                        logger.info(f"Chat {chat.id} status updated to idle")
+                except Exception as e:
+                    logger.warning(f"Failed to update chat status to idle: {e}")
 
             # NOTE: save_session_state removed.
             # _persist_chat_messages already saves the complete session state

@@ -419,6 +419,14 @@ async def console_chat(
             # full structured persistence (thinking, tool_use, tool_result, text blocks)
             # directly in the session, avoiding text-only overwrite.
         )
+        
+        # Update chat status to "running" when task starts
+        if started:
+            try:
+                await user_cm.patch_chat(chat.id, ChatUpdate(status="running"))
+                logger.info(f"Chat {chat.id} status updated to running")
+            except Exception as e:
+                logger.warning(f"Failed to update chat status to running: {e}")
 
     # ── SSE event generator ──
     # Note: All message persistence is handled by workspace._process_handler

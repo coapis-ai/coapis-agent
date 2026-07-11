@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ..permissions.decorators import require_permission
 from ..runner.utils import agentscope_msg_to_message
+from ..runner.models import ChatUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +382,27 @@ async def list_chats(
     result = []
     for c in chats:
         entry = _normalize_chat_spec(c)
-        entry["generating"] = entry["id"] in generating_chat_ids
+        
+        # Check generating status from multiple sources
+        # Priority 1: TaskTracker (in-memory, most accurate)
+        is_in_tracker = entry["id"] in generating_chat_ids
+        # Priority 2: ChatSpec.status (persistent, survives restart)
+        status_running = entry.get("status") == "running"
+        
+        if is_in_tracker:
+            entry["generating"] = True
+        elif status_running:
+            # TaskTracker doesn't have this task, but status shows "running"
+            # This means the task was lost (backend restart), fix the status
+            entry["generating"] = False
+            try:
+                await cm.patch_chat(entry["id"], ChatUpdate(status="idle"))
+                logger.info(f"Fixed stale running status for chat {entry['id']}")
+            except Exception as e:
+                logger.warning(f"Failed to fix stale status: {e}")
+        else:
+            entry["generating"] = False
+        
         result.append(entry)
     return result
 
