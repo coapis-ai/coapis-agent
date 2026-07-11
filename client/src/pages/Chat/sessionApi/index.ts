@@ -718,6 +718,18 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     this._currentSessionId = sessionId;
     // Only reset userId/channel if not already set by authentication
     // This prevents overwriting the authenticated user's identity
+    // Get current username from JWT token if window.currentUserId not set
+    if (!window.currentUserId) {
+      try {
+        const token = localStorage.getItem("coapis_auth_token");
+        if (token) {
+          const payload = JSON.parse(atob(token.split(".")[1] || ""));
+          window.currentUserId = payload?.sub || payload?.username || DEFAULT_USER_ID;
+        }
+      } catch {
+        // ignore
+      }
+    }
     if (!window.currentUserId || window.currentUserId === DEFAULT_USER_ID) {
       window.currentUserId = DEFAULT_USER_ID;
     }
@@ -815,11 +827,28 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       try {
         // Filter by current user to avoid loading other users' chats.
         // Filter by current agent for multi-agent isolation.
-        const userId = window.currentUserId;
+        // Get userId from window or JWT token
+        let userId = window.currentUserId;
+        if (!userId) {
+          try {
+            const token = localStorage.getItem("coapis_auth_token");
+            if (token) {
+              const payload = JSON.parse(atob(token.split(".")[1] || ""));
+              userId = payload?.sub || payload?.username || "";
+            }
+          } catch {
+            // ignore
+          }
+        }
         const channel = window.currentChannel;
         const agentId = useAgentStore.getState().selectedAgent;
         if (!agentId) {
           console.warn('[sessionApi] getSessionList: no agent selected, skipping');
+          this._sessionListLoaded = true;
+          return [];
+        }
+        if (!userId) {
+          console.warn('[sessionApi] getSessionList: no user_id available, skipping');
           this._sessionListLoaded = true;
           return [];
         }

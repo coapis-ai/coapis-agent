@@ -589,11 +589,22 @@ export default function ChatPage() {
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
 
   // Sync authenticated username to window for AgentScope Runtime session API
+  // IMPORTANT: Set immediately on mount to ensure window.currentUserId is available
+  // before any API calls that depend on it (e.g., sessionApi.getSessionList)
   useEffect(() => {
     if (user?.username) {
       window.currentUserId = user.username;
+      console.log(`[Chat] Set window.currentUserId = ${user.username}`);
     }
   }, [user?.username]);
+  
+  // Also set on initial mount if user is already loaded
+  useEffect(() => {
+    if (user?.username && !window.currentUserId) {
+      window.currentUserId = user.username;
+      console.log(`[Chat] Initial mount: Set window.currentUserId = ${user.username}`);
+    }
+  }, []); // Run once on mount
 
   useEffect(() => {
     let cancelled = false;
@@ -945,10 +956,18 @@ export default function ChatPage() {
     const prevAgent = prevSelectedAgentRef.current;
     if (prevAgent !== selectedAgent && prevAgent !== undefined) {
       // Save current chat ID for the agent we're leaving
+      // Priority: URL chatId > lastSessionIdRef > currentSession.id
+      const currentSession = sessionApi.currentSession;
       const currentChatId =
-        chatIdRef.current || lastSessionIdRef.current || undefined;
+        chatIdRef.current ||
+        lastSessionIdRef.current ||
+        (currentSession?.id !== currentSession?.realId ? currentSession?.realId : currentSession?.id) ||
+        undefined;
       if (currentChatId && prevAgent) {
+        console.log(`[Agent Switch] Saving chat ${currentChatId} for agent ${prevAgent}`);
         setLastChatId(prevAgent, currentChatId);
+      } else {
+        console.log(`[Agent Switch] No chat to save for agent ${prevAgent} (chatId=${chatIdRef.current}, lastSessionId=${lastSessionIdRef.current})`);
       }
 
       // Clear cached session list so it re-fetches for the new agent
@@ -957,6 +976,7 @@ export default function ChatPage() {
       // Restore last chat ID for the agent we're switching to
       const restored = getLastChatId(selectedAgent);
       if (restored) {
+        console.log(`[Agent Switch] Restoring chat ${restored} for agent ${selectedAgent}`);
         // Validate that this chat belongs to the current user AND agent before restoring
         // This prevents cross-user and cross-agent data leakage from stale localStorage data
         (async () => {
@@ -977,6 +997,7 @@ export default function ChatPage() {
               navigateRef.current("/chat", { replace: true });
             } else {
               // Valid chat, proceed with restore
+              console.log(`[Agent Switch] Restored chat ${restored} successfully`);
               navigateRef.current(`/chat/${restored}`, { replace: true });
               sessionApi.preferredChatId = restored;
             }
@@ -988,10 +1009,11 @@ export default function ChatPage() {
           }
         })();
       } else {
+        console.log(`[Agent Switch] No saved chat for agent ${selectedAgent}, starting fresh`);
         navigateRef.current("/chat", { replace: true });
       }
-      lastSessionIdRef.current = null;
-
+      // Don't clear lastSessionIdRef - let the new session initialize naturally
+      
       setRefreshKey((prev) => prev + 1);
     }
     prevSelectedAgentRef.current = selectedAgent;
