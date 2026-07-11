@@ -1312,15 +1312,22 @@ class AgentRunner(Runner):
             # Check if this is a default agent (global_default or user:xxx)
             # Sub-agents should NOT trigger bootstrap
             _should_bootstrap = False
+            logger.debug(
+                "Bootstrap check: workspace_dir=%s, has_pending=%s",
+                self.workspace_dir,
+                has_pending_bootstrap(self.workspace_dir) if self.workspace_dir else None,
+            )
             if self.workspace_dir and has_pending_bootstrap(self.workspace_dir):
                 try:
                     # Use agent._agent_config directly (already loaded with user preference)
                     agent_cfg = getattr(agent, "_agent_config", None)
                     if agent_cfg:
                         agent_id_value = agent_cfg.id
+                        logger.debug("Bootstrap: agent_id=%s", agent_id_value)
                         # Only bootstrap default agents
                         if agent_id_value == "global_default" or agent_id_value.startswith("user:"):
                             _should_bootstrap = True
+                            logger.info("Bootstrap enabled for agent: %s", agent_id_value)
                         else:
                             logger.debug(
                                 "Skipping bootstrap for non-default agent: %s",
@@ -1330,6 +1337,8 @@ class AgentRunner(Runner):
                     logger.warning("Failed to check agent ID for bootstrap: %s", e)
                     # Fallback: if check fails, proceed with bootstrap
                     _should_bootstrap = True
+            else:
+                logger.debug("Bootstrap skipped: no workspace or not pending")
             
             if _should_bootstrap:
                 state_file = self.workspace_dir / ".bootstrap_state"
