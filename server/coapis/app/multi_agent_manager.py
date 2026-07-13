@@ -596,7 +596,14 @@ class MultiAgentManager:
                     await ws.start()
                     ws.set_manager(self)
                 except Exception as e:
-                    logger.error(f"Lazy-start failed for {cache_key}: {e}")
+                    # Distinguish "missing provider" (expected) from real errors
+                    if "No provider configured" in str(e):
+                        logger.info(
+                            f"Workspace not started: {cache_key} - "
+                            "waiting for provider configuration"
+                        )
+                    else:
+                        logger.error(f"Lazy-start failed for {cache_key}: {e}")
             return ws
 
         should_start = False
