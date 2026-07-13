@@ -968,8 +968,13 @@ html.dark-mode .coapis-sender-content {
   min-height: 36px !important;
 }
 
+/* Avatar img 占满容器 */
+.coapis-avatar > img,
+.coapis-avatar-image > img,
 [class*="chat-anywhere-welcome-default"] [class*="-avatar"] > img,
 [class*="message-list-welcome"] [class*="-avatar"] > img {
+  width: 100% !important;
+  height: 100% !important;
   object-fit: contain !important;
   object-position: center;
 }
