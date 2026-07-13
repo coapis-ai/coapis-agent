@@ -80,11 +80,14 @@ def detect_system_language() -> str:
     }
     
     # Try environment variables
-    for env_var in ["LANG", "LC_ALL", "LANGUAGE"]:
+    # Priority: LC_ALL > LANGUAGE > LANG (following GNU gettext convention)
+    for env_var in ["LC_ALL", "LANGUAGE", "LANG"]:
         lang_env = os.environ.get(env_var, "").lower().strip()
         if lang_env:
             # Extract language code (e.g., "zh_CN.UTF-8" -> "zh")
-            # Format: language[_territory][.codeset]
+            # Format: language[_territory][.codeset] or language[:territory] (LANGUAGE)
+            # LANGUAGE can be "zh_CN:en_US" format, take first part
+            lang_env = lang_env.split(":")[0]  # Handle LANGUAGE format
             lang_code = lang_env.split("_")[0].split(".")[0]
             
             # Try exact match first
