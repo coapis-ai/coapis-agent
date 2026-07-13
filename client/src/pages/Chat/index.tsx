@@ -65,7 +65,6 @@ import {
   extractCopyableText,
   buildModelError,
   normalizeContentUrls,
-  extractUserMessageText,
   extractTextFromMessage,
   setTextareaValue,
   type CopyableResponse,
@@ -644,8 +643,9 @@ export default function ChatPage() {
   // Consume approvals from Context and filter by current session
   useEffect(() => {
     // Get current session ID from multiple sources
-    // During new session creation, chatId may be empty but window.currentSessionId gets set
-    const currentSessionId = window.currentSessionId || chatId || "";
+    // Priority: chatId (UUID from URL) > window.currentSessionId
+    // chatId is the actual chat UUID used by backend for approval routing
+    const currentSessionId = chatId || window.currentSessionId || "";
 
     // Filter approvals by root_session_id (includes children sessions)
     console.debug(
@@ -724,7 +724,8 @@ export default function ChatPage() {
       }
 
       // Use currentSessionId (root session) instead of request.sessionId (sub-agent session)
-      const rootSessionId = window.currentSessionId || chatId || "";
+      // Priority: chatId (UUID) > window.currentSessionId
+      const rootSessionId = chatId || window.currentSessionId || "";
       console.log("[Approval] Sending approve command:", {
         requestId,
         rootSessionId,
@@ -1084,21 +1085,6 @@ export default function ChatPage() {
         // instead of matching by session_id (which is shared across all console chats).
         chat_id: chatIdRef.current || undefined,
       };
-
-      const backendChatId =
-        sessionApi.getRealIdForSession(requestBody.session_id) ??
-        chatIdRef.current ??
-        requestBody.session_id;
-      if (backendChatId) {
-        const userText = rewrittenInput
-          .filter((m: any) => m.role === "user")
-          .map(extractUserMessageText)
-          .join("\n")
-          .trim();
-        if (userText) {
-          sessionApi.setLastUserMessage(backendChatId, userText);
-        }
-      }
 
       const response = await fetch(getApiUrl("/console/chat"), {
         method: "POST",
