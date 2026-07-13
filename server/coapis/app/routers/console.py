@@ -80,18 +80,49 @@ async def get_push_messages(
     pending_approvals: list[Dict[str, Any]] = []
     try:
         svc = get_approval_service()
+        # Debug: log all pending approvals
+        all_pending = await svc.get_all_pending_by_session(None)
+        if all_pending:
+            logger.info(
+                "[PUSH MESSAGES] Total pending approvals: %d. "
+                "Query session_id=%s. "
+                "Pending: %s",
+                len(all_pending),
+                session_id,
+                [
+                    {
+                        "request_id": p.request_id[:8],
+                        "session_id": p.session_id,
+                        "root_session_id": p.root_session_id[:8] if p.root_session_id else None,
+                        "tool": p.tool_name,
+                    }
+                    for p in all_pending[:5]  # Only log first 5
+                ],
+            )
+        
         # Strict session-level isolation: must have session_id
         if not session_id:
             # No session_id = no approvals (security by default)
             pendings = []
+            logger.debug("[PUSH MESSAGES] No session_id provided, returning empty")
         else:
             # Query by both session_id and root_session_id to handle
             # format differences: chat UUID vs "console:{username}".
             # list_pending_by_session filters by p.session_id (exact match),
             # get_pending_by_root_session filters by p.root_session_id.
             pendings = await svc.list_pending_by_session(session_id)
+            logger.debug(
+                "[PUSH MESSAGES] list_pending_by_session(%s) returned %d results",
+                session_id,
+                len(pendings),
+            )
             if not pendings:
                 pendings = await svc.get_pending_by_root_session(session_id)
+                logger.debug(
+                    "[PUSH MESSAGES] get_pending_by_root_session(%s) returned %d results",
+                    session_id,
+                    len(pendings),
+                )
 
         for p in pendings:
             guard_result = getattr(p, "extra", {}).get("guard_result")
@@ -117,6 +148,13 @@ async def get_push_messages(
                 "created_at": p.created_at,
                 "timeout_seconds": p.timeout_seconds,
             })
+        
+        if pending_approvals:
+            logger.info(
+                "[PUSH MESSAGES] Returning %d pending approvals for session_id=%s",
+                len(pending_approvals),
+                session_id,
+            )
     except Exception:
         logger.debug("Failed to fetch pending approvals", exc_info=True)
 
@@ -394,11 +432,42 @@ async def console_chat(
     tracker = workspace.task_tracker
     is_reconnect = payload.get("reconnect") is True
 
-    # NOTE: User message pre-persist removed.
-    # _persist_chat_messages (in runner.py finally block) is the SINGLE
-    # persistence point for session messages. Pre-persisting caused every
-    # user message to be saved twice (once here, once in _persist_chat_messages),
-    # leading to massive duplication in session files.
+    # ── Pre-persist user message before streaming starts ──
+    # This ensures the user message is saved immediately, so it's available
+    # if the user refreshes before the stream completes.
+    # _persist_chat_messages has dedup logic to skip duplicate user messages.
+    if not is_reconnect and native_payload.get("content_parts"):
+        user_content = None
+        first_part = native_payload["content_parts"][0]
+        if isinstance(first_part, str):
+            user_content = first_part
+        elif isinstance(first_part, dict) and "text" in first_part:
+            user_content = first_part["text"]
+        
+        if user_content and chat:
+            try:
+                from .chats import _get_session_for_user
+                session_obj = _get_session_for_user(username, request)
+                if session_obj:
+                    state = await session_obj.get_session_state_dict(
+                        chat.id, chat.user_id,
+                        allow_not_exist=True,
+                    )
+                    memory_state = (state or {}).get("agent", {}).get("memory", {})
+                    from agentscope.memory import InMemoryMemory
+                    mem = InMemoryMemory()
+                    mem.load_state_dict(memory_state, strict=False)
+                    from agentscope.message import Msg, TextBlock
+                    await mem.add(Msg(name="user", content=[TextBlock(text=user_content)], role="user"))
+                    await session_obj.update_session_state(
+                        session_id=chat.id,
+                        key="agent.memory",
+                        value=mem.state_dict(),
+                        user_id=chat.user_id,
+                    )
+                    logger.info(f"Pre-persisted user message to session chat={chat.id}")
+            except Exception as e:
+                logger.warning(f"Failed to pre-persist user message to session: {e}")
 
     if is_reconnect:
         queue = await tracker.attach(chat.id)
