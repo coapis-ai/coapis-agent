@@ -1,6 +1,46 @@
 # CoApis 快速部署指南
 
-## 🚀 一键部署
+## 🚀 一键安装（推荐）
+
+### 使用安装脚本
+
+```bash
+# 默认版本（v0.9.11）
+curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
+
+# 指定版本
+COAPIS_VERSION=v0.9.12 curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
+
+# 源码构建
+curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash -s -- --source
+
+# 包含浏览器服务
+curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash -s -- --with-playwright
+```
+
+### 安装脚本功能
+
+- ✅ 自动检测并安装 Docker
+- ✅ 自动下载配置文件（docker-compose.yml、.env）
+- ✅ 自动拉取镜像并启动服务
+- ✅ 支持多种安装模式
+
+### 访问服务
+
+```bash
+# 地址
+http://localhost:4208
+
+# 默认账号
+账号: admin
+密码: admin123
+
+# ⚠️ 首次登录后请立即修改密码
+```
+
+---
+
+## 📦 手动部署
 
 ### 查看可用版本
 
@@ -10,7 +50,7 @@
 
 ```bash
 # 1. 设置镜像版本（必填，与 GitHub tag 同步）
-export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11
+export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.12
 
 # 2. 下载 docker-compose.yml
 wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml

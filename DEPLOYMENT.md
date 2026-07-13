@@ -1,6 +1,51 @@
 # CoApis 部署文档
 
-## 🚀 一键部署（推荐）
+## 🚀 一键安装（推荐）
+
+### 使用安装脚本
+
+**最简单的部署方式**：
+
+```bash
+# 默认版本（v0.9.11）
+curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
+
+# 指定版本
+COAPIS_VERSION=v0.9.12 curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
+
+# 访问服务
+# 地址：http://localhost:4208
+# 账号：admin / admin123
+```
+
+### 安装脚本功能
+
+- ✅ 自动检测并安装 Docker
+- ✅ 自动下载配置文件（docker-compose.yml、.env）
+- ✅ 自动拉取镜像并启动服务
+- ✅ 支持多种安装模式：
+  - `bash -s -- --source` - 源码构建
+  - `bash -s -- --with-playwright` - 包含浏览器服务
+  - `bash -s -- --update` - 更新到新版本
+  - `bash -s -- --uninstall` - 卸载
+
+### 安装脚本选项
+
+```bash
+bash install.sh [选项]
+
+选项:
+  (无参数)          标准安装（默认版本: v0.9.11）
+  COAPIS_VERSION=v1.0.0 bash install.sh  指定版本
+  --source          源码构建模式
+  --with-playwright 包含浏览器自动化服务
+  --update          更新到新版本
+  --uninstall       卸载
+```
+
+---
+
+## 📦 手动部署
 
 ### 查看可用版本
 
@@ -10,7 +55,7 @@
 
 ```bash
 # 1. 设置镜像版本（必填，与 GitHub tag 同步）
-export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11
+export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.12
 
 # 2. 下载 docker-compose.yml
 wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml
@@ -25,29 +70,25 @@ docker compose up -d
 
 ---
 
-## 📦 部署方式
+## 📦 部署方式对比
 
-### 方式一：一键部署（最简单 ⭐）
+### 方式一：一键安装（最简单 ⭐）
 
 ```bash
-# 设置版本
-export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11
-
-# 下载并启动
-wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml
-docker compose up -d
+curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
 ```
 
 **优点**：
-- ✅ 版本明确可控
-- ✅ 一行命令完成部署
-- ✅ 与 GitHub tag 同步
+- ✅ 全自动安装，无需手动配置
+- ✅ 自动检测并安装 Docker
+- ✅ 支持指定版本
+- ✅ 支持多种安装模式
 
 **适用场景**：快速体验、测试环境、生产环境
 
 ---
 
-### 方式二：完整配置部署（推荐生产 ⭐）
+### 方式二：手动部署（推荐生产 ⭐）
 
 ```bash
 # 1. 下载配置文件
@@ -55,7 +96,7 @@ wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compos
 wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/.env.example -O .env
 
 # 2. 指定版本（必填）
-export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11
+export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.12
 
 # 3. 编辑配置（可选）
 nano .env
