@@ -465,12 +465,11 @@ def init_cmd(
             click.echo("Skipped environment variable configuration.")
 
     # --- md files (check language change) ---
-    from ..agents.utils import copy_md_files
+    from ..agents.utils import copy_md_files, detect_system_language
 
     config = load_config(config_path) if config_path.is_file() else Config()
-    current_language = (
-        config.agents.language or "zh"
-    )  # Default to "zh" if None
+    # Auto-detect language if not configured
+    current_language = config.agents.language or detect_system_language()
     installed_language = config.agents.installed_md_files_language
 
     if use_defaults:

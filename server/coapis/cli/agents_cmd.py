@@ -32,6 +32,7 @@ from ..agents.templates import (
     build_agent_template,
     list_supported_agent_templates,
 )
+from ..agents.utils import detect_system_language
 from ..config import load_config, save_config
 from ..config.config import (
     AgentProfileRef,
@@ -613,7 +614,7 @@ def create_cmd(
             effective_template,
             agent_id=new_id,
             workspace_dir=resolved_workspace_dir,
-            fallback_language=getattr(config.agents, "language", None) or "zh",
+            fallback_language=getattr(config.agents, "language", None) or detect_system_language(),
             name=name,
             description=description,
             language=language,

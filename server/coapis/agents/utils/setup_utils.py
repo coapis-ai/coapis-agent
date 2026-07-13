@@ -43,6 +43,79 @@ def normalize_agent_language(language: str) -> str:
     return "en"
 
 
+def detect_system_language() -> str:
+    """Detect system language and map to supported agent language.
+    
+    Detection order:
+    1. LANG environment variable (Linux/macOS)
+    2. LC_ALL environment variable
+    3. LANGUAGE environment variable
+    4. Default to 'en'
+    
+    Returns:
+        Language code in SUPPORTED_AGENT_LANGUAGES (e.g., 'en', 'zh', 'ru')
+    """
+    import locale
+    import os
+    
+    # Map locale codes to agent language codes
+    LANG_MAP = {
+        # Chinese variants
+        "zh": "zh",
+        "zh_cn": "zh",
+        "zh_cn.utf-8": "zh",
+        "zh_tw": "zh",
+        "zh_hk": "zh",
+        "zh_sg": "zh",
+        # English variants
+        "en": "en",
+        "en_us": "en",
+        "en_us.utf-8": "en",
+        "en_gb": "en",
+        "en_au": "en",
+        "en_ca": "en",
+        # Russian variants
+        "ru": "ru",
+        "ru_ru": "ru",
+        "ru_ru.utf-8": "ru",
+    }
+    
+    # Try environment variables
+    for env_var in ["LANG", "LC_ALL", "LANGUAGE"]:
+        lang_env = os.environ.get(env_var, "").lower().strip()
+        if lang_env:
+            # Extract language code (e.g., "zh_CN.UTF-8" -> "zh")
+            # Format: language[_territory][.codeset]
+            lang_code = lang_env.split("_")[0].split(".")[0]
+            
+            # Try exact match first
+            if lang_env in LANG_MAP:
+                detected = LANG_MAP[lang_env]
+                if detected in SUPPORTED_AGENT_LANGUAGES:
+                    return detected
+            
+            # Try language code match
+            if lang_code in LANG_MAP:
+                detected = LANG_MAP[lang_code]
+                if detected in SUPPORTED_AGENT_LANGUAGES:
+                    return detected
+    
+    # Try system locale
+    try:
+        system_locale = locale.getdefaultlocale()[0]
+        if system_locale:
+            lang_code = system_locale.lower().split("_")[0]
+            if lang_code in LANG_MAP:
+                detected = LANG_MAP[lang_code]
+                if detected in SUPPORTED_AGENT_LANGUAGES:
+                    return detected
+    except Exception:
+        pass
+    
+    # Default to English
+    return "en"
+
+
 def copy_md_files(
     language: str,
     skip_existing: bool = False,
