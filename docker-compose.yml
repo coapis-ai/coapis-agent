@@ -11,7 +11,7 @@ name: coapis-prod
 services:
   # ── 后端 API 服务 ──
   server:
-    image: ${COAPIS_IMAGE:-ghcr.io/coapis-ai/coapis-agent/server:latest}
+    image: ${COAPIS_IMAGE:?请设置COAPIS_IMAGE环境变量，例如: export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11}
     container_name: coapis-server
     ports:
       - "${COAPIS_SERVER_PORT:-4208}:8000"

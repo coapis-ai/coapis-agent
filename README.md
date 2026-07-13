@@ -74,36 +74,26 @@
 
 ### 方式一：一键部署（推荐 ⭐）
 
-**使用最新版本**：
+**查看可用版本**：[GitHub Packages](https://github.com/coapis-ai/coapis-agent/pkgs/container/server)
 
 ```bash
-# 1. 下载 docker-compose.yml
+# 1. 设置镜像版本（必填）
+export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11
+
+# 2. 下载 docker-compose.yml
 wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml
 
-# 2. 启动服务（自动拉取最新镜像）
+# 3. 启动服务
 docker compose up -d
 
-# 3. 访问服务
+# 4. 访问服务
 # 地址：http://<server-ip>:4208
 # 账号：admin / admin123
 ```
 
-**指定版本部署**：
-
-```bash
-# 设置版本号（与 GitHub tag 同步）
-export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11
-
-# 启动服务
-docker compose up -d
-```
-
 **版本说明**：
-- `latest` - 最新正式版本（推荐生产使用）
-- `v0.9.11` - 指定版本（生产环境固定版本）
-- `dev` - 开发版本（每次推送到 main 自动构建）
-
-**查看可用版本**：[GitHub Packages](https://github.com/coapis-ai/coapis-agent/pkgs/container/server)
+- `v0.9.11` - 正式版本（与 GitHub tag 同步，推荐生产使用）
+- `dev-20260713-abc1234` - 开发版本（每次推送到 main 自动构建）
 
 ---
 
@@ -114,8 +104,8 @@ docker compose up -d
 wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml
 wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/.env.example -O .env
 
-# 2. 编辑配置
-nano .env  # 配置镜像版本、端口、数据目录等
+# 2. 编辑配置（设置镜像版本）
+nano .env
 
 # 3. 启动服务
 docker compose up -d

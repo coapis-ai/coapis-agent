@@ -41,8 +41,6 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Build and push Server (all-in-one)
         uses: docker/build-push-action@v5
@@ -114,8 +112,9 @@ jobs:
             ### Docker 镜像
             ```
             ghcr.io/${{ github.repository }}/server:${{ steps.version.outputs.VERSION }}
-            ghcr.io/${{ github.repository }}/server:latest
             ```
+
+            **查看所有版本**: https://github.com/${{ github.repository }}/pkgs/container/server
 
             ### 更新日志
             详见 [CHANGELOG.md](./CHANGELOG.md)

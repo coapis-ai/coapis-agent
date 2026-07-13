@@ -3,6 +3,7 @@
 # CoApis 一键安装脚本（增强版）
 # 用法:
 #   curl -fsSL https://get.coapis.com | bash                    # 默认安装
+#   COAPIS_VERSION=v0.9.11 bash install.sh                       # 指定版本
 #   bash install.sh --source                                     # 源码构建
 #   bash install.sh --with-playwright                            # 包含浏览器服务
 #   bash install.sh --update                                     # 仅更新
@@ -10,11 +11,17 @@
 # ═══════════════════════════════════════════════════════════════════
 set -e
 
-VERSION="2.0"
-REPO="coapis/coapis"
+VERSION="2.1"
+REPO="coapis-ai/coapis-agent"
 INSTALL_DIR="${COAPIS_INSTALL_DIR:-/opt/coapis}"
 COMPOSE_URL="https://raw.githubusercontent.com/${REPO}/main/docker-compose.yml"
 ENV_EXAMPLE_URL="https://raw.githubusercontent.com/${REPO}/main/.env.example"
+
+# ── 镜像版本配置 ──────────────────────────────────────────────────
+# 查看可用版本: https://github.com/coapis-ai/coapis-agent/pkgs/container/server
+DEFAULT_VERSION="v0.9.11"
+COAPIS_VERSION="${COAPIS_VERSION:-$DEFAULT_VERSION}"
+COAPIS_IMAGE="ghcr.io/${REPO}/server:${COAPIS_VERSION}"
 
 # ── 默认选项 ──────────────────────────────────────────────────────
 MODE="standard"         # standard | source | dev
@@ -118,7 +125,11 @@ show_banner() {
     echo ""
     
     case ${MODE} in
-        standard) info "安装模式: 标准安装（预构建镜像）" ;;
+        standard) 
+            info "安装模式: 标准安装"
+            info "镜像版本: ${COAPIS_VERSION}"
+            info "镜像地址: ${COAPIS_IMAGE}"
+            ;;
         source)   info "安装模式: 源码构建" ;;
         dev)      info "安装模式: 开发模式（本地运行）" ;;
     esac
@@ -364,7 +375,8 @@ install_standard() {
     fi
     
     # 拉取镜像
-    info "拉取 CoApis 镜像（可能需要几分钟）..."
+    info "拉取镜像: ${COAPIS_IMAGE}"
+    info "（可能需要几分钟...）"
     ${COMPOSE_CMD} pull
     
     # 启动服务
@@ -483,13 +495,13 @@ wait_for_ready() {
 
 # ── 生成 compose 文件（备用） ───────────────────────────────────
 generate_compose_file() {
-    cat > "${INSTALL_DIR}/docker-compose.yml" <<'COMPOSEEOF'
+    cat > "${INSTALL_DIR}/docker-compose.yml" <<COMPOSEEOF
 services:
   server:
-    image: ghcr.io/coapis-ai/coapis-agent/server:latest
+    image: ${COAPIS_IMAGE}
     container_name: coapis
     ports:
-      - "${COAPIS_PORT:-4200}:8000"
+      - "\${COAPIS_PORT:-4200}:8000"
     volumes:
       - coapis-data:/data
     env_file:

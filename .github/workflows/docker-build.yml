@@ -17,6 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate dev tag
+        id: tag
+        run: |
+          # 格式: dev-YYYYMMDD-{short_sha}
+          DATE=$(date +%Y%m%d)
+          SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "TAG=dev-${DATE}-${SHA}" >> $GITHUB_OUTPUT
+          echo "Generated tag: dev-${DATE}-${SHA}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -27,13 +36,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Server image (no push on PR)
+      - name: Build and push Server image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: server/deploy/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/${{ github.repository }}/server:dev
+          tags: ghcr.io/${{ github.repository }}/server:${{ steps.tag.outputs.TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
