@@ -112,7 +112,7 @@ docker compose -f docker-compose.build.yml up -d --build
 **适用场景**: 快速体验、标准部署
 
 ```bash
-curl -fsSL https://get.coapis.com | bash
+curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
 # 或
 bash install.sh --source
 ```

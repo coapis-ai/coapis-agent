@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════════
 # CoApis 一键安装脚本（增强版）
 # 用法:
-#   curl -fsSL https://get.coapis.com | bash                    # 默认安装
+#   curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
 #   COAPIS_VERSION=v0.9.11 bash install.sh                       # 指定版本
 #   bash install.sh --source                                     # 源码构建
 #   bash install.sh --with-playwright                            # 包含浏览器服务

@@ -111,10 +111,10 @@ COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11
 
 ```bash
 # 默认版本（v0.9.11）
-curl -fsSL https://get.coapis.com | bash
+curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
 
 # 指定版本
-COAPIS_VERSION=v1.0.0 curl -fsSL https://get.coapis.com | bash
+COAPIS_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
 ```
 
 ---
