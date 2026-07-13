@@ -851,10 +851,27 @@ class ToolGuardMixin:
         # not set, fall back to request_context.root_session_id or
         # session_id.
         current_chat_id = get_current_chat_id()
+        
+        # Debug: log session context
+        logger.info(
+            "[APPROVAL] Session context: "
+            "current_chat_id=%s, "
+            "request_context.session_id=%s, "
+            "request_context.root_session_id=%s",
+            current_chat_id,
+            self._request_context.get("session_id"),
+            self._request_context.get("root_session_id"),
+        )
+        
         root_session_id = str(
             current_chat_id
             or self._request_context.get("root_session_id")
             or session_id,
+        )
+        
+        logger.info(
+            "[APPROVAL] Using root_session_id=%s for approval request",
+            root_session_id,
         )
 
         svc = self._tool_guard_approval_service
@@ -879,6 +896,18 @@ class ToolGuardMixin:
             result=guard_result,
             timeout_seconds=TOOL_GUARD_APPROVAL_TIMEOUT_SECONDS,
             extra=extra,
+        )
+        
+        logger.info(
+            "[APPROVAL] Created pending approval: "
+            "request_id=%s, "
+            "session_id=%s, "
+            "root_session_id=%s, "
+            "tool_name=%s",
+            pending.request_id[:8],
+            pending.session_id,
+            pending.root_session_id[:8] if pending.root_session_id else None,
+            pending.tool_name,
         )
 
         # Send approval request message to user (with frontend metadata)
