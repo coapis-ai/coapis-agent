@@ -1,0 +1,32 @@
+# ═══════════════════════════════════════════════════════════════════
+# CoApis 源码构建 Docker Compose
+#
+# 构建全量镜像:  docker compose -f docker-compose.build.yml build
+# 构建最小镜像:  docker compose -f docker-compose.build.yml build \
+#                   --build-arg TARGET=min
+# 构建并启动:    docker compose -f docker-compose.build.yml up -d --build
+#
+# 适用: 开发者、需要定制的高级用户
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: server/deploy/Dockerfile
+      target: ${TARGET:-full}
+    image: ${COAPIS_IMAGE:-coapis-agent:latest}
+    container_name: coapis-server
+    ports:
+      - "${COAPIS_SERVER_PORT:-4200}:8000"
+    volumes:
+      - ${COAPIS_WORKING_DIR}:${COAPIS_WORKING_DIR}
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
