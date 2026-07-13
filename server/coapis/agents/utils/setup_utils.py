@@ -55,7 +55,6 @@ def detect_system_language() -> str:
     Returns:
         Language code in SUPPORTED_AGENT_LANGUAGES (e.g., 'en', 'zh', 'ru')
     """
-    import locale
     import os
     
     # Map locale codes to agent language codes
@@ -99,18 +98,6 @@ def detect_system_language() -> str:
                 detected = LANG_MAP[lang_code]
                 if detected in SUPPORTED_AGENT_LANGUAGES:
                     return detected
-    
-    # Try system locale
-    try:
-        system_locale = locale.getdefaultlocale()[0]
-        if system_locale:
-            lang_code = system_locale.lower().split("_")[0]
-            if lang_code in LANG_MAP:
-                detected = LANG_MAP[lang_code]
-                if detected in SUPPORTED_AGENT_LANGUAGES:
-                    return detected
-    except Exception:
-        pass
     
     # Default to English
     return "en"
