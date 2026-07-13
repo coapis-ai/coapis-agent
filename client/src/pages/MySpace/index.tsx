@@ -424,16 +424,16 @@ const MySpacePage: React.FC = () => {
     setUploading(true);
     uploadAbortRef.current = new AbortController();
 
-    // 先提取所有目录路径并批量创建
+    // 提取所有目录路径（从 webkitRelativePath 中提取完整目录结构）
     const dirPaths = new Set<string>();
-    for (const { file, path } of files) {
-      // 从 webkitRelativePath 提取目录部分
+    for (const { file } of files) {
       const relPath = (file as any).webkitRelativePath || '';
       if (relPath) {
         const parts = relPath.split('/');
-        const dirParts = parts.slice(0, -1); // 去掉文件名
-        if (dirParts.length > 0) {
-          const dirPath = path + '/' + dirParts.join('/');
+        // 从第一层目录开始，逐层添加目录路径
+        // 例如 "docs/a/b/file.txt" -> ["docs", "docs/a", "docs/a/b"]
+        for (let i = 1; i < parts.length; i++) {
+          const dirPath = currentPath + '/' + parts.slice(0, i).join('/');
           dirPaths.add(dirPath);
         }
       }
