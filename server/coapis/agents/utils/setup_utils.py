@@ -66,7 +66,9 @@ def copy_md_files(
     target_dir = workspace_dir if workspace_dir is not None else WORKING_DIR
 
     # Get md_files directory path with language subdirectory
-    md_files_dir = Path(__file__).parent.parent / "md_files" / language
+    # Updated to use data/packs/{language}/templates/user_level/
+    from ...constant import DATA_PACKS_DIR
+    md_files_dir = DATA_PACKS_DIR / language / "templates" / "user_level"
 
     if not md_files_dir.exists():
         logger.warning(
@@ -74,7 +76,7 @@ def copy_md_files(
             md_files_dir,
         )
         # Fallback to English if specified language not found
-        md_files_dir = Path(__file__).parent.parent / "md_files" / "en"
+        md_files_dir = DATA_PACKS_DIR / "en" / "templates" / "user_level"
         if not md_files_dir.exists():
             logger.error("Default 'en' md files not found either")
             return []
@@ -114,14 +116,15 @@ def copy_md_files(
 
 
 def _resolve_md_lang_dir(agents_root: Path, language: str) -> Path:
-    """Return ``md_files/<language>``, falling back to ``en`` if missing."""
-    md_lang_dir = agents_root / "md_files" / language
+    """Return ``data/packs/{language}/templates/user_level``, falling back to ``en`` if missing."""
+    from ...constant import DATA_PACKS_DIR
+    md_lang_dir = DATA_PACKS_DIR / language / "templates" / "user_level"
     if not md_lang_dir.exists():
         logger.warning(
             "MD lang dir not found: %s, falling back to 'en'",
             md_lang_dir,
         )
-        md_lang_dir = agents_root / "md_files" / "en"
+        md_lang_dir = DATA_PACKS_DIR / "en" / "templates" / "user_level"
     return md_lang_dir
 
 
