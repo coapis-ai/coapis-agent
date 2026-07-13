@@ -1,0 +1,35 @@
+# ═══════════════════════════════════════════════════════════════════
+# CoApis 生产环境 Docker Compose（使用 GitHub Container Registry 镜像）
+# 用法: 
+#   curl -fsSL https://get.coapis.com | bash
+#   或
+#   docker compose up -d
+# ═══════════════════════════════════════════════════════════════════
+
+name: coapis-prod
+
+services:
+  # ── 后端 API 服务 ──
+  server:
+    image: ${COAPIS_IMAGE:-ghcr.io/coapis-ai/coapis-agent/server:latest}
+    container_name: coapis-server
+    ports:
+      - "${COAPIS_SERVER_PORT:-4208}:8000"
+    volumes:
+      - ${COAPIS_WORKING_DIR:-/apps/ai/coapis}:${COAPIS_WORKING_DIR:-/apps/ai/coapis}
+    env_file:
+      - .env
+    environment:
+      - COAPIS_WORKING_DIR=${COAPIS_WORKING_DIR:-/apps/ai/coapis}
+      - COAPIS_WORKSPACES_DIR=${COAPIS_WORKSPACES_DIR:-${COAPIS_WORKING_DIR}/workspaces}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  coapis-data:
+    driver: local

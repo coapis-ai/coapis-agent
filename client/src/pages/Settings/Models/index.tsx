@@ -27,52 +27,56 @@ function ModelsPage() {
     void fetchAll(false);
   }, [fetchAll]);
 
-  const { regularProviders, localProviders } = useMemo(() => {
-    const regular: ProviderInfo[] = [];
-    const local: ProviderInfo[] = [];
-    for (const p of providers) {
-      if (p.is_local) local.push(p);
-      else regular.push(p);
-    }
-
-    // Sort providers: custom/available first, then configured, then the rest.
-    // This mirrors the isConfigured logic in RemoteProviderCard.
-    const sortPriority = (provider: ProviderInfo): number => {
-      let isConfigured = false;
-      if (provider.is_custom && provider.base_url) {
-        isConfigured = true;
-      } else if (provider.require_api_key === false) {
-        isConfigured = true;
-      } else if (provider.require_api_key && provider.api_key) {
-        isConfigured = true;
+  const { sortedProviders } = useMemo(() => {
+    // Sort providers: available first, then configured, then unconfigured.
+    // Within each group, sort by name alphabetically.
+    const sorted = [...providers].sort((a, b) => {
+      let isConfiguredA = false;
+      let isConfiguredB = false;
+      
+      if (a.is_custom && a.base_url) {
+        isConfiguredA = true;
+      } else if (a.require_api_key === false) {
+        isConfiguredA = true;
+      } else if (a.require_api_key && a.api_key) {
+        isConfiguredA = true;
+      }
+      
+      if (b.is_custom && b.base_url) {
+        isConfiguredB = true;
+      } else if (b.require_api_key === false) {
+        isConfiguredB = true;
+      } else if (b.require_api_key && b.api_key) {
+        isConfiguredB = true;
       }
 
-      const hasModels =
-        provider.models.length > 0;
-      const isAvailable = isConfigured && hasModels;
+      const hasModelsA = a.models.length > 0;
+      const hasModelsB = b.models.length > 0;
+      const isAvailableA = isConfiguredA && hasModelsA;
+      const isAvailableB = isConfiguredB && hasModelsB;
 
-      // Lower number = higher priority (shown first)
-      // Available providers (configured + has models) always come first,
-      // then custom providers, then configured-only, then unconfigured.
-      if (isAvailable && provider.is_custom) return 0;
-      if (isAvailable) return 1;
-      if (provider.is_custom) return 2;
-      if (isConfigured) return 3;
-      return 4;
-    };
-
-    regular.sort((a, b) => sortPriority(a) - sortPriority(b));
+      // Priority: available (0) > configured (1) > unconfigured (2)
+      const priorityA = isAvailableA ? 0 : isConfiguredA ? 1 : 2;
+      const priorityB = isAvailableB ? 0 : isConfiguredB ? 1 : 2;
+      
+      // First sort by priority
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      
+      // Within same priority, sort by name alphabetically
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
 
     // Fuzzy search filter: match provider name (case-insensitive)
     const query = searchQuery.trim().toLowerCase();
     if (!query) {
-      return { regularProviders: regular, localProviders: local };
+      return { sortedProviders: sorted };
     }
     return {
-      regularProviders: regular.filter((p) =>
+      sortedProviders: sorted.filter((p) =>
         p.name.toLowerCase().includes(query),
       ),
-      localProviders: local.filter((p) => p.name.toLowerCase().includes(query)),
     };
   }, [providers, searchQuery]);
 
@@ -142,21 +146,10 @@ function ModelsPage() {
                 </div>
               </div>
 
-              {localProviders.length > 0 && (
-                <div className={styles.providerGroup}>
-                  {/* <h4 className={styles.providerGroupTitle}>
-                  {t("models.localEmbedded")}
-                </h4> */}
-                  <div className={styles.providerCards}>
-                    {renderProviderCards(localProviders)}
-                  </div>
-                </div>
-              )}
-
-              {regularProviders.length > 0 && (
+              {sortedProviders.length > 0 && (
                 <div className={styles.providerGroup}>
                   <div className={styles.providerCards}>
-                    {renderProviderCards(regularProviders)}
+                    {renderProviderCards(sortedProviders)}
                   </div>
                 </div>
               )}

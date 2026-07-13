@@ -243,6 +243,8 @@ async def upload_file(
     request: Request = None,
 ):
     """上传文件"""
+    logger.info(f"[UPLOAD] Start: file={file.filename}, path={path}, category={category}, relative_path={relative_path}")
+    
     if category != "files":
         raise HTTPException(status_code=403, detail="仅支持在文件类别中上传")
 
@@ -253,6 +255,7 @@ async def upload_file(
     overwrite = overwrite.lower() in ("true", "1", "yes")
 
     username = get_current_user(request)["username"]
+    logger.info(f"[UPLOAD] username={username}")
     _check_extension(file.filename)
 
     # Read file content and check size

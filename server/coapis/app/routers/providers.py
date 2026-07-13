@@ -1032,3 +1032,64 @@ async def filter_openrouter_models(
             status_code=500,
             detail=f"Failed to filter models: {str(exc)}",
         ) from exc
+
+
+# 统一的提供商删除/重置接口（必须放在最后，避免路由冲突）
+@router.delete(
+    "/{provider_id}",
+    response_model=List[ProviderInfo],
+    summary="Delete or reset a provider",
+)
+@require_permission("models:write")
+async def delete_provider_endpoint(
+    request: Request,
+    manager: ProviderManager = Depends(get_provider_manager),
+    provider_id: str = Path(...),
+) -> List[ProviderInfo]:
+    """Delete a provider.
+    
+    For custom providers: permanently delete from system.
+    For builtin providers: hide from the provider list.
+    
+    Note: This route must be defined AFTER all other DELETE routes to avoid
+    route conflicts (e.g., /custom-providers/{provider_id}, /{provider_id}/models/{model_id}).
+    """
+    # Ownership check: non-admin users can only modify their own or global providers
+    role = getattr(request.state, "role", "user")
+    username = getattr(request.state, "username", "anonymous")
+    
+    try:
+        # Check if it's a custom provider
+        if provider_id in manager.custom_providers:
+            # Custom provider: check ownership
+            provider_info = await manager.get_provider_info(provider_id)
+            if role != "admin" and provider_info and provider_info.owner and provider_info.owner != username:
+                raise HTTPException(status_code=403, detail="无权删除他人的 Provider")
+            
+            # Delete custom provider
+            ok = manager.remove_custom_provider(provider_id)
+            if not ok:
+                raise ValueError(f"Custom Provider '{provider_id}' not found")
+            logger.info(f"Deleted custom provider '{provider_id}'")
+        elif provider_id in manager.builtin_providers:
+            # Builtin provider: hide from list
+            ok = manager.hide_builtin_provider(provider_id)
+            if not ok:
+                raise ValueError(f"Builtin Provider '{provider_id}' not found")
+            logger.info(f"Hidden builtin provider '{provider_id}'")
+        else:
+            raise ValueError(f"Provider '{provider_id}' not found")
+    except (ValueError, AppBaseException) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Invalidate cached workspaces that reference the deleted/reset provider.
+    # Without this, workspaces keep using the old provider config from memory cache.
+    multi_agent_manager = getattr(request.app.state, "multi_agent_manager", None)
+    if multi_agent_manager:
+        evicted = await multi_agent_manager.invalidate_workspaces_by_provider(provider_id)
+        if evicted:
+            logger.info(
+                f"Evicted {evicted} workspace(s) referencing provider '{provider_id}'"
+            )
+
+    return await manager.list_provider_info()

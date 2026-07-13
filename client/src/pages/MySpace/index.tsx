@@ -538,11 +538,9 @@ const MySpacePage: React.FC = () => {
     const uploadItems: Array<{ file: File; path: string }> = files.map((file) => {
       const relPath = (file as any).webkitRelativePath || '';
       if (relPath) {
-        // 目录上传：保持目录结构
-        const targetPath = currentPath + '/' + relPath;
-        // 取父目录作为上传路径
-        const parentDir = targetPath.substring(0, targetPath.lastIndexOf('/')) || currentPath;
-        return { file, path: parentDir };
+        // 目录上传：relative_path 已包含完整路径，后端会解析
+        // path 只需要传递当前目录即可
+        return { file, path: currentPath };
       }
       return { file, path: currentPath };
     });

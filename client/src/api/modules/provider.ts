@@ -90,6 +90,13 @@ export const providerApi = {
       { method: "DELETE" },
     ),
 
+  // 统一的删除/重置接口（支持所有提供商）
+  deleteProvider: (providerId: string) =>
+    request<ProviderInfo[]>(
+      `/models/${encodeURIComponent(providerId)}`,
+      { method: "DELETE" },
+    ),
+
   /* ---- Model CRUD (works for both built-in and custom providers) ---- */
 
   addModel: (providerId: string, body: AddModelRequest) =>

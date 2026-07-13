@@ -27,6 +27,7 @@ export const RemoteProviderCard = React.memo(function RemoteProviderCard({
 
   const handleDeleteProvider = (e: React.MouseEvent) => {
     e.stopPropagation();
+    
     Modal.confirm({
       title: t("models.deleteProvider"),
       content: t("models.deleteProviderConfirm", { name: provider.name }),
@@ -35,7 +36,7 @@ export const RemoteProviderCard = React.memo(function RemoteProviderCard({
       cancelText: t("models.cancel"),
       onOk: async () => {
         try {
-          await api.deleteCustomProvider(provider.id);
+          await api.deleteProvider(provider.id);
           message.success(t("models.providerDeleted", { name: provider.name }));
           onSaved();
         } catch (error) {
@@ -177,17 +178,15 @@ export const RemoteProviderCard = React.memo(function RemoteProviderCard({
         >
           {t("models.settings")}
         </Button>
-        {provider.is_custom && (
-          <Button
-            type="default"
-            size="small"
-            danger
-            onClick={handleDeleteProvider}
-            className={styles.actionBtn}
-          >
-            {t("common.delete")}
-          </Button>
-        )}
+        <Button
+          type="default"
+          size="small"
+          danger
+          onClick={handleDeleteProvider}
+          className={styles.actionBtn}
+        >
+          {t("common.delete")}
+        </Button>
       </div>
 
       <ProviderConfigModal

@@ -486,7 +486,7 @@ generate_compose_file() {
     cat > "${INSTALL_DIR}/docker-compose.yml" <<'COMPOSEEOF'
 services:
   server:
-    image: ghcr.io/coapis/server:latest
+    image: ghcr.io/coapis-ai/coapis-agent/server:latest
     container_name: coapis
     ports:
       - "${COAPIS_PORT:-4200}:8000"

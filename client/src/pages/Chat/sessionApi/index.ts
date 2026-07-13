@@ -129,17 +129,6 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/** Extract plain text from a message's content array. */
-const extractTextFromContent = (content: unknown): string => {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return String(content || "");
-  return (content as ContentItem[])
-    .filter((c) => c.type === "text")
-    .map((c) => c.text || "")
-    .filter(Boolean)
-    .join("\n");
-};
-
 /** Normalize absolute filesystem paths to relative paths for file preview.
  *  e.g. "/apps/ai/coapis/workspaces/admin/files/media/xxx.ppm" → "/media/xxx.ppm"
  *  If the path is already relative, return as-is. */
@@ -505,36 +494,6 @@ const resolveRealId = (
 };
 
 // ---------------------------------------------------------------------------
-// Per-session user message persistence (survives page refresh)
-// ---------------------------------------------------------------------------
-
-const STORAGE_PREFIX = "coapis_pending_user_msg_";
-
-function savePendingUserMessage(sessionId: string, text: string): void {
-  try {
-    sessionStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, text);
-  } catch {
-    /* quota exceeded – ignore */
-  }
-}
-
-function loadPendingUserMessage(sessionId: string): string {
-  try {
-    return sessionStorage.getItem(`${STORAGE_PREFIX}${sessionId}`) || "";
-  } catch {
-    return "";
-  }
-}
-
-function clearPendingUserMessage(sessionId: string): void {
-  try {
-    sessionStorage.removeItem(`${STORAGE_PREFIX}${sessionId}`);
-  } catch {
-    /* ignore */
-  }
-}
-
-// ---------------------------------------------------------------------------
 // SessionApi
 // ---------------------------------------------------------------------------
 
@@ -589,16 +548,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   private _generatingPolls: Map<string, ReturnType<typeof setInterval>> = new Map();
   private static readonly POLL_INTERVAL_MS = 3000;
   private static readonly POLL_MAX_ATTEMPTS = 60; // 3min max (60 × 3s)
-
-  /**
-   * Cache the latest user message for a chat so it can be patched into
-   * history during reconnect (the backend only persists it after generation
-   * completes). Persisted to sessionStorage so it survives page refresh.
-   */
-  setLastUserMessage(sessionId: string, text: string): void {
-    if (!sessionId || !text) return;
-    savePendingUserMessage(sessionId, text);
-  }
 
   /**
    * Deduplicates concurrent getSessionList calls so that two parallel
@@ -668,49 +617,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     return (this._sessions.find(
       (s: any) => s.id === id || s.sessionId === id || s.realId === id,
     ) as ExtendedSession) || null;
-  }
-
-  /**
-   * When reconnecting to a running conversation, the backend history may not
-   * include the latest user message (it's only persisted after generation
-   * completes). If generating, look up the cached text from sessionStorage
-   * and patch it into the message list.
-   *
-   * When not generating the conversation is done — clear the cached entry.
-   */
-  private patchLastUserMessage(
-    messages: IAgentScopeRuntimeWebUIMessage[],
-    generating: boolean,
-    backendSessionId: string,
-  ): void {
-    if (!generating) {
-      clearPendingUserMessage(backendSessionId);
-      return;
-    }
-
-    const cachedText = loadPendingUserMessage(backendSessionId);
-    if (!cachedText) return;
-
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.role === ROLE_USER) {
-      const text = extractTextFromContent(
-        lastMsg?.cards?.[0]?.data?.input?.[0]?.content,
-      );
-      if (!text) {
-        // Replace the entire message instead of mutating read-only cards property
-        messages[messages.length - 1] = buildUserCard({
-          content: [{ type: "text", text: cachedText }],
-          role: ROLE_USER,
-        } as Message);
-      }
-    } else {
-      messages.push(
-        buildUserCard({
-          content: [{ type: "text", text: cachedText }],
-          role: ROLE_USER,
-        } as Message),
-      );
-    }
   }
 
   private createEmptySession(sessionId: string): ExtendedSession {
@@ -970,7 +876,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
           const chatHistory = await withRetry(() => api.getChat(fromList.realId!));
           const generating = isGenerating(chatHistory);
           const messages = convertMessages(chatHistory.messages || []);
-          this.patchLastUserMessage(messages, generating, fromList.realId);
           // Prefer spec.name from backend (auto-renamed) over local cache
           const backendName = (chatHistory as any).spec?.name;
           const session: ExtendedSession = {
@@ -1024,7 +929,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
           const chatHistory = await withRetry(() => api.getChat(refreshed.realId!));
           const generating = isGenerating(chatHistory);
           const messages = convertMessages(chatHistory.messages || []);
-          this.patchLastUserMessage(messages, generating, refreshed.realId);
           // Prefer spec.name from backend (auto-renamed) over local cache
           const backendName = (chatHistory as any).spec?.name;
           const session: ExtendedSession = {
@@ -1089,7 +993,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       const chatHistory = await withRetry(() => api.getChat(effectiveId));
       const generating = isGenerating(chatHistory);
       const messages = convertMessages(chatHistory.messages || []);
-      this.patchLastUserMessage(messages, generating, effectiveId);
       // Prefer spec.name from backend (auto-renamed) over local cache
       const backendName = (chatHistory as any).spec?.name;
       const session: ExtendedSession = {
@@ -1332,7 +1235,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
             if (backendName) existingSession.name = backendName;
             existingSession.hasMore = chatHistory.has_more ?? false;
             existingSession.totalCount = chatHistory.total_count;
-            clearPendingUserMessage(existingSession.realId || existingSession.id);
           }
 
           // Trigger UI refresh via callbacks

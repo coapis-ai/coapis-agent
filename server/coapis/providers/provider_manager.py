@@ -740,11 +740,13 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self.builtin_providers: Dict[str, Provider] = {}
         self.custom_providers: Dict[str, Provider] = {}
         self.plugin_providers: Dict[str, Dict] = {}  # Plugin providers
+        self.hidden_providers: set[str] = set()  # Hidden builtin providers
         self.active_model: ModelSlotConfig | None = None
         self.root_path = SECRET_DIR / "providers"
         self.builtin_path = self.root_path / "builtin"
         self.custom_path = self.root_path / "custom"
         self.plugin_path = self.root_path / "plugin"  # Plugin provider configs
+        self.hidden_path = self.root_path / "hidden_providers.json"  # Hidden providers list
         self._prepare_disk_storage()
         self._init_builtins()
         try:
@@ -752,6 +754,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         except Exception as e:
             logger.warning("Failed to migrate legacy providers: %s", e)
         self._init_from_storage()
+        self._load_hidden_providers()
         self._apply_default_annotations()
 
     def _prepare_disk_storage(self):
@@ -803,9 +806,13 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self.builtin_providers[provider_copy.id] = provider_copy
 
     async def list_provider_info(self) -> List[ProviderInfo]:
-        tasks = [
-            provider.get_info() for provider in self.builtin_providers.values()
-        ]
+        tasks = []
+        
+        # Filter out hidden builtin providers
+        for provider_id, provider in self.builtin_providers.items():
+            if provider_id not in self.hidden_providers:
+                tasks.append(provider.get_info())
+        
         tasks += [
             provider.get_info() for provider in self.custom_providers.values()
         ]
@@ -1012,6 +1019,39 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 os.remove(provider_path)
             return True
         return False
+
+    def hide_builtin_provider(self, provider_id: str) -> bool:
+        """Hide a builtin provider from the list.
+        
+        This is used when user wants to "delete" a builtin provider.
+        The provider is not actually deleted from the code, just hidden from the UI.
+        """
+        if provider_id in self.builtin_providers:
+            self.hidden_providers.add(provider_id)
+            self._save_hidden_providers()
+            logger.info(f"Hidden builtin provider '{provider_id}'")
+            return True
+        return False
+
+    def _load_hidden_providers(self) -> None:
+        """Load hidden providers list from disk."""
+        if self.hidden_path.exists():
+            try:
+                with open(self.hidden_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.hidden_providers = set(data.get("hidden", []))
+                    logger.info(f"Loaded {len(self.hidden_providers)} hidden providers")
+            except Exception as e:
+                logger.warning(f"Failed to load hidden providers: {e}")
+                self.hidden_providers = set()
+
+    def _save_hidden_providers(self) -> None:
+        """Save hidden providers list to disk."""
+        try:
+            with open(self.hidden_path, 'w', encoding='utf-8') as f:
+                json.dump({"hidden": list(self.hidden_providers)}, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save hidden providers: {e}")
 
     async def activate_model(self, provider_id: str, model_id: str):
         # Set the active provider and model for the agent. This will update
