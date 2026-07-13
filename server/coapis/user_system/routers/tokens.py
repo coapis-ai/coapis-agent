@@ -66,6 +66,29 @@ async def get_token_summary(username: str):
     return get_usage_summary(username)
 
 
+@router.get("/tokens/summary")
+async def get_global_token_summary():
+    """Get global token usage summary (admin only)."""
+    from ...token_usage import get_token_usage_manager
+    from datetime import date, timedelta
+    
+    # Get last 30 days summary
+    end = date.today()
+    start = end - timedelta(days=30)
+    
+    manager = get_token_usage_manager()
+    summary = await manager.get_summary(start_date=start, end_date=end)
+    
+    return {
+        "total_prompt_tokens": summary.total_prompt_tokens,
+        "total_completion_tokens": summary.total_completion_tokens,
+        "total_calls": summary.total_calls,
+        "by_model": {k: v.model_dump() for k, v in summary.by_model.items()},
+        "by_provider": {k: v.model_dump() for k, v in summary.by_provider.items()},
+        "by_date": {k: v.model_dump() for k, v in summary.by_date.items()},
+    }
+
+
 @router.get("/tokens/history", response_model=TokenUsageList)
 async def get_token_history(
     username: str,
