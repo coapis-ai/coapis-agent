@@ -72,29 +72,82 @@
 
 ## 🚀 快速开始
 
-### Docker 部署
+### 方式一：一键部署（推荐 ⭐）
+
+**使用最新版本**：
 
 ```bash
-# 只下载 docker 目录
-git clone --depth 1 --filter=blob:none --sparse \
-  https://github.com/coapis-ai/coapis-agent.git && \
-  cd coapis-agent && \
-  git sparse-checkout set docker && \
-  cd docker
+# 1. 下载 docker-compose.yml
+wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml
 
-# 配置环境变量
-cp .env.example .env
-nano .env  # 填写 API Key
+# 2. 启动服务（自动拉取最新镜像）
+docker compose up -d
+
+# 3. 访问服务
+# 地址：http://<server-ip>:4208
+# 账号：admin / admin123
+```
+
+**指定版本部署**：
+
+```bash
+# 设置版本号（与 GitHub tag 同步）
+export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.11
 
 # 启动服务
 docker compose up -d
 ```
 
+**版本说明**：
+- `latest` - 最新正式版本（推荐生产使用）
+- `v0.9.11` - 指定版本（生产环境固定版本）
+- `dev` - 开发版本（每次推送到 main 自动构建）
+
+**查看可用版本**：[GitHub Packages](https://github.com/coapis-ai/coapis-agent/pkgs/container/server)
+
+---
+
+### 方式二：完整配置部署
+
+```bash
+# 1. 下载配置文件
+wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml
+wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/.env.example -O .env
+
+# 2. 编辑配置
+nano .env  # 配置镜像版本、端口、数据目录等
+
+# 3. 启动服务
+docker compose up -d
+```
+
+---
+
+### 方式三：源码构建（开发者）
+
+```bash
+# 克隆仓库
+git clone https://github.com/coapis-ai/coapis-agent.git
+cd coapis-agent
+
+# 配置环境变量
+cp docker/.env.example docker/.env
+
+# 编辑配置
+nano docker/.env  # 填写 API Key 等
+
+# 构建并启动
+cd docker
+docker compose -f docker-compose.build.yml up -d --build
+```
+
+---
+
 ### 访问服务
 
-- 地址：`http://<server-ip>:4200`
-- 账号：`admin` / `admin123`
-- ⚠️ 请立即修改默认密码
+- **地址**：`http://<server-ip>:4208`
+- **账号**：`admin` / `admin123`
+- ⚠️ **请立即修改默认密码**
 
 ---
 
