@@ -953,19 +953,19 @@ html.dark-mode .coapis-sender-content {
 [class*="chat-anywhere-welcome-default"] [class*="-avatar"],
 [class*="message-list-welcome"] [class*="welcome-default"] [class*="-avatar"] {
   width: 36px !important;
-  height: 48px !important;
+  height: 36px !important;
   min-width: 36px !important;
-  min-height: 48px !important;
+  min-height: 36px !important;
   overflow: visible !important;
 }
 
 /* Chat bubble avatar size */
 .coapis-avatar,
 .coapis-avatar {
-  width: 40px !important;
-  height: 40px !important;
-  min-width: 40px !important;
-  min-height: 40px !important;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
 }
 
 [class*="chat-anywhere-welcome-default"] [class*="-avatar"] > img,
