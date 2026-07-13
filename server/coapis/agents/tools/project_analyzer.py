@@ -113,12 +113,21 @@ def _should_skip(name: str) -> bool:
 
 
 def _get_workspace() -> Path:
-    """Get workspace directory."""
+    """Get workspace directory.
+    
+    优先返回 files 子目录（用户上传文件的位置），
+    如果不存在则返回工作目录根目录。
+    """
     try:
         from ...config.context import get_current_workspace_dir
         ws = get_current_workspace_dir()
         if ws:
-            return Path(ws)
+            workspace = Path(ws)
+            # 优先检查 files 子目录（MySpace 上传文件的位置）
+            files_dir = workspace / "files"
+            if files_dir.exists() and files_dir.is_dir():
+                return files_dir
+            return workspace
     except Exception:
         pass
     return Path.cwd()
