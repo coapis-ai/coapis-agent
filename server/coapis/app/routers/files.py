@@ -239,6 +239,7 @@ async def upload_file(
     path: str = Form("/"),
     category: str = Form("files"),
     overwrite: str = Form("false"),
+    relative_path: str = Form(""),  # 文件夹上传时的完整相对路径
     request: Request = None,
 ):
     """上传文件"""
@@ -266,12 +267,27 @@ async def upload_file(
     if usage + total_size > cfg["max_user_space"]:
         raise HTTPException(status_code=400, detail="存储空间不足")
 
+    # Determine target path: use relative_path if provided (folder upload)
+    if relative_path:
+        # relative_path = "/docs/a/a.md" -> parent_dir = "/docs/a", filename = "a.md"
+        relative_path = relative_path.strip("/")
+        last_slash = relative_path.rfind("/")
+        if last_slash > 0:
+            target_path = "/" + relative_path[:last_slash]
+            target_filename = relative_path[last_slash + 1:]
+        else:
+            target_path = "/"
+            target_filename = relative_path
+    else:
+        target_path = path
+        target_filename = file.filename
+
     # Upload - pass content directly since we already read it
     try:
         result = await file_service.upload_file_with_content(
             username=username,
-            path=path,
-            filename=file.filename,
+            path=target_path,
+            filename=target_filename,
             content=content,
             category=category,
             overwrite=overwrite,

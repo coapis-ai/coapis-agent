@@ -347,7 +347,14 @@ const MySpacePage: React.FC = () => {
     const url = getApiUrl(`${FILES_API}/upload`);
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('path', path);
+
+    // 如果有 webkitRelativePath，传递完整相对路径
+    const relPath = (file as any).webkitRelativePath || '';
+    if (relPath) {
+      formData.append('relative_path', path + '/' + relPath);
+    } else {
+      formData.append('path', path);
+    }
     formData.append('category', category);
 
     return new Promise((resolve) => {
@@ -426,14 +433,15 @@ const MySpacePage: React.FC = () => {
 
     // 提取所有目录路径（从 webkitRelativePath 中提取完整目录结构）
     const dirPaths = new Set<string>();
+    const rootPath = files[0]?.path || '';  // 使用第一个文件的 path 作为根路径
     for (const { file } of files) {
       const relPath = (file as any).webkitRelativePath || '';
       if (relPath) {
         const parts = relPath.split('/');
         // 从第一层目录开始，逐层添加目录路径
-        // 例如 "docs/a/b/file.txt" -> ["docs", "docs/a", "docs/a/b"]
+        // 例如 "docs/a/b/file.txt" -> ["/docs", "/docs/a", "/docs/a/b"]
         for (let i = 1; i < parts.length; i++) {
-          const dirPath = currentPath + '/' + parts.slice(0, i).join('/');
+          const dirPath = rootPath + '/' + parts.slice(0, i).join('/');
           dirPaths.add(dirPath);
         }
       }
@@ -778,12 +786,6 @@ const MySpacePage: React.FC = () => {
                   return;
                 }
                 const uploadItems: Array<{ file: File; path: string }> = files.map((file) => {
-                  const relPath = (file as any).webkitRelativePath || '';
-                  if (relPath) {
-                    const targetPath = currentPath + '/' + relPath;
-                    const parentDir = targetPath.substring(0, targetPath.lastIndexOf('/')) || currentPath;
-                    return { file, path: parentDir };
-                  }
                   return { file, path: currentPath };
                 });
                 await processUploadQueue(uploadItems, activeCategory);
