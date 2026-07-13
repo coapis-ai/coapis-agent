@@ -131,8 +131,8 @@ function OverviewTab() {
       <Col span={6}>
         <Card className={styles.statCard}>
           <Statistic
-            title={t('admin.totalTokens')}
-            value={summary?.total_tokens ?? 0}
+            title="总消耗 Tokens"
+            value={(summary?.total_prompt_tokens ?? 0) + (summary?.total_completion_tokens ?? 0)}
             prefix={<CloudServerOutlined />}
             precision={0}
           />
@@ -141,8 +141,8 @@ function OverviewTab() {
       <Col span={6}>
         <Card className={styles.statCard}>
           <Statistic
-            title={t('admin.usedTokens')}
-            value={summary?.used_tokens ?? 0}
+            title="总调用次数"
+            value={summary?.total_calls ?? 0}
             prefix={<ThunderboltOutlined />}
             precision={0}
           />
@@ -151,8 +151,8 @@ function OverviewTab() {
       <Col span={6}>
         <Card className={styles.statCard}>
           <Statistic
-            title={t('admin.remainingTokens')}
-            value={(summary?.total_tokens ?? 0) - (summary?.used_tokens ?? 0)}
+            title="输入 Tokens"
+            value={summary?.total_prompt_tokens ?? 0}
             prefix={<TrophyOutlined />}
             precision={0}
           />
