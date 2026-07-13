@@ -59,15 +59,29 @@ async def get_token_usage(
             "start_date": start_date,
             "end_date": end_date,
             "total_tokens": summary.total_prompt_tokens + summary.total_completion_tokens,
-            "prompt_tokens": summary.total_prompt_tokens,
-            "completion_tokens": summary.total_completion_tokens,
-            "call_count": summary.total_calls,
+            "total_prompt_tokens": summary.total_prompt_tokens,
+            "total_completion_tokens": summary.total_completion_tokens,
+            "total_calls": summary.total_calls,
             "by_model": {
-                m: {"prompt": v.prompt_tokens, "completion": v.completion_tokens, "calls": v.call_count}
+                m: {
+                    "provider_id": v.provider_id,
+                    "model": v.model,
+                    "prompt_tokens": v.prompt_tokens,
+                    "completion_tokens": v.completion_tokens,
+                    "call_count": v.call_count,
+                }
                 for m, v in summary.by_model.items()
             },
+            "by_date": {
+                d: {
+                    "prompt_tokens": v.prompt_tokens,
+                    "completion_tokens": v.completion_tokens,
+                    "call_count": v.call_count,
+                }
+                for d, v in summary.by_date.items()
+            },
             "by_provider": {
-                p: {"prompt": v.prompt_tokens, "completion": v.completion_tokens, "calls": v.call_count}
+                p: {"prompt_tokens": v.prompt_tokens, "completion_tokens": v.completion_tokens, "call_count": v.call_count}
                 for p, v in summary.by_provider.items()
             },
         }
@@ -77,10 +91,11 @@ async def get_token_usage(
             "start_date": start_date,
             "end_date": end_date,
             "total_tokens": 0,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "call_count": 0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "total_calls": 0,
             "by_model": {},
+            "by_date": {},
             "by_provider": {},
             "error": str(e),
         }
