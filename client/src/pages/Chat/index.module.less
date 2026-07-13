@@ -737,3 +737,15 @@
     padding: 4px 8px !important;
   }
 }
+
+/* ── Welcome avatar size adjustment ── */
+.chatMessagesArea {
+  :global {
+    /* Welcome section avatar */
+    [class*="welcome-suggestion"] img,
+    [class*="WelcomeSuggestion"] img {
+      max-width: 60px !important;
+      max-height: 60px !important;
+    }
+  }
+}
