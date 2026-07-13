@@ -214,22 +214,66 @@ async def project_analyzer(
     action: str = "overview",
     path: str = "",
     depth: int = 3,
+    query: str = "",
 ) -> dict[str, Any]:
     """项目结构分析。
 
     Args:
-        action: 分析类型 (overview/tree/languages/types)
+        action: 分析类型
+            - overview: 项目概览（默认）
+            - tree: 目录树
+            - languages: 语言统计
+            - types: 项目类型检测
+            - search: 搜索目录（需要 query 参数）
         path: 子目录路径（可选，默认整个 workspace）
         depth: 目录树深度，默认 3
+        query: 搜索关键词（search 时必填）
 
     Returns:
         分析结果
     """
     workspace = _get_workspace()
+    
+    # 搜索功能：查找匹配的目录
+    if action == "search":
+        if not query.strip():
+            return {"error": "搜索需要提供 query 参数"}
+        
+        matches = []
+        max_results = 20
+        try:
+            for item in workspace.rglob("*"):
+                if item.is_dir() and not _should_skip(item.name):
+                    if query.lower() in item.name.lower():
+                        rel_path = item.relative_to(workspace)
+                        matches.append({
+                            "path": str(rel_path),
+                            "name": item.name,
+                        })
+                        if len(matches) >= max_results:
+                            break
+        except Exception as e:
+            return {"error": f"搜索失败: {e}"}
+        
+        return {
+            "query": query,
+            "matches": matches,
+            "total": len(matches),
+            "hint": "使用 path 参数指定完整路径进行分析" if matches else "未找到匹配的目录",
+        }
+    
+    # 其他功能需要检查路径
     target = workspace / path.strip() if path.strip() else workspace
 
     if not target.exists():
+        # 提供搜索建议
+        if path.strip():
+            return {
+                "error": f"路径不存在: {path}",
+                "hint": f"使用 action='search' 和 query='{path.split('/')[-1]}' 搜索目录位置",
+            }
         return {"error": f"路径不存在: {target}"}
+        
     if not target.is_dir():
         return {"error": f"不是目录: {target}"}
 
