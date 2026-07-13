@@ -952,30 +952,30 @@ html.dark-mode .coapis-sender-content {
 /* Welcome avatar: full tall SVG. Class is coapis-avatar (no "ant"). */
 [class*="chat-anywhere-welcome-default"] [class*="-avatar"],
 [class*="message-list-welcome"] [class*="welcome-default"] [class*="-avatar"] {
-  width: 36px !important;
-  height: 36px !important;
-  min-width: 36px !important;
-  min-height: 36px !important;
+  width: 33px !important;
+  height: 33px !important;
+  min-width: 33px !important;
+  min-height: 33px !important;
   overflow: visible !important;
 }
 
 /* Chat bubble avatar size */
 .coapis-avatar,
 .coapis-avatar {
-  width: 36px !important;
-  height: 36px !important;
-  min-width: 36px !important;
-  min-height: 36px !important;
+  width: 33px !important;
+  height: 33px !important;
+  min-width: 33px !important;
+  min-height: 33px !important;
 }
 
-/* Avatar img 占满容器 */
+/* Avatar img 占满容器并填充 */
 .coapis-avatar > img,
 .coapis-avatar-image > img,
 [class*="chat-anywhere-welcome-default"] [class*="-avatar"] > img,
 [class*="message-list-welcome"] [class*="-avatar"] > img {
   width: 100% !important;
   height: 100% !important;
-  object-fit: contain !important;
+  object-fit: cover !important;
   object-position: center;
 }
 
