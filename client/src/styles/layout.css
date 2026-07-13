@@ -973,8 +973,8 @@ html.dark-mode .coapis-sender-content {
 .coapis-avatar-image > img,
 [class*="chat-anywhere-welcome-default"] [class*="-avatar"] > img,
 [class*="message-list-welcome"] [class*="-avatar"] > img {
-  width: 100% !important;
-  height: 100% !important;
+  width: 72px !important;
+  height: 72px !important;
   object-fit: cover !important;
   object-position: center;
 }

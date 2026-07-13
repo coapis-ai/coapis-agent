@@ -741,13 +741,13 @@
 /* ── Welcome avatar size adjustment ── */
 .chatMessagesArea {
   :global {
-    /* Welcome section avatar - 让图片占满容器 */
+    /* Welcome section avatar - 直接放大图片尺寸 */
     [class*="welcome-suggestion"] img,
     [class*="WelcomeSuggestion"] img {
-      width: 100% !important;
-      height: 100% !important;
-      max-width: 100% !important;
-      max-height: 100% !important;
+      width: 72px !important;
+      height: 72px !important;
+      max-width: 72px !important;
+      max-height: 72px !important;
       object-fit: contain !important;
     }
   }
