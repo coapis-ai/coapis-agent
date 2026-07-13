@@ -311,42 +311,43 @@ def get_usage_history(
     model: Optional[str] = None,
     agent_id: Optional[str] = None,
 ) -> TokenUsageList:
-    """Get token usage history for a user."""
-    db = get_db()
-
-    where = "username = ?"
-    params: list = [username]
-
-    if model:
-        where += " AND model = ?"
-        params.append(model)
-
-    if agent_id:
-        where += " AND agent_id = ?"
-        params.append(agent_id)
-
-    total = db.fetch_one(f"SELECT COUNT(*) as cnt FROM token_usage WHERE {where}", tuple(params))["cnt"]
-
-    offset = (page - 1) * page_size
-    rows = db.fetch_all(
-        f"SELECT * FROM token_usage WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        tuple(params) + [page_size, offset],
+    """Get token usage history for a user.
+    
+    Open-source version: query from JSON file (token_usage_details.json)
+    Enterprise version: query from SQLite database
+    """
+    # Open-source version: query from JSON file
+    from ..token_usage.db_writer import get_user_token_history, get_user_token_history_count
+    
+    records_raw = get_user_token_history(
+        username=username,
+        page=page,
+        page_size=page_size,
+        model=model,
+        agent_id=agent_id,
     )
-
+    
+    total = get_user_token_history_count(
+        username=username,
+        model=model,
+        agent_id=agent_id,
+    )
+    
+    # Convert to TokenUsageRecord format
     records = [
         TokenUsageRecord(
-            id=r["id"],
-            user_id=r["user_id"],
-            username=r["username"],
+            id=idx,  # Use index as ID for JSON mode
+            user_id=r.get("user_id", 0),
+            username=r.get("username", username),
             agent_id=r.get("agent_id"),
-            model=r["model"],
+            model=r.get("model", "unknown"),
             input_tokens=r.get("input_tokens", 0),
             output_tokens=r.get("output_tokens", 0),
             total_tokens=r.get("total_tokens", 0),
             cost_cents=r.get("cost_cents", 0.0),
             created_at=r.get("created_at"),
         )
-        for r in rows
+        for idx, r in enumerate(records_raw)
     ]
 
     return TokenUsageList(

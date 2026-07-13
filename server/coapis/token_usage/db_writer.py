@@ -293,3 +293,88 @@ def get_agent_token_usage(
     except Exception as e:
         logger.warning("Failed to get token usage for agent %s: %s", agent_id, e)
         return {"total_tokens": 0, "by_user": {}, "by_model": {}}
+
+
+def get_user_token_history(
+    username: str,
+    page: int = 1,
+    page_size: int = 50,
+    model: Optional[str] = None,
+    agent_id: Optional[str] = None,
+) -> list:
+    """Get paginated token usage history for a user from JSON file.
+    
+    Args:
+        username: Username to query
+        page: Page number (1-based)
+        page_size: Number of records per page
+        model: Optional model filter
+        agent_id: Optional agent_id filter
+    
+    Returns:
+        List of token usage records (sorted by created_at DESC)
+    """
+    try:
+        data = _load_data()
+        records = data.get("records", [])
+        
+        # Filter by username
+        filtered = [r for r in records if r.get("username") == username]
+        
+        # Filter by model
+        if model:
+            filtered = [r for r in filtered if r.get("model") == model]
+        
+        # Filter by agent_id
+        if agent_id:
+            filtered = [r for r in filtered if r.get("agent_id") == agent_id]
+        
+        # Sort by created_at DESC
+        filtered.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+        
+        # Paginate
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        
+        return filtered[start_idx:end_idx]
+        
+    except Exception as e:
+        logger.warning("Failed to get token history for user %s: %s", username, e)
+        return []
+
+
+def get_user_token_history_count(
+    username: str,
+    model: Optional[str] = None,
+    agent_id: Optional[str] = None,
+) -> int:
+    """Get total count of token usage records for a user.
+    
+    Args:
+        username: Username to query
+        model: Optional model filter
+        agent_id: Optional agent_id filter
+    
+    Returns:
+        Total count of records
+    """
+    try:
+        data = _load_data()
+        records = data.get("records", [])
+        
+        # Filter by username
+        filtered = [r for r in records if r.get("username") == username]
+        
+        # Filter by model
+        if model:
+            filtered = [r for r in filtered if r.get("model") == model]
+        
+        # Filter by agent_id
+        if agent_id:
+            filtered = [r for r in filtered if r.get("agent_id") == agent_id]
+        
+        return len(filtered)
+        
+    except Exception as e:
+        logger.warning("Failed to get token history count for user %s: %s", username, e)
+        return 0
