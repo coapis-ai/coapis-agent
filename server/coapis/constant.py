@@ -191,14 +191,15 @@ CHATS_FILE = EnvVarLoader.get_str("COAPIS_CHATS_FILE", "chats.json")
 # Builtin Q&A helper profile.  agent_id keeps "CoApis" prefix for existing
 # workspaces and agent.json; do not rename.
 def _discover_agent_languages() -> frozenset[str]:
-    md_root = Path(__file__).resolve().parent / "agents" / "md_files"
-    if md_root.is_dir():
+    """Discover available agent languages from data/packs directory."""
+    packs_dir = Path(__file__).resolve().parent / "data" / "packs"
+    if packs_dir.is_dir():
         langs = {
             d.name
-            for d in md_root.iterdir()
+            for d in packs_dir.iterdir()
             if d.is_dir()
             and not d.name.startswith(".")
-            and any(d.glob("*.md"))
+            and (d / "templates" / "user_level").exists()
         }
         if langs:
             return frozenset(langs)
