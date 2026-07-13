@@ -33,6 +33,8 @@ PREFIX_WORKSPACES = "data/workspaces/"
 PREFIX_SECRETS = "data/secrets/"
 PREFIX_SKILL_POOL = "data/skill_pool/"
 PREFIX_CONFIG = "data/config.json"
+PREFIX_SYSTEM = "data/system/"
+PREFIX_TOKEN_USAGE = "data/token_usage.json"
 
 # Allowed characters for a backup ID. Accepts both the new human-readable
 # format (coapis-{ver}-{ts}-{short8}) and legacy UUID strings.

@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Helpers for creating backups: agents, global config, secrets, skill pool."""
+"""Helpers for creating backups: agents, global config, secrets, skill pool, system."""
 from __future__ import annotations
 
 import logging
@@ -27,9 +27,11 @@ from .._utils.constants import (
     PREFIX_CONFIG,
     PREFIX_SECRETS,
     PREFIX_SKILL_POOL,
+    PREFIX_SYSTEM,
+    PREFIX_TOKEN_USAGE,
     PREFIX_WORKSPACES,
 )
-from ...constant import CONFIG_FILE, SECRET_DIR, WORKING_DIR
+from ...constant import CONFIG_FILE, SECRET_DIR, SYSTEM_DIR, WORKING_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +87,11 @@ def add_agent_workspaces(
 
 
 def add_global_config(zf: zipfile.ZipFile) -> None:
-    """Add the global config file to the zip."""
-    cfg_src = WORKING_DIR / CONFIG_FILE
+    """Add the global config file to the zip.
+    
+    Note: config.json is located in SYSTEM_DIR, not WORKING_DIR root.
+    """
+    cfg_src = SYSTEM_DIR / CONFIG_FILE
     if cfg_src.is_file():
         zf.write(cfg_src, PREFIX_CONFIG)
         logger.info("Global config added to backup: %s", cfg_src)
@@ -151,6 +156,91 @@ def add_skill_pool(zf: zipfile.ZipFile, stop_event=None) -> bool:
     return True
 
 
+# System files that should be backed up (excluding .secret which is handled separately)
+_SYSTEM_BACKUP_FILES = [
+    "users.json",
+    "permissions.json",
+    "auth.json",
+    "audit_logs.json",
+    "audit_chain.jsonl",
+    "user_preferences.json",
+    "token_usage_details.json",
+    "global_defaults.json",
+    "input_guard_rules.yaml",
+    "tool_guard.yaml",
+    "api_keys.json",
+    "heartbeat.json",
+    "skill_metrics.json",
+    "migration_report.json",
+]
+
+# System subdirectories to backup
+_SYSTEM_BACKUP_DIRS = [
+    "templates",
+    "evolution",
+    "skill_evolution",
+    "reviews",
+]
+
+
+def add_system_dir(zf: zipfile.ZipFile, stop_event=None) -> bool:
+    """Add system directory to the zip.
+    
+    Backs up critical system files: users, permissions, audit logs, etc.
+    Excludes .secret directory (handled by include_secrets).
+    
+    Returns ``False`` if *stop_event* was set (cancelled), ``True`` otherwise.
+    """
+    if not SYSTEM_DIR.is_dir():
+        logger.warning("System directory not found: %s", SYSTEM_DIR)
+        return True
+    
+    file_count = 0
+    
+    # Backup specific files
+    for filename in _SYSTEM_BACKUP_FILES:
+        if stop_event and stop_event.is_set():
+            return False
+        src_file = SYSTEM_DIR / filename
+        if src_file.is_file():
+            arcname = f"{PREFIX_SYSTEM}{filename}"
+            zf.write(src_file, arcname)
+            file_count += 1
+            logger.debug("  Added system file: %s", filename)
+    
+    # Backup subdirectories
+    for dirname in _SYSTEM_BACKUP_DIRS:
+        if stop_event and stop_event.is_set():
+            return False
+        src_dir = SYSTEM_DIR / dirname
+        if src_dir.is_dir():
+            for entry in sorted(src_dir.rglob("*")):
+                if stop_event and stop_event.is_set():
+                    return False
+                if entry.is_file():
+                    rel = entry.relative_to(src_dir).as_posix()
+                    arcname = f"{PREFIX_SYSTEM}{dirname}/{rel}"
+                    zf.write(entry, arcname)
+                    file_count += 1
+    
+    logger.info("System directory backed up: %d file(s) from %s", file_count, SYSTEM_DIR)
+    return True
+
+
+def add_token_usage(zf: zipfile.ZipFile) -> None:
+    """Add token usage file to the zip.
+    
+    The token_usage.json file is located in SYSTEM_DIR.
+    """
+    from ...constant import TOKEN_USAGE_JSON
+    token_file = SYSTEM_DIR / TOKEN_USAGE_JSON
+    if token_file.is_file():
+        zf.write(token_file, PREFIX_TOKEN_USAGE)
+        logger.info("Token usage file added to backup: %s", token_file)
+    else:
+        logger.debug("Token usage file not found: %s", token_file)
+
+
 def add_files_to_zip(
     zf: zipfile.ZipFile,
     meta,
@@ -190,5 +280,10 @@ def add_files_to_zip(
     if meta.scope.include_skill_pool:
         if not add_skill_pool(zf, stop_event):
             return []
+    if meta.scope.include_system:
+        if not add_system_dir(zf, stop_event):
+            return []
+    if meta.scope.include_token_usage:
+        add_token_usage(zf)
 
     return [aid for aid, _ in valid_agents]

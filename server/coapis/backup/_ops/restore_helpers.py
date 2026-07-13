@@ -29,8 +29,8 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .._utils.constants import PREFIX_SECRETS, PREFIX_WORKSPACES
-from ...constant import BACKUP_DIR, SECRET_DIR, WORKING_DIR
+from .._utils.constants import PREFIX_SECRETS, PREFIX_SYSTEM, PREFIX_TOKEN_USAGE, PREFIX_WORKSPACES
+from ...constant import BACKUP_DIR, SECRET_DIR, SYSTEM_DIR, WORKING_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -172,3 +172,245 @@ def handle_master_key_conflict(
             "Failed to back up current master_key before restore",
         )
         return None
+    
+
+
+# ---------------------------------------------------------------------------
+# System directory restore helpers
+# ---------------------------------------------------------------------------
+
+def collect_system_files_from_zip(zf: zipfile.ZipFile) -> set[str]:
+    """Return the set of file paths in the system directory stored in *zf*."""
+    files: set[str] = set()
+    for info in zf.infolist():
+        if info.filename.startswith(PREFIX_SYSTEM) and not info.is_dir():
+            # Extract relative path from "data/system/..."
+            rel = info.filename[len(PREFIX_SYSTEM):]
+            if rel:
+                files.add(rel)
+    return files
+
+
+def has_system_dir_in_zip(zf: zipfile.ZipFile) -> bool:
+    """Check if the zip contains system directory."""
+    return bool(collect_system_files_from_zip(zf))
+
+
+def merge_json_by_key(
+    local_path: Path,
+    backup_data: list | dict,
+    key_field: str = "id",
+) -> list | dict:
+    """Merge JSON data by a key field.
+    
+    For list data: merge by key_field, backup takes precedence.
+    For dict data: shallow merge, backup takes precedence.
+    
+    Args:
+        local_path: Path to local JSON file
+        backup_data: Data from backup
+        key_field: Field to use as key for list merging
+        
+    Returns:
+        Merged data
+    """
+    if not local_path.exists():
+        return backup_data
+    
+    try:
+        with open(local_path, "r", encoding="utf-8") as f:
+            local_data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to read local %s: %s, using backup data", local_path, e)
+        return backup_data
+    
+    # Handle dict data (shallow merge)
+    if isinstance(backup_data, dict) and isinstance(local_data, dict):
+        result = dict(local_data)  # Start with local
+        result.update(backup_data)  # Backup overwrites
+        return result
+    
+    # Handle list data (merge by key)
+    if isinstance(backup_data, list) and isinstance(local_data, list):
+        local_map = {item[key_field]: item for item in local_data if key_field in item}
+        backup_map = {item[key_field]: item for item in backup_data if key_field in item}
+        
+        # Start with local items
+        result_map = dict(local_map)
+        # Backup items overwrite/add
+        result_map.update(backup_map)
+        
+        return list(result_map.values())
+    
+    # Fallback: backup takes precedence
+    return backup_data
+
+
+def merge_audit_logs(
+    local_path: Path,
+    backup_data: list,
+) -> list:
+    """Merge audit logs by timestamp (deduplicate).
+    
+    Args:
+        local_path: Path to local audit_logs.json
+        backup_data: Audit logs from backup
+        
+    Returns:
+        Merged and sorted logs
+    """
+    if not local_path.exists():
+        return backup_data
+    
+    try:
+        with open(local_path, "r", encoding="utf-8") as f:
+            local_data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to read local %s: %s, using backup data", local_path, e)
+        return backup_data
+    
+    if not isinstance(local_data, list) or not isinstance(backup_data, list):
+        return backup_data
+    
+    # Deduplicate by timestamp
+    seen = set()
+    result = []
+    
+    for entry in local_data + backup_data:
+        ts = entry.get("timestamp")
+        if ts and ts not in seen:
+            seen.add(ts)
+            result.append(entry)
+    
+    # Sort by timestamp
+    return sorted(result, key=lambda x: x.get("timestamp", ""))
+
+
+def restore_system_file(
+    zf: zipfile.ZipFile,
+    filename: str,
+    tmp_dir: Path,
+    mode: str,
+) -> None:
+    """Restore a single system file with merge support.
+    
+    Args:
+        zf: ZipFile to extract from
+        filename: Relative filename within system directory
+        tmp_dir: Temporary directory for extraction
+        mode: "full" for replace, "custom" for merge
+    """
+    zip_entry = f"{PREFIX_SYSTEM}{filename}"
+    if zip_entry not in zf.namelist():
+        return
+    
+    local_path = SYSTEM_DIR / filename
+    
+    # Extract to tmp first
+    zf.extract(zip_entry, tmp_dir)
+    extracted_path = tmp_dir / zip_entry
+    
+    # Read backup data
+    try:
+        with open(extracted_path, "r", encoding="utf-8") as f:
+            backup_data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to read backup %s: %s, skipping", filename, e)
+        return
+    
+    if mode == "full":
+        # Direct replace
+        shutil.copy2(extracted_path, local_path)
+        logger.info("Restored system file (full mode): %s", filename)
+    else:
+        # Merge based on file type
+        if filename == "users.json":
+            merged = merge_json_by_key(local_path, backup_data, key_field="username")
+        elif filename == "permissions.json":
+            merged = merge_json_by_key(local_path, backup_data, key_field="user_id")
+        elif filename in ("audit_logs.json", "audit_chain.jsonl"):
+            if filename.endswith(".jsonl"):
+                # JSONL files: append unique lines
+                merged = backup_data  # Simplified: just use backup for JSONL
+            else:
+                merged = merge_audit_logs(local_path, backup_data)
+        elif filename == "user_preferences.json":
+            merged = merge_json_by_key(local_path, backup_data, key_field="username")
+        elif filename == "token_usage_details.json":
+            merged = merge_json_by_key(local_path, backup_data, key_field="date")
+        else:
+            # Default: backup takes precedence
+            merged = backup_data
+        
+        # Write merged data
+        with open(local_path, "w", encoding="utf-8") as f:
+            json.dump(merged, f, indent=2, ensure_ascii=False)
+        logger.info("Restored system file (custom mode, merged): %s", filename)
+
+
+def restore_system_dir(
+    zf: zipfile.ZipFile,
+    tmp_dir: Path,
+    mode: str,
+) -> None:
+    """Restore system directory from backup.
+    
+    Args:
+        zf: ZipFile to restore from
+        tmp_dir: Temporary directory for extraction
+        mode: "full" for complete replacement, "custom" for selective merge
+    """
+    system_files = collect_system_files_from_zip(zf)
+    if not system_files:
+        logger.info("No system files found in backup")
+        return
+    
+    logger.info("Restoring system directory (%s mode): %d files", mode, len(system_files))
+    
+    # Ensure SYSTEM_DIR exists
+    SYSTEM_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Restore each file
+    for rel_path in sorted(system_files):
+        # Check if it is a file (not in a subdirectory)
+        if "/" not in rel_path:
+            # It is a file in system root
+            restore_system_file(zf, rel_path, tmp_dir, mode)
+        else:
+            # It is in a subdirectory (templates/, evolution/, etc.)
+            zip_entry = f"{PREFIX_SYSTEM}{rel_path}"
+            if zip_entry in zf.namelist():
+                local_path = SYSTEM_DIR / rel_path
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                zf.extract(zip_entry, SYSTEM_DIR)
+                logger.debug("Restored system subdirectory file: %s", rel_path)
+    
+    logger.info("System directory restore completed")
+
+
+def has_token_usage_in_zip(zf: zipfile.ZipFile) -> bool:
+    """Check if the zip contains token usage file."""
+    return PREFIX_TOKEN_USAGE in zf.namelist()
+
+
+def restore_token_usage(zf: zipfile.ZipFile, tmp_dir: Path) -> None:
+    """Restore token usage file from backup.
+    
+    Args:
+        zf: ZipFile to restore from
+        tmp_dir: Temporary directory
+    """
+    from ...constant import TOKEN_USAGE_JSON
+    
+    if PREFIX_TOKEN_USAGE not in zf.namelist():
+        logger.debug("No token usage file in backup")
+        return
+    
+    # Extract to tmp
+    zf.extract(PREFIX_TOKEN_USAGE, tmp_dir)
+    extracted_path = tmp_dir / PREFIX_TOKEN_USAGE
+    
+    # Copy to SYSTEM_DIR
+    local_path = SYSTEM_DIR / TOKEN_USAGE_JSON
+    shutil.copy2(extracted_path, local_path)
+    logger.info("Token usage file restored: %s", local_path)

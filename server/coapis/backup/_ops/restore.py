@@ -30,6 +30,8 @@ from .._utils.constants import (
     PREFIX_CONFIG,
     PREFIX_SECRETS,
     PREFIX_SKILL_POOL,
+    PREFIX_SYSTEM,
+    PREFIX_TOKEN_USAGE,
     PREFIX_WORKSPACES,
     zip_path,
 )
@@ -48,13 +50,17 @@ from ...security.secret_store import reload_master_key_from_disk
 from .restore_helpers import (
     collect_workspace_agents_from_zip,
     handle_master_key_conflict,
+    has_system_dir_in_zip,
+    has_token_usage_in_zip,
     resolve_workspace_dst,
+    restore_system_dir,
+    restore_token_usage,
     rewrite_agent_workspace_dir,
 )
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_BACKUP_VERSIONS = {"1"}
+_SUPPORTED_BACKUP_VERSIONS = {"1", "2"}
 
 # Serialise concurrent restores so that concurrent HTTP requests cannot
 # interleave their file operations (especially critical on Windows where open
@@ -426,6 +432,27 @@ def _restore_sync(backup_id: str, req: RestoreBackupRequest) -> None:
         new_aids,
         backup_id,
     )
+    
+    # Restore system directory and token usage (after commit, before refresh)
+    # These are restored directly without staging since they support merge mode
+    with zipfile.ZipFile(zp, "r") as zf:
+        tmp_dir = None
+        try:
+            if req.include_system and has_system_dir_in_zip(zf):
+                tmp_dir = extract_to_tmp(zf, PREFIX_SYSTEM)
+                restore_system_dir(zf, tmp_dir, req.mode)
+                logger.info("System directory restored")
+            
+            if req.include_token_usage and has_token_usage_in_zip(zf):
+                if tmp_dir is None:
+                    tmp_dir = extract_to_tmp(zf, PREFIX_TOKEN_USAGE)
+                restore_token_usage(zf, tmp_dir)
+        finally:
+            if tmp_dir and tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+    
+    # Refresh components after restore
+    _refresh_after_restore(req)
 
 
 def _merge_profiles_into(
@@ -574,3 +601,79 @@ def _apply_workspace_paths_and_save(
         backup_id,
         list(dst_map.keys()),
     )
+
+
+def _refresh_after_restore(req: RestoreBackupRequest) -> None:
+    """Refresh components after restore.
+    
+    This is called after all files have been restored to ensure
+    in-memory state is synchronized with disk.
+    
+    Refresh order matters:
+    1. Secrets (other components may depend on encryption)
+    2. Global config (other components may depend on config)
+    3. User system (clear cache for next read)
+    4. Skill pool (clear cache for next read)
+    5. Agents (restart affected agents)
+    """
+    logger.info("Refreshing components after restore...")
+    
+    # 1. Refresh secrets
+    if req.include_secrets:
+        try:
+            reload_master_key_from_disk()
+            logger.info("Reloaded master key from disk")
+        except Exception as e:
+            logger.warning("Failed to reload master key: %s", e)
+    
+    # 2. Clear global config cache (will reload on next access)
+    if req.include_global_config:
+        try:
+            import coapis.config.utils as config_utils
+            with config_utils._config_lock:
+                config_utils._config_cache = None
+                config_utils._config_mtime = None
+            logger.info("Cleared global config cache")
+        except Exception as e:
+            logger.warning("Failed to clear config cache: %s", e)
+    
+    # 3. Clear user system cache (UserSystemDB is a singleton)
+    if req.include_system:
+        try:
+            from ...user_system.database import UserSystemDB
+            # Reset singleton instance
+            if hasattr(UserSystemDB, '_instance'):
+                UserSystemDB._instance = None
+            logger.info("Cleared user system cache")
+        except Exception as e:
+            logger.warning("Failed to clear user system cache: %s", e)
+    
+    # 4. Clear skill pool cache
+    if req.include_skill_pool:
+        try:
+            from ...agents.skills_manager import _skill_pool_cache
+            _skill_pool_cache.clear()
+            logger.info("Cleared skill pool cache")
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning("Failed to clear skill pool cache: %s", e)
+    
+    # 5. Restart affected agents
+    if req.include_agents and req.agent_ids:
+        try:
+            from ...app.multi_agent_manager import get_multi_agent_manager
+            manager = get_multi_agent_manager()
+            # Restart each affected agent
+            for agent_id in req.agent_ids:
+                try:
+                    # Stop and restart the agent
+                    if hasattr(manager, "restart_agent"):
+                        manager.restart_agent(agent_id)
+                        logger.info("Restarted agent: %s", agent_id)
+                except Exception as e:
+                    logger.warning("Failed to restart agent %s: %s", agent_id, e)
+        except Exception as e:
+            logger.warning("Failed to access multi-agent manager: %s", e)
+    
+    logger.info("Component refresh completed")

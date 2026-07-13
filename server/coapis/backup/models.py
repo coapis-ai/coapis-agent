@@ -43,6 +43,14 @@ class BackupScope(BaseModel):
         default=True,
         description="Include skill pool directory",
     )
+    include_system: bool = Field(
+        default=True,
+        description="Include system directory (users, permissions, audit, etc.)",
+    )
+    include_token_usage: bool = Field(
+        default=True,
+        description="Include token usage statistics",
+    )
 
 
 class BackupMeta(BaseModel):
@@ -55,7 +63,7 @@ class BackupMeta(BaseModel):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
     )
-    version: str = Field(default="1", description="Backup format version")
+    version: str = Field(default="2", description="Backup format version")
     scope: BackupScope = Field(default_factory=BackupScope)
     agent_count: int = Field(
         default=0,
@@ -96,6 +104,14 @@ class RestoreBackupRequest(BaseModel):
     include_global_config: bool = Field(default=True)
     include_secrets: bool = Field(default=False)
     include_skill_pool: bool = Field(default=True)
+    include_system: bool = Field(
+        default=True,
+        description="Restore system directory (users, permissions, audit, etc.)",
+    )
+    include_token_usage: bool = Field(
+        default=True,
+        description="Restore token usage statistics",
+    )
     default_workspace_dir: Optional[str] = Field(
         default=None,
         description=(
