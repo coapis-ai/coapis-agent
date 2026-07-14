@@ -3,8 +3,6 @@
 import { useState, useEffect } from 'react';
 import { Tabs } from 'antd';
 import { PinButton } from './PinButton';
-import { FileTreeSelector } from './FileTreeSelector';
-import { KnowledgeSelector } from './KnowledgeSelector';
 import { SelectedReferences } from './SelectedReferences';
 import { GlobalTools } from './GlobalTools';
 import type { FileInfo, KnowledgeInfo } from '../types';
@@ -21,10 +19,8 @@ interface ChatToolbarSidebarProps {
   onPinToggle?: (pinned: boolean) => void;
   defaultPinned?: boolean;
   // 工具功能回调
-  onModelSelect?: () => void;
-  onHistoryClick?: () => void;
   onSettingsClick?: () => void;
-  onSearchClick?: () => void;
+  showKnowledge?: boolean;  // 是否显示知识库
 }
 
 /**
@@ -33,7 +29,7 @@ interface ChatToolbarSidebarProps {
  * 功能：
  * - 侧边栏形式显示（不使用Drawer）
  * - 支持固定显示（PC端）
- * - 包含工具、文件选择器、知识库选择器、已选引用
+ * - 包含工具、已选引用
  */
 export function ChatToolbarSidebar({
   onFileSelect,
@@ -43,10 +39,8 @@ export function ChatToolbarSidebar({
   showPinButton = true,
   onPinToggle,
   defaultPinned = false,
-  onModelSelect,
-  onHistoryClick,
   onSettingsClick,
-  onSearchClick,
+  showKnowledge = true,
 }: ChatToolbarSidebarProps) {
   // 固定状态
   const [pinned, setPinned] = useState(() => {
@@ -57,7 +51,7 @@ export function ChatToolbarSidebar({
   });
 
   // 当前标签页
-  const [activeTab, setActiveTab] = useState<'tools' | 'files' | 'knowledge' | 'references'>('tools');
+  const [activeTab, setActiveTab] = useState<'tools' | 'references'>('tools');
 
   // 保存固定状态
   useEffect(() => {
@@ -77,30 +71,12 @@ export function ChatToolbarSidebar({
       label: '工具',
       children: (
         <GlobalTools
-          onModelSelect={onModelSelect}
-          onHistoryClick={onHistoryClick}
+          selectedFiles={selectedFiles}
+          selectedKnowledge={selectedKnowledge}
+          onFileSelect={onFileSelect}
+          onKnowledgeSelect={onKnowledgeSelect}
           onSettingsClick={onSettingsClick}
-          onSearchClick={onSearchClick}
-        />
-      ),
-    },
-    {
-      key: 'files',
-      label: `文件 ${selectedFiles.length > 0 ? `(${selectedFiles.length})` : ''}`,
-      children: (
-        <FileTreeSelector
-          selected={selectedFiles}
-          onSelect={onFileSelect}
-        />
-      ),
-    },
-    {
-      key: 'knowledge',
-      label: `知识库 ${selectedKnowledge.length > 0 ? `(${selectedKnowledge.length})` : ''}`,
-      children: (
-        <KnowledgeSelector
-          selected={selectedKnowledge}
-          onSelect={onKnowledgeSelect}
+          showKnowledge={showKnowledge}
         />
       ),
     },

@@ -106,6 +106,8 @@ interface ChatSessionDropdownProps {
   open: boolean;
   /** Callback to close the dropdown */
   onClose: () => void;
+  /** Search keyword to filter sessions */
+  searchKeyword?: string;
 }
 
 /** Format an ISO 8601 timestamp to YYYY-MM-DD HH:mm:ss */
@@ -202,7 +204,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
 
   /** Sessions sorted by pinned first, then by updatedAt descending */
   const sortedSessions = useMemo(() => {
-    return [...localSessions].sort((a, b) => {
+    const sessions = [...localSessions].sort((a, b) => {
       const extA = a as ExtendedChatSession;
       const extB = b as ExtendedChatSession;
 
@@ -216,7 +218,17 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
       if (bTime) return 1;
       return 0;
     });
-  }, [localSessions]);
+
+    // 根据搜索关键词过滤
+    if (props.searchKeyword) {
+      const keyword = props.searchKeyword.toLowerCase();
+      return sessions.filter(s => 
+        s.name?.toLowerCase().includes(keyword)
+      );
+    }
+
+    return sessions;
+  }, [localSessions, props.searchKeyword]);
 
   /** Load session list on mount and when selectedAgent changes */
   const selectedAgent = useAgentStore((s) => s.selectedAgent);

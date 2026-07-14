@@ -31,8 +31,6 @@ import { IconButton } from "@agentscope-ai/design";
 import ChatSessionInitializer from "./components/ChatSessionInitializer";
 import ChatSessionHeader from "./components/ChatSessionHeader";
 import ChatErrorBoundary from "./components/ChatErrorBoundary";
-import ChatSessionDropdown from "./components/ChatSessionDropdown";
-import ChatSearchDropdown from "./components/ChatSearchDropdown";
 import { ApprovalCard } from "../../components/ApprovalCard/ApprovalCard";
 import { commandsApi } from "../../api/modules/commands";
 import { useApprovalContext } from "../../contexts/ApprovalContext";
@@ -601,26 +599,9 @@ export default function ChatPage() {
     setSelectedKnowledge,
   } = useToolbarState();
 
-  // 工具栏功能状态
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-
   // 工具栏功能回调
-  const handleModelSelect = useCallback(() => {
-    // 模型选择由 ModelSelector 组件内部处理
-    console.log('Model select clicked');
-  }, []);
-
-  const handleHistoryClick = useCallback(() => {
-    setHistoryOpen(true);
-  }, []);
-
   const handleSettingsClick = useCallback(() => {
     setShowDisplaySettings(true);
-  }, []);
-
-  const handleSearchClick = useCallback(() => {
-    setSearchOpen(true);
   }, []);
 
   // Sync authenticated username to window for AgentScope Runtime session API
@@ -1522,10 +1503,7 @@ export default function ChatPage() {
                 selectedKnowledge={selectedKnowledge}
                 onFileSelect={setSelectedFiles}
                 onKnowledgeSelect={setSelectedKnowledge}
-                onModelSelect={handleModelSelect}
-                onHistoryClick={handleHistoryClick}
                 onSettingsClick={handleSettingsClick}
-                onSearchClick={handleSearchClick}
               />
             </div>
           )}
@@ -1718,45 +1696,10 @@ export default function ChatPage() {
           selectedKnowledge={selectedKnowledge}
           onFileSelect={setSelectedFiles}
           onKnowledgeSelect={setSelectedKnowledge}
-          onModelSelect={handleModelSelect}
-          onHistoryClick={handleHistoryClick}
           onSettingsClick={handleSettingsClick}
-          onSearchClick={handleSearchClick}
           showPinButton={false}
         />
       </Drawer>
-    )}
-
-    {/* 聊天历史 */}
-    {historyOpen && (
-      <Modal
-        title={t('chat.chatHistoryTooltip', '聊天历史')}
-        open={historyOpen}
-        onCancel={() => setHistoryOpen(false)}
-        footer={null}
-        width={600}
-      >
-        <ChatSessionDropdown
-          open={historyOpen}
-          onClose={() => setHistoryOpen(false)}
-        />
-      </Modal>
-    )}
-
-    {/* 搜索消息 */}
-    {searchOpen && (
-      <Modal
-        title={t('chat.searchTooltip', '搜索消息')}
-        open={searchOpen}
-        onCancel={() => setSearchOpen(false)}
-        footer={null}
-        width={600}
-      >
-        <ChatSearchDropdown
-          open={searchOpen}
-          onClose={() => setSearchOpen(false)}
-        />
-      </Modal>
     )}
     </ChatDisplayConfigContext.Provider>
   );
