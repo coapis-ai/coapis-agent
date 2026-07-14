@@ -111,5 +111,6 @@ docker/dev-overrides/
 server/configure_llm.py
 server/restart_backend.py
 
-# --- Technical documentation (internal) ---
-tech_docs/
+# --- Technical documentation ---
+# tech_docs/ is now versioned (design documents, architecture, etc.)
+# tech_docs/
