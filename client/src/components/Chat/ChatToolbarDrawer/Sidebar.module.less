@@ -9,46 +9,35 @@
   overflow: hidden;
 }
 
-.chatToolbarHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid #f0f0f0;
-  font-weight: 600;
-  font-size: 16px;
-  background: #ffffff;
-}
-
-.chatToolbarTabs {
+.chatToolbarContent {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   
-  // Ant Design Tabs 样式覆盖
-  :global {
-    .ant-tabs-nav {
-      margin-bottom: 0;
-      padding: 0 16px;
-      background: #fafafa;
-    }
+  // 自定义滚动条
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #d9d9d9;
+    border-radius: 3px;
     
-    .ant-tabs-content-holder {
-      flex: 1;
-      overflow: hidden;
-    }
-    
-    .ant-tabs-content {
-      height: 100%;
-    }
-    
-    .ant-tabs-tabpane {
-      height: 100%;
-      overflow-y: auto;
-      padding: 16px;
+    &:hover {
+      background: #bfbfbf;
     }
   }
+  
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+.selectedReferencesSection {
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 // 暗色模式
@@ -57,18 +46,19 @@
   border-right-color: #303030;
 }
 
-:global(.dark) .chatToolbarHeader {
-  background: #141414;
-  border-bottom-color: #303030;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-:global(.dark) .chatToolbarTabs {
-  :global {
-    .ant-tabs-nav {
-      background: #1f1f1f;
+:global(.dark) .chatToolbarContent {
+  &::-webkit-scrollbar-thumb {
+    background: #434343;
+    
+    &:hover {
+      background: #5a5a5a;
     }
   }
+}
+
+:global(.dark) .selectedReferencesSection {
+  border-top-color: #303030;
+  background: #1f1f1f;
 }
 
 // 移动端适配

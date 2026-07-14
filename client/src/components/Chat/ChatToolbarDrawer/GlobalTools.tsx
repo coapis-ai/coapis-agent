@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { Collapse, Button, Modal } from 'antd';
 import {
-  ThunderboltOutlined,
   HistoryOutlined,
   SettingOutlined,
   FolderOutlined,
@@ -37,19 +36,9 @@ export function GlobalTools({
   const [historySearchKeyword, setHistorySearchKeyword] = useState('');
   
   return (
-    <div style={{ padding: '0 4px' }}>
-      {/* 模型选择 */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ 
-          fontSize: 14, 
-          fontWeight: 500, 
-          marginBottom: 8,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}>
-          <ThunderboltOutlined /> 模型选择
-        </div>
+    <div style={{ padding: 8 }}>
+      {/* 模型选择 - 直接显示下拉框 */}
+      <div style={{ marginBottom: 12 }}>
         <ModelSelector />
       </div>
 
@@ -58,7 +47,7 @@ export function GlobalTools({
         icon={<HistoryOutlined />}
         onClick={() => setHistoryModalOpen(true)}
         block
-        style={{ marginBottom: 16 }}
+        style={{ marginBottom: 8, textAlign: 'left' }}
       >
         聊天历史
       </Button>
@@ -117,12 +106,12 @@ export function GlobalTools({
         />
       )}
 
-      {/* 显示设置 */}
+      {/* 显示设置按钮 */}
       <Button 
         icon={<SettingOutlined />} 
         onClick={onSettingsClick}
         block
-        style={{ marginTop: 8 }}
+        style={{ marginTop: 8, textAlign: 'left' }}
       >
         显示设置
       </Button>
