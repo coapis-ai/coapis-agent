@@ -8,6 +8,7 @@ export { FileTreeSelector } from './ChatToolbarDrawer/FileTreeSelector';
 export { KnowledgeSelector } from './ChatToolbarDrawer/KnowledgeSelector';
 export { SelectedReferences } from './ChatToolbarDrawer/SelectedReferences';
 export { ReferenceHint } from './ReferenceHint';
+export { ModelCapabilityHint } from './ModelCapabilityHint';
 
 export { useToolbarState } from './hooks/useToolbarState';
 export { useFileTree } from './hooks/useFileTree';

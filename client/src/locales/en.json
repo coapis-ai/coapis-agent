@@ -2019,6 +2019,13 @@
       "imageOnlyAccept": "Current model only supports image files",
       "imageOnlyWarning": "Current model only supports images, non-image files like videos may not be processed correctly"
     },
+    "capability": {
+      "imageAndVideo": "Supports image and video recognition",
+      "imageOnly": "Supports image recognition",
+      "videoOnly": "Supports video recognition",
+      "textOnly": "Current model does not support image/video recognition",
+      "notProbed": "Model capability not probed"
+    },
     "search": {
       "title": "Search Chat",
       "tooltip": "Search current chat",

@@ -44,7 +44,7 @@ import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
-import { ChatToolbarSidebar, useToolbarState } from "../../components/Chat";
+import { ChatToolbarSidebar, useToolbarState, ModelCapabilityHint } from "../../components/Chat";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -1283,6 +1283,7 @@ export default function ChatPage() {
           label: renderSuggestionLabel(item.command, item.description),
           value: item.value,
         })),
+        footer: <ModelCapabilityHint caps={multimodalCaps} />,
       },
       session: {
         multiple: true,

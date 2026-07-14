@@ -1919,6 +1919,13 @@
       "imageOnlyAccept": "当前模型仅支持图片文件",
       "imageOnlyWarning": "当前模型仅检测到图片支持，视频等非图片文件可能无法被正确处理"
     },
+    "capability": {
+      "imageAndVideo": "支持图片和视频识别",
+      "imageOnly": "支持图片识别",
+      "videoOnly": "支持视频识别",
+      "textOnly": "当前模型不支持图片/视频识别",
+      "notProbed": "模型能力未检测"
+    },
     "search": {
       "title": "搜索聊天",
       "tooltip": "搜索当前聊天",
