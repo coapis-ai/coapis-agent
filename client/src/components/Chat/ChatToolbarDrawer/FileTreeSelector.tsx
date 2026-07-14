@@ -1,7 +1,7 @@
 // 文件树选择器组件
 
-import { useState, useMemo, useEffect } from 'react';
-import { Tree, Input, Button, Empty } from 'antd';
+import { useState, useEffect, useMemo } from 'react';
+import { Tree, Input, Button, Empty, Spin } from 'antd';
 import { SearchOutlined, ReloadOutlined, FileOutlined, FolderOutlined } from '@ant-design/icons';
 import { useFileTree } from '../hooks/useFileTree';
 import type { FileInfo, FileNode } from '../types';
@@ -15,11 +15,10 @@ interface FileTreeSelectorProps {
  * 文件树选择器
  * 
  * 功能：
- * - 树形展示文件和目录
- * - 支持搜索过滤
+ * - 简单的文件列表选择器
  * - 支持多选（复选框）
- * - 显示文件大小、类型图标
- * - 点击文件夹可展开/收缩
+ * - 支持搜索过滤
+ * - 文件夹可展开/收缩
  */
 export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) {
   const { treeData, loading, searchText, setSearchText, refresh } = useFileTree();
@@ -27,10 +26,7 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
 
   // 转换为 Tree 组件数据格式
   const treeDataForAntd = useMemo(() => {
-    console.log('🔍 FileTreeSelector - treeData:', treeData);
-    const converted = convertToTreeData(treeData);
-    console.log('🔍 FileTreeSelector - treeDataForAntd:', converted);
-    return converted;
+    return convertToTreeData(treeData);
   }, [treeData]);
 
   // 默认展开所有文件夹
@@ -41,15 +37,10 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
     }
   }, [treeData]);
 
-  // 处理选择
+  // 处理选择（只选择文件，不选择文件夹）
   const handleCheck = (checkedKeys: any) => {
     const files = findFilesByIds(treeData, checkedKeys as string[]);
     onSelect(files);
-  };
-
-  // 处理展开/收缩
-  const handleExpand = (keys: React.Key[]) => {
-    setExpandedKeys(keys as string[]);
   };
 
   return (
@@ -75,35 +66,26 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
       </div>
 
       {/* 文件树 */}
-      {treeDataForAntd.length > 0 ? (
-        <Tree
-          checkable
-          checkedKeys={selected.map((f) => f.id)}
-          expandedKeys={expandedKeys}
-          onExpand={handleExpand}
-          onCheck={handleCheck}
-          onSelect={(_selectedKeys, info) => {
-            // 点击节点内容时，如果是文件夹则展开/收缩
-            const node = info.node as any;
-            const isFolder = node.isFolder || node.icon?.type?.displayName === 'FolderOutlined';
-            
-            if (isFolder) {
-              const key = node.key as string;
-              if (expandedKeys.includes(key)) {
-                setExpandedKeys(expandedKeys.filter(k => k !== key));
-              } else {
-                setExpandedKeys([...expandedKeys, key]);
-              }
-            }
-          }}
-          treeData={treeDataForAntd}
-          selectable={true}
-          showIcon
-          blockNode
-        />
-      ) : (
-        <Empty description="暂无文件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-      )}
+      <Spin spinning={loading}>
+        {treeDataForAntd.length > 0 ? (
+          <Tree
+            checkable
+            checkedKeys={selected.map((f) => f.id)}
+            expandedKeys={expandedKeys}
+            onExpand={(keys) => setExpandedKeys(keys as string[])}
+            onCheck={handleCheck}
+            treeData={treeDataForAntd}
+            selectable={false}
+            showIcon
+            blockNode
+          />
+        ) : (
+          <Empty 
+            description="暂无文件" 
+            image={Empty.PRESENTED_IMAGE_SIMPLE} 
+          />
+        )}
+      </Spin>
 
       {/* 已选文件数量 */}
       {selected.length > 0 && (
@@ -150,18 +132,18 @@ function convertToTreeData(nodes: FileNode[]): any[] {
     key: node.id,
     title: node.name,
     icon: node.type === 'folder' ? <FolderOutlined /> : <FileOutlined />,
-    // 只有当 children 有内容时才传递，否则传 undefined（空数组会导致无法展开）
     children: node.children && node.children.length > 0 ? convertToTreeData(node.children) : undefined,
-    isFolder: node.type === 'folder',  // 标记是否为文件夹
+    isLeaf: node.type === 'file',  // 标记是否为叶子节点
   }));
 }
 
-// 辅助函数：根据ID查找文件
+// 辅助函数：根据ID查找文件（只返回文件，不返回文件夹）
 function findFilesByIds(nodes: FileNode[], ids: string[]): FileInfo[] {
   const files: FileInfo[] = [];
   
   function traverse(node: FileNode) {
-    if (ids.includes(node.id)) {
+    // 只添加文件，不添加文件夹
+    if (ids.includes(node.id) && node.type === 'file') {
       files.push({
         id: node.id,
         name: node.name,
