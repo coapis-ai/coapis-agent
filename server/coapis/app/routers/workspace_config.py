@@ -439,68 +439,16 @@ def _get_selected_agent_id(request: Request) -> Optional[str]:
 @require_permission("chat:configure")
 async def get_running_config(request: Request) -> Dict[str, Any]:
     """Get agent running configuration."""
-    return {
-        "max_iters": 50,
-        "auto_continue_on_text_only": True,
-        "shell_command_timeout": 120,
-        "llm_retry_enabled": True,
-        "llm_max_retries": 3,
-        "llm_backoff_base": 2.0,
-        "llm_backoff_cap": 60.0,
-        "llm_max_concurrent": 1,
-        "llm_max_qpm": 0,
-        "llm_rate_limit_pause": 0,
-        "llm_rate_limit_jitter": 0,
-        "llm_acquire_timeout": 300,
-        "max_input_length": 128000,
-        "history_max_length": 100,
-        "context_manager_backend": "light",
-        "light_context_config": {
-            "dialog_path": "dialog",
-            "token_count_estimate_divisor": 4,
-            "context_compact_config": {
-                "enabled": True,
-                "compact_threshold_ratio": 0.7,
-                "reserve_threshold_ratio": 0.3,
-                "compact_with_thinking_block": False,
-            },
-            "tool_result_pruning_config": {
-                "enabled": True,
-                "pruning_recent_n": 10,
-                "pruning_old_msg_max_bytes": 4000,
-                "pruning_recent_msg_max_bytes": 16000,
-                "offload_retention_days": 7,
-                "exempt_file_extensions": [],
-                "exempt_tool_names": [],
-            },
-        },
-        "memory_manager_backend": "reme_light",
-        "reme_light_memory_config": {
-            "summarize_when_compact": True,
-            "auto_memory_interval": 10,
-            "dream_cron": "0 3 * * *",
-            "auto_memory_search_config": {
-                "enabled": True,
-                "max_results": 5,
-                "min_score": 0.1,
-            },
-            "embedding_model_config": {
-                "backend": "openai",
-                "api_key": "",
-                "base_url": "",
-                "model_name": "",
-                "dimensions": 1536,
-                "enable_cache": True,
-                "use_dimensions": True,
-                "max_cache_size": 10000,
-                "max_input_length": 8000,
-                "max_batch_size": 100,
-            },
-            "rebuild_memory_index_on_start": False,
-            "recursive_file_watcher": False,
-        },
-        "scene": None,
-    }
+    from coapis.config.config import AgentsRunningConfig
+    
+    # Use default values from AgentsRunningConfig
+    default_config = AgentsRunningConfig()
+    config_dict = default_config.model_dump()
+    
+    # Add scene field (not part of AgentsRunningConfig)
+    config_dict["scene"] = None
+    
+    return config_dict
 
 
 @router.put("/workspace/running-config")
@@ -510,7 +458,25 @@ async def update_running_config(
     payload: Dict[str, Any] = Body(...),
 ) -> Dict[str, Any]:
     """Update agent running configuration."""
-    return payload
+    from coapis.config.config import load_agent_config, save_agent_config
+    from coapis.agents.workspace import get_request_agent_id
+    
+    agent_id = get_request_agent_id(request)
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="Agent ID not found")
+    
+    # Load current agent config
+    agent_config = load_agent_config(agent_id)
+    
+    # Update running config fields
+    for key, value in payload.items():
+        if hasattr(agent_config.running, key):
+            setattr(agent_config.running, key, value)
+    
+    # Save to agent.json
+    save_agent_config(agent_id, agent_config)
+    
+    return agent_config.running.model_dump()
 
 
 # ── Language (user+) ────────────────────────────────────────────────────

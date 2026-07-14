@@ -258,6 +258,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self.toolkit = toolkit
         self.formatter = formatter
         self.max_iters = running_config.max_iters
+        self._loop_protection_threshold = running_config.loop_protection_threshold
+
+        logger.info(
+            "CoApisAgent '%s' initialized: max_iters=%s, loop_protection_threshold=%s",
+            agent_config.id, self.max_iters, self._loop_protection_threshold
+        )
 
         # ── ToolSchemaRouter: dynamic schema trimming ──
         from .utils.tool_schema_router import ToolSchemaRouter
@@ -2038,16 +2044,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             self._consecutive_same_tool = 1
             self._last_acting_tool = tool_name
 
-        # Check if same tool called 3+ times consecutively
-        if self._consecutive_same_tool >= 3:
+        # Check if same tool called beyond threshold
+        threshold = self._loop_protection_threshold
+        if self._consecutive_same_tool >= threshold:
             logger.warning(
-                "Loop-level protection: %s called %d times consecutively",
-                tool_name, self._consecutive_same_tool,
+                "Loop-level protection: %s called %d times consecutively (threshold: %d)",
+                tool_name, self._consecutive_same_tool, threshold,
             )
             from agentscope.message import TextBlock
             block_msg = (
                 f"[循环保护] {tool_name} 已连续调用 {self._consecutive_same_tool} 次，"
-                f"已触发循环保护。请基于已有信息直接给出结论。"
+                f"已触发循环保护（阈值: {threshold}）。请基于已有信息直接给出结论。"
             )
             return {
                 "content": [TextBlock(type="text", text=block_msg)],

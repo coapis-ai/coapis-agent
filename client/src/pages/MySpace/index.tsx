@@ -799,114 +799,124 @@ const MySpacePage: React.FC = () => {
       {activeCategory === 'agents' && (
         <AgentIdentityPanel />
       )}
-      {activeCategory !== 'agents' && viewMode === 'list' && (
-        <List
-          loading={loading}
-          dataSource={filteredItems}
-          locale={{ emptyText: <Empty description={t('myspace.emptyFolder')} /> }}
-          renderItem={(item: any) => (
-            <List.Item
-              actions={[
-                item.type === 'file' && (
-                  <Tooltip key="download" title={t('myspace.download')}>
-                    <Button type="text" icon={<DownloadOutlined />} onClick={() => handleDownload(item)} />
-                  </Tooltip>
-                ),
-                // 只读模式隐藏写操作按钮
-                !isReadOnly && (
-                  <Tooltip key="copy" title={t('myspace.copy')}>
-                    <Button type="text" icon={<CopyOutlined />} onClick={() => handleCopy(item)} />
-                  </Tooltip>
-                ),
-                !isReadOnly && (
-                  <Tooltip key="rename" title={t('myspace.rename')}>
-                    <Button type="text" icon={<EditOutlined />} onClick={() => setRenameModal({ visible: true, item, value: item.name })} />
-                  </Tooltip>
-                ),
-                !isReadOnly && canDelete && (
-                  <Tooltip key="delete" title={t('myspace.delete')}>
-                    <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDelete(item)} />
-                  </Tooltip>
-                ),
-              ].filter(Boolean)}
-            >
-              <div
-                onClick={() => handleDoubleClick(item)}
-                onDoubleClick={() => handleDoubleClick(item)}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', cursor: 'pointer' }}
-              >
-                {getFileIcon(item)}
-                <Text strong style={{ flex: 1 }}>{item.name}</Text>
-                {item.type === 'file' && <Text type="secondary" style={{ width: 80 }}>{formatSize(item.size)}</Text>}
-                {item.type === 'file' && <Text type="secondary" style={{ width: 160 }}>{formatTime(item.modified)}</Text>}
-                {item.type === 'directory' && <Tag color="blue">{t('myspace.folder')}</Tag>}
-              </div>
-            </List.Item>
+      {activeCategory !== 'agents' && (
+        <div className="page-content" style={{ padding: '16px' }}>
+          {viewMode === 'list' && (
+            <List
+              loading={loading}
+              dataSource={filteredItems}
+              locale={{ emptyText: <Empty description={t('myspace.emptyFolder')} /> }}
+              renderItem={(item: any) => (
+                <List.Item
+                  actions={[
+                    item.type === 'file' && (
+                      <Tooltip key="download" title={t('myspace.download')}>
+                        <Button type="text" icon={<DownloadOutlined />} onClick={() => handleDownload(item)} />
+                      </Tooltip>
+                    ),
+                    // 只读模式隐藏写操作按钮
+                    !isReadOnly && (
+                      <Tooltip key="copy" title={t('myspace.copy')}>
+                        <Button type="text" icon={<CopyOutlined />} onClick={() => handleCopy(item)} />
+                      </Tooltip>
+                    ),
+                    !isReadOnly && (
+                      <Tooltip key="rename" title={t('myspace.rename')}>
+                        <Button type="text" icon={<EditOutlined />} onClick={() => setRenameModal({ visible: true, item, value: item.name })} />
+                      </Tooltip>
+                    ),
+                    !isReadOnly && canDelete && (
+                      <Tooltip key="delete" title={t('myspace.delete')}>
+                        <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDelete(item)} />
+                      </Tooltip>
+                    ),
+                  ].filter(Boolean)}
+                >
+                  <div
+                    onClick={() => handleDoubleClick(item)}
+                    onDoubleClick={() => handleDoubleClick(item)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', cursor: 'pointer' }}
+                  >
+                    {getFileIcon(item)}
+                    <Text strong style={{ flex: 1 }}>{item.name}</Text>
+                    {item.type === 'file' && <Text type="secondary" style={{ width: 80 }}>{formatSize(item.size)}</Text>}
+                    {item.type === 'file' && <Text type="secondary" style={{ width: 160 }}>{formatTime(item.modified)}</Text>}
+                    {item.type === 'directory' && <Tag color="blue">{t('myspace.folder')}</Tag>}
+                  </div>
+                </List.Item>
+              )}
+            />
           )}
-        />
-      )}
 
-      {/* 文件列表 - 网格视图 (仅文件 tab) */}
-      {activeCategory !== 'agents' && viewMode === 'grid' && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, padding: 8 }}>
-          {loading && <LoadingOutlined style={{ fontSize: 24, color: '#736dff', margin: '40px auto' }} />}
-          {!loading && filteredItems.length === 0 && <Empty description={t('myspace.emptyFolder')} style={{ margin: '40px auto' }} />}
-          {!loading && filteredItems.map((item: any) => (
-            <div
-              key={item.path}
-              style={{
-                width: 140, padding: 16, textAlign: 'center',
-                border: '1px solid #f0f0f0', borderRadius: 8,
-                cursor: 'pointer', transition: 'all 0.2s',
-                position: 'relative', overflow: 'hidden',
-              }}
-              onClick={() => handleDoubleClick(item)}
-              onDoubleClick={() => handleDoubleClick(item)}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
-                const overlay = e.currentTarget.querySelector('.grid-overlay') as HTMLElement | null;
-                if (overlay) overlay.style.opacity = '1';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.boxShadow = 'none';
-                const overlay = e.currentTarget.querySelector('.grid-overlay') as HTMLElement | null;
-                if (overlay) overlay.style.opacity = '0';
-              }}
-            >
-              <div style={{ fontSize: 36, marginBottom: 8 }}>{getFileIcon(item)}</div>
-              <Text ellipsis style={{ display: 'block', fontSize: 13 }}>{item.name}</Text>
-              {item.type === 'file' && <Text type="secondary" style={{ fontSize: 11 }}>{formatSize(item.size)}</Text>}
-              
-              {/* Hover 操作遮罩层 - 按钮放在底部 */}
-              <div className="grid-overlay" style={{
-                position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                background: 'rgba(0,0,0,0.55)',
-                display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'flex-end',
-                paddingBottom: 8,
-                gap: 4, opacity: 0, transition: 'opacity 0.2s',
-                cursor: 'pointer',
-              }}>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {item.type === 'file' && (
-                    <Button size="small" type="text" icon={<DownloadOutlined style={{ fontSize: 16 }} />}
-                      style={{ color: '#fff' }}
-                      onClick={(e) => { e.stopPropagation(); handleDownload(item); }} />
-                  )}
-                  {!isReadOnly && (
-                    <Button size="small" type="text" icon={<EditOutlined style={{ fontSize: 16 }} />}
-                      style={{ color: '#fff' }}
-                      onClick={(e) => { e.stopPropagation(); setRenameModal({ visible: true, item, value: item.name }); }} />
-                  )}
-                  {!isReadOnly && canDelete && (
-                    <Button size="small" type="text" danger
-                      icon={<DeleteOutlined style={{ fontSize: 16, color: '#ff4d4f' }} />}
-                      onClick={(e) => { e.stopPropagation(); handleDelete(item); }} />
-                  )}
+          {/* 文件列表 - 网格视图 */}
+          {viewMode === 'grid' && (
+            <div style={{ 
+              display: 'flex', 
+              flexWrap: 'wrap', 
+              gap: 16, 
+              padding: 8,
+              width: '100%',
+            }}>
+              {loading && <LoadingOutlined style={{ fontSize: 24, color: '#736dff', margin: '40px auto' }} />}
+              {!loading && filteredItems.length === 0 && <Empty description={t('myspace.emptyFolder')} style={{ margin: '40px auto' }} />}
+              {!loading && filteredItems.map((item: any) => (
+                <div
+                  key={item.path}
+                  style={{
+                    width: 140, padding: 16, textAlign: 'center',
+                    border: '1px solid #f0f0f0', borderRadius: 8,
+                    cursor: 'pointer', transition: 'all 0.2s',
+                    position: 'relative', overflow: 'hidden',
+                  }}
+                  onClick={() => handleDoubleClick(item)}
+                  onDoubleClick={() => handleDoubleClick(item)}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                    const overlay = e.currentTarget.querySelector('.grid-overlay') as HTMLElement | null;
+                    if (overlay) overlay.style.opacity = '1';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow = 'none';
+                    const overlay = e.currentTarget.querySelector('.grid-overlay') as HTMLElement | null;
+                    if (overlay) overlay.style.opacity = '0';
+                  }}
+                >
+                  <div style={{ fontSize: 36, marginBottom: 8 }}>{getFileIcon(item)}</div>
+                  <Text ellipsis style={{ display: 'block', fontSize: 13 }}>{item.name}</Text>
+                  {item.type === 'file' && <Text type="secondary" style={{ fontSize: 11 }}>{formatSize(item.size)}</Text>}
+                  
+                  {/* Hover 操作遮罩层 - 按钮放在底部 */}
+                  <div className="grid-overlay" style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.55)',
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'flex-end',
+                    paddingBottom: 8,
+                    gap: 4, opacity: 0, transition: 'opacity 0.2s',
+                    cursor: 'pointer',
+                  }}>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {item.type === 'file' && (
+                        <Button size="small" type="text" icon={<DownloadOutlined style={{ fontSize: 16 }} />}
+                          style={{ color: '#fff' }}
+                          onClick={(e) => { e.stopPropagation(); handleDownload(item); }} />
+                      )}
+                      {!isReadOnly && (
+                        <Button size="small" type="text" icon={<EditOutlined style={{ fontSize: 16 }} />}
+                          style={{ color: '#fff' }}
+                          onClick={(e) => { e.stopPropagation(); setRenameModal({ visible: true, item, value: item.name }); }} />
+                      )}
+                      {!isReadOnly && canDelete && (
+                        <Button size="small" type="text" danger
+                          icon={<DeleteOutlined style={{ fontSize: 16, color: '#ff4d4f' }} />}
+                          onClick={(e) => { e.stopPropagation(); handleDelete(item); }} />
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 

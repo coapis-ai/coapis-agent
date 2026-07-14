@@ -118,7 +118,10 @@ async def _initialize_single_proactive_agent(
 ) -> ReActAgent:
     """Initialize a single proactive agent instance."""
     agent_config = load_agent_config(agent_id)
-    agent_config.running.max_iters = 50
+    # Use default max_iters from AgentsRunningConfig (200)
+    from ....config.config import AgentsRunningConfig
+    if agent_config.running.max_iters == 30:  # Old default value
+        agent_config.running.max_iters = AgentsRunningConfig().max_iters
 
     # Create model and formatter for the agent
     from ...model_factory import create_model_and_formatter

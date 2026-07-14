@@ -754,12 +754,12 @@ class AgentsRunningConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     max_iters: int = Field(
-        default=30,
+        default=200,
         ge=1,
         description=(
             "Maximum number of reasoning-acting iterations for ReAct agent. "
-            "Most tasks complete in 5-15 iterations. 30 provides ample headroom "
-            "while preventing runaway loops."
+            "Most tasks complete in 5-15 iterations. 200 provides ample headroom "
+            "for complex tasks while preventing runaway loops."
         ),
     )
 
@@ -857,6 +857,16 @@ class AgentsRunningConfig(BaseModel):
         ),
     )
 
+    loop_protection_threshold: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Maximum consecutive calls to the same tool before loop protection triggers. "
+            "If not set, automatically calculated as 60% of max_iters. "
+            "Set to a higher value if your tasks legitimately need many sequential tool calls."
+        ),
+    )
+
     @model_validator(mode="after")
     def validate_llm_retry_backoff(self) -> "AgentsRunningConfig":
         """Validate LLM retry backoff relationships."""
@@ -868,6 +878,14 @@ class AgentsRunningConfig(BaseModel):
                     "llm_backoff_base"
                 ),
             )
+        return self
+
+    @model_validator(mode="after")
+    def set_loop_protection_threshold(self) -> "AgentsRunningConfig":
+        """Auto-calculate loop protection threshold based on max_iters."""
+        if self.loop_protection_threshold is None:
+            # Default: 60% of max_iters, minimum 5
+            self.loop_protection_threshold = max(5, int(self.max_iters * 0.6))
         return self
 
     max_input_length: int = Field(
