@@ -27,7 +27,10 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
 
   // 转换为 Tree 组件数据格式
   const treeDataForAntd = useMemo(() => {
-    return convertToTreeData(treeData);
+    console.log('🔍 FileTreeSelector - treeData:', treeData);
+    const converted = convertToTreeData(treeData);
+    console.log('🔍 FileTreeSelector - treeDataForAntd:', converted);
+    return converted;
   }, [treeData]);
 
   // 默认展开所有文件夹
@@ -82,7 +85,9 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
           onSelect={(_selectedKeys, info) => {
             // 点击节点内容时，如果是文件夹则展开/收缩
             const node = info.node as any;
-            if (node.children && node.children.length > 0) {
+            const isFolder = node.isFolder || node.icon?.type?.displayName === 'FolderOutlined';
+            
+            if (isFolder) {
               const key = node.key as string;
               if (expandedKeys.includes(key)) {
                 setExpandedKeys(expandedKeys.filter(k => k !== key));
@@ -145,7 +150,9 @@ function convertToTreeData(nodes: FileNode[]): any[] {
     key: node.id,
     title: node.name,
     icon: node.type === 'folder' ? <FolderOutlined /> : <FileOutlined />,
-    children: node.children ? convertToTreeData(node.children) : undefined,
+    // 只有当 children 有内容时才传递，否则传 undefined（空数组会导致无法展开）
+    children: node.children && node.children.length > 0 ? convertToTreeData(node.children) : undefined,
+    isFolder: node.type === 'folder',  // 标记是否为文件夹
   }));
 }
 
