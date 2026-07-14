@@ -2,36 +2,73 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
-import { knowledgeApi } from '@/api/modules/knowledge';
 import type { KnowledgeInfo } from '../types';
 
+interface BackendKnowledgeBase {
+  id: string;
+  name: string;
+  description: string;
+  scope: string;
+  status: string;
+  chunk_count: number;
+  config: Record<string, unknown>;
+  created_at: number;
+  updated_at: number;
+}
+
+interface BackendKnowledgeListResponse {
+  bases: BackendKnowledgeBase[];
+  total: number;
+}
+
 /**
- * 知识库列表数据加载和管理
+ * 知识库列表数据加载 Hook
+ * 
+ * 功能：
+ * - 加载知识库列表
+ * - 支持搜索过滤
  */
 export function useKnowledgeList() {
   const [loading, setLoading] = useState(false);
   const [knowledgeList, setKnowledgeList] = useState<KnowledgeInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState('');
 
   // 加载知识库列表
   const loadKnowledgeList = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
-      const response = await knowledgeApi.listBases();
+      const token = localStorage.getItem('token');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch('/api/knowledge/bases', {
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data: BackendKnowledgeListResponse = await response.json();
+      
       // 转换为 KnowledgeInfo 格式
-      const list: KnowledgeInfo[] = (response.bases || []).map(base => ({
+      const list: KnowledgeInfo[] = (data.bases || []).map(base => ({
         id: base.id,
         name: base.name,
         description: base.description,
         documentCount: base.chunk_count,
         createdAt: new Date(base.created_at).toISOString(),
       }));
+      
       setKnowledgeList(list);
-    } catch (err: any) {
-      console.error('Failed to load knowledge list:', err);
-      setError(err.message || '加载知识库列表失败');
+    } catch (error) {
+      console.error('Failed to load knowledge list:', error);
       message.error('加载知识库列表失败');
+      setKnowledgeList([]);
     } finally {
       setLoading(false);
     }
@@ -42,15 +79,22 @@ export function useKnowledgeList() {
     loadKnowledgeList();
   }, [loadKnowledgeList]);
 
-  // 刷新列表
-  const refresh = useCallback(() => {
-    loadKnowledgeList();
-  }, [loadKnowledgeList]);
+  // 搜索过滤
+  const filteredList = useCallback(() => {
+    if (!searchText) return knowledgeList;
+    
+    const search = searchText.toLowerCase();
+    return knowledgeList.filter(item => 
+      item.name.toLowerCase().includes(search) ||
+      item.description?.toLowerCase().includes(search)
+    );
+  }, [knowledgeList, searchText]);
 
   return {
+    knowledgeList: filteredList(),
     loading,
-    knowledgeList,
-    error,
-    refresh,
+    searchText,
+    setSearchText,
+    refresh: loadKnowledgeList,
   };
 }

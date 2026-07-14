@@ -1,10 +1,9 @@
-// 知识库选择器组件（更新：使用真实API）
+// 知识库选择器组件
 
-import { List, Checkbox, Empty, Spin, Button } from 'antd';
-import { BookOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Empty, Checkbox } from 'antd';
+import { ReloadOutlined, BookOutlined } from '@ant-design/icons';
 import { useKnowledgeList } from '../hooks/useKnowledgeList';
 import type { KnowledgeInfo } from '../types';
-import './index.module.less';
 
 interface KnowledgeSelectorProps {
   selected: KnowledgeInfo[];
@@ -20,7 +19,7 @@ interface KnowledgeSelectorProps {
  * - 支持多选（复选框）
  */
 export function KnowledgeSelector({ selected, onSelect }: KnowledgeSelectorProps) {
-  const { loading, knowledgeList, error, refresh } = useKnowledgeList();
+  const { knowledgeList, loading, refresh } = useKnowledgeList();
 
   // 处理选择
   const handleSelect = (item: KnowledgeInfo, checked: boolean) => {
@@ -46,62 +45,43 @@ export function KnowledgeSelector({ selected, onSelect }: KnowledgeSelectorProps
         </Button>
       </div>
 
-      {/* 错误提示 */}
-      {error && (
-        <div className="error-message" style={{ padding: 16, color: '#ff4d4f' }}>
-          {error}
+      {/* 知识库列表 */}
+      {knowledgeList.length > 0 ? (
+        <div className="knowledge-list">
+          {knowledgeList.map((item) => (
+            <div key={item.id} className="knowledge-item">
+              <Checkbox
+                checked={selected.some(s => s.id === item.id)}
+                onChange={(e) => handleSelect(item, e.target.checked)}
+              >
+                <div className="knowledge-content">
+                  <div className="knowledge-name">
+                    <BookOutlined style={{ marginRight: 8 }} />
+                    {item.name}
+                  </div>
+                  {item.description && (
+                    <div className="knowledge-desc">{item.description}</div>
+                  )}
+                  <div className="knowledge-meta">
+                    文档数: {item.documentCount || 0}
+                  </div>
+                </div>
+              </Checkbox>
+            </div>
+          ))}
         </div>
+      ) : (
+        <Empty description="暂无知识库" />
       )}
 
-      {/* 知识库列表 */}
-      {loading && knowledgeList.length === 0 ? (
-        <div className="loading-container">
-          <Spin />
+      {/* 已选数量 */}
+      {selected.length > 0 && (
+        <div className="selected-count">
+          <span>已选择 {selected.length} 个知识库</span>
+          <Button type="link" size="small" onClick={() => onSelect([])}>
+            清空
+          </Button>
         </div>
-      ) : knowledgeList.length > 0 ? (
-        <>
-          <List
-            dataSource={knowledgeList}
-            renderItem={(item) => (
-              <List.Item className="knowledge-item">
-                <Checkbox
-                  checked={selected.some(k => k.id === item.id)}
-                  onChange={(e) => handleSelect(item, e.target.checked)}
-                >
-                  <div className="knowledge-content">
-                    <div className="knowledge-name">
-                      <BookOutlined style={{ marginRight: 8 }} />
-                      {item.name}
-                    </div>
-                    {item.description && (
-                      <div className="knowledge-desc">{item.description}</div>
-                    )}
-                    {item.documentCount && (
-                      <div className="knowledge-meta">
-                        {item.documentCount} 篇文档
-                      </div>
-                    )}
-                  </div>
-                </Checkbox>
-              </List.Item>
-            )}
-          />
-
-          {/* 已选数量 */}
-          {selected.length > 0 && (
-            <div className="selected-count">
-              已选择 {selected.length} 个知识库
-              <Button type="link" size="small" onClick={() => onSelect([])}>
-                清空
-              </Button>
-            </div>
-          )}
-        </>
-      ) : (
-        <Empty 
-          description="暂无知识库" 
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
       )}
     </div>
   );

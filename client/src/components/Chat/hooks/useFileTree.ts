@@ -2,30 +2,96 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { message } from 'antd';
-import { fileApi } from '@/api/modules/file';
 import type { FileNode } from '../types';
 
+interface BackendFileInfo {
+  name: string;
+  type: 'file' | 'directory';
+  path: string;
+  size: number;
+  mimeType: string;
+  previewable: boolean;
+  downloadable: boolean;
+  modified?: string;
+  items_count?: number;
+}
+
+interface BackendFileListResponse {
+  items: BackendFileInfo[];
+  total: number;
+  path: string;
+}
+
 /**
- * 文件树数据加载和管理
+ * 将后端文件列表转换为树形结构
+ */
+function convertToTree(items: BackendFileInfo[]): FileNode[] {
+  return items.map(item => {
+    const node: FileNode = {
+      id: item.path,
+      name: item.name,
+      path: item.path,
+      type: item.type === 'directory' ? 'folder' : 'file',
+      size: item.size,
+      mimeType: item.mimeType,
+    };
+
+    // 目录可能有子项（但后端没有返回，需要前端异步加载）
+    if (item.type === 'directory') {
+      node.children = [];
+    }
+
+    return node;
+  });
+}
+
+/**
+ * 文件树加载 Hook
+ * 
+ * 功能：
+ * - 加载文件列表并转换为树形结构
+ * - 支持搜索过滤
  */
 export function useFileTree() {
+  const [treeData, setTreeData] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fileTree, setFileTree] = useState<FileNode[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
-  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
-  // 加载文件树
-  const loadFileTree = useCallback(async () => {
+  // 加载文件列表
+  const loadFiles = useCallback(async (path: string = '/') => {
     setLoading(true);
-    setError(null);
     try {
-      const response = await fileApi.getFileTree();
-      setFileTree(response.tree || []);
-    } catch (err: any) {
-      console.error('Failed to load file tree:', err);
-      setError(err.message || '加载文件树失败');
-      message.error('加载文件树失败');
+      const token = localStorage.getItem('token');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const params = new URLSearchParams({
+        path: path,
+        category: 'files',
+        page_size: '1000', // 加载所有文件
+      });
+
+      const response = await fetch(`/api/myfiles/list?${params}`, {
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data: BackendFileListResponse = await response.json();
+      
+      // 转换为树形结构
+      const tree = convertToTree(data.items);
+      setTreeData(tree);
+    } catch (error) {
+      console.error('Failed to load file tree:', error);
+      message.error('加载文件列表失败');
+      setTreeData([]);
     } finally {
       setLoading(false);
     }
@@ -33,75 +99,38 @@ export function useFileTree() {
 
   // 初始加载
   useEffect(() => {
-    loadFileTree();
-  }, [loadFileTree]);
+    loadFiles('/');
+  }, [loadFiles]);
 
-  // 过滤文件树
+  // 搜索过滤
   const filteredTree = useMemo(() => {
-    if (!searchText) return fileTree;
-    return filterTree(fileTree, searchText.toLowerCase());
-  }, [fileTree, searchText]);
-
-  // 搜索文件
-  const handleSearch = useCallback((text: string) => {
-    setSearchText(text);
-    // 搜索时自动展开所有匹配的目录
-    if (text) {
-      const matchedKeys = findMatchedKeys(fileTree, text.toLowerCase());
-      setExpandedKeys(matchedKeys);
-    }
-  }, [fileTree]);
-
-  // 刷新文件树
-  const refresh = useCallback(() => {
-    loadFileTree();
-  }, [loadFileTree]);
+    if (!searchText) return treeData;
+    
+    const search = searchText.toLowerCase();
+    const filterNode = (nodes: FileNode[]): FileNode[] => {
+      return nodes.reduce<FileNode[]>((acc, node) => {
+        const matches = node.name.toLowerCase().includes(search);
+        const childMatches = node.children ? filterNode(node.children) : [];
+        
+        if (matches || childMatches.length > 0) {
+          acc.push({
+            ...node,
+            children: childMatches.length > 0 ? childMatches : node.children,
+          });
+        }
+        
+        return acc;
+      }, []);
+    };
+    
+    return filterNode(treeData);
+  }, [treeData, searchText]);
 
   return {
+    treeData: filteredTree,
     loading,
-    fileTree,
-    filteredTree,
-    error,
     searchText,
-    setSearchText: handleSearch,
-    expandedKeys,
-    setExpandedKeys,
-    refresh,
+    setSearchText,
+    refresh: () => loadFiles('/'),
   };
-}
-
-// 辅助函数：过滤文件树
-function filterTree(nodes: FileNode[], searchText: string): FileNode[] {
-  return nodes
-    .map((node) => {
-      if (node.children) {
-        const filteredChildren = filterTree(node.children, searchText);
-        if (filteredChildren.length > 0 || node.name.toLowerCase().includes(searchText)) {
-          return { ...node, children: filteredChildren };
-        }
-        return null;
-      }
-      return node.name.toLowerCase().includes(searchText) ? node : null;
-    })
-    .filter(Boolean) as FileNode[];
-}
-
-// 辅助函数：查找匹配的节点keys
-function findMatchedKeys(nodes: FileNode[], searchText: string): string[] {
-  const keys: string[] = [];
-
-  function traverse(node: FileNode, parentKeys: string[]) {
-    const currentKeys = [...parentKeys, node.id];
-
-    if (node.name.toLowerCase().includes(searchText)) {
-      keys.push(...parentKeys); // 展开所有父节点
-    }
-
-    if (node.children) {
-      node.children.forEach(child => traverse(child, currentKeys));
-    }
-  }
-
-  nodes.forEach(node => traverse(node, []));
-  return [...new Set(keys)]; // 去重
 }
