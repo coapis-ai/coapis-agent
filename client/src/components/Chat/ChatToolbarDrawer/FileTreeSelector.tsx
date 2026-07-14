@@ -102,9 +102,9 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
             display: 'flex', 
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: 4,
+            marginBottom: 8,
           }}>
-            <span style={{ fontSize: 12, color: '#666' }}>
+            <span style={{ fontSize: 13, fontWeight: 500 }}>
               已选择 {selected.length} 项
             </span>
             <Button type="link" size="small" onClick={() => onSelect([])}>
@@ -112,19 +112,27 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
             </Button>
           </div>
           
-          {/* 分类显示 */}
+          {/* 工作路径 */}
           {selectedFolders.length > 0 && (
-            <div style={{ marginBottom: 4 }}>
-              <Tag color="blue" style={{ fontSize: 11 }}>
+            <div style={{ marginBottom: 8 }}>
+              <Tag color="blue" style={{ fontSize: 11, marginBottom: 4 }}>
                 <FolderOutlined /> {selectedFolders.length} 个工作路径
               </Tag>
+              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.6 }}>
+                设置对话工作目录，AI可访问文件夹下的文件
+              </div>
             </div>
           )}
+          
+          {/* 文件 */}
           {selectedFiles.length > 0 && (
             <div>
-              <Tag color="green" style={{ fontSize: 11 }}>
+              <Tag color="green" style={{ fontSize: 11, marginBottom: 4 }}>
                 <FileOutlined /> {selectedFiles.length} 个文件
               </Tag>
+              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.6 }}>
+                AI会自动读取文件内容，根据问题参考或使用
+              </div>
             </div>
           )}
         </div>
