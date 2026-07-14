@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Spin } from "antd";
+import { Spin, Input } from "antd";
 import { FixedSizeList, type ListChildComponentProps } from "react-window";
 import { IconButton } from "@agentscope-ai/design";
 import { SparkOperateRightLine } from "@agentscope-ai/icons";
@@ -108,6 +108,10 @@ interface ChatSessionDropdownProps {
   onClose: () => void;
   /** Search keyword to filter sessions */
   searchKeyword?: string;
+  /** Show search input */
+  showSearch?: boolean;
+  /** Callback when search keyword changes */
+  onSearchChange?: (keyword: string) => void;
 }
 
 /** Format an ISO 8601 timestamp to YYYY-MM-DD HH:mm:ss */
@@ -444,6 +448,18 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
           {t("chat.createNewChat")}
         </div>
       </div>
+
+      {/* Search box */}
+      {props.showSearch && (
+        <div style={{ padding: "0 16px 12px" }}>
+          <Input.Search
+            placeholder={t("chat.searchHistory", "搜索聊天历史...")}
+            allowClear
+            value={props.searchKeyword}
+            onChange={(e) => props.onSearchChange?.(e.target.value)}
+          />
+        </div>
+      )}
 
       {/* Session list */}
       <div className={styles.listWrapper} ref={listWrapperRef}>
