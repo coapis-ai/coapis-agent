@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { message } from 'antd';
 import type { FileNode } from '../types';
+import { buildAuthHeaders } from '@/api/authHeaders';
 
 interface BackendFileInfo {
   name: string;
@@ -61,22 +62,14 @@ export function useFileTree() {
   const loadFiles = useCallback(async (path: string = '/') => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
       const params = new URLSearchParams({
         path: path,
         category: 'files',
-        page_size: '1000', // 加载所有文件
+        page_size: '1000',
       });
 
       const response = await fetch(`/api/myfiles/list?${params}`, {
-        headers,
+        headers: buildAuthHeaders(),
       });
 
       if (!response.ok) {

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
 import type { KnowledgeInfo } from '../types';
+import { buildAuthHeaders } from '@/api/authHeaders';
 
 interface BackendKnowledgeBase {
   id: string;
@@ -37,16 +38,8 @@ export function useKnowledgeList() {
   const loadKnowledgeList = useCallback(async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
       const response = await fetch('/api/knowledge/bases', {
-        headers,
+        headers: buildAuthHeaders(),
       });
 
       if (!response.ok) {
