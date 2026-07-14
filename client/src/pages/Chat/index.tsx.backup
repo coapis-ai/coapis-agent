@@ -44,7 +44,6 @@ import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
-import { ChatToolbarDrawer, useToolbarState, ReferenceHint } from "../../components/Chat";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -587,21 +586,6 @@ export default function ChatPage() {
     setDisplayConfig,
   } = useChatDisplayFromUser();
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
-
-  // 工具栏状态管理
-  const {
-    visible: toolbarOpen,
-    openToolbar,
-    closeToolbar,
-    selectedFiles,
-    selectedKnowledge,
-    setSelectedFiles,
-    setSelectedKnowledge,
-    removeFileReference,
-    removeKnowledgeReference,
-    clearAllReferences,
-    totalReferences,
-  } = useToolbarState();
 
   // Sync authenticated username to window for AgentScope Runtime session API
   // IMPORTANT: Set immediately on mount to ensure window.currentUserId is available
@@ -1486,22 +1470,7 @@ export default function ChatPage() {
         }}
       >
         {/* Chat session header: title + actions */}
-        <ChatSessionHeader 
-          onShowDisplaySettings={() => setShowDisplaySettings(true)}
-          onToolbarOpen={openToolbar}
-        />
-        
-        {/* 引用提示 */}
-        {totalReferences > 0 && (
-          <ReferenceHint
-            files={selectedFiles}
-            knowledge={selectedKnowledge}
-            onRemoveFile={removeFileReference}
-            onRemoveKnowledge={removeKnowledgeReference}
-            onClear={clearAllReferences}
-          />
-        )}
-        
+        <ChatSessionHeader onShowDisplaySettings={() => setShowDisplaySettings(true)} />
         <div
           className={styles.chatMessagesArea}
           onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -1672,16 +1641,6 @@ export default function ChatPage() {
         onCancel={() => setShowOnboarding(false)}
       />
     </div>
-
-    {/* 工具栏抽屉 */}
-    <ChatToolbarDrawer
-      visible={toolbarOpen}
-      onClose={closeToolbar}
-      selectedFiles={selectedFiles}
-      selectedKnowledge={selectedKnowledge}
-      onFileSelect={setSelectedFiles}
-      onKnowledgeSelect={setSelectedKnowledge}
-    />
     </ChatDisplayConfigContext.Provider>
   );
 }

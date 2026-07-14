@@ -22,6 +22,7 @@ import styles from './index.module.less';
 
 interface ChatSessionHeaderProps {
   onShowDisplaySettings: () => void;
+  onToolbarOpen?: () => void;  // 新增：工具栏打开回调
 }
 
 const PlanIcon = () => (
@@ -40,7 +41,10 @@ const PlanIcon = () => (
   </svg>
 );
 
-const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySettings }) => {
+const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ 
+  onShowDisplaySettings,
+  onToolbarOpen,
+}) => {
   const { t } = useTranslation();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -84,51 +88,51 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
     };
   }, [selectedAgent]);
 
-  // Close other panels when one opens
-  const handleHistoryToggle = () => {
-    if (historyOpen) {
-      setHistoryOpen(false);
-      setSearchOpen(false);
-    } else {
-      setHistoryOpen(true);
-      setSearchOpen(false);
-    }
-  };
+  const handleHistoryToggle = useCallback(() => {
+    setHistoryOpen((prev) => !prev);
+  }, []);
 
-  const handleSearchToggle = () => {
-    if (searchOpen) {
-      setSearchOpen(false);
-      setHistoryOpen(false);
+  const handleSearchToggle = useCallback(() => {
+    setSearchOpen((prev) => !prev);
+  }, []);
+
+  // Mobile menu
+  const handleMenuClick = useCallback(() => {
+    if (onToolbarOpen) {
+      onToolbarOpen();
     } else {
-      setSearchOpen(true);
-      setHistoryOpen(false);
+      setDrawerOpen(true);
     }
-  };
+  }, [onToolbarOpen]);
 
   return (
     <>
-    <div className={styles.sessionHeader}>
-      {/* Left side: icons + title */}
-      <Flex align="center" className={styles.headerLeft} gap={4}>
-        {isMobile && (
+    <div className={styles.chatSessionHeader}>
+      <Flex gap={4} align="center">
+        {/* 新增：菜单按钮（打开工具栏） */}
+        <Tooltip title={t('chat.toolbarTooltip', '工具栏')} mouseEnterDelay={0.5}>
           <IconButton
             bordered={false}
             icon={<MenuOutlined />}
-            onClick={() => setDrawerOpen(true)}
+            onClick={handleMenuClick}
           />
+        </Tooltip>
+
+        {/* Display settings */}
+        {onShowDisplaySettings && (
+          <Tooltip title={t('chat.displaySettingsTooltip')} mouseEnterDelay={0.5}>
+            <IconButton
+              bordered={false}
+              icon={<BgColorsOutlined />}
+              onClick={onShowDisplaySettings}
+            />
+          </Tooltip>
         )}
+
+        {/* Search - only on desktop */}
         {!isMobile && (
           <>
-            {/* Order: Display Settings → Search → History → New Chat → Title */}
-            <Tooltip title={t('chat.settings.title', { defaultValue: '聊天显示设置' })}>
-              <IconButton
-                bordered={false}
-                icon={<BgColorsOutlined />}
-                onClick={onShowDisplaySettings}
-              />
-            </Tooltip>
-            
-            {/* Search - dropdown below button */}
+            {/* Search dropdown popover */}
             <Popover
               content={
                 <ChatSearchDropdown
@@ -137,7 +141,10 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
                 />
               }
               open={searchOpen}
-              onOpenChange={handleSearchToggle}
+              onOpenChange={(open) => {
+                setSearchOpen(open);
+                if (open) setHistoryOpen(false);
+              }}
               placement="bottomLeft"
               arrow={{ pointAtCenter: false }}
               overlayInnerStyle={{ padding: 0 }}
@@ -155,7 +162,7 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
             </Popover>
           </>
         )}
-        
+
         {/* History - dropdown below button */}
         <Popover
           content={
@@ -184,7 +191,8 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
             </span>
           </Tooltip>
         </Popover>
-        
+
+        {/* New chat */}
         <Tooltip title={t('chat.newChatTooltip')} mouseEnterDelay={0.5}>
           <IconButton
             bordered={false}
@@ -192,8 +200,11 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
             onClick={handleNewChat}
           />
         </Tooltip>
+
+        {/* Session title */}
         <span className={styles.sessionTitle}>{chatTitle}</span>
       </Flex>
+
       {/* Right side: model selector + plan */}
       <Flex gap={4} align="center" className={styles.headerRight}>
         {!isMobile && <ModelSelector />}
@@ -211,8 +222,9 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ onShowDisplaySett
         )}
       </Flex>
     </div>
+
     {/* Mobile navigation drawer */}
-    {isMobile && (
+    {isMobile && !onToolbarOpen && (
       <Drawer
         placement="left"
         open={drawerOpen}
