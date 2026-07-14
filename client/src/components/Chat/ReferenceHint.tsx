@@ -1,8 +1,8 @@
-# 引用提示组件
+// 引用提示组件
 
 import { Tag, Button, Space } from 'antd';
 import { FileOutlined, BookOutlined } from '@ant-design/icons';
-import type { FileInfo, KnowledgeInfo } from '../types';
+import type { FileInfo, KnowledgeInfo } from './types';
 import './ReferenceHint.module.less';
 
 interface ReferenceHintProps {

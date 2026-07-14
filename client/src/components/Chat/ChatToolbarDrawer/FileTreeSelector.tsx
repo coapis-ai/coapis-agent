@@ -1,4 +1,4 @@
-# 文件选择器组件（更新：使用真实API）
+// 文件选择器组件（更新：使用真实API）
 
 import { useMemo } from 'react';
 import { Tree, Input, Empty, Spin, Button } from 'antd';
@@ -84,7 +84,7 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
             checkable
             checkedKeys={selected.map((f) => f.id)}
             expandedKeys={expandedKeys}
-            onExpand={setExpandedKeys}
+            onExpand={(keys) => setExpandedKeys(keys as string[])}
             onCheck={handleCheck}
             treeData={treeData}
             selectable={false}

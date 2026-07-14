@@ -1,8 +1,7 @@
-# ChatToolbarDrawer 主组件
+// ChatToolbarDrawer 主组件
 
 import { useState, useEffect, useCallback } from 'react';
-import { Drawer, Tabs, Button, Tooltip } from 'antd';
-import { MenuOutlined } from '@ant-design/icons';
+import { Drawer, Tabs } from 'antd';
 import { PinButton } from './PinButton';
 import { GlobalTools } from './GlobalTools';
 import { FileTreeSelector } from './FileTreeSelector';

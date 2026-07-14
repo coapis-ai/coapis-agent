@@ -1,4 +1,4 @@
-# 知识库选择器组件（更新：使用真实API）
+// 知识库选择器组件（更新：使用真实API）
 
 import { List, Checkbox, Empty, Spin, Button } from 'antd';
 import { BookOutlined, ReloadOutlined } from '@ant-design/icons';

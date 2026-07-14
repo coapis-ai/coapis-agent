@@ -1,4 +1,4 @@
-# Chat 组件类型定义
+// Chat 组件类型定义
 
 import type { ReactNode } from 'react';
 

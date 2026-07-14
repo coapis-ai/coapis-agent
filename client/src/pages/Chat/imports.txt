@@ -1,3 +1,0 @@
-﻿// 在 Chat/index.tsx 顶部添加导入
-
-import { ChatToolbarDrawer, useToolbarState, ReferenceHint } from '@/components/Chat';

@@ -1,4 +1,4 @@
-# 文件API接口
+// 文件API接口
 
 import { request } from '../request';
 

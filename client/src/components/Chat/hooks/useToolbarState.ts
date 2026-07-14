@@ -1,4 +1,4 @@
-# 工具栏状态管理 Hook
+// 工具栏状态管理 Hook
 
 import { useState, useCallback, useEffect } from 'react';
 import type { FileInfo, KnowledgeInfo } from '../types';

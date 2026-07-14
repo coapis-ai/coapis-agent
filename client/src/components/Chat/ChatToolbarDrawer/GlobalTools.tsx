@@ -1,4 +1,4 @@
-# 全局工具组件
+// 全局工具组件
 
 import { List, Button } from 'antd';
 import {

@@ -1,9 +1,9 @@
-# 文件树数据加载 Hook
+// 文件树数据加载 Hook
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { message } from 'antd';
 import { fileApi } from '@/api/modules/file';
-import type { FileNode, FileInfo } from '../types';
+import type { FileNode } from '../types';
 
 /**
  * 文件树数据加载和管理
