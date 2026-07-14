@@ -44,7 +44,7 @@ import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
-import { ChatToolbarDrawer, useToolbarState, ReferenceHint } from "../../components/Chat";
+import { ChatToolbarSidebar, useToolbarState } from "../../components/Chat";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -597,10 +597,6 @@ export default function ChatPage() {
     selectedKnowledge,
     setSelectedFiles,
     setSelectedKnowledge,
-    removeFileReference,
-    removeKnowledgeReference,
-    clearAllReferences,
-    totalReferences,
   } = useToolbarState();
 
   // Sync authenticated username to window for AgentScope Runtime session API
@@ -1491,45 +1487,50 @@ export default function ChatPage() {
           onToolbarOpen={openToolbar}
         />
         
-        {/* 引用提示 */}
-        {totalReferences > 0 && (
-          <ReferenceHint
-            files={selectedFiles}
-            knowledge={selectedKnowledge}
-            onRemoveFile={removeFileReference}
-            onRemoveKnowledge={removeKnowledgeReference}
-            onClear={clearAllReferences}
-          />
-        )}
-        
-        <div
-          className={styles.chatMessagesArea}
-          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const files = Array.from(e.dataTransfer.files);
-            if (files.length > 0) {
-              // Trigger file upload through the @agentscope-ai/chat attachment system
-              const input = document.querySelector('input[type="file"]') as HTMLInputElement | null;
-              if (input) {
-                const dt = new DataTransfer();
-                files.forEach(f => dt.items.add(f));
-                input.files = dt.files;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-              } else {
-                message.info(t("chat.inputPlaceholder"));
+        {/* 主内容区域：工具栏 + 聊天区 */}
+        <div className={styles.chatContentArea}>
+          {/* PC端：工具栏在主内容区域内 */}
+          {!isMobile && toolbarOpen && (
+            <div className={styles.toolbarSidebar}>
+              <ChatToolbarSidebar
+                selectedFiles={selectedFiles}
+                selectedKnowledge={selectedKnowledge}
+                onFileSelect={setSelectedFiles}
+                onKnowledgeSelect={setSelectedKnowledge}
+              />
+            </div>
+          )}
+          
+          {/* 聊天区域 */}
+          <div
+            className={styles.chatMessagesArea}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const files = Array.from(e.dataTransfer.files);
+              if (files.length > 0) {
+                // Trigger file upload through the @agentscope-ai/chat attachment system
+                const input = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+                if (input) {
+                  const dt = new DataTransfer();
+                  files.forEach(f => dt.items.add(f));
+                  input.files = dt.files;
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
+                } else {
+                  message.info(t("chat.inputPlaceholder"));
+                }
               }
-            }
-          }}
-        >
-          <ChatErrorBoundary>
-            <AgentScopeRuntimeWebUI
-              ref={chatRef}
-              key={refreshKey}
-              options={options}
-            />
-          </ChatErrorBoundary>
+            }}
+          >
+            <ChatErrorBoundary>
+              <AgentScopeRuntimeWebUI
+                ref={chatRef}
+                key={refreshKey}
+                options={options}
+              />
+            </ChatErrorBoundary>
+          </div>
         </div>
 
         {/* Chat display settings modal */}
@@ -1673,15 +1674,23 @@ export default function ChatPage() {
       />
     </div>
 
-    {/* 工具栏抽屉 */}
-    <ChatToolbarDrawer
-      visible={toolbarOpen}
-      onClose={closeToolbar}
-      selectedFiles={selectedFiles}
-      selectedKnowledge={selectedKnowledge}
-      onFileSelect={setSelectedFiles}
-      onKnowledgeSelect={setSelectedKnowledge}
-    />
+    {/* 移动端：工具栏从底部滑出 */}
+    {isMobile && toolbarOpen && (
+      <div className={styles.mobileToolbarOverlay}>
+        <div className={styles.mobileToolbarDrawer}>
+          <ChatToolbarSidebar
+            selectedFiles={selectedFiles}
+            selectedKnowledge={selectedKnowledge}
+            onFileSelect={setSelectedFiles}
+            onKnowledgeSelect={setSelectedKnowledge}
+            showPinButton={false}
+          />
+          <Button onClick={closeToolbar} block>
+            关闭
+          </Button>
+        </div>
+      </div>
+    )}
     </ChatDisplayConfigContext.Provider>
   );
 }
