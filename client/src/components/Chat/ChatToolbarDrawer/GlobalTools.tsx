@@ -2,63 +2,72 @@
 
 import { List, Button } from 'antd';
 import {
-  HistoryOutlined,
   ThunderboltOutlined,
+  HistoryOutlined,
   SettingOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import type { ToolbarTool } from '../types';
-import './index.module.less';
 
 interface GlobalToolsProps {
-  onToolClick?: (key: string) => void;
+  onModelSelect?: () => void;
+  onHistoryClick?: () => void;
+  onSettingsClick?: () => void;
+  onSearchClick?: () => void;
 }
 
 /**
  * 全局工具列表
- * 包含历史、模型、设置、搜索等全局操作
+ * 包含模型选择、聊天历史、显示设置、搜索消息等全局操作
  */
-export function GlobalTools({ onToolClick }: GlobalToolsProps) {
-  const tools: ToolbarTool[] = [
-    {
-      key: 'history',
-      icon: <HistoryOutlined />,
-      label: '历史会话',
-      order: 1,
-    },
+export function GlobalTools({ 
+  onModelSelect,
+  onHistoryClick,
+  onSettingsClick,
+  onSearchClick,
+}: GlobalToolsProps) {
+  const tools = [
     {
       key: 'model',
       icon: <ThunderboltOutlined />,
       label: '模型选择',
-      order: 2,
+      onClick: onModelSelect,
+    },
+    {
+      key: 'history',
+      icon: <HistoryOutlined />,
+      label: '聊天历史',
+      onClick: onHistoryClick,
     },
     {
       key: 'settings',
       icon: <SettingOutlined />,
       label: '显示设置',
-      order: 3,
+      onClick: onSettingsClick,
     },
     {
       key: 'search',
       icon: <SearchOutlined />,
       label: '搜索消息',
-      order: 4,
+      onClick: onSearchClick,
     },
   ];
 
   return (
     <div className="chat-toolbar-global-tools">
       <List
-        dataSource={tools.sort((a, b) => (a.order || 0) - (b.order || 0))}
+        dataSource={tools}
         renderItem={(tool) => (
-          <List.Item>
+          <List.Item style={{ border: 'none', padding: '8px 0' }}>
             <Button
               type="text"
-              className="tool-item"
               icon={tool.icon}
-              onClick={() => onToolClick?.(tool.key)}
-              disabled={tool.disabled}
+              onClick={tool.onClick}
               block
+              style={{ 
+                textAlign: 'left',
+                height: '40px',
+                fontSize: '14px',
+              }}
             >
               {tool.label}
             </Button>

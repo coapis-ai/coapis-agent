@@ -1,35 +1,26 @@
 // ChatToolbarSidebar 侧边栏样式
 
-.chat-toolbar-sidebar {
+.chatToolbarSidebar {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg-color, #fff);
-  border-right: 1px solid var(--border-color, #e8e8e8);
+  background: #ffffff;
+  border-right: 1px solid #f0f0f0;
   overflow: hidden;
-  
-  // 暗色主题
-  [data-theme='dark'] & {
-    background: var(--bg-color, #141414);
-    border-right-color: var(--border-color, #303030);
-  }
 }
 
-.chat-toolbar-header {
+.chatToolbarHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 16px;
-  border-bottom: 1px solid var(--border-color, #e8e8e8);
+  border-bottom: 1px solid #f0f0f0;
   font-weight: 600;
   font-size: 16px;
-  
-  [data-theme='dark'] & {
-    border-bottom-color: var(--border-color, #303030);
-  }
+  background: #ffffff;
 }
 
-.chat-toolbar-tabs {
+.chatToolbarTabs {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -40,11 +31,7 @@
     .ant-tabs-nav {
       margin-bottom: 0;
       padding: 0 16px;
-      background: var(--bg-color, #fafafa);
-      
-      [data-theme='dark'] & {
-        background: var(--bg-color, #1f1f1f);
-      }
+      background: #fafafa;
     }
     
     .ant-tabs-content-holder {
@@ -64,25 +51,29 @@
   }
 }
 
-.chat-toolbar-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-color, #e8e8e8);
-  background: var(--bg-color, #fafafa);
-  
-  [data-theme='dark'] & {
-    border-top-color: var(--border-color, #303030);
-    background: var(--bg-color, #1f1f1f);
+// 暗色模式
+:global(.dark) .chatToolbarSidebar {
+  background: #141414;
+  border-right-color: #303030;
+}
+
+:global(.dark) .chatToolbarHeader {
+  background: #141414;
+  border-bottom-color: #303030;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+:global(.dark) .chatToolbarTabs {
+  :global {
+    .ant-tabs-nav {
+      background: #1f1f1f;
+    }
   }
 }
 
 // 移动端适配
 @media (max-width: 768px) {
-  .chat-toolbar-sidebar {
+  .chatToolbarSidebar {
     border-right: none;
-    border-bottom: 1px solid var(--border-color, #e8e8e8);
-    
-    [data-theme='dark'] & {
-      border-bottom-color: var(--border-color, #303030);
-    }
   }
 }
