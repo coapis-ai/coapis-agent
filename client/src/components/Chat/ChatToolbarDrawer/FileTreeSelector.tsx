@@ -1,6 +1,6 @@
 // 文件树选择器组件
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Tree, Input, Button, Empty } from 'antd';
 import { SearchOutlined, ReloadOutlined, FileOutlined, FolderOutlined } from '@ant-design/icons';
 import { useFileTree } from '../hooks/useFileTree';
@@ -19,6 +19,7 @@ interface FileTreeSelectorProps {
  * - 支持搜索过滤
  * - 支持多选（复选框）
  * - 显示文件大小、类型图标
+ * - 点击文件夹可展开/收缩
  */
 export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) {
   const { treeData, loading, searchText, setSearchText, refresh } = useFileTree();
@@ -29,22 +30,36 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
     return convertToTreeData(treeData);
   }, [treeData]);
 
+  // 默认展开所有文件夹
+  useEffect(() => {
+    if (treeData.length > 0 && expandedKeys.length === 0) {
+      const folderKeys = getAllFolderKeys(treeData);
+      setExpandedKeys(folderKeys);
+    }
+  }, [treeData]);
+
   // 处理选择
   const handleCheck = (checkedKeys: any) => {
     const files = findFilesByIds(treeData, checkedKeys as string[]);
     onSelect(files);
   };
 
+  // 处理展开/收缩
+  const handleExpand = (keys: React.Key[]) => {
+    setExpandedKeys(keys as string[]);
+  };
+
   return (
-    <div className="chat-toolbar-file-tree">
+    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
       {/* 搜索框和刷新按钮 */}
-      <div className="search-box">
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <Input
           placeholder="搜索文件..."
           prefix={<SearchOutlined />}
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           allowClear
+          size="small"
         />
         <Button
           type="text"
@@ -52,31 +67,40 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
           onClick={refresh}
           loading={loading}
           title="刷新"
+          size="small"
         />
       </div>
 
       {/* 文件树 */}
-      <div className="file-tree-container">
-        {treeDataForAntd.length > 0 ? (
-          <Tree
-            checkable
-            checkedKeys={selected.map((f) => f.id)}
-            expandedKeys={expandedKeys}
-            onExpand={(keys) => setExpandedKeys(keys as string[])}
-            onCheck={handleCheck}
-            treeData={treeDataForAntd}
-            selectable={false}
-            showIcon
-          />
-        ) : (
-          <Empty description="暂无文件" />
-        )}
-      </div>
+      {treeDataForAntd.length > 0 ? (
+        <Tree
+          checkable
+          checkedKeys={selected.map((f) => f.id)}
+          expandedKeys={expandedKeys}
+          onExpand={handleExpand}
+          onCheck={handleCheck}
+          treeData={treeDataForAntd}
+          selectable={false}
+          showIcon
+          blockNode
+        />
+      ) : (
+        <Empty description="暂无文件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+      )}
 
       {/* 已选文件数量 */}
       {selected.length > 0 && (
-        <div className="selected-count">
-          <span>已选择 {selected.length} 个文件</span>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginTop: 8,
+          padding: '8px 0',
+          borderTop: '1px solid #f0f0f0',
+        }}>
+          <span style={{ fontSize: 12, color: '#666' }}>
+            已选择 {selected.length} 个文件
+          </span>
           <Button type="link" size="small" onClick={() => onSelect([])}>
             清空
           </Button>
@@ -84,6 +108,23 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
       )}
     </div>
   );
+}
+
+// 辅助函数：获取所有文件夹的key
+function getAllFolderKeys(nodes: FileNode[]): string[] {
+  const keys: string[] = [];
+  
+  function traverse(node: FileNode) {
+    if (node.type === 'folder') {
+      keys.push(node.id);
+      if (node.children) {
+        node.children.forEach(traverse);
+      }
+    }
+  }
+  
+  nodes.forEach(traverse);
+  return keys;
 }
 
 // 辅助函数：转换树数据格式
