@@ -1,7 +1,8 @@
 // 知识库选择器组件
 
-import { Button, Empty, Checkbox } from 'antd';
-import { ReloadOutlined, BookOutlined } from '@ant-design/icons';
+import { useMemo } from 'react';
+import { List, Checkbox, Empty, Spin } from 'antd';
+import { BookOutlined } from '@ant-design/icons';
 import { useKnowledgeList } from '../hooks/useKnowledgeList';
 import type { KnowledgeInfo } from '../types';
 
@@ -14,75 +15,61 @@ interface KnowledgeSelectorProps {
  * 知识库选择器
  * 
  * 功能：
- * - 列表展示知识库
- * - 显示知识库描述
- * - 支持多选（复选框）
+ * - 显示知识库列表
+ * - 支持多选
+ * - 无知识库时显示空状态（不报错）
  */
 export function KnowledgeSelector({ selected, onSelect }: KnowledgeSelectorProps) {
-  const { knowledgeList, loading, refresh } = useKnowledgeList();
+  const { knowledgeList, loading } = useKnowledgeList();
+
+  // 选中的知识库ID
+  const selectedIds = useMemo(() => {
+    return selected.map(item => item.id);
+  }, [selected]);
 
   // 处理选择
-  const handleSelect = (item: KnowledgeInfo, checked: boolean) => {
-    if (checked) {
-      onSelect([...selected, item]);
+  const handleToggle = (item: KnowledgeInfo) => {
+    if (selectedIds.includes(item.id)) {
+      // 取消选择
+      onSelect(selected.filter(s => s.id !== item.id));
     } else {
-      onSelect(selected.filter(k => k.id !== item.id));
+      // 添加选择
+      onSelect([...selected, item]);
     }
   };
 
   return (
-    <div className="chat-toolbar-knowledge-selector">
-      {/* 刷新按钮 */}
-      <div style={{ padding: '8px 16px', textAlign: 'right' }}>
-        <Button
-          type="text"
-          size="small"
-          icon={<ReloadOutlined />}
-          onClick={refresh}
-          loading={loading}
-        >
-          刷新
-        </Button>
-      </div>
-
-      {/* 知识库列表 */}
-      {knowledgeList.length > 0 ? (
-        <div className="knowledge-list">
-          {knowledgeList.map((item) => (
-            <div key={item.id} className="knowledge-item">
-              <Checkbox
-                checked={selected.some(s => s.id === item.id)}
-                onChange={(e) => handleSelect(item, e.target.checked)}
+    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+      <Spin spinning={loading}>
+        {knowledgeList.length > 0 ? (
+          <List
+            dataSource={knowledgeList}
+            renderItem={(item) => (
+              <List.Item
+                style={{ padding: '8px 0', border: 'none' }}
+                actions={[
+                  <Checkbox
+                    key="checkbox"
+                    checked={selectedIds.includes(item.id)}
+                    onChange={() => handleToggle(item)}
+                  />,
+                ]}
               >
-                <div className="knowledge-content">
-                  <div className="knowledge-name">
-                    <BookOutlined style={{ marginRight: 8 }} />
-                    {item.name}
-                  </div>
-                  {item.description && (
-                    <div className="knowledge-desc">{item.description}</div>
-                  )}
-                  <div className="knowledge-meta">
-                    文档数: {item.documentCount || 0}
-                  </div>
-                </div>
-              </Checkbox>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Empty description="暂无知识库" />
-      )}
-
-      {/* 已选数量 */}
-      {selected.length > 0 && (
-        <div className="selected-count">
-          <span>已选择 {selected.length} 个知识库</span>
-          <Button type="link" size="small" onClick={() => onSelect([])}>
-            清空
-          </Button>
-        </div>
-      )}
+                <List.Item.Meta
+                  avatar={<BookOutlined style={{ color: '#1890ff' }} />}
+                  title={item.name}
+                  description={item.description || `${item.documentCount || 0} 个文档`}
+                />
+              </List.Item>
+            )}
+          />
+        ) : (
+          <Empty 
+            description="暂无知识库" 
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        )}
+      </Spin>
     </div>
   );
 }

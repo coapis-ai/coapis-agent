@@ -80,7 +80,7 @@ export function GlobalTools({
         ]}
       />
 
-      {/* 知识库（可展开，可选显示） */}
+      {/* 知识库（可展开，可选显示，有数据才显示） */}
       {showKnowledge && onKnowledgeSelect && (
         <Collapse
           style={{ marginBottom: 8 }}

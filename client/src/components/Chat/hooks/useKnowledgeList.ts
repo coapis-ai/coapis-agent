@@ -1,7 +1,6 @@
 // 知识库列表数据加载 Hook
 
 import { useState, useEffect, useCallback } from 'react';
-import { message } from 'antd';
 import type { KnowledgeInfo } from '../types';
 import { buildAuthHeaders } from '@/api/authHeaders';
 
@@ -27,7 +26,8 @@ interface BackendKnowledgeListResponse {
  * 
  * 功能：
  * - 加载知识库列表
- * - 支持搜索过滤
+ * - 社区版可能无知识库功能，优雅降级
+ * - 不报错，返回空列表
  */
 export function useKnowledgeList() {
   const [loading, setLoading] = useState(false);
@@ -43,7 +43,11 @@ export function useKnowledgeList() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // 404 或其他错误，说明无知识库功能
+        // 不报错，返回空列表
+        console.log('Knowledge bases not available:', response.status);
+        setKnowledgeList([]);
+        return;
       }
 
       const data: BackendKnowledgeListResponse = await response.json();
@@ -59,8 +63,8 @@ export function useKnowledgeList() {
       
       setKnowledgeList(list);
     } catch (error) {
-      console.error('Failed to load knowledge list:', error);
-      message.error('加载知识库列表失败');
+      // 网络错误或解析错误，不报错，返回空列表
+      console.log('Knowledge bases load failed:', error);
       setKnowledgeList([]);
     } finally {
       setLoading(false);
