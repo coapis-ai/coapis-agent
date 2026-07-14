@@ -79,11 +79,22 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
           expandedKeys={expandedKeys}
           onExpand={handleExpand}
           onCheck={handleCheck}
+          onSelect={(_selectedKeys, info) => {
+            // 点击节点内容时，如果是文件夹则展开/收缩
+            const node = info.node as any;
+            if (node.children && node.children.length > 0) {
+              const key = node.key as string;
+              if (expandedKeys.includes(key)) {
+                setExpandedKeys(expandedKeys.filter(k => k !== key));
+              } else {
+                setExpandedKeys([...expandedKeys, key]);
+              }
+            }
+          }}
           treeData={treeDataForAntd}
-          selectable={false}
+          selectable={true}
           showIcon
           blockNode
-          expandAction="click"
         />
       ) : (
         <Empty description="暂无文件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
