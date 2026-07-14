@@ -1,8 +1,9 @@
-# 文件选择器组件
+# 文件选择器组件（更新：使用真实API）
 
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Tree, Input, Empty, Spin, Button } from 'antd';
-import { SearchOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
+import { SearchOutlined, FolderOutlined, FileOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useFileTree } from '../hooks/useFileTree';
 import type { FileInfo, FileNode } from '../types';
 import './index.module.less';
 
@@ -21,46 +22,16 @@ interface FileTreeSelectorProps {
  * - 显示文件大小、类型图标
  */
 export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) {
-  const [loading, setLoading] = useState(false);
-  const [fileTree, setFileTree] = useState<FileNode[]>([]);
-  const [searchText, setSearchText] = useState('');
-  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
-
-  // TODO: 加载文件树（后续对接API）
-  useEffect(() => {
-    // 模拟数据
-    setLoading(true);
-    setTimeout(() => {
-      setFileTree([
-        {
-          id: 'folder-1',
-          name: '文档',
-          path: '/文档',
-          type: 'folder',
-          children: [
-            { id: 'file-1', name: '需求文档.docx', path: '/文档/需求文档.docx', type: 'file', size: 102400 },
-            { id: 'file-2', name: '设计文档.pdf', path: '/文档/设计文档.pdf', type: 'file', size: 204800 },
-          ],
-        },
-        {
-          id: 'folder-2',
-          name: '图片',
-          path: '/图片',
-          type: 'folder',
-          children: [
-            { id: 'file-3', name: 'logo.png', path: '/图片/logo.png', type: 'file', size: 51200 },
-          ],
-        },
-      ]);
-      setLoading(false);
-    }, 500);
-  }, []);
-
-  // 过滤文件树
-  const filteredTree = useMemo(() => {
-    if (!searchText) return fileTree;
-    return filterTree(fileTree, searchText.toLowerCase());
-  }, [fileTree, searchText]);
+  const {
+    loading,
+    filteredTree,
+    error,
+    searchText,
+    setSearchText,
+    expandedKeys,
+    setExpandedKeys,
+    refresh,
+  } = useFileTree();
 
   // 转换为 Tree 组件数据格式
   const treeData = useMemo(() => {
@@ -69,13 +40,13 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
 
   // 处理选择
   const handleCheck = (checkedKeys: any) => {
-    const files = findFilesByIds(fileTree, checkedKeys as string[]);
+    const files = findFilesByIds(filteredTree, checkedKeys as string[]);
     onSelect(files);
   };
 
   return (
     <div className="chat-toolbar-file-tree">
-      {/* 搜索框 */}
+      {/* 搜索框和刷新按钮 */}
       <div className="search-box">
         <Input
           placeholder="搜索文件..."
@@ -83,8 +54,24 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           allowClear
+          suffix={
+            <Button
+              type="text"
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={refresh}
+              title="刷新"
+            />
+          }
         />
       </div>
+
+      {/* 错误提示 */}
+      {error && (
+        <div className="error-message" style={{ padding: 16, color: '#ff4d4f' }}>
+          {error}
+        </div>
+      )}
 
       {/* 文件树 */}
       <div className="file-tree-container">
@@ -104,7 +91,10 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
             showIcon
           />
         ) : (
-          <Empty description="暂无文件" />
+          <Empty 
+            description={searchText ? "未找到匹配的文件" : "暂无文件"} 
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
         )}
       </div>
 
@@ -136,22 +126,6 @@ function convertToTreeData(nodes: FileNode[]): any[] {
     icon: node.type === 'folder' ? <FolderOutlined /> : <FileOutlined />,
     children: node.children ? convertToTreeData(node.children) : undefined,
   }));
-}
-
-// 辅助函数：过滤文件树
-function filterTree(nodes: FileNode[], searchText: string): FileNode[] {
-  return nodes
-    .map((node) => {
-      if (node.children) {
-        const filteredChildren = filterTree(node.children, searchText);
-        if (filteredChildren.length > 0 || node.name.toLowerCase().includes(searchText)) {
-          return { ...node, children: filteredChildren };
-        }
-        return null;
-      }
-      return node.name.toLowerCase().includes(searchText) ? node : null;
-    })
-    .filter(Boolean) as FileNode[];
 }
 
 // 辅助函数：根据ID查找文件

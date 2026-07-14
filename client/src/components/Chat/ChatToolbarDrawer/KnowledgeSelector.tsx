@@ -1,8 +1,8 @@
-# 知识库选择器组件
+# 知识库选择器组件（更新：使用真实API）
 
-import { useState, useEffect } from 'react';
 import { List, Checkbox, Empty, Spin, Button } from 'antd';
-import { BookOutlined } from '@ant-design/icons';
+import { BookOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useKnowledgeList } from '../hooks/useKnowledgeList';
 import type { KnowledgeInfo } from '../types';
 import './index.module.less';
 
@@ -20,37 +20,7 @@ interface KnowledgeSelectorProps {
  * - 支持多选（复选框）
  */
 export function KnowledgeSelector({ selected, onSelect }: KnowledgeSelectorProps) {
-  const [loading, setLoading] = useState(false);
-  const [knowledgeList, setKnowledgeList] = useState<KnowledgeInfo[]>([]);
-
-  // TODO: 加载知识库列表（后续对接API）
-  useEffect(() => {
-    // 模拟数据
-    setLoading(true);
-    setTimeout(() => {
-      setKnowledgeList([
-        {
-          id: 'kb-1',
-          name: '产品文档',
-          description: '产品需求、功能说明、用户手册',
-          documentCount: 15,
-        },
-        {
-          id: 'kb-2',
-          name: '技术文档',
-          description: 'API文档、开发指南、最佳实践',
-          documentCount: 23,
-        },
-        {
-          id: 'kb-3',
-          name: '运维文档',
-          description: '部署、配置、监控、故障排查',
-          documentCount: 8,
-        },
-      ]);
-      setLoading(false);
-    }, 500);
-  }, []);
+  const { loading, knowledgeList, error, refresh } = useKnowledgeList();
 
   // 处理选择
   const handleSelect = (item: KnowledgeInfo, checked: boolean) => {
@@ -63,7 +33,28 @@ export function KnowledgeSelector({ selected, onSelect }: KnowledgeSelectorProps
 
   return (
     <div className="chat-toolbar-knowledge-selector">
-      {loading ? (
+      {/* 刷新按钮 */}
+      <div style={{ padding: '8px 16px', textAlign: 'right' }}>
+        <Button
+          type="text"
+          size="small"
+          icon={<ReloadOutlined />}
+          onClick={refresh}
+          loading={loading}
+        >
+          刷新
+        </Button>
+      </div>
+
+      {/* 错误提示 */}
+      {error && (
+        <div className="error-message" style={{ padding: 16, color: '#ff4d4f' }}>
+          {error}
+        </div>
+      )}
+
+      {/* 知识库列表 */}
+      {loading && knowledgeList.length === 0 ? (
         <div className="loading-container">
           <Spin />
         </div>
@@ -107,7 +98,10 @@ export function KnowledgeSelector({ selected, onSelect }: KnowledgeSelectorProps
           )}
         </>
       ) : (
-        <Empty description="暂无知识库" />
+        <Empty 
+          description="暂无知识库" 
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
       )}
     </div>
   );
