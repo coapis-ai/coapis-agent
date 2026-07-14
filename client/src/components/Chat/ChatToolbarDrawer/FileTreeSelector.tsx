@@ -83,6 +83,7 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
           selectable={false}
           showIcon
           blockNode
+          expandAction="click"
         />
       ) : (
         <Empty description="暂无文件" image={Empty.PRESENTED_IMAGE_SIMPLE} />

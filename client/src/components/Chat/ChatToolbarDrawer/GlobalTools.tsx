@@ -43,14 +43,16 @@ export function GlobalTools({
       </div>
 
       {/* 聊天历史按钮 */}
-      <Button 
-        icon={<HistoryOutlined />}
-        onClick={() => setHistoryModalOpen(true)}
-        block
-        style={{ marginBottom: 8, textAlign: 'left' }}
-      >
-        聊天历史
-      </Button>
+      <div style={{ marginBottom: 8 }}>
+        <Button 
+          icon={<HistoryOutlined />}
+          onClick={() => setHistoryModalOpen(true)}
+          block
+          style={{ justifyContent: 'flex-start' }}
+        >
+          聊天历史
+        </Button>
+      </div>
 
       {/* 我的空间（可展开） */}
       <Collapse
@@ -107,14 +109,16 @@ export function GlobalTools({
       )}
 
       {/* 显示设置按钮 */}
-      <Button 
-        icon={<SettingOutlined />} 
-        onClick={onSettingsClick}
-        block
-        style={{ marginTop: 8, textAlign: 'left' }}
-      >
-        显示设置
-      </Button>
+      <div style={{ marginTop: 8 }}>
+        <Button 
+          icon={<SettingOutlined />} 
+          onClick={onSettingsClick}
+          block
+          style={{ justifyContent: 'flex-start' }}
+        >
+          显示设置
+        </Button>
+      </div>
 
       {/* 聊天历史弹窗 */}
       <Modal
