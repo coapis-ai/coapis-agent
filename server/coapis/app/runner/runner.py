@@ -441,6 +441,12 @@ class AgentRunner(Runner):
             # This preserves ALL message types: tool_call, tool_output, mcp_call,
             # mcp_call_output, reasoning, assistant — not just user + assistant.
             if agent_messages:
+                # Debug: log agent_messages structure
+                logger.info(
+                    "_persist_chat_messages: agent_messages count=%d",
+                    len(agent_messages),
+                )
+
                 # CRITICAL: Replace user message in agent_messages with user_text_override
                 # when user_text is available. agent_messages comes from agent.memory
                 # which may have been modified by hooks (e.g. bootstrap), so we must
@@ -450,8 +456,9 @@ class AgentRunner(Runner):
                     _first_msg = _agent_msgs[0]
                     if getattr(_first_msg, "role", "") == "user":
                         # Replace the first user message content with original user text
-                        _first_msg.content = [TextBlock(text=user_text)]
-                        _first_msg._content = [TextBlock(text=user_text)]
+                        # Use string format (simplest) or dict format with 'type' field
+                        # TextBlock() creates {'text': '...'} without 'type', which breaks get_text_content()
+                        _first_msg.content = user_text  # Simple string format
                         logger.info(
                             "_persist_chat_messages: replaced user message content "
                             "with original text (%d chars)", len(user_text),
@@ -1250,6 +1257,55 @@ class AgentRunner(Runner):
             # only the NEW messages afterwards (includes tool_call, tool_output,
             # reasoning, assistant — not just user + assistant text).
             _memory_snapshot_len = len(agent.memory.content) if agent.memory else 0
+
+            # ── Inject file reference hint to agent.memory ──
+            # This is dynamic (not persisted to chat history)
+            # selected_files is passed through request.input[0].metadata
+            # Note: msgs is converted from request.input by message_to_agentscope_msg
+            # The conversion may lose metadata, so we check the original request.input
+            selected_files = None
+            
+            # Try to get from request.input[0].metadata (original Message object)
+            if request and hasattr(request, "input") and request.input:
+                first_msg = request.input[0]
+                if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
+                    selected_files = first_msg.metadata.get("selected_files")
+                    if selected_files:
+                        logger.info(f"Found selected_files in request.input[0].metadata: {selected_files}")
+            
+            # Fallback: try to get from converted msgs[0] (Msg object)
+            if not selected_files and msgs and len(msgs) > 0:
+                first_msg = msgs[0]
+                if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
+                    selected_files = first_msg.metadata.get("selected_files")
+                    if selected_files:
+                        logger.info(f"Found selected_files in msgs[0].metadata: {selected_files}")
+            
+            if selected_files and isinstance(selected_files, list) and len(selected_files) > 0:
+                # Build file hint message
+                file_list = ", ".join([f"{f.get('name', 'unknown')} (path: {f.get('path', 'unknown')})" for f in selected_files])
+                
+                # Detect file types for doc_reader hint
+                file_types = set()
+                for f in selected_files:
+                    name = f.get("name", "")
+                    if "." in name:
+                        ext = name.split(".")[-1].lower()
+                        if ext in ["pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls"]:
+                            file_types.add(ext.upper())
+                
+                if file_types:
+                    hint_text = f"[用户选择了以下文件：{file_list}。请使用 doc_reader 工具读取这些 {', '.join(sorted(file_types))} 文件。文件路径已提供，无需搜索。]"
+                else:
+                    hint_text = f"[用户选择了以下文件：{file_list}。文件路径已提供，无需搜索。]"
+                
+                # Inject hint to agent.memory (AI will see it, but not persisted)
+                # Msg already imported at top of file
+                if agent.memory:
+                    await agent.memory.add(Msg(name="system", content=hint_text, role="system"))
+                    # Adjust snapshot length to include the hint
+                    _memory_snapshot_len = len(agent.memory.content)
+                    logger.info(f"Injected file reference hint to agent.memory: {len(selected_files)} files")
 
             # --- Execution: Mission Mode (phased) or standard -----
             # Collect full assistant response for evolution engine & chat persistence

@@ -1158,55 +1158,6 @@ class Workspace:
                 # Add user message to context BEFORE streaming
                 context.add_message("user", user_message)
 
-                # ── Inject file reference hint before AI processing ──
-                # Check meta.selected_files and inject a system hint
-                # This is dynamic (not persisted to chat history)
-                selected_files = None
-                # Try to get from request_obj's input message meta
-                try:
-                    if hasattr(request_obj, "input") and request_obj.input:
-                        first_msg = request_obj.input[0] if isinstance(request_obj.input, list) else request_obj.input
-                        if hasattr(first_msg, "meta") and isinstance(first_msg.meta, dict):
-                            selected_files = first_msg.meta.get("selected_files")
-                except Exception:
-                    pass
-                
-                # Fallback: check if request has channel_meta attribute
-                if not selected_files and hasattr(request_obj, "channel_meta"):
-                    if isinstance(request_obj.channel_meta, dict):
-                        selected_files = request_obj.channel_meta.get("selected_files")
-                
-                if selected_files and isinstance(selected_files, list) and len(selected_files) > 0:
-                    # Build file hint message
-                    file_list = ", ".join([f"{f.get('name', 'unknown')} (path: {f.get('path', 'unknown')})" for f in selected_files])
-                    
-                    # Detect file types for doc_reader hint
-                    file_types = set()
-                    for f in selected_files:
-                        name = f.get("name", "")
-                        if "." in name:
-                            ext = name.split(".")[-1].lower()
-                            if ext in ["pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls"]:
-                                file_types.add(ext.upper())
-                    
-                    if file_types:
-                        hint_text = f"[User selected files: {file_list}. Please use doc_reader tool to read these {', '.join(sorted(file_types))} files. File paths are provided, no need to search.]"
-                    else:
-                        hint_text = f"[User selected files: {file_list}. File paths are provided, no need to search.]"
-                    
-                    # Inject hint as a temporary system message to memory
-                    # This will be seen by AI but not persisted to chat_context
-                    try:
-                        from agentscope.message import Msg
-                        hint_msg = Msg(name="system", content=hint_text, role="system")
-                        # Add to memory (temporary context for AI)
-                        # Note: This won't be persisted because we're not adding to chat_context
-                        if self.memory:
-                            await self.memory.add(hint_msg)
-                            logger.info(f"Injected file reference hint to memory: {len(selected_files)} files")
-                    except Exception as hint_err:
-                        logger.warning(f"Failed to inject file hint: {hint_err}")
-
                 # ── Core stream: delegate to runner.stream_query() ──
                 # stream_query() calls query_handler() internally, then passes
                 # (msg, last) tuples through adapt_agentscope_message_stream adapter

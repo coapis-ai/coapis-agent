@@ -421,7 +421,7 @@ async def console_chat(
         )
     elif chat.name in ("New Chat", "新聊天", "") and name != "New Chat":
         # Auto-rename: update chat name from first user message
-        from ..runner.models import ChatUpdate
+        # ChatUpdate already imported at top of file
         try:
             await user_cm.patch_chat(chat.id, ChatUpdate(name=name))
             chat.name = name
@@ -429,7 +429,7 @@ async def console_chat(
             logger.warning(f"Failed to auto-rename chat {chat.id}: {e}")
     elif _is_default_chat_name(chat.name) and name and name != "New Chat":
         # Auto-rename: also handle UUID-like or other default names
-        from ..runner.models import ChatUpdate
+        # ChatUpdate already imported at top of file
         try:
             await user_cm.patch_chat(chat.id, ChatUpdate(name=name))
             chat.name = name

@@ -1126,8 +1126,11 @@ export default function ChatPage() {
       const rewrittenInput = lastMsg
         ? [
             {
-              ...lastMsg,
+              role: lastMsg.role,
+              type: lastMsg.type,
               content: rewrittenContent,
+              session: lastMsg.session,
+              // 注意：不复制 cards 等只读属性
             },
           ]
         : lastInput;
