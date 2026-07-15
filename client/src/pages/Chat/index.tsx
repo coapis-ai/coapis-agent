@@ -1090,7 +1090,8 @@ export default function ChatPage() {
       // 添加文件引用到 content 中
       if (selectedFiles.length > 0) {
         // 先添加明确的提示文本，告诉 AI 使用 doc_reader 工具
-        const fileList = selectedFiles.map(f => f.name).join('、');
+        // 包含文件路径信息，避免 AI 需要搜索文件
+        const fileList = selectedFiles.map(f => `${f.name}（路径：${f.path}）`).join('、');
         const fileTypes = [...new Set(selectedFiles.map(f => {
           const ext = f.name.split('.').pop()?.toLowerCase();
           if (['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls'].includes(ext || '')) {
@@ -1100,8 +1101,8 @@ export default function ChatPage() {
         }).filter(Boolean))].join('/');
         
         const hintMsg = fileTypes 
-          ? `\n\n[用户选择了以下文件：${fileList}。请使用 doc_reader 工具读取这些${fileTypes.toUpperCase()}文件的内容。]`
-          : `\n\n[用户选择了以下文件：${fileList}]`;
+          ? `\n\n[用户选择了以下文件：${fileList}。请使用 doc_reader 工具读取这些${fileTypes.toUpperCase()}文件的内容。文件路径已提供，无需搜索。]`
+          : `\n\n[用户选择了以下文件：${fileList}。文件路径已提供，无需搜索。]`;
         
         rewrittenContent.push({
           type: "text",
@@ -1109,17 +1110,19 @@ export default function ChatPage() {
         });
         
         // 再添加文件引用（供后端处理）
-        // 路径格式：files/filename.pdf（相对于工作空间）
+        // 后端返回的 path 已经是相对于 workspace/files/ 的路径
+        // 例如：/media/docs/developer/api.md
+        // read_file 会自动添加 workspace/files/ 前缀，所以这里只需移除开头的 /
         selectedFiles.forEach(file => {
-          // 移除开头的 /，添加 files/ 前缀
-          const relativePath = file.path.startsWith('/') 
-            ? `files${file.path}` 
-            : `files/${file.path}`;
+          // 移除开头的 /，直接传递相对路径
+          const filePath = file.path.startsWith('/') 
+            ? file.path.slice(1) 
+            : file.path;
           
           rewrittenContent.push({
             type: "file",
             source: {
-              url: `file://${relativePath}`,
+              url: `file://${filePath}`,
             },
             filename: file.name,
           });
