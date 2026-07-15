@@ -266,6 +266,30 @@ class WorkspaceGuard:
             except ValueError:
                 pass
 
+            # Check 4: Global shared read paths
+            # 允许读取特定系统文件（只读）
+            SHARED_READ_PATHS = [
+                "/etc/passwd",      # 用户信息
+                "/etc/hosts",       # 主机解析
+                "/etc/hostname",    # 主机名
+                "/etc/resolv.conf", # DNS配置
+                "/usr/share/doc",   # 文档目录
+                "/usr/share/man",   # 手册页
+            ]
+            for shared_path in SHARED_READ_PATHS:
+                try:
+                    shared_resolved = Path(shared_path).resolve()
+                    # 对于文件，精确匹配
+                    if shared_resolved.is_file():
+                        if target_resolved == shared_resolved:
+                            return True
+                    # 对于目录，检查是否在目录内
+                    else:
+                        target_resolved.relative_to(shared_resolved)
+                        return True
+                except (ValueError, OSError):
+                    pass
+
             return False
         except (OSError, RuntimeError) as e:
             logger.warning(
