@@ -1089,11 +1089,23 @@ export default function ChatPage() {
       
       // 添加文件引用到 content 中
       if (selectedFiles.length > 0) {
-        // 先添加明确的提示文本
+        // 先添加明确的提示文本，告诉 AI 使用 doc_reader 工具
         const fileList = selectedFiles.map(f => f.name).join('、');
+        const fileTypes = [...new Set(selectedFiles.map(f => {
+          const ext = f.name.split('.').pop()?.toLowerCase();
+          if (['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls'].includes(ext || '')) {
+            return ext;
+          }
+          return null;
+        }).filter(Boolean))].join('/');
+        
+        const hintMsg = fileTypes 
+          ? `\n\n[用户选择了以下文件：${fileList}。请使用 doc_reader 工具读取这些${fileTypes.toUpperCase()}文件的内容。]`
+          : `\n\n[用户选择了以下文件：${fileList}]`;
+        
         rewrittenContent.push({
           type: "text",
-          text: `\n\n[用户选择了以下文件：${fileList}]`,
+          text: hintMsg,
         });
         
         // 再添加文件引用（供后端处理）
