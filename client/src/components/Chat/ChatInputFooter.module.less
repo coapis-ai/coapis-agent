@@ -17,6 +17,16 @@
   min-width: 0;  // 允许收缩
 }
 
+.placeholder {
+  flex: 1;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.25);
+  }
+}
+
 .refTag {
   display: inline-flex;
   align-items: center;

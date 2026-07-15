@@ -16,6 +16,7 @@ interface ChatInputFooterProps {
 /**
  * 聊天输入框底部引用条
  * 单行显示，超长省略
+ * 无引用时显示占位文字
  */
 export function ChatInputFooter({
   files,
@@ -25,9 +26,15 @@ export function ChatInputFooter({
 }: ChatInputFooterProps) {
   const totalCount = files.length + knowledge.length;
 
-  // 没有引用时不显示
+  // 没有引用时显示占位文字
   if (totalCount === 0) {
-    return null;
+    return (
+      <div className={styles.footer}>
+        <div className={styles.placeholder}>
+          引用资源
+        </div>
+      </div>
+    );
   }
 
   // 构建显示内容
