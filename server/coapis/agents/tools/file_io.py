@@ -39,9 +39,14 @@ from ...constant import WORKING_DIR, TRUNCATION_NOTICE_MARKER
 
 def _resolve_file_path(file_path: str) -> str:
     """Resolve file path for READ operations: use absolute path as-is,
-    resolve relative path from current workspace or WORKING_DIR.
+    resolve relative path from current workspace/files/ or WORKING_DIR/files/.
 
     Note: This is for reading files. For writing, use _resolve_write_path.
+    
+    Path resolution rules:
+    1. Absolute paths → used as-is
+    2. Relative paths → resolved from workspace/files/
+       (consistent with write_file behavior)
 
     Args:
         file_path: The input file path (absolute or relative).
@@ -55,7 +60,11 @@ def _resolve_file_path(file_path: str) -> str:
     else:
         # Use current workspace_dir from context, fallback to WORKING_DIR
         workspace_dir = get_current_workspace_dir() or WORKING_DIR
-        return str(workspace_dir / file_path)
+        # 确保 workspace_dir 是 Path 对象
+        workspace_dir = Path(workspace_dir)
+        # 用户文件存储在 workspace/files/ 目录
+        files_dir = workspace_dir / "files"
+        return str(files_dir / file_path)
 
 
 def _resolve_write_path(file_path: str) -> str:
@@ -79,6 +88,8 @@ def _resolve_write_path(file_path: str) -> str:
         return str(path)
 
     workspace_dir = get_current_workspace_dir() or WORKING_DIR
+    # 确保 workspace_dir 是 Path 对象
+    workspace_dir = Path(workspace_dir)
     files_dir = workspace_dir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
     return str(files_dir / file_path)
