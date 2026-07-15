@@ -3,6 +3,7 @@ import App from "./App.tsx";
 import "./i18n";
 import { installHostExternals } from "./plugins/hostExternals";
 import { registerHostModulesEager } from "./plugins/dynamicModuleRegistry";
+import { initLanguages } from "./utils/preloadLanguages";
 
 // Expose host dependencies (React, antd, etc.) on window
 // so that plugin UI modules can use them without bundling their own copies.
@@ -11,6 +12,10 @@ installHostExternals();
 // Dynamic module registration - no generated files needed!
 // Automatically discovers all modules in src/pages at build time
 registerHostModulesEager();
+
+// Preload syntax highlighter languages
+// This fixes dynamic import failures in @ant-design/x CodeHighlighter
+initLanguages();
 
 if (typeof window !== "undefined") {
   const originalError = console.error;
