@@ -9,3 +9,27 @@
     color: #faad14;
   }
 }
+
+// 简洁版本样式
+.hintCompact {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.capItem {
+  display: inline-flex;
+  align-items: center;
+}
+
+// 深色模式
+:global(.dark-mode) {
+  .hint {
+    color: rgba(255, 255, 255, 0.45);
+  }
+  
+  .hintCompact {
+    color: rgba(255, 255, 255, 0.45);
+  }
+}

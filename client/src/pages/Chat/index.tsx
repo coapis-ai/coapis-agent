@@ -44,7 +44,7 @@ import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
-import { ChatToolbarSidebar, useToolbarState, ModelCapabilityHint } from "../../components/Chat";
+import { ChatToolbarSidebar, useToolbarState, ChatInputFooter } from "../../components/Chat";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -1288,7 +1288,19 @@ export default function ChatPage() {
           label: renderSuggestionLabel(item.command, item.description),
           value: item.value,
         })),
-        footer: <ModelCapabilityHint caps={multimodalCaps} />,
+        footer: (
+          <ChatInputFooter
+            files={selectedFiles}
+            knowledge={selectedKnowledge}
+            onRemoveFile={(id) => {
+              setSelectedFiles(prev => prev.filter(f => f.id !== id));
+            }}
+            onRemoveKnowledge={(id) => {
+              setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
+            }}
+            caps={multimodalCaps}
+          />
+        ),
       },
       session: {
         multiple: true,

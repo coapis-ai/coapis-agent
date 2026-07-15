@@ -3,8 +3,6 @@ import {
   CheckCircleOutlined, 
   WarningOutlined,
   InfoCircleOutlined,
-  EyeOutlined,
-  VideoCameraOutlined 
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import styles from './ModelCapabilityHint.module.less';
@@ -19,7 +17,7 @@ interface CapabilityHintProps {
 
 /**
  * 显示当前模型的能力提示
- * 在输入框下方显示一行文字，说明模型支持的文件类型
+ * 简洁版本：✓图片 ✓视频
  */
 export function ModelCapabilityHint({ caps }: CapabilityHintProps) {
   const { t } = useTranslation();
@@ -27,10 +25,16 @@ export function ModelCapabilityHint({ caps }: CapabilityHintProps) {
   // 支持图片+视频
   if (caps.supportsImage && caps.supportsVideo) {
     return (
-      <div className={styles.hint}>
-        <Space size={4}>
-          <CheckCircleOutlined style={{ color: '#52c41a' }} />
-          <span>{t('chat.capability.imageAndVideo')}</span>
+      <div className={styles.hintCompact}>
+        <Space size={8}>
+          <span className={styles.capItem}>
+            <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 2 }} />
+            {t('chat.capability.image', '图片')}
+          </span>
+          <span className={styles.capItem}>
+            <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 2 }} />
+            {t('chat.capability.video', '视频')}
+          </span>
         </Space>
       </div>
     );
@@ -39,12 +43,11 @@ export function ModelCapabilityHint({ caps }: CapabilityHintProps) {
   // 仅支持图片
   if (caps.supportsImage) {
     return (
-      <div className={styles.hint}>
-        <Space size={4}>
-          <CheckCircleOutlined style={{ color: '#52c41a' }} />
-          <EyeOutlined style={{ color: '#52c41a' }} />
-          <span>{t('chat.capability.imageOnly')}</span>
-        </Space>
+      <div className={styles.hintCompact}>
+        <span className={styles.capItem}>
+          <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 2 }} />
+          {t('chat.capability.image', '图片')}
+        </span>
       </div>
     );
   }
@@ -52,12 +55,11 @@ export function ModelCapabilityHint({ caps }: CapabilityHintProps) {
   // 仅支持视频
   if (caps.supportsVideo) {
     return (
-      <div className={styles.hint}>
-        <Space size={4}>
-          <CheckCircleOutlined style={{ color: '#52c41a' }} />
-          <VideoCameraOutlined style={{ color: '#52c41a' }} />
-          <span>{t('chat.capability.videoOnly')}</span>
-        </Space>
+      <div className={styles.hintCompact}>
+        <span className={styles.capItem}>
+          <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 2 }} />
+          {t('chat.capability.video', '视频')}
+        </span>
       </div>
     );
   }
@@ -65,22 +67,22 @@ export function ModelCapabilityHint({ caps }: CapabilityHintProps) {
   // 纯文本模型（已探测但不支持）
   if (caps.supportsMultimodal === false) {
     return (
-      <div className={`${styles.hint} ${styles.warning}`}>
-        <Space size={4}>
-          <WarningOutlined style={{ color: '#faad14' }} />
-          <span>{t('chat.capability.textOnly')}</span>
-        </Space>
+      <div className={styles.hintCompact}>
+        <span className={styles.capItem}>
+          <WarningOutlined style={{ color: '#faad14', marginRight: 2 }} />
+          {t('chat.capability.textOnlyShort', '仅文本')}
+        </span>
       </div>
     );
   }
   
   // 未检测
   return (
-    <div className={styles.hint}>
-      <Space size={4}>
-        <InfoCircleOutlined style={{ color: '#1890ff' }} />
-        <span>{t('chat.capability.notProbed')}</span>
-      </Space>
+    <div className={styles.hintCompact}>
+      <span className={styles.capItem}>
+        <InfoCircleOutlined style={{ color: '#1890ff', marginRight: 2 }} />
+        {t('chat.capability.notProbedShort', '未检测')}
+      </span>
     </div>
   );
 }
