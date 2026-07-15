@@ -157,6 +157,10 @@ class ProgressTracker:
             params: 工具调用参数
             result: 工具执行结果
         """
+        # 如果未启用，跳过记录
+        if not self._config.enabled:
+            return
+        
         params_hash = _hash_params(params)
         params_summary = _summarize_params(tool_name, params)
         result_summary, result_len = _summarize_result(result)
@@ -185,6 +189,9 @@ class ProgressTracker:
 
     def should_inject(self) -> bool:
         """是否应该注入进度摘要。"""
+        # 先检查是否启用
+        if not self._config.enabled:
+            return False
         return len(self.records) >= self._config.inject_threshold
 
     def has_reached_hard_limit(self) -> bool:
