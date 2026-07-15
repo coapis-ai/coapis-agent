@@ -1288,10 +1288,8 @@ export default function ChatPage() {
           label: renderSuggestionLabel(item.command, item.description),
           value: item.value,
         })),
-        // 输入框右侧 - 显示模型能力
-        prefix: <ModelCapabilityTag caps={multimodalCaps} />,
         // 输入框下方 - 显示引用条
-        footer: selectedFiles.length + selectedKnowledge.length > 0 ? (
+        afterUI: selectedFiles.length + selectedKnowledge.length > 0 ? (
           <ChatInputFooter
             files={selectedFiles}
             knowledge={selectedKnowledge}
@@ -1302,7 +1300,9 @@ export default function ChatPage() {
               setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
             }}
           />
-        ) : null,
+        ) : undefined,
+        // 右下角操作区 - 显示模型能力
+        actionAffix: <ModelCapabilityTag caps={multimodalCaps} />,
       },
       session: {
         multiple: true,
