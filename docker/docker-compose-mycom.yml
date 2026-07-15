@@ -20,6 +20,7 @@ services:
       - ./volume/mcp:/root/.cache/pip
     env_file:
       - .env.mycom
+      - .env.mycom
     environment:
       - COAPIS_WORKING_DIR=${COAPIS_WORKING_DIR}
       - COAPIS_WORKSPACES_DIR=${COAPIS_WORKSPACES_DIR:-${COAPIS_WORKING_DIR}/workspaces}
