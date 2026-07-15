@@ -1097,11 +1097,17 @@ export default function ChatPage() {
         });
         
         // 再添加文件引用（供后端处理）
+        // 路径格式：files/filename.pdf（相对于工作空间）
         selectedFiles.forEach(file => {
+          // 移除开头的 /，添加 files/ 前缀
+          const relativePath = file.path.startsWith('/') 
+            ? `files${file.path}` 
+            : `files/${file.path}`;
+          
           rewrittenContent.push({
             type: "file",
             source: {
-              url: `file://${file.path}`,
+              url: `file://${relativePath}`,
             },
             filename: file.name,
           });
