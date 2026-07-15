@@ -55,7 +55,26 @@ export default defineConfig(({ mode }) => {
       },
     },
     optimizeDeps: {
-      include: ["diff"],
+      include: [
+        "diff",
+        // 代码高亮语言包（解决动态导入失败问题）
+        "react-syntax-highlighter/dist/esm/languages/prism/javascript",
+        "react-syntax-highlighter/dist/esm/languages/prism/typescript",
+        "react-syntax-highlighter/dist/esm/languages/prism/jsx",
+        "react-syntax-highlighter/dist/esm/languages/prism/tsx",
+        "react-syntax-highlighter/dist/esm/languages/prism/python",
+        "react-syntax-highlighter/dist/esm/languages/prism/bash",
+        "react-syntax-highlighter/dist/esm/languages/prism/json",
+        "react-syntax-highlighter/dist/esm/languages/prism/css",
+        "react-syntax-highlighter/dist/esm/languages/prism/markdown",
+        "react-syntax-highlighter/dist/esm/languages/prism/yaml",
+        "react-syntax-highlighter/dist/esm/languages/prism/sql",
+        "react-syntax-highlighter/dist/esm/languages/prism/java",
+        "react-syntax-highlighter/dist/esm/languages/prism/c",
+        "react-syntax-highlighter/dist/esm/languages/prism/cpp",
+        "react-syntax-highlighter/dist/esm/languages/prism/go",
+        "react-syntax-highlighter/dist/esm/languages/prism/rust",
+      ],
     },
     build: {
       // Output to the console directory,
