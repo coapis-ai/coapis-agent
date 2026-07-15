@@ -4,9 +4,15 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--ant-color-bg-container, #ffffff);
-  border-right: 1px solid var(--ant-color-border, #f0f0f0);
+  background: #ffffff;
+  border-right: 1px solid #f0f0f0;
   overflow: hidden;
+
+  // 深色模式
+  :global(.dark-mode) & {
+    background: #141414;
+    border-right-color: #303030;
+  }
 }
 
 .chatToolbarContent {
@@ -20,27 +26,42 @@
   }
   
   &::-webkit-scrollbar-thumb {
-    background: var(--ant-color-border, #d9d9d9);
+    background: #d9d9d9;
     border-radius: 3px;
     
     &:hover {
-      background: var(--ant-color-text-disabled, #bfbfbf);
+      background: #bfbfbf;
     }
   }
   
   &::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  // 深色模式滚动条
+  :global(.dark-mode) & {
+    &::-webkit-scrollbar-thumb {
+      background: #434343;
+      
+      &:hover {
+        background: #5a5a5a;
+      }
+    }
+  }
 }
 
 .selectedReferencesSection {
-  border-top: 1px solid var(--ant-color-border, #f0f0f0);
-  background: var(--ant-color-bg-layout, #fafafa);
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
   max-height: 200px;
   overflow-y: auto;
-}
 
-// 暗色模式由 CSS 变量自动处理，无需额外覆盖
+  // 深色模式
+  :global(.dark-mode) & {
+    border-top-color: #303030;
+    background: #1f1f1f;
+  }
+}
 
 // 移动端适配
 @media (max-width: 768px) {
