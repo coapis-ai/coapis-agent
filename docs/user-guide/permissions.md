@@ -21,6 +21,11 @@ CoApis 采用**零信任权限架构**，所有操作都需要通过权限验证
 | 绝对路径 | `/tmp/report.pdf` | `/tmp/report.pdf` | ❌ 可能拒绝 |
 | Home路径 | `~/data/report.pdf` | `/home/user/data/report.pdf` | ❌ 可能拒绝 |
 
+**重要说明**：
+- ✅ **相对路径**自动解析到 `workspace/files/` 目录
+- ✅ 这是用户上传文件的存储位置
+- ✅ `read_file` 和 `write_file` 使用相同的路径解析规则
+
 **推荐做法**：
 ```python
 # ✅ 使用相对路径（推荐）
@@ -29,6 +34,9 @@ read_file("report.pdf")
 
 # ❌ 避免使用绝对路径
 write_file("/tmp/report.pdf", "内容...")  # 可能被拒绝
+
+# ✅ 如果需要读取 workspace 根目录文件，使用绝对路径
+read_file("/path/to/workspace/MEMORY.md")
 ```
 
 ### 1.2 文件工具权限对比
