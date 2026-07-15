@@ -64,7 +64,7 @@ export function GlobalTools({
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <FolderOutlined /> 我的空间
                 {selectedFiles.length > 0 && (
-                  <span style={{ color: '#1890ff', fontSize: 12 }}>
+                  <span style={{ color: 'var(--ant-color-primary, #1890ff)', fontSize: 12 }}>
                     ({selectedFiles.length})
                   </span>
                 )}
@@ -91,7 +91,7 @@ export function GlobalTools({
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <BookOutlined /> 知识库
                   {selectedKnowledge.length > 0 && (
-                    <span style={{ color: '#1890ff', fontSize: 12 }}>
+                    <span style={{ color: 'var(--ant-color-primary, #1890ff)', fontSize: 12 }}>
                       ({selectedKnowledge.length})
                     </span>
                   )}

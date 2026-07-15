@@ -4,8 +4,8 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
-  border-right: 1px solid #f0f0f0;
+  background: var(--ant-color-bg-container, #ffffff);
+  border-right: 1px solid var(--ant-color-border, #f0f0f0);
   overflow: hidden;
 }
 
@@ -20,11 +20,11 @@
   }
   
   &::-webkit-scrollbar-thumb {
-    background: #d9d9d9;
+    background: var(--ant-color-border, #d9d9d9);
     border-radius: 3px;
     
     &:hover {
-      background: #bfbfbf;
+      background: var(--ant-color-text-disabled, #bfbfbf);
     }
   }
   
@@ -34,32 +34,13 @@
 }
 
 .selectedReferencesSection {
-  border-top: 1px solid #f0f0f0;
-  background: #fafafa;
+  border-top: 1px solid var(--ant-color-border, #f0f0f0);
+  background: var(--ant-color-bg-layout, #fafafa);
   max-height: 200px;
   overflow-y: auto;
 }
 
-// 暗色模式
-:global(.dark) .chatToolbarSidebar {
-  background: #141414;
-  border-right-color: #303030;
-}
-
-:global(.dark) .chatToolbarContent {
-  &::-webkit-scrollbar-thumb {
-    background: #434343;
-    
-    &:hover {
-      background: #5a5a5a;
-    }
-  }
-}
-
-:global(.dark) .selectedReferencesSection {
-  border-top-color: #303030;
-  background: #1f1f1f;
-}
+// 暗色模式由 CSS 变量自动处理，无需额外覆盖
 
 // 移动端适配
 @media (max-width: 768px) {

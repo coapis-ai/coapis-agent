@@ -591,8 +591,8 @@ export default function ChatPage() {
   // 工具栏状态管理
   const {
     visible: toolbarOpen,
-    openToolbar,
     closeToolbar,
+    toggleToolbar,
     selectedFiles,
     selectedKnowledge,
     setSelectedFiles,
@@ -1490,7 +1490,7 @@ export default function ChatPage() {
         {/* Chat session header: title + actions */}
         <ChatSessionHeader 
           onShowDisplaySettings={() => setShowDisplaySettings(true)}
-          onToolbarOpen={openToolbar}
+          onToolbarToggle={toggleToolbar}
         />
         
         {/* 主内容区域：工具栏 + 聊天区 */}

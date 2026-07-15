@@ -10,11 +10,11 @@ import styles from './index.module.less';
 
 interface ChatSessionHeaderProps {
   onShowDisplaySettings?: () => void;
-  onToolbarOpen?: () => void;  // 工具栏打开回调
+  onToolbarToggle?: () => void;  // 工具栏切换回调
 }
 
 const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ 
-  onToolbarOpen,
+  onToolbarToggle,
 }) => {
   const { t } = useTranslation();
   const { sessions, currentSessionId } = useChatAnywhereSessionsState();
@@ -47,7 +47,7 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
           <IconButton
             bordered={false}
             icon={<MenuOutlined />}
-            onClick={onToolbarOpen}
+            onClick={onToolbarToggle}
           />
         </Tooltip>
 
