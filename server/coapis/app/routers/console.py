@@ -354,36 +354,13 @@ async def console_chat(
     native_payload["meta"]["session_id"] = session_id
     native_payload["meta"]["user_id"] = user_id
     
-    # ── Inject file references hint (dynamic, not persisted) ──
-    # Check biz_params.selected_files and inject a hint for the AI
-    # This hint is added to content_parts but won't be persisted
-    # because pre-persist only saves the first content_part (original user message)
+    # ── Pass file references through meta (not content_parts) ──
+    # File references are passed via meta to avoid polluting user message
+    # They will be injected as system hint before AI processing
     selected_files = biz_params.get("selected_files", [])
     if selected_files:
-        # Build file hint message
-        file_list = ", ".join([f"{f['name']} (path: {f['path']})" for f in selected_files])
-        
-        # Detect file types for doc_reader hint
-        file_types = set()
-        for f in selected_files:
-            ext = f.get("name", "").split(".")[-1].lower() if "." in f.get("name", "") else ""
-            if ext in ["pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls"]:
-                file_types.add(ext.upper())
-        
-        if file_types:
-            hint_text = f"\n\n[User selected files: {file_list}. Please use doc_reader tool to read these {', '.join(sorted(file_types))} files. File paths are provided, no need to search.]"
-        else:
-            hint_text = f"\n\n[User selected files: {file_list}. File paths are provided, no need to search.]"
-        
-        # Add hint to content_parts (will be sent to AI but not persisted)
-        if "content_parts" not in native_payload:
-            native_payload["content_parts"] = []
-        
-        # Insert hint after the first content part (original user message)
-        # This ensures pre-persist saves only the original message
-        native_payload["content_parts"].insert(1, {"type": "text", "text": hint_text})
-        
-        logger.info(f"Injected file reference hint for {len(selected_files)} files")
+        native_payload["meta"]["selected_files"] = selected_files
+        logger.info(f"Passing {len(selected_files)} file references through meta")
 
     # ── Extract chat_id early (used in session context + chat lookup) ──
     # Check both top-level and biz_params (frontend may pass it in either place)

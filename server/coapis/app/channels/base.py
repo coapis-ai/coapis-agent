@@ -332,6 +332,10 @@ class BaseChannel(ABC):
             role=Role.USER,
             content=content_parts,
         )
+        # Pass selected_files through message meta for dynamic hint injection
+        if channel_meta and channel_meta.get("selected_files"):
+            msg.meta = {"selected_files": channel_meta["selected_files"]}
+        
         req = AgentRequest(
             session_id=session_id,
             user_id=sender_id,
