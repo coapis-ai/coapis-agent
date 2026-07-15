@@ -1261,7 +1261,7 @@ export default function ChatPage() {
       },
       sender: {
         ...(i18nConfig as any)?.sender,
-        disclaimer: isMobile ? undefined : (i18nConfig as any)?.sender?.disclaimer,
+        disclaimer: undefined,  // 禁用默认的 disclaimer，使用 footer 替代
         beforeSubmit: handleBeforeSubmit,
         allowSpeech: true,
         attachments: {
