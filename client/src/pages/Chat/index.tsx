@@ -1078,15 +1078,39 @@ export default function ChatPage() {
       const session: SessionInfo = input[input.length - 1]?.session || {};
       const lastInput = input.slice(-1);
       const lastMsg = lastInput[0];
-      const rewrittenInput =
-        lastMsg?.content && Array.isArray(lastMsg.content)
-          ? [
-              {
-                ...lastMsg,
-                content: lastMsg.content.map(normalizeContentUrls),
-              },
-            ]
-          : lastInput;
+      
+      // 构建基础 content
+      let rewrittenContent: any[] = [];
+      if (Array.isArray(lastMsg?.content)) {
+        rewrittenContent = lastMsg.content.map(normalizeContentUrls);
+      } else if (lastMsg?.content) {
+        rewrittenContent = [{ type: "text", text: String(lastMsg.content) }];
+      }
+      
+      // 添加文件引用到 content 中
+      if (selectedFiles.length > 0) {
+        selectedFiles.forEach(file => {
+          rewrittenContent.push({
+            type: "file",
+            path: file.path,
+            name: file.name,
+          });
+        });
+      }
+      
+      // 添加知识库引用（在 biz_params 中传递）
+      const knowledgeRefs = selectedKnowledge.length > 0 
+        ? selectedKnowledge.map(kb => ({ id: kb.id, name: kb.name }))
+        : undefined;
+      
+      const rewrittenInput = lastMsg
+        ? [
+            {
+              ...lastMsg,
+              content: rewrittenContent,
+            },
+          ]
+        : lastInput;
 
       const requestBody = {
         input: rewrittenInput,
@@ -1097,6 +1121,8 @@ export default function ChatPage() {
         biz_params: {
           agent_id: selectedAgent,
           ...biz_params,
+          // 添加知识库引用
+          ...(knowledgeRefs && { knowledge_bases: knowledgeRefs }),
         },
         // Pass chat_id (UUID) so backend can persist messages to the correct chat
         // instead of matching by session_id (which is shared across all console chats).
@@ -1118,7 +1144,7 @@ export default function ChatPage() {
 
       return response;
     },
-    [selectedAgent],
+    [selectedAgent, selectedFiles, selectedKnowledge],
   );
 
   const handleFileUpload = useCallback(
