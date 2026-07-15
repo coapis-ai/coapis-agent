@@ -1087,32 +1087,12 @@ export default function ChatPage() {
         rewrittenContent = [{ type: "text", text: String(lastMsg.content) }];
       }
       
-      // 添加文件引用到 content 中
+      // 添加文件引用（供后端处理）
+      // 注意：文件提示信息通过 biz_params 传递，不直接添加到 content 中
+      // 这样可以保持用户消息的原始内容，避免污染聊天历史
       if (selectedFiles.length > 0) {
-        // 先添加明确的提示文本，告诉 AI 使用 doc_reader 工具
-        // 包含文件路径信息，避免 AI 需要搜索文件
-        const fileList = selectedFiles.map(f => `${f.name}（路径：${f.path}）`).join('、');
-        const fileTypes = [...new Set(selectedFiles.map(f => {
-          const ext = f.name.split('.').pop()?.toLowerCase();
-          if (['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls'].includes(ext || '')) {
-            return ext;
-          }
-          return null;
-        }).filter(Boolean))].join('/');
-        
-        const hintMsg = fileTypes 
-          ? `\n\n[用户选择了以下文件：${fileList}。请使用 doc_reader 工具读取这些${fileTypes.toUpperCase()}文件的内容。文件路径已提供，无需搜索。]`
-          : `\n\n[用户选择了以下文件：${fileList}。文件路径已提供，无需搜索。]`;
-        
-        rewrittenContent.push({
-          type: "text",
-          text: hintMsg,
-        });
-        
-        // 再添加文件引用（供后端处理）
+        // 添加文件引用（file:// URL）供后端工具处理
         // 后端返回的 path 已经是相对于 workspace/files/ 的路径
-        // 例如：/media/docs/developer/api.md
-        // read_file 会自动添加 workspace/files/ 前缀，所以这里只需移除开头的 /
         selectedFiles.forEach(file => {
           // 移除开头的 /，直接传递相对路径
           const filePath = file.path.startsWith('/') 
@@ -1129,18 +1109,18 @@ export default function ChatPage() {
         });
       }
       
-      // 添加知识库提示
-      if (selectedKnowledge.length > 0) {
-        const kbList = selectedKnowledge.map(kb => kb.name).join('、');
-        rewrittenContent.push({
-          type: "text",
-          text: `\n\n[用户选择了以下知识库：${kbList}]`,
-        });
-      }
-      
       // 添加知识库引用（在 biz_params 中传递）
       const knowledgeRefs = selectedKnowledge.length > 0 
         ? selectedKnowledge.map(kb => ({ id: kb.id, name: kb.name }))
+        : undefined;
+      
+      // 文件引用信息（通过 biz_params 传递，后端动态注入到 AI 上下文）
+      const fileRefs = selectedFiles.length > 0 
+        ? selectedFiles.map(f => ({ 
+            name: f.name, 
+            path: f.path,
+            type: f.type 
+          }))
         : undefined;
       
       const rewrittenInput = lastMsg
@@ -1163,6 +1143,8 @@ export default function ChatPage() {
           ...biz_params,
           // 添加知识库引用
           ...(knowledgeRefs && { knowledge_bases: knowledgeRefs }),
+          // 添加文件引用（用于后端动态注入提示，避免污染用户消息）
+          ...(fileRefs && { selected_files: fileRefs }),
         },
         // Pass chat_id (UUID) so backend can persist messages to the correct chat
         // instead of matching by session_id (which is shared across all console chats).
