@@ -44,7 +44,7 @@ import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
-import { ChatToolbarSidebar, useToolbarState, ChatInputFooter } from "../../components/Chat";
+import { ChatToolbarSidebar, useToolbarState, ChatInputFooter, ModelCapabilityTag } from "../../components/Chat";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -1288,8 +1288,10 @@ export default function ChatPage() {
           label: renderSuggestionLabel(item.command, item.description),
           value: item.value,
         })),
-        // 输入框前缀 UI - 显示引用和模型能力
-        prefix: (
+        // 输入框右侧 - 显示模型能力
+        prefix: <ModelCapabilityTag caps={multimodalCaps} />,
+        // 输入框下方 - 显示引用条
+        footer: selectedFiles.length + selectedKnowledge.length > 0 ? (
           <ChatInputFooter
             files={selectedFiles}
             knowledge={selectedKnowledge}
@@ -1299,9 +1301,8 @@ export default function ChatPage() {
             onRemoveKnowledge={(id) => {
               setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
             }}
-            caps={multimodalCaps}
           />
-        ),
+        ) : null,
       },
       session: {
         multiple: true,

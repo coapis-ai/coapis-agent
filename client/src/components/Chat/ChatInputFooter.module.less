@@ -1,20 +1,11 @@
-// 聊天输入框底部样式
+// 聊天输入框底部引用条样式
 
 .footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  min-height: 32px;
-  gap: 12px;
-  background: var(--bg-color, #fafafa);
-  border-bottom: 1px solid var(--border-color, #f0f0f0);
-  
-  // 深色模式
-  :global(.dark-mode) & {
-    background: var(--bg-color, #1a1a1a);
-    border-bottom-color: var(--border-color, #303030);
-  }
+  padding: 6px 16px;
+  min-height: 28px;
+  background: transparent;
 }
 
 .left {
@@ -26,12 +17,6 @@
   min-width: 0;  // 允许收缩
 }
 
-.right {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-
 .refTag {
   display: inline-flex;
   align-items: center;
@@ -39,9 +24,17 @@
   margin: 0;
   padding: 2px 8px;
   font-size: 12px;
+  flex-shrink: 0;  // 不收缩
   
   &:hover {
     opacity: 0.8;
+  }
+  
+  :global {
+    .anticon {
+      margin-right: 4px;
+      font-size: 11px;
+    }
   }
 }
 
