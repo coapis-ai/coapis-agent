@@ -1089,12 +1089,31 @@ export default function ChatPage() {
       
       // 添加文件引用到 content 中
       if (selectedFiles.length > 0) {
+        // 先添加明确的提示文本
+        const fileList = selectedFiles.map(f => f.name).join('、');
+        rewrittenContent.push({
+          type: "text",
+          text: `\n\n[用户选择了以下文件：${fileList}]`,
+        });
+        
+        // 再添加文件引用（供后端处理）
         selectedFiles.forEach(file => {
           rewrittenContent.push({
             type: "file",
-            path: file.path,
-            name: file.name,
+            source: {
+              url: `file://${file.path}`,
+            },
+            filename: file.name,
           });
+        });
+      }
+      
+      // 添加知识库提示
+      if (selectedKnowledge.length > 0) {
+        const kbList = selectedKnowledge.map(kb => kb.name).join('、');
+        rewrittenContent.push({
+          type: "text",
+          text: `\n\n[用户选择了以下知识库：${kbList}]`,
         });
       }
       
