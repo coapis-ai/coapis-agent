@@ -1487,6 +1487,8 @@ export default function ChatPage() {
     planEnabled,
     displayConfig,
     sessionApi,
+    selectedFiles,
+    selectedKnowledge,
   ]);
 
   return (
