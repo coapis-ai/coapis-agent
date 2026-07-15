@@ -41,8 +41,8 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
 
   return (
     <div className={styles.chatSessionHeader}>
-      <Flex gap={8} align="center" justify="space-between" style={{ width: '100%' }}>
-        {/* 左侧：根工具按钮 */}
+      <Flex gap={8} align="center" style={{ width: '100%' }}>
+        {/* 左侧：工具栏按钮 + 新聊天按钮 */}
         <Tooltip title={t('chat.toolbarTooltip', '工具栏')} mouseEnterDelay={0.5}>
           <IconButton
             bordered={false}
@@ -51,10 +51,6 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
           />
         </Tooltip>
 
-        {/* 中间：聊天标题 */}
-        <span className={styles.sessionTitle}>{chatTitle}</span>
-
-        {/* 右侧：新聊天按钮 */}
         <Tooltip title={t('chat.newChatTooltip')} mouseEnterDelay={0.5}>
           <IconButton
             bordered={false}
@@ -62,6 +58,9 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
             onClick={handleNewChat}
           />
         </Tooltip>
+
+        {/* 中间：聊天标题 */}
+        <span className={styles.sessionTitle}>{chatTitle}</span>
       </Flex>
     </div>
   );
