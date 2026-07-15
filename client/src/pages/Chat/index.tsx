@@ -1288,19 +1288,6 @@ export default function ChatPage() {
           label: renderSuggestionLabel(item.command, item.description),
           value: item.value,
         })),
-        footer: (
-          <ChatInputFooter
-            files={selectedFiles}
-            knowledge={selectedKnowledge}
-            onRemoveFile={(id) => {
-              setSelectedFiles(prev => prev.filter(f => f.id !== id));
-            }}
-            onRemoveKnowledge={(id) => {
-              setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
-            }}
-            caps={multimodalCaps}
-          />
-        ),
       },
       session: {
         multiple: true,
@@ -1487,8 +1474,6 @@ export default function ChatPage() {
     planEnabled,
     displayConfig,
     sessionApi,
-    selectedFiles,
-    selectedKnowledge,
   ]);
 
   return (
@@ -1544,6 +1529,19 @@ export default function ChatPage() {
               }
             }}
           >
+            {/* 输入框上方的引用条 */}
+            <ChatInputFooter
+              files={selectedFiles}
+              knowledge={selectedKnowledge}
+              onRemoveFile={(id) => {
+                setSelectedFiles(prev => prev.filter(f => f.id !== id));
+              }}
+              onRemoveKnowledge={(id) => {
+                setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
+              }}
+              caps={multimodalCaps}
+            />
+            
             <ChatErrorBoundary>
               <AgentScopeRuntimeWebUI
                 ref={chatRef}

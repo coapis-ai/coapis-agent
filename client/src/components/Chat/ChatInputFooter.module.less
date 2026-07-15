@@ -4,9 +4,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 0;
-  min-height: 28px;
+  padding: 8px 16px;
+  min-height: 32px;
   gap: 12px;
+  background: var(--bg-color, #fafafa);
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+  
+  // 深色模式
+  :global(.dark-mode) & {
+    background: var(--bg-color, #1a1a1a);
+    border-bottom-color: var(--border-color, #303030);
+  }
 }
 
 .left {
