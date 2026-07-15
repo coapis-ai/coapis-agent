@@ -1,7 +1,7 @@
 // 文件树选择器组件
 
 import { useState, useEffect, useMemo } from 'react';
-import { Tree, Input, Button, Empty, Spin, Tag } from 'antd';
+import { Tree, Input, Button, Empty, Spin } from 'antd';
 import { SearchOutlined, ReloadOutlined, FileOutlined, FolderOutlined } from '@ant-design/icons';
 import { useFileTree } from '../hooks/useFileTree';
 import type { FileInfo, FileNode } from '../types';
@@ -42,10 +42,6 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
     const items = findItemsByIds(treeData, checkedKeys as string[]);
     onSelect(items);
   };
-
-  // 统计选中的文件和文件夹数量
-  const selectedFiles = selected.filter(item => item.type === 'file');
-  const selectedFolders = selected.filter(item => item.type === 'folder');
 
   return (
     <div style={{ maxHeight: 300, overflowY: 'auto' }}>
@@ -90,53 +86,6 @@ export function FileTreeSelector({ selected, onSelect }: FileTreeSelectorProps) 
           />
         )}
       </Spin>
-
-      {/* 已选统计 */}
-      {selected.length > 0 && (
-        <div style={{ 
-          marginTop: 8,
-          padding: '8px 0',
-          borderTop: '1px solid #f0f0f0',
-        }}>
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 8,
-          }}>
-            <span style={{ fontSize: 13, fontWeight: 500 }}>
-              已选择 {selected.length} 项
-            </span>
-            <Button type="link" size="small" onClick={() => onSelect([])}>
-              清空
-            </Button>
-          </div>
-          
-          {/* 工作路径 */}
-          {selectedFolders.length > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              <Tag color="blue" style={{ fontSize: 11, marginBottom: 4 }}>
-                <FolderOutlined /> {selectedFolders.length} 个工作路径
-              </Tag>
-              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.6 }}>
-                设置对话工作目录，AI可访问文件夹下的文件
-              </div>
-            </div>
-          )}
-          
-          {/* 文件 */}
-          {selectedFiles.length > 0 && (
-            <div>
-              <Tag color="green" style={{ fontSize: 11, marginBottom: 4 }}>
-                <FileOutlined /> {selectedFiles.length} 个文件
-              </Tag>
-              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.6 }}>
-                AI会自动读取文件内容，根据问题参考或使用
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
