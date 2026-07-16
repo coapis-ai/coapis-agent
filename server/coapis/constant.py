@@ -490,6 +490,9 @@ PUBLIC_PATHS: frozenset = frozenset({
     # User system auth endpoints (login/register via /api/users/)
     "/api/users/login",
     "/api/users/register",
+    # SSO 单点登录（外部系统接入）
+    "/api/external/login",
+    "/external/login",
     # Health and docs
     "/api/health",
     "/health",

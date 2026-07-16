@@ -377,14 +377,8 @@ async def execute_shell_command(
 
     cmd = _collapse_embedded_newlines((command or "").strip())
 
-    # ── WorkspaceGuard: shell command validation ──
-    try:
-        from ..security.workspace_guard import check_command
-        check_command(cmd)
-    except ValueError as e:
-        return ToolResponse(
-            content=[TextBlock(type="text", text=f"权限拒绝: {e}")],
-        )
+    # 命令分级策略由 ToolGuardMixin.UnifiedToolGuardEngine 统一处理
+    # 白名单检查已移除，不再在此处拦截
 
     if isinstance(timeout, str):
         try:
