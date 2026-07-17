@@ -1,0 +1,1777 @@
+{
+  "dimension": "domain",
+  "dimension_name": "按领域分类",
+  "categories": [
+    {
+      "id": "natural-resources",
+      "name": "自然资源",
+      "icon": "🏞️",
+      "description": "国土空间规划、土地管理、矿产资源、测绘地理信息等",
+      "sort_order": 1,
+      "scene_count": 8,
+      "context": {
+        "keywords": [
+          "三区三线",
+          "占补平衡",
+          "国土空间规划",
+          "用地审批"
+        ],
+        "regulations": [
+          "土地管理法",
+          "城乡规划法",
+          "矿产资源法"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "project-approval",
+          "name": "项目审批",
+          "description": "项目审批流程辅助，支持发改、资规、环保、住建等领域",
+          "icon": "✅",
+          "agent_id": "scene-project-approval",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "合规检查",
+              "进度跟踪"
+            ],
+            "keywords": [
+              "项目",
+              "审批",
+              "立项"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "planning-compilation",
+          "name": "规划编制",
+          "description": "规划方案编制辅助，支持发改、资规、农业、文旅等领域",
+          "icon": "📋",
+          "agent_id": "scene-planning-compilation",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "medium",
+          "tags": {
+            "features": [
+              "专业性强",
+              "数据分析",
+              "GIS支持"
+            ],
+            "keywords": [
+              "规划",
+              "编制",
+              "方案"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "law-enforcement-inspection",
+          "name": "执法检查",
+          "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+          "icon": "🔍",
+          "agent_id": "scene-law-enforcement-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "违法行为识别",
+              "文书生成"
+            ],
+            "keywords": [
+              "执法",
+              "检查",
+              "巡查"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "complaint-handling",
+          "name": "投诉处理",
+          "description": "投诉处理流程辅助，支持资规、环保、住建、农业、卫健、执法等领域",
+          "icon": "📞",
+          "agent_id": "scene-complaint-handling",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "情绪分析",
+              "流程规范",
+              "回复生成"
+            ],
+            "keywords": [
+              "投诉",
+              "举报",
+              "信访"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "monitoring-analysis",
+          "name": "监测分析",
+          "description": "数据监测和分析，支持环保、资规、发改、卫健等领域",
+          "icon": "📊",
+          "agent_id": "scene-monitoring-analysis",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据分析",
+              "可视化",
+              "趋势预测"
+            ],
+            "keywords": [
+              "监测",
+              "分析",
+              "统计"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "ecological-environment",
+      "name": "生态环境",
+      "icon": "🌳",
+      "description": "环评审批、污染防治、环境监测、环境执法等",
+      "sort_order": 2,
+      "scene_count": 9,
+      "context": {
+        "keywords": [
+          "环评",
+          "排污许可",
+          "空气质量指数",
+          "污染因子"
+        ],
+        "regulations": [
+          "环境保护法",
+          "大气污染防治法",
+          "水污染防治法"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "project-approval",
+          "name": "项目审批",
+          "description": "项目审批流程辅助，支持发改、资规、环保、住建等领域",
+          "icon": "✅",
+          "agent_id": "scene-project-approval",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "合规检查",
+              "进度跟踪"
+            ],
+            "keywords": [
+              "项目",
+              "审批",
+              "立项"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "law-enforcement-inspection",
+          "name": "执法检查",
+          "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+          "icon": "🔍",
+          "agent_id": "scene-law-enforcement-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "违法行为识别",
+              "文书生成"
+            ],
+            "keywords": [
+              "执法",
+              "检查",
+              "巡查"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "complaint-handling",
+          "name": "投诉处理",
+          "description": "投诉处理流程辅助，支持资规、环保、住建、农业、卫健、执法等领域",
+          "icon": "📞",
+          "agent_id": "scene-complaint-handling",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "情绪分析",
+              "流程规范",
+              "回复生成"
+            ],
+            "keywords": [
+              "投诉",
+              "举报",
+              "信访"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "rectification-acceptance",
+          "name": "整改验收",
+          "description": "整改验收流程辅助，支持住建、环保、交通、卫健等领域",
+          "icon": "✔️",
+          "agent_id": "scene-rectification-acceptance",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "medium",
+          "tags": {
+            "features": [
+              "材料审核",
+              "验收标准",
+              "报告生成"
+            ],
+            "keywords": [
+              "整改",
+              "验收",
+              "复核"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "emergency-response",
+          "name": "应急响应",
+          "description": "突发事件应急响应辅助，支持环保、卫健、应急等领域",
+          "icon": "🚨",
+          "agent_id": "scene-emergency-response",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "low",
+          "tags": {
+            "features": [
+              "实时监控",
+              "预案启动",
+              "资源调配"
+            ],
+            "keywords": [
+              "应急",
+              "响应",
+              "突发事件"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "monitoring-analysis",
+          "name": "监测分析",
+          "description": "数据监测和分析，支持环保、资规、发改、卫健等领域",
+          "icon": "📊",
+          "agent_id": "scene-monitoring-analysis",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据分析",
+              "可视化",
+              "趋势预测"
+            ],
+            "keywords": [
+              "监测",
+              "分析",
+              "统计"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "agriculture-rural",
+      "name": "农业农村",
+      "icon": "🌾",
+      "description": "乡村振兴、农业产业发展、农村改革、农产品质量安全等",
+      "sort_order": 3,
+      "scene_count": 6,
+      "context": {
+        "keywords": [
+          "乡村振兴",
+          "三品一标",
+          "农业产业化",
+          "农村改革"
+        ],
+        "regulations": [
+          "农业法",
+          "乡村振兴促进法",
+          "农产品质量安全法"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "planning-compilation",
+          "name": "规划编制",
+          "description": "规划方案编制辅助，支持发改、资规、农业、文旅等领域",
+          "icon": "📋",
+          "agent_id": "scene-planning-compilation",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "medium",
+          "tags": {
+            "features": [
+              "专业性强",
+              "数据分析",
+              "GIS支持"
+            ],
+            "keywords": [
+              "规划",
+              "编制",
+              "方案"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "law-enforcement-inspection",
+          "name": "执法检查",
+          "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+          "icon": "🔍",
+          "agent_id": "scene-law-enforcement-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "违法行为识别",
+              "文书生成"
+            ],
+            "keywords": [
+              "执法",
+              "检查",
+              "巡查"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "complaint-handling",
+          "name": "投诉处理",
+          "description": "投诉处理流程辅助，支持资规、环保、住建、农业、卫健、执法等领域",
+          "icon": "📞",
+          "agent_id": "scene-complaint-handling",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "情绪分析",
+              "流程规范",
+              "回复生成"
+            ],
+            "keywords": [
+              "投诉",
+              "举报",
+              "信访"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "development-reform",
+      "name": "发展改革",
+      "icon": "📈",
+      "description": "发展规划、经济运行、项目审批、价格监测等",
+      "sort_order": 4,
+      "scene_count": 8,
+      "context": {
+        "keywords": [
+          "发展规划",
+          "宏观经济",
+          "产业政策",
+          "价格监管"
+        ],
+        "regulations": [
+          "价格法",
+          "招标投标法",
+          "政府投资条例"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "project-approval",
+          "name": "项目审批",
+          "description": "项目审批流程辅助，支持发改、资规、环保、住建等领域",
+          "icon": "✅",
+          "agent_id": "scene-project-approval",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "合规检查",
+              "进度跟踪"
+            ],
+            "keywords": [
+              "项目",
+              "审批",
+              "立项"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "planning-compilation",
+          "name": "规划编制",
+          "description": "规划方案编制辅助，支持发改、资规、农业、文旅等领域",
+          "icon": "📋",
+          "agent_id": "scene-planning-compilation",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "medium",
+          "tags": {
+            "features": [
+              "专业性强",
+              "数据分析",
+              "GIS支持"
+            ],
+            "keywords": [
+              "规划",
+              "编制",
+              "方案"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "safety-inspection",
+          "name": "安全检查",
+          "description": "安全检查流程辅助，支持住建、交通、应急、卫健等领域",
+          "icon": "🛡️",
+          "agent_id": "scene-safety-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "隐患识别",
+              "整改建议",
+              "流程规范"
+            ],
+            "keywords": [
+              "安全",
+              "检查",
+              "隐患"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "emergency-response",
+          "name": "应急响应",
+          "description": "突发事件应急响应辅助，支持环保、卫健、应急等领域",
+          "icon": "🚨",
+          "agent_id": "scene-emergency-response",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "low",
+          "tags": {
+            "features": [
+              "实时监控",
+              "预案启动",
+              "资源调配"
+            ],
+            "keywords": [
+              "应急",
+              "响应",
+              "突发事件"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "monitoring-analysis",
+          "name": "监测分析",
+          "description": "数据监测和分析，支持环保、资规、发改、卫健等领域",
+          "icon": "📊",
+          "agent_id": "scene-monitoring-analysis",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据分析",
+              "可视化",
+              "趋势预测"
+            ],
+            "keywords": [
+              "监测",
+              "分析",
+              "统计"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "housing-construction",
+      "name": "城乡建设",
+      "icon": "🏗️",
+      "description": "城乡建设规划、房地产市场、建筑市场、工程质量安全等",
+      "sort_order": 5,
+      "scene_count": 8,
+      "context": {
+        "keywords": [
+          "建筑工程",
+          "房地产市场",
+          "施工许可",
+          "质量安全"
+        ],
+        "regulations": [
+          "建筑法",
+          "城市房地产管理法",
+          "建设工程质量管理条例"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "project-approval",
+          "name": "项目审批",
+          "description": "项目审批流程辅助，支持发改、资规、环保、住建等领域",
+          "icon": "✅",
+          "agent_id": "scene-project-approval",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "合规检查",
+              "进度跟踪"
+            ],
+            "keywords": [
+              "项目",
+              "审批",
+              "立项"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "law-enforcement-inspection",
+          "name": "执法检查",
+          "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+          "icon": "🔍",
+          "agent_id": "scene-law-enforcement-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "违法行为识别",
+              "文书生成"
+            ],
+            "keywords": [
+              "执法",
+              "检查",
+              "巡查"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "complaint-handling",
+          "name": "投诉处理",
+          "description": "投诉处理流程辅助，支持资规、环保、住建、农业、卫健、执法等领域",
+          "icon": "📞",
+          "agent_id": "scene-complaint-handling",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "情绪分析",
+              "流程规范",
+              "回复生成"
+            ],
+            "keywords": [
+              "投诉",
+              "举报",
+              "信访"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "safety-inspection",
+          "name": "安全检查",
+          "description": "安全检查流程辅助，支持住建、交通、应急、卫健等领域",
+          "icon": "🛡️",
+          "agent_id": "scene-safety-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "隐患识别",
+              "整改建议",
+              "流程规范"
+            ],
+            "keywords": [
+              "安全",
+              "检查",
+              "隐患"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "rectification-acceptance",
+          "name": "整改验收",
+          "description": "整改验收流程辅助，支持住建、环保、交通、卫健等领域",
+          "icon": "✔️",
+          "agent_id": "scene-rectification-acceptance",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "medium",
+          "tags": {
+            "features": [
+              "材料审核",
+              "验收标准",
+              "报告生成"
+            ],
+            "keywords": [
+              "整改",
+              "验收",
+              "复核"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "education",
+      "name": "教育管理",
+      "icon": "🎓",
+      "description": "教育规划、招生考试、教师队伍、教育质量等",
+      "sort_order": 6,
+      "scene_count": 3,
+      "context": {
+        "keywords": [
+          "教育规划",
+          "招生考试",
+          "教师培训",
+          "教育质量"
+        ],
+        "regulations": [
+          "教育法",
+          "义务教育法",
+          "教师法"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "forestry-grassland",
+      "name": "林草湿荒",
+      "icon": "🌲",
+      "description": "森林资源、草原资源、湿地资源、荒漠化防治等",
+      "sort_order": 7,
+      "scene_count": 4,
+      "context": {
+        "keywords": [
+          "森林采伐",
+          "草原保护",
+          "湿地管理",
+          "野生动物"
+        ],
+        "regulations": [
+          "森林法",
+          "草原法",
+          "野生动物保护法"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "law-enforcement-inspection",
+          "name": "执法检查",
+          "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+          "icon": "🔍",
+          "agent_id": "scene-law-enforcement-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "违法行为识别",
+              "文书生成"
+            ],
+            "keywords": [
+              "执法",
+              "检查",
+              "巡查"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "culture-tourism",
+      "name": "文化旅游",
+      "icon": "🏛️",
+      "description": "文化遗产保护、旅游规划、文化市场、旅游监管等",
+      "sort_order": 8,
+      "scene_count": 5,
+      "context": {
+        "keywords": [
+          "文物保护",
+          "非物质文化遗产",
+          "旅游规划",
+          "景区管理"
+        ],
+        "regulations": [
+          "文物保护法",
+          "非物质文化遗产法",
+          "旅游法"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "planning-compilation",
+          "name": "规划编制",
+          "description": "规划方案编制辅助，支持发改、资规、农业、文旅等领域",
+          "icon": "📋",
+          "agent_id": "scene-planning-compilation",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "medium",
+          "tags": {
+            "features": [
+              "专业性强",
+              "数据分析",
+              "GIS支持"
+            ],
+            "keywords": [
+              "规划",
+              "编制",
+              "方案"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "law-enforcement-inspection",
+          "name": "执法检查",
+          "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+          "icon": "🔍",
+          "agent_id": "scene-law-enforcement-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "违法行为识别",
+              "文书生成"
+            ],
+            "keywords": [
+              "执法",
+              "检查",
+              "巡查"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "health",
+      "name": "卫生健康",
+      "icon": "🏥",
+      "description": "医疗卫生、公共卫生、疾病预防、健康促进等",
+      "sort_order": 9,
+      "scene_count": 9,
+      "context": {
+        "keywords": [
+          "医疗机构",
+          "疾病预防",
+          "公共卫生",
+          "健康促进"
+        ],
+        "regulations": [
+          "基本医疗卫生与健康促进法",
+          "传染病防治法",
+          "医疗机构管理条例"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "law-enforcement-inspection",
+          "name": "执法检查",
+          "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+          "icon": "🔍",
+          "agent_id": "scene-law-enforcement-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "违法行为识别",
+              "文书生成"
+            ],
+            "keywords": [
+              "执法",
+              "检查",
+              "巡查"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "complaint-handling",
+          "name": "投诉处理",
+          "description": "投诉处理流程辅助，支持资规、环保、住建、农业、卫健、执法等领域",
+          "icon": "📞",
+          "agent_id": "scene-complaint-handling",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "情绪分析",
+              "流程规范",
+              "回复生成"
+            ],
+            "keywords": [
+              "投诉",
+              "举报",
+              "信访"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "safety-inspection",
+          "name": "安全检查",
+          "description": "安全检查流程辅助，支持住建、交通、应急、卫健等领域",
+          "icon": "🛡️",
+          "agent_id": "scene-safety-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "隐患识别",
+              "整改建议",
+              "流程规范"
+            ],
+            "keywords": [
+              "安全",
+              "检查",
+              "隐患"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "rectification-acceptance",
+          "name": "整改验收",
+          "description": "整改验收流程辅助，支持住建、环保、交通、卫健等领域",
+          "icon": "✔️",
+          "agent_id": "scene-rectification-acceptance",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "medium",
+          "tags": {
+            "features": [
+              "材料审核",
+              "验收标准",
+              "报告生成"
+            ],
+            "keywords": [
+              "整改",
+              "验收",
+              "复核"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "emergency-response",
+          "name": "应急响应",
+          "description": "突发事件应急响应辅助，支持环保、卫健、应急等领域",
+          "icon": "🚨",
+          "agent_id": "scene-emergency-response",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "low",
+          "tags": {
+            "features": [
+              "实时监控",
+              "预案启动",
+              "资源调配"
+            ],
+            "keywords": [
+              "应急",
+              "响应",
+              "突发事件"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "monitoring-analysis",
+          "name": "监测分析",
+          "description": "数据监测和分析，支持环保、资规、发改、卫健等领域",
+          "icon": "📊",
+          "agent_id": "scene-monitoring-analysis",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据分析",
+              "可视化",
+              "趋势预测"
+            ],
+            "keywords": [
+              "监测",
+              "分析",
+              "统计"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    },
+    {
+      "id": "comprehensive-enforcement",
+      "name": "综合执法",
+      "icon": "⚖️",
+      "description": "城市管理、市场监管、交通运输、文化市场等综合执法",
+      "sort_order": 10,
+      "scene_count": 7,
+      "context": {
+        "keywords": [
+          "行政处罚",
+          "执法检查",
+          "案件办理",
+          "行政复议"
+        ],
+        "regulations": [
+          "行政处罚法",
+          "行政强制法",
+          "行政复议法"
+        ]
+      },
+      "scenes": [
+        {
+          "id": "meeting-minutes",
+          "name": "会议纪要",
+          "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+          "icon": "📝",
+          "agent_id": "scene-meeting-minutes",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "待办提取",
+              "决议跟踪"
+            ],
+            "keywords": [
+              "会议",
+              "纪要",
+              "录音转写"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "document-drafting",
+          "name": "公文起草",
+          "description": "公文写作辅助，支持多种公文类型和格式规范",
+          "icon": "📄",
+          "agent_id": "scene-document-drafting",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "格式规范",
+              "模板丰富",
+              "合规检查"
+            ],
+            "keywords": [
+              "公文",
+              "起草",
+              "写作"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "work-report",
+          "name": "工作报告",
+          "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+          "icon": "📊",
+          "agent_id": "scene-work-report",
+          "is_generic": true,
+          "is_domain_specific": false,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "数据统计",
+              "进度跟踪",
+              "格式规范"
+            ],
+            "keywords": [
+              "工作报告",
+              "总结",
+              "汇报"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "law-enforcement-inspection",
+          "name": "执法检查",
+          "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+          "icon": "🔍",
+          "agent_id": "scene-law-enforcement-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "流程规范",
+              "违法行为识别",
+              "文书生成"
+            ],
+            "keywords": [
+              "执法",
+              "检查",
+              "巡查"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "complaint-handling",
+          "name": "投诉处理",
+          "description": "投诉处理流程辅助，支持资规、环保、住建、农业、卫健、执法等领域",
+          "icon": "📞",
+          "agent_id": "scene-complaint-handling",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "情绪分析",
+              "流程规范",
+              "回复生成"
+            ],
+            "keywords": [
+              "投诉",
+              "举报",
+              "信访"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "safety-inspection",
+          "name": "安全检查",
+          "description": "安全检查流程辅助，支持住建、交通、应急、卫健等领域",
+          "icon": "🛡️",
+          "agent_id": "scene-safety-inspection",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "high",
+          "tags": {
+            "features": [
+              "隐患识别",
+              "整改建议",
+              "流程规范"
+            ],
+            "keywords": [
+              "安全",
+              "检查",
+              "隐患"
+            ]
+          },
+          "domain_context": null
+        },
+        {
+          "id": "rectification-acceptance",
+          "name": "整改验收",
+          "description": "整改验收流程辅助，支持住建、环保、交通、卫健等领域",
+          "icon": "✔️",
+          "agent_id": "scene-rectification-acceptance",
+          "is_generic": true,
+          "is_domain_specific": true,
+          "frequency": "medium",
+          "tags": {
+            "features": [
+              "材料审核",
+              "验收标准",
+              "报告生成"
+            ],
+            "keywords": [
+              "整改",
+              "验收",
+              "复核"
+            ]
+          },
+          "domain_context": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,211 @@
+{
+  "version": "2.0",
+  "description": "分类配置文件 - 多维度分类",
+  
+  "dimensions": {
+    "nature": {
+      "name": "按性质分类",
+      "description": "按场景的功能性质分类",
+      "categories": [
+        {
+          "id": "office-common",
+          "name": "办公通用",
+          "icon": "📄",
+          "description": "日常办公场景，所有领域通用",
+          "sort_order": 1,
+          "scene_count": 3
+        },
+        
+        {
+          "id": "approval-service",
+          "name": "审批服务",
+          "icon": "✅",
+          "description": "行政审批场景，流程导向",
+          "sort_order": 2,
+          "scene_count": 8
+        },
+        
+        {
+          "id": "planning-compilation",
+          "name": "规划编制",
+          "icon": "📋",
+          "description": "规划方案编制，专业性强",
+          "sort_order": 3,
+          "scene_count": 5
+        },
+        
+        {
+          "id": "supervision-enforcement",
+          "name": "监管执法",
+          "icon": "🔍",
+          "description": "监督检查执法，合规导向",
+          "sort_order": 4,
+          "scene_count": 7
+        },
+        
+        {
+          "id": "data-analysis",
+          "name": "数据分析",
+          "icon": "📊",
+          "description": "数据统计分析，决策支持",
+          "sort_order": 5,
+          "scene_count": 5
+        },
+        
+        {
+          "id": "public-service",
+          "name": "公共服务",
+          "icon": "🏥",
+          "description": "公共服务场景，服务导向",
+          "sort_order": 6,
+          "scene_count": 4
+        },
+        
+        {
+          "id": "emergency-handling",
+          "name": "应急处置",
+          "icon": "🚨",
+          "description": "突发事件应对，应急响应",
+          "sort_order": 7,
+          "scene_count": 3
+        }
+      ]
+    },
+    
+    "domain": {
+      "name": "按领域分类",
+      "description": "按业务领域分类",
+      "categories": [
+        {
+          "id": "natural-resources",
+          "name": "自然资源",
+          "icon": "🏞️",
+          "description": "国土空间规划、土地管理、矿产资源、测绘地理信息等",
+          "sort_order": 1,
+          "scene_count": 8,
+          "context": {
+            "keywords": ["三区三线", "占补平衡", "国土空间规划", "用地审批"],
+            "regulations": ["土地管理法", "城乡规划法", "矿产资源法"]
+          }
+        },
+        
+        {
+          "id": "ecological-environment",
+          "name": "生态环境",
+          "icon": "🌳",
+          "description": "环评审批、污染防治、环境监测、环境执法等",
+          "sort_order": 2,
+          "scene_count": 7,
+          "context": {
+            "keywords": ["环评", "排污许可", "空气质量指数", "污染因子"],
+            "regulations": ["环境保护法", "大气污染防治法", "水污染防治法"]
+          }
+        },
+        
+        {
+          "id": "agriculture-rural",
+          "name": "农业农村",
+          "icon": "🌾",
+          "description": "乡村振兴、农业产业发展、农村改革、农产品质量安全等",
+          "sort_order": 3,
+          "scene_count": 8,
+          "context": {
+            "keywords": ["乡村振兴", "三品一标", "农业产业化", "农村改革"],
+            "regulations": ["农业法", "乡村振兴促进法", "农产品质量安全法"]
+          }
+        },
+        
+        {
+          "id": "development-reform",
+          "name": "发展改革",
+          "icon": "📈",
+          "description": "发展规划、经济运行、项目审批、价格监测等",
+          "sort_order": 4,
+          "scene_count": 7,
+          "context": {
+            "keywords": ["发展规划", "宏观经济", "产业政策", "价格监管"],
+            "regulations": ["价格法", "招标投标法", "政府投资条例"]
+          }
+        },
+        
+        {
+          "id": "housing-construction",
+          "name": "城乡建设",
+          "icon": "🏗️",
+          "description": "城乡建设规划、房地产市场、建筑市场、工程质量安全等",
+          "sort_order": 5,
+          "scene_count": 8,
+          "context": {
+            "keywords": ["建筑工程", "房地产市场", "施工许可", "质量安全"],
+            "regulations": ["建筑法", "城市房地产管理法", "建设工程质量管理条例"]
+          }
+        },
+        
+        {
+          "id": "education",
+          "name": "教育管理",
+          "icon": "🎓",
+          "description": "教育规划、招生考试、教师队伍、教育质量等",
+          "sort_order": 6,
+          "scene_count": 9,
+          "context": {
+            "keywords": ["教育规划", "招生考试", "教师培训", "教育质量"],
+            "regulations": ["教育法", "义务教育法", "教师法"]
+          }
+        },
+        
+        {
+          "id": "forestry-grassland",
+          "name": "林草湿荒",
+          "icon": "🌲",
+          "description": "森林资源、草原资源、湿地资源、荒漠化防治等",
+          "sort_order": 7,
+          "scene_count": 8,
+          "context": {
+            "keywords": ["森林采伐", "草原保护", "湿地管理", "野生动物"],
+            "regulations": ["森林法", "草原法", "野生动物保护法"]
+          }
+        },
+        
+        {
+          "id": "culture-tourism",
+          "name": "文化旅游",
+          "icon": "🏛️",
+          "description": "文化遗产保护、旅游规划、文化市场、旅游监管等",
+          "sort_order": 8,
+          "scene_count": 7,
+          "context": {
+            "keywords": ["文物保护", "非物质文化遗产", "旅游规划", "景区管理"],
+            "regulations": ["文物保护法", "非物质文化遗产法", "旅游法"]
+          }
+        },
+        
+        {
+          "id": "health",
+          "name": "卫生健康",
+          "icon": "🏥",
+          "description": "医疗卫生、公共卫生、疾病预防、健康促进等",
+          "sort_order": 9,
+          "scene_count": 8,
+          "context": {
+            "keywords": ["医疗机构", "疾病预防", "公共卫生", "健康促进"],
+            "regulations": ["基本医疗卫生与健康促进法", "传染病防治法", "医疗机构管理条例"]
+          }
+        },
+        
+        {
+          "id": "comprehensive-enforcement",
+          "name": "综合执法",
+          "icon": "⚖️",
+          "description": "城市管理、市场监管、交通运输、文化市场等综合执法",
+          "sort_order": 10,
+          "scene_count": 6,
+          "context": {
+            "keywords": ["行政处罚", "执法检查", "案件办理", "行政复议"],
+            "regulations": ["行政处罚法", "行政强制法", "行政复议法"]
+          }
+        }
+      ]
+    }
+  }
+}
