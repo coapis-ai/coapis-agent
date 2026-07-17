@@ -71,6 +71,9 @@ PUBLIC_PATHS = [
     "/level-info",
     "/api/tokens/config",
     "/tokens/config",
+    # SSO 单点登录（外部系统接入）
+    "/api/external/login",
+    "/external/login",
     # SSE streaming endpoints
     "/api/console/chat",
     "/console/chat",

@@ -4,7 +4,7 @@ import {
   type IAgentScopeRuntimeWebUIRef,
 } from "@agentscope-ai/chat";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, Result, Tooltip } from "antd";
+import { Button, Modal, Result, Tooltip, Drawer } from "antd";
 import { useAppMessage } from "../../hooks/useAppMessage";
 import {
   ExclamationCircleOutlined,
@@ -44,6 +44,7 @@ import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
+import { ChatToolbarSidebar, useToolbarState, ChatInputFooter, ModelCapabilityTag } from "../../components/Chat";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -587,6 +588,22 @@ export default function ChatPage() {
   } = useChatDisplayFromUser();
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
 
+  // 工具栏状态管理
+  const {
+    visible: toolbarOpen,
+    closeToolbar,
+    toggleToolbar,
+    selectedFiles,
+    selectedKnowledge,
+    setSelectedFiles,
+    setSelectedKnowledge,
+  } = useToolbarState();
+
+  // 工具栏功能回调
+  const handleSettingsClick = useCallback(() => {
+    setShowDisplaySettings(true);
+  }, []);
+
   // Sync authenticated username to window for AgentScope Runtime session API
   // IMPORTANT: Set immediately on mount to ensure window.currentUserId is available
   // before any API calls that depend on it (e.g., sessionApi.getSessionList)
@@ -821,6 +838,7 @@ export default function ChatPage() {
   const navigateRef = useRef(navigate);
   const chatRef = useRef<IAgentScopeRuntimeWebUIRef>(null);
   const pendingClearHistoryRef = useRef(false);
+  const requestSessionIdRef = useRef<string | null>(null);
 
   useMessageHistoryNavigation(chatRef, isChatActive, isComposingRef);
   chatIdRef.current = chatId;
@@ -874,6 +892,13 @@ export default function ChatPage() {
       realId: string | null,
     ) => {
       if (!isChatActiveRef.current) return;
+      
+      // Clear previous session's SSE filtering state
+      const targetId = realId || sessionId;
+      if (targetId && targetId !== requestSessionIdRef.current) {
+        console.log("[Chat] Session changed, clearing SSE filter state");
+        requestSessionIdRef.current = null;
+      }
 
       // Skip when ChatSessionInitializer set currentSessionId — breaks the URL↔session loop.
       if (skipNextSessionSelectedRef.current) {
@@ -1061,15 +1086,62 @@ export default function ChatPage() {
       const session: SessionInfo = input[input.length - 1]?.session || {};
       const lastInput = input.slice(-1);
       const lastMsg = lastInput[0];
-      const rewrittenInput =
-        lastMsg?.content && Array.isArray(lastMsg.content)
-          ? [
-              {
-                ...lastMsg,
-                content: lastMsg.content.map(normalizeContentUrls),
-              },
-            ]
-          : lastInput;
+      
+      // 构建基础 content
+      let rewrittenContent: any[] = [];
+      if (Array.isArray(lastMsg?.content)) {
+        rewrittenContent = lastMsg.content.map(normalizeContentUrls);
+      } else if (lastMsg?.content) {
+        rewrittenContent = [{ type: "text", text: String(lastMsg.content) }];
+      }
+      
+      // 添加文件引用（供后端处理）
+      // 注意：文件提示信息通过 biz_params 传递，不直接添加到 content 中
+      // 这样可以保持用户消息的原始内容，避免污染聊天历史
+      if (selectedFiles.length > 0) {
+        // 添加文件引用（file:// URL）供后端工具处理
+        // 后端返回的 path 已经是相对于 workspace/files/ 的路径
+        selectedFiles.forEach(file => {
+          // 移除开头的 /，直接传递相对路径
+          const filePath = file.path.startsWith('/') 
+            ? file.path.slice(1) 
+            : file.path;
+          
+          rewrittenContent.push({
+            type: "file",
+            source: {
+              url: `file://${filePath}`,
+            },
+            filename: file.name,
+          });
+        });
+      }
+      
+      // 添加知识库引用（在 biz_params 中传递）
+      const knowledgeRefs = selectedKnowledge.length > 0 
+        ? selectedKnowledge.map(kb => ({ id: kb.id, name: kb.name }))
+        : undefined;
+      
+      // 文件引用信息（通过 biz_params 传递，后端动态注入到 AI 上下文）
+      const fileRefs = selectedFiles.length > 0 
+        ? selectedFiles.map(f => ({ 
+            name: f.name, 
+            path: f.path,
+            type: f.type 
+          }))
+        : undefined;
+      
+      const rewrittenInput = lastMsg
+        ? [
+            {
+              role: lastMsg.role,
+              type: lastMsg.type,
+              content: rewrittenContent,
+              session: lastMsg.session,
+              // 注意：不复制 cards 等只读属性
+            },
+          ]
+        : lastInput;
 
       const requestBody = {
         input: rewrittenInput,
@@ -1080,11 +1152,20 @@ export default function ChatPage() {
         biz_params: {
           agent_id: selectedAgent,
           ...biz_params,
+          // 添加知识库引用
+          ...(knowledgeRefs && { knowledge_bases: knowledgeRefs }),
+          // 添加文件引用（用于后端动态注入提示，避免污染用户消息）
+          ...(fileRefs && { selected_files: fileRefs }),
         },
         // Pass chat_id (UUID) so backend can persist messages to the correct chat
         // instead of matching by session_id (which is shared across all console chats).
         chat_id: chatIdRef.current || undefined,
       };
+
+      // Record current session_id for SSE filtering
+      const currentSessionId = requestBody.session_id || requestBody.chat_id || null;
+      requestSessionIdRef.current = currentSessionId;
+      console.log("[Chat] Request session_id:", currentSessionId);
 
       const response = await fetch(getApiUrl("/console/chat"), {
         method: "POST",
@@ -1101,7 +1182,7 @@ export default function ChatPage() {
 
       return response;
     },
-    [selectedAgent],
+    [selectedAgent, selectedFiles, selectedKnowledge],
   );
 
   const handleFileUpload = useCallback(
@@ -1244,7 +1325,7 @@ export default function ChatPage() {
       },
       sender: {
         ...(i18nConfig as any)?.sender,
-        disclaimer: isMobile ? undefined : (i18nConfig as any)?.sender?.disclaimer,
+        disclaimer: undefined,  // 禁用默认的 disclaimer，使用 footer 替代
         beforeSubmit: handleBeforeSubmit,
         allowSpeech: true,
         attachments: {
@@ -1271,6 +1352,21 @@ export default function ChatPage() {
           label: renderSuggestionLabel(item.command, item.description),
           value: item.value,
         })),
+        // 输入框下方 - 显示引用条（始终占位）
+        afterUI: (
+          <ChatInputFooter
+            files={selectedFiles}
+            knowledge={selectedKnowledge}
+            onRemoveFile={(id) => {
+              setSelectedFiles(prev => prev.filter(f => f.id !== id));
+            }}
+            onRemoveKnowledge={(id) => {
+              setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
+            }}
+          />
+        ),
+        // 右下角操作区 - 显示模型能力
+        actionAffix: <ModelCapabilityTag caps={multimodalCaps} />,
       },
       session: {
         multiple: true,
@@ -1282,6 +1378,18 @@ export default function ChatPage() {
         fetch: customFetch,
         responseParser: (chunk: string) => {
           const payload = JSON.parse(chunk) as Record<string, unknown>;
+          
+          // Filter out SSE events from other chats
+          // Backend adds chat_id to metadata for session isolation
+          const payloadChatId = (payload.metadata as Record<string, unknown>)?.chat_id as string | undefined;
+          const currentChatId = requestSessionIdRef.current;
+          
+          if (payloadChatId && currentChatId && payloadChatId !== currentChatId) {
+            console.log("[SSE] Ignoring payload from other chat:", payloadChatId, "current:", currentChatId);
+            // Return a minimal heartbeat event to prevent errors
+            return { object: "heartbeat", status: "completed" };
+          }
+          
           const completed = payloadCompletesResponse(payload);
 
           // Debug: log key events
@@ -1457,6 +1565,8 @@ export default function ChatPage() {
     planEnabled,
     displayConfig,
     sessionApi,
+    selectedFiles,
+    selectedKnowledge,
   ]);
 
   return (
@@ -1470,35 +1580,56 @@ export default function ChatPage() {
         }}
       >
         {/* Chat session header: title + actions */}
-        <ChatSessionHeader onShowDisplaySettings={() => setShowDisplaySettings(true)} />
-        <div
-          className={styles.chatMessagesArea}
-          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const files = Array.from(e.dataTransfer.files);
-            if (files.length > 0) {
-              // Trigger file upload through the @agentscope-ai/chat attachment system
-              const input = document.querySelector('input[type="file"]') as HTMLInputElement | null;
-              if (input) {
-                const dt = new DataTransfer();
-                files.forEach(f => dt.items.add(f));
-                input.files = dt.files;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-              } else {
-                message.info(t("chat.inputPlaceholder"));
+        <ChatSessionHeader 
+          onShowDisplaySettings={() => setShowDisplaySettings(true)}
+          onToolbarToggle={toggleToolbar}
+        />
+        
+        {/* 主内容区域：工具栏 + 聊天区 */}
+        <div className={styles.chatContentArea}>
+          {/* PC端：工具栏在主内容区域内 */}
+          {!isMobile && toolbarOpen && (
+            <div className={styles.toolbarSidebar}>
+              <ChatToolbarSidebar
+                selectedFiles={selectedFiles}
+                selectedKnowledge={selectedKnowledge}
+                onFileSelect={setSelectedFiles}
+                onKnowledgeSelect={setSelectedKnowledge}
+                onSettingsClick={handleSettingsClick}
+              />
+            </div>
+          )}
+          
+          {/* 聊天区域 */}
+          <div
+            className={styles.chatMessagesArea}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const files = Array.from(e.dataTransfer.files);
+              if (files.length > 0) {
+                // Trigger file upload through the @agentscope-ai/chat attachment system
+                const input = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+                if (input) {
+                  const dt = new DataTransfer();
+                  files.forEach(f => dt.items.add(f));
+                  input.files = dt.files;
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
+                } else {
+                  message.info(t("chat.inputPlaceholder"));
+                }
               }
-            }
-          }}
-        >
-          <ChatErrorBoundary>
-            <AgentScopeRuntimeWebUI
-              ref={chatRef}
-              key={refreshKey}
-              options={options}
-            />
-          </ChatErrorBoundary>
+            }}
+          >
+            <ChatErrorBoundary>
+              <AgentScopeRuntimeWebUI
+                ref={chatRef}
+                key={refreshKey}
+                options={options}
+              />
+            </ChatErrorBoundary>
+          </div>
         </div>
 
         {/* Chat display settings modal */}
@@ -1641,6 +1772,27 @@ export default function ChatPage() {
         onCancel={() => setShowOnboarding(false)}
       />
     </div>
+
+    {/* 移动端：工具栏从底部滑出 */}
+    {isMobile && (
+      <Drawer
+        title="工具栏"
+        placement="bottom"
+        height="80%"
+        open={toolbarOpen}
+        onClose={closeToolbar}
+        styles={{ body: { padding: 0 } }}
+      >
+        <ChatToolbarSidebar
+          selectedFiles={selectedFiles}
+          selectedKnowledge={selectedKnowledge}
+          onFileSelect={setSelectedFiles}
+          onKnowledgeSelect={setSelectedKnowledge}
+          onSettingsClick={handleSettingsClick}
+          showPinButton={false}
+        />
+      </Drawer>
+    )}
     </ChatDisplayConfigContext.Provider>
   );
 }

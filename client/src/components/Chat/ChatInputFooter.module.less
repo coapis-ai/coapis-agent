@@ -1,0 +1,68 @@
+// 聊天输入框底部引用条样式
+
+.footer {
+  display: flex;
+  align-items: center;
+  padding: 6px 16px;
+  min-height: 28px;
+  background: transparent;
+}
+
+.left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  min-width: 0;  // 允许收缩
+}
+
+.placeholder {
+  flex: 1;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.25);
+  }
+}
+
+.refTag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 150px;
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  flex-shrink: 0;  // 不收缩
+  
+  &:hover {
+    opacity: 0.8;
+  }
+  
+  :global {
+    .anticon {
+      margin-right: 4px;
+      font-size: 11px;
+    }
+  }
+}
+
+.refName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// 深色模式
+:global(.dark-mode) {
+  .refTag {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.85);
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+  }
+}

@@ -332,6 +332,14 @@ class BaseChannel(ABC):
             role=Role.USER,
             content=content_parts,
         )
+        # Pass selected_files through message metadata for dynamic hint injection
+        # Note: Msg class uses 'metadata' attribute, not 'meta'
+        if channel_meta:
+            if channel_meta.get("selected_files"):
+                msg.metadata = msg.metadata or {}
+                msg.metadata["selected_files"] = channel_meta["selected_files"]
+                logger.info(f"[DEBUG] Set msg.metadata to {msg.metadata}")
+        
         req = AgentRequest(
             session_id=session_id,
             user_id=sender_id,

@@ -1,0 +1,59 @@
+// ChatToolbarSidebar 侧边栏样式
+
+.chatToolbarSidebar {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-right: 1px solid #f0f0f0;
+  overflow: hidden;
+
+  // 深色模式
+  :global(.dark-mode) & {
+    background: #141414;
+    border-right-color: #303030;
+  }
+}
+
+.chatToolbarContent {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-top: 8px;  // 顶部间距，避免与标题靠太近
+  
+  // 自定义滚动条
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #d9d9d9;
+    border-radius: 3px;
+    
+    &:hover {
+      background: #bfbfbf;
+    }
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  // 深色模式滚动条
+  :global(.dark-mode) & {
+    &::-webkit-scrollbar-thumb {
+      background: #434343;
+      
+      &:hover {
+        background: #5a5a5a;
+      }
+    }
+  }
+}
+
+// 移动端适配
+@media (max-width: 768px) {
+  .chatToolbarSidebar {
+    border-right: none;
+  }
+}

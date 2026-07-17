@@ -112,9 +112,13 @@ class ConsoleChannel(BaseChannel):
         if isinstance(payload, dict) and "content_parts" in payload:
             request = self.build_agent_request_from_native(payload)
             session_id = getattr(request, "session_id", "") or ""
+            # Extract chat_id from meta for frontend filtering
+            meta = payload.get("meta", {})
+            chat_id = meta.get("chat_id", "") or meta.get("session_id", "")
         else:
             request = payload
             session_id = getattr(request, "session_id", "") or ""
+            chat_id = session_id  # Fallback
 
         last_response = None
         event_count = 0
@@ -153,6 +157,19 @@ class ConsoleChannel(BaseChannel):
 
                 # ── Serialize and yield event ──
                 data = _serialize_event(event)
+                
+                # Add chat_id to metadata for frontend session isolation
+                # Frontend uses chat_id (UUID) to filter SSE events from different chats
+                if chat_id:
+                    try:
+                        event_dict = json.loads(data)
+                        if "metadata" not in event_dict:
+                            event_dict["metadata"] = {}
+                        event_dict["metadata"]["chat_id"] = chat_id
+                        data = json.dumps(event_dict, ensure_ascii=False)
+                    except (json.JSONDecodeError, TypeError):
+                        pass  # Keep original data if parsing fails
+                
                 yield f"data: {data}\n\n"
 
                 # ── Handle message completion ──

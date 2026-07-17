@@ -93,7 +93,7 @@ from ..i18n import router as i18n_router
 from ..config_hot_reload import router as config_reload_router
 from ..theme import router as theme_router
 from ..monitoring import monitoring_router
-from ..sso import sso_router
+from ..external_login import external_login_router
 from .audit import router as audit_router
 from ..license_api import router as license_router
 from ..cleanup_api import router as cleanup_router
@@ -169,7 +169,7 @@ router.include_router(admin_providers_router)
 router.include_router(user_model_prefs_router)
 router.include_router(monitoring_router)
 router.include_router(audit_router)
-router.include_router(sso_router)
+router.include_router(external_login_router)
 router.include_router(init_router)
 
 # ═══════════════════════════════════════════════════════════

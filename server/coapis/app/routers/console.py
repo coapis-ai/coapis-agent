@@ -353,6 +353,14 @@ async def console_chat(
     native_payload["sender_id"] = user_id
     native_payload["meta"]["session_id"] = session_id
     native_payload["meta"]["user_id"] = user_id
+    
+    # ── Pass file references through meta (not content_parts) ──
+    # File references are passed via meta to avoid polluting user message
+    # They will be injected as system hint before AI processing
+    selected_files = biz_params.get("selected_files", [])
+    if selected_files:
+        native_payload["meta"]["selected_files"] = selected_files
+        logger.info(f"Passing {len(selected_files)} file references through meta")
 
     # ── Extract chat_id early (used in session context + chat lookup) ──
     # Check both top-level and biz_params (frontend may pass it in either place)
@@ -413,7 +421,7 @@ async def console_chat(
         )
     elif chat.name in ("New Chat", "新聊天", "") and name != "New Chat":
         # Auto-rename: update chat name from first user message
-        from ..runner.models import ChatUpdate
+        # ChatUpdate already imported at top of file
         try:
             await user_cm.patch_chat(chat.id, ChatUpdate(name=name))
             chat.name = name
@@ -421,7 +429,7 @@ async def console_chat(
             logger.warning(f"Failed to auto-rename chat {chat.id}: {e}")
     elif _is_default_chat_name(chat.name) and name and name != "New Chat":
         # Auto-rename: also handle UUID-like or other default names
-        from ..runner.models import ChatUpdate
+        # ChatUpdate already imported at top of file
         try:
             await user_cm.patch_chat(chat.id, ChatUpdate(name=name))
             chat.name = name

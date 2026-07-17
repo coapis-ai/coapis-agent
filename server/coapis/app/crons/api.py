@@ -69,14 +69,14 @@ def _normalize_session_id(spec: CronJobSpec, mgr: CronManager) -> None:
 
 
 @router.get("/jobs", response_model=list[CronJobSpec])
-@require_permission("cron-jobs:read")
+@require_permission("cron:read")
 async def list_jobs(request: Request, mgr: CronManager = Depends(get_user_cron_manager)):
     """List cron jobs for the current user."""
     return await mgr.list_jobs()
 
 
 @router.get("/jobs/{job_id}", response_model=CronJobView)
-@require_permission("cron-jobs:read")
+@require_permission("cron:read")
 async def get_job(request: Request, job_id: str, mgr: CronManager = Depends(get_user_cron_manager)):
     """Get a specific cron job."""
     job = await mgr.get_job(job_id)
@@ -86,7 +86,7 @@ async def get_job(request: Request, job_id: str, mgr: CronManager = Depends(get_
 
 
 @router.post("/jobs", response_model=CronJobSpec)
-@require_permission("cron-jobs:write")
+@require_permission("cron:create")
 async def create_job(
     request: Request,
     spec: CronJobSpec,
@@ -114,7 +114,7 @@ async def create_job(
 
 
 @router.put("/jobs/{job_id}", response_model=CronJobSpec)
-@require_permission("cron-jobs:write")
+@require_permission("cron:update")
 async def replace_job(
     request: Request,
     job_id: str,
@@ -140,7 +140,7 @@ async def replace_job(
 
 
 @router.delete("/jobs/{job_id}")
-@require_permission("cron-jobs:delete")
+@require_permission("cron:delete")
 async def delete_job(
     request: Request,
     job_id: str,
@@ -154,7 +154,7 @@ async def delete_job(
 
 
 @router.post("/jobs/{job_id}/run")
-@require_permission("cron-jobs:execute")
+@require_permission("cron:execute")
 async def run_job_now(
     request: Request,
     job_id: str,
@@ -188,7 +188,7 @@ async def run_job_now(
 
 
 @router.post("/jobs/{job_id}/pause")
-@require_permission("cron-jobs:write")
+@require_permission("cron:update")
 async def pause_job(
     request: Request,
     job_id: str,
@@ -203,7 +203,7 @@ async def pause_job(
 
 
 @router.post("/jobs/{job_id}/resume")
-@require_permission("cron-jobs:write")
+@require_permission("cron:update")
 async def resume_job(
     request: Request,
     job_id: str,
@@ -218,7 +218,7 @@ async def resume_job(
 
 
 @router.get("/jobs/{job_id}/state")
-@require_permission("cron-jobs:read")
+@require_permission("cron:read")
 async def get_job_state(
     request: Request,
     job_id: str,
@@ -233,7 +233,7 @@ async def get_job_state(
 
 
 @router.get("/jobs/{job_id}/history", response_model=list[CronExecutionRecord])
-@require_permission("cron-jobs:read")
+@require_permission("cron:read")
 async def get_job_history(
     request: Request,
     job_id: str,
