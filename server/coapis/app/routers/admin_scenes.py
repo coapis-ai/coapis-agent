@@ -40,7 +40,8 @@ from ...models.scene import (
 )
 from ...services.scene_agent_service import SceneAgentService
 from ...exceptions import SceneNotFoundError
-from ..auth import get_current_user, require_permission
+from ..auth import get_current_user
+from ..permissions.decorators import require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,8 @@ router = APIRouter(prefix="/admin/scenes", tags=["admin-scenes"])
 
 def get_scene_service() -> SceneAgentService:
     """Get scene service instance."""
-    data_dir = Path(__file__).parent.parent.parent / "data"
-    return SceneAgentService(data_dir=data_dir)
+    from ...constant import WORKING_DIR
+    return SceneAgentService(data_dir=Path(WORKING_DIR))
 
 
 # ---------------------------------------------------------------------------

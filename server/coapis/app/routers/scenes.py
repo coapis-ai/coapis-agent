@@ -53,11 +53,10 @@ router = APIRouter(prefix="/scenes", tags=["scenes"])
 def get_scene_service() -> SceneAgentService:
     """Get scene service instance.
     
-    Uses data directory from environment or default.
+    Uses WORKING_DIR from constant.
     """
-    # Default to server/data
-    data_dir = Path(__file__).parent.parent.parent / "data"
-    return SceneAgentService(data_dir=data_dir)
+    from ...constant import WORKING_DIR
+    return SceneAgentService(data_dir=Path(WORKING_DIR))
 
 
 # ---------------------------------------------------------------------------

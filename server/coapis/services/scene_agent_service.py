@@ -74,12 +74,12 @@ class SceneAgentService:
         """Initialize scene agent service.
         
         Args:
-            data_dir: Data directory path (default: server/data)
+            data_dir: Data directory path (default: WORKING_DIR)
         """
         if data_dir is None:
-            # Default to server/data
-            current_dir = Path(__file__).parent
-            data_dir = current_dir.parent / "data"
+            # Use WORKING_DIR from constant
+            from ..constant import WORKING_DIR
+            data_dir = Path(WORKING_DIR)
         
         self.data_dir = Path(data_dir)
         self.scenes_file = self.data_dir / "scenes.json"
