@@ -1,10 +1,12 @@
 // Embedded chat drawer component
 import React, { useState, useEffect } from 'react';
-import { Drawer, Button, Spin, Empty, message } from 'antd';
+import { Drawer, Button, Spin, message } from 'antd';
 import { CloseOutlined, ExpandOutlined } from '@ant-design/icons';
-import type { SceneConfig, EnterSceneResponse } from '../Workbench/types';
+import type { SceneConfig, EnterSceneResponse } from './types';
 import styles from './EmbeddedChat.module.less';
 import { getApiToken } from '../../api/config';
+import { ChatWrapper } from '../../components/ChatWrapper';
+import ChatPage from '../../pages/Chat';
 
 interface EmbeddedChatProps {
   visible: boolean;
@@ -97,12 +99,13 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
         </div>
       }
       placement="right"
-      width={600}
+      width={800}
       open={visible}
       onClose={onClose}
       closeIcon={<CloseOutlined />}
       className={styles.embeddedChat}
       destroyOnClose
+      styles={{ body: { padding: 0, height: '100%' } }}
     >
       {loading ? (
         <div className={styles.loading}>
@@ -110,30 +113,24 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
         </div>
       ) : chatData ? (
         <div className={styles.chatContent}>
-          {/* Welcome message */}
-          {chatData.welcome_message && (
-            <div className={styles.welcomeMessage}>
-              <p>{chatData.welcome_message}</p>
-            </div>
-          )}
-          
-          {/* TODO: Integrate with @agentscope-ai/chat component */}
-          {/* For now, show placeholder */}
-          <div className={styles.chatPlaceholder}>
-            <Empty
-              description={
-                <span>
-                  聊天功能开发中...
-                  <br />
-                  Chat ID: {chatData.chat_id}
-                </span>
-              }
-            />
-          </div>
+          {/* 使用ChatWrapper包装Chat页面 */}
+          <ChatWrapper
+            mode="embedded"
+            sessionId={chatData.chat_id}
+            sceneId={chatData.scene.id}
+            sceneName={chatData.scene.name}
+            welcomeMessage={chatData.welcome_message}
+            showToolbar={true}
+            compactLayout={true}
+            onError={(error) => {
+              console.error('Chat error:', error);
+              message.error('聊天发生错误');
+            }}
+          >
+            <ChatPage />
+          </ChatWrapper>
         </div>
-      ) : (
-        <Empty description="场景加载失败" />
-      )}
+      ) : null}
     </Drawer>
   );
 };

@@ -562,10 +562,44 @@ export default function ChatPage() {
   const { isDark } = useTheme();
   const isMobile = useIsMobile();
   const { user } = useUser();
+  
+  // 读取场景参数（嵌入式模式通过window注入）
+  const chatMode = useMemo(() => {
+    return (window as any).__CHAT_MODE__ || 'full';
+  }, []);
+  
+  const sceneSessionId = useMemo(() => {
+    return (window as any).__CHAT_SESSION_ID__;
+  }, []);
+  
+  const sceneId = useMemo(() => {
+    return (window as any).__CHAT_SCENE_ID__;
+  }, []);
+  
+  const sceneName = useMemo(() => {
+    return (window as any).__CHAT_SCENE_NAME__;
+  }, []);
+  
+  const sceneWelcomeMessage = useMemo(() => {
+    return (window as any).__CHAT_WELCOME_MESSAGE__;
+  }, []);
+  
+  const sceneShowToolbar = useMemo(() => {
+    const val = (window as any).__CHAT_SHOW_TOOLBAR__;
+    return val !== undefined ? val : true;
+  }, []);
+  
+  const isEmbeddedMode = chatMode === 'embedded';
+  
   const chatId = useMemo(() => {
+    // 嵌入式模式：使用场景会话ID
+    if (isEmbeddedMode && sceneSessionId) {
+      return sceneSessionId;
+    }
+    // 完整模式：从路由获取
     const match = location.pathname.match(/^\/chat\/(.+)$/);
     return match?.[1];
-  }, [location.pathname]);
+  }, [isEmbeddedMode, sceneSessionId, location.pathname]);
   const [showModelPrompt, setShowModelPrompt] = useState(false);
   const { selectedAgent } = useAgentStore();
   const { toolRenderConfig } = usePlugins();
@@ -1321,8 +1355,9 @@ export default function ChatPage() {
       },
       welcome: {
         ...i18nConfig.welcome,
-        nick: "CoApis",
+        nick: sceneName || "CoApis",
         avatar: "/bee_icon.png",
+        message: sceneWelcomeMessage || i18nConfig.welcome.message,
         // Use dynamic recommendations if available, fallback to static prompts
         prompts: dynamicRecommendations.length > 0
           ? dynamicRecommendations.map((rec) => ({
@@ -1654,9 +1689,9 @@ export default function ChatPage() {
           key={request.requestId}
           data-approval-id={request.requestId}
           style={{
-            position: "fixed",
+            position: isEmbeddedMode ? "absolute" : "fixed",
             bottom: 80,
-            right: isMobile ? 8 : 24,
+            right: isEmbeddedMode ? 0 : (isMobile ? 8 : 24),
             zIndex: 1000,
             maxWidth: 480,
             width: isMobile ? "calc(100vw - 16px)" : "calc(100vw - 48px)",
@@ -1781,12 +1816,13 @@ export default function ChatPage() {
       />
     </div>
 
-    {/* 移动端：工具栏从底部滑出 */}
-    {isMobile && (
+    {/* 工具栏Drawer */}
+    {sceneShowToolbar && (
       <Drawer
         title="工具栏"
-        placement="bottom"
-        height="80%"
+        placement={isEmbeddedMode ? "left" : "bottom"}
+        width={isEmbeddedMode ? "80%" : undefined}
+        height={isMobile && !isEmbeddedMode ? "80%" : undefined}
         open={toolbarOpen}
         onClose={closeToolbar}
         styles={{ body: { padding: 0 } }}
