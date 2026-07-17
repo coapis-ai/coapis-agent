@@ -55,6 +55,9 @@ class ChatSpec(BaseModel):
     meta: Optional[Dict[str, Any]] = None
     status: str = "idle"
     pinned: bool = False
+    # Scene-related fields
+    scene_id: Optional[str] = None
+    composed_agent_id: Optional[str] = None
 
 
 class Message(BaseModel):
