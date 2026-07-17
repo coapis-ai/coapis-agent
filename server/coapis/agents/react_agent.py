@@ -2966,7 +2966,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         try:
             from .utils.query_analyzer import QueryAnalyzer
             if not hasattr(self, "_query_analyzer"):
-                self._query_analyzer = QueryAnalyzer(enabled=True)
+                self._query_analyzer = QueryAnalyzer(enabled=False)  # 关闭工具裁剪机制
         except Exception:
             pass
 

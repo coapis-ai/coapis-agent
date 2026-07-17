@@ -17,10 +17,9 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  EyeOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import type { SceneConfig, SceneConfigCreate, SceneConfigUpdate } from '../Workbench/types';
+import type { SceneConfig } from '../Workbench/types';
 import styles from './SceneManagement.module.less';
 
 const { Option } = Select;

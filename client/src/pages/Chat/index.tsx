@@ -893,8 +893,10 @@ export default function ChatPage() {
     ) => {
       if (!isChatActiveRef.current) return;
       
-      // Clear previous session's SSE filtering state
+      // Get target ID
       const targetId = realId || sessionId;
+      
+      // Clear previous session's SSE filtering state
       if (targetId && targetId !== requestSessionIdRef.current) {
         console.log("[Chat] Session changed, clearing SSE filter state");
         requestSessionIdRef.current = null;
@@ -907,7 +909,6 @@ export default function ChatPage() {
       }
 
       // Update URL when session is selected and different from current
-      const targetId = realId || sessionId;
       if (!targetId) return;
 
       // If a preferred chatId from the URL exists and no navigation has happened yet,
