@@ -17,6 +17,34 @@
   background: #f9f8f4;
 }
 
+// Navigation tabs (工作台 / 控制台)
+.navTabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.navTab {
+  color: #595959;
+  font-size: 14px;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 6px;
+  
+  &:hover {
+    color: #262626;
+    background: rgba(0, 0, 0, 0.04);
+  }
+}
+
+.navTabActive {
+  font-size: 14px;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
 .headerTitle {
   font-size: 18px;
   font-weight: 500;
@@ -592,6 +620,16 @@
 
   .headerTitle {
     color: rgba(255, 255, 255, 0.85);
+  }
+
+  // Navigation tabs in dark mode
+  .navTab {
+    color: rgba(255, 255, 255, 0.65);
+    
+    &:hover {
+      color: rgba(255, 255, 255, 0.85);
+      background: rgba(255, 255, 255, 0.08);
+    }
   }
 
   .sider {
