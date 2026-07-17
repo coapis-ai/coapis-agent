@@ -145,6 +145,26 @@ export default function Header() {
               className={styles.logoImg}
             />
             <div className={styles.logoDivider} />
+            {version && (
+              <Badge
+                dot={!!hasUpdate}
+                color="rgba(255, 157, 77, 1)"
+                offset={[4, 28]}
+              >
+                <span
+                  className={`${styles.versionBadge} ${
+                    hasUpdate
+                      ? styles.versionBadgeClickable
+                      : styles.versionBadgeDefault
+                  }`}
+                  onClick={() => hasUpdate && handleOpenUpdateModal()}
+                >
+                  v{version}
+                </span>
+              </Badge>
+            )}
+            
+            <div className={styles.logoDivider} />
             
             {/* 工作台 / 控制台 切换按钮 */}
             <div className={styles.navTabs}>
@@ -165,26 +185,6 @@ export default function Header() {
                 控制台
               </AntButton>
             </div>
-            
-            <div className={styles.logoDivider} />
-            {version && (
-              <Badge
-                dot={!!hasUpdate}
-                color="rgba(255, 157, 77, 1)"
-                offset={[4, 28]}
-              >
-                <span
-                  className={`${styles.versionBadge} ${
-                    hasUpdate
-                      ? styles.versionBadgeClickable
-                      : styles.versionBadgeDefault
-                  }`}
-                  onClick={() => hasUpdate && handleOpenUpdateModal()}
-                >
-                  v{version}
-                </span>
-              </Badge>
-            )}
           </div>
         )}
         {isMobile ? null : (
