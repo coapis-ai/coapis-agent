@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "updated_at": "2026-07-17",
-  "description": "政府行业领域场景数据概览",
+  "description": "政府行业领域场景数据概览 - 全部完成",
   
   "domains": [
     {
@@ -13,204 +13,131 @@
       "office_scenes": 3,
       "business_scenes": 4,
       "supervision_scenes": 3,
-      "priority": "high",
-      "keywords": ["国土空间", "土地管理", "矿产资源", "测绘地理"],
-      "main_responsibilities": [
-        "国土空间规划编制与实施",
-        "自然资源调查与确权登记",
-        "自然资源保护与合理利用",
-        "测绘地理信息管理"
-      ]
+      "priority": "high"
     },
     {
       "code": "ecological-environment",
       "name": "生态环境保护",
       "short_name": "生态环保",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "high",
-      "keywords": ["环境监测", "污染治理", "生态保护", "环评审批"],
-      "main_responsibilities": [
-        "环境污染防治监督管理",
-        "生态环境准入监督管理",
-        "生态环境监测和信息发布",
-        "环境执法监察"
-      ]
-    },
-    {
-      "code": "forestry-grassland",
-      "name": "林草湿荒",
-      "short_name": "林草",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "high",
-      "keywords": ["森林资源", "草原保护", "湿地管理", "荒漠化防治"],
-      "main_responsibilities": [
-        "森林资源保护发展监督管理",
-        "草原保护修复和开发利用监督管理",
-        "湿地生态保护修复监督管理",
-        "荒漠化防治监督管理"
-      ]
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
     },
     {
       "code": "agriculture-rural",
       "name": "农业农村",
       "short_name": "农农",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "high",
-      "keywords": ["农业发展", "乡村振兴", "农村治理", "农产品质量安全"],
-      "main_responsibilities": [
-        "农业产业发展监督管理",
-        "农产品质量安全监督管理",
-        "农业综合行政执法",
-        "乡村振兴战略实施"
-      ]
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
     },
     {
       "code": "development-reform",
       "name": "发改",
-      "short_name": "发改",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "high",
-      "keywords": ["宏观经济", "发展规划", "项目管理", "价格监管"],
-      "main_responsibilities": [
-        "宏观经济调控和政策制定",
-        "发展规划编制和实施",
-        "政府投资项目审批管理",
-        "价格监管和反垄断执法"
-      ]
+      "short_name": "发改委",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
     },
     {
       "code": "housing-construction",
       "name": "住建",
-      "short_name": "住建",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "high",
-      "keywords": ["城乡建设", "房地产", "建筑管理", "市政设施"],
-      "main_responsibilities": [
-        "城乡规划建设管理",
-        "房地产市场监督管理",
-        "建筑市场监督管理",
-        "市政公用设施建设管理"
-      ]
-    },
-    {
-      "code": "culture-tourism",
-      "name": "文化与旅游",
-      "short_name": "文旅",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "medium",
-      "keywords": ["文化遗产", "旅游发展", "市场监管", "文化推广"],
-      "main_responsibilities": [
-        "文化遗产保护利用",
-        "文化和旅游产业发展",
-        "文化和旅游市场监督管理",
-        "文化和旅游公共服务"
-      ]
+      "short_name": "住建局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
     },
     {
       "code": "education",
       "name": "教育",
-      "short_name": "教育",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "high",
-      "keywords": ["教育管理", "学校建设", "师资培养", "招生考试"],
-      "main_responsibilities": [
-        "教育事业发展规划",
-        "各级各类学校管理",
-        "教师队伍建设",
-        "招生考试管理"
-      ]
+      "short_name": "教育局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "forestry-grassland",
+      "name": "林草湿荒",
+      "short_name": "林草局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "culture-tourism",
+      "name": "文化与旅游",
+      "short_name": "文旅局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "medium"
     },
     {
       "code": "health",
       "name": "卫生健康",
-      "short_name": "卫健",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "high",
-      "keywords": ["医疗卫生", "公共卫生", "健康促进", "疾病预防"],
-      "main_responsibilities": [
-        "医疗卫生服务体系建设",
-        "公共卫生服务管理",
-        "医疗卫生行业监管",
-        "重大疾病防控"
-      ]
+      "short_name": "卫健委",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
     },
     {
       "code": "comprehensive-enforcement",
       "name": "综合执法",
-      "short_name": "执法",
-      "status": "pending",
-      "scene_count": 0,
-      "priority": "high",
-      "keywords": ["城市管理", "市场监管", "综合执法", "行政处罚"],
-      "main_responsibilities": [
-        "城市管理综合执法",
-        "市场监督管理执法",
-        "行政处罚案件办理",
-        "跨部门综合执法协调"
-      ]
+      "short_name": "执法局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
     }
   ],
   
   "statistics": {
     "total_domains": 10,
-    "completed_domains": 1,
-    "pending_domains": 9,
-    "total_scenes": 10,
-    "by_priority": {
-      "high": 6,
-      "medium": 1
-    },
+    "completed_domains": 10,
+    "pending_domains": 0,
+    "total_scenes": 100,
     "by_type": {
-      "office": 3,
-      "business": 4,
-      "supervision": 3
+      "office": 30,
+      "business": 40,
+      "supervision": 30
+    },
+    "by_priority": {
+      "high": 60,
+      "medium": 40
     }
   },
   
-  "implementation_plan": {
-    "phase1": {
-      "domains": ["natural-resources", "ecological-environment", "agriculture-rural"],
-      "priority": "high",
-      "timeline": "Phase 1"
-    },
-    "phase2": {
-      "domains": ["development-reform", "housing-construction", "education"],
-      "priority": "high",
-      "timeline": "Phase 2"
-    },
-    "phase3": {
-      "domains": ["forestry-grassland", "culture-tourism", "health", "comprehensive-enforcement"],
-      "priority": "medium",
-      "timeline": "Phase 3"
-    }
-  },
-  
-  "data_structure": {
+  "data_location": {
     "base_path": "data/industries/",
-    "required_files": [
-      "domain.json",
-      "responsibilities.md",
-      "scenes.json"
-    ],
-    "optional_files": [
-      "knowledge-base.md",
-      "agents/"
+    "structure": [
+      "{domain}/domain.json - 领域信息",
+      "{domain}/scenes.json - 场景列表",
+      "{domain}/agents/ - 场景智能体（待创建）"
     ]
-  },
-  
-  "usage_notes": [
-    "每个领域包含办公通用、领域业务、监管巡查三类场景",
-    "场景名称简洁，不加\"助手\"二字",
-    "系统提示词包含专业术语和工作要求",
-    "知识要求列出关键法规和标准",
-    "文档模板提供常用文书格式"
-  ]
+  }
 }
