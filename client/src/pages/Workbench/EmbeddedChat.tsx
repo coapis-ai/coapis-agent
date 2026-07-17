@@ -4,6 +4,7 @@ import { Drawer, Button, Spin, Empty, message } from 'antd';
 import { CloseOutlined, ExpandOutlined } from '@ant-design/icons';
 import type { SceneConfig, EnterSceneResponse } from '../Workbench/types';
 import styles from './EmbeddedChat.module.less';
+import { getApiToken } from '../../api/config';
 
 interface EmbeddedChatProps {
   visible: boolean;
@@ -40,10 +41,12 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
     
     try {
       setLoading(true);
+      const token = getApiToken();
       const response = await fetch(`/api/scenes/${scene.id}/enter`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
       });
 

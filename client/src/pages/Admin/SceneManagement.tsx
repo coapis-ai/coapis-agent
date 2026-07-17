@@ -21,6 +21,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import type { SceneConfig } from '../Workbench/types';
 import styles from './SceneManagement.module.less';
+import { getApiToken } from '../../api/config';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -39,7 +40,12 @@ const SceneManagement: React.FC = () => {
   const loadScenes = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/admin/scenes');
+      const token = getApiToken();
+      const response = await fetch('/api/admin/scenes', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
       if (!response.ok) {
         throw new Error('Failed to load scenes');
       }
@@ -76,10 +82,14 @@ const SceneManagement: React.FC = () => {
 
   const handleDelete = async (sceneId: string, hardDelete: boolean = false) => {
     try {
+      const token = getApiToken();
       const response = await fetch(
         `/api/admin/scenes/${sceneId}?hard_delete=${hardDelete}`,
         {
           method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
         }
       );
 
@@ -97,6 +107,7 @@ const SceneManagement: React.FC = () => {
 
   const handleSubmit = async (values: any) => {
     try {
+      const token = getApiToken();
       const url = editingScene
         ? `/api/admin/scenes/${editingScene.id}`
         : '/api/admin/scenes';
@@ -106,6 +117,7 @@ const SceneManagement: React.FC = () => {
         method,
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(values),
       });

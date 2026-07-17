@@ -6,6 +6,7 @@ import SceneCard from './SceneCard';
 import EmbeddedChat from './EmbeddedChat';
 import type { SceneConfig, SceneListResponse } from './types';
 import styles from './index.module.less';
+import { getApiToken } from '../../api/config';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -30,7 +31,12 @@ const Workbench: React.FC = () => {
   const loadScenes = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/scenes');
+      const token = getApiToken();
+      const response = await fetch('/api/scenes', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
       if (!response.ok) {
         throw new Error('Failed to load scenes');
       }
