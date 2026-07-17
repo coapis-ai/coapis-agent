@@ -355,11 +355,6 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       icon: <SparkChatTabFill size={16} />,
     },
     {
-      key: "workbench",
-      label: collapsed ? null : t("nav.workbench", "工作台"),
-      icon: <SparkModePlazaLine size={16} />,
-    },
-    {
       key: "control-group",
       label: collapsed ? null : t("nav.control"),
       children: [

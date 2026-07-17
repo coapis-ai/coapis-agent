@@ -1,5 +1,8 @@
 .sceneCard {
   transition: all 0.3s;
+  height: 220px;
+  display: flex;
+  flex-direction: column;
   
   &:hover {
     transform: translateY(-4px);
@@ -9,6 +12,9 @@
   :global {
     .ant-card-body {
       padding: 16px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
     }
     
     .ant-card-actions {
@@ -52,8 +58,15 @@
 
 .sceneMeta {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
   gap: 4px;
+  margin-top: auto;
+  
+  :global(.ant-tag) {
+    margin: 0;
+    white-space: nowrap;
+  }
 }
 
 .enterButton {

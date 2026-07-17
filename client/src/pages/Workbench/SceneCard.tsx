@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Tag, Space } from 'antd';
+import { Card, Tag, Space, Tooltip } from 'antd';
 import { PlayCircleOutlined } from '@ant-design/icons';
 import type { SceneConfig } from './types';
 import styles from './SceneCard.module.less';
@@ -10,6 +10,16 @@ interface SceneCardProps {
 }
 
 const SceneCard: React.FC<SceneCardProps> = ({ scene, onEnter }) => {
+  // Tags to display (max 3 visible)
+  const visibleTags = scene.tags.slice(0, 3);
+  const hiddenTags = scene.tags.slice(3);
+  const hasHiddenTags = hiddenTags.length > 0;
+  
+  // All tags for tooltip
+  const allTags = scene.category 
+    ? [scene.category, ...scene.tags]
+    : scene.tags;
+
   return (
     <Card
       className={styles.sceneCard}
@@ -29,14 +39,22 @@ const SceneCard: React.FC<SceneCardProps> = ({ scene, onEnter }) => {
       
       <p className={styles.sceneDescription}>{scene.description}</p>
       
-      <div className={styles.sceneMeta}>
-        {scene.category && (
-          <Tag color="blue">{scene.category}</Tag>
-        )}
-        {scene.tags.slice(0, 3).map(tag => (
-          <Tag key={tag}>{tag}</Tag>
-        ))}
-      </div>
+      <Tooltip 
+        title={allTags.join(' · ')}
+        placement="top"
+      >
+        <div className={styles.sceneMeta}>
+          {scene.category && (
+            <Tag color="blue">{scene.category}</Tag>
+          )}
+          {visibleTags.map(tag => (
+            <Tag key={tag}>{tag}</Tag>
+          ))}
+          {hasHiddenTags && (
+            <Tag>+{hiddenTags.length}</Tag>
+          )}
+        </div>
+      </Tooltip>
     </Card>
   );
 };
