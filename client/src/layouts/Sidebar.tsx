@@ -559,40 +559,37 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     
     // Add dynamic categories from API
     if (categoryData?.dimensions) {
-      // Add divider and "通用分类" section
+      // Add divider
       items.push({ type: 'divider' });
       
+      // 通用分类 - 可折叠子菜单
       const natureCategories = categoryData.dimensions.nature?.categories || [];
       if (natureCategories.length > 0) {
         items.push({
           key: 'nature-group',
           label: collapsed ? null : '通用分类',
           icon: <SparkLocalFileLine size={16} />,
-          type: 'group',
           children: natureCategories.map((cat: any) => ({
             key: `category-${cat.id}`,
             label: collapsed ? null : cat.name,
             icon: <span style={{ fontSize: 16 }}>{cat.icon}</span>,
           })),
-        } as any);
+        });
       }
       
-      // Add divider and "领域分类" section
-      items.push({ type: 'divider' });
-      
+      // 领域分类 - 可折叠子菜单
       const domainCategories = categoryData.dimensions.domain?.categories || [];
       if (domainCategories.length > 0) {
         items.push({
           key: 'domain-group',
           label: collapsed ? null : '领域分类',
           icon: <SparkBarChartLine size={16} />,
-          type: 'group',
           children: domainCategories.map((cat: any) => ({
             key: `category-${cat.id}`,
             label: collapsed ? null : cat.name,
             icon: <span style={{ fontSize: 16 }}>{cat.icon}</span>,
           })),
-        } as any);
+        });
       }
     }
     
@@ -681,7 +678,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
             <Menu
               mode="inline"
               selectedKeys={[workbenchSelectedKey]}
-              openKeys={['management-group']}
+              defaultOpenKeys={['nature-group', 'domain-group', 'management-group']}
               onClick={({ key }) => {
                 // Handle workbench menu clicks
                 if (key === 'category-all') {
