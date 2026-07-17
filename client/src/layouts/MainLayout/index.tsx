@@ -141,15 +141,12 @@ export default function MainLayout() {
   // causing the @agentscope-ai/chat library to abort the SSE connection.
   const isChatRoute =
     currentPath === "/" || currentPath.startsWith("/chat");
-    
-  // Hide sidebar on workbench route
-  const isWorkbenchRoute = currentPath === "/workbench";
 
   return (
     <Layout className={styles.mainLayout}>
       {!(isMobile && isChatRoute) && <Header />}
       <Layout style={isMobile ? { flexDirection: "column" } : undefined}>
-        {!isMobile && !isWorkbenchRoute && <Sidebar selectedKey={selectedKey} />}
+        {!isMobile && <Sidebar selectedKey={selectedKey} />}
         <Content className="page-container" style={isMobile ? { width: "100%" } : undefined}>
           <ConsolePollService />
           <div className="page-content">

@@ -7,7 +7,7 @@ import {
   type MenuProps,
 } from "antd";
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   SparkChatTabFill,
@@ -61,12 +61,16 @@ interface SidebarProps {
 
 export default function Sidebar({ selectedKey }: SidebarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const { isDark } = useTheme();
   const { pluginRoutes } = usePlugins();
   const { selectedAgent, agents, setSelectedAgent, setAgents } = useAgentStore();
   const { user } = useUser();
   const [collapsed, setCollapsed] = useState(false);
+  
+  // Check if we're on workbench route
+  const isWorkbench = location.pathname === '/workbench';
   
   // Permission state
   const [allowedModules, setAllowedModules] = useState<string[]>([]);
@@ -499,6 +503,48 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     } as any);
   }
 
+  // ── Menu items — workbench ──────────────────────────────────────
+
+  const workbenchMenuItems: MenuProps["items"] = [
+    {
+      key: "workbench-home",
+      label: collapsed ? null : "场景列表",
+      icon: <SparkModePlazaLine size={16} />,
+    },
+    {
+      key: "workbench-categories",
+      label: collapsed ? null : "场景分类",
+      icon: <SparkBrowseLine size={16} />,
+      children: [
+        {
+          key: "category-office",
+          label: collapsed ? null : "办公",
+          icon: <SparkLocalFileLine size={16} />,
+        },
+        {
+          key: "category-rd",
+          label: collapsed ? null : "研发",
+          icon: <SparkDebugLine size={16} />,
+        },
+        {
+          key: "category-operations",
+          label: collapsed ? null : "运营",
+          icon: <SparkBarChartLine size={16} />,
+        },
+        {
+          key: "category-marketing",
+          label: collapsed ? null : "市场",
+          icon: <SparkMagicWandLine size={16} />,
+        },
+      ],
+    },
+    {
+      key: "admin",
+      label: collapsed ? null : "场景管理",
+      icon: <CrownOutlined />,
+    },
+  ];
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -556,55 +602,80 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
             </div>
           )}
 
-          {/* Agent-scoped section: Chat + Control + Workspace */}
-          <div className={styles.agentScopedSection}>
+          {/* Workbench menu or Agent-scoped menu */}
+          {isWorkbench ? (
             <Menu
               mode="inline"
               selectedKeys={[selectedKey]}
               openKeys={DEFAULT_OPEN_KEYS}
               onClick={({ key }) => {
-                const path = KEY_TO_PATH[String(key)];
-                if (path) navigate(path);
+                // Handle workbench menu clicks
+                if (key === 'workbench-home') {
+                  navigate('/workbench');
+                } else if (key.startsWith('category-')) {
+                  // TODO: Filter scenes by category
+                  navigate('/workbench?category=' + key.replace('category-', ''));
+                } else if (key === 'admin') {
+                  navigate('/admin');
+                }
               }}
-              items={filterMenuItems(agentMenuItems)}
+              items={workbenchMenuItems}
               theme={isDark ? "dark" : "light"}
               className={styles.sideMenu}
             />
-          </div>
+          ) : (
+            <>
+              {/* Agent-scoped section: Chat + Control + Workspace */}
+              <div className={styles.agentScopedSection}>
+                <Menu
+                  mode="inline"
+                  selectedKeys={[selectedKey]}
+                  openKeys={DEFAULT_OPEN_KEYS}
+                  onClick={({ key }) => {
+                    const path = KEY_TO_PATH[String(key)];
+                    if (path) navigate(path);
+                  }}
+                  items={filterMenuItems(agentMenuItems)}
+                  theme={isDark ? "dark" : "light"}
+                  className={styles.sideMenu}
+                />
+              </div>
 
-          {/* Global settings section */}
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedKey]}
-            openKeys={[
-              ...DEFAULT_OPEN_KEYS,
-              ...(pluginRoutes.length > 0 ? ["plugins-group"] : []),
-            ]}
-            onClick={({ key }) => {
-              const path = KEY_TO_PATH[String(key)] ?? `/${String(key)}`;
-              navigate(path);
-            }}
-            items={filterMenuItems(settingsMenuItems)}
-            theme={isDark ? "dark" : "light"}
-            className={styles.sideMenu}
-          />
+              {/* Global settings section */}
+              <Menu
+                mode="inline"
+                selectedKeys={[selectedKey]}
+                openKeys={[
+                  ...DEFAULT_OPEN_KEYS,
+                  ...(pluginRoutes.length > 0 ? ["plugins-group"] : []),
+                ]}
+                onClick={({ key }) => {
+                  const path = KEY_TO_PATH[String(key)] ?? `/${String(key)}`;
+                  navigate(path);
+                }}
+                items={filterMenuItems(settingsMenuItems)}
+                theme={isDark ? "dark" : "light"}
+                className={styles.sideMenu}
+              />
+            </>
+          )}
+
+          <div className={styles.collapseToggleContainer}>
+            <Button
+              type="text"
+              icon={
+                collapsed ? (
+                  <SparkMenuExpandLine size={20} />
+                ) : (
+                  <SparkMenuFoldLine size={20} />
+                )
+              }
+              onClick={() => setCollapsed(!collapsed)}
+              className={styles.collapseToggle}
+            />
+          </div>
         </>
       )}
-
-      <div className={styles.collapseToggleContainer}>
-        <Button
-          type="text"
-          icon={
-            collapsed ? (
-              <SparkMenuExpandLine size={20} />
-            ) : (
-              <SparkMenuFoldLine size={20} />
-            )
-          }
-          onClick={() => setCollapsed(!collapsed)}
-          className={styles.collapseToggle}
-        />
-      </div>
     </Sider>
   );
 }
