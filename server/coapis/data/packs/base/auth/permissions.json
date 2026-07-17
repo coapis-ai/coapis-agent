@@ -25,6 +25,7 @@
     "user_system": {"description": "User system management"},
     "sessions": {"description": "Session management"},
     "files": {"description": "File management"},
-    "settings": {"description": "Settings management"}
+    "settings": {"description": "Settings management"},
+    "scene": {"description": "Scene management"}
   }
 }

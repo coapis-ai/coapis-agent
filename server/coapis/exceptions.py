@@ -117,6 +117,28 @@ class SkillsError(AgentRuntimeErrorException):
         super().__init__("SKILLS_ERROR", message, details)
 
 
+class SceneNotFoundError(AgentRuntimeErrorException):
+    """Exception raised when scene not found."""
+
+    def __init__(
+        self,
+        message: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__("SCENE_NOT_FOUND", message, details)
+
+
+class SceneAgentError(AgentRuntimeErrorException):
+    """Exception raised for scene agent errors."""
+
+    def __init__(
+        self,
+        message: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__("SCENE_AGENT_ERROR", message, details)
+
+
 # ==================== LLM API Exception Converter ====================
 
 
