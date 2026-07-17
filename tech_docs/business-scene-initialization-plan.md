@@ -276,7 +276,7 @@ def delete_scene(scene_id, hard_delete=False):
 [
   {
     "id": "meeting-minutes",
-    "name": "会议纪要助手",
+    "name": "会议纪要",
     "icon": "📝",
     "category": "办公",
     "subcategory": "会议管理",
@@ -286,7 +286,7 @@ def delete_scene(scene_id, hard_delete=False):
   },
   {
     "id": "data-analysis",
-    "name": "数据分析助手",
+    "name": "数据分析",
     "icon": "📊",
     "category": "数据分析",
     "subcategory": "数据统计",
@@ -296,7 +296,7 @@ def delete_scene(scene_id, hard_delete=False):
   },
   {
     "id": "policy-interpretation",
-    "name": "政策解读助手",
+    "name": "政策解读",
     "icon": "📋",
     "category": "政策",
     "subcategory": "政策解读",
@@ -306,7 +306,7 @@ def delete_scene(scene_id, hard_delete=False):
   },
   {
     "id": "report-writing",
-    "name": "报告撰写助手",
+    "name": "报告撰写",
     "icon": "📄",
     "category": "写作",
     "subcategory": "报告撰写",
@@ -316,7 +316,7 @@ def delete_scene(scene_id, hard_delete=False):
   },
   {
     "id": "requirements-analysis",
-    "name": "需求分析助手",
+    "name": "需求分析",
     "icon": "🔍",
     "category": "研究",
     "subcategory": "需求分析",
@@ -326,7 +326,7 @@ def delete_scene(scene_id, hard_delete=False):
   },
   {
     "id": "solution-design",
-    "name": "方案设计助手",
+    "name": "方案设计",
     "icon": "💡",
     "category": "研究",
     "subcategory": "方案设计",
@@ -339,11 +339,11 @@ def delete_scene(scene_id, hard_delete=False):
 
 **扩展场景（可选，基于行业需求）**：
 
-- 文字润色助手（`text-polishing`）
-- 邮件撰写助手（`email-writing`）
-- 公文起草助手（`official-document`）
-- 工作计划助手（`work-plan`）
-- 会议安排助手（`meeting-scheduling`）
+- 文字润色（`text-polishing`）
+- 邮件撰写（`email-compose`）
+- 公文起草（`official-document`）
+- 工作计划（`work-plan`）
+- 会议安排（`meeting-scheduling`）
 
 ---
 
