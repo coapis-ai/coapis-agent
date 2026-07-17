@@ -6,7 +6,7 @@ import {
   Select,
   type MenuProps,
 } from "antd";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -71,6 +71,20 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   
   // Check if we're on workbench route
   const isWorkbench = location.pathname === '/workbench';
+  
+  // For workbench, get category from URL and use it as selectedKey
+  const workbenchSelectedKey = useMemo(() => {
+    if (!isWorkbench) return selectedKey;
+    
+    const params = new URLSearchParams(location.search);
+    const category = params.get('category');
+    
+    if (category) {
+      return `category-${category}`;
+    }
+    
+    return 'category-all';
+  }, [isWorkbench, selectedKey, location.search]);
   
   // Permission state
   const [allowedModules, setAllowedModules] = useState<string[]>([]);
@@ -507,36 +521,32 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
 
   const workbenchMenuItems: MenuProps["items"] = [
     {
-      key: "workbench-home",
-      label: collapsed ? null : "场景列表",
+      key: "category-all",
+      label: collapsed ? null : "全部场景",
       icon: <SparkModePlazaLine size={16} />,
     },
     {
-      key: "workbench-categories",
-      label: collapsed ? null : "场景分类",
+      key: "category-office",
+      label: collapsed ? null : "办公",
+      icon: <SparkLocalFileLine size={16} />,
+    },
+    {
+      key: "category-data-analysis",
+      label: collapsed ? null : "数据分析",
+      icon: <SparkBarChartLine size={16} />,
+    },
+    {
+      key: "category-document",
+      label: collapsed ? null : "文档处理",
       icon: <SparkBrowseLine size={16} />,
-      children: [
-        {
-          key: "category-office",
-          label: collapsed ? null : "办公",
-          icon: <SparkLocalFileLine size={16} />,
-        },
-        {
-          key: "category-rd",
-          label: collapsed ? null : "研发",
-          icon: <SparkDebugLine size={16} />,
-        },
-        {
-          key: "category-operations",
-          label: collapsed ? null : "运营",
-          icon: <SparkBarChartLine size={16} />,
-        },
-        {
-          key: "category-marketing",
-          label: collapsed ? null : "市场",
-          icon: <SparkMagicWandLine size={16} />,
-        },
-      ],
+    },
+    {
+      key: "category-communication",
+      label: collapsed ? null : "沟通协作",
+      icon: <SparkWifiLine size={16} />,
+    },
+    {
+      type: 'divider',
     },
     {
       key: "admin",
@@ -606,15 +616,16 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           {isWorkbench ? (
             <Menu
               mode="inline"
-              selectedKeys={[selectedKey]}
+              selectedKeys={[workbenchSelectedKey]}
               openKeys={DEFAULT_OPEN_KEYS}
               onClick={({ key }) => {
                 // Handle workbench menu clicks
-                if (key === 'workbench-home') {
+                if (key === 'category-all') {
                   navigate('/workbench');
                 } else if (key.startsWith('category-')) {
-                  // TODO: Filter scenes by category
-                  navigate('/workbench?category=' + key.replace('category-', ''));
+                  // Filter scenes by category
+                  const category = key.replace('category-', '');
+                  navigate(`/workbench?category=${category}`);
                 } else if (key === 'admin') {
                   navigate('/admin');
                 }

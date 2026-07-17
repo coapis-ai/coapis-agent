@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Input, Select, Tag, Empty, Spin, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import SceneCard from './SceneCard';
 import EmbeddedChat from './EmbeddedChat';
 import type { SceneConfig, SceneListResponse } from './types';
@@ -11,13 +11,26 @@ import { getApiToken } from '../../api/config';
 const { Search } = Input;
 const { Option } = Select;
 
+// Category mapping (URL param -> Chinese name)
+const CATEGORY_MAP: Record<string, string> = {
+  'all': '',
+  'office': '办公',
+  'data-analysis': '数据分析',
+  'document': '文档处理',
+  'communication': '沟通协作',
+};
+
 const Workbench: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [scenes, setScenes] = useState<SceneConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>();
   const [selectedTag, setSelectedTag] = useState<string>();
+  
+  // Get category from URL
+  const categoryParam = searchParams.get('category') || 'all';
+  const selectedCategoryName = CATEGORY_MAP[categoryParam] || '';
   
   // Embedded chat state
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -66,8 +79,7 @@ const Workbench: React.FC = () => {
     navigate(`/chat/${chatId}`);
   };
 
-  // Get unique categories and tags
-  const categories = Array.from(new Set(scenes.map(s => s.category).filter(Boolean)));
+  // Get unique tags
   const allTags = Array.from(new Set(scenes.flatMap(s => s.tags)));
 
   // Filter scenes
@@ -81,7 +93,8 @@ const Workbench: React.FC = () => {
       if (!matchName && !matchDesc) return false;
     }
     
-    if (selectedCategory && scene.category !== selectedCategory) {
+    // Filter by category from URL
+    if (selectedCategoryName && scene.category !== selectedCategoryName) {
       return false;
     }
     
@@ -115,18 +128,6 @@ const Workbench: React.FC = () => {
           style={{ width: 300 }}
           prefix={<SearchOutlined />}
         />
-        
-        <Select
-          placeholder="选择分类"
-          allowClear
-          style={{ width: 150 }}
-          onChange={setSelectedCategory}
-          value={selectedCategory}
-        >
-          {categories.map(cat => (
-            <Option key={cat} value={cat}>{cat}</Option>
-          ))}
-        </Select>
         
         <Select
           placeholder="选择标签"
