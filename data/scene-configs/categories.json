@@ -4,8 +4,8 @@
   
   "dimensions": {
     "nature": {
-      "name": "按性质分类",
-      "description": "按场景的功能性质分类",
+      "name": "通用分类",
+      "description": "按场景的通用性分类",
       "categories": [
         {
           "id": "office-common",

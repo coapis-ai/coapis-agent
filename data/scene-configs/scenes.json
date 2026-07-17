@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "description": "场景配置文件 - 多维度分类",
+  "description": "场景配置文件 - 支持多分类",
   "scenes": [
     {
       "id": "meeting-minutes",
@@ -9,11 +9,9 @@
       "agent_id": "scene-meeting-minutes",
       "icon": "📝",
       
+      "category": ["office-common", "natural-resources", "ecological-environment", "agriculture-rural", "development-reform", "housing-construction", "education", "forestry-grassland", "culture-tourism", "health", "comprehensive-enforcement"],
+      
       "properties": {
-        "nature": "office-common",
-        "nature_name": "办公通用",
-        "domains": ["all"],
-        "domain_names": ["自然资源", "生态环境", "农业农村", "发展改革", "城乡建设", "教育管理", "林草湿荒", "文化旅游", "卫生健康", "综合执法"],
         "frequency": "high",
         "is_generic": true,
         "priority": "high"
@@ -36,11 +34,9 @@
       "agent_id": "scene-document-drafting",
       "icon": "📄",
       
+      "category": ["office-common", "natural-resources", "ecological-environment", "agriculture-rural", "development-reform", "housing-construction", "education", "forestry-grassland", "culture-tourism", "health", "comprehensive-enforcement"],
+      
       "properties": {
-        "nature": "office-common",
-        "nature_name": "办公通用",
-        "domains": ["all"],
-        "domain_names": ["自然资源", "生态环境", "农业农村", "发展改革", "城乡建设", "教育管理", "林草湿荒", "文化旅游", "卫生健康", "综合执法"],
         "frequency": "high",
         "is_generic": true,
         "priority": "high"
@@ -63,11 +59,9 @@
       "agent_id": "scene-work-report",
       "icon": "📊",
       
+      "category": ["office-common", "natural-resources", "ecological-environment", "agriculture-rural", "development-reform", "housing-construction", "education", "forestry-grassland", "culture-tourism", "health", "comprehensive-enforcement"],
+      
       "properties": {
-        "nature": "office-common",
-        "nature_name": "办公通用",
-        "domains": ["all"],
-        "domain_names": ["自然资源", "生态环境", "农业农村", "发展改革", "城乡建设", "教育管理", "林草湿荒", "文化旅游", "卫生健康", "综合执法"],
         "frequency": "high",
         "is_generic": true,
         "priority": "high"
@@ -90,11 +84,9 @@
       "agent_id": "scene-project-approval",
       "icon": "✅",
       
+      "category": ["approval-service", "natural-resources", "ecological-environment", "development-reform", "housing-construction"],
+      
       "properties": {
-        "nature": "approval-service",
-        "nature_name": "审批服务",
-        "domains": ["natural-resources", "ecological-environment", "development-reform", "housing-construction"],
-        "domain_names": ["自然资源", "生态环境", "发展改革", "城乡建设"],
         "frequency": "high",
         "is_generic": true,
         "priority": "high"
@@ -117,11 +109,9 @@
       "agent_id": "scene-planning-compilation",
       "icon": "📋",
       
+      "category": ["planning-compilation", "natural-resources", "agriculture-rural", "development-reform", "culture-tourism"],
+      
       "properties": {
-        "nature": "planning-compilation",
-        "nature_name": "规划编制",
-        "domains": ["natural-resources", "agriculture-rural", "development-reform", "culture-tourism"],
-        "domain_names": ["自然资源", "农业农村", "发展改革", "文化旅游"],
         "frequency": "medium",
         "is_generic": true,
         "priority": "high"
@@ -144,11 +134,9 @@
       "agent_id": "scene-law-enforcement-inspection",
       "icon": "🔍",
       
+      "category": ["supervision-enforcement", "natural-resources", "ecological-environment", "housing-construction", "agriculture-rural", "forestry-grassland", "health", "culture-tourism", "comprehensive-enforcement"],
+      
       "properties": {
-        "nature": "supervision-enforcement",
-        "nature_name": "监管执法",
-        "domains": ["natural-resources", "ecological-environment", "housing-construction", "agriculture-rural", "forestry-grassland", "health", "culture-tourism", "comprehensive-enforcement"],
-        "domain_names": ["自然资源", "生态环境", "城乡建设", "农业农村", "林草湿荒", "卫生健康", "文化旅游", "综合执法"],
         "frequency": "high",
         "is_generic": true,
         "priority": "high"
@@ -171,11 +159,9 @@
       "agent_id": "scene-complaint-handling",
       "icon": "📞",
       
+      "category": ["supervision-enforcement", "natural-resources", "ecological-environment", "housing-construction", "agriculture-rural", "health", "comprehensive-enforcement"],
+      
       "properties": {
-        "nature": "supervision-enforcement",
-        "nature_name": "监管执法",
-        "domains": ["natural-resources", "ecological-environment", "housing-construction", "agriculture-rural", "health", "comprehensive-enforcement"],
-        "domain_names": ["自然资源", "生态环境", "城乡建设", "农业农村", "卫生健康", "综合执法"],
         "frequency": "high",
         "is_generic": true,
         "priority": "high"
@@ -198,11 +184,9 @@
       "agent_id": "scene-safety-inspection",
       "icon": "🛡️",
       
+      "category": ["supervision-enforcement", "housing-construction", "development-reform", "health", "comprehensive-enforcement"],
+      
       "properties": {
-        "nature": "supervision-enforcement",
-        "nature_name": "监管执法",
-        "domains": ["housing-construction", "development-reform", "health", "comprehensive-enforcement"],
-        "domain_names": ["城乡建设", "发展改革", "卫生健康", "综合执法"],
         "frequency": "high",
         "is_generic": true,
         "priority": "high"
@@ -225,11 +209,9 @@
       "agent_id": "scene-rectification-acceptance",
       "icon": "✔️",
       
+      "category": ["supervision-enforcement", "housing-construction", "ecological-environment", "health", "comprehensive-enforcement"],
+      
       "properties": {
-        "nature": "supervision-enforcement",
-        "nature_name": "监管执法",
-        "domains": ["housing-construction", "ecological-environment", "health", "comprehensive-enforcement"],
-        "domain_names": ["城乡建设", "生态环境", "卫生健康", "综合执法"],
         "frequency": "medium",
         "is_generic": true,
         "priority": "medium"
@@ -252,11 +234,9 @@
       "agent_id": "scene-emergency-response",
       "icon": "🚨",
       
+      "category": ["emergency-handling", "ecological-environment", "health", "development-reform"],
+      
       "properties": {
-        "nature": "emergency-handling",
-        "nature_name": "应急处置",
-        "domains": ["ecological-environment", "health", "development-reform"],
-        "domain_names": ["生态环境", "卫生健康", "发展改革"],
         "frequency": "low",
         "is_generic": true,
         "priority": "high"
@@ -279,11 +259,9 @@
       "agent_id": "scene-monitoring-analysis",
       "icon": "📊",
       
+      "category": ["data-analysis", "ecological-environment", "natural-resources", "development-reform", "health"],
+      
       "properties": {
-        "nature": "data-analysis",
-        "nature_name": "数据分析",
-        "domains": ["ecological-environment", "natural-resources", "development-reform", "health"],
-        "domain_names": ["生态环境", "自然资源", "发展改革", "卫生健康"],
         "frequency": "high",
         "is_generic": true,
         "priority": "high"
