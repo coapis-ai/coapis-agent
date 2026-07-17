@@ -48,6 +48,7 @@ const UserSystemPage = lazyImportWithRetry("../../pages/UserSystem/index");
 const UserProfilePage = lazyImportWithRetry("../../pages/UserProfile/index");
 const AdminPage = lazyImportWithRetry("../../pages/Admin/index");
 const MultiLayerEvolutionPage = lazyImportWithRetry("../../pages/MultiLayerEvolution/index");
+const WorkbenchPage = lazyImportWithRetry("../../pages/Workbench/index");
 // 知识库功能暂时隐藏
 // const KnowledgeBasePage = lazyImportWithRetry("../../pages/KnowledgeBase/index");
 
@@ -82,6 +83,7 @@ const pathToKey: Record<string, string> = {
   "/workspace/myspace": "myspace",
   "/user-system": "user-system",
   "/evolution": "evolution",
+  "/workbench": "workbench",
   // "/knowledge": "knowledge",
   // P2 Enterprise Features
   "/monitoring": "monitoring",
@@ -195,6 +197,7 @@ export default function MainLayout() {
                   <Route path="/user/profile" element={<UserProfilePage />} />
                   <Route path="/admin" element={<AdminPage />} />
                   <Route path="/evolution" element={<MultiLayerEvolutionPage />} />
+                  <Route path="/workbench" element={<WorkbenchPage />} />
                   {/* <Route path="/knowledge" element={<KnowledgeBasePage />} /> */}
                   <Route path="/cross-agent" element={<Navigate to="/evolution" replace />} />
 

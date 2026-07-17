@@ -20,6 +20,7 @@ export const DEFAULT_OPEN_KEYS = [
 
 export const KEY_TO_PATH: Record<string, string> = {
   chat: "/chat",
+  workbench: "/workbench",
   channels: "/channels",
   sessions: "/sessions",
   "cron-jobs": "/cron-jobs",
@@ -53,6 +54,7 @@ export const KEY_TO_PATH: Record<string, string> = {
 
 export const KEY_TO_LABEL: Record<string, string> = {
   chat: "nav.chat",
+  workbench: "nav.workbench",
   channels: "nav.channels",
   sessions: "nav.sessions",
   "cron-jobs": "nav.cronJobs",

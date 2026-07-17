@@ -191,6 +191,12 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       label: t("nav.chat"),
     },
     {
+      key: "workbench",
+      icon: <SparkModePlazaLine size={18} />,
+      path: "/workbench",
+      label: t("nav.workbench", "工作台"),
+    },
+    {
       key: "channels",
       icon: <SparkWifiLine size={18} />,
       path: "/channels",
@@ -347,6 +353,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       key: "chat",
       label: collapsed ? null : t("nav.chat"),
       icon: <SparkChatTabFill size={16} />,
+    },
+    {
+      key: "workbench",
+      label: collapsed ? null : t("nav.workbench", "工作台"),
+      icon: <SparkModePlazaLine size={16} />,
     },
     {
       key: "control-group",
