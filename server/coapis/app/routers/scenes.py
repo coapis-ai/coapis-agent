@@ -100,6 +100,34 @@ async def list_categories(
     return service.get_scene_categories()
 
 
+@router.get("/categories/grouped")
+async def list_categories_grouped(
+    current_user: dict = Depends(get_current_user),
+    service: SceneAgentService = Depends(get_scene_service),
+):
+    """List categories grouped by dimension.
+    
+    Returns categories in two dimensions:
+    - nature: 通用分类（办公通用、审批服务等）
+    - domain: 领域分类（自然资源、生态环境等）
+    
+    Returns:
+        {
+            "dimensions": {
+                "nature": {
+                    "name": "通用分类",
+                    "categories": [...]
+                },
+                "domain": {
+                    "name": "按领域分类",
+                    "categories": [...]
+                }
+            }
+        }
+    """
+    return service.get_categories_with_dimensions()
+
+
 @router.get("/tags")
 async def list_tags(
     current_user: dict = Depends(get_current_user),

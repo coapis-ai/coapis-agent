@@ -498,6 +498,45 @@ class SceneAgentService:
                 categories.add(scene.category)
         return sorted(list(categories))
     
+    def get_categories_with_dimensions(self) -> Dict[str, Any]:
+        """Get categories with dimension grouping.
+        
+        Reads from categories.json and returns structured data:
+        {
+            "dimensions": {
+                "nature": {
+                    "name": "通用分类",
+                    "categories": [...]
+                },
+                "domain": {
+                    "name": "按领域分类",
+                    "categories": [...]
+                }
+            }
+        }
+        
+        Returns:
+            Dict with dimension-grouped categories
+        """
+        # Read categories.json
+        categories_file = self.data_dir / "categories.json"
+        
+        if not categories_file.exists():
+            logger.warning(f"categories.json not found at {categories_file}")
+            return {"dimensions": {}}
+        
+        try:
+            with open(categories_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Return dimensions structure
+            return {
+                "dimensions": data.get("dimensions", {})
+            }
+        except Exception as e:
+            logger.error(f"Failed to load categories.json: {e}")
+            return {"dimensions": {}}
+    
     def get_scene_tags(self) -> List[str]:
         """Get all unique scene tags.
         

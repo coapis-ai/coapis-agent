@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Row, Col, Input, Select, Tag, Empty, Spin, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -11,19 +11,17 @@ import { getApiToken } from '../../api/config';
 const { Search } = Input;
 const { Option } = Select;
 
-// Category mapping (URL param -> Chinese name)
-const CATEGORY_MAP: Record<string, string> = {
-  'all': '',
-  'office': '办公',
-  'data-analysis': '数据分析',
-  'document': '文档处理',
-  'communication': '沟通协作',
-};
+interface CategoryInfo {
+  id: string;
+  name: string;
+  icon: string;
+}
 
 const Workbench: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [scenes, setScenes] = useState<SceneConfig[]>([]);
+  const [categoryMap, setCategoryMap] = useState<Record<string, string>>({}); // id -> name
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>();
@@ -31,7 +29,6 @@ const Workbench: React.FC = () => {
   // Get category and management mode from URL
   const categoryParam = searchParams.get('category') || 'all';
   const managementMode = searchParams.get('management'); // 'scenes' | 'tags'
-  const selectedCategoryName = CATEGORY_MAP[categoryParam] || '';
   
   // Embedded chat state
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -46,16 +43,45 @@ const Workbench: React.FC = () => {
     try {
       setLoading(true);
       const token = getApiToken();
-      const response = await fetch('/api/scenes', {
+      
+      // Load scenes
+      const scenesRes = await fetch('/api/scenes', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
-      if (!response.ok) {
+      if (!scenesRes.ok) {
         throw new Error('Failed to load scenes');
       }
-      const data: SceneListResponse = await response.json();
-      setScenes(data.scenes);
+      const scenesData: SceneListResponse = await scenesRes.json();
+      setScenes(scenesData.scenes);
+      
+      // Load categories
+      const categoriesRes = await fetch('/api/scenes/categories/grouped', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (categoriesRes.ok) {
+        const categoriesData = await categoriesRes.json();
+        
+        // Build category map: id -> name
+        const map: Record<string, string> = {};
+        if (categoriesData?.dimensions) {
+          // Add nature categories
+          const natureCats = categoriesData.dimensions.nature?.categories || [];
+          natureCats.forEach((cat: CategoryInfo) => {
+            map[cat.id] = cat.name;
+          });
+          
+          // Add domain categories
+          const domainCats = categoriesData.dimensions.domain?.categories || [];
+          domainCats.forEach((cat: CategoryInfo) => {
+            map[cat.id] = cat.name;
+          });
+        }
+        setCategoryMap(map);
+      }
     } catch (error) {
       console.error('Failed to load scenes:', error);
       message.error('加载场景失败');
@@ -84,27 +110,33 @@ const Workbench: React.FC = () => {
   const allTags = Array.from(new Set(scenes.flatMap(s => s.tags)));
 
   // Filter scenes
-  const filteredScenes = scenes.filter(scene => {
-    if (scene.status !== 'active') return false;
-    
-    if (searchText) {
-      const searchLower = searchText.toLowerCase();
-      const matchName = scene.name.toLowerCase().includes(searchLower);
-      const matchDesc = scene.description.toLowerCase().includes(searchLower);
-      if (!matchName && !matchDesc) return false;
-    }
-    
-    // Filter by category from URL
-    if (selectedCategoryName && scene.category !== selectedCategoryName) {
-      return false;
-    }
-    
-    if (selectedTag && !scene.tags.includes(selectedTag)) {
-      return false;
-    }
-    
-    return true;
-  });
+  const filteredScenes = useMemo(() => {
+    return scenes.filter(scene => {
+      if (scene.status !== 'active') return false;
+      
+      // Filter by category from URL
+      if (categoryParam !== 'all') {
+        // categoryParam是分类ID（如office-common），需要转换为分类名称进行匹配
+        const categoryName = categoryMap[categoryParam];
+        if (categoryName && scene.category !== categoryName) {
+          return false;
+        }
+      }
+      
+      if (searchText) {
+        const searchLower = searchText.toLowerCase();
+        const matchName = scene.name.toLowerCase().includes(searchLower);
+        const matchDesc = scene.description.toLowerCase().includes(searchLower);
+        if (!matchName && !matchDesc) return false;
+      }
+      
+      if (selectedTag && !scene.tags.includes(selectedTag)) {
+        return false;
+      }
+      
+      return true;
+    });
+  }, [scenes, categoryParam, categoryMap, searchText, selectedTag]);
 
   if (loading) {
     return (

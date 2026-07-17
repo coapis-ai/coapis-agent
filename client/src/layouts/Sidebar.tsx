@@ -69,6 +69,9 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   const { user } = useUser();
   const [collapsed, setCollapsed] = useState(false);
   
+  // Category data for dynamic workbench menu
+  const [categoryData, setCategoryData] = useState<any>(null);
+  
   // Check if we're on workbench route
   const isWorkbench = location.pathname === '/workbench';
   
@@ -125,6 +128,25 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       })
       .catch(() => {});
   }, [setAgents, setSelectedAgent]);
+  
+  // Load category data for workbench menu
+  useEffect(() => {
+    if (!isWorkbench) return;
+    
+    const token = localStorage.getItem('api_token') || '';
+    fetch('/api/scenes/categories/grouped', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    })
+      .then(res => res.json())
+      .then(data => {
+        setCategoryData(data);
+      })
+      .catch(err => {
+        console.error('Failed to load categories:', err);
+      });
+  }, [isWorkbench]);
   
   // Load permissions on mount and when user changes
   useEffect(() => {
@@ -524,36 +546,58 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
 
   // ── Menu items — workbench ──────────────────────────────────────
 
-  const workbenchMenuItems: MenuProps["items"] = [
-    {
-      key: "category-all",
-      label: collapsed ? null : "全部场景",
-      icon: <SparkModePlazaLine size={16} />,
-    },
-    {
-      key: "category-office",
-      label: collapsed ? null : "办公",
-      icon: <SparkLocalFileLine size={16} />,
-    },
-    {
-      key: "category-data-analysis",
-      label: collapsed ? null : "数据分析",
-      icon: <SparkBarChartLine size={16} />,
-    },
-    {
-      key: "category-document",
-      label: collapsed ? null : "文档处理",
-      icon: <SparkBrowseLine size={16} />,
-    },
-    {
-      key: "category-communication",
-      label: collapsed ? null : "沟通协作",
-      icon: <SparkWifiLine size={16} />,
-    },
-    {
-      type: 'divider',
-    },
-    {
+  const workbenchMenuItems: MenuProps["items"] = useMemo(() => {
+    // Base items: "全部场景"
+    const items: MenuProps["items"] = [
+      {
+        key: "category-all",
+        label: collapsed ? null : "全部场景",
+        icon: <SparkModePlazaLine size={16} />,
+      },
+    ];
+    
+    // Add dynamic categories from API
+    if (categoryData?.dimensions) {
+      // Add divider and "通用分类" section
+      items.push({ type: 'divider' });
+      
+      const natureCategories = categoryData.dimensions.nature?.categories || [];
+      if (natureCategories.length > 0) {
+        items.push({
+          key: 'nature-group',
+          label: collapsed ? null : '通用分类',
+          icon: <SparkLocalFileLine size={16} />,
+          type: 'group',
+          children: natureCategories.map((cat: any) => ({
+            key: `category-${cat.id}`,
+            label: collapsed ? null : cat.name,
+            icon: <span style={{ fontSize: 16 }}>{cat.icon}</span>,
+          })),
+        } as any);
+      }
+      
+      // Add divider and "领域分类" section
+      items.push({ type: 'divider' });
+      
+      const domainCategories = categoryData.dimensions.domain?.categories || [];
+      if (domainCategories.length > 0) {
+        items.push({
+          key: 'domain-group',
+          label: collapsed ? null : '领域分类',
+          icon: <SparkBarChartLine size={16} />,
+          type: 'group',
+          children: domainCategories.map((cat: any) => ({
+            key: `category-${cat.id}`,
+            label: collapsed ? null : cat.name,
+            icon: <span style={{ fontSize: 16 }}>{cat.icon}</span>,
+          })),
+        } as any);
+      }
+    }
+    
+    // Add management section
+    items.push({ type: 'divider' });
+    items.push({
       key: "management-group",
       label: collapsed ? null : "管理",
       icon: <CrownOutlined />,
@@ -569,8 +613,10 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           icon: <SparkLocalFileLine size={16} />,
         },
       ],
-    },
-  ];
+    });
+    
+    return items;
+  }, [collapsed, categoryData]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
