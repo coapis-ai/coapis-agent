@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Input, Select, Tag, Empty, Spin, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import SceneCard from './SceneCard';
+import EmbeddedChat from './EmbeddedChat';
 import type { SceneConfig, SceneListResponse } from './types';
 import styles from './index.module.less';
 
@@ -9,11 +11,16 @@ const { Search } = Input;
 const { Option } = Select;
 
 const Workbench: React.FC = () => {
+  const navigate = useNavigate();
   const [scenes, setScenes] = useState<SceneConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>();
   const [selectedTag, setSelectedTag] = useState<string>();
+  
+  // Embedded chat state
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [selectedScene, setSelectedScene] = useState<SceneConfig | null>(null);
 
   // Load scenes
   useEffect(() => {
@@ -37,33 +44,20 @@ const Workbench: React.FC = () => {
     }
   };
 
-  const handleEnterScene = async (scene: SceneConfig) => {
-    try {
-      const response = await fetch(`/api/scenes/${scene.id}/enter`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to enter scene');
-      }
-      
-      const data = await response.json();
-      message.success(`已进入场景: ${scene.name}`);
-      
-      // Navigate to chat with scene context
-      // This would be implemented with router navigation
-      console.log('Enter scene response:', data);
-      
-      // TODO: Navigate to chat page with scene context
-      // history.push(`/chat/${data.chat_id}`, { scene: data });
-      
-    } catch (error) {
-      console.error('Failed to enter scene:', error);
-      message.error('进入场景失败');
-    }
+  const handleEnterScene = (scene: SceneConfig) => {
+    // Open embedded chat drawer
+    setSelectedScene(scene);
+    setDrawerVisible(true);
+  };
+  
+  const handleCloseDrawer = () => {
+    setDrawerVisible(false);
+    setSelectedScene(null);
+  };
+  
+  const handleExpandChat = (chatId: string) => {
+    // Navigate to full chat page
+    navigate(`/chat/${chatId}`);
   };
 
   // Get unique categories and tags
@@ -161,6 +155,14 @@ const Workbench: React.FC = () => {
           </Tag>
         </div>
       )}
+      
+      {/* Embedded Chat Drawer */}
+      <EmbeddedChat
+        visible={drawerVisible}
+        scene={selectedScene}
+        onClose={handleCloseDrawer}
+        onExpand={handleExpandChat}
+      />
     </div>
   );
 };

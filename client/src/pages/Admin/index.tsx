@@ -9,6 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import PermissionMatrix from './components/PermissionMatrix';
+import SceneManagement from './SceneManagement';
 import { CRUD_OPS } from './components/PermissionMatrix';
 import {
   getTokenSummary, getUsersConfig,
@@ -79,6 +80,11 @@ function AdminDashboard() {
       key: 'config',
       label: <><SettingOutlined /> {t('admin.quota')}</>,
       children: <ConfigTab />,
+    },
+    {
+      key: 'scenes',
+      label: <><PlayCircleOutlined /> {t('admin.scenes', '场景管理')}</>,
+      children: <SceneManagement />,
     },
   ];
 
