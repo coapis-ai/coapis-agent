@@ -46,6 +46,7 @@ import { getAgentDisplayName, isDefaultAgent } from "../utils/agentDisplayName";
 import {
   MENU_TO_PERMISSION,
 } from "../config/menuModules";
+import { getApiToken } from "../api/config";
 
 // ── Layout ────────────────────────────────────────────────────────────────
 
@@ -133,7 +134,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   useEffect(() => {
     if (!isWorkbench) return;
     
-    const token = localStorage.getItem('api_token') || '';
+    const token = getApiToken();
     fetch('/api/scenes/categories/grouped', {
       headers: {
         'Authorization': `Bearer ${token}`,
