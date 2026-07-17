@@ -28,8 +28,9 @@ const Workbench: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>();
   
-  // Get category from URL
+  // Get category and management mode from URL
   const categoryParam = searchParams.get('category') || 'all';
+  const managementMode = searchParams.get('management'); // 'scenes' | 'tags'
   const selectedCategoryName = CATEGORY_MAP[categoryParam] || '';
   
   // Embedded chat state
@@ -113,6 +114,42 @@ const Workbench: React.FC = () => {
     );
   }
 
+  // Render management pages
+  if (managementMode === 'scenes') {
+    return (
+      <div className={styles.workbench}>
+        <div className={styles.header}>
+          <h1 className={styles.title}>场景管理</h1>
+          <p className={styles.subtitle}>创建、编辑、删除场景</p>
+        </div>
+        <div className={styles.managementContent}>
+          {/* TODO: Implement SceneManagement component */}
+          <p style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
+            场景管理功能开发中...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (managementMode === 'tags') {
+    return (
+      <div className={styles.workbench}>
+        <div className={styles.header}>
+          <h1 className={styles.title}>标签管理</h1>
+          <p className={styles.subtitle}>创建、编辑、删除标签</p>
+        </div>
+        <div className={styles.managementContent}>
+          {/* TODO: Implement TagManagement component */}
+          <p style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
+            标签管理功能开发中...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Render scene list
   return (
     <div className={styles.workbench}>
       <div className={styles.header}>

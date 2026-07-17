@@ -78,8 +78,13 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     
     const params = new URLSearchParams(location.search);
     const category = params.get('category');
+    const management = params.get('management');
     
-    if (category) {
+    if (management === 'scenes') {
+      return 'scene-management';
+    } else if (management === 'tags') {
+      return 'tag-management';
+    } else if (category) {
       return `category-${category}`;
     }
     
@@ -549,9 +554,21 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       type: 'divider',
     },
     {
-      key: "admin",
-      label: collapsed ? null : "场景管理",
+      key: "management-group",
+      label: collapsed ? null : "管理",
       icon: <CrownOutlined />,
+      children: [
+        {
+          key: "scene-management",
+          label: collapsed ? null : "场景管理",
+          icon: <SparkModePlazaLine size={16} />,
+        },
+        {
+          key: "tag-management",
+          label: collapsed ? null : "标签管理",
+          icon: <SparkLocalFileLine size={16} />,
+        },
+      ],
     },
   ];
 
@@ -617,7 +634,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
             <Menu
               mode="inline"
               selectedKeys={[workbenchSelectedKey]}
-              openKeys={DEFAULT_OPEN_KEYS}
+              openKeys={['management-group']}
               onClick={({ key }) => {
                 // Handle workbench menu clicks
                 if (key === 'category-all') {
@@ -626,8 +643,10 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
                   // Filter scenes by category
                   const category = key.replace('category-', '');
                   navigate(`/workbench?category=${category}`);
-                } else if (key === 'admin') {
-                  navigate('/admin');
+                } else if (key === 'scene-management') {
+                  navigate('/workbench?management=scenes');
+                } else if (key === 'tag-management') {
+                  navigate('/workbench?management=tags');
                 }
               }}
               items={workbenchMenuItems}
