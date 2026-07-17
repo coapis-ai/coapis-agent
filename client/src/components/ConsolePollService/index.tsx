@@ -22,6 +22,9 @@ export default function ConsolePollService() {
   const originalTitleRef = useRef(document.title);
   const blinkRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { setApprovals } = useApprovalContext();
+  
+  // Cache previous approvals to avoid unnecessary state updates
+  const prevApprovalsRef = useRef<string>("");  // Store sorted request_ids as string
 
   const dismiss = (id: string) => {
     setItems((prev) => prev.filter((i) => i.id !== id));
@@ -39,8 +42,27 @@ export default function ConsolePollService() {
         .getPushMessages(sessionId || undefined)
         .then((res) => {
           // Update pending approvals (global, will be filtered by Chat component)
+          // ✅ Optimization: Only update when approvals actually changed
           if (res?.pending_approvals) {
-            setApprovals(res.pending_approvals);
+            const approvals = res.pending_approvals;
+            
+            // Compare approval request IDs (sorted, joined as string)
+            const nextIds = approvals
+              .map((a) => a.request_id)
+              .sort()
+              .join(",");
+            
+            if (prevApprovalsRef.current !== nextIds) {
+              // Approvals changed, update state
+              console.log(
+                "[ConsolePollService] Approvals changed:",
+                nextIds.length,
+                "items",
+              );
+              prevApprovalsRef.current = nextIds;
+              setApprovals(approvals);
+            }
+            // else: approvals unchanged, skip update to prevent flickering
           }
 
           // Update message bubbles

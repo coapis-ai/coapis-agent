@@ -151,6 +151,7 @@ export function AgentTable({
     {
       title: t("common.actions"),
       key: "actions",
+      width: 180,
       render: (_: any, record: AgentSummary) => (
         <Space>
           {onOpenFiles && (

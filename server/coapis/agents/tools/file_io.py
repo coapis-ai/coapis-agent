@@ -121,7 +121,7 @@ def _get_encoding_for_file(file_path: str) -> str:
 
 @register_tool(
     name="read_file",
-    description="读取文件内容，支持文本文件",
+    description="读取文件内容。必需参数：file_path（文件路径）。可选参数：start_line、end_line（行号范围）。",
     category="builtin",
     tags=['file', 'read'],
     scene="core",
@@ -131,18 +131,18 @@ async def read_file(  # pylint: disable=too-many-return-statements
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
 ) -> ToolResponse:
-    """Read a file. Relative paths resolve from WORKING_DIR.
+    """读取文件内容。相对路径从 workspace/files/ 目录解析。
 
-    Use start_line/end_line to read a specific line range (output includes
-    line numbers). Omit both to read the full file.
+    ⚠️ 注意：参数名是 file_path（不是 path）
 
     Args:
-        file_path (`str`):
-            Path to the file.
-        start_line (`int`, optional):
-            First line to read (1-based, inclusive).
-        end_line (`int`, optional):
-            Last line to read (1-based, inclusive).
+        file_path: 文件路径（必需）。可以是绝对路径或相对路径。
+        start_line: 起始行号（可选，1-based，包含）。默认读取全文。
+        end_line: 结束行号（可选，1-based，包含）。默认读取全文。
+    
+    示例：
+        读取全文：{"file_path": "/apps/ai/config.json"}
+        读取部分：{"file_path": "report.txt", "start_line": 1, "end_line": 10}
     """
 
     # Convert start_line/end_line to int if they are strings
@@ -284,7 +284,7 @@ async def read_file(  # pylint: disable=too-many-return-statements
 
 @register_tool(
     name="write_file",
-    description="写入文件内容",
+    description="写入文件内容。必需参数：file_path（文件路径）、content（文件内容）。",
     category="builtin",
     tags=['file', 'write'],
     scene="core",
@@ -293,13 +293,17 @@ async def write_file(
     file_path: str,
     content: str,
 ) -> ToolResponse:
-    """Create or overwrite a file. Relative paths resolve from workspace/files/.
+    """写入文件内容。相对路径保存到 workspace/files/ 目录。
+
+    ⚠️ 注意：参数名是 file_path（不是 path）
 
     Args:
-        file_path (`str`):
-            Path to the file.
-        content (`str`):
-            Content to write.
+        file_path: 文件路径（必需）。相对路径会保存到 workspace/files/ 目录。
+        content: 文件内容（必需）。支持文本内容。
+    
+    示例：
+        {"file_path": "report.txt", "content": "报告内容..."}
+        {"file_path": "/apps/ai/data/output.txt", "content": "输出数据..."}
     """
 
     if not file_path:
@@ -355,7 +359,7 @@ async def write_file(
 # pylint: disable=too-many-return-statements
 @register_tool(
     name="edit_file",
-    description="查找替换文件内容",
+    description="查找替换文件内容。必需参数：file_path（文件路径）、old_text（原文本）、new_text（新文本）。",
     category="builtin",
     tags=['file', 'edit'],
     scene="core",
@@ -365,16 +369,17 @@ async def edit_file(
     old_text: str,
     new_text: str,
 ) -> ToolResponse:
-    """Find-and-replace text in a file. All occurrences of old_text are
-    replaced with new_text. Relative paths resolve from WORKING_DIR.
+    """查找替换文件内容。相对路径从 workspace/files/ 目录解析。
+
+    ⚠️ 注意：参数名是 file_path（不是 path）
 
     Args:
-        file_path (`str`):
-            Path to the file.
-        old_text (`str`):
-            Exact text to find.
-        new_text (`str`):
-            Replacement text.
+        file_path: 文件路径（必需）。
+        old_text: 要查找的原文本（必需）。精确匹配。
+        new_text: 替换的新文本（必需）。
+    
+    示例：
+        {"file_path": "config.txt", "old_text": "debug=false", "new_text": "debug=true"}
     """
 
     if not file_path:
@@ -468,7 +473,7 @@ async def edit_file(
 
 @register_tool(
     name="append_file",
-    description="追加内容到文件末尾",
+    description="追加内容到文件末尾。必需参数：file_path（文件路径）、content（追加内容）。",
     category="builtin",
     tags=["file", "append"],
     scene="core",
@@ -477,14 +482,16 @@ async def append_file(
     file_path: str,
     content: str,
 ) -> ToolResponse:
-    """Append content to the end of a file. Relative paths resolve from
-    workspace/files/.
+    """追加内容到文件末尾。相对路径从 workspace/files/ 目录解析。
+
+    ⚠️ 注意：参数名是 file_path（不是 path）
 
     Args:
-        file_path (`str`):
-            Path to the file.
-        content (`str`):
-            Content to append.
+        file_path: 文件路径（必需）。
+        content: 追加的内容（必需）。
+    
+    示例：
+        {"file_path": "log.txt", "content": "新的日志条目\\n"}
     """
 
     if not file_path:

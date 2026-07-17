@@ -838,6 +838,7 @@ export default function ChatPage() {
   const navigateRef = useRef(navigate);
   const chatRef = useRef<IAgentScopeRuntimeWebUIRef>(null);
   const pendingClearHistoryRef = useRef(false);
+  const requestSessionIdRef = useRef<string | null>(null);
 
   useMessageHistoryNavigation(chatRef, isChatActive, isComposingRef);
   chatIdRef.current = chatId;
@@ -891,6 +892,13 @@ export default function ChatPage() {
       realId: string | null,
     ) => {
       if (!isChatActiveRef.current) return;
+      
+      // Clear previous session's SSE filtering state
+      const targetId = realId || sessionId;
+      if (targetId && targetId !== requestSessionIdRef.current) {
+        console.log("[Chat] Session changed, clearing SSE filter state");
+        requestSessionIdRef.current = null;
+      }
 
       // Skip when ChatSessionInitializer set currentSessionId — breaks the URL↔session loop.
       if (skipNextSessionSelectedRef.current) {
@@ -1154,6 +1162,11 @@ export default function ChatPage() {
         chat_id: chatIdRef.current || undefined,
       };
 
+      // Record current session_id for SSE filtering
+      const currentSessionId = requestBody.session_id || requestBody.chat_id || null;
+      requestSessionIdRef.current = currentSessionId;
+      console.log("[Chat] Request session_id:", currentSessionId);
+
       const response = await fetch(getApiUrl("/console/chat"), {
         method: "POST",
         headers,
@@ -1365,6 +1378,18 @@ export default function ChatPage() {
         fetch: customFetch,
         responseParser: (chunk: string) => {
           const payload = JSON.parse(chunk) as Record<string, unknown>;
+          
+          // Filter out SSE events from other chats
+          // Backend adds chat_id to metadata for session isolation
+          const payloadChatId = (payload.metadata as Record<string, unknown>)?.chat_id as string | undefined;
+          const currentChatId = requestSessionIdRef.current;
+          
+          if (payloadChatId && currentChatId && payloadChatId !== currentChatId) {
+            console.log("[SSE] Ignoring payload from other chat:", payloadChatId, "current:", currentChatId);
+            // Return a minimal heartbeat event to prevent errors
+            return { object: "heartbeat", status: "completed" };
+          }
+          
           const completed = payloadCompletesResponse(payload);
 
           // Debug: log key events
