@@ -568,6 +568,8 @@ export default function ChatPage() {
     return (window as any).__CHAT_MODE__ || 'full';
   }, []);
   
+  const isEmbeddedMode = chatMode === 'embedded';
+  
   const sceneSessionId = useMemo(() => {
     return (window as any).__CHAT_SESSION_ID__;
   }, []);
@@ -575,6 +577,13 @@ export default function ChatPage() {
   const sceneId = useMemo(() => {
     return (window as any).__CHAT_SCENE_ID__;
   }, []);
+  
+  // 场景ID用于后续场景智能体相关逻辑
+  useEffect(() => {
+    if (sceneId && isEmbeddedMode) {
+      console.log('[Chat] Scene mode activated:', sceneId);
+    }
+  }, [sceneId, isEmbeddedMode]);
   
   const sceneName = useMemo(() => {
     return (window as any).__CHAT_SCENE_NAME__;
@@ -588,8 +597,6 @@ export default function ChatPage() {
     const val = (window as any).__CHAT_SHOW_TOOLBAR__;
     return val !== undefined ? val : true;
   }, []);
-  
-  const isEmbeddedMode = chatMode === 'embedded';
   
   const chatId = useMemo(() => {
     // 嵌入式模式：使用场景会话ID
@@ -1357,7 +1364,7 @@ export default function ChatPage() {
         ...i18nConfig.welcome,
         nick: sceneName || "CoApis",
         avatar: "/bee_icon.png",
-        message: sceneWelcomeMessage || i18nConfig.welcome.message,
+        greeting: sceneWelcomeMessage || i18nConfig.welcome.greeting,
         // Use dynamic recommendations if available, fallback to static prompts
         prompts: dynamicRecommendations.length > 0
           ? dynamicRecommendations.map((rec) => ({
