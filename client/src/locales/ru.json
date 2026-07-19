@@ -62,6 +62,7 @@
     "plugins": "Плагины",
     "acp": "ACP",
     "backups": "Бэкапы и очистка",
+    "knowledge": "База знаний",
     "adminPanel": "Панель управления"
   },
   "debug": {

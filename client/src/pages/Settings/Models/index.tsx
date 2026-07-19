@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { Button, Input } from "@agentscope-ai/design";
+import { useCallback, useMemo, useState, useEffect } from "react";
+import { Button, Input, message } from "antd";
 import { PlusOutlined, SearchOutlined, SyncOutlined } from "@ant-design/icons";
 import { useProviders } from "./useProviders";
 import {
@@ -8,9 +8,12 @@ import {
   CustomProviderModal,
   ModelsSection,
 } from "./components";
+import { DefaultModelSelector } from "./components/DefaultModelSelector";
+import { ModelTypeTabs } from "./components/ModelTypeTabs";
 import { PageHeader } from "@/components/PageHeader";
 import { useTranslation } from "react-i18next";
 import type { ProviderInfo } from "../../../api/types/provider";
+import api from "@/api";
 import styles from "./index.module.less";
 
 /* ------------------------------------------------------------------ */
@@ -22,6 +25,52 @@ function ModelsPage() {
   const { providers, activeModels, loading, error, fetchAll } = useProviders();
   const [addProviderOpen, setAddProviderOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  
+  // Model type filter
+  const [modelTypeFilter, setModelTypeFilter] = useState<string | undefined>(undefined);
+  
+  // Default models configuration
+  const [defaultModels, setDefaultModels] = useState<Record<string, { providerId: string; modelId: string } | null>>({});
+
+  // Load default models
+  useEffect(() => {
+    api.get("/models/default-models").then((res: any) => {
+      const models: Record<string, any> = {};
+      Object.entries(res.data).forEach(([type, value]: [string, any]) => {
+        if (value) {
+          models[type] = {
+            providerId: value.provider_id,
+            modelId: value.model_id,
+          };
+        }
+      });
+      setDefaultModels(models);
+    });
+  }, []);
+
+  const handleDefaultModelChange = async (
+    type: string,
+    value: { providerId: string; modelId: string } | null
+  ) => {
+    if (!value) return;
+
+    try {
+      await api.put("/models/default-models", {
+        provider_id: value.providerId,
+        model_id: value.modelId,
+        model_type: type,
+      });
+      
+      setDefaultModels((prev) => ({
+        ...prev,
+        [type]: value,
+      }));
+      
+      message.success(t("models.defaultModelSaved"));
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || t("common.saveFailed"));
+    }
+  };
 
   const refreshProvidersSilently = useCallback(() => {
     void fetchAll(false);
@@ -30,7 +79,7 @@ function ModelsPage() {
   const { sortedProviders } = useMemo(() => {
     // Sort providers: available first, then configured, then unconfigured.
     // Within each group, sort by name alphabetically.
-    const sorted = [...providers].sort((a, b) => {
+    let sorted = [...providers].sort((a, b) => {
       let isConfiguredA = false;
       let isConfiguredB = false;
       
@@ -68,17 +117,31 @@ function ModelsPage() {
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
 
+    // Filter by model type
+    if (modelTypeFilter) {
+      sorted = sorted.filter((p) =>
+        p.models.some((m: any) => (m.model_type || "chat") === modelTypeFilter)
+      );
+      
+      // Filter models within providers
+      sorted = sorted.map((p) => ({
+        ...p,
+        models: p.models.filter(
+          (m: any) => (m.model_type || "chat") === modelTypeFilter
+        ),
+      })) as ProviderInfo[];
+    }
+
     // Fuzzy search filter: match provider name (case-insensitive)
     const query = searchQuery.trim().toLowerCase();
-    if (!query) {
-      return { sortedProviders: sorted };
+    if (query) {
+      sorted = sorted.filter((p) =>
+        p.name.toLowerCase().includes(query)
+      );
     }
-    return {
-      sortedProviders: sorted.filter((p) =>
-        p.name.toLowerCase().includes(query),
-      ),
-    };
-  }, [providers, searchQuery]);
+
+    return { sortedProviders: sorted };
+  }, [providers, searchQuery, modelTypeFilter]);
 
   const renderProviderCards = (list: ProviderInfo[]) =>
     list.map((provider) => (
@@ -110,6 +173,42 @@ function ModelsPage() {
               activeModels={activeModels}
               onSaved={fetchAll}
             />
+            
+            {/* ---- Default Models Section ---- */}
+            <div className={styles.defaultModelsSection}>
+              <PageHeader current={t("models.defaultModelsTitle")} />
+              <div className={styles.defaultModelsGrid}>
+                <DefaultModelSelector
+                  modelType="chat"
+                  label={t("models.chatModels")}
+                  icon="💬"
+                  value={defaultModels.chat}
+                  onChange={(value) => handleDefaultModelChange("chat", value)}
+                />
+                <DefaultModelSelector
+                  modelType="embedding"
+                  label={t("models.embeddingModels")}
+                  icon="🔢"
+                  value={defaultModels.embedding}
+                  onChange={(value) => handleDefaultModelChange("embedding", value)}
+                />
+                <DefaultModelSelector
+                  modelType="rerank"
+                  label={t("models.rerankModels")}
+                  icon="🔄"
+                  value={defaultModels.rerank}
+                  onChange={(value) => handleDefaultModelChange("rerank", value)}
+                />
+                <DefaultModelSelector
+                  modelType="audio"
+                  label={t("models.audioModels")}
+                  icon="🎵"
+                  value={defaultModels.audio}
+                  onChange={(value) => handleDefaultModelChange("audio", value)}
+                />
+              </div>
+            </div>
+            
             {/* ---- Providers Section ---- */}
             <div className={styles.providersBlock}>
               <div className={styles.sectionHeaderRow}>
@@ -145,6 +244,13 @@ function ModelsPage() {
                   </Button>
                 </div>
               </div>
+
+              {/* ---- Model Type Tabs ---- */}
+              <ModelTypeTabs
+                activeType={modelTypeFilter}
+                onChange={setModelTypeFilter}
+                providers={providers}
+              />
 
               {sortedProviders.length > 0 && (
                 <div className={styles.providerGroup}>

@@ -64,7 +64,19 @@ class MdFileContent(BaseModel):
 
 
 def _get_workspace_dir(request: Request) -> Path:
-    """Get the workspace directory for the selected agent."""
+    """Get the workspace directory for the current user (not agent)."""
+    from ...constant import WORKSPACES_DIR
+    
+    # Get username from request state
+    username = getattr(request.state, 'username', None)
+    
+    # If username available, return user's workspace directory
+    if username:
+        user_workspace = WORKSPACES_DIR / username
+        if user_workspace.exists():
+            return user_workspace
+    
+    # Fallback: use first agent's workspace (backward compatibility)
     from ...constant import AGENTS_DIR
     manager = getattr(request.app.state, 'multi_agent_manager', None)
     if not manager:
@@ -222,6 +234,9 @@ async def list_memory_files(request: Request) -> List[Dict[str, Any]]:
     workspace_dir = _get_workspace_dir(request)
     memory_dir = workspace_dir / "memory"
 
+    # Debug log
+    logger.info(f"[list_memory_files] workspace_dir={workspace_dir}, memory_dir={memory_dir}, exists={memory_dir.exists()}")
+
     if not memory_dir.exists():
         return []
 
@@ -243,6 +258,97 @@ async def list_memory_files(request: Request) -> List[Dict[str, Any]]:
             logger.error(f"Failed to stat {md_file}: {e}")
 
     return result
+
+
+@router.get("/workspace/memory/{date}.md")
+@require_permission("myspace:read")
+async def load_daily_memory(
+    request: Request,
+    date: str,
+) -> Dict[str, Any]:
+    """Load daily memory file content.
+    
+    Args:
+        date: Date string in YYYY-MM-DD format
+    
+    Returns:
+        { content: str, exists: bool, path: str }
+    """
+    workspace_dir = _get_workspace_dir(request)
+    memory_dir = workspace_dir / "memory"
+    
+    # Validate date format
+    if not date.endswith(".md"):
+        date = f"{date}.md"
+    
+    # Security: prevent path traversal
+    if ".." in date or "/" in date or "\\" in date:
+        raise HTTPException(400, "Invalid date format")
+    
+    memory_file = memory_dir / date
+    
+    if not memory_file.exists():
+        return {
+            "content": "",
+            "exists": False,
+            "path": str(memory_file.relative_to(workspace_dir)),
+        }
+    
+    try:
+        content = memory_file.read_text(encoding="utf-8")
+        return {
+            "content": content,
+            "exists": True,
+            "path": str(memory_file.relative_to(workspace_dir)),
+        }
+    except Exception as e:
+        logger.error(f"Failed to read memory file {memory_file}: {e}")
+        raise HTTPException(500, f"Failed to read memory file: {e}")
+
+
+@router.put("/workspace/memory/{date}.md")
+@require_permission("myspace:write")
+async def save_daily_memory(
+    request: Request,
+    date: str,
+    body: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """Save daily memory file content.
+    
+    Args:
+        date: Date string in YYYY-MM-DD format
+        body: { content: str }
+    
+    Returns:
+        { ok: bool, path: str, size: int }
+    """
+    workspace_dir = _get_workspace_dir(request)
+    memory_dir = workspace_dir / "memory"
+    
+    # Validate date format
+    if not date.endswith(".md"):
+        date = f"{date}.md"
+    
+    # Security: prevent path traversal
+    if ".." in date or "/" in date or "\\" in date:
+        raise HTTPException(400, "Invalid date format")
+    
+    # Create memory directory if not exists
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    
+    memory_file = memory_dir / date
+    content = body.get("content", "")
+    
+    try:
+        memory_file.write_text(content, encoding="utf-8")
+        return {
+            "ok": True,
+            "path": str(memory_file.relative_to(workspace_dir)),
+            "size": len(content.encode("utf-8")),
+        }
+    except Exception as e:
+        logger.error(f"Failed to save memory file {memory_file}: {e}")
+        raise HTTPException(500, f"Failed to save memory file: {e}")
 
 
 @router.get("/workspace/memory/content")

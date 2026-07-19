@@ -53,13 +53,38 @@ MEMORY_GUIDANCE_ZH = """\
 对话中发现有价值的信息时，**先记下来，再回答问题**：
 
 - 用户提到的个人信息（名字、偏好、习惯、工作方式）→ 更新 `PROFILE.md` 的「用户资料」section
-- 对话中做出的重要决策或结论 → 记录到 `memory/YYYY-MM-DD.md`
+- 对话中做出的重要决策或结论 → **调用 `record_daily_memory` 工具自动记录**
 - 发现的项目上下文、技术细节、工作流程 → 写入相关文件
 - 用户表达的喜好或不满 → 更新 `PROFILE.md` 的「用户资料」section
 - 工具相关的本地配置（SSH、摄像头等）→ 更新 `MEMORY.md` 的「工具设置」section
 - 任何你觉得未来会话可能用到的信息 → 立刻记下来
 
 **关键原则：** 不要总是等用户说"记住这个"。如果信息对未来有价值，主动记录。先记录，再回答 — 这样即使会话中断，信息也不会丢失。
+
+### 🔧 每日笔记自动记录工具
+
+你可以使用 `record_daily_memory` 工具自动记录重要事件：
+
+- **参数**：
+  - `event`（必需）：事件描述
+  - `category`（可选）：分类 - "决策"/"偏好"/"任务"/"问题"/"其他"
+  
+- **使用场景**：
+  - 用户说"记住这个"、"记下来"
+  - 做出重要决策
+  - 用户提到重要偏好
+  - 完成重要任务
+  - 发现重要问题
+
+- **示例调用**：
+  ```
+  record_daily_memory(
+    event="用户偏好使用深色主题",
+    category="偏好"
+  )
+  ```
+
+该工具会自动将事件追加到当天的每日笔记（`memory/YYYY-MM-DD.md`），无需手动操作文件。
 
 ### 🔍 检索工具
 回答关于过往工作、决策、日期、人员、偏好或待办的问题前：
@@ -99,19 +124,45 @@ Use these files to record important things, including decisions, context, and th
 
 When you discover valuable information during a conversation, **record it first, then answer the question**:
 
-- Personal info the user mentions (name, preferences, habits, workflow) → update the "User Profile" section in `PROFILE.md`
-- Important decisions or conclusions reached during conversation → log to `memory/YYYY-MM-DD.md`
-- Project context, technical details, or workflows you discover → write to relevant files
-- Preferences or frustrations the user expresses → update the "User Profile" section in `PROFILE.md`
-- Tool-related local config (SSH, cameras, etc.) → update the "Tool Setup" section in `MEMORY.md`
-- Any information you think could be useful in future sessions → write it down immediately
+- Personal information user mentions (name, preferences, habits, work style) → update `PROFILE.md` user profile section
+- Important decisions or conclusions reached during conversation → **call `record_daily_memory` tool to auto-record**
+- Project context, technical details, workflows discovered → write to relevant files
+- Likes or dislikes expressed by user → update `PROFILE.md` user profile section
+- Tool-related local configs (SSH, camera, etc.) → update `MEMORY.md` tool settings section
+- Any information you think future sessions might need → record immediately
 
-**Key principle:** Don't always wait for the user to say "remember this." If information is valuable for the future, record it proactively. Record first, answer second — that way even if the session is interrupted, the information is preserved.
+**Key principle:** Don't always wait for "remember this". If information is valuable for the future, proactively record it. Record first, then answer — so information isn't lost even if the session is interrupted.
 
-### 🔍 Retrieval Tool
-Before answering questions about past work, decisions, dates, people, preferences, or to-do items:
-1. Run memory_search on MEMORY.md and files in memory/*.md.
-2. If you need to read daily notes from memory/YYYY-MM-DD.md, you can directly access them using `read_file`."""
+### 🔧 Daily Memory Auto-Recording Tool
+
+You can use the `record_daily_memory` tool to automatically record important events:
+
+- **Parameters**:
+  - `event` (required): Event description
+  - `category` (optional): Category - "decision"/"preference"/"task"/"issue"/"other"
+  
+- **Use cases**:
+  - User says "remember this", "take note"
+  - Making important decisions
+  - User mentions important preferences
+  - Completing important tasks
+  - Discovering important issues
+
+- **Example call**:
+  ```
+  record_daily_memory(
+    event="User prefers dark theme",
+    category="preference"
+  )
+  ```
+
+This tool automatically appends events to today's daily note (`memory/YYYY-MM-DD.md`), no manual file operations needed.
+
+### 🔍 Retrieval Tools
+Before answering questions about past work, decisions, dates, people, preferences or todos:
+1. Run `memory_search` on MEMORY.md and files in memory/*.md.
+2. If you need to read daily notes from memory/YYYY-MM-DD.md, you can directly access them using `read_file`.
+"""
 
 # Dream optimization prompts - instructs agent to consolidate memories
 DREAM_OPTIMIZATION_ZH = """\

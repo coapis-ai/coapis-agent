@@ -362,6 +362,12 @@ async def console_chat(
         native_payload["meta"]["selected_files"] = selected_files
         logger.info(f"Passing {len(selected_files)} file references through meta")
 
+    # ── Scene ID: 场景智能体（叠加到用户智能体） ──
+    scene_id = biz_params.get("scene_id")
+    if scene_id:
+        native_payload["meta"]["scene_id"] = scene_id
+        logger.info(f"Scene agent mode: scene_id={scene_id}")
+
     # ── Extract chat_id early (used in session context + chat lookup) ──
     # Check both top-level and biz_params (frontend may pass it in either place)
     request_chat_id = payload.get("chat_id") or (payload.get("biz_params") or {}).get("chat_id")

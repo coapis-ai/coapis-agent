@@ -205,13 +205,51 @@ async def enter_scene(
     user_id = current_user.get("username", "anonymous")
     
     try:
+        # Get scene config first (for scene name)
+        scene_config = service.get_scene(scene_id)
+        if not scene_config:
+            raise SceneNotFoundError(f"Scene not found: {scene_id}")
+        
         result = service.enter_scene(
             scene_id=scene_id,
             user_id=user_id,
             request=request,
         )
         
-        logger.info(f"User {user_id} entered scene: {scene_id}")
+        # CRITICAL: Create chat session in database
+        # This is necessary so that sessionApi.getSessionList() can find the new chat
+        from ..runner.manager import ChatManager
+        from ..runner.models import ChatSpec
+        from ..runner.repo.json_repo import JsonChatRepository
+        from ...constant import WORKING_DIR
+        from pathlib import Path
+        
+        # Create chat repository and manager
+        data_dir = Path(WORKING_DIR)
+        chats_file = data_dir / "workspaces" / user_id / "chat" / "chats.json"
+        chats_file.parent.mkdir(parents=True, exist_ok=True)
+        repo = JsonChatRepository(chats_file)
+        chat_manager = ChatManager(repo=repo)
+        
+        # Create chat spec
+        chat_spec = ChatSpec(
+            id=result.chat_id,
+            name=f"场景: {scene_config.name}",
+            session_id=result.session_id,
+            user_id=user_id,
+            channel="console",
+            agent_id=result.agent["id"],
+            meta={
+                "scene_id": scene_id,
+                "scene_name": scene_config.name,
+                "scene_icon": result.scene.icon,
+            },
+        )
+        
+        # Save chat to database
+        await chat_manager.create_chat(chat_spec)
+        
+        logger.info(f"User {user_id} entered scene: {scene_id}, chat_id: {result.chat_id}")
         return result
         
     except SceneNotFoundError as e:

@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, List, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Type
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
@@ -30,10 +30,31 @@ from coapis.exceptions import ProviderError
 if TYPE_CHECKING:
     from .multimodal_prober import ProbeResult
 
+# Model type enumeration
+ModelType = Literal["chat", "embedding", "rerank", "audio", "vision"]
+
 
 class ModelInfo(BaseModel):
     id: str = Field(..., description="Model identifier used in API calls")
     name: str = Field(..., description="Human-readable model name")
+    
+    # Model type (chat, embedding, rerank, audio, vision)
+    model_type: ModelType = Field(
+        default="chat",
+        description="Model type: chat, embedding, rerank, audio, or vision",
+    )
+    
+    # Embedding model specific fields
+    embedding_dimension: int | None = Field(
+        default=None,
+        description="Embedding vector dimension (for embedding models)",
+    )
+    max_sequence_length: int | None = Field(
+        default=None,
+        description="Maximum sequence length (for embedding models)",
+    )
+    
+    # Multimodal support (for chat/vision models)
     supports_multimodal: bool | None = Field(
         default=None,
         description="Whether this model supports multimodal input "
@@ -49,6 +70,8 @@ class ModelInfo(BaseModel):
         description="Whether this model supports video input. "
         "None means not yet probed.",
     )
+    
+    # Other metadata
     probe_source: str | None = Field(
         default=None,
         description=(
@@ -387,3 +410,57 @@ class Provider(ProviderInfo, ABC):
             require_api_key=self.require_api_key,
             generate_kwargs=self.generate_kwargs,
         )
+
+
+# ============================================================================
+# Default Models Configuration
+# ============================================================================
+
+
+class DefaultModelSlot(BaseModel):
+    """Default model configuration for a specific model type."""
+
+    provider_id: str = Field(..., description="Provider ID")
+    model_id: str = Field(..., description="Model ID")
+    model_type: ModelType = Field(..., description="Model type")
+
+
+class DefaultModelsConfig(BaseModel):
+    """Default models configuration for all model types."""
+
+    chat: DefaultModelSlot | None = Field(
+        default=None, description="Default chat model"
+    )
+    embedding: DefaultModelSlot | None = Field(
+        default=None, description="Default embedding model"
+    )
+    rerank: DefaultModelSlot | None = Field(
+        default=None, description="Default rerank model"
+    )
+    audio: DefaultModelSlot | None = Field(
+        default=None, description="Default audio model"
+    )
+    vision: DefaultModelSlot | None = Field(
+        default=None, description="Default vision model"
+    )
+
+    def get_by_type(self, model_type: ModelType) -> DefaultModelSlot | None:
+        """Get default model by type."""
+        return getattr(self, model_type, None)
+
+    def set_by_type(self, model_type: ModelType, slot: DefaultModelSlot) -> None:
+        """Set default model by type."""
+        if hasattr(self, model_type):
+            setattr(self, model_type, slot)
+
+    def to_dict(self) -> Dict[str, Dict]:
+        """Export to dict format for JSON serialization."""
+        result = {}
+        for field in ["chat", "embedding", "rerank", "audio", "vision"]:
+            slot = getattr(self, field)
+            if slot:
+                result[field] = {
+                    "provider_id": slot.provider_id,
+                    "model_id": slot.model_id,
+                }
+        return result

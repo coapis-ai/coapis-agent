@@ -401,11 +401,16 @@ class SceneAgentService:
         user_id: str,
         request: Optional[EnterSceneRequest] = None,
     ) -> EnterSceneResponse:
-        """Enter a scene - create chat session with scene agent.
+        """Enter a scene - create chat session with scene context.
+        
+        Scene代入架构：
+            - agent_id: 用户默认智能体 (user:{user_id})
+            - scene_id: 场景标识，运行时注入场景能力
+            - 进化记忆：用户记忆（隔离）+ 场景记忆（共享）
         
         This method:
         1. Validates scene exists
-        2. Creates or retrieves scene agent
+        2. Creates or retrieves scene agent config
         3. Creates chat session with scene context
         4. Returns scene info and welcome message
         
@@ -428,7 +433,7 @@ class SceneAgentService:
         if scene_config.status != "active":
             raise SceneAgentError(f"Scene is not active: {scene_id}")
         
-        # Get or create scene agent
+        # Get or create scene agent config (for scene capabilities)
         scene_agent = self.get_scene_agent(scene_id)
         if not scene_agent:
             scene_agent = self._create_scene_agent(scene_config)
@@ -438,17 +443,16 @@ class SceneAgentService:
         chat_id = str(uuid4())
         session_id = f"console:{user_id}:{chat_id[:8]}"
         
-        # Compose agent info (scene agent + user agent)
-        composed_agent_id = f"scene-{scene_id}:{user_id}"
+        # User's default agent (not a composed agent)
+        user_agent_id = f"user:{user_id}"
         
         return EnterSceneResponse(
             chat_id=chat_id,
             session_id=session_id,
             scene=scene_agent.scene,
             agent={
-                "id": composed_agent_id,
-                "type": "composed",
-                "scene_agent_id": scene_agent.id,
+                "id": user_agent_id,
+                "type": "user",
                 "user_id": user_id,
             },
             welcome_message=scene_agent.welcome_message,

@@ -33,7 +33,7 @@ import {
   SparkDebugLine,
   SparkSaveLine,
 } from "@agentscope-ai/icons";
-import { ThunderboltOutlined, CrownOutlined } from "@ant-design/icons";
+import { ThunderboltOutlined, CrownOutlined, BookOutlined } from "@ant-design/icons";
 import { agentsApi } from "../api/modules/agents";
 import { permissionsApi } from "../api/modules/permissions";
 import { usePlugins } from "../plugins/PluginContext";
@@ -471,6 +471,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: "agent-stats",
           label: collapsed ? null : t("nav.agentStats"),
           icon: <SparkBarChartLine size={16} />,
+        },
+        {
+          key: "knowledge",
+          label: collapsed ? null : t("nav.knowledge", "知识库"),
+          icon: <BookOutlined />,
         },
       ],
     },

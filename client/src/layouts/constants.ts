@@ -44,7 +44,7 @@ export const KEY_TO_PATH: Record<string, string> = {
   myspace: "/workspace/myspace",
   "user-system": "/user-system",
   evolution: "/evolution",
-  // knowledge: "/knowledge",
+  knowledge: "/knowledge",
   "cross-agent": "/cross-agent",
   // P2 Enterprise Features
   monitoring: "/monitoring",
@@ -76,7 +76,7 @@ export const KEY_TO_LABEL: Record<string, string> = {
   debug: "nav.debug",
   backups: "nav.backups",
   evolution: "nav.evolution",
-  // knowledge: "nav.knowledge",
+  knowledge: "nav.knowledge",
   "cross-agent": "nav.crossAgent",
   // P2 Enterprise Features
   monitoring: "nav.monitoring",

@@ -10,6 +10,7 @@ import {
   Empty,
   message,
   Segmented,
+  List,
 } from "antd";
 import {
   SaveOutlined,
@@ -22,6 +23,8 @@ import {
   RocketOutlined,
   EditOutlined,
   EyeOutlined,
+  CalendarOutlined,
+  FileOutlined,
 } from "@ant-design/icons";
 
 import { agentsApi } from "@/api/modules/agents";
@@ -39,6 +42,16 @@ interface FileInfo {
   originalContent: string;
   modified: boolean;
   loading: boolean;
+}
+
+interface MemoryFileInfo {
+  filename: string;
+  path: string;
+  size: number;
+  created_time: string;
+  modified_time: string;
+  date: string;
+  updated_at: number;
 }
 
 const IDENTITY_FILES = [
@@ -61,6 +74,13 @@ export default function AgentIdentityPanel() {
   // Two-level memory state
   const [memoryLevel, setMemoryLevel] = useState<"user" | "agent">("user");
   const [memoryContent, setMemoryContent] = useState<Record<string, { content: string; originalContent: string; modified: boolean; loading: boolean }>>({});
+  
+  // Memory files list state
+  const [memoryFiles, setMemoryFiles] = useState<MemoryFileInfo[]>([]);
+  const [loadingMemoryFiles, setLoadingMemoryFiles] = useState(false);
+  const [selectedMemoryDate, setSelectedMemoryDate] = useState<string | null>(null);
+  const [selectedMemoryContent, setSelectedMemoryContent] = useState<string>("");
+  const [loadingSelectedMemory, setLoadingSelectedMemory] = useState(false);
 
   const currentAgent = agents?.find((a) => a.id === selectedAgent);
   const agentId = selectedAgent;
@@ -185,6 +205,48 @@ export default function AgentIdentityPanel() {
     }
   };
 
+  // Load memory files list (daily notes)
+  const loadMemoryFiles = useCallback(async () => {
+    setLoadingMemoryFiles(true);
+    try {
+      const files = await workspaceApi.listDailyMemory();
+      // Sort by date descending (newest first)
+      const sorted = files.sort((a: any, b: any) => b.updated_at - a.updated_at);
+      setMemoryFiles(sorted);
+    } catch (error: any) {
+      console.error('Failed to load memory files:', error);
+      setMemoryFiles([]);
+    } finally {
+      setLoadingMemoryFiles(false);
+    }
+  }, []);
+
+  // Load selected memory file content
+  const loadSelectedMemoryContent = useCallback(async (date: string) => {
+    setLoadingSelectedMemory(true);
+    try {
+      const res = await workspaceApi.loadDailyMemory(date);
+      setSelectedMemoryContent(res.content || "");
+    } catch (error: any) {
+      console.error('Failed to load memory file:', error);
+      setSelectedMemoryContent("");
+    } finally {
+      setLoadingSelectedMemory(false);
+    }
+  }, []);
+
+  // Load memory files on component mount
+  useEffect(() => {
+    loadMemoryFiles();
+  }, [loadMemoryFiles]);
+
+  // Load selected memory content when date changes
+  useEffect(() => {
+    if (selectedMemoryDate) {
+      loadSelectedMemoryContent(selectedMemoryDate);
+    }
+  }, [selectedMemoryDate, loadSelectedMemoryContent]);
+
   // Reload file
   const handleReload = (fileName: string) => {
     loadFile(fileName);
@@ -225,12 +287,46 @@ export default function AgentIdentityPanel() {
 
   // ── Render MEMORY.md tab with two-level editor ──
   const renderMemoryTab = () => {
+    return (
+      <Tabs defaultActiveKey="long-term" style={{ padding: "8px 0" }}>
+        <Tabs.TabPane
+          key="long-term"
+          tab={
+            <Space size={4}>
+              <DatabaseOutlined />
+              <span>长期记忆</span>
+            </Space>
+          }
+        >
+          {renderLongTermMemory()}
+        </Tabs.TabPane>
+        <Tabs.TabPane
+          key="daily"
+          tab={
+            <Space size={4}>
+              <CalendarOutlined />
+              <span>每日笔记</span>
+              {memoryFiles.length > 0 && (
+                <Tag color="blue" style={{ marginLeft: 4 }}>
+                  {memoryFiles.length}
+                </Tag>
+              )}
+            </Space>
+          }
+        >
+          {renderDailyMemory()}
+        </Tabs.TabPane>
+      </Tabs>
+    );
+  };
+
+  const renderLongTermMemory = () => {
     const mem = memoryContent[memoryLevel];
     const isModified = mem?.modified ?? false;
     const isPreview = previewMode["MEMORY.md"] ?? false;
 
     return (
-      <div style={{ padding: "8px 0" }}>
+      <div>
         {/* Level switcher */}
         <div
           style={{
@@ -311,7 +407,7 @@ export default function AgentIdentityPanel() {
               borderRadius: 8,
               padding: 20,
               minHeight: 400,
-              maxHeight: "calc(100vh - 360px)",
+              maxHeight: "calc(100vh - 400px)",
               overflow: "auto",
             }}
           >
@@ -349,6 +445,98 @@ export default function AgentIdentityPanel() {
             placeholder={`编辑${memoryLevel === "user" ? "用户级" : "智能体级"}记忆...`}
           />
         )}
+      </div>
+    );
+  };
+
+  const renderDailyMemory = () => {
+    return (
+      <div style={{ display: "flex", gap: 16, height: "calc(100vh - 300px)" }}>
+        {/* Left: Memory files list */}
+        <div style={{ width: 280, borderRight: "1px solid #f0f0f0", paddingRight: 16 }}>
+          <div style={{ marginBottom: 12 }}>
+            <Text strong>记忆文件列表</Text>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={loadMemoryFiles}
+              loading={loadingMemoryFiles}
+              style={{ float: "right" }}
+            >
+              刷新
+            </Button>
+          </div>
+          
+          {loadingMemoryFiles ? (
+            <div style={{ textAlign: "center", padding: 40 }}>
+              <Spin />
+            </div>
+          ) : memoryFiles.length === 0 ? (
+            <Empty description="暂无记忆文件" />
+          ) : (
+            <List
+              dataSource={memoryFiles}
+              renderItem={(file) => (
+                <List.Item
+                  onClick={() => setSelectedMemoryDate(file.date)}
+                  style={{
+                    cursor: "pointer",
+                    backgroundColor: selectedMemoryDate === file.date ? "#e6f7ff" : "transparent",
+                    borderRadius: 4,
+                    padding: "8px 12px",
+                  }}
+                >
+                  <List.Item.Meta
+                    avatar={<FileOutlined style={{ fontSize: 18, color: "#1890ff" }} />}
+                    title={file.date}
+                    description={`${(file.size / 1024).toFixed(1)} KB`}
+                  />
+                </List.Item>
+              )}
+              style={{ maxHeight: "calc(100vh - 380px)", overflow: "auto" }}
+            />
+          )}
+        </div>
+
+        {/* Right: Selected memory content */}
+        <div style={{ flex: 1 }}>
+          {selectedMemoryDate ? (
+            <div>
+              <div style={{ marginBottom: 12 }}>
+                <Text strong style={{ fontSize: 16 }}>
+                  {selectedMemoryDate}
+                </Text>
+              </div>
+              
+              {loadingSelectedMemory ? (
+                <div style={{ textAlign: "center", padding: 40 }}>
+                  <Spin />
+                </div>
+              ) : (
+                <div
+                  style={{
+                    background: "#fafafa",
+                    border: "1px solid #e8e8e8",
+                    borderRadius: 8,
+                    padding: 20,
+                    maxHeight: "calc(100vh - 380px)",
+                    overflow: "auto",
+                  }}
+                >
+                  {selectedMemoryContent ? (
+                    <XMarkdown>{stripFrontmatter(selectedMemoryContent)}</XMarkdown>
+                  ) : (
+                    <Text type="secondary">文件内容为空</Text>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ textAlign: "center", padding: 80 }}>
+              <Empty description="请从左侧选择一个日期查看记忆内容" />
+            </div>
+          )}
+        </div>
       </div>
     );
   };

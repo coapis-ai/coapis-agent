@@ -49,8 +49,8 @@ const UserProfilePage = lazyImportWithRetry("../../pages/UserProfile/index");
 const AdminPage = lazyImportWithRetry("../../pages/Admin/index");
 const MultiLayerEvolutionPage = lazyImportWithRetry("../../pages/MultiLayerEvolution/index");
 const WorkbenchPage = lazyImportWithRetry("../../pages/Workbench/index");
-// 知识库功能暂时隐藏
-// const KnowledgeBasePage = lazyImportWithRetry("../../pages/KnowledgeBase/index");
+// 知识库功能 - 企业版扩展
+const KnowledgeBasePage = lazyImportWithRetry("../../pages/KnowledgeBase/index");
 
 // P2 Enterprise Features
 const MonitoringPage = lazyImportWithRetry("../../pages/Monitoring/index");
@@ -198,7 +198,7 @@ export default function MainLayout() {
                   <Route path="/admin" element={<AdminPage />} />
                   <Route path="/evolution" element={<MultiLayerEvolutionPage />} />
                   <Route path="/workbench" element={<WorkbenchPage />} />
-                  {/* <Route path="/knowledge" element={<KnowledgeBasePage />} /> */}
+                  <Route path="/knowledge" element={<KnowledgeBasePage />} />
                   <Route path="/cross-agent" element={<Navigate to="/evolution" replace />} />
 
                   {/* P2 Enterprise Features */}

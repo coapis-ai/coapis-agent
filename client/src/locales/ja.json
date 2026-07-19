@@ -62,6 +62,7 @@
     "plugins": "プラグイン",
     "acp": "ACP",
     "backups": "バックアップとクリーンアップ",
+    "knowledge": "ナレッジベース",
     "adminPanel": "管理画面"
   },
   "debug": {

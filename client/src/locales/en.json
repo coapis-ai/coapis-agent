@@ -1406,7 +1406,15 @@
     "modalityFile": "File",
     "modalityText": "Text only",
     "perMillionIn": "/1M in",
-    "perMillionOut": "/1M out"
+    "perMillionOut": "/1M out",
+    "chatModels": "Chat Models",
+    "embeddingModels": "Embedding Models",
+    "rerankModels": "Rerank Models",
+    "audioModels": "Audio Models",
+    "visionModels": "Vision Models",
+    "defaultModelsTitle": "Default Models",
+    "selectDefaultModel": "Select default model",
+    "defaultModelSaved": "Default model saved"
   },
   "agentConfig": {
     "title": "Configuration",

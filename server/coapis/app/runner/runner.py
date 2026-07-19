@@ -906,6 +906,49 @@ class AgentRunner(Runner):
             # Load agent-specific configuration
             agent_config = load_agent_config(self.agent_id)
 
+            # ── Scene Agent Injection: 场景智能体提示词叠加 ──
+            # 从 request.input[0].metadata 中获取 scene_id
+            scene_id = None
+            try:
+                if request and hasattr(request, "input") and request.input:
+                    first_msg = request.input[0]
+                    logger.info(f"[Scene DEBUG] first_msg type: {type(first_msg)}, metadata: {getattr(first_msg, 'metadata', None)}")
+                    if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
+                        scene_id = first_msg.metadata.get("scene_id")
+                        if scene_id:
+                            logger.info(f"[Scene] Detected scene_id={scene_id}, loading scene agent config")
+            except Exception as e:
+                logger.warning(f"[Scene] Failed to get scene_id from request: {e}")
+
+            # 如果有 scene_id，加载场景智能体配置并注入系统提示词
+            scene_prompt = None
+            scene_skills = []
+            if scene_id:
+                try:
+                    from pathlib import Path
+                    from ...constant import WORKING_DIR
+                    
+                    scene_agent_path = Path(WORKING_DIR) / "agents" / f"scene-{scene_id}" / "agent.json"
+                    if scene_agent_path.exists():
+                        with open(scene_agent_path, "r", encoding="utf-8") as f:
+                            scene_data = json.load(f)
+                        
+                        # 场景智能体的 system_prompt 在 capabilities 下
+                        capabilities = scene_data.get("capabilities", {})
+                        scene_prompt = capabilities.get("system_prompt", "") or scene_data.get("system_prompt", "") or ""
+                        
+                        # 场景技能
+                        scene_skills = capabilities.get("skills", []) or scene_data.get("skills", []) or []
+                        
+                        if scene_prompt:
+                            logger.info(f"[Scene] Loaded scene prompt (length: {len(scene_prompt)})")
+                        if scene_skills:
+                            logger.info(f"[Scene] Loaded scene skills: {scene_skills}")
+                    else:
+                        logger.warning(f"[Scene] Scene agent config not found: {scene_agent_path}")
+                except Exception as e:
+                    logger.warning(f"[Scene] Failed to load scene config: {e}")
+
             # Override agent language with user's language preference
             # This ensures LLM outputs in the user's preferred language
             try:
@@ -1129,6 +1172,17 @@ class AgentRunner(Runner):
                         exc_info=True,
                     )
                     plan_notebook = None
+
+            # ── Scene Injection: 注入场景系统提示词到消息列表 ──
+            if scene_prompt and msgs:
+                scene_system_msg = Msg(
+                    name="system",
+                    role="system",
+                    content=f"[场景能力注入]\n\n{scene_prompt}",
+                )
+                # 在消息列表开头插入场景系统消息
+                msgs.insert(0, scene_system_msg)
+                logger.info(f"[Scene] Injected scene system prompt into message list")
 
             agent = CoApisAgent(
                 agent_config=agent_config,
