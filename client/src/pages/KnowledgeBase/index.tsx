@@ -13,7 +13,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Table, Button, Modal, Form, Input, Select, Space, Tag, Drawer,
-  Upload, message, Popconfirm, Card, Descriptions, Divider, Tooltip
+  Upload, message, Popconfirm, Card, Descriptions, Divider
 } from 'antd';
 import { 
   PlusOutlined, DeleteOutlined, FileTextOutlined, TeamOutlined,
@@ -139,35 +139,6 @@ export default function KnowledgeBasePage() {
       console.error('删除文档失败:', error);
       message.error('删除失败');
     }
-  };
-
-  // 可见性标签
-  const visibilityTag = (visibility?: string) => {
-    const map: Record<string, { color: string; icon: React.ReactNode; text: string }> = {
-      public: { color: 'green', icon: <GlobalOutlined />, text: '全局可见' },
-      department: { color: 'blue', icon: <TeamOutlined />, text: '部门可见' },
-      private: { color: 'default', icon: <LockOutlined />, text: '私有' },
-    };
-    const config = map[visibility || 'private'] || map.private;
-    return (
-      <Tag color={config.color}>
-        <Space size={4}>
-          {config.icon}
-          {config.text}
-        </Space>
-      </Tag>
-    );
-  };
-
-  // 权限角色标签
-  const roleTag = (role?: string) => {
-    const map: Record<string, { color: string; text: string }> = {
-      admin: { color: 'red', text: '管理员' },
-      editor: { color: 'blue', text: '编辑者' },
-      viewer: { color: 'default', text: '查看者' },
-    };
-    const config = map[role || 'viewer'] || map.viewer;
-    return <Tag color={config.color}>{config.text}</Tag>;
   };
 
   // 表格列
@@ -309,8 +280,8 @@ export default function KnowledgeBasePage() {
   return (
     <div style={{ padding: 24 }}>
       <PageHeader 
-        title="知识库管理" 
-        subtitle="管理知识库和文档"
+        parent="设置"
+        current="知识库管理"
       />
 
       <Card>
@@ -426,8 +397,8 @@ export default function KnowledgeBasePage() {
       >
         <Card title="当前设置" size="small">
           <Descriptions column={2}>
-            <Descriptions.Item label="可见性">
-              {visibilityTag(currentKb?.visibility)}
+            <Descriptions.Item label="范围">
+              <Tag>{currentKb?.scope || 'private'}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="创建者">
               {currentKb?.created_at || '-'}

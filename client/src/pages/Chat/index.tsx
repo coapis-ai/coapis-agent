@@ -588,14 +588,15 @@ export default function ChatPage() {
   // 使用状态管理window参数，确保在参数注入后能正确读取
   const [sceneName, setSceneName] = useState<string>('');
   const [sceneWelcomeMessage, setSceneWelcomeMessage] = useState<string>('');
-  const [sceneShowToolbar, setSceneShowToolbar] = useState<boolean>(true);
+  // sceneShowToolbar 预留给 ChatWrapper 控制，暂未使用
+  // const [sceneShowToolbar, setSceneShowToolbar] = useState<boolean>(true);
   
   // 监听window参数变化（ChatWrapper使用useLayoutEffect设置参数）
   useEffect(() => {
     if (isEmbeddedMode) {
       setSceneName((window as any).__CHAT_SCENE_NAME__ || '');
       setSceneWelcomeMessage((window as any).__CHAT_WELCOME_MESSAGE__ || '');
-      setSceneShowToolbar((window as any).__CHAT_SHOW_TOOLBAR__ !== false);
+      // setSceneShowToolbar((window as any).__CHAT_SHOW_TOOLBAR__ !== false);
     }
   }, [isEmbeddedMode]);
   
@@ -645,6 +646,22 @@ export default function ChatPage() {
   const handleSettingsClick = useCallback(() => {
     setShowDisplaySettings(true);
   }, []);
+
+  // 嵌入式模式：用户聚焦输入框时自动关闭工具栏
+  useEffect(() => {
+    if (!isEmbeddedMode) return;
+    
+    const handleFocus = (e: FocusEvent) => {
+      if (e.target instanceof HTMLTextAreaElement && toolbarOpen) {
+        closeToolbar();
+      }
+    };
+    
+    document.addEventListener('focusin', handleFocus, true);
+    return () => {
+      document.removeEventListener('focusin', handleFocus, true);
+    };
+  }, [isEmbeddedMode, toolbarOpen, closeToolbar]);
 
   // Sync authenticated username to window for AgentScope Runtime session API
   // IMPORTANT: Set immediately on mount to ensure window.currentUserId is available
@@ -1668,8 +1685,8 @@ export default function ChatPage() {
         
         {/* 主内容区域：工具栏 + 聊天区 */}
         <div className={styles.chatContentArea}>
-          {/* PC端：工具栏在主内容区域内 */}
-          {!isMobile && toolbarOpen && (
+          {/* PC端完整模式：工具栏在主内容区域内（固定Sidebar） */}
+          {!isEmbeddedMode && !isMobile && toolbarOpen && (
             <div className={styles.toolbarSidebar}>
               <ChatToolbarSidebar
                 selectedFiles={selectedFiles}
@@ -1854,13 +1871,40 @@ export default function ChatPage() {
       />
     </div>
 
-    {/* 工具栏Drawer */}
-    {sceneShowToolbar && (
+    {/* 嵌入式模式工具栏 - 内部浮层，覆盖在聊天区域上 */}
+    {isEmbeddedMode && toolbarOpen && (
       <Drawer
         title="工具栏"
-        placement={isEmbeddedMode ? "left" : "bottom"}
-        width={isEmbeddedMode ? "80%" : undefined}
-        height={isMobile && !isEmbeddedMode ? "80%" : undefined}
+        placement="left"
+        width="80%"
+        open={toolbarOpen}
+        onClose={closeToolbar}
+        mask={true}
+        maskClosable={true}
+        styles={{ 
+          body: { padding: 0 },
+          wrapper: { position: 'absolute' }
+        }}
+        getContainer={false}
+        style={{ position: 'absolute' }}
+      >
+        <ChatToolbarSidebar
+          selectedFiles={selectedFiles}
+          selectedKnowledge={selectedKnowledge}
+          onFileSelect={setSelectedFiles}
+          onKnowledgeSelect={setSelectedKnowledge}
+          onSettingsClick={handleSettingsClick}
+          showPinButton={false}
+        />
+      </Drawer>
+    )}
+
+    {/* 完整模式移动端工具栏 - 底部抽屉 */}
+    {!isEmbeddedMode && isMobile && toolbarOpen && (
+      <Drawer
+        title="工具栏"
+        placement="bottom"
+        height="80%"
         open={toolbarOpen}
         onClose={closeToolbar}
         styles={{ body: { padding: 0 } }}
