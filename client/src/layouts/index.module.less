@@ -180,23 +180,30 @@
     /* Group title (一级菜单分组) */
     .coapis-menu-submenu-title {
       font-family: "PingFang SC", sans-serif !important;
-      font-size: 12px !important;
-      font-weight: 500 !important;
+      font-size: 14px !important;
+      font-weight: 400 !important;
       line-height: 32px !important;
       letter-spacing: normal !important;
-      color: rgba(26, 23, 22, 0.25) !important;
+      color: rgba(26, 23, 22, 0.85) !important;
       padding-left: 8px !important;
 
-      /* No hover effect for group titles */
       &:hover {
-        background: transparent !important;
-        color: rgba(26, 23, 22, 0.25) !important;
+        background: rgba(0, 0, 0, 0.04) !important;
+        color: rgba(26, 23, 22, 0.95) !important;
       }
     }
 
-    /* Hide submenu arrow */
+    /* Show submenu arrow (展开/收起指示器) */
     .coapis-menu-submenu-arrow {
-      display: none !important;
+      display: inline-block !important;
+      color: rgba(0, 0, 0, 0.45) !important;
+      font-size: 12px !important;
+      transition: transform 0.2s !important;
+    }
+
+    /* 展开时箭头旋转 */
+    .coapis-menu-submenu-open > .coapis-menu-submenu-title > .coapis-menu-submenu-arrow {
+      transform: rotate(90deg) !important;
     }
 
     /* Always expand submenus */
