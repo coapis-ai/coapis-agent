@@ -17,12 +17,15 @@ interface FloatingChatWindowProps {
   minHeight?: number;
 }
 
+// 缩放角类型
+type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
+
 /**
  * 可拖拽、可缩放的浮窗组件
  * 
  * 功能：
  * 1. 拖拽：按住标题栏移动窗口
- * 2. 缩放：拖拽右下角调整窗口大小
+ * 2. 四角缩放：拖拽四个角调整窗口大小
  * 3. 固定：固定后点击外部不关闭
  */
 const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
@@ -42,11 +45,14 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
   const [size, setSize] = useState({ width: initialWidth, height: initialHeight });
   const [isPinned, setIsPinned] = useState(false);
   
-  // 拖拽/缩放状态
+  // 拖拽状态
   const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0, windowX: 0, windowY: 0 });
-  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  
+  // 缩放状态
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeCorner, setResizeCorner] = useState<ResizeCorner | null>(null);
+  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });
   
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -162,34 +168,69 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
     };
   }, [isDragging, size]);
 
-  // 缩放逻辑
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+  // 四角缩放逻辑
+  const handleResizeStart = useCallback((corner: ResizeCorner) => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
+    setResizeCorner(corner);
     resizeStartRef.current = {
       x: e.clientX,
       y: e.clientY,
       width: size.width,
       height: size.height,
+      posX: position.x,
+      posY: position.y,
     };
-  }, [size]);
+  }, [size, position]);
 
   useEffect(() => {
-    if (!isResizing) return;
+    if (!isResizing || !resizeCorner) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - resizeStartRef.current.x;
       const deltaY = e.clientY - resizeStartRef.current.y;
       
-      const newWidth = Math.max(minWidth, resizeStartRef.current.width + deltaX);
-      const newHeight = Math.max(minHeight, resizeStartRef.current.height + deltaY);
+      let newWidth = resizeStartRef.current.width;
+      let newHeight = resizeStartRef.current.height;
+      let newX = resizeStartRef.current.posX;
+      let newY = resizeStartRef.current.posY;
+      
+      // 根据角的位置计算新尺寸和位置
+      switch (resizeCorner) {
+        case 'nw': // 左上角：向左上缩放
+          newWidth = Math.max(minWidth, resizeStartRef.current.width - deltaX);
+          newHeight = Math.max(minHeight, resizeStartRef.current.height - deltaY);
+          newX = resizeStartRef.current.posX + (resizeStartRef.current.width - newWidth);
+          newY = resizeStartRef.current.posY + (resizeStartRef.current.height - newHeight);
+          break;
+        case 'ne': // 右上角：向右上缩放
+          newWidth = Math.max(minWidth, resizeStartRef.current.width + deltaX);
+          newHeight = Math.max(minHeight, resizeStartRef.current.height - deltaY);
+          newY = resizeStartRef.current.posY + (resizeStartRef.current.height - newHeight);
+          break;
+        case 'sw': // 左下角：向左下缩放
+          newWidth = Math.max(minWidth, resizeStartRef.current.width - deltaX);
+          newHeight = Math.max(minHeight, resizeStartRef.current.height + deltaY);
+          newX = resizeStartRef.current.posX + (resizeStartRef.current.width - newWidth);
+          break;
+        case 'se': // 右下角：向右下缩放
+          newWidth = Math.max(minWidth, resizeStartRef.current.width + deltaX);
+          newHeight = Math.max(minHeight, resizeStartRef.current.height + deltaY);
+          break;
+      }
+      
+      // 边界限制
+      newX = Math.max(0, newX);
+      newY = Math.max(0, newY);
       
       setSize({ width: newWidth, height: newHeight });
+      setPosition({ x: newX, y: newY });
     };
 
     const handleMouseUp = () => {
       setIsResizing(false);
+      setResizeCorner(null);
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -199,7 +240,7 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, minWidth, minHeight]);
+  }, [isResizing, resizeCorner, minWidth, minHeight]);
 
   if (!scene) return null;
 
@@ -244,11 +285,11 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
         ) : null}
       </div>
 
-      {/* 缩放手柄 - 右下角 */}
-      <div
-        className={styles.resizeHandle}
-        onMouseDown={handleResizeStart}
-      />
+      {/* 四角缩放手柄 */}
+      <div className={`${styles.resizeHandle} ${styles.resizeNw}`} onMouseDown={handleResizeStart('nw')} />
+      <div className={`${styles.resizeHandle} ${styles.resizeNe}`} onMouseDown={handleResizeStart('ne')} />
+      <div className={`${styles.resizeHandle} ${styles.resizeSw}`} onMouseDown={handleResizeStart('sw')} />
+      <div className={`${styles.resizeHandle} ${styles.resizeSe}`} onMouseDown={handleResizeStart('se')} />
     </div>
   );
 };
