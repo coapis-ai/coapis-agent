@@ -684,6 +684,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           {/* Workbench menu or Agent-scoped menu */}
           {isWorkbench ? (
             <Menu
+              key={`workbench-menu-${workbenchOpenKeys.join('-')}`}
               mode="inline"
               selectedKeys={[workbenchSelectedKey]}
               openKeys={workbenchOpenKeys}
