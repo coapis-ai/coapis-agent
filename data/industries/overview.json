@@ -1,0 +1,143 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-07-17",
+  "description": "政府行业领域场景数据概览 - 全部完成",
+  
+  "domains": [
+    {
+      "code": "natural-resources",
+      "name": "自然资源和规划",
+      "short_name": "资规",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "ecological-environment",
+      "name": "生态环境保护",
+      "short_name": "生态环保",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "agriculture-rural",
+      "name": "农业农村",
+      "short_name": "农农",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "development-reform",
+      "name": "发改",
+      "short_name": "发改委",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "housing-construction",
+      "name": "住建",
+      "short_name": "住建局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "education",
+      "name": "教育",
+      "short_name": "教育局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "forestry-grassland",
+      "name": "林草湿荒",
+      "short_name": "林草局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "culture-tourism",
+      "name": "文化与旅游",
+      "short_name": "文旅局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "medium"
+    },
+    {
+      "code": "health",
+      "name": "卫生健康",
+      "short_name": "卫健委",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    },
+    {
+      "code": "comprehensive-enforcement",
+      "name": "综合执法",
+      "short_name": "执法局",
+      "status": "completed",
+      "scene_count": 10,
+      "office_scenes": 3,
+      "business_scenes": 4,
+      "supervision_scenes": 3,
+      "priority": "high"
+    }
+  ],
+  
+  "statistics": {
+    "total_domains": 10,
+    "completed_domains": 10,
+    "pending_domains": 0,
+    "total_scenes": 100,
+    "by_type": {
+      "office": 30,
+      "business": 40,
+      "supervision": 30
+    },
+    "by_priority": {
+      "high": 60,
+      "medium": 40
+    }
+  },
+  
+  "data_location": {
+    "base_path": "data/industries/",
+    "structure": [
+      "{domain}/domain.json - 领域信息",
+      "{domain}/scenes.json - 场景列表",
+      "{domain}/agents/ - 场景智能体（待创建）"
+    ]
+  }
+}

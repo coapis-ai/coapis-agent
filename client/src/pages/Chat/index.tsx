@@ -562,10 +562,58 @@ export default function ChatPage() {
   const { isDark } = useTheme();
   const isMobile = useIsMobile();
   const { user } = useUser();
+  
+  // 读取场景参数（嵌入式模式通过window注入）
+  const chatMode = useMemo(() => {
+    return (window as any).__CHAT_MODE__ || 'full';
+  }, []);
+  
+  const isEmbeddedMode = chatMode === 'embedded';
+  
+  const sceneSessionId = useMemo(() => {
+    return (window as any).__CHAT_SESSION_ID__;
+  }, []);
+  
+  const sceneId = useMemo(() => {
+    return (window as any).__CHAT_SCENE_ID__;
+  }, []);
+  
+  // 场景ID用于后续场景智能体相关逻辑
+  useEffect(() => {
+    if (sceneId && isEmbeddedMode) {
+      console.log('[Chat] Scene mode activated:', sceneId);
+    }
+  }, [sceneId, isEmbeddedMode]);
+  
+  // 使用状态管理window参数，确保在参数注入后能正确读取
+  const [sceneName, setSceneName] = useState<string>('');
+  const [sceneWelcomeMessage, setSceneWelcomeMessage] = useState<string>('');
+  // sceneShowToolbar 预留给 ChatWrapper 控制，暂未使用
+  // const [sceneShowToolbar, setSceneShowToolbar] = useState<boolean>(true);
+  
+  // 监听window参数变化（ChatWrapper使用useLayoutEffect设置参数）
+  useEffect(() => {
+    if (isEmbeddedMode) {
+      setSceneName((window as any).__CHAT_SCENE_NAME__ || '');
+      setSceneWelcomeMessage((window as any).__CHAT_WELCOME_MESSAGE__ || '');
+      // setSceneShowToolbar((window as any).__CHAT_SHOW_TOOLBAR__ !== false);
+    }
+  }, [isEmbeddedMode]);
+  
+  // 嵌入式模式的回调函数
+  const embeddedOnClose = useMemo(() => {
+    return (window as any).__CHAT_ON_CLOSE__;
+  }, [isEmbeddedMode]);
+  
   const chatId = useMemo(() => {
+    // 嵌入式模式：使用场景会话ID
+    if (isEmbeddedMode && sceneSessionId) {
+      return sceneSessionId;
+    }
+    // 完整模式：从路由获取
     const match = location.pathname.match(/^\/chat\/(.+)$/);
     return match?.[1];
-  }, [location.pathname]);
+  }, [isEmbeddedMode, sceneSessionId, location.pathname]);
   const [showModelPrompt, setShowModelPrompt] = useState(false);
   const { selectedAgent } = useAgentStore();
   const { toolRenderConfig } = usePlugins();
@@ -603,6 +651,22 @@ export default function ChatPage() {
   const handleSettingsClick = useCallback(() => {
     setShowDisplaySettings(true);
   }, []);
+
+  // 嵌入式模式：用户聚焦输入框时自动关闭工具栏
+  useEffect(() => {
+    if (!isEmbeddedMode) return;
+    
+    const handleFocus = (e: FocusEvent) => {
+      if (e.target instanceof HTMLTextAreaElement && toolbarOpen) {
+        closeToolbar();
+      }
+    };
+    
+    document.addEventListener('focusin', handleFocus, true);
+    return () => {
+      document.removeEventListener('focusin', handleFocus, true);
+    };
+  }, [isEmbeddedMode, toolbarOpen, closeToolbar]);
 
   // Sync authenticated username to window for AgentScope Runtime session API
   // IMPORTANT: Set immediately on mount to ensure window.currentUserId is available
@@ -859,8 +923,15 @@ export default function ChatPage() {
 
   // Tell sessionApi which session to put first in getSessionList, so the library's
   // useMount auto-selects the correct session without an extra getSession round-trip.
+  // CRITICAL: This must be set BEFORE AgentScopeRuntimeWebUI renders
+  // In embedded mode, chatId is already set from window.__CHAT_SESSION_ID__
   if (chatId && sessionApi.preferredChatId !== chatId) {
     sessionApi.preferredChatId = chatId;
+    // If session list is already loaded, force reload to apply preferredChatId
+    if ((sessionApi as any)._sessionListLoaded) {
+      sessionApi.invalidateSessionList();
+      sessionApi.getSessionList();
+    }
   }
 
   // Register session API event callbacks for URL synchronization
@@ -868,6 +939,8 @@ export default function ChatPage() {
   useEffect(() => {
     sessionApi.onSessionIdResolved = (realId) => {
       if (!isChatActiveRef.current) return;
+      // ⭐ 嵌入式模式：不跳转URL
+      if (isEmbeddedMode) return;
       // Update URL when realId is resolved, regardless of current chatId
       // (chatId may be undefined if URL was cleared in onSessionCreated)
       lastSessionIdRef.current = realId;
@@ -876,6 +949,8 @@ export default function ChatPage() {
 
     sessionApi.onSessionRemoved = (removedId) => {
       if (!isChatActiveRef.current) return;
+      // ⭐ 嵌入式模式：不跳转URL
+      if (isEmbeddedMode) return;
       // Clear URL when current session is removed
       // Check if removed session matches current session (by realId or sessionId)
       const currentRealId = sessionApi.getRealIdForSession(
@@ -892,9 +967,13 @@ export default function ChatPage() {
       realId: string | null,
     ) => {
       if (!isChatActiveRef.current) return;
+      // ⭐ 嵌入式模式：不跳转URL
+      if (isEmbeddedMode) return;
+      
+      // Get target ID
+      const targetId = realId || sessionId;
       
       // Clear previous session's SSE filtering state
-      const targetId = realId || sessionId;
       if (targetId && targetId !== requestSessionIdRef.current) {
         console.log("[Chat] Session changed, clearing SSE filter state");
         requestSessionIdRef.current = null;
@@ -907,7 +986,6 @@ export default function ChatPage() {
       }
 
       // Update URL when session is selected and different from current
-      const targetId = realId || sessionId;
       if (!targetId) return;
 
       // If a preferred chatId from the URL exists and no navigation has happened yet,
@@ -941,6 +1019,8 @@ export default function ChatPage() {
 
     sessionApi.onSessionCreated = (localId: string) => {
       if (!isChatActiveRef.current) return;
+      // ⭐ 嵌入式模式：不跳转URL
+      if (isEmbeddedMode) return;
       // createSession() already calls api.createChat() and sets realId.
       // Navigate to the real backend UUID immediately so page refresh survives.
       const realId = sessionApi.getRealIdForSession(localId);
@@ -1020,23 +1100,35 @@ export default function ChatPage() {
                 `not user=${currentUser}/agent=${selectedAgent}, clearing`
               );
               setLastChatId(selectedAgent, "");
-              navigateRef.current("/chat", { replace: true });
+              // ⭐ 嵌入式模式：不跳转URL
+              if (!isEmbeddedMode) {
+                navigateRef.current("/chat", { replace: true });
+              }
             } else {
               // Valid chat, proceed with restore
               console.log(`[Agent Switch] Restored chat ${restored} successfully`);
-              navigateRef.current(`/chat/${restored}`, { replace: true });
+              // ⭐ 嵌入式模式：不跳转URL
+              if (!isEmbeddedMode) {
+                navigateRef.current(`/chat/${restored}`, { replace: true });
+              }
               sessionApi.preferredChatId = restored;
             }
           } catch (error) {
             // Chat not found or access denied, clear stale data
             console.warn(`Failed to verify chat ${restored}, clearing:`, error);
             setLastChatId(selectedAgent, "");
-            navigateRef.current("/chat", { replace: true });
+            // ⭐ 嵌入式模式：不跳转URL
+            if (!isEmbeddedMode) {
+              navigateRef.current("/chat", { replace: true });
+            }
           }
         })();
       } else {
         console.log(`[Agent Switch] No saved chat for agent ${selectedAgent}, starting fresh`);
-        navigateRef.current("/chat", { replace: true });
+        // ⭐ 嵌入式模式：不跳转URL
+        if (!isEmbeddedMode) {
+          navigateRef.current("/chat", { replace: true });
+        }
       }
       // Don't clear lastSessionIdRef - let the new session initialize naturally
       
@@ -1152,6 +1244,8 @@ export default function ChatPage() {
         biz_params: {
           agent_id: selectedAgent,
           ...biz_params,
+          // ⭐ 嵌入式模式：传递场景ID
+          ...(isEmbeddedMode && sceneId && { scene_id: sceneId }),
           // 添加知识库引用
           ...(knowledgeRefs && { knowledge_bases: knowledgeRefs }),
           // 添加文件引用（用于后端动态注入提示，避免污染用户消息）
@@ -1194,17 +1288,24 @@ export default function ChatPage() {
     }) => {
       const { file, onSuccess, onError, onProgress } = options;
       try {
-        // Warn when model has no multimodal support
-        if (!multimodalCaps.supportsMultimodal) {
-          message.warning(t("chat.attachments.multimodalWarning"));
-        } else if (
-          multimodalCaps.supportsImage &&
-          !multimodalCaps.supportsVideo &&
-          !file.type.startsWith("image/")
-        ) {
-          // Warn (not block) when only image is supported
-          message.warning(t("chat.attachments.imageOnlyWarning"));
+        // Check multimodal support only for image/video files
+        const isImage = file.type.startsWith("image/");
+        const isVideo = file.type.startsWith("video/");
+        
+        if (isImage || isVideo) {
+          // Warn when model has no multimodal support for image/video
+          if (!multimodalCaps.supportsMultimodal) {
+            message.warning(t("chat.attachments.multimodalWarning"));
+          } else if (
+            isVideo &&
+            multimodalCaps.supportsImage &&
+            !multimodalCaps.supportsVideo
+          ) {
+            // Warn when uploading video but model only supports image
+            message.warning(t("chat.attachments.imageOnlyWarning"));
+          }
         }
+        
         const sizeMb = file.size / 1024 / 1024;
         const isWithinLimit = sizeMb < CHAT_ATTACHMENT_MAX_MB;
 
@@ -1313,15 +1414,16 @@ export default function ChatPage() {
       },
       welcome: {
         ...i18nConfig.welcome,
-        nick: "CoApis",
+        nick: sceneName || "CoApis",
         avatar: "/bee_icon.png",
-        // Use dynamic recommendations if available, fallback to static prompts
-        prompts: dynamicRecommendations.length > 0
+        greeting: sceneWelcomeMessage || i18nConfig.welcome.greeting,
+        // 嵌入式模式（场景代入）：不显示推荐prompts，只显示场景欢迎消息
+        prompts: isEmbeddedMode ? [] : (dynamicRecommendations.length > 0
           ? dynamicRecommendations.map((rec) => ({
               value: rec.prompt,  // Use the actual prompt text
               label: `${rec.icon} ${rec.title}`,
             }))
-          : i18nConfig.welcome.prompts,
+          : i18nConfig.welcome.prompts),
       },
       sender: {
         ...(i18nConfig as any)?.sender,
@@ -1387,7 +1489,8 @@ export default function ChatPage() {
           if (payloadChatId && currentChatId && payloadChatId !== currentChatId) {
             console.log("[SSE] Ignoring payload from other chat:", payloadChatId, "current:", currentChatId);
             // Return a minimal heartbeat event to prevent errors
-            return { object: "heartbeat", status: "completed" };
+            // Note: must use object: "message" with type: "heartbeat" for SDK to recognize it
+            return { object: "message", type: "heartbeat", status: "completed" };
           }
           
           const completed = payloadCompletesResponse(payload);
@@ -1583,12 +1686,15 @@ export default function ChatPage() {
         <ChatSessionHeader 
           onShowDisplaySettings={() => setShowDisplaySettings(true)}
           onToolbarToggle={toggleToolbar}
+          isEmbeddedMode={isEmbeddedMode}
+          onClose={embeddedOnClose}
+          sceneName={sceneName}
         />
         
         {/* 主内容区域：工具栏 + 聊天区 */}
         <div className={styles.chatContentArea}>
-          {/* PC端：工具栏在主内容区域内 */}
-          {!isMobile && toolbarOpen && (
+          {/* PC端完整模式：工具栏在主内容区域内（固定Sidebar） */}
+          {!isEmbeddedMode && !isMobile && toolbarOpen && (
             <div className={styles.toolbarSidebar}>
               <ChatToolbarSidebar
                 selectedFiles={selectedFiles}
@@ -1603,6 +1709,12 @@ export default function ChatPage() {
           {/* 聊天区域 */}
           <div
             className={styles.chatMessagesArea}
+            onClick={() => {
+              // 嵌入式模式：点击聊天区域时自动收缩工具栏
+              if (isEmbeddedMode && toolbarOpen) {
+                closeToolbar();
+              }
+            }}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onDrop={(e) => {
               e.preventDefault();
@@ -1646,9 +1758,9 @@ export default function ChatPage() {
           key={request.requestId}
           data-approval-id={request.requestId}
           style={{
-            position: "fixed",
+            position: isEmbeddedMode ? "absolute" : "fixed",
             bottom: 80,
-            right: isMobile ? 8 : 24,
+            right: isEmbeddedMode ? 0 : (isMobile ? 8 : 24),
             zIndex: 1000,
             maxWidth: 480,
             width: isMobile ? "calc(100vw - 16px)" : "calc(100vw - 48px)",
@@ -1773,8 +1885,46 @@ export default function ChatPage() {
       />
     </div>
 
-    {/* 移动端：工具栏从底部滑出 */}
-    {isMobile && (
+    {/* 嵌入式模式工具栏 - 纯浮层，不影响聊天区域位置 */}
+    {isEmbeddedMode && toolbarOpen && (
+      <div
+        style={{
+          position: 'absolute',
+          top: '40px',
+          left: 0,
+          width: '75%',
+          height: 'calc(100% - 48px)',
+          backgroundColor: '#fff',
+          boxShadow: '2px 0 8px rgba(0,0,0,0.15)',
+          zIndex: 100,
+          overflow: 'auto',
+          borderTop: '1px solid #f0f0f0',
+        }}
+      >
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          borderBottom: '1px solid #f0f0f0',
+          backgroundColor: '#fafafa',
+        }}>
+          <span style={{ fontWeight: 500, fontSize: '14px' }}>工具栏</span>
+          <Button type="text" size="small" onClick={closeToolbar}>✕</Button>
+        </div>
+        <ChatToolbarSidebar
+          selectedFiles={selectedFiles}
+          selectedKnowledge={selectedKnowledge}
+          onFileSelect={setSelectedFiles}
+          onKnowledgeSelect={setSelectedKnowledge}
+          onSettingsClick={handleSettingsClick}
+          showPinButton={false}
+        />
+      </div>
+    )}
+
+    {/* 完整模式移动端工具栏 - 底部抽屉 */}
+    {!isEmbeddedMode && isMobile && toolbarOpen && (
       <Drawer
         title="工具栏"
         placement="bottom"

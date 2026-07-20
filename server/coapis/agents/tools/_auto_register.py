@@ -23,6 +23,7 @@ from . import web_search
 from . import session_search
 from . import doc_reader
 from . import skill_manager
+from . import daily_memory  # Daily memory recording tool
 
 # ── Code tools ──
 from . import git_ops

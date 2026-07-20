@@ -129,6 +129,7 @@ class KnowledgeFlow:
         self._user_counts: Dict[str, set] = {}  # experience_id → set of user_ids
         self._flow_queue: List[FlowRecord] = []
         self._completed_flows: List[FlowRecord] = []
+        self._tracked_experiences: List[Any] = []  # Tracked experiences for promotion
 
         # Rate limiting
         self._flows_this_hour: int = 0
@@ -639,8 +640,13 @@ class KnowledgeFlow:
         )
 
         try:
+            # Convert datetime to ISO format string for JSON serialization
+            record_dict = record.__dict__.copy()
+            if "timestamp" in record_dict and isinstance(record_dict["timestamp"], datetime):
+                record_dict["timestamp"] = record_dict["timestamp"].isoformat()
+            
             history_file.write_text(
-                json.dumps(record.__dict__, ensure_ascii=False, indent=2),
+                json.dumps(record_dict, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except Exception as e:

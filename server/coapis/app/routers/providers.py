@@ -41,6 +41,7 @@ from agentscope_runtime.engine.schemas.exception import (
 from ..permissions.decorators import require_permission
 from ..agent_context import get_agent_for_request
 from ..utils import schedule_agent_reload
+from ..auth import get_current_user
 from ...config.config import load_agent_config, save_agent_config
 from ...providers.provider import ProviderInfo, ModelInfo
 from ...config.config import ActiveModelsInfo
@@ -108,6 +109,17 @@ class ModelSlotRequest(BaseModel):
     agent_id: Optional[str] = Field(
         default=None,
         description="Target agent ID when scope is 'agent'",
+    )
+
+
+class SetDefaultModelRequest(BaseModel):
+    """Request to set a default model for a specific type."""
+    
+    provider_id: str = Field(..., description="Provider ID")
+    model_id: str = Field(..., description="Model ID")
+    model_type: str = Field(
+        ...,
+        description="Model type: chat, embedding, rerank, audio, or vision",
     )
 
 
@@ -1093,4 +1105,122 @@ async def filter_openrouter_models(
             status_code=500,
             detail=f"Failed to filter models: {str(exc)}",
         ) from exc
+
+
+# ============================================================================
+# Default Models API
+# ============================================================================
+
+
+@router.get(
+    "/by-type/{model_type}",
+    summary="Get models by type",
+    description="Get all models of a specific type across all providers",
+)
+async def get_models_by_type(
+    model_type: str = Path(
+        ...,
+        description="Model type: chat, embedding, rerank, audio, or vision",
+    ),
+    configured_only: bool = Query(
+        True,
+        description="Only return models from configured providers",
+    ),
+    manager: ProviderManager = Depends(get_provider_manager),
+) -> List[Dict[str, Any]]:
+    """Get all models of a specific type.
+    
+    This API is used by:
+    - Model management page (type filter tabs)
+    - Knowledge base settings (select embedding model)
+    - Voice features (select audio model)
+    """
+    # Validate model type
+    valid_types = ["chat", "embedding", "rerank", "audio", "vision"]
+    if model_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model type: {model_type}. "
+            f"Valid types: {', '.join(valid_types)}",
+        )
+    
+    return manager.get_models_by_type(model_type, configured_only)
+
+
+@router.get(
+    "/default-models",
+    summary="Get all default models",
+    description="Get default model configuration for all types",
+)
+async def get_default_models(
+    manager: ProviderManager = Depends(get_provider_manager),
+) -> Dict[str, Any]:
+    """Get default models configuration."""
+    return manager.get_default_models().to_dict()
+
+
+@router.get(
+    "/default-models/{model_type}",
+    summary="Get default model by type",
+    description="Get default model for a specific type",
+)
+async def get_default_model_by_type(
+    model_type: str = Path(
+        ...,
+        description="Model type: chat, embedding, rerank, audio, or vision",
+    ),
+    manager: ProviderManager = Depends(get_provider_manager),
+) -> Optional[Dict[str, str]]:
+    """Get default model for a specific type."""
+    # Validate model type
+    valid_types = ["chat", "embedding", "rerank", "audio", "vision"]
+    if model_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model type: {model_type}. "
+            f"Valid types: {', '.join(valid_types)}",
+        )
+    
+    slot = manager.get_default_model_by_type(model_type)
+    if slot:
+        return {
+            "provider_id": slot.provider_id,
+            "model_id": slot.model_id,
+        }
+    return None
+
+
+@router.put(
+    "/default-models",
+    summary="Set default model",
+    description="Set default model for a specific type",
+)
+@require_permission("models:write")
+async def set_default_model(
+    request: Request,
+    body: SetDefaultModelRequest,
+    manager: ProviderManager = Depends(get_provider_manager),
+    current_user: dict = Depends(get_current_user),
+) -> Dict[str, str]:
+    """Set default model for a specific type.
+    
+    Requires 'models:write' permission.
+    """
+    try:
+        manager.set_default_model(
+            model_type=body.model_type,
+            provider_id=body.provider_id,
+            model_id=body.model_id,
+        )
+        
+        return {
+            "status": "ok",
+            "message": f"Default {body.model_type} model set to "
+            f"{body.provider_id}/{body.model_id}",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
 

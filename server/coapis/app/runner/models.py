@@ -50,6 +50,15 @@ class ChatSpec(BaseModel):
         default=False,
         description="Whether the chat is pinned to the top",
     )
+    # Scene-related fields for scene agent architecture
+    scene_id: str | None = Field(
+        default=None,
+        description="Scene ID if this chat is associated with a scene (e.g., meeting-minutes)",
+    )
+    composed_agent_id: str | None = Field(
+        default=None,
+        description="Composed agent ID (scene-agent-id:user-id format)",
+    )
     # NOTE: messages removed — history now stored in sessions/{session_id}.json
     # via AgentScope memory state, matching CoApis's architecture.
     # Use GET /chats/{chat_id} to load messages on-demand.

@@ -1272,7 +1272,15 @@
     "modalityFile": "文件",
     "modalityText": "仅文本",
     "perMillionIn": "/1M 输入",
-    "perMillionOut": "/1M 输出"
+    "perMillionOut": "/1M 输出",
+    "chatModels": "对话模型",
+    "embeddingModels": "嵌入模型",
+    "rerankModels": "重排序模型",
+    "audioModels": "音频模型",
+    "visionModels": "视觉模型",
+    "defaultModelsTitle": "默认模型设置",
+    "selectDefaultModel": "选择默认模型",
+    "defaultModelSaved": "默认模型已保存"
   },
   "agentConfig": {
     "title": "运行配置",

@@ -1,6 +1,6 @@
-import React, { useCallback } from 'react';
-import { Flex, Tooltip } from 'antd';
-import { MenuOutlined } from '@ant-design/icons';
+import React, { useCallback, useState, useEffect } from 'react';
+import { Flex, Tooltip, Button } from 'antd';
+import { MenuOutlined, CloseOutlined, PushpinOutlined, PushpinFilled } from '@ant-design/icons';
 import { IconButton } from '@agentscope-ai/design';
 import { SparkNewChatFill } from '@agentscope-ai/icons';
 import { useChatAnywhereSessionsState } from '@agentscope-ai/chat';
@@ -11,13 +11,41 @@ import styles from './index.module.less';
 interface ChatSessionHeaderProps {
   onShowDisplaySettings?: () => void;
   onToolbarToggle?: () => void;  // 工具栏切换回调
+  isEmbeddedMode?: boolean;  // 嵌入式模式
+  onClose?: () => void;  // 关闭浮窗
+  sceneName?: string;  // 场景名称
 }
 
 const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ 
   onToolbarToggle,
+  isEmbeddedMode = false,
+  onClose,
+  sceneName,
 }) => {
   const { t } = useTranslation();
   const { sessions, currentSessionId } = useChatAnywhereSessionsState();
+  const [isPinned, setIsPinned] = useState(false);
+  const [onTogglePin, setOnTogglePin] = useState<(() => void) | null>(null);
+  const [onDragStart, setOnDragStart] = useState<((e: React.MouseEvent) => void) | null>(null);
+
+  // 从 window 对象读取嵌入式模式参数
+  useEffect(() => {
+    if (isEmbeddedMode) {
+      const windowOnTogglePin = (window as any).__CHAT_ON_TOGGLE_PIN__;
+      const windowIsPinned = (window as any).__CHAT_IS_PINNED__;
+      const windowOnDragStart = (window as any).__CHAT_ON_DRAG_START__;
+      
+      if (typeof windowOnTogglePin === 'function') {
+        setOnTogglePin(() => windowOnTogglePin);
+      }
+      if (typeof windowIsPinned === 'boolean') {
+        setIsPinned(windowIsPinned);
+      }
+      if (typeof windowOnDragStart === 'function') {
+        setOnDragStart(() => windowOnDragStart);
+      }
+    }
+  }, [isEmbeddedMode]);
 
   // Direct new chat: go through sessionApi so sidebar updates immediately
   const handleNewChat = useCallback(async () => {
@@ -37,10 +65,31 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
     sessions.find((s) => (s as any).realId === currentSessionId) ??
     sessions.find((s) => (s as any).sessionId === currentSessionId) ??
     liveSession;
-  const chatTitle = currentSession?.name || t('chat.newChatTitle', 'New Chat');
+  
+  // 嵌入式模式：显示场景名称，否则显示会话标题
+  const chatTitle = isEmbeddedMode && sceneName 
+    ? sceneName 
+    : (currentSession?.name || t('chat.newChatTitle', 'New Chat'));
+
+  const handlePin = () => {
+    if (onTogglePin) {
+      onTogglePin();
+      setIsPinned(!isPinned);
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (onDragStart) {
+      onDragStart(e);
+    }
+  };
 
   return (
-    <div className={styles.chatSessionHeader}>
+    <div 
+      className={styles.chatSessionHeader}
+      onMouseDown={isEmbeddedMode ? handleMouseDown : undefined}
+      style={isEmbeddedMode ? { cursor: 'move' } : undefined}
+    >
       <Flex gap={8} align="center" style={{ width: '100%' }}>
         {/* 左侧：工具栏按钮 + 新聊天按钮 */}
         <Tooltip title={t('chat.toolbarTooltip', '工具栏')} mouseEnterDelay={0.5}>
@@ -61,6 +110,33 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
 
         {/* 中间：聊天标题 */}
         <span className={styles.sessionTitle}>{chatTitle}</span>
+
+        {/* 右侧：嵌入式模式下的操作按钮 */}
+        {isEmbeddedMode && (
+          <Flex gap={4} align="center" style={{ marginLeft: 'auto' }}>
+            {onTogglePin && (
+              <Tooltip title={isPinned ? "取消固定" : "固定窗口"} mouseEnterDelay={0.5}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={isPinned ? <PushpinFilled /> : <PushpinOutlined />}
+                  onClick={handlePin}
+                  className={isPinned ? styles.pinned : ''}
+                />
+              </Tooltip>
+            )}
+            {onClose && (
+              <Tooltip title="关闭" mouseEnterDelay={0.5}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CloseOutlined />}
+                  onClick={onClose}
+                />
+              </Tooltip>
+            )}
+          </Flex>
+        )}
       </Flex>
     </div>
   );

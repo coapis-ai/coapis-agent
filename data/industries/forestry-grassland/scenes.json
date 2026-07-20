@@ -1,0 +1,18 @@
+{
+  "domain_code": "forestry-grassland",
+  "domain_name": "林草湿荒",
+  "version": "1.0",
+  "scenes": [
+    {"id": "fg-office-meeting", "name": "会议纪要", "type": "office", "icon": "📝", "priority": "high", "description": "森林资源管理会议、草原保护会议、湿地保护会议纪要"},
+    {"id": "fg-office-document", "name": "公文起草", "type": "office", "icon": "📄", "priority": "high", "description": "森林采伐审批文件、草原征占用文件、湿地保护文件"},
+    {"id": "fg-office-report", "name": "工作报告", "type": "office", "icon": "📊", "priority": "high", "description": "森林资源报告、草原监测报告、湿地保护报告"},
+    {"id": "fg-business-forest-approval", "name": "采伐审批", "type": "business", "icon": "🌲", "priority": "high", "description": "森林采伐审批、采伐设计、采伐监管"},
+    {"id": "fg-business-grassland-approval", "name": "草原审批", "type": "business", "icon": "🌿", "priority": "high", "description": "草原征占用审批、草原保护、草原利用"},
+    {"id": "fg-business-wetland-protection", "name": "湿地保护", "type": "business", "icon": "🦆", "priority": "medium", "description": "湿地保护方案、湿地修复、湿地监测"},
+    {"id": "fg-business-wildlife-protection", "name": "野生动物保护", "type": "business", "icon": "🦌", "priority": "medium", "description": "物种保护、栖息地保护、执法监管"},
+    {"id": "fg-supervision-forest-patrol", "name": "森林巡查", "type": "supervision", "icon": "🚨", "priority": "high", "description": "森林资源巡查、违法采伐查处、森林防火"},
+    {"id": "fg-supervision-fire-prevention", "name": "防火巡查", "type": "supervision", "icon": "🔥", "priority": "high", "description": "森林草原防火检查、隐患排查、应急响应"},
+    {"id": "fg-supervision-law-enforcement", "name": "执法检查", "type": "supervision", "icon": "🔍", "priority": "medium", "description": "林草执法检查、违法案件查处、投诉处理"}
+  ],
+  "scene_statistics": {"total": 10, "by_type": {"office": 3, "business": 4, "supervision": 3}}
+}

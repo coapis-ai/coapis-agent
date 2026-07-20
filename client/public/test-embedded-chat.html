@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoApis 嵌入式聊天测试</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      margin-bottom: 20px;
+      color: #262626;
+    }
+    
+    .section {
+      background: #fff;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    h2 {
+      margin-bottom: 15px;
+      color: #262626;
+      font-size: 18px;
+      border-bottom: 1px solid #f0f0f0;
+      padding-bottom: 10px;
+    }
+    
+    .form-group {
+      margin-bottom: 15px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #595959;
+      font-size: 14px;
+    }
+    
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #d9d9d9;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    
+    input:focus,
+    select:focus {
+      outline: none;
+      border-color: #FF7F16;
+    }
+    
+    button {
+      padding: 8px 16px;
+      background: #FF7F16;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+    
+    button:hover {
+      background: #ff9a4d;
+    }
+    
+    button.secondary {
+      background: #fff;
+      color: #262626;
+      border: 1px solid #d9d9d9;
+    }
+    
+    button.secondary:hover {
+      border-color: #FF7F16;
+      color: #FF7F16;
+    }
+    
+    .button-group {
+      margin-top: 15px;
+    }
+    
+    .result {
+      margin-top: 15px;
+      padding: 10px;
+      background: #fafafa;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .error {
+      color: #ff4d4f;
+    }
+    
+    .success {
+      color: #52c41a;
+    }
+    
+    #iframe-container {
+      margin-top: 20px;
+      border: 1px solid #d9d9d9;
+      border-radius: 8px;
+      overflow: hidden;
+      display: none;
+    }
+    
+    #chat-iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    
+    .sdk-window {
+      margin-top: 20px;
+    }
+    
+    .log-panel {
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      width: 400px;
+      height: 300px;
+      background: #fff;
+      border: 1px solid #d9d9d9;
+      border-radius: 8px 0 0 0;
+      box-shadow: -2px -2px 8px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .log-header {
+      padding: 10px 15px;
+      background: #fafafa;
+      border-bottom: 1px solid #f0f0f0;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .log-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    
+    .log-entry {
+      margin-bottom: 5px;
+      padding: 5px;
+      background: #fafafa;
+      border-radius: 4px;
+    }
+    
+    .log-entry.info {
+      border-left: 3px solid #1890ff;
+    }
+    
+    .log-entry.success {
+      border-left: 3px solid #52c41a;
+    }
+    
+    .log-entry.error {
+      border-left: 3px solid #ff4d4f;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 CoApis 嵌入式聊天测试</h1>
+    
+    <!-- 登录区域 -->
+    <div class="section" id="login-section">
+      <h2>1. 登录获取 Token</h2>
+      <div class="form-group">
+        <label>用户名：</label>
+        <input type="text" id="username" value="admin" placeholder="输入用户名">
+      </div>
+      <div class="form-group">
+        <label>密码：</label>
+        <input type="password" id="password" value="" placeholder="输入密码">
+      </div>
+      <div class="button-group">
+        <button onclick="login()">登录</button>
+        <button onclick="checkAuthStatus()" class="secondary">检查认证状态</button>
+      </div>
+      <div class="result" id="login-result"></div>
+    </div>
+    
+    <!-- 配置区域 -->
+    <div class="section hidden" id="config-section">
+      <h2>2. 配置聊天参数</h2>
+      <div class="form-group">
+        <label>CoApis 地址：</label>
+        <input type="text" id="base-url" value="http://172.16.6.241:4300">
+      </div>
+      <div class="form-group">
+        <label>场景 ID（可选）：</label>
+        <select id="scene-id">
+          <option value="">无场景（默认 AI 助手）</option>
+          <option value="meeting-minutes">会议纪要</option>
+          <option value="doc-drafting">公文起草</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>场景名称（可选）：</label>
+        <input type="text" id="scene-name" placeholder="如：会议纪要助手">
+      </div>
+      <div class="form-group">
+        <label>集成方式：</label>
+        <select id="integration-mode">
+          <option value="iframe">iframe 嵌入</option>
+          <option value="sdk">JavaScript SDK（浮动窗口）</option>
+        </select>
+      </div>
+      <div class="button-group">
+        <button onclick="startChat()">启动聊天</button>
+        <button onclick="stopChat()" class="secondary">停止</button>
+      </div>
+    </div>
+    
+    <!-- iframe 嵌入区域 -->
+    <div id="iframe-container">
+      <iframe id="chat-iframe"></iframe>
+    </div>
+    
+    <!-- 日志面板 -->
+    <div class="log-panel hidden" id="log-panel">
+      <div class="log-header">
+        <span>📋 事件日志</span>
+        <button onclick="clearLogs()" class="secondary" style="padding: 4px 8px; font-size: 12px;">清空</button>
+      </div>
+      <div class="log-content" id="log-content"></div>
+    </div>
+  </div>
+
+  <!-- 引入 SDK -->
+  <script src="/sdk/coapis-chat.js"></script>
+  
+  <script>
+    let token = null;
+    let chatInstance = null;
+    
+    // 日志函数
+    function log(message, type = 'info') {
+      const logPanel = document.getElementById('log-panel');
+      const logContent = document.getElementById('log-content');
+      
+      logPanel.classList.remove('hidden');
+      
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logContent.appendChild(entry);
+      logContent.scrollTop = logContent.scrollHeight;
+    }
+    
+    function clearLogs() {
+      document.getElementById('log-content').innerHTML = '';
+    }
+    
+    // 检查认证状态
+    async function checkAuthStatus() {
+      try {
+        const response = await fetch('/api/auth/status');
+        const data = await response.json();
+        document.getElementById('login-result').textContent = JSON.stringify(data, null, 2);
+        log('认证状态: ' + JSON.stringify(data), 'info');
+      } catch (err) {
+        log('检查认证状态失败: ' + err.message, 'error');
+      }
+    }
+    
+    // 登录
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      
+      if (!username || !password) {
+        log('请输入用户名和密码', 'error');
+        return;
+      }
+      
+      try {
+        log('正在登录...', 'info');
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.token) {
+          token = data.token;
+          log('登录成功！Token 已获取', 'success');
+          document.getElementById('login-result').innerHTML = 
+            `<span class="success">✅ 登录成功</span>\n用户: ${data.user?.username || username}\nToken: ${token.substring(0, 50)}...`;
+          
+          // 显示配置区域
+          document.getElementById('config-section').classList.remove('hidden');
+        } else {
+          log('登录失败: ' + (data.detail || '未知错误'), 'error');
+          document.getElementById('login-result').innerHTML = 
+            `<span class="error">❌ 登录失败</span>\n${JSON.stringify(data, null, 2)}`;
+        }
+      } catch (err) {
+        log('登录请求失败: ' + err.message, 'error');
+        document.getElementById('login-result').innerHTML = 
+          `<span class="error">❌ 请求失败</span>\n${err.message}`;
+      }
+    }
+    
+    // 启动聊天
+    function startChat() {
+      const baseUrl = document.getElementById('base-url').value;
+      const sceneId = document.getElementById('scene-id').value;
+      const sceneName = document.getElementById('scene-name').value;
+      const mode = document.getElementById('integration-mode').value;
+      
+      if (!token) {
+        log('请先登录获取 Token', 'error');
+        return;
+      }
+      
+      if (mode === 'iframe') {
+        startIframeChat(baseUrl, sceneId, sceneName);
+      } else {
+        startSDKChat(baseUrl, sceneId, sceneName);
+      }
+    }
+    
+    // iframe 嵌入模式
+    function startIframeChat(baseUrl, sceneId, sceneName) {
+      log('启动 iframe 嵌入模式...', 'info');
+      
+      const url = new URL('/chat/embedded', baseUrl);
+      url.searchParams.set('token', token);
+      if (sceneId) url.searchParams.set('scene_id', sceneId);
+      if (sceneName) url.searchParams.set('scene_name', sceneName);
+      
+      const iframe = document.getElementById('chat-iframe');
+      iframe.src = url.toString();
+      
+      document.getElementById('iframe-container').style.display = 'block';
+      
+      log('iframe URL: ' + url.toString(), 'info');
+    }
+    
+    // SDK 模式
+    function startSDKChat(baseUrl, sceneId, sceneName) {
+      log('启动 SDK 浮动窗口模式...', 'info');
+      
+      // 销毁旧实例
+      if (chatInstance) {
+        chatInstance.destroy();
+        chatInstance = null;
+      }
+      
+      const config = {
+        baseUrl: baseUrl,
+        token: token,
+        sceneId: sceneId || undefined,
+        sceneName: sceneName || undefined,
+        width: 700,
+        height: 500,
+        onReady: () => log('SDK: 聊天窗口已就绪', 'success'),
+        onMessage: (msg) => log('SDK: 收到消息 - ' + msg.substring(0, 50), 'info'),
+        onMessageSent: (msg) => log('SDK: 消息已发送 - ' + msg.substring(0, 50), 'info'),
+        onError: (err) => log('SDK: 错误 - ' + err, 'error'),
+        onClose: () => log('SDK: 窗口已关闭', 'info'),
+      };
+      
+      chatInstance = CoApisChat.open(config);
+      log('SDK 实例已创建', 'success');
+    }
+    
+    // 停止聊天
+    function stopChat() {
+      // 停止 iframe
+      document.getElementById('iframe-container').style.display = 'none';
+      document.getElementById('chat-iframe').src = '';
+      
+      // 停止 SDK
+      if (chatInstance) {
+        chatInstance.destroy();
+        chatInstance = null;
+      }
+      
+      log('聊天已停止', 'info');
+    }
+    
+    // 监听 postMessage 事件
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.type) {
+        const { type, data } = event.data;
+        log(`postMessage: ${type} - ${JSON.stringify(data || {})}`, 'info');
+      }
+    });
+    
+    // 页面加载完成后检查
+    window.addEventListener('load', () => {
+      log('测试页面已加载', 'success');
+      checkAuthStatus();
+    });
+  </script>
+</body>
+</html>

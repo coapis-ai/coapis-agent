@@ -1,0 +1,230 @@
+.floatingWindow {
+  position: fixed;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+  
+  // 拖拽时的视觉效果
+  &.dragging {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+    transition: box-shadow 0.2s;
+  }
+}
+
+.windowHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: move;
+  user-select: none;
+  flex-shrink: 0;
+  
+  &:hover {
+    background: #f5f5f5;
+  }
+}
+
+.sceneInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sceneIcon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.sceneName {
+  font-size: 15px;
+  font-weight: 600;
+  color: #262626;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.headerActions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+  
+  :global {
+    .ant-btn {
+      color: #595959;
+      
+      &:hover {
+        color: #1890ff;
+      }
+    }
+  }
+}
+
+.pinned {
+  color: #1890ff !important;
+}
+
+.windowBody {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  padding: 0 12px; // 左右留白
+}
+
+// 无标题栏的内容区域
+.windowBodyNoHeader {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  padding: 0 12px; // 左右留白
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  min-height: 200px;
+}
+
+// 四角缩放手柄通用样式
+.resizeHandle {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  
+  // 三角形缩放指示器
+  &::before {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    transition: border-color 0.2s;
+  }
+  
+  &:hover::before {
+    border-color: #1890ff;
+  }
+}
+
+// 左上角
+.resizeNw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+  
+  &::before {
+    left: 4px;
+    top: 4px;
+    border-left: 2px solid #bfbfbf;
+    border-top: 2px solid #bfbfbf;
+  }
+}
+
+// 右上角
+.resizeNe {
+  right: 0;
+  top: 0;
+  cursor: nesw-resize;
+  
+  &::before {
+    right: 4px;
+    top: 4px;
+    border-right: 2px solid #bfbfbf;
+    border-top: 2px solid #bfbfbf;
+  }
+}
+
+// 左下角
+.resizeSw {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+  
+  &::before {
+    left: 4px;
+    bottom: 4px;
+    border-left: 2px solid #bfbfbf;
+    border-bottom: 2px solid #bfbfbf;
+  }
+}
+
+// 右下角
+.resizeSe {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+  
+  &::before {
+    right: 4px;
+    bottom: 4px;
+    border-right: 2px solid #bfbfbf;
+    border-bottom: 2px solid #bfbfbf;
+  }
+}
+
+// 暗色模式
+:global(.dark-mode) {
+  .floatingWindow {
+    background: #1f1f1f;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  }
+  
+  .windowHeader {
+    background: #141414;
+    border-bottom-color: #303030;
+    
+    &:hover {
+      background: #262626;
+    }
+  }
+  
+  .sceneName {
+    color: #ffffff;
+  }
+  
+  .headerActions {
+    :global {
+      .ant-btn {
+        color: #a6a6a6;
+        
+        &:hover {
+          color: #40a9ff;
+        }
+      }
+    }
+  }
+  
+  .pinned {
+    color: #40a9ff !important;
+  }
+  
+  .windowBody,
+  .windowBodyNoHeader {
+    background: #1f1f1f;
+  }
+  
+  .resizeHandle::before {
+    border-color: #595959;
+  }
+  
+  .resizeHandle:hover::before {
+    border-color: #40a9ff;
+  }
+}

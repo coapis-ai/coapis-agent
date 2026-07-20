@@ -1,0 +1,99 @@
+.sceneCard {
+  transition: all 0.3s;
+  height: 220px;
+  display: flex;
+  flex-direction: column;
+  
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  
+  :global {
+    .ant-card-body {
+      padding: 16px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .ant-card-actions {
+      border-top: 1px solid #f0f0f0;
+      background: #fafafa;
+    }
+  }
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sceneIcon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.sceneName {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.sceneDescription {
+  color: #595959;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  min-height: 42px;
+}
+
+.sceneMeta {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  gap: 4px;
+  margin-top: auto;
+  
+  :global(.ant-tag) {
+    margin: 0;
+    white-space: nowrap;
+  }
+}
+
+.enterButton {
+  color: #1890ff;
+  font-weight: 500;
+  
+  &:hover {
+    color: #40a9ff;
+  }
+}
+
+// Dark mode
+:global(.dark-mode) {
+  .sceneCard {
+    :global {
+      .ant-card-actions {
+        background: #1f1f1f;
+        border-top-color: #303030;
+      }
+    }
+  }
+  
+  .sceneName {
+    color: #ffffff;
+  }
+  
+  .sceneDescription {
+    color: #a6a6a6;
+  }
+}

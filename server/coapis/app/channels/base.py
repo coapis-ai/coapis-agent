@@ -339,6 +339,11 @@ class BaseChannel(ABC):
                 msg.metadata = msg.metadata or {}
                 msg.metadata["selected_files"] = channel_meta["selected_files"]
                 logger.info(f"[DEBUG] Set msg.metadata to {msg.metadata}")
+            # ── Scene ID: 场景智能体注入 ──
+            if channel_meta.get("scene_id"):
+                msg.metadata = msg.metadata or {}
+                msg.metadata["scene_id"] = channel_meta["scene_id"]
+                logger.info(f"[Scene] Set msg.metadata.scene_id to {channel_meta['scene_id']}")
         
         req = AgentRequest(
             session_id=session_id,

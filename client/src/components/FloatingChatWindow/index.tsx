@@ -1,0 +1,297 @@
+// FloatingChatWindow - 可拖拽、可缩放的浮窗组件
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Spin, message } from 'antd';
+import type { SceneConfig, EnterSceneResponse } from '../../pages/Workbench/types';
+import styles from './index.module.less';
+import { getApiToken } from '../../api/config';
+import { ChatWrapper } from '../ChatWrapper';
+import ChatPage from '../../pages/Chat';
+
+interface FloatingChatWindowProps {
+  visible: boolean;
+  scene: SceneConfig | null;
+  onClose: () => void;
+  initialWidth?: number;
+  initialHeight?: number;
+  minWidth?: number;
+  minHeight?: number;
+}
+
+// 缩放角类型
+type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
+
+/**
+ * 可拖拽、可缩放的浮窗组件
+ * 
+ * 功能：
+ * 1. 拖拽：按住标题栏移动窗口
+ * 2. 四角缩放：拖拽四个角调整窗口大小
+ * 3. 固定：固定后点击外部不关闭
+ */
+const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
+  visible,
+  scene,
+  onClose,
+  initialWidth = 700,
+  initialHeight = 500,
+  minWidth = 400,
+  minHeight = 300,
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [chatData, setChatData] = useState<EnterSceneResponse | null>(null);
+  
+  // 窗口状态
+  const [position, setPosition] = useState({ x: 100, y: 50 });
+  const [size, setSize] = useState({ width: initialWidth, height: initialHeight });
+  const [isPinned, setIsPinned] = useState(false);
+  
+  // 拖拽状态
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0, windowX: 0, windowY: 0 });
+  
+  // 缩放状态
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeCorner, setResizeCorner] = useState<ResizeCorner | null>(null);
+  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });
+  
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // 加载场景数据
+  useEffect(() => {
+    if (visible && scene) {
+      enterScene();
+    }
+  }, [visible, scene]);
+
+  // 重置状态（仅在未固定时）
+  useEffect(() => {
+    if (!visible) {
+      setChatData(null);
+      // 未固定时才重置位置和大小
+      if (!isPinned) {
+        // 初始位置：偏右侧
+        const initialX = Math.max(50, window.innerWidth - initialWidth - 50);
+        setPosition({ x: initialX, y: 50 });
+        setSize({ width: initialWidth, height: initialHeight });
+      }
+      setIsPinned(false);
+    }
+  }, [visible, isPinned, initialWidth, initialHeight]);
+
+  // 点击外部关闭（未固定时）
+  useEffect(() => {
+    if (!visible || isPinned) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+
+    // 延迟添加监听，避免立即触发
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [visible, isPinned, onClose]);
+
+  const enterScene = async () => {
+    if (!scene) return;
+    
+    try {
+      setLoading(true);
+      const token = getApiToken();
+      const response = await fetch(`/api/scenes/${scene.id}/enter`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to enter scene');
+      }
+
+      const data: EnterSceneResponse = await response.json();
+      setChatData(data);
+      message.success(`已进入场景: ${scene.name}`);
+    } catch (error) {
+      console.error('Failed to enter scene:', error);
+      message.error('进入场景失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 拖拽逻辑
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if (isResizing) return;
+    
+    e.preventDefault();
+    setIsDragging(true);
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      windowX: position.x,
+      windowY: position.y,
+    };
+  }, [isResizing, position]);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = e.clientX - dragStartRef.current.x;
+      const deltaY = e.clientY - dragStartRef.current.y;
+      
+      const newX = Math.max(0, Math.min(window.innerWidth - size.width, dragStartRef.current.windowX + deltaX));
+      const newY = Math.max(0, Math.min(window.innerHeight - 100, dragStartRef.current.windowY + deltaY));
+      
+      setPosition({ x: newX, y: newY });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, size]);
+
+  // 四角缩放逻辑
+  const handleResizeStart = useCallback((corner: ResizeCorner) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    setResizeCorner(corner);
+    resizeStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: size.width,
+      height: size.height,
+      posX: position.x,
+      posY: position.y,
+    };
+  }, [size, position]);
+
+  useEffect(() => {
+    if (!isResizing || !resizeCorner) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = e.clientX - resizeStartRef.current.x;
+      const deltaY = e.clientY - resizeStartRef.current.y;
+      
+      let newWidth = resizeStartRef.current.width;
+      let newHeight = resizeStartRef.current.height;
+      let newX = resizeStartRef.current.posX;
+      let newY = resizeStartRef.current.posY;
+      
+      // 根据角的位置计算新尺寸和位置
+      switch (resizeCorner) {
+        case 'nw': // 左上角：向左上缩放
+          newWidth = Math.max(minWidth, resizeStartRef.current.width - deltaX);
+          newHeight = Math.max(minHeight, resizeStartRef.current.height - deltaY);
+          newX = resizeStartRef.current.posX + (resizeStartRef.current.width - newWidth);
+          newY = resizeStartRef.current.posY + (resizeStartRef.current.height - newHeight);
+          break;
+        case 'ne': // 右上角：向右上缩放
+          newWidth = Math.max(minWidth, resizeStartRef.current.width + deltaX);
+          newHeight = Math.max(minHeight, resizeStartRef.current.height - deltaY);
+          newY = resizeStartRef.current.posY + (resizeStartRef.current.height - newHeight);
+          break;
+        case 'sw': // 左下角：向左下缩放
+          newWidth = Math.max(minWidth, resizeStartRef.current.width - deltaX);
+          newHeight = Math.max(minHeight, resizeStartRef.current.height + deltaY);
+          newX = resizeStartRef.current.posX + (resizeStartRef.current.width - newWidth);
+          break;
+        case 'se': // 右下角：向右下缩放
+          newWidth = Math.max(minWidth, resizeStartRef.current.width + deltaX);
+          newHeight = Math.max(minHeight, resizeStartRef.current.height + deltaY);
+          break;
+      }
+      
+      // 边界限制
+      newX = Math.max(0, newX);
+      newY = Math.max(0, newY);
+      
+      setSize({ width: newWidth, height: newHeight });
+      setPosition({ x: newX, y: newY });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      setResizeCorner(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, resizeCorner, minWidth, minHeight]);
+
+  if (!scene) return null;
+
+  return (
+    <div
+      ref={containerRef}
+      className={styles.floatingWindow}
+      style={{
+        left: position.x,
+        top: position.y,
+        width: size.width,
+        height: size.height,
+        cursor: isDragging ? 'move' : 'default',
+      }}
+    >
+      {/* 内容区域（无标题栏，由 ChatSessionHeader 作为标题栏） */}
+      <div className={styles.windowBodyNoHeader}>
+        {loading ? (
+          <div className={styles.loading}>
+            <Spin size="large" tip="加载中..." />
+          </div>
+        ) : chatData ? (
+          <ChatWrapper
+            mode="embedded"
+            sessionId={chatData.chat_id}
+            sceneId={chatData.scene.id}
+            sceneName={scene.name}
+            welcomeMessage={chatData.welcome_message}
+            showToolbar={true}
+            compactLayout={true}
+            onClose={onClose}
+            onTogglePin={() => setIsPinned(!isPinned)}
+            isPinned={isPinned}
+            onDragStart={handleDragStart}
+            onError={(error) => {
+              console.error('Chat error:', error);
+              message.error('聊天发生错误');
+            }}
+          >
+            <ChatPage />
+          </ChatWrapper>
+        ) : null}
+      </div>
+
+      {/* 四角缩放手柄 */}
+      <div className={`${styles.resizeHandle} ${styles.resizeNw}`} onMouseDown={handleResizeStart('nw')} />
+      <div className={`${styles.resizeHandle} ${styles.resizeNe}`} onMouseDown={handleResizeStart('ne')} />
+      <div className={`${styles.resizeHandle} ${styles.resizeSw}`} onMouseDown={handleResizeStart('sw')} />
+      <div className={`${styles.resizeHandle} ${styles.resizeSe}`} onMouseDown={handleResizeStart('se')} />
+    </div>
+  );
+};
+
+export default FloatingChatWindow;

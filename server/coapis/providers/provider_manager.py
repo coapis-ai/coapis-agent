@@ -21,7 +21,7 @@ providers, adding/removing custom providers, and fetching provider details."""
 
 import asyncio
 import os
-from typing import Dict, List
+from typing import Any, Dict, List
 import logging
 import json
 
@@ -40,7 +40,10 @@ from .gemini_provider import GeminiProvider
 from .ollama_provider import OllamaProvider
 from .openai_provider import OpenAIProvider
 from .provider import (
+    DefaultModelSlot,
+    DefaultModelsConfig,
     ModelInfo,
+    ModelType,
     Provider,
     ProviderInfo,
 )
@@ -756,6 +759,10 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self._init_from_storage()
         self._load_hidden_providers()
         self._apply_default_annotations()
+        
+        # Initialize default models configuration
+        self.default_models: DefaultModelsConfig = DefaultModelsConfig()
+        self._load_default_models()
 
     def _prepare_disk_storage(self):
         """Prepare directory structure"""
@@ -1803,3 +1810,163 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 message=f"Active provider '{model.provider_id}' not found.",
             )
         return provider.get_chat_model_instance(model.model)
+
+    # ========================================================================
+    # Default Models Management
+    # ========================================================================
+
+    def _load_default_models(self) -> None:
+        """Load default models configuration from disk."""
+        default_path = self.root_path / "default_models.json"
+        
+        if default_path.exists():
+            try:
+                with open(default_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.default_models = DefaultModelsConfig.model_validate(data)
+                logger.info("✓ Loaded default models configuration")
+            except Exception as e:
+                logger.error(f"Failed to load default models: {e}")
+                self.default_models = DefaultModelsConfig()
+        else:
+            # Migrate from legacy active_model if exists
+            self._migrate_active_model_to_default_models()
+
+    def _migrate_active_model_to_default_models(self) -> None:
+        """Migrate legacy active_model to default_models.chat."""
+        if self.active_model and self.active_model.provider_id and self.active_model.model:
+            self.default_models.chat = DefaultModelSlot(
+                provider_id=self.active_model.provider_id,
+                model_id=self.active_model.model,
+                model_type="chat",
+            )
+            self._save_default_models()
+            logger.info(
+                f"✓ Migrated active_model to default_models.chat: "
+                f"{self.active_model.provider_id}/{self.active_model.model}"
+            )
+
+    def _save_default_models(self) -> None:
+        """Save default models configuration to disk."""
+        default_path = self.root_path / "default_models.json"
+        
+        try:
+            with open(default_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    self.default_models.to_dict(),
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            try:
+                os.chmod(default_path, 0o600)
+            except OSError:
+                pass
+        except Exception as e:
+            logger.error(f"Failed to save default models: {e}")
+
+    def get_default_models(self) -> DefaultModelsConfig:
+        """Get all default models configuration."""
+        return self.default_models
+
+    def get_default_model_by_type(self, model_type: ModelType) -> DefaultModelSlot | None:
+        """Get default model for a specific type."""
+        return self.default_models.get_by_type(model_type)
+
+    def set_default_model(
+        self,
+        model_type: ModelType,
+        provider_id: str,
+        model_id: str,
+    ) -> None:
+        """Set default model for a specific type."""
+        # Verify the model exists
+        provider = self.get_provider(provider_id)
+        if not provider:
+            raise ProviderError(
+                message=f"Provider '{provider_id}' not found",
+            )
+        
+        model = next(
+            (m for m in provider.models if m.id == model_id),
+            None
+        )
+        if not model:
+            raise ProviderError(
+                message=f"Model '{model_id}' not found in provider '{provider_id}'",
+            )
+        
+        # Verify model type matches
+        if model.model_type != model_type:
+            raise ProviderError(
+                message=f"Model type mismatch: expected '{model_type}', "
+                f"got '{model.model_type}'",
+            )
+        
+        # Set default model
+        slot = DefaultModelSlot(
+            provider_id=provider_id,
+            model_id=model_id,
+            model_type=model_type,
+        )
+        self.default_models.set_by_type(model_type, slot)
+        self._save_default_models()
+        
+        logger.info(
+            f"✓ Set default {model_type} model: {provider_id}/{model_id}"
+        )
+
+    def get_models_by_type(
+        self,
+        model_type: ModelType,
+        configured_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Get all models of a specific type across all providers.
+        
+        Args:
+            model_type: Model type to filter by
+            configured_only: If True, only return models from configured providers
+            
+        Returns:
+            List of model info dicts with provider info included
+        """
+        result = []
+        
+        # Get all providers (builtin + custom + plugin)
+        all_providers = {}
+        all_providers.update(self.builtin_providers)
+        all_providers.update(self.custom_providers)
+        
+        # Add plugin providers
+        for provider_id, plugin_data in self.plugin_providers.items():
+            provider_info = plugin_data.get("info")
+            if provider_info:
+                all_providers[provider_id] = provider_info
+        
+        for provider_id, provider in all_providers.items():
+            # Check if provider is configured (if configured_only)
+            if configured_only:
+                # A provider is configured if it has api_key or doesn't require one
+                if provider.require_api_key and not provider.api_key:
+                    continue
+                if provider.is_custom and not provider.base_url:
+                    continue
+            
+            # Get models of the specified type
+            models = getattr(provider, "models", [])
+            for model in models:
+                model_type_value = getattr(model, "model_type", "chat")
+                if model_type_value == model_type:
+                    result.append({
+                        "provider_id": provider_id,
+                        "provider_name": provider.name,
+                        "model_id": model.id,
+                        "model_name": model.name,
+                        "model_type": model.model_type,
+                        "supports_image": model.supports_image,
+                        "supports_video": model.supports_video,
+                        "embedding_dimension": model.embedding_dimension,
+                        "is_free": model.is_free,
+                    })
+        
+        return result

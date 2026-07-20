@@ -1,0 +1,27 @@
+{
+  "code": "forestry-grassland",
+  "name": "林业和草原局",
+  "short_name": "林草局",
+  "description": "负责森林、草原、湿地、荒漠资源保护发展监督管理",
+  "keywords": ["森林资源", "草原保护", "湿地管理", "荒漠化防治", "野生动物保护"],
+  "parent_department": "市政府",
+  "level": "市级",
+  "main_responsibilities": [
+    "负责森林资源保护发展监督管理",
+    "负责草原保护修复和开发利用监督管理",
+    "负责湿地生态保护修复监督管理",
+    "负责荒漠化防治监督管理",
+    "负责陆生野生动植物资源监督管理",
+    "负责各类自然保护地监督管理",
+    "负责林业和草原有害生物防治",
+    "负责森林草原防火工作"
+  ],
+  "business_modules": [
+    {"code": "forest-management", "name": "森林资源管理", "scenarios": ["森林采伐", "森林培育", "森林保护"]},
+    {"code": "grassland-management", "name": "草原资源管理", "scenarios": ["草原保护", "草原利用", "草原监测"]},
+    {"code": "wetland-management", "name": "湿地保护管理", "scenarios": ["湿地保护", "湿地修复", "湿地监测"]},
+    {"code": "wildlife-protection", "name": "野生动物保护", "scenarios": ["物种保护", "栖息地保护", "执法监管"]}
+  ],
+  "key_regulations": ["中华人民共和国森林法", "中华人民共和国草原法", "中华人民共和国野生动物保护法", "中华人民共和国湿地保护法"],
+  "created_at": "2026-07-17T10:00:00Z"
+}

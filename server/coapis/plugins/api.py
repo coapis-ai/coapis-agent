@@ -17,7 +17,7 @@
 
 """Plugin API for plugin developers."""
 
-from typing import Any, Callable, Dict, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 import logging
 
 logger = logging.getLogger(__name__)
@@ -187,6 +187,82 @@ class PluginApi:
             logger.info(
                 f"Plugin '{self.plugin_id}' registered control command "
                 f"'{handler.command_name}' (priority={priority_level})",
+            )
+
+    def register_router(
+        self,
+        router: Any,
+        prefix: str = "",
+        tags: Optional[List[str]] = None,
+        priority: int = 100,
+    ):
+        """Register a FastAPI router.
+
+        This allows plugins to add new API endpoints to the application.
+
+        Args:
+            router: FastAPI APIRouter instance
+            prefix: URL prefix for the router (e.g., "/api/ent")
+            tags: OpenAPI tags for documentation
+            priority: Priority (lower = earlier execution, default: 100)
+
+        Example:
+            >>> from fastapi import APIRouter
+            >>> router = APIRouter()
+            >>> @router.get("/custom-endpoint")
+            ... async def custom_endpoint():
+            ...     return {"message": "Hello from plugin"}
+            >>> api.register_router(
+            ...     router=router,
+            ...     prefix="/api/custom",
+            ...     tags=["Custom"],
+            ...     priority=10,
+            ... )
+        """
+        if self._registry:
+            self._registry.register_router(
+                plugin_id=self.plugin_id,
+                router=router,
+                prefix=prefix,
+                tags=tags,
+                priority=priority,
+            )
+            logger.info(
+                f"Plugin '{self.plugin_id}' registered router "
+                f"(prefix='{prefix}', priority={priority})",
+            )
+
+    def register_middleware(
+        self,
+        middleware: Callable,
+        priority: int = 100,
+    ):
+        """Register a middleware function.
+
+        This allows plugins to add custom middleware to the application.
+
+        Args:
+            middleware: Middleware callable (async function)
+            priority: Priority (lower = earlier execution, default: 100)
+
+        Example:
+            >>> async def auth_middleware(request, call_next):
+            ...     # Custom authentication logic
+            ...     response = await call_next(request)
+            ...     return response
+            >>> api.register_middleware(
+            ...     middleware=auth_middleware,
+            ...     priority=10,
+            ... )
+        """
+        if self._registry:
+            self._registry.register_middleware(
+                plugin_id=self.plugin_id,
+                middleware=middleware,
+                priority=priority,
+            )
+            logger.info(
+                f"Plugin '{self.plugin_id}' registered middleware (priority={priority})",
             )
 
     @property

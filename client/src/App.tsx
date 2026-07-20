@@ -29,6 +29,7 @@ import { Suspense } from "react";
 import { lazyImportWithRetry } from "./utils/lazyWithRetry";
 
 const LoginPage = lazyImportWithRetry("./pages/Login/index");
+const EmbeddedChatPage = lazyImportWithRetry("./pages/Chat/EmbeddedChatPage");
 import { authApi } from "./api/modules/auth";
 import { languageApi } from "./api/modules/language";
 import { getApiUrl, getApiToken, clearAuthToken } from "./api/config";
@@ -206,6 +207,15 @@ function AppInner() {
         <AntdApp>
           <ApprovalProvider>
             <Routes>
+              {/* 嵌入式聊天页面（外部系统 iframe 嵌入） */}
+              <Route
+                path="/chat/embedded"
+                element={
+                  <Suspense fallback={null}>
+                    <EmbeddedChatPage />
+                  </Suspense>
+                }
+              />
               <Route
                 path="/login"
                 element={

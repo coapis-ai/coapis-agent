@@ -1,0 +1,67 @@
+{
+  "code": "ecological-environment",
+  "name": "生态环境局",
+  "short_name": "生态环保",
+  "description": "负责生态环境保护和污染防治监督管理",
+  "keywords": ["环境监测", "污染治理", "生态保护", "环评审批", "执法监察"],
+  "parent_department": "市政府",
+  "level": "市级",
+  
+  "main_responsibilities": [
+    "负责建立健全生态环境基本制度",
+    "负责重大生态环境问题的统筹协调和监督管理",
+    "负责监督管理减排目标的落实",
+    "负责提出生态环境领域固定资产投资规模和方向建议",
+    "负责环境污染防治的监督管理",
+    "指导协调和监督生态保护修复工作",
+    "负责辐射安全的监督管理",
+    "负责生态环境准入的监督管理",
+    "负责生态环境监测和信息发布",
+    "负责生态环境监督执法"
+  ],
+  
+  "business_modules": [
+    {
+      "code": "environmental-impact-assessment",
+      "name": "环境影响评价",
+      "description": "建设项目环评审批、规划环评审查",
+      "scenarios": ["环评审批", "规划环评", "环评验收"]
+    },
+    {
+      "code": "pollution-control",
+      "name": "污染防治",
+      "description": "大气、水、土壤、噪声污染防治",
+      "scenarios": ["大气污染防治", "水污染防治", "土壤污染防治", "噪声污染防治"]
+    },
+    {
+      "code": "environmental-monitoring",
+      "name": "环境监测",
+      "description": "环境质量监测、污染源监测、应急监测",
+      "scenarios": ["环境质量监测", "污染源监测", "应急监测", "数据分析"]
+    },
+    {
+      "code": "ecological-protection",
+      "name": "生态保护",
+      "description": "生态保护红线监管、自然保护地管理",
+      "scenarios": ["生态红线监管", "自然保护地管理", "生物多样性保护"]
+    },
+    {
+      "code": "law-enforcement",
+      "name": "环境执法",
+      "description": "环境执法监察、违法案件查处",
+      "scenarios": ["执法检查", "违法查处", "信访处理", "应急响应"]
+    }
+  ],
+  
+  "key_regulations": [
+    "中华人民共和国环境保护法",
+    "中华人民共和国大气污染防治法",
+    "中华人民共和国水污染防治法",
+    "中华人民共和国土壤污染防治法",
+    "中华人民共和国环境影响评价法",
+    "建设项目环境影响报告书（表）审批管理办法"
+  ],
+  
+  "created_at": "2026-07-17T10:00:00Z",
+  "updated_at": "2026-07-17T10:00:00Z"
+}

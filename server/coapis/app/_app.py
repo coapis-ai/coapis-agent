@@ -108,13 +108,30 @@ def _load_enterprise_routes(app: FastAPI) -> None:
     """
     try:
         from coapis_enterprise import get_routers, register_plugin
+        from coapis.plugins.registry import PluginRegistry
         
-        routers = get_routers()
-        for router in routers:
-            app.include_router(router, prefix="/api")
-        
+        # 1. 注册企业版插件（会调用 PluginApi.register_router 等）
         register_plugin()
-        logger.info("Enterprise routes loaded (%d routers)", len(routers))
+        
+        # 2. 从 PluginRegistry 获取路由并挂载
+        registry = PluginRegistry()
+        router_regs = registry.get_routers()
+        for router_reg in router_regs:
+            app.include_router(
+                router_reg.router,
+                prefix=router_reg.prefix,
+                tags=router_reg.tags,
+            )
+        
+        # 3. 从 PluginRegistry 获取中间件并挂载
+        middleware_regs = registry.get_middleware()
+        for mid_reg in middleware_regs:
+            app.middleware("http")(mid_reg.middleware)
+        
+        logger.info(
+            f"Enterprise routes loaded ({len(router_regs)} routers, "
+            f"{len(middleware_regs)} middleware)"
+        )
         
     except ImportError:
         logger.info("Enterprise package not installed - running Community edition")
@@ -341,6 +358,11 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
     multi_agent_manager = MultiAgentManager(base_dir=WORKSPACES_DIR)
     provider_manager = ProviderManager.get_instance()
     local_model_manager = LocalModelManager.get_instance()
+    
+    # Initialize Repository Factory (Community edition)
+    from ..foundation.repository_factory import RepositoryFactory
+    RepositoryFactory.initialize(edition="community", data_dir=DATA_DIR)
+    logger.debug("RepositoryFactory initialized (Community edition)")
 
     # Start token usage manager background tasks
     logger.debug("Starting TokenUsageManager background tasks...")

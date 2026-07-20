@@ -4,11 +4,13 @@ import {
   UserOutlined, TrophyOutlined, ThunderboltOutlined, CloudServerOutlined,
   PlusOutlined, DeleteOutlined, EditOutlined, SearchOutlined, ReloadOutlined,
   BarChartOutlined, FileTextOutlined, SettingOutlined, CrownOutlined,
-  SafetyOutlined, StopOutlined, PlayCircleOutlined,
+  SafetyOutlined, StopOutlined, PlayCircleOutlined, TagOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import PermissionMatrix from './components/PermissionMatrix';
+import SceneManagement from './SceneManagement';
+import TagManagement from './TagManagement';
 import { CRUD_OPS } from './components/PermissionMatrix';
 import {
   getTokenSummary, getUsersConfig,
@@ -79,6 +81,16 @@ function AdminDashboard() {
       key: 'config',
       label: <><SettingOutlined /> {t('admin.quota')}</>,
       children: <ConfigTab />,
+    },
+    {
+      key: 'scenes',
+      label: <><PlayCircleOutlined /> {t('admin.scenes', '场景管理')}</>,
+      children: <SceneManagement />,
+    },
+    {
+      key: 'tags',
+      label: <><TagOutlined /> {t('admin.tags', '标签管理')}</>,
+      children: <TagManagement />,
     },
   ];
 

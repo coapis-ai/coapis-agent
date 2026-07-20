@@ -1,0 +1,67 @@
+{
+  "code": "education",
+  "name": "教育局",
+  "short_name": "教育局",
+  "description": "负责教育事业发展规划、学校管理、教师队伍建设",
+  "keywords": ["教育管理", "学校建设", "师资培养", "招生考试", "教育质量"],
+  "parent_department": "市政府",
+  "level": "市级",
+  
+  "main_responsibilities": [
+    "拟订教育事业发展规划",
+    "统筹管理各级各类学校",
+    "负责教师队伍建设",
+    "组织招生考试工作",
+    "指导教育科学研究",
+    "管理教育经费和资产",
+    "监督教育质量",
+    "推进教育信息化建设",
+    "指导学校安全工作",
+    "管理民办教育"
+  ],
+  
+  "business_modules": [
+    {
+      "code": "education-planning",
+      "name": "教育规划",
+      "description": "教育发展规划、学校布局调整、教育资源优化配置",
+      "scenarios": ["规划编制", "学校布局", "资源配置", "教育统计"]
+    },
+    {
+      "code": "school-management",
+      "name": "学校管理",
+      "description": "学校设置审批、教育教学管理、学校安全监管",
+      "scenarios": ["学校审批", "教学管理", "安全监管", "评估督导"]
+    },
+    {
+      "code": "teacher-development",
+      "name": "教师发展",
+      "description": "教师招聘、培训、职称评审、绩效考核",
+      "scenarios": ["教师招聘", "培训管理", "职称评审", "绩效考核"]
+    },
+    {
+      "code": "enrollment-examination",
+      "name": "招生考试",
+      "description": "中小学招生、高考中考组织、考务管理",
+      "scenarios": ["招生组织", "考试管理", "考务安排", "成绩管理"]
+    },
+    {
+      "code": "education-quality",
+      "name": "教育质量",
+      "description": "教育质量监测、教学评估、教育督导",
+      "scenarios": ["质量监测", "教学评估", "教育督导", "改进指导"]
+    }
+  ],
+  
+  "key_regulations": [
+    "中华人民共和国教育法",
+    "中华人民共和国义务教育法",
+    "中华人民共和国教师法",
+    "中华人民共和国民办教育促进法",
+    "教师资格条例",
+    "中小学教师职称评审办法"
+  ],
+  
+  "created_at": "2026-07-17T10:00:00Z",
+  "updated_at": "2026-07-17T10:00:00Z"
+}

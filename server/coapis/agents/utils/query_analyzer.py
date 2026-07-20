@@ -225,12 +225,11 @@ class QueryAnalyzer:
         """
         t0 = time.monotonic()
 
-        # ── 未启用时返回默认值 ──
-        if not self._enabled:
-            return QueryAnalysis(
-                query=query,
-                latency_ms=(time.monotonic() - t0) * 1000,
-            )
+        # ── 永远返回默认值，禁用工具裁剪 ──
+        return QueryAnalysis(
+            query=query,
+            latency_ms=(time.monotonic() - t0) * 1000,
+        )
 
         try:
             return self._analyze_internal(query, recent_messages, t0)

@@ -906,6 +906,75 @@ class AgentRunner(Runner):
             # Load agent-specific configuration
             agent_config = load_agent_config(self.agent_id)
 
+            # ── Scene Agent Injection: 场景身份融合（核心！）──
+            # 场景智能体作为"最重要的智能体要求"，融合到用户智能体中
+            scene_id = None
+            scene_name = None
+            scene_prompt = None
+            scene_skills = []
+            
+            # 从 request.input[0].metadata 中获取 scene_id
+            try:
+                if request and hasattr(request, "input") and request.input:
+                    first_msg = request.input[0]
+                    if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
+                        scene_id = first_msg.metadata.get("scene_id")
+                        if scene_id:
+                            logger.info(f"[Scene] Detected scene_id={scene_id}, loading scene agent config")
+            except Exception as e:
+                logger.warning(f"[Scene] Failed to get scene_id from request: {e}")
+
+            # 如果有 scene_id，加载场景智能体配置并融合到 agent_config
+            if scene_id:
+                try:
+                    from pathlib import Path
+                    from ...constant import WORKING_DIR
+                    
+                    scene_agent_path = Path(WORKING_DIR) / "agents" / f"scene-{scene_id}" / "agent.json"
+                    if scene_agent_path.exists():
+                        with open(scene_agent_path, "r", encoding="utf-8") as f:
+                            scene_data = json.load(f)
+                        
+                        # 场景基本信息
+                        scene_name = scene_data.get("name", "")
+                        
+                        # 场景智能体的 system_prompt 在 capabilities 下
+                        capabilities = scene_data.get("capabilities", {})
+                        scene_prompt = capabilities.get("system_prompt", "") or scene_data.get("system_prompt", "") or ""
+                        
+                        # 场景技能（优选，不是替换）
+                        scene_skills = capabilities.get("skills", []) or scene_data.get("skills", []) or []
+                        
+                        # ── 核心：将场景身份注入到 agent_config ──
+                        # 1. 场景系统提示词作为"最重要的要求"前置
+                        if scene_prompt and hasattr(agent_config, "scene_system_prompt"):
+                            agent_config.scene_system_prompt = scene_prompt
+                            logger.info(f"[Scene] Injected scene system prompt into agent_config")
+                        
+                        # 2. 场景名称（用于前端显示）
+                        if scene_name and hasattr(agent_config, "display_name"):
+                            agent_config.display_name = scene_name
+                            logger.info(f"[Scene] Set display name to '{scene_name}'")
+                        
+                        # 3. 场景技能优选（合并到用户技能，场景技能优先）
+                        if scene_skills and hasattr(agent_config, "preferred_skills"):
+                            existing_skills = getattr(agent_config, "preferred_skills", []) or []
+                            # 场景技能在前，用户技能在后（去重）
+                            merged_skills = scene_skills + [s for s in existing_skills if s not in scene_skills]
+                            agent_config.preferred_skills = merged_skills
+                            logger.info(f"[Scene] Merged skills: {merged_skills}")
+                        
+                        # 4. 场景欢迎消息（可选）
+                        welcome_msg = scene_data.get("welcome_message", "")
+                        if welcome_msg and hasattr(agent_config, "welcome_message"):
+                            agent_config.welcome_message = welcome_msg
+                        
+                        logger.info(f"[Scene] Scene identity merged: name={scene_name}, skills={scene_skills}, prompt_len={len(scene_prompt)}")
+                    else:
+                        logger.warning(f"[Scene] Scene agent config not found: {scene_agent_path}")
+                except Exception as e:
+                    logger.warning(f"[Scene] Failed to load scene config: {e}")
+
             # Override agent language with user's language preference
             # This ensures LLM outputs in the user's preferred language
             try:
@@ -933,6 +1002,14 @@ class AgentRunner(Runner):
                 "channel": channel,
                 "agent_id": self.agent_id,
             }
+            
+            # ── Scene Context: 将场景信息传入 request_context ──
+            if scene_id and scene_prompt:
+                base_request_context["scene_id"] = scene_id
+                base_request_context["scene_name"] = scene_name
+                base_request_context["scene_system_prompt"] = scene_prompt
+                base_request_context["scene_skills"] = scene_skills
+                logger.info(f"[Scene] Scene context added to request_context: {scene_name}")
 
             # ── 从 auth middleware 注入 role（用于记忆配额等多用户场景）──
             _role = getattr(getattr(request, "state", None), "role", None)
@@ -1130,6 +1207,7 @@ class AgentRunner(Runner):
                     )
                     plan_notebook = None
 
+            # 场景身份已在 request_context 中传递，由 CoApisAgent._build_sys_prompt() 注入
             agent = CoApisAgent(
                 agent_config=agent_config,
                 env_context=env_context,
@@ -1147,6 +1225,41 @@ class AgentRunner(Runner):
                 f"[MCP_DEBUG] register_mcp_clients done: mcp_clients={len(mcp_clients)}, toolkit_mcp_tools={mcp_tool_count}, total_tools={len(agent.toolkit.tools) if hasattr(agent, 'toolkit') and agent.toolkit else 0}"
             )
             agent.set_console_output_enabled(enabled=False)
+            
+            # ── Scene Skills Injection: 场景技能优选注入到 toolkit ──
+            scene_skills_ctx = base_request_context.get("scene_skills", [])
+            if scene_skills_ctx and hasattr(agent, 'toolkit') and agent.toolkit:
+                from pathlib import Path
+                from ...constant import WORKING_DIR
+                skill_pool_dir = Path(WORKING_DIR) / "skill_pool"
+                
+                injected_count = 0
+                for skill_name in scene_skills_ctx:
+                    skill_dir = skill_pool_dir / skill_name
+                    if skill_dir.exists() and skill_dir.is_dir():
+                        if hasattr(agent.toolkit, 'skills') and isinstance(agent.toolkit.skills, dict):
+                            if skill_name not in agent.toolkit.skills:
+                                skill_md = skill_dir / "SKILL.md"
+                                if skill_md.exists():
+                                    import yaml as _yaml
+                                    content = skill_md.read_text(encoding="utf-8")
+                                    summary = ""
+                                    if content.startswith("---"):
+                                        parts = content.split("---", 2)
+                                        if len(parts) >= 3:
+                                            meta = _yaml.safe_load(parts[1]) or {}
+                                            summary = meta.get("description", "") or meta.get("summary", "")
+                                
+                                agent.toolkit.skills[skill_name] = {
+                                    "name": skill_name,
+                                    "description": summary or f"场景技能: {skill_name}",
+                                    "dir": str(skill_dir),
+                                }
+                                injected_count += 1
+                                logger.info(f"[Scene] Injected skill '{skill_name}' into toolkit")
+                
+                if injected_count > 0:
+                    logger.info(f"[Scene] Total {injected_count} scene skills injected")
 
             logger.debug(
                 f"Agent Query msgs {msgs}",

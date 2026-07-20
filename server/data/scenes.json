@@ -1,0 +1,880 @@
+{
+  "version": 1,
+  "scenes": [
+    {
+      "id": "meeting-minutes",
+      "name": "会议纪要",
+      "icon": "📝",
+      "description": "会议录音转写和纪要生成，支持待办事项提取和决议跟踪",
+      "category": "办公通用",
+      "tags": [
+        "会议",
+        "纪要",
+        "录音转写",
+        "通用"
+      ],
+      "skills": [
+        "audio-transcription",
+        "docx"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 转写会议录音\n• 生成结构化会议纪要\n• 提取待办事项和决议\n\n请告诉我会议类型和主要内容。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "document-drafting",
+      "name": "公文起草",
+      "icon": "📄",
+      "description": "公文写作辅助，支持多种公文类型和格式规范",
+      "category": "办公通用",
+      "tags": [
+        "公文",
+        "起草",
+        "写作",
+        "通用"
+      ],
+      "skills": [
+        "docx",
+        "document-templates"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 起草各类公文\n• 格式规范化检查\n• 公文模板应用\n\n请告诉我公文类型和主要内容。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "work-report",
+      "name": "工作报告",
+      "icon": "📊",
+      "description": "工作总结和报告撰写，支持周报、月报、年报等多种类型",
+      "category": "办公通用",
+      "tags": [
+        "工作报告",
+        "总结",
+        "汇报",
+        "通用"
+      ],
+      "skills": [
+        "docx",
+        "data-analysis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 撰写工作报告\n• 数据统计分析\n• 进度跟踪汇总\n\n请告诉我报告类型和时间段。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "project-approval",
+      "name": "项目审批",
+      "icon": "✅",
+      "description": "项目审批流程辅助，支持发改、资规、环保、住建等领域",
+      "category": "审批服务",
+      "tags": [
+        "项目",
+        "审批",
+        "立项",
+        "通用"
+      ],
+      "skills": [
+        "document-analysis",
+        "compliance-check",
+        "workflow"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 项目审批流程指导\n• 材料合规性检查\n• 审批进度跟踪\n\n请告诉我项目类型和审批阶段。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "planning-compilation",
+      "name": "规划编制",
+      "icon": "📋",
+      "description": "规划方案编制辅助，支持发改、资规、农业、文旅等领域",
+      "category": "规划编制",
+      "tags": [
+        "规划",
+        "编制",
+        "方案",
+        "通用"
+      ],
+      "skills": [
+        "document-analysis",
+        "data-analysis",
+        "gis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 规划方案编制\n• 数据分析支持\n• 规划文本撰写\n\n请告诉我规划类型和主要内容。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "law-enforcement-inspection",
+      "name": "执法检查",
+      "icon": "🔍",
+      "description": "执法检查流程辅助，支持资规、环保、住建、执法等领域",
+      "category": "监管执法",
+      "tags": [
+        "执法",
+        "检查",
+        "巡查",
+        "通用"
+      ],
+      "skills": [
+        "document-analysis",
+        "compliance-check",
+        "image-analysis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 执法检查流程指导\n• 违法行为识别\n• 执法文书生成\n\n请告诉我检查类型和对象。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "complaint-handling",
+      "name": "投诉处理",
+      "icon": "📞",
+      "description": "投诉处理流程辅助，支持资规、环保、住建、农业、卫健、执法等领域",
+      "category": "监管执法",
+      "tags": [
+        "投诉",
+        "举报",
+        "信访",
+        "通用"
+      ],
+      "skills": [
+        "document-analysis",
+        "sentiment-analysis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 投诉内容分析\n• 处理流程指导\n• 回复建议生成\n\n请告诉我投诉类型和主要内容。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "safety-inspection",
+      "name": "安全检查",
+      "icon": "🛡️",
+      "description": "安全检查流程辅助，支持住建、交通、应急、卫健等领域",
+      "category": "监管执法",
+      "tags": [
+        "安全",
+        "检查",
+        "隐患",
+        "通用"
+      ],
+      "skills": [
+        "document-analysis",
+        "image-analysis",
+        "compliance-check"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 安全检查流程指导\n• 隐患识别分析\n• 整改建议生成\n\n请告诉我检查类型和对象。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "rectification-acceptance",
+      "name": "整改验收",
+      "icon": "✔️",
+      "description": "整改验收流程辅助，支持住建、环保、交通、卫健等领域",
+      "category": "监管执法",
+      "tags": [
+        "整改",
+        "验收",
+        "复核",
+        "通用"
+      ],
+      "skills": [
+        "document-analysis",
+        "image-analysis",
+        "compliance-check"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 整改验收流程指导\n• 整改材料审核\n• 验收报告生成\n\n请告诉我整改内容和验收要求。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "emergency-response",
+      "name": "应急响应",
+      "icon": "🚨",
+      "description": "突发事件应急响应辅助，支持环保、卫健、应急等领域",
+      "category": "应急处置",
+      "tags": [
+        "应急",
+        "响应",
+        "突发事件",
+        "通用"
+      ],
+      "skills": [
+        "document-analysis",
+        "real-time-monitoring",
+        "notification"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 应急响应流程指导\n• 预案启动建议\n• 资源调配方案\n\n请告诉我突发事件类型和级别。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "monitoring-analysis",
+      "name": "监测分析",
+      "icon": "📊",
+      "description": "数据监测和分析，支持环保、资规、发改、卫健等领域",
+      "category": "数据分析",
+      "tags": [
+        "监测",
+        "分析",
+        "统计",
+        "通用"
+      ],
+      "skills": [
+        "data-analysis",
+        "visualization",
+        "report-generation"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 数据监测分析\n• 趋势预测\n• 分析报告生成\n\n请告诉我监测对象和分析需求。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "real-estate-registration",
+      "name": "不动产登记",
+      "icon": "🏠",
+      "description": "不动产登记业务辅助，支持不动产登记申请、审核、发证等流程",
+      "category": "自然资源",
+      "tags": [
+        "不动产",
+        "登记",
+        "房产",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "workflow"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 不动产登记流程指导\n• 登记材料审核\n• 登记进度查询\n\n请告诉我登记类型和申请人信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "geological-disaster-inspection",
+      "name": "地灾排查",
+      "icon": "⛰️",
+      "description": "地质灾害隐患排查辅助，支持地灾点巡查、风险评估、预警监测",
+      "category": "自然资源",
+      "tags": [
+        "地质灾害",
+        "排查",
+        "隐患",
+        "专属"
+      ],
+      "skills": [
+        "gis",
+        "image-analysis",
+        "data-analysis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 地灾隐患点排查\n• 风险评估分析\n• 预警监测建议\n\n请告诉我排查区域和类型。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "mine-supervision",
+      "name": "矿山监管",
+      "icon": "⛏️",
+      "description": "矿山开发监管辅助，支持矿山巡查、违规开采识别、生态修复监督",
+      "category": "自然资源",
+      "tags": [
+        "矿山",
+        "监管",
+        "开采",
+        "专属"
+      ],
+      "skills": [
+        "gis",
+        "image-analysis",
+        "document-analysis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 矿山巡查监管\n• 违规开采识别\n• 生态修复监督\n\n请告诉我矿山名称和监管类型。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "eia-approval",
+      "name": "环评审批",
+      "icon": "🌍",
+      "description": "环境影响评价审批辅助，支持环评报告审核、审批流程指导",
+      "category": "生态环境",
+      "tags": [
+        "环评",
+        "审批",
+        "环境影响",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "compliance-check"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 环评报告审核\n• 审批流程指导\n• 审批进度查询\n\n请告诉我项目类型和环评阶段。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "environmental-monitoring",
+      "name": "环境监测",
+      "icon": "🌡️",
+      "description": "环境质量监测分析，支持空气、水质、土壤等环境指标监测",
+      "category": "生态环境",
+      "tags": [
+        "环境",
+        "监测",
+        "污染",
+        "专属"
+      ],
+      "skills": [
+        "data-analysis",
+        "visualization",
+        "real-time-monitoring"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 环境质量监测\n• 污染预警分析\n• 监测报告生成\n\n请告诉我监测类型和区域。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "rural-revitalization-planning",
+      "name": "振兴规划",
+      "icon": "🏘️",
+      "description": "乡村振兴规划编制辅助，支持村庄规划、产业发展规划等",
+      "category": "农业农村",
+      "tags": [
+        "乡村振兴",
+        "规划",
+        "村庄",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "data-analysis",
+        "gis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 乡村振兴规划编制\n• 产业发展规划\n• 规划文本撰写\n\n请告诉我规划类型和村庄信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "agricultural-quality-certification",
+      "name": "质量认证",
+      "icon": "🌱",
+      "description": "农产品质量认证辅助，支持三品一标认证、有机认证等",
+      "category": "农业农村",
+      "tags": [
+        "质量认证",
+        "三品一标",
+        "有机",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "compliance-check"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 质量认证申请\n• 认证材料准备\n• 认证进度查询\n\n请告诉我认证类型和产品信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "agricultural-technology-extension",
+      "name": "技术推广",
+      "icon": "🔬",
+      "description": "农业技术推广服务，支持新技术推广、技术培训组织",
+      "category": "农业农村",
+      "tags": [
+        "农业技术",
+        "推广",
+        "培训",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "knowledge-base"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 农业技术推广\n• 技术培训组织\n• 推广效果评估\n\n请告诉我技术类型和推广区域。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "economic-analysis",
+      "name": "经济分析",
+      "icon": "📈",
+      "description": "宏观经济形势分析，支持经济运行监测、趋势预测",
+      "category": "发展改革",
+      "tags": [
+        "经济",
+        "分析",
+        "预测",
+        "专属"
+      ],
+      "skills": [
+        "data-analysis",
+        "visualization",
+        "report-generation"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 经济运行分析\n• 发展趋势预测\n• 分析报告生成\n\n请告诉我分析类型和时间范围。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "price-monitoring",
+      "name": "价格监测",
+      "icon": "💰",
+      "description": "市场价格监测分析，支持重要商品价格监测、价格预警",
+      "category": "发展改革",
+      "tags": [
+        "价格",
+        "监测",
+        "预警",
+        "专属"
+      ],
+      "skills": [
+        "data-analysis",
+        "real-time-monitoring",
+        "notification"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 价格监测分析\n• 价格波动预警\n• 监测报告生成\n\n请告诉我监测商品和时间范围。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "construction-permit",
+      "name": "施工许可",
+      "icon": "🏗️",
+      "description": "施工许可证办理辅助，支持施工许可申请、审核流程指导",
+      "category": "城乡建设",
+      "tags": [
+        "施工许可",
+        "办理",
+        "审批",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "workflow",
+        "compliance-check"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 施工许可申请\n• 申请材料审核\n• 审批进度查询\n\n请告诉我项目信息和申请类型。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "housing-security",
+      "name": "住房保障",
+      "icon": "🏢",
+      "description": "住房保障业务辅助，支持保障房申请、资格审核、分配管理",
+      "category": "城乡建设",
+      "tags": [
+        "住房保障",
+        "保障房",
+        "申请",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "workflow",
+        "data-analysis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 保障房申请指导\n• 资格审核\n• 分配方案管理\n\n请告诉我申请类型和申请人信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "bidding-management",
+      "name": "招投标管理",
+      "icon": "📋",
+      "description": "招投标业务辅助，支持招标文件审核、评标流程监督",
+      "category": "城乡建设",
+      "tags": [
+        "招投标",
+        "招标",
+        "评标",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "compliance-check"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 招标文件审核\n• 评标流程监督\n• 异常情况识别\n\n请告诉我招标项目信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "enrollment-organization",
+      "name": "招生组织",
+      "icon": "📝",
+      "description": "招生考试组织辅助，支持招生计划制定、考试组织协调",
+      "category": "教育管理",
+      "tags": [
+        "招生",
+        "考试",
+        "录取",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "workflow",
+        "data-analysis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 招生计划制定\n• 考试组织协调\n• 招生统计分析\n\n请告诉我招生类型和学校信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "teacher-recruitment",
+      "name": "教师招聘",
+      "icon": "👨‍🏫",
+      "description": "教师招聘业务辅助，支持招聘计划、资格审核、面试组织",
+      "category": "教育管理",
+      "tags": [
+        "教师招聘",
+        "招聘",
+        "面试",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "workflow"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 招聘计划制定\n• 资格审核\n• 面试组织\n\n请告诉我招聘类型和岗位信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "teacher-training",
+      "name": "教师培训",
+      "icon": "📚",
+      "description": "教师培训组织辅助，支持培训计划制定、培训效果评估",
+      "category": "教育管理",
+      "tags": [
+        "教师培训",
+        "培训",
+        "进修",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "knowledge-base"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 培训计划制定\n• 培训资源组织\n• 培训效果评估\n\n请告诉我培训类型和对象。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "education-quality-monitoring",
+      "name": "质量监测",
+      "icon": "📊",
+      "description": "教育质量监测分析，支持教学质量评估、教育质量报告",
+      "category": "教育管理",
+      "tags": [
+        "教育质量",
+        "监测",
+        "评估",
+        "专属"
+      ],
+      "skills": [
+        "data-analysis",
+        "visualization",
+        "report-generation"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 教学质量评估\n• 质量监测分析\n• 质量报告生成\n\n请告诉我监测类型和学校信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "logging-permit",
+      "name": "采伐审批",
+      "icon": "🌲",
+      "description": "林木采伐审批辅助，支持采伐许可申请、审核、监管",
+      "category": "林草湿荒",
+      "tags": [
+        "采伐",
+        "许可",
+        "林木",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "gis",
+        "compliance-check"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 采伐许可申请\n• 申请材料审核\n• 采伐监管\n\n请告诉我采伐类型和地点信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "wildlife-protection",
+      "name": "野生动物保护",
+      "icon": "🦌",
+      "description": "野生动物保护辅助，支持野生动物监测、救助、保护管理",
+      "category": "林草湿荒",
+      "tags": [
+        "野生动物",
+        "保护",
+        "救助",
+        "专属"
+      ],
+      "skills": [
+        "gis",
+        "image-analysis",
+        "knowledge-base"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 野生动物监测\n• 救助指导\n• 保护管理\n\n请告诉我保护类型和区域信息。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "wetland-protection",
+      "name": "湿地保护",
+      "icon": "🦆",
+      "description": "湿地保护管理辅助，支持湿地监测、生态修复、保护规划",
+      "category": "林草湿荒",
+      "tags": [
+        "湿地",
+        "保护",
+        "生态",
+        "专属"
+      ],
+      "skills": [
+        "gis",
+        "image-analysis",
+        "data-analysis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 湿地监测分析\n• 生态修复指导\n• 保护规划编制\n\n请告诉我湿地类型和保护需求。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "cultural-relics-protection",
+      "name": "文物保护",
+      "icon": "🏛️",
+      "description": "文物保护管理辅助，支持文物巡查、保护规划、修缮管理",
+      "category": "文化旅游",
+      "tags": [
+        "文物",
+        "保护",
+        "修缮",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "image-analysis",
+        "gis"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 文物巡查管理\n• 保护规划编制\n• 修缮方案审核\n\n请告诉我文物类型和保护需求。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "intangible-heritage-protection",
+      "name": "非遗保护",
+      "icon": "🎭",
+      "description": "非物质文化遗产保护辅助，支持非遗项目申报、传承人管理",
+      "category": "文化旅游",
+      "tags": [
+        "非遗",
+        "传承",
+        "保护",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "knowledge-base"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 非遗项目申报\n• 传承人管理\n• 保护活动组织\n\n请告诉我非遗类型和保护需求。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "medical-institution-approval",
+      "name": "医疗机构审批",
+      "icon": "🏥",
+      "description": "医疗机构设置审批辅助，支持设置审批、执业登记、变更管理",
+      "category": "卫生健康",
+      "tags": [
+        "医疗机构",
+        "审批",
+        "执业",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "compliance-check",
+        "workflow"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 设置审批申请\n• 执业登记\n• 变更管理\n\n请告诉我医疗机构类型和申请事项。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "disease-prevention",
+      "name": "疾病预防",
+      "icon": "💉",
+      "description": "疾病预防控制辅助，支持疫情监测、预防接种、健康教育",
+      "category": "卫生健康",
+      "tags": [
+        "疾病预防",
+        "疫情",
+        "接种",
+        "专属"
+      ],
+      "skills": [
+        "data-analysis",
+        "real-time-monitoring",
+        "notification"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 疫情监测分析\n• 预防接种指导\n• 健康教育宣传\n\n请告诉我疾病类型和预防需求。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "health-promotion",
+      "name": "健康促进",
+      "icon": "❤️",
+      "description": "健康促进活动组织，支持健康教育、健康讲座、健康宣传",
+      "category": "卫生健康",
+      "tags": [
+        "健康促进",
+        "健康教育",
+        "宣传",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "knowledge-base"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 健康教育活动\n• 健康讲座组织\n• 健康宣传策划\n\n请告诉我活动类型和目标人群。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    },
+    {
+      "id": "case-handling",
+      "name": "案件办理",
+      "icon": "⚖️",
+      "description": "行政执法案件办理辅助，支持立案、调查、处罚、结案全流程",
+      "category": "综合执法",
+      "tags": [
+        "案件",
+        "执法",
+        "处罚",
+        "专属"
+      ],
+      "skills": [
+        "document-analysis",
+        "compliance-check",
+        "workflow"
+      ],
+      "system_prompt": "",
+      "welcome_message": "您好！我可以帮您：\n• 案件立案登记\n• 调查取证指导\n• 处罚决定审核\n• 结案归档\n\n请告诉我案件类型和基本情况。",
+      "status": "active",
+      "created_at": "2026-07-17T10:00:00Z",
+      "updated_at": "2026-07-17T10:00:00Z",
+      "created_by": "system"
+    }
+  ]
+}

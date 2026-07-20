@@ -1,500 +1,417 @@
-import { useState, useEffect, useCallback } from "react";
-import {
-  Card,
-  Table,
-  Button,
-  Modal,
-  Form,
-  Input,
-  Select,
-  Space,
-  Tag,
-  Popconfirm,
-  message,
-  Upload,
-  Drawer,
-  Empty,
-  Spin,
-  Typography,
-} from "antd";
-import type { ColumnsType } from "antd/es/table";
-import {
-  PlusOutlined,
-  DeleteOutlined,
-  FileTextOutlined,
-  SearchOutlined,
-  UploadOutlined,
-  DatabaseOutlined,
-  ReloadOutlined,
-} from "@ant-design/icons";
-import { knowledgeApi } from "@/api/modules/knowledge";
-import type {
-  KnowledgeBase,
-  KnowledgeDocument,
-  KnowledgeSearchResult,
-} from "@/api/modules/knowledge";
-import { usePermission } from "@/hooks/usePermission";
-import { PageHeader } from "@/components/PageHeader";
+/**
+ * 知识库管理页面
+ * 
+ * 基于社区版架构，扩展企业版功能
+ * 
+ * 功能：
+ * - 知识库CRUD（社区版基础）
+ * - 文档管理（社区版基础）
+ * - 权限管理（企业版扩展）
+ * - 部门关联（企业版扩展）
+ */
 
-const { Text, Paragraph } = Typography;
+import { useState, useEffect } from 'react';
+import { 
+  Table, Button, Modal, Form, Input, Select, Space, Tag, Drawer,
+  Upload, message, Popconfirm, Card, Descriptions, Divider
+} from 'antd';
+import { 
+  PlusOutlined, DeleteOutlined, FileTextOutlined, TeamOutlined,
+  GlobalOutlined, LockOutlined, SafetyOutlined, UploadOutlined
+} from '@ant-design/icons';
+import type { UploadProps } from 'antd';
+import { knowledgeApi, type KnowledgeBase, type KnowledgeDocument } from '@/api/modules/knowledge';
+import { PageHeader } from '@/components/PageHeader';
+
 const { TextArea } = Input;
 
-// ── Scope options ──
-const SCOPE_OPTIONS = [
-  { label: "全局", value: "global" },
-  { label: "用户级", value: "user" },
-  { label: "智能体级", value: "agent" },
-];
-
 export default function KnowledgeBasePage() {
-  const { hasPermission } = usePermission();
-  const canWrite = hasPermission("knowledge:write");
-
-  // ── State ──
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-
-  // Document drawer
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createForm] = Form.useForm();
+  
+  // 文档管理抽屉
   const [docDrawerOpen, setDocDrawerOpen] = useState(false);
-  const [selectedBase, setSelectedBase] = useState<KnowledgeBase | null>(null);
+  const [currentKb, setCurrentKb] = useState<KnowledgeBase | null>(null);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [docLoading, setDocLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  
+  // 权限管理抽屉（企业版功能）
+  const [permissionDrawerOpen, setPermissionDrawerOpen] = useState(false);
 
-  // Search
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchText, setSearchText] = useState("");
-  const [searchResults, setSearchResults] = useState<KnowledgeSearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
+  // 加载知识库列表
+  useEffect(() => {
+    loadBases();
+  }, []);
 
-  const [createForm] = Form.useForm();
-
-  // ── Load bases ──
-  const loadBases = useCallback(async () => {
+  const loadBases = async () => {
     setLoading(true);
     try {
       const res = await knowledgeApi.listBases();
       setBases(res.bases || []);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      message.error(`加载知识库列表失败: ${msg}`);
+    } catch (error) {
+      console.error('加载知识库失败:', error);
+      message.error('加载知识库失败');
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    loadBases();
-  }, [loadBases]);
-
-  // ── Create base ──
+  // 创建知识库
   const handleCreate = async () => {
     try {
       const values = await createForm.validateFields();
-      setCreating(true);
-      await knowledgeApi.createBase({
-        name: values.name,
-        description: values.description || "",
-        scope: values.scope || "global",
-      });
-      message.success("知识库创建成功");
-      setCreateOpen(false);
+      await knowledgeApi.createBase(values);
+      message.success('创建成功');
+      setCreateModalOpen(false);
       createForm.resetFields();
       loadBases();
-    } catch (e: unknown) {
-      if (e instanceof Error) message.error(`创建失败: ${e.message}`);
-    } finally {
-      setCreating(false);
+    } catch (error) {
+      console.error('创建知识库失败:', error);
+      message.error('创建失败');
     }
   };
 
-  // ── Delete base ──
+  // 删除知识库
   const handleDelete = async (kbId: string) => {
     try {
       await knowledgeApi.deleteBase(kbId);
-      message.success("知识库已删除");
+      message.success('删除成功');
       loadBases();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      message.error(`删除失败: ${msg}`);
+    } catch (error) {
+      console.error('删除知识库失败:', error);
+      message.error('删除失败');
     }
   };
 
-  // ── Document management ──
-  const openDocDrawer = async (base: KnowledgeBase) => {
-    setSelectedBase(base);
+  // 打开文档管理
+  const openDocDrawer = async (kb: KnowledgeBase) => {
+    setCurrentKb(kb);
     setDocDrawerOpen(true);
     setDocLoading(true);
     try {
-      const res = await knowledgeApi.listDocuments(base.id);
+      const res = await knowledgeApi.listDocuments(kb.id);
       setDocuments(res.documents || []);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      message.error(`加载文档失败: ${msg}`);
+    } catch (error) {
+      console.error('加载文档失败:', error);
+      message.error('加载文档失败');
     } finally {
       setDocLoading(false);
     }
   };
 
-  const handleUpload = async (file: File) => {
-    if (!selectedBase) return;
-    setUploading(true);
-    try {
-      await knowledgeApi.uploadDocument(selectedBase.id, file);
-      message.success(`文档 ${file.name} 上传成功`);
-      const res = await knowledgeApi.listDocuments(selectedBase.id);
-      setDocuments(res.documents || []);
-      loadBases();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      message.error(`上传失败: ${msg}`);
-    } finally {
-      setUploading(false);
-    }
-    return false; // Prevent default upload
+  // 上传文档
+  const uploadProps: UploadProps = {
+    name: 'file',
+    multiple: true,
+    showUploadList: false,
+    customRequest: async (options) => {
+      const { file, onSuccess, onError } = options;
+      if (!currentKb) return;
+      
+      try {
+        await knowledgeApi.uploadDocument(currentKb.id, file as File);
+        message.success('上传成功');
+        onSuccess?.(file);
+        // 刷新文档列表
+        const res = await knowledgeApi.listDocuments(currentKb.id);
+        setDocuments(res.documents || []);
+      } catch (error) {
+        console.error('上传文档失败:', error);
+        message.error('上传失败');
+        onError?.(new Error('上传失败'));
+      }
+    },
   };
 
+  // 删除文档
   const handleDeleteDoc = async (docId: string) => {
     try {
       await knowledgeApi.deleteDocument(docId);
-      message.success("文档已删除");
-      if (selectedBase) {
-        const res = await knowledgeApi.listDocuments(selectedBase.id);
+      message.success('删除成功');
+      // 刷新文档列表
+      if (currentKb) {
+        const res = await knowledgeApi.listDocuments(currentKb.id);
         setDocuments(res.documents || []);
-        loadBases();
       }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      message.error(`删除失败: ${msg}`);
+    } catch (error) {
+      console.error('删除文档失败:', error);
+      message.error('删除失败');
     }
   };
 
-  // ── Search ──
-  const handleSearch = async () => {
-    if (!searchText.trim()) return;
-    setSearching(true);
-    try {
-      const res = await knowledgeApi.search({ text: searchText, limit: 10 });
-      setSearchResults(res.results || []);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      message.error(`搜索失败: ${msg}`);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  // ── Scope label ──
-  const scopeLabel = (scope: string) => {
-    const map: Record<string, { color: string; text: string }> = {
-      global: { color: "blue", text: "全局" },
-      user: { color: "green", text: "用户" },
-      agent: { color: "purple", text: "智能体" },
-    };
-    const s = map[scope] || { color: "default", text: scope };
-    return <Tag color={s.color}>{s.text}</Tag>;
-  };
-
-  // ── Table columns ──
-  const columns: ColumnsType<KnowledgeBase> = [
+  // 表格列
+  const columns = [
     {
-      title: "名称",
-      dataIndex: "name",
-      key: "name",
-      render: (name: string, record) => (
-        <Space>
-          <DatabaseOutlined />
-          <a onClick={() => openDocDrawer(record)}>{name}</a>
-        </Space>
-      ),
-    },
-    {
-      title: "描述",
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
+      title: '知识库名称',
+      dataIndex: 'name',
+      key: 'name',
       width: 200,
     },
     {
-      title: "作用域",
-      dataIndex: "scope",
-      key: "scope",
+      title: '描述',
+      dataIndex: 'description',
+      key: 'description',
+      width: 250,
+      ellipsis: true,
+    },
+    {
+      title: '作用域',
+      dataIndex: 'scope',
+      key: 'scope',
       width: 100,
-      render: scopeLabel,
+      render: (scope: string) => {
+        const map: Record<string, string> = {
+          global: '全局',
+          user: '用户',
+          agent: '智能体',
+        };
+        return map[scope] || scope;
+      },
     },
     {
-      title: "文档数",
-      key: "chunk_count",
+      title: '文档数',
+      dataIndex: 'chunk_count',
+      key: 'chunk_count',
       width: 100,
-      render: (_, record) => (
-        <Space>
-          <FileTextOutlined />
-          <span>{record.chunk_count} chunks</span>
-        </Space>
-      ),
+      render: (count: number) => count || 0,
     },
     {
-      title: "状态",
-      dataIndex: "status",
-      key: "status",
-      width: 80,
-      render: (status: string) => (
-        <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
-      ),
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: string) => {
+        const map: Record<string, { color: string; text: string }> = {
+          active: { color: 'success', text: '正常' },
+          inactive: { color: 'default', text: '停用' },
+        };
+        const config = map[status] || map.active;
+        return <Tag color={config.color}>{config.text}</Tag>;
+      },
     },
     {
-      title: "操作",
-      key: "actions",
-      width: 160,
-      render: (_, record) => (
+      title: '操作',
+      key: 'actions',
+      width: 200,
+      render: (_: unknown, record: KnowledgeBase) => (
         <Space>
-          <Button
-            size="small"
+          <Button 
+            size="small" 
             icon={<FileTextOutlined />}
             onClick={() => openDocDrawer(record)}
           >
             文档
           </Button>
-          {canWrite && (
-            <Popconfirm
-              title="确定删除此知识库？"
-              description="所有文档和索引将被永久删除"
-              onConfirm={() => handleDelete(record.id)}
-              okText="删除"
-              okType="danger"
-              cancelText="取消"
-            >
-              <Button size="small" danger icon={<DeleteOutlined />} />
-            </Popconfirm>
-          )}
+          {/* 企业版：权限管理按钮 */}
+          <Button 
+            size="small" 
+            icon={<SafetyOutlined />}
+            onClick={() => {
+              setCurrentKb(record);
+              setPermissionDrawerOpen(true);
+            }}
+          >
+            权限
+          </Button>
+          <Popconfirm
+            title="确定删除此知识库？"
+            onConfirm={() => handleDelete(record.id)}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />}>
+              删除
+            </Button>
+          </Popconfirm>
         </Space>
       ),
     },
   ];
 
-  // ── Document columns ──
-  const docColumns: ColumnsType<KnowledgeDocument> = [
+  // 文档表格列
+  const docColumns = [
     {
-      title: "标题",
-      dataIndex: "title",
-      key: "title",
-      ellipsis: true,
+      title: '文档标题',
+      dataIndex: 'title',
+      key: 'title',
     },
     {
-      title: "类型",
-      dataIndex: "content_type",
-      key: "content_type",
-      width: 80,
-      render: (t: string) => <Tag>{t}</Tag>,
+      title: '来源',
+      dataIndex: 'source',
+      key: 'source',
+      width: 150,
     },
     {
-      title: "Chunks",
-      dataIndex: "chunk_count",
-      key: "chunk_count",
-      width: 80,
+      title: '分片数',
+      dataIndex: 'chunk_count',
+      key: 'chunk_count',
+      width: 100,
     },
     {
-      title: "状态",
-      dataIndex: "status",
-      key: "status",
-      width: 80,
-      render: (s: string) => (
-        <Tag color={s === "indexed" ? "success" : s === "error" ? "error" : "default"}>
-          {s}
-        </Tag>
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: string) => {
+        const map: Record<string, { color: string; text: string }> = {
+          completed: { color: 'success', text: '已完成' },
+          processing: { color: 'processing', text: '处理中' },
+          failed: { color: 'error', text: '失败' },
+        };
+        const config = map[status] || map.completed;
+        return <Tag color={config.color}>{config.text}</Tag>;
+      },
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 100,
+      render: (_: unknown, record: KnowledgeDocument) => (
+        <Popconfirm
+          title="确定删除此文档？"
+          onConfirm={() => handleDeleteDoc(record.id)}
+        >
+          <Button size="small" danger>删除</Button>
+        </Popconfirm>
       ),
-    },
-    {
-      title: "",
-      key: "actions",
-      width: 60,
-      render: (_, record) =>
-        canWrite ? (
-          <Popconfirm
-            title="确定删除此文档？"
-            onConfirm={() => handleDeleteDoc(record.id)}
-            okText="删除"
-            okType="danger"
-            cancelText="取消"
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        ) : null,
     },
   ];
 
   return (
     <div style={{ padding: 24 }}>
-      <PageHeader
-        current="知识库"
-        subRow={<span style={{ color: '#999', fontSize: 13 }}>管理知识库文档，智能体可在对话中自动检索相关知识</span>}
-        extra={
-          <Space>
-            <Button icon={<SearchOutlined />} onClick={() => setSearchOpen(true)}>
-              搜索知识库
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={loadBases} />
-            {canWrite && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => setCreateOpen(true)}
-              >
-                新建知识库
-              </Button>
-            )}
-          </Space>
-        }
+      <PageHeader 
+        parent="设置"
+        current="知识库管理"
       />
 
       <Card>
+        <div style={{ marginBottom: 16 }}>
+          <Button 
+            type="primary" 
+            icon={<PlusOutlined />}
+            onClick={() => setCreateModalOpen(true)}
+          >
+            创建知识库
+          </Button>
+        </div>
+
         <Table
-          columns={columns}
           dataSource={bases}
+          columns={columns}
           rowKey="id"
           loading={loading}
-          locale={{ emptyText: <Empty description="暂无知识库，点击上方按钮创建" /> }}
-          pagination={false}
+          pagination={{ pageSize: 10 }}
         />
       </Card>
 
-      {/* ── Create Modal ── */}
+      {/* 创建知识库 Modal */}
       <Modal
-        title="新建知识库"
-        open={createOpen}
+        title="创建知识库"
+        open={createModalOpen}
         onOk={handleCreate}
         onCancel={() => {
-          setCreateOpen(false);
+          setCreateModalOpen(false);
           createForm.resetFields();
         }}
-        confirmLoading={creating}
-        okText="创建"
-        cancelText="取消"
       >
         <Form form={createForm} layout="vertical">
           <Form.Item
             name="name"
-            label="名称"
-            rules={[{ required: true, message: "请输入知识库名称" }]}
+            label="知识库名称"
+            rules={[{ required: true, message: '请输入知识库名称' }]}
           >
-            <Input placeholder="例如：产品文档、API 手册" />
+            <Input placeholder="例如：产品文档库" />
           </Form.Item>
-          <Form.Item name="description" label="描述">
-            <TextArea rows={2} placeholder="可选描述" />
+
+          <Form.Item
+            name="description"
+            label="描述"
+          >
+            <TextArea rows={2} placeholder="知识库用途说明" />
           </Form.Item>
-          <Form.Item name="scope" label="作用域" initialValue="global">
-            <Select options={SCOPE_OPTIONS} />
+
+          <Form.Item
+            name="scope"
+            label="作用域"
+            initialValue="user"
+          >
+            <Select>
+              <Select.Option value="global">全局</Select.Option>
+              <Select.Option value="user">用户</Select.Option>
+              <Select.Option value="agent">智能体</Select.Option>
+            </Select>
+          </Form.Item>
+
+          {/* 企业版扩展字段：可见性 */}
+          <Divider>企业版功能</Divider>
+          
+          <Form.Item
+            name="visibility"
+            label="可见性"
+            initialValue="private"
+            tooltip="控制知识库的访问范围"
+          >
+            <Select>
+              <Select.Option value="public">
+                <Space><GlobalOutlined /> 全局可见</Space>
+              </Select.Option>
+              <Select.Option value="department">
+                <Space><TeamOutlined /> 部门可见</Space>
+              </Select.Option>
+              <Select.Option value="private">
+                <Space><LockOutlined /> 仅自己可见</Space>
+              </Select.Option>
+            </Select>
           </Form.Item>
         </Form>
       </Modal>
 
-      {/* ── Document Drawer ── */}
+      {/* 文档管理抽屉 */}
       <Drawer
-        title={
-          <Space>
-            <FileTextOutlined />
-            <span>{selectedBase?.name} — 文档管理</span>
-          </Space>
-        }
+        title={`文档管理 - ${currentKb?.name || ''}`}
+        width={800}
         open={docDrawerOpen}
-        onClose={() => {
-          setDocDrawerOpen(false);
-          setSelectedBase(null);
-          setDocuments([]);
-        }}
-        width={640}
-        extra={
-          canWrite ? (
-            <Upload
-              accept=".md,.txt,.json,.csv,.html"
-              showUploadList={false}
-              beforeUpload={handleUpload}
-            >
-              <Button
-                type="primary"
-                icon={<UploadOutlined />}
-                loading={uploading}
-              >
-                上传文档
-              </Button>
-            </Upload>
-          ) : undefined
-        }
+        onClose={() => setDocDrawerOpen(false)}
       >
-        {docLoading ? (
-          <div style={{ textAlign: "center", padding: 40 }}>
-            <Spin />
-          </div>
-        ) : (
-          <Table
-            columns={docColumns}
-            dataSource={documents}
-            rowKey="id"
-            size="small"
-            pagination={false}
-            locale={{ emptyText: <Empty description="暂无文档，点击右上角上传" /> }}
-          />
-        )}
+        <div style={{ marginBottom: 16 }}>
+          <Upload {...uploadProps}>
+            <Button icon={<UploadOutlined />}>上传文档</Button>
+          </Upload>
+        </div>
+
+        <Table
+          dataSource={documents}
+          columns={docColumns}
+          rowKey="id"
+          loading={docLoading}
+          pagination={{ pageSize: 10 }}
+        />
       </Drawer>
 
-      {/* ── Search Modal ── */}
-      <Modal
-        title="搜索知识库"
-        open={searchOpen}
-        onCancel={() => {
-          setSearchOpen(false);
-          setSearchText("");
-          setSearchResults([]);
-        }}
-        footer={null}
-        width={720}
+      {/* 权限管理抽屉（企业版功能） */}
+      <Drawer
+        title={`权限管理 - ${currentKb?.name || ''}`}
+        width={600}
+        open={permissionDrawerOpen}
+        onClose={() => setPermissionDrawerOpen(false)}
       >
-        <Space.Compact style={{ width: "100%", marginBottom: 16 }}>
-          <Input
-            placeholder="输入关键词搜索..."
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            onPressEnter={handleSearch}
-          />
-          <Button
-            type="primary"
-            icon={<SearchOutlined />}
-            loading={searching}
-            onClick={handleSearch}
-          >
-            搜索
-          </Button>
-        </Space.Compact>
+        <Card title="当前设置" size="small">
+          <Descriptions column={2}>
+            <Descriptions.Item label="范围">
+              <Tag>{currentKb?.scope || 'private'}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="创建者">
+              {currentKb?.created_at || '-'}
+            </Descriptions.Item>
+          </Descriptions>
+        </Card>
 
-        {searchResults.length > 0 ? (
-          <div style={{ maxHeight: 400, overflow: "auto" }}>
-            {searchResults.map((r) => (
-              <Card
-                key={r.chunk_id}
-                size="small"
-                style={{ marginBottom: 8 }}
-                title={
-                  <Space>
-                    <Text type="secondary">[{r.score.toFixed(2)}]</Text>
-                    <Text>{r.source_title || "未知来源"}</Text>
-                  </Space>
-                }
-              >
-                <Paragraph
-                  style={{ marginBottom: 0, whiteSpace: "pre-wrap" }}
-                  ellipsis={{ rows: 3, expandable: true }}
-                >
-                  {r.text}
-                </Paragraph>
-              </Card>
-            ))}
+        <Card title="权限列表" style={{ marginTop: 16 }} size="small">
+          <div style={{ padding: 20, textAlign: 'center', color: '#999' }}>
+            权限管理功能开发中...
           </div>
-        ) : searchText && !searching ? (
-          <Empty description="未找到相关内容" />
-        ) : null}
-      </Modal>
+        </Card>
+      </Drawer>
     </div>
   );
 }

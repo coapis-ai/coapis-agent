@@ -6,8 +6,8 @@ import {
   Select,
   type MenuProps,
 } from "antd";
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   SparkChatTabFill,
@@ -33,7 +33,7 @@ import {
   SparkDebugLine,
   SparkSaveLine,
 } from "@agentscope-ai/icons";
-import { ThunderboltOutlined, CrownOutlined } from "@ant-design/icons";
+import { ThunderboltOutlined, CrownOutlined, BookOutlined } from "@ant-design/icons";
 import { agentsApi } from "../api/modules/agents";
 import { permissionsApi } from "../api/modules/permissions";
 import { usePlugins } from "../plugins/PluginContext";
@@ -46,6 +46,7 @@ import { getAgentDisplayName, isDefaultAgent } from "../utils/agentDisplayName";
 import {
   MENU_TO_PERMISSION,
 } from "../config/menuModules";
+import { getApiToken } from "../api/config";
 
 // ── Layout ────────────────────────────────────────────────────────────────
 
@@ -61,12 +62,41 @@ interface SidebarProps {
 
 export default function Sidebar({ selectedKey }: SidebarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const { isDark } = useTheme();
   const { pluginRoutes } = usePlugins();
   const { selectedAgent, agents, setSelectedAgent, setAgents } = useAgentStore();
   const { user } = useUser();
   const [collapsed, setCollapsed] = useState(false);
+  
+  // Category data for dynamic workbench menu
+  const [categoryData, setCategoryData] = useState<any>(null);
+  
+  // Workbench menu open state (controlled)
+  const [workbenchOpenKeys, setWorkbenchOpenKeys] = useState<string[]>([]);
+  
+  // Check if we're on workbench route
+  const isWorkbench = location.pathname === '/workbench';
+  
+  // For workbench, get category from URL and use it as selectedKey
+  const workbenchSelectedKey = useMemo(() => {
+    if (!isWorkbench) return selectedKey;
+    
+    const params = new URLSearchParams(location.search);
+    const category = params.get('category');
+    const management = params.get('management');
+    
+    if (management === 'scenes') {
+      return 'scene-management';
+    } else if (management === 'tags') {
+      return 'tag-management';
+    } else if (category) {
+      return `category-${category}`;
+    }
+    
+    return 'category-all';
+  }, [isWorkbench, selectedKey, location.search]);
   
   // Permission state
   const [allowedModules, setAllowedModules] = useState<string[]>([]);
@@ -102,6 +132,25 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       })
       .catch(() => {});
   }, [setAgents, setSelectedAgent]);
+  
+  // Load tag data for workbench menu
+  useEffect(() => {
+    if (!isWorkbench) return;
+    
+    const token = getApiToken();
+    fetch('/api/admin/tags/menu', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    })
+      .then(res => res.json())
+      .then(data => {
+        setCategoryData(data);
+      })
+      .catch(err => {
+        console.error('Failed to load tags:', err);
+      });
+  }, [isWorkbench]);
   
   // Load permissions on mount and when user changes
   useEffect(() => {
@@ -189,6 +238,12 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       icon: <SparkChatTabFill size={18} />,
       path: "/chat",
       label: t("nav.chat"),
+    },
+    {
+      key: "workbench",
+      icon: <SparkModePlazaLine size={18} />,
+      path: "/workbench",
+      label: t("nav.workbench", "工作台"),
     },
     {
       key: "channels",
@@ -420,6 +475,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           label: collapsed ? null : t("nav.agentStats"),
           icon: <SparkBarChartLine size={16} />,
         },
+        {
+          key: "knowledge",
+          label: collapsed ? null : t("nav.knowledge", "知识库"),
+          icon: <BookOutlined />,
+        },
       ],
     },
   ];
@@ -493,6 +553,63 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     } as any);
   }
 
+  // ── Menu items — workbench ──────────────────────────────────────
+
+  const workbenchMenuItems: MenuProps["items"] = useMemo(() => {
+    // Base items: "全部场景"
+    const items: MenuProps["items"] = [
+      {
+        key: "category-all",
+        label: collapsed ? null : "全部场景",
+        icon: <SparkModePlazaLine size={16} />,
+      },
+    ];
+    
+    // Add dynamic tags from API
+    if (categoryData && Array.isArray(categoryData)) {
+      // Add divider
+      items.push({ type: 'divider' });
+      
+      // Render dimension tags with children
+      categoryData.forEach((dimension: any) => {
+        if (dimension.children && dimension.children.length > 0) {
+          items.push({
+            key: dimension.id,
+            label: collapsed ? null : dimension.name,
+            icon: <span style={{ fontSize: 16 }}>{dimension.icon}</span>,
+            children: dimension.children.map((category: any) => ({
+              key: `category-${category.id}`,
+              label: collapsed ? null : category.name,
+              icon: <span style={{ fontSize: 16 }}>{category.icon}</span>,
+            })),
+          });
+        }
+      });
+    }
+    
+    // Add management section
+    items.push({ type: 'divider' });
+    items.push({
+      key: "management-group",
+      label: collapsed ? null : "管理",
+      icon: <CrownOutlined />,
+      children: [
+        {
+          key: "scene-management",
+          label: collapsed ? null : "场景管理",
+          icon: <SparkModePlazaLine size={16} />,
+        },
+        {
+          key: "tag-management",
+          label: collapsed ? null : "标签管理",
+          icon: <SparkLocalFileLine size={16} />,
+        },
+      ],
+    });
+    
+    return items;
+  }, [collapsed, categoryData]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -550,55 +667,97 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
             </div>
           )}
 
-          {/* Agent-scoped section: Chat + Control + Workspace */}
-          <div className={styles.agentScopedSection}>
+          {/* Workbench menu or Agent-scoped menu */}
+          {isWorkbench ? (
             <Menu
+              key={`workbench-menu-${workbenchOpenKeys.join('-')}`}
               mode="inline"
-              selectedKeys={[selectedKey]}
-              openKeys={DEFAULT_OPEN_KEYS}
-              onClick={({ key }) => {
-                const path = KEY_TO_PATH[String(key)];
-                if (path) navigate(path);
+              selectedKeys={[workbenchSelectedKey]}
+              openKeys={workbenchOpenKeys}
+              onOpenChange={(openKeys) => {
+                // 手风琴模式：同一时间只展开一个一级菜单
+                // 找出新增的 key（在 openKeys 中但不在当前 state 中）
+                const addedKey = openKeys.find(key => !workbenchOpenKeys.includes(key));
+                
+                if (addedKey) {
+                  // 有新展开的菜单：只保留这个，实现手风琴效果
+                  setWorkbenchOpenKeys([addedKey]);
+                } else {
+                  // 没有新增，说明是收起操作
+                  setWorkbenchOpenKeys(openKeys);
+                }
               }}
-              items={filterMenuItems(agentMenuItems)}
+              onClick={({ key }) => {
+                // Handle workbench menu clicks
+                if (key === 'category-all') {
+                  navigate('/workbench');
+                } else if (key.startsWith('category-')) {
+                  // Filter scenes by category
+                  const category = key.replace('category-', '');
+                  navigate(`/workbench?category=${category}`);
+                } else if (key === 'scene-management') {
+                  navigate('/workbench?management=scenes');
+                } else if (key === 'tag-management') {
+                  navigate('/workbench?management=tags');
+                }
+              }}
+              items={workbenchMenuItems}
               theme={isDark ? "dark" : "light"}
               className={styles.sideMenu}
             />
-          </div>
+          ) : (
+            <>
+              {/* Agent-scoped section: Chat + Control + Workspace */}
+              <div className={styles.agentScopedSection}>
+                <Menu
+                  mode="inline"
+                  selectedKeys={[selectedKey]}
+                  openKeys={DEFAULT_OPEN_KEYS}
+                  onClick={({ key }) => {
+                    const path = KEY_TO_PATH[String(key)];
+                    if (path) navigate(path);
+                  }}
+                  items={filterMenuItems(agentMenuItems)}
+                  theme={isDark ? "dark" : "light"}
+                  className={styles.sideMenu}
+                />
+              </div>
 
-          {/* Global settings section */}
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedKey]}
-            openKeys={[
-              ...DEFAULT_OPEN_KEYS,
-              ...(pluginRoutes.length > 0 ? ["plugins-group"] : []),
-            ]}
-            onClick={({ key }) => {
-              const path = KEY_TO_PATH[String(key)] ?? `/${String(key)}`;
-              navigate(path);
-            }}
-            items={filterMenuItems(settingsMenuItems)}
-            theme={isDark ? "dark" : "light"}
-            className={styles.sideMenu}
-          />
+              {/* Global settings section */}
+              <Menu
+                mode="inline"
+                selectedKeys={[selectedKey]}
+                openKeys={[
+                  ...DEFAULT_OPEN_KEYS,
+                  ...(pluginRoutes.length > 0 ? ["plugins-group"] : []),
+                ]}
+                onClick={({ key }) => {
+                  const path = KEY_TO_PATH[String(key)] ?? `/${String(key)}`;
+                  navigate(path);
+                }}
+                items={filterMenuItems(settingsMenuItems)}
+                theme={isDark ? "dark" : "light"}
+                className={styles.sideMenu}
+              />
+            </>
+          )}
+
+          <div className={styles.collapseToggleContainer}>
+            <Button
+              type="text"
+              icon={
+                collapsed ? (
+                  <SparkMenuExpandLine size={20} />
+                ) : (
+                  <SparkMenuFoldLine size={20} />
+                )
+              }
+              onClick={() => setCollapsed(!collapsed)}
+              className={styles.collapseToggle}
+            />
+          </div>
         </>
       )}
-
-      <div className={styles.collapseToggleContainer}>
-        <Button
-          type="text"
-          icon={
-            collapsed ? (
-              <SparkMenuExpandLine size={20} />
-            ) : (
-              <SparkMenuFoldLine size={20} />
-            )
-          }
-          onClick={() => setCollapsed(!collapsed)}
-          className={styles.collapseToggle}
-        />
-      </div>
     </Sider>
   );
 }
