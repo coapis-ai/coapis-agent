@@ -687,14 +687,17 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
               mode="inline"
               selectedKeys={[workbenchSelectedKey]}
               openKeys={workbenchOpenKeys}
-              onOpenChange={(keys) => {
+              onOpenChange={(openKeys) => {
                 // 手风琴模式：同一时间只展开一个一级菜单
-                // 点击已展开的菜单会收起
-                if (keys.length === 0) {
-                  setWorkbenchOpenKeys([]);
+                // openKeys 是 Ant Design 计算后的新展开 keys 数组
+                const latestOpenKey = openKeys.find(key => !workbenchOpenKeys.includes(key));
+                
+                if (latestOpenKey) {
+                  // 新展开的菜单：只保留这个，收起其他
+                  setWorkbenchOpenKeys([latestOpenKey]);
                 } else {
-                  // 只保留最新展开的那个
-                  setWorkbenchOpenKeys([keys[keys.length - 1] as string]);
+                  // 点击已展开的菜单：全部收起
+                  setWorkbenchOpenKeys([]);
                 }
               }}
               onClick={({ key }) => {
