@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Row, Col, Input, Select, Tag, Empty, Spin, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import SceneCard from './SceneCard';
-import EmbeddedChat from './EmbeddedChat';
+import FloatingChatWindow from '../../components/FloatingChatWindow';
 import type { SceneConfig, SceneListResponse } from './types';
 import styles from './index.module.less';
 import { getApiToken } from '../../api/config';
@@ -18,7 +18,6 @@ interface CategoryInfo {
 }
 
 const Workbench: React.FC = () => {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [scenes, setScenes] = useState<SceneConfig[]>([]);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({}); // id -> name
@@ -99,11 +98,6 @@ const Workbench: React.FC = () => {
   const handleCloseDrawer = () => {
     setDrawerVisible(false);
     setSelectedScene(null);
-  };
-  
-  const handleExpandChat = (chatId: string) => {
-    // Navigate to full chat page
-    navigate(`/chat/${chatId}`);
   };
 
   // Get unique tags
@@ -232,12 +226,11 @@ const Workbench: React.FC = () => {
         </div>
       )}
       
-      {/* Embedded Chat Drawer */}
-      <EmbeddedChat
+      {/* Floating Chat Window */}
+      <FloatingChatWindow
         visible={drawerVisible}
         scene={selectedScene}
         onClose={handleCloseDrawer}
-        onExpand={handleExpandChat}
       />
     </div>
   );
