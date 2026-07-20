@@ -687,7 +687,16 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
               mode="inline"
               selectedKeys={[workbenchSelectedKey]}
               openKeys={workbenchOpenKeys}
-              onOpenChange={(keys) => setWorkbenchOpenKeys(keys as string[])}
+              onOpenChange={(keys) => {
+                // 手风琴模式：同一时间只展开一个一级菜单
+                // 点击已展开的菜单会收起
+                if (keys.length === 0) {
+                  setWorkbenchOpenKeys([]);
+                } else {
+                  // 只保留最新展开的那个
+                  setWorkbenchOpenKeys([keys[keys.length - 1] as string]);
+                }
+              }}
               onClick={({ key }) => {
                 // Handle workbench menu clicks
                 if (key === 'category-all') {
