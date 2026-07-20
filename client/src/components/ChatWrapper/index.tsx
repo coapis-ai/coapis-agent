@@ -17,6 +17,10 @@ export interface ChatWrapperProps {
   showToolbar?: boolean;
   compactLayout?: boolean;
   
+  // 浮窗控制（嵌入式模式）
+  onClose?: () => void;
+  onExpand?: () => void;
+  
   // 回调
   onSessionCreated?: (id: string) => void;
   onError?: (error: Error) => void;
@@ -43,6 +47,8 @@ export function ChatWrapper({
   welcomeMessage,
   showToolbar = true,
   compactLayout = false,
+  onClose,
+  onExpand,
   onSessionCreated,
   onError,
   children,
@@ -57,6 +63,8 @@ export function ChatWrapper({
     (window as any).__CHAT_WELCOME_MESSAGE__ = welcomeMessage;
     (window as any).__CHAT_SHOW_TOOLBAR__ = showToolbar;
     (window as any).__CHAT_COMPACT__ = compactLayout;
+    (window as any).__CHAT_ON_CLOSE__ = onClose;
+    (window as any).__CHAT_ON_EXPAND__ = onExpand;
     (window as any).__CHAT_ON_SESSION_CREATED__ = onSessionCreated;
     (window as any).__CHAT_ON_ERROR__ = onError;
   } else {
@@ -68,6 +76,8 @@ export function ChatWrapper({
     delete (window as any).__CHAT_WELCOME_MESSAGE__;
     delete (window as any).__CHAT_SHOW_TOOLBAR__;
     delete (window as any).__CHAT_COMPACT__;
+    delete (window as any).__CHAT_ON_CLOSE__;
+    delete (window as any).__CHAT_ON_EXPAND__;
     delete (window as any).__CHAT_ON_SESSION_CREATED__;
     delete (window as any).__CHAT_ON_ERROR__;
   }
@@ -82,6 +92,8 @@ export function ChatWrapper({
       delete (window as any).__CHAT_WELCOME_MESSAGE__;
       delete (window as any).__CHAT_SHOW_TOOLBAR__;
       delete (window as any).__CHAT_COMPACT__;
+      delete (window as any).__CHAT_ON_CLOSE__;
+      delete (window as any).__CHAT_ON_EXPAND__;
       delete (window as any).__CHAT_ON_SESSION_CREATED__;
       delete (window as any).__CHAT_ON_ERROR__;
     };

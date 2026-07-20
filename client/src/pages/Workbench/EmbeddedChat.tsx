@@ -1,7 +1,6 @@
 // Embedded chat drawer component
 import React, { useState, useEffect } from 'react';
-import { Drawer, Button, Spin, message } from 'antd';
-import { CloseOutlined, ExpandOutlined } from '@ant-design/icons';
+import { Drawer, Spin, message } from 'antd';
 import type { SceneConfig, EnterSceneResponse } from './types';
 import styles from './EmbeddedChat.module.less';
 import { getApiToken } from '../../api/config';
@@ -80,32 +79,18 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
 
   return (
     <Drawer
-      title={
-        <div className={styles.drawerHeader}>
-          <div className={styles.sceneInfo}>
-            <span className={styles.sceneIcon}>{scene.icon}</span>
-            <span className={styles.sceneName}>{scene.name}</span>
-          </div>
-          <div className={styles.actions}>
-            {onExpand && (
-              <Button
-                type="text"
-                icon={<ExpandOutlined />}
-                onClick={handleExpand}
-                title="展开到完整页面"
-              />
-            )}
-          </div>
-        </div>
-      }
+      title={null}
       placement="right"
       width={800}
       open={visible}
       onClose={onClose}
-      closeIcon={<CloseOutlined />}
+      closable={false}
       className={styles.embeddedChat}
       destroyOnClose
-      styles={{ body: { padding: 0, height: '100%' } }}
+      styles={{ 
+        body: { padding: 0, height: '100%', display: 'flex', flexDirection: 'column' },
+        wrapper: { height: 'calc(100vh - 64px)', top: '64px' }
+      }}
     >
       {loading ? (
         <div className={styles.loading}>
@@ -122,6 +107,8 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
             welcomeMessage={chatData.welcome_message}
             showToolbar={true}
             compactLayout={true}
+            onClose={onClose}
+            onExpand={onExpand ? handleExpand : undefined}
             onError={(error) => {
               console.error('Chat error:', error);
               message.error('聊天发生错误');

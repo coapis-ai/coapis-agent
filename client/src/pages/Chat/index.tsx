@@ -600,6 +600,15 @@ export default function ChatPage() {
     }
   }, [isEmbeddedMode]);
   
+  // 嵌入式模式的回调函数
+  const embeddedOnClose = useMemo(() => {
+    return (window as any).__CHAT_ON_CLOSE__;
+  }, [isEmbeddedMode]);
+  
+  const embeddedOnExpand = useMemo(() => {
+    return (window as any).__CHAT_ON_EXPAND__;
+  }, [isEmbeddedMode]);
+  
   const chatId = useMemo(() => {
     // 嵌入式模式：使用场景会话ID
     if (isEmbeddedMode && sceneSessionId) {
@@ -1681,6 +1690,10 @@ export default function ChatPage() {
         <ChatSessionHeader 
           onShowDisplaySettings={() => setShowDisplaySettings(true)}
           onToolbarToggle={toggleToolbar}
+          isEmbeddedMode={isEmbeddedMode}
+          onClose={embeddedOnClose}
+          onExpand={embeddedOnExpand}
+          sceneName={sceneName}
         />
         
         {/* 主内容区域：工具栏 + 聊天区 */}
@@ -1882,24 +1895,26 @@ export default function ChatPage() {
       <div
         style={{
           position: 'absolute',
-          top: '48px',
+          top: '40px',
           left: 0,
-          width: '80%',
+          width: '75%',
           height: 'calc(100% - 48px)',
           backgroundColor: '#fff',
           boxShadow: '2px 0 8px rgba(0,0,0,0.15)',
           zIndex: 100,
           overflow: 'auto',
+          borderTop: '1px solid #f0f0f0',
         }}
       >
         <div style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '12px 16px',
+          padding: '8px 12px',
           borderBottom: '1px solid #f0f0f0',
+          backgroundColor: '#fafafa',
         }}>
-          <span style={{ fontWeight: 500 }}>工具栏</span>
+          <span style={{ fontWeight: 500, fontSize: '14px' }}>工具栏</span>
           <Button type="text" size="small" onClick={closeToolbar}>✕</Button>
         </div>
         <ChatToolbarSidebar
