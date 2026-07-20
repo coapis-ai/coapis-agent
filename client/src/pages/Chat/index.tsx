@@ -1877,23 +1877,31 @@ export default function ChatPage() {
       />
     </div>
 
-    {/* 嵌入式模式工具栏 - 内部浮层，覆盖在聊天区域上，聊天时自动收缩 */}
+    {/* 嵌入式模式工具栏 - 纯浮层，不影响聊天区域位置 */}
     {isEmbeddedMode && toolbarOpen && (
-      <Drawer
-        title="工具栏"
-        placement="left"
-        width="80%"
-        open={toolbarOpen}
-        onClose={closeToolbar}
-        mask={false}
-        maskClosable={false}
-        styles={{ 
-          body: { padding: 0 },
-          wrapper: { position: 'absolute', top: '48px', height: 'calc(100% - 48px)' }
+      <div
+        style={{
+          position: 'absolute',
+          top: '48px',
+          left: 0,
+          width: '80%',
+          height: 'calc(100% - 48px)',
+          backgroundColor: '#fff',
+          boxShadow: '2px 0 8px rgba(0,0,0,0.15)',
+          zIndex: 100,
+          overflow: 'auto',
         }}
-        getContainer={false}
-        style={{ position: 'absolute', top: '48px', height: 'calc(100% - 48px)' }}
       >
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 16px',
+          borderBottom: '1px solid #f0f0f0',
+        }}>
+          <span style={{ fontWeight: 500 }}>工具栏</span>
+          <Button type="text" size="small" onClick={closeToolbar}>✕</Button>
+        </div>
         <ChatToolbarSidebar
           selectedFiles={selectedFiles}
           selectedKnowledge={selectedKnowledge}
@@ -1902,7 +1910,7 @@ export default function ChatPage() {
           onSettingsClick={handleSettingsClick}
           showPinButton={false}
         />
-      </Drawer>
+      </div>
     )}
 
     {/* 完整模式移动端工具栏 - 底部抽屉 */}
