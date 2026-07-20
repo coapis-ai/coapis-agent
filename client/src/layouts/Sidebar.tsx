@@ -73,6 +73,9 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   // Category data for dynamic workbench menu
   const [categoryData, setCategoryData] = useState<any>(null);
   
+  // Workbench menu open state (controlled)
+  const [workbenchOpenKeys, setWorkbenchOpenKeys] = useState<string[]>([]);
+  
   // Check if we're on workbench route
   const isWorkbench = location.pathname === '/workbench';
   
@@ -683,7 +686,8 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
             <Menu
               mode="inline"
               selectedKeys={[workbenchSelectedKey]}
-              defaultOpenKeys={['nature-group', 'domain-group', 'management-group']}
+              openKeys={workbenchOpenKeys}
+              onOpenChange={(keys) => setWorkbenchOpenKeys(keys as string[])}
               onClick={({ key }) => {
                 // Handle workbench menu clicks
                 if (key === 'category-all') {
