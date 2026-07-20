@@ -133,12 +133,12 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       .catch(() => {});
   }, [setAgents, setSelectedAgent]);
   
-  // Load category data for workbench menu
+  // Load tag data for workbench menu
   useEffect(() => {
     if (!isWorkbench) return;
     
     const token = getApiToken();
-    fetch('/api/scenes/categories/grouped', {
+    fetch('/api/admin/tags/menu', {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -148,7 +148,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
         setCategoryData(data);
       })
       .catch(err => {
-        console.error('Failed to load categories:', err);
+        console.error('Failed to load tags:', err);
       });
   }, [isWorkbench]);
   
@@ -565,40 +565,26 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       },
     ];
     
-    // Add dynamic categories from API
-    if (categoryData?.dimensions) {
+    // Add dynamic tags from API
+    if (categoryData && Array.isArray(categoryData)) {
       // Add divider
       items.push({ type: 'divider' });
       
-      // 通用分类 - 可折叠子菜单
-      const natureCategories = categoryData.dimensions.nature?.categories || [];
-      if (natureCategories.length > 0) {
-        items.push({
-          key: 'nature-group',
-          label: collapsed ? null : '通用分类',
-          icon: <SparkLocalFileLine size={16} />,
-          children: natureCategories.map((cat: any) => ({
-            key: `category-${cat.id}`,
-            label: collapsed ? null : cat.name,
-            icon: <span style={{ fontSize: 16 }}>{cat.icon}</span>,
-          })),
-        });
-      }
-      
-      // 领域分类 - 可折叠子菜单
-      const domainCategories = categoryData.dimensions.domain?.categories || [];
-      if (domainCategories.length > 0) {
-        items.push({
-          key: 'domain-group',
-          label: collapsed ? null : '领域分类',
-          icon: <SparkBarChartLine size={16} />,
-          children: domainCategories.map((cat: any) => ({
-            key: `category-${cat.id}`,
-            label: collapsed ? null : cat.name,
-            icon: <span style={{ fontSize: 16 }}>{cat.icon}</span>,
-          })),
-        });
-      }
+      // Render dimension tags with children
+      categoryData.forEach((dimension: any) => {
+        if (dimension.children && dimension.children.length > 0) {
+          items.push({
+            key: dimension.id,
+            label: collapsed ? null : dimension.name,
+            icon: <span style={{ fontSize: 16 }}>{dimension.icon}</span>,
+            children: dimension.children.map((category: any) => ({
+              key: `category-${category.id}`,
+              label: collapsed ? null : category.name,
+              icon: <span style={{ fontSize: 16 }}>{category.icon}</span>,
+            })),
+          });
+        }
+      });
     }
     
     // Add management section

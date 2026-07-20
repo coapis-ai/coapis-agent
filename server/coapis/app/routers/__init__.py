@@ -101,6 +101,7 @@ from ..access_control_api import router as access_control_router
 from .init import router as init_router
 from .scenes import router as scenes_router
 from .admin_scenes import router as admin_scenes_router
+from .tags import router as tags_router
 
 router = APIRouter()
 
@@ -159,6 +160,9 @@ router.include_router(permissions_router)
 # Scene management routers
 router.include_router(scenes_router)
 router.include_router(admin_scenes_router)
+
+# Tag management router
+router.include_router(tags_router)
 
 # Session Execution Manager API
 from .session_execution import router as session_execution_router

@@ -24,12 +24,28 @@ from .scene import (
     EvolutionConfig,
     ModelConfig,
 )
+from .tag import (
+    TagType,
+    TagConfig,
+    TagCreateRequest,
+    TagUpdateRequest,
+    TagListResponse,
+    TagTreeItem,
+)
 
 __all__ = [
+    # Scene models
     "SceneConfig",
     "SceneAgentConfig",
     "SceneInfo",
     "Capabilities",
     "EvolutionConfig",
     "ModelConfig",
+    # Tag models
+    "TagType",
+    "TagConfig",
+    "TagCreateRequest",
+    "TagUpdateRequest",
+    "TagListResponse",
+    "TagTreeItem",
 ]
