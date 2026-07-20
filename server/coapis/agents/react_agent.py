@@ -1637,6 +1637,15 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception as e:
             logger.warning("Failed to inject skill prompt: %s", e)
 
+        # ── Scene System Prompt: 场景身份注入（最重要！）──
+        # 场景提示词应该在系统提示词的最前面，作为"最重要的智能体要求"
+        scene_prompt = self._request_context.get("scene_system_prompt", "") if self._request_context else ""
+        scene_name = self._request_context.get("scene_name", "") if self._request_context else ""
+        if scene_prompt:
+            scene_header = f"# 🎯 场景身份：{scene_name}\n\n" if scene_name else "# 🎯 场景身份\n\n"
+            sys_prompt = scene_header + scene_prompt + "\n\n---\n\n" + sys_prompt
+            logger.info(f"[Scene] Injected scene prompt at the beginning of system prompt (scene: {scene_name})")
+
         return sys_prompt
 
     def _register_hooks(self) -> None:

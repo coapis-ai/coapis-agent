@@ -55,6 +55,26 @@ class ControlCommandRegistration:
     priority_level: int = 10
 
 
+@dataclass
+class RouterRegistration:
+    """Router registration record for FastAPI routers."""
+
+    plugin_id: str
+    router: Any  # APIRouter from FastAPI
+    prefix: str = ""
+    tags: List[str] = field(default_factory=list)
+    priority: int = 100
+
+
+@dataclass
+class MiddlewareRegistration:
+    """Middleware registration record."""
+
+    plugin_id: str
+    middleware: Callable
+    priority: int = 100
+
+
 class PluginRegistry:
     """Central plugin registry (Singleton).
 
@@ -82,6 +102,8 @@ class PluginRegistry:
         self._startup_hooks: List[HookRegistration] = []
         self._shutdown_hooks: List[HookRegistration] = []
         self._control_commands: List[ControlCommandRegistration] = []
+        self._routers: List[RouterRegistration] = []
+        self._middleware: List[MiddlewareRegistration] = []
         self._runtime_helpers = None
 
         self._initialized = True
@@ -267,3 +289,96 @@ class PluginRegistry:
             List of ControlCommandRegistration
         """
         return self._control_commands.copy()
+
+    def register_router(
+        self,
+        plugin_id: str,
+        router: Any,
+        prefix: str = "",
+        tags: Optional[List[str]] = None,
+        priority: int = 100,
+    ):
+        """Register a FastAPI router.
+
+        Args:
+            plugin_id: Plugin identifier
+            router: FastAPI APIRouter instance
+            prefix: URL prefix for the router (e.g., "/ent")
+            tags: OpenAPI tags for documentation
+            priority: Priority (lower = earlier execution, default: 100)
+
+        Example:
+            >>> registry.register_router(
+            ...     plugin_id="enterprise",
+            ...     router=enterprise_router,
+            ...     prefix="/api/ent",
+            ...     tags=["Enterprise"],
+            ...     priority=10,
+            ... )
+        """
+        router_reg = RouterRegistration(
+            plugin_id=plugin_id,
+            router=router,
+            prefix=prefix,
+            tags=tags or [],
+            priority=priority,
+        )
+        self._routers.append(router_reg)
+        # Sort by priority (lower = earlier)
+        self._routers.sort(key=lambda r: r.priority)
+        logger.info(
+            f"Registered router from plugin '{plugin_id}' "
+            f"(prefix='{prefix}', priority={priority})",
+        )
+
+    def register_middleware(
+        self,
+        plugin_id: str,
+        middleware: Callable,
+        priority: int = 100,
+    ):
+        """Register a middleware function.
+
+        Args:
+            plugin_id: Plugin identifier
+            middleware: Middleware callable (async function)
+            priority: Priority (lower = earlier execution, default: 100)
+
+        Example:
+            >>> async def auth_middleware(request, call_next):
+            ...     # Check authentication
+            ...     response = await call_next(request)
+            ...     return response
+            >>> registry.register_middleware(
+            ...     plugin_id="enterprise",
+            ...     middleware=auth_middleware,
+            ...     priority=10,
+            ... )
+        """
+        mid_reg = MiddlewareRegistration(
+            plugin_id=plugin_id,
+            middleware=middleware,
+            priority=priority,
+        )
+        self._middleware.append(mid_reg)
+        # Sort by priority (lower = earlier)
+        self._middleware.sort(key=lambda m: m.priority)
+        logger.info(
+            f"Registered middleware from plugin '{plugin_id}' (priority={priority})",
+        )
+
+    def get_routers(self) -> List[RouterRegistration]:
+        """Get all registered routers sorted by priority.
+
+        Returns:
+            List of RouterRegistration
+        """
+        return self._routers.copy()
+
+    def get_middleware(self) -> List[MiddlewareRegistration]:
+        """Get all registered middleware sorted by priority.
+
+        Returns:
+            List of MiddlewareRegistration
+        """
+        return self._middleware.copy()
