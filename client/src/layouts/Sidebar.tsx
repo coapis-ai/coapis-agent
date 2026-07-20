@@ -689,15 +689,15 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
               openKeys={workbenchOpenKeys}
               onOpenChange={(openKeys) => {
                 // 手风琴模式：同一时间只展开一个一级菜单
-                // openKeys 是 Ant Design 计算后的新展开 keys 数组
-                const latestOpenKey = openKeys.find(key => !workbenchOpenKeys.includes(key));
+                // 找出新增的 key（在 openKeys 中但不在当前 state 中）
+                const addedKey = openKeys.find(key => !workbenchOpenKeys.includes(key));
                 
-                if (latestOpenKey) {
-                  // 新展开的菜单：只保留这个，收起其他
-                  setWorkbenchOpenKeys([latestOpenKey]);
+                if (addedKey) {
+                  // 有新展开的菜单：只保留这个，实现手风琴效果
+                  setWorkbenchOpenKeys([addedKey]);
                 } else {
-                  // 点击已展开的菜单：全部收起
-                  setWorkbenchOpenKeys([]);
+                  // 没有新增，说明是收起操作
+                  setWorkbenchOpenKeys(openKeys);
                 }
               }}
               onClick={({ key }) => {
