@@ -83,6 +83,16 @@
   background: #fff;
 }
 
+// 无标题栏的内容区域
+.windowBodyNoHeader {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
 .loading {
   display: flex;
   justify-content: center;
@@ -153,7 +163,8 @@
     color: #40a9ff !important;
   }
   
-  .windowBody {
+  .windowBody,
+  .windowBodyNoHeader {
     background: #1f1f1f;
   }
   

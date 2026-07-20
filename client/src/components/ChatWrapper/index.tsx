@@ -20,6 +20,9 @@ export interface ChatWrapperProps {
   // 浮窗控制（嵌入式模式）
   onClose?: () => void;
   onExpand?: () => void;
+  onTogglePin?: () => void;
+  isPinned?: boolean;
+  onDragStart?: (e: React.MouseEvent) => void;
   
   // 回调
   onSessionCreated?: (id: string) => void;
@@ -49,6 +52,9 @@ export function ChatWrapper({
   compactLayout = false,
   onClose,
   onExpand,
+  onTogglePin,
+  isPinned,
+  onDragStart,
   onSessionCreated,
   onError,
   children,
@@ -65,6 +71,9 @@ export function ChatWrapper({
     (window as any).__CHAT_COMPACT__ = compactLayout;
     (window as any).__CHAT_ON_CLOSE__ = onClose;
     (window as any).__CHAT_ON_EXPAND__ = onExpand;
+    (window as any).__CHAT_ON_TOGGLE_PIN__ = onTogglePin;
+    (window as any).__CHAT_IS_PINNED__ = isPinned;
+    (window as any).__CHAT_ON_DRAG_START__ = onDragStart;
     (window as any).__CHAT_ON_SESSION_CREATED__ = onSessionCreated;
     (window as any).__CHAT_ON_ERROR__ = onError;
   } else {
@@ -78,6 +87,9 @@ export function ChatWrapper({
     delete (window as any).__CHAT_COMPACT__;
     delete (window as any).__CHAT_ON_CLOSE__;
     delete (window as any).__CHAT_ON_EXPAND__;
+    delete (window as any).__CHAT_ON_TOGGLE_PIN__;
+    delete (window as any).__CHAT_IS_PINNED__;
+    delete (window as any).__CHAT_ON_DRAG_START__;
     delete (window as any).__CHAT_ON_SESSION_CREATED__;
     delete (window as any).__CHAT_ON_ERROR__;
   }
@@ -94,6 +106,9 @@ export function ChatWrapper({
       delete (window as any).__CHAT_COMPACT__;
       delete (window as any).__CHAT_ON_CLOSE__;
       delete (window as any).__CHAT_ON_EXPAND__;
+      delete (window as any).__CHAT_ON_TOGGLE_PIN__;
+      delete (window as any).__CHAT_IS_PINNED__;
+      delete (window as any).__CHAT_ON_DRAG_START__;
       delete (window as any).__CHAT_ON_SESSION_CREATED__;
       delete (window as any).__CHAT_ON_ERROR__;
     };

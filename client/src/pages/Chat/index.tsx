@@ -605,10 +605,6 @@ export default function ChatPage() {
     return (window as any).__CHAT_ON_CLOSE__;
   }, [isEmbeddedMode]);
   
-  const embeddedOnExpand = useMemo(() => {
-    return (window as any).__CHAT_ON_EXPAND__;
-  }, [isEmbeddedMode]);
-  
   const chatId = useMemo(() => {
     // 嵌入式模式：使用场景会话ID
     if (isEmbeddedMode && sceneSessionId) {
@@ -1692,7 +1688,6 @@ export default function ChatPage() {
           onToolbarToggle={toggleToolbar}
           isEmbeddedMode={isEmbeddedMode}
           onClose={embeddedOnClose}
-          onExpand={embeddedOnExpand}
           sceneName={sceneName}
         />
         

@@ -1,7 +1,6 @@
 // FloatingChatWindow - 可拖拽、可缩放的浮窗组件
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Spin, message, Button, Tooltip } from 'antd';
-import { CloseOutlined, PushpinOutlined, PushpinFilled } from '@ant-design/icons';
+import { Spin, message } from 'antd';
 import type { SceneConfig, EnterSceneResponse } from '../../pages/Workbench/types';
 import styles from './index.module.less';
 import { getApiToken } from '../../api/config';
@@ -58,15 +57,20 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
     }
   }, [visible, scene]);
 
-  // 重置状态
+  // 重置状态（仅在未固定时）
   useEffect(() => {
     if (!visible) {
       setChatData(null);
-      setPosition({ x: 100, y: 50 });
-      setSize({ width: initialWidth, height: initialHeight });
+      // 未固定时才重置位置和大小
+      if (!isPinned) {
+        // 初始位置：偏右侧
+        const initialX = Math.max(50, window.innerWidth - initialWidth - 50);
+        setPosition({ x: initialX, y: 50 });
+        setSize({ width: initialWidth, height: initialHeight });
+      }
       setIsPinned(false);
     }
-  }, [visible]);
+  }, [visible, isPinned, initialWidth, initialHeight]);
 
   // 点击外部关闭（未固定时）
   useEffect(() => {
@@ -211,38 +215,8 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
         cursor: isDragging ? 'move' : 'default',
       }}
     >
-      {/* 标题栏 - 可拖拽 */}
-      <div
-        className={styles.windowHeader}
-        onMouseDown={handleDragStart}
-      >
-        <div className={styles.sceneInfo}>
-          <span className={styles.sceneIcon}>{scene.icon}</span>
-          <span className={styles.sceneName}>{scene.name}</span>
-        </div>
-        <div className={styles.headerActions}>
-          <Tooltip title={isPinned ? "取消固定" : "固定窗口"}>
-            <Button
-              type="text"
-              size="small"
-              icon={isPinned ? <PushpinFilled /> : <PushpinOutlined />}
-              onClick={() => setIsPinned(!isPinned)}
-              className={isPinned ? styles.pinned : ''}
-            />
-          </Tooltip>
-          <Tooltip title="关闭">
-            <Button
-              type="text"
-              size="small"
-              icon={<CloseOutlined />}
-              onClick={onClose}
-            />
-          </Tooltip>
-        </div>
-      </div>
-
-      {/* 内容区域 */}
-      <div className={styles.windowBody}>
+      {/* 内容区域（无标题栏，由 ChatSessionHeader 作为标题栏） */}
+      <div className={styles.windowBodyNoHeader}>
         {loading ? (
           <div className={styles.loading}>
             <Spin size="large" tip="加载中..." />
@@ -256,6 +230,10 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
             welcomeMessage={chatData.welcome_message}
             showToolbar={true}
             compactLayout={true}
+            onClose={onClose}
+            onTogglePin={() => setIsPinned(!isPinned)}
+            isPinned={isPinned}
+            onDragStart={handleDragStart}
             onError={(error) => {
               console.error('Chat error:', error);
               message.error('聊天发生错误');
