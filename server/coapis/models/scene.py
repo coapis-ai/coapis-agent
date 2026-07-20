@@ -104,17 +104,27 @@ class SceneConfig(BaseModel):
     
     model_config = ConfigDict(extra="forbid")
     
+    # Basic information
     id: str = Field(..., description="Scene ID (e.g., meeting-minutes)")
     name: str = Field(..., description="Scene name")
     icon: str = Field(default="📝", description="Scene icon emoji")
     description: str = Field(default="", description="Scene description")
-    category: str = Field(default="", description="Scene category (e.g., 办公)")
-    tags: List[str] = Field(default_factory=list, description="Scene tags")
+    short_description: str = Field(default="", description="Short description for cards (max 50 chars)")
+    
+    # Tag association (new fields)
+    primary_tag_id: Optional[str] = Field(default=None, description="Primary tag ID (determines menu section)")
+    tag_ids: List[str] = Field(default_factory=list, description="All tag IDs (including primary)")
+    
+    # Capabilities
     skills: List[str] = Field(default_factory=list, description="Associated skill IDs")
     system_prompt: str = Field(default="", description="System prompt for the scene agent")
     welcome_message: str = Field(default="", description="Welcome message for users")
     
+    # Status and statistics
     status: str = Field(default="active", description="Scene status: active / disabled / deleted")
+    usage_count: int = Field(default=0, description="Usage count for popularity sorting")
+    
+    # Timestamps
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="Creation timestamp",
@@ -124,6 +134,10 @@ class SceneConfig(BaseModel):
         description="Last update timestamp",
     )
     created_by: Optional[str] = Field(default=None, description="Creator username")
+    
+    # Backward compatibility (deprecated fields)
+    category: str = Field(default="", description="Scene category (deprecated, use primary_tag_id)")
+    tags: List[str] = Field(default_factory=list, description="Scene tags (deprecated, use tag_ids)")
 
 
 class SceneConfigCreate(BaseModel):
@@ -134,15 +148,26 @@ class SceneConfigCreate(BaseModel):
     
     model_config = ConfigDict(extra="forbid")
     
+    # Required fields
     id: str = Field(..., description="Scene ID (e.g., meeting-minutes)")
     name: str = Field(..., description="Scene name")
+    
+    # Optional basic fields
     icon: str = Field(default="📝", description="Scene icon emoji")
     description: str = Field(default="", description="Scene description")
-    category: str = Field(default="", description="Scene category")
-    tags: List[str] = Field(default_factory=list, description="Scene tags")
+    short_description: str = Field(default="", description="Short description for cards")
+    
+    # Tag association
+    primary_tag_id: Optional[str] = Field(default=None, description="Primary tag ID")
+    tag_ids: List[str] = Field(default_factory=list, description="All tag IDs")
+    
+    # Capabilities
     skills: List[str] = Field(default_factory=list, description="Associated skill IDs")
     system_prompt: str = Field(default="", description="System prompt")
     welcome_message: str = Field(default="", description="Welcome message")
+    
+    # Status
+    status: str = Field(default="active", description="Scene status")
 
 
 class SceneConfigUpdate(BaseModel):
@@ -154,14 +179,22 @@ class SceneConfigUpdate(BaseModel):
     
     model_config = ConfigDict(extra="forbid")
     
+    # Basic information
     name: Optional[str] = None
     icon: Optional[str] = None
     description: Optional[str] = None
-    category: Optional[str] = None
-    tags: Optional[List[str]] = None
+    short_description: Optional[str] = None
+    
+    # Tag association
+    primary_tag_id: Optional[str] = None
+    tag_ids: Optional[List[str]] = None
+    
+    # Capabilities
     skills: Optional[List[str]] = None
     system_prompt: Optional[str] = None
     welcome_message: Optional[str] = None
+    
+    # Status
     status: Optional[str] = None
 
 

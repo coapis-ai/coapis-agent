@@ -68,7 +68,7 @@ class RepositoryFactory:
         elif edition == "enterprise":
             # Dynamically import enterprise implementation
             try:
-                from coapis_enterprise.repository_postgres import PostgresKnowledgeBaseRepository
+                from coapis.enterprise.repository_postgres import PostgresKnowledgeBaseRepository
                 
                 session = kwargs.get("session")
                 if not session:
@@ -80,7 +80,7 @@ class RepositoryFactory:
             except ImportError as e:
                 logger.error(f"Failed to import enterprise repositories: {e}")
                 raise ValueError(
-                    "Enterprise edition requires 'coapis_enterprise' package. "
+                    "Enterprise edition requires 'coapis.enterprise' package. "
                     "Install it with: pip install coapis-enterprise"
                 )
         

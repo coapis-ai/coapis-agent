@@ -5,15 +5,29 @@ export interface SceneConfig {
   name: string;
   icon: string;
   description: string;
-  category: string;
-  tags: string[];
+  short_description: string;
+  
+  // Tag association (new fields)
+  primary_tag_id?: string;
+  tag_ids: string[];
+  
+  // Capabilities
   skills: string[];
   system_prompt: string;
   welcome_message: string;
+  
+  // Status and statistics
   status: 'active' | 'disabled' | 'deleted';
+  usage_count: number;
+  
+  // Timestamps
   created_at: string;
   updated_at: string;
   created_by?: string;
+  
+  // Backward compatibility (deprecated)
+  category: string;
+  tags: string[];
 }
 
 export interface SceneInfo {
@@ -40,4 +54,23 @@ export interface EnterSceneResponse {
 export interface SceneListResponse {
   scenes: SceneConfig[];
   total: number;
+}
+
+// Workbench menu item
+export interface WorkbenchMenuItem {
+  id: string;
+  name: string;
+  icon: string;
+  scene_count: number;
+}
+
+// Workbench section
+export interface WorkbenchSection {
+  tag: {
+    id: string;
+    name: string;
+    icon: string;
+    description: string;
+  };
+  scenes: SceneConfig[];
 }

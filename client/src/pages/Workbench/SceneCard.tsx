@@ -10,15 +10,23 @@ interface SceneCardProps {
 }
 
 const SceneCard: React.FC<SceneCardProps> = ({ scene, onEnter }) => {
-  // Tags to display (max 3 visible)
-  const visibleTags = scene.tags.slice(0, 3);
-  const hiddenTags = scene.tags.slice(3);
-  const hasHiddenTags = hiddenTags.length > 0;
+  // Use short_description for display, fallback to description
+  const displayDescription = scene.short_description || scene.description;
   
-  // All tags for tooltip
-  const allTags = scene.category 
-    ? [scene.category, ...scene.tags]
-    : scene.tags;
+  // Use primary_tag_id for category display (if available)
+  // Otherwise fall back to category for backward compatibility
+  const categoryTag = scene.primary_tag_id ? null : (scene.category ? (
+    <Tag color="blue">{scene.category}</Tag>
+  ) : null);
+  
+  // Use tag_ids for tags display (if available)
+  // Otherwise fall back to tags for backward compatibility
+  const displayTags = scene.tag_ids?.length > 0 ? scene.tag_ids : scene.tags;
+  
+  // Tags to display (max 3 visible)
+  const visibleTags = displayTags.slice(0, 3);
+  const hiddenTags = displayTags.slice(3);
+  const hasHiddenTags = hiddenTags.length > 0;
 
   return (
     <Card
@@ -37,16 +45,20 @@ const SceneCard: React.FC<SceneCardProps> = ({ scene, onEnter }) => {
         <h3 className={styles.sceneName}>{scene.name}</h3>
       </div>
       
-      <p className={styles.sceneDescription}>{scene.description}</p>
+      <p className={styles.sceneDescription}>{displayDescription}</p>
+      
+      {scene.usage_count > 0 && (
+        <div className={styles.usageCount}>
+          使用次数: {scene.usage_count}
+        </div>
+      )}
       
       <Tooltip 
-        title={allTags.join(' · ')}
+        title={displayTags.join(' · ')}
         placement="top"
       >
         <div className={styles.sceneMeta}>
-          {scene.category && (
-            <Tag color="blue">{scene.category}</Tag>
-          )}
+          {categoryTag}
           {visibleTags.map(tag => (
             <Tag key={tag}>{tag}</Tag>
           ))}

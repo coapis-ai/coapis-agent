@@ -1,5 +1,5 @@
 // Admin scene management page
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Table,
   Button,
@@ -22,20 +22,69 @@ import type { ColumnsType } from 'antd/es/table';
 import type { SceneConfig } from '../Workbench/types';
 import styles from './SceneManagement.module.less';
 import { getApiToken } from '../../api/config';
+import { PrimaryTagSelector, OtherTagsSelector } from './TagSelectors';
 
 const { Option } = Select;
 const { TextArea } = Input;
 
+// Tag interface
+interface TagConfig {
+  id: string;
+  name: string;
+  icon: string;
+  type: 'dimension' | 'category' | 'industry' | 'frequency';
+  parent_id?: string;
+  enabled: boolean;
+}
+
 const SceneManagement: React.FC = () => {
   const [scenes, setScenes] = useState<SceneConfig[]>([]);
+  const [tags, setTags] = useState<TagConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingScene, setEditingScene] = useState<SceneConfig | null>(null);
+  const [filterTag, setFilterTag] = useState<string>('all');
   const [form] = Form.useForm();
 
+  // Build tag id -> name map
+  const tagNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    tags.forEach(tag => {
+      map[tag.id] = `${tag.icon} ${tag.name}`;
+    });
+    return map;
+  }, [tags]);
+
+  // Filter scenes by tag
+  const filteredScenes = useMemo(() => {
+    if (filterTag === 'all') {
+      return scenes;
+    }
+    return scenes.filter(scene => {
+      // Check primary_tag_id
+      if (scene.primary_tag_id === filterTag) {
+        return true;
+      }
+      // Check tag_ids
+      if (scene.tag_ids && scene.tag_ids.includes(filterTag)) {
+        return true;
+      }
+      return false;
+    });
+  }, [scenes, filterTag]);
+
+  // Get category tags for filter dropdown
+  const categoryTags = useMemo(() => {
+    return tags.filter(tag => tag.type === 'category' && tag.enabled);
+  }, [tags]);
+
   useEffect(() => {
-    loadScenes();
+    loadData();
   }, []);
+
+  const loadData = async () => {
+    await Promise.all([loadScenes(), loadTags()]);
+  };
 
   const loadScenes = async () => {
     try {
@@ -59,6 +108,24 @@ const SceneManagement: React.FC = () => {
     }
   };
 
+  const loadTags = async () => {
+    try {
+      const token = getApiToken();
+      const response = await fetch('/api/admin/tags?enabled=true', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error('Failed to load tags');
+      }
+      const data = await response.json();
+      setTags(data.tags);
+    } catch (error) {
+      console.error('Failed to load tags:', error);
+    }
+  };
+
   const handleCreate = () => {
     setEditingScene(null);
     form.resetFields();
@@ -71,11 +138,13 @@ const SceneManagement: React.FC = () => {
       name: scene.name,
       icon: scene.icon,
       description: scene.description,
-      category: scene.category,
-      tags: scene.tags,
+      short_description: scene.short_description,
+      primary_tag_id: scene.primary_tag_id,
+      tag_ids: scene.tag_ids,
       skills: scene.skills,
       system_prompt: scene.system_prompt,
       welcome_message: scene.welcome_message,
+      status: scene.status,
     });
     setModalVisible(true);
   };
@@ -113,75 +182,116 @@ const SceneManagement: React.FC = () => {
         : '/api/admin/scenes';
       const method = editingScene ? 'PATCH' : 'POST';
 
+      // Clean up empty values
+      const cleanedValues = { ...values };
+      if (!cleanedValues.skills || cleanedValues.skills.length === 0) {
+        delete cleanedValues.skills;
+      }
+      if (!cleanedValues.primary_tag_id) {
+        delete cleanedValues.primary_tag_id;
+      }
+      if (!cleanedValues.tag_ids || cleanedValues.tag_ids.length === 0) {
+        delete cleanedValues.tag_ids;
+      }
+
       const response = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify(values),
+        body: JSON.stringify(cleanedValues),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to save scene');
+        const errorData = await response.json().catch(() => ({}));
+        const errorMsg = errorData.detail || errorData.message || '保存失败';
+        throw new Error(errorMsg);
       }
 
       message.success(editingScene ? '场景已更新' : '场景已创建');
       setModalVisible(false);
       loadScenes();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to save scene:', error);
-      message.error('保存场景失败');
+      message.error(error.message || '保存场景失败');
     }
   };
 
   const columns: ColumnsType<SceneConfig> = [
     {
-      title: '图标',
-      dataIndex: 'icon',
-      key: 'icon',
-      width: 60,
-      render: (icon: string) => <span style={{ fontSize: 24 }}>{icon}</span>,
+      title: '场景ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 150,
+      render: (id: string) => <code style={{ fontSize: 12 }}>{id}</code>,
     },
     {
       title: '名称',
       dataIndex: 'name',
       key: 'name',
-      width: 150,
+      width: 120,
+      render: (name: string) => <span style={{ fontWeight: 500 }}>{name}</span>,
     },
     {
-      title: '场景ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 150,
-      render: (id: string) => <code>{id}</code>,
-    },
-    {
-      title: '分类',
-      dataIndex: 'category',
-      key: 'category',
-      width: 100,
-      render: (category: string) => category ? <Tag color="blue">{category}</Tag> : '-',
+      title: '图标',
+      dataIndex: 'icon',
+      key: 'icon',
+      width: 60,
+      align: 'center',
+      render: (icon: string) => <span style={{ fontSize: 20 }}>{icon}</span>,
     },
     {
       title: '标签',
-      dataIndex: 'tags',
+      dataIndex: 'primary_tag_id',
       key: 'tags',
+      width: 150,
+      render: (primary_tag_id: string, record) => {
+        const tags: string[] = [];
+        // Add primary tag
+        if (primary_tag_id && tagNameMap[primary_tag_id]) {
+          tags.push(tagNameMap[primary_tag_id]);
+        } else if (record.category) {
+          tags.push(record.category);
+        }
+        // Add other tags
+        if (record.tag_ids && record.tag_ids.length > 0) {
+          record.tag_ids.forEach(tagId => {
+            if (tagNameMap[tagId] && !tags.includes(tagNameMap[tagId])) {
+              tags.push(tagNameMap[tagId]);
+            }
+          });
+        }
+        
+        if (tags.length === 0) return '-';
+        
+        return (
+          <Space size={[2, 2]} wrap>
+            {tags.slice(0, 2).map((tag, idx) => (
+              <Tag key={idx} style={{ margin: 0, fontSize: 11 }}>{tag}</Tag>
+            ))}
+            {tags.length > 2 && <span style={{ fontSize: 11, color: '#999' }}>+{tags.length - 2}</span>}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '场景描述',
+      dataIndex: 'short_description',
+      key: 'description',
       width: 200,
-      render: (tags: string[]) => (
-        <Space size={[0, 4]} wrap>
-          {tags.slice(0, 3).map(tag => (
-            <Tag key={tag}>{tag}</Tag>
-          ))}
-          {tags.length > 3 && <span>+{tags.length - 3}</span>}
-        </Space>
-      ),
+      ellipsis: true,
+      render: (desc: string, record) => {
+        const text = desc || record.description || '-';
+        return <span style={{ color: '#666', fontSize: 12 }}>{text}</span>;
+      },
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 80,
+      align: 'center',
       render: (status: string) => {
         const colorMap: Record<string, string> = {
           active: 'green',
@@ -193,32 +303,42 @@ const SceneManagement: React.FC = () => {
           disabled: '禁用',
           deleted: '已删除',
         };
-        return <Tag color={colorMap[status]}>{textMap[status] || status}</Tag>;
+        return <Tag color={colorMap[status]} style={{ margin: 0 }}>{textMap[status] || status}</Tag>;
       },
+    },
+    {
+      title: '使用次数',
+      dataIndex: 'usage_count',
+      key: 'usage_count',
+      width: 80,
+      align: 'center',
+      sorter: (a, b) => (a.usage_count || 0) - (b.usage_count || 0),
+      render: (count: number) => <span style={{ fontWeight: 500 }}>{count || 0}</span>,
     },
     {
       title: '操作',
       key: 'actions',
-      width: 200,
+      width: 100,
       fixed: 'right',
+      align: 'center',
       render: (_, record) => (
-        <Space>
+        <Space size="small">
           <Tooltip title="编辑">
             <Button
               type="text"
+              size="small"
               icon={<EditOutlined />}
               onClick={() => handleEdit(record)}
             />
           </Tooltip>
           <Popconfirm
             title="确定要删除此场景吗？"
-            description="软删除后可以恢复"
             onConfirm={() => handleDelete(record.id)}
             okText="确定"
             cancelText="取消"
           >
             <Tooltip title="删除">
-              <Button type="text" danger icon={<DeleteOutlined />} />
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} />
             </Tooltip>
           </Popconfirm>
         </Space>
@@ -228,8 +348,35 @@ const SceneManagement: React.FC = () => {
 
   return (
     <div className={styles.sceneManagement}>
-      <div className={styles.header}>
-        <h1>场景管理</h1>
+      {/* Header with filter and create button */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: 16 
+      }}>
+        <Space>
+          <span style={{ fontWeight: 500 }}>按标签筛选：</span>
+          <Select
+            value={filterTag}
+            onChange={setFilterTag}
+            style={{ width: 200 }}
+            options={[
+              { label: '全部标签', value: 'all' },
+              ...categoryTags.map(tag => ({
+                label: `${tag.icon} ${tag.name}`,
+                value: tag.id,
+              })),
+            ]}
+          />
+          {filterTag !== 'all' && (
+            <Button onClick={() => setFilterTag('all')}>重置</Button>
+          )}
+          <span style={{ color: '#999', fontSize: 12, marginLeft: 16 }}>
+            共 {filteredScenes.length} 个场景
+          </span>
+        </Space>
+        
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -241,15 +388,16 @@ const SceneManagement: React.FC = () => {
 
       <Table
         columns={columns}
-        dataSource={scenes}
+        dataSource={filteredScenes}
         rowKey="id"
         loading={loading}
+        size="small"
         pagination={{
-          pageSize: 10,
+          pageSize: 20,
           showSizeChanger: true,
           showTotal: (total) => `共 ${total} 个场景`,
         }}
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1000 }}
       />
 
       <Modal
@@ -301,17 +449,27 @@ const SceneManagement: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="category"
-            label="场景分类"
+            name="short_description"
+            label="简短描述"
+            extra="用于场景卡片显示，建议50字以内"
           >
-            <Input placeholder="办公" />
+            <Input placeholder="支持音频转写" />
           </Form.Item>
 
           <Form.Item
-            name="tags"
-            label="场景标签"
+            name="primary_tag_id"
+            label="主标签"
+            extra="决定场景归属哪个菜单分区"
           >
-            <Select mode="tags" placeholder="输入标签后回车" />
+            <PrimaryTagSelector placeholder="选择主标签" />
+          </Form.Item>
+
+          <Form.Item
+            name="tag_ids"
+            label="其他标签"
+            extra="场景属性标签（行业、频率等）"
+          >
+            <OtherTagsSelector placeholder="选择其他标签" />
           </Form.Item>
 
           <Form.Item

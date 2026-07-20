@@ -189,7 +189,7 @@ class LicenseManager:
     def is_enterprise_package_installed(self) -> bool:
         """Check if the enterprise package is installed."""
         try:
-            import coapis_enterprise
+            import coapis.enterprise
             return True
         except ImportError:
             return False

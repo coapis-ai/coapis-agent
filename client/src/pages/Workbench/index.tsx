@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 import SceneCard from './SceneCard';
 import FloatingChatWindow from '../../components/FloatingChatWindow';
 import TagManagement from '../Admin/TagManagement';
+import SceneManagement from '../Admin/SceneManagement';
 import type { SceneConfig, SceneListResponse } from './types';
 import styles from './index.module.less';
 import { getApiToken } from '../../api/config';
@@ -150,10 +151,7 @@ const Workbench: React.FC = () => {
           <p className={styles.subtitle}>创建、编辑、删除场景</p>
         </div>
         <div className={styles.managementContent}>
-          {/* TODO: Implement SceneManagement component */}
-          <p style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
-            场景管理功能开发中...
-          </p>
+          <SceneManagement />
         </div>
       </div>
     );

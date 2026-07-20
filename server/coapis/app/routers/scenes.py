@@ -249,6 +249,9 @@ async def enter_scene(
         # Save chat to database
         await chat_manager.create_chat(chat_spec)
         
+        # Increment usage count
+        service.increment_usage(scene_id)
+        
         logger.info(f"User {user_id} entered scene: {scene_id}, chat_id: {result.chat_id}")
         return result
         
@@ -262,3 +265,122 @@ async def enter_scene(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+
+# ---------------------------------------------------------------------------
+# Workbench API Endpoints (v0.10.1+)
+# ---------------------------------------------------------------------------
+
+@router.get("/workbench/menu", dependencies=[])
+async def get_workbench_menu(
+    service: SceneAgentService = Depends(get_scene_service),
+) -> dict:
+    """Get workbench menu items.
+    
+    Returns category tags with scene counts for the left sidebar menu.
+    No authentication required (public data).
+    
+    Returns:
+        {
+            "menu": [
+                {
+                    "id": "office-common",
+                    "name": "办公通用",
+                    "icon": "📄",
+                    "scene_count": 3
+                },
+                ...
+            ]
+        }
+    """
+    menu_items = service.get_workbench_menu()
+    return {"menu": menu_items}
+
+
+@router.get("/workbench/section/{tag_id}")
+async def get_workbench_section(
+    tag_id: str,
+    service: SceneAgentService = Depends(get_scene_service),
+) -> dict:
+    """Get scenes for a workbench section.
+    
+    Returns all active scenes with the specified primary tag.
+    No authentication required (public data).
+    
+    Args:
+        tag_id: Primary tag ID (e.g., "office-common")
+    
+    Returns:
+        {
+            "tag": {
+                "id": "office-common",
+                "name": "办公通用",
+                "icon": "📄",
+                "description": "..."
+            },
+            "scenes": [
+                {
+                    "id": "meeting-minutes",
+                    "name": "会议纪要",
+                    "icon": "📝",
+                    "short_description": "支持音频转写",
+                    "usage_count": 100
+                },
+                ...
+            ]
+        }
+    """
+    try:
+        result = service.get_workbench_section(tag_id)
+        return result
+    except SceneNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+
+@router.get("/workbench/scene/{scene_id}")
+async def get_workbench_scene(
+    scene_id: str,
+    service: SceneAgentService = Depends(get_scene_service),
+) -> dict:
+    """Get scene details for workbench.
+    
+    Returns detailed scene info for the scene detail page.
+    No authentication required (public data).
+    
+    Args:
+        scene_id: Scene ID (e.g., "meeting-minutes")
+    
+    Returns:
+        {
+            "id": "meeting-minutes",
+            "name": "会议纪要",
+            "icon": "📝",
+            "description": "...",
+            "short_description": "支持音频转写",
+            "skills": ["audio-transcription", "docx"],
+            "welcome_message": "...",
+            "usage_count": 100
+        }
+    """
+    scene = service.get_scene(scene_id)
+    if not scene or scene.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scene not found: {scene_id}",
+        )
+    
+    return {
+        "id": scene.id,
+        "name": scene.name,
+        "icon": scene.icon,
+        "description": scene.description,
+        "short_description": scene.short_description,
+        "primary_tag_id": scene.primary_tag_id,
+        "tag_ids": scene.tag_ids,
+        "skills": scene.skills,
+        "welcome_message": scene.welcome_message,
+        "usage_count": scene.usage_count,
+    }

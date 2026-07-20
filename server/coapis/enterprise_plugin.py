@@ -120,7 +120,7 @@ def is_enterprise_installed() -> bool:
     """
     # First check if package is importable
     try:
-        import coapis_enterprise
+        import coapis.enterprise
         has_package = True
     except ImportError:
         has_package = False

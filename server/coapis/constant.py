@@ -520,6 +520,8 @@ PUBLIC_PREFIXES: tuple = (
     # Static assets
     "/logo.png",
     "/coapis-symbol.svg",
+    # Workbench public APIs (no auth required)
+    "/api/scenes/workbench",
     "/favicon.ico",
     "/robots.txt",
 )

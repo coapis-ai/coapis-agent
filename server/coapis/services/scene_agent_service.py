@@ -169,12 +169,13 @@ class SceneAgentService:
             name=scene_create.name,
             icon=scene_create.icon,
             description=scene_create.description,
-            category=scene_create.category,
-            tags=scene_create.tags,
+            short_description=scene_create.short_description,
+            primary_tag_id=scene_create.primary_tag_id,
+            tag_ids=scene_create.tag_ids,
             skills=scene_create.skills,
             system_prompt=scene_create.system_prompt,
             welcome_message=scene_create.welcome_message,
-            status="active",
+            status=scene_create.status,
             created_at=now,
             updated_at=now,
             created_by=created_by,
@@ -553,3 +554,153 @@ class SceneAgentService:
             for tag in scene.tags:
                 tags.add(tag)
         return sorted(list(tags))
+    
+    # ---------------------------------------------------------------------------
+    # Scene Management Extensions (v0.10.1+)
+    # ---------------------------------------------------------------------------
+    
+    def get_workbench_menu(self) -> List[Dict[str, Any]]:
+        """Get workbench menu items (category tags with scene counts).
+        
+        Returns:
+            List of menu items with:
+            - id: tag ID
+            - name: tag name
+            - icon: tag icon
+            - scene_count: number of active scenes
+        """
+        # Load tags from tag service
+        from ..app.services.tag_service import TagService
+        tag_service = TagService(data_dir=self.data_dir)
+        
+        # Get category tags (type="category")
+        from ..models.tag import TagType
+        category_tags = tag_service.list_tags(
+            tag_type=TagType.CATEGORY,
+            enabled=True,
+            show_in_menu=True
+        )
+        
+        # Load scenes
+        scenes_file = self._load_scenes_file()
+        active_scenes = [s for s in scenes_file.scenes if s.status == "active"]
+        
+        # Build menu items
+        menu_items = []
+        for tag in category_tags.tags:
+            # Count scenes with this tag as primary_tag_id
+            scene_count = sum(
+                1 for s in active_scenes
+                if s.primary_tag_id == tag.id
+            )
+            
+            if scene_count > 0:  # Only show tags with scenes
+                menu_items.append({
+                    "id": tag.id,
+                    "name": tag.name,
+                    "icon": tag.icon,
+                    "scene_count": scene_count,
+                })
+        
+        # Sort by scene_count descending
+        menu_items.sort(key=lambda x: -x["scene_count"])
+        
+        return menu_items
+    
+    def get_workbench_section(self, tag_id: str) -> Dict[str, Any]:
+        """Get scenes for a workbench section (by primary tag).
+        
+        Args:
+            tag_id: Primary tag ID
+            
+        Returns:
+            Dict with:
+            - tag: tag info (id, name, icon, description)
+            - scenes: list of scenes (id, name, icon, short_description)
+        """
+        # Load tag info
+        from ..app.services.tag_service import TagService
+        tag_service = TagService(data_dir=self.data_dir)
+        tag = tag_service.get_tag(tag_id)
+        
+        if not tag:
+            raise SceneNotFoundError(f"Tag not found: {tag_id}")
+        
+        # Load scenes with this primary_tag_id
+        scenes_file = self._load_scenes_file()
+        active_scenes = [
+            s for s in scenes_file.scenes
+            if s.status == "active" and s.primary_tag_id == tag_id
+        ]
+        
+        # Sort by usage_count descending
+        active_scenes.sort(key=lambda x: -x.usage_count)
+        
+        # Build response
+        return {
+            "tag": {
+                "id": tag.id,
+                "name": tag.name,
+                "icon": tag.icon,
+                "description": tag.description or "",
+            },
+            "scenes": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "icon": s.icon,
+                    "short_description": s.short_description,
+                    "usage_count": s.usage_count,
+                }
+                for s in active_scenes
+            ]
+        }
+    
+    def increment_usage(self, scene_id: str) -> None:
+        """Increment scene usage count.
+        
+        Args:
+            scene_id: Scene ID
+        """
+        scenes_file = self._load_scenes_file()
+        
+        # Find scene
+        for scene in scenes_file.scenes:
+            if scene.id == scene_id:
+                scene.usage_count += 1
+                scene.updated_at = datetime.now(timezone.utc).isoformat()
+                break
+        else:
+            raise SceneNotFoundError(f"Scene not found: {scene_id}")
+        
+        # Save
+        self._save_scenes_file(scenes_file)
+    
+    def list_scenes_by_primary_tag(
+        self,
+        primary_tag_id: str,
+        status: Optional[str] = "active"
+    ) -> SceneListResponse:
+        """List scenes by primary tag.
+        
+        Args:
+            primary_tag_id: Primary tag ID
+            status: Filter by status (default: active)
+            
+        Returns:
+            SceneListResponse
+        """
+        scenes_file = self._load_scenes_file()
+        scenes = scenes_file.scenes
+        
+        # Filter by primary_tag_id
+        scenes = [s for s in scenes if s.primary_tag_id == primary_tag_id]
+        
+        # Filter by status
+        if status:
+            scenes = [s for s in scenes if s.status == status]
+        
+        # Sort by usage_count descending
+        scenes = sorted(scenes, key=lambda x: -x.usage_count)
+        
+        return SceneListResponse(scenes=scenes, total=len(scenes))

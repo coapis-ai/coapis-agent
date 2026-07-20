@@ -107,7 +107,7 @@ def _load_enterprise_routes(app: FastAPI) -> None:
         app: FastAPI application instance
     """
     try:
-        from coapis_enterprise import get_routers, register_plugin
+        from coapis.enterprise import get_routers, register_plugin
         from coapis.plugins.registry import PluginRegistry
         
         # 1. 注册企业版插件（会调用 PluginApi.register_router 等）
@@ -402,8 +402,8 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
     from ..license_manager_lite import license_manager
     
     try:
-        from coapis_enterprise import get_routers, register_plugin
-        from coapis_enterprise.license.manager import license_manager as enterprise_license_manager
+        from coapis.enterprise import get_routers, register_plugin
+        from coapis.enterprise.license.manager import license_manager as enterprise_license_manager
         
         logger.info("Enterprise package detected - initializing security modules...")
         
