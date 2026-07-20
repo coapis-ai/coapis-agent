@@ -1,0 +1,44 @@
+.embeddedChatContainer {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.embeddedLoading,
+.embeddedError {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background: #fafafa;
+  
+  p {
+    margin: 8px 0;
+    color: #595959;
+    font-size: 14px;
+  }
+}
+
+.embeddedError {
+  color: #ff4d4f;
+}
+
+// 暗色模式
+:global(.dark-mode) {
+  .embeddedChatContainer {
+    background: #1f1f1f;
+  }
+  
+  .embeddedLoading,
+  .embeddedError {
+    background: #141414;
+    
+    p {
+      color: #a6a6a6;
+    }
+  }
+}
