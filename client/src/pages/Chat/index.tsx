@@ -1701,6 +1701,12 @@ export default function ChatPage() {
           {/* 聊天区域 */}
           <div
             className={styles.chatMessagesArea}
+            onClick={() => {
+              // 嵌入式模式：点击聊天区域时自动收缩工具栏
+              if (isEmbeddedMode && toolbarOpen) {
+                closeToolbar();
+              }
+            }}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onDrop={(e) => {
               e.preventDefault();
@@ -1871,7 +1877,7 @@ export default function ChatPage() {
       />
     </div>
 
-    {/* 嵌入式模式工具栏 - 内部浮层，覆盖在聊天区域上 */}
+    {/* 嵌入式模式工具栏 - 内部浮层，覆盖在聊天区域上，聊天时自动收缩 */}
     {isEmbeddedMode && toolbarOpen && (
       <Drawer
         title="工具栏"
@@ -1879,14 +1885,14 @@ export default function ChatPage() {
         width="80%"
         open={toolbarOpen}
         onClose={closeToolbar}
-        mask={true}
-        maskClosable={true}
+        mask={false}
+        maskClosable={false}
         styles={{ 
           body: { padding: 0 },
-          wrapper: { position: 'absolute' }
+          wrapper: { position: 'absolute', top: '48px', height: 'calc(100% - 48px)' }
         }}
         getContainer={false}
-        style={{ position: 'absolute' }}
+        style={{ position: 'absolute', top: '48px', height: 'calc(100% - 48px)' }}
       >
         <ChatToolbarSidebar
           selectedFiles={selectedFiles}
