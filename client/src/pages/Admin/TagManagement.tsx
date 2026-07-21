@@ -23,6 +23,8 @@ import {
   TagOutlined,
   AppstoreOutlined,
   DashboardOutlined,
+  DownloadOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import styles from './SceneManagement.module.less';
@@ -221,6 +223,101 @@ const TagManagement: React.FC = () => {
     }
   };
 
+  const handleExport = () => {
+    try {
+      // Export all tags to JSON file
+      const exportData = {
+        version: '1.0',
+        exportTime: new Date().toISOString(),
+        total: tags.length,
+        tags: tags,
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `tags-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      message.success(`已导出 ${tags.length} 个标签`);
+    } catch (error) {
+      console.error('Export failed:', error);
+      message.error('导出失败');
+    }
+  };
+
+  const handleImport = () => {
+    // Create file input
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e: any) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        // Validate import data
+        if (!data.tags || !Array.isArray(data.tags)) {
+          throw new Error('无效的标签数据格式');
+        }
+
+        // Import tags via API
+        const token = getApiToken();
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const tag of data.tags) {
+          try {
+            const payload = {
+              ...tag,
+              keywords: tag.keywords || [],
+              related_skills: tag.related_skills || [],
+            };
+
+            const response = await fetch('/api/admin/tags', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+              },
+              body: JSON.stringify(payload),
+            });
+
+            if (response.ok) {
+              successCount++;
+            } else {
+              failCount++;
+            }
+          } catch (err) {
+            failCount++;
+          }
+        }
+
+        if (successCount > 0) {
+          message.success(`成功导入 ${successCount} 个标签${failCount > 0 ? `，失败 ${failCount} 个` : ''}`);
+          loadTags();
+        } else {
+          message.error('导入失败，所有标签可能已存在');
+        }
+      } catch (error: any) {
+        console.error('Import failed:', error);
+        message.error(error.message || '导入失败');
+      }
+    };
+
+    input.click();
+  };
+
   const getTagTypeLabel = (type: TagType) => {
     const labels: Record<TagType, string> = {
       dimension: '维度',
@@ -370,6 +467,18 @@ const TagManagement: React.FC = () => {
             <Radio.Button value="industry">行业</Radio.Button>
             <Radio.Button value="frequency">频率</Radio.Button>
           </Radio.Group>
+          <Button
+            icon={<UploadOutlined />}
+            onClick={handleImport}
+          >
+            导入
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={handleExport}
+          >
+            导出
+          </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}

@@ -16,6 +16,17 @@
   }
 }
 
+// 移动端专用样式
+.mobileWindow {
+  border-radius: 12px; // 更大的圆角
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
+  
+  // 确保内容区域有足够的空间
+  .windowBodyNoHeader {
+    padding: 0 8px; // 移动端减少左右留白，给输入框更多空间
+  }
+}
+
 .windowHeader {
   display: flex;
   justify-content: space-between;

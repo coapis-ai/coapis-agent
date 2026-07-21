@@ -27,15 +27,33 @@ interface ChatSessionInitializerProps {
  * session up-front. This avoids the race in @agentscope-ai/chat where the first
  * user message is cleared by the session loader that runs when currentSessionId
  * changes from undefined to a new id during handleSubmit.
+ *
+ * COAPIS FIX 2: In embedded mode (scenes), chatId comes from window.__CHAT_SESSION_ID__
+ * instead of URL, so we need to read from window object as well.
  */
 const ChatSessionInitializer: React.FC<ChatSessionInitializerProps> = ({
   skipNextSessionSelectedRef,
 }) => {
   const location = useLocation();
+  
+  // ⭐ 嵌入式模式：从 window 对象获取 chatId
+  const isEmbeddedMode = useMemo(() => {
+    return (window as any).__CHAT_MODE__ === 'embedded';
+  }, []);
+  
+  const windowChatId = useMemo(() => {
+    return (window as any).__CHAT_SESSION_ID__;
+  }, []);
+  
   const chatId = useMemo(() => {
+    // 嵌入式模式：优先使用 window.__CHAT_SESSION_ID__
+    if (isEmbeddedMode && windowChatId) {
+      return windowChatId;
+    }
+    // 完整模式：从路由获取
     const match = location.pathname.match(/^\/chat\/(.+)$/);
     return match?.[1];
-  }, [location.pathname]);
+  }, [isEmbeddedMode, windowChatId, location.pathname]);
 
   const { sessions, currentSessionId, setCurrentSessionId } =
     useChatAnywhereSessionsState();

@@ -183,17 +183,18 @@ async def enter_scene(
     current_user: dict = Depends(get_current_user),
     service: SceneAgentService = Depends(get_scene_service),
 ) -> EnterSceneResponse:
-    """Enter a scene - create chat session with scene agent.
+    """Enter a scene - create or retrieve chat session with scene agent.
     
-    This endpoint:
-    1. Validates scene exists and is active
-    2. Creates or retrieves scene agent
-    3. Creates chat session with scene context
-    4. Returns scene info and welcome message
+    会话管理策略：
+        1. 使用固定的 chat_id: scene-{scene_id}-{user_id}
+        2. 先查找是否已有该场景的会话
+        3. 如果存在且不强制新建，返回已有的会话
+        4. 如果不存在或 force_new=True，创建新会话
+        5. force_new=True 时，先删除旧的聊天记录
     
     Args:
         scene_id: Scene ID (e.g., meeting-minutes)
-        request: Optional enter scene request
+        request: Optional enter scene request (force_new: force create new session)
     
     Returns:
         EnterSceneResponse with chat session info
@@ -203,6 +204,7 @@ async def enter_scene(
         HTTPException: 400 if scene is not active
     """
     user_id = current_user.get("username", "anonymous")
+    force_new = request.force_new if request else False
     
     try:
         # Get scene config first (for scene name)
@@ -210,11 +212,9 @@ async def enter_scene(
         if not scene_config:
             raise SceneNotFoundError(f"Scene not found: {scene_id}")
         
-        result = service.enter_scene(
-            scene_id=scene_id,
-            user_id=user_id,
-            request=request,
-        )
+        # ⭐ 固定的 chat_id 和 session_id
+        chat_id = f"scene-{scene_id}-{user_id}"
+        session_id = f"scene:{scene_id}:user:{user_id}"
         
         # CRITICAL: Create chat session in database
         # This is necessary so that sessionApi.getSessionList() can find the new chat
@@ -231,6 +231,39 @@ async def enter_scene(
         repo = JsonChatRepository(chats_file)
         chat_manager = ChatManager(repo=repo)
         
+        # ⭐ 查找已有会话
+        existing_chat = await repo.get_chat(chat_id)
+        
+        # ⭐ 处理 force_new：删除旧的聊天记录
+        if force_new and existing_chat:
+            logger.info(f"Force new session for scene {scene_id}, deleting old chat {chat_id}")
+            await repo.delete_chats([chat_id])
+            existing_chat = None
+        
+        # ⭐ 如果已存在，返回已有的会话
+        if existing_chat:
+            logger.info(f"User {user_id} re-entered scene: {scene_id}, reusing chat_id: {chat_id}")
+            
+            result = service.enter_scene(
+                scene_id=scene_id,
+                user_id=user_id,
+                request=request,
+            )
+            
+            # 更新返回的 chat_id 和 session_id（确保一致性）
+            result.chat_id = existing_chat.id
+            result.session_id = existing_chat.session_id
+            return result
+        
+        # ⭐ 创建新会话
+        result = service.enter_scene(
+            scene_id=scene_id,
+            user_id=user_id,
+            request=request,
+        )
+        
+        logger.info(f"🔍 [enter_scene] scene_id={scene_id}, user_id={user_id}, chat_id={result.chat_id}, session_id={result.session_id}")
+        
         # Create chat spec
         chat_spec = ChatSpec(
             id=result.chat_id,
@@ -239,6 +272,7 @@ async def enter_scene(
             user_id=user_id,
             channel="console",
             agent_id=result.agent["id"],
+            scene_id=scene_id,
             meta={
                 "scene_id": scene_id,
                 "scene_name": scene_config.name,
@@ -249,10 +283,12 @@ async def enter_scene(
         # Save chat to database
         await chat_manager.create_chat(chat_spec)
         
+        logger.info(f"✅ [enter_scene] Saved chat to database: {chat_spec.id}")
+        
         # Increment usage count
         service.increment_usage(scene_id)
         
-        logger.info(f"User {user_id} entered scene: {scene_id}, chat_id: {result.chat_id}")
+        logger.info(f"User {user_id} entered scene: {scene_id}, created chat_id: {result.chat_id}")
         return result
         
     except SceneNotFoundError as e:

@@ -1,5 +1,5 @@
 // FloatingChatWindow - 可拖拽、可缩放的浮窗组件
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Spin, message } from 'antd';
 import type { SceneConfig, EnterSceneResponse } from '../../pages/Workbench/types';
 import styles from './index.module.less';
@@ -21,12 +21,21 @@ interface FloatingChatWindowProps {
 type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
 
 /**
+ * 检测是否为移动设备
+ */
+const isMobileDevice = (): boolean => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
+    || window.innerWidth < 768;
+};
+
+/**
  * 可拖拽、可缩放的浮窗组件
  * 
  * 功能：
- * 1. 拖拽：按住标题栏移动窗口
- * 2. 四角缩放：拖拽四个角调整窗口大小
+ * 1. 拖拽：按住标题栏移动窗口（桌面端）
+ * 2. 四角缩放：拖拽四个角调整窗口大小（桌面端）
  * 3. 固定：固定后点击外部不关闭
+ * 4. 移动端优化：自适应尺寸，接近全屏
  */
 const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
   visible,
@@ -40,16 +49,39 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
   const [loading, setLoading] = useState(false);
   const [chatData, setChatData] = useState<EnterSceneResponse | null>(null);
   
-  // 窗口状态
-  const [position, setPosition] = useState({ x: 100, y: 50 });
-  const [size, setSize] = useState({ width: initialWidth, height: initialHeight });
+  // 检测移动设备
+  const isMobile = useMemo(() => isMobileDevice(), []);
+  
+  // 移动端使用自适应尺寸，桌面端使用固定尺寸
+  const [position, setPosition] = useState(() => {
+    if (isMobile) {
+      // 移动端：固定在顶部
+      return { x: 0, y: 0 };
+    }
+    // 桌面端：初始位置偏右侧
+    const initialX = Math.max(50, window.innerWidth - initialWidth - 50);
+    return { x: initialX, y: 50 };
+  });
+  
+  const [size, setSize] = useState(() => {
+    if (isMobile) {
+      // 移动端：接近全屏（95vw × 85vh）
+      return {
+        width: window.innerWidth * 0.95,
+        height: window.innerHeight * 0.85,
+      };
+    }
+    // 桌面端：使用传入的尺寸
+    return { width: initialWidth, height: initialHeight };
+  });
+  
   const [isPinned, setIsPinned] = useState(false);
   
-  // 拖拽状态
+  // 拖拽状态（移动端禁用）
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0, windowX: 0, windowY: 0 });
   
-  // 缩放状态
+  // 缩放状态（移动端禁用）
   const [isResizing, setIsResizing] = useState(false);
   const [resizeCorner, setResizeCorner] = useState<ResizeCorner | null>(null);
   const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });
@@ -118,6 +150,15 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
       }
 
       const data: EnterSceneResponse = await response.json();
+      
+      // 🔍 调试：打印返回的数据
+      console.log('🔍 [enterScene] Response:', {
+        chat_id: data.chat_id,
+        session_id: data.session_id,
+        scene_id: data.scene?.id,
+        agent_id: data.agent?.id,
+      });
+      
       setChatData(data);
       message.success(`已进入场景: ${scene.name}`);
     } catch (error) {
@@ -128,8 +169,10 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
     }
   };
 
-  // 拖拽逻辑
+  // 拖拽逻辑（移动端禁用）
   const handleDragStart = useCallback((e: React.MouseEvent) => {
+    // 移动端禁用拖拽
+    if (isMobile) return;
     if (isResizing) return;
     
     e.preventDefault();
@@ -140,7 +183,7 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
       windowX: position.x,
       windowY: position.y,
     };
-  }, [isResizing, position]);
+  }, [isMobile, isResizing, position]);
 
   useEffect(() => {
     if (!isDragging) return;
@@ -168,8 +211,11 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
     };
   }, [isDragging, size]);
 
-  // 四角缩放逻辑
+  // 四角缩放逻辑（移动端禁用）
   const handleResizeStart = useCallback((corner: ResizeCorner) => (e: React.MouseEvent) => {
+    // 移动端禁用缩放
+    if (isMobile) return;
+    
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
@@ -182,7 +228,7 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
       posX: position.x,
       posY: position.y,
     };
-  }, [size, position]);
+  }, [isMobile, size, position]);
 
   useEffect(() => {
     if (!isResizing || !resizeCorner) return;
@@ -247,13 +293,14 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
   return (
     <div
       ref={containerRef}
-      className={styles.floatingWindow}
+      className={`${styles.floatingWindow} ${isMobile ? styles.mobileWindow : ''}`}
       style={{
-        left: position.x,
-        top: position.y,
+        left: isMobile ? '50%' : position.x,
+        top: isMobile ? '7.5vh' : position.y,
         width: size.width,
         height: size.height,
         cursor: isDragging ? 'move' : 'default',
+        transform: isMobile ? 'translateX(-50%)' : 'none',
       }}
     >
       {/* 内容区域（无标题栏，由 ChatSessionHeader 作为标题栏） */}
@@ -285,11 +332,15 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
         ) : null}
       </div>
 
-      {/* 四角缩放手柄 */}
-      <div className={`${styles.resizeHandle} ${styles.resizeNw}`} onMouseDown={handleResizeStart('nw')} />
-      <div className={`${styles.resizeHandle} ${styles.resizeNe}`} onMouseDown={handleResizeStart('ne')} />
-      <div className={`${styles.resizeHandle} ${styles.resizeSw}`} onMouseDown={handleResizeStart('sw')} />
-      <div className={`${styles.resizeHandle} ${styles.resizeSe}`} onMouseDown={handleResizeStart('se')} />
+      {/* 四角缩放手柄（移动端隐藏） */}
+      {!isMobile && (
+        <>
+          <div className={`${styles.resizeHandle} ${styles.resizeNw}`} onMouseDown={handleResizeStart('nw')} />
+          <div className={`${styles.resizeHandle} ${styles.resizeNe}`} onMouseDown={handleResizeStart('ne')} />
+          <div className={`${styles.resizeHandle} ${styles.resizeSw}`} onMouseDown={handleResizeStart('sw')} />
+          <div className={`${styles.resizeHandle} ${styles.resizeSe}`} onMouseDown={handleResizeStart('se')} />
+        </>
+      )}
     </div>
   );
 };

@@ -17,6 +17,8 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
+  DownloadOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { SceneConfig } from '../Workbench/types';
@@ -218,6 +220,95 @@ const SceneManagement: React.FC = () => {
     }
   };
 
+  const handleExport = () => {
+    try {
+      // Export filtered scenes to JSON file
+      const exportData = {
+        version: '1.0',
+        exportTime: new Date().toISOString(),
+        total: filteredScenes.length,
+        scenes: filteredScenes,
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `scenes-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      message.success(`已导出 ${filteredScenes.length} 个场景`);
+    } catch (error) {
+      console.error('Export failed:', error);
+      message.error('导出失败');
+    }
+  };
+
+  const handleImport = () => {
+    // Create file input
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e: any) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        // Validate import data
+        if (!data.scenes || !Array.isArray(data.scenes)) {
+          throw new Error('无效的场景数据格式');
+        }
+
+        // Import scenes via API
+        const token = getApiToken();
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const scene of data.scenes) {
+          try {
+            const response = await fetch('/api/admin/scenes', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+              },
+              body: JSON.stringify(scene),
+            });
+
+            if (response.ok) {
+              successCount++;
+            } else {
+              failCount++;
+            }
+          } catch (err) {
+            failCount++;
+          }
+        }
+
+        if (successCount > 0) {
+          message.success(`成功导入 ${successCount} 个场景${failCount > 0 ? `，失败 ${failCount} 个` : ''}`);
+          loadScenes();
+        } else {
+          message.error('导入失败，所有场景可能已存在');
+        }
+      } catch (error: any) {
+        console.error('Import failed:', error);
+        message.error(error.message || '导入失败');
+      }
+    };
+
+    input.click();
+  };
+
   const columns: ColumnsType<SceneConfig> = [
     {
       title: '场景ID',
@@ -377,13 +468,27 @@ const SceneManagement: React.FC = () => {
           </span>
         </Space>
         
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={handleCreate}
-        >
-          新建场景
-        </Button>
+        <Space>
+          <Button
+            icon={<UploadOutlined />}
+            onClick={handleImport}
+          >
+            导入
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={handleExport}
+          >
+            导出
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleCreate}
+          >
+            新建场景
+          </Button>
+        </Space>
       </div>
 
       <Table

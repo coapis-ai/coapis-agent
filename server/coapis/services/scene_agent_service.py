@@ -439,10 +439,11 @@ class SceneAgentService:
         if not scene_agent:
             scene_agent = self._create_scene_agent(scene_config)
         
-        # Create chat session
-        from uuid import uuid4
-        chat_id = str(uuid4())
-        session_id = f"console:{user_id}:{chat_id[:8]}"
+        # ⭐ Scene代入会话管理：固定ID格式，避免重复创建
+        # chat_id: scene-{scene_id}-{user_id}
+        # session_id: scene:{scene_id}:user:{user_id}
+        chat_id = f"scene-{scene_id}-{user_id}"
+        session_id = f"scene:{scene_id}:user:{user_id}"
         
         # User's default agent (not a composed agent)
         user_agent_id = f"user:{user_id}"

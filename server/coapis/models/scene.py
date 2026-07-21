@@ -309,6 +309,7 @@ class EnterSceneRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     
     session_name: Optional[str] = Field(default=None, description="Optional session name")
+    force_new: bool = Field(default=False, description="Force create new session (delete old if exists)")
 
 
 class EnterSceneResponse(BaseModel):
