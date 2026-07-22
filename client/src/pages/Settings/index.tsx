@@ -1,4 +1,4 @@
-import { Card, Row, Col, Typography, Spin } from 'antd';
+import { Card, Row, Col, Typography, Spin, Tooltip } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useState, useEffect } from 'react';
@@ -289,21 +289,22 @@ export default function Settings() {
           <Row gutter={[16, 16]} className={styles.cardGrid}>
             {filteredUserFeatures.map((feature) => (
               <Col key={feature.key}>
-                <Card
-                  className={styles.featureCard}
-                  hoverable
-                  onClick={() => handleCardClick(feature.path)}
-                >
-                  <div className={styles.cardContent}>
-                    <div className={styles.iconWrapper}>
-                      {feature.icon}
+                <Tooltip title={feature.description} placement="top">
+                  <Card
+                    className={styles.featureCard}
+                    hoverable
+                    onClick={() => handleCardClick(feature.path)}
+                  >
+                    <div className={styles.cardContent}>
+                      <div className={styles.iconWrapper}>
+                        {feature.icon}
+                      </div>
+                      <div className={styles.textWrapper}>
+                        <Text strong className={styles.cardTitle}>{feature.title}</Text>
+                      </div>
                     </div>
-                    <div className={styles.textWrapper}>
-                      <Text strong className={styles.cardTitle}>{feature.title}</Text>
-                      <Text type="secondary" className={styles.cardDesc}>{feature.description}</Text>
-                    </div>
-                  </div>
-                </Card>
+                  </Card>
+                </Tooltip>
               </Col>
             ))}
           </Row>
@@ -320,21 +321,22 @@ export default function Settings() {
           <Row gutter={[16, 16]} className={styles.cardGrid}>
             {filteredAdminFeatures.map((feature) => (
               <Col key={feature.key}>
-                <Card
-                  className={styles.featureCard}
-                  hoverable
-                  onClick={() => handleCardClick(feature.path)}
-                >
-                  <div className={styles.cardContent}>
-                    <div className={styles.iconWrapper}>
-                      {feature.icon}
+                <Tooltip title={feature.description} placement="top">
+                  <Card
+                    className={styles.featureCard}
+                    hoverable
+                    onClick={() => handleCardClick(feature.path)}
+                  >
+                    <div className={styles.cardContent}>
+                      <div className={styles.iconWrapper}>
+                        {feature.icon}
+                      </div>
+                      <div className={styles.textWrapper}>
+                        <Text strong className={styles.cardTitle}>{feature.title}</Text>
+                      </div>
                     </div>
-                    <div className={styles.textWrapper}>
-                      <Text strong className={styles.cardTitle}>{feature.title}</Text>
-                      <Text type="secondary" className={styles.cardDesc}>{feature.description}</Text>
-                    </div>
-                  </div>
-                </Card>
+                  </Card>
+                </Tooltip>
               </Col>
             ))}
           </Row>
