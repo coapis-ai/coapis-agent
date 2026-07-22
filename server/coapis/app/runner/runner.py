@@ -931,24 +931,18 @@ class AgentRunner(Runner):
             except Exception as e:
                 logger.warning(f"[Scene] Failed to get scene_config from ChatSpec: {e}")
             
-            # ⭐ 向后兼容：如果没有从 ChatSpec 获取到，尝试从 request.meta 或 request.input[0].metadata 读取
-            if not scene_id:
+            # ⭐ 向后兼容：如果没有从 ChatSpec 获取到，尝试从 request.input[0].metadata 读取
+            # 注意：msgs 是从 request.input 转换来的，转换过程可能丢失 metadata
+            # 所以直接从 request.input[0].metadata 读取更可靠
+            if not scene_id and hasattr(request, "input") and request.input:
                 try:
-                    # 优先从 request.meta.scene_id 读取（console 传递）
-                    if hasattr(request, "meta") and isinstance(request.meta, dict):
-                        scene_id = request.meta.get("scene_id")
+                    first_msg = request.input[0]
+                    if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
+                        scene_id = first_msg.metadata.get("scene_id")
                         if scene_id:
-                            logger.info(f"[Scene] Detected scene_id={scene_id} from request.meta (fallback)")
-                    
-                    # 如果还是没有，尝试从 request.input[0].metadata.scene_id 读取（向后兼容）
-                    if not scene_id and hasattr(request, "input") and request.input:
-                        first_msg = request.input[0]
-                        if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
-                            scene_id = first_msg.metadata.get("scene_id")
-                            if scene_id:
-                                logger.info(f"[Scene] Detected scene_id={scene_id} from request.input[0].metadata (fallback)")
+                            logger.info(f"[Scene] Detected scene_id={scene_id} from request.input[0].metadata")
                 except Exception as e:
-                    logger.warning(f"[Scene] Failed to get scene_id from request: {e}")
+                    logger.warning(f"[Scene] Failed to get scene_id from request: {e}", exc_info=True)
 
             # ⭐ 如果有 scene_id，但没有场景配置快照，才加载场景智能体配置文件
             if scene_id and not scene_prompt:
