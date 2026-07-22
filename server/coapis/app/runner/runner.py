@@ -931,17 +931,24 @@ class AgentRunner(Runner):
             except Exception as e:
                 logger.warning(f"[Scene] Failed to get scene_config from ChatSpec: {e}")
             
-            # ⭐ 向后兼容：如果没有从 ChatSpec 获取到，尝试从 request.input[0].metadata 读取
+            # ⭐ 向后兼容：如果没有从 ChatSpec 获取到，尝试从 request.meta 或 request.input[0].metadata 读取
             if not scene_id:
                 try:
-                    if request and hasattr(request, "input") and request.input:
+                    # 优先从 request.meta.scene_id 读取（console 传递）
+                    if hasattr(request, "meta") and isinstance(request.meta, dict):
+                        scene_id = request.meta.get("scene_id")
+                        if scene_id:
+                            logger.info(f"[Scene] Detected scene_id={scene_id} from request.meta (fallback)")
+                    
+                    # 如果还是没有，尝试从 request.input[0].metadata.scene_id 读取（向后兼容）
+                    if not scene_id and hasattr(request, "input") and request.input:
                         first_msg = request.input[0]
                         if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
                             scene_id = first_msg.metadata.get("scene_id")
                             if scene_id:
-                                logger.info(f"[Scene] Detected scene_id={scene_id} from request metadata (fallback)")
+                                logger.info(f"[Scene] Detected scene_id={scene_id} from request.input[0].metadata (fallback)")
                 except Exception as e:
-                    logger.warning(f"[Scene] Failed to get scene_id from request metadata: {e}")
+                    logger.warning(f"[Scene] Failed to get scene_id from request: {e}")
 
             # ⭐ 如果有 scene_id，但没有场景配置快照，才加载场景智能体配置文件
             if scene_id and not scene_prompt:
@@ -968,13 +975,6 @@ class AgentRunner(Runner):
                         logger.warning(f"[Scene] Scene agent config not found: {scene_agent_path}")
                 except Exception as e:
                     logger.warning(f"[Scene] Failed to load scene config from file: {e}")
-            
-            # ⭐ 自动生成场景系统提示词（如果配置中没有）
-            if scene_id and not scene_prompt and scene_name:
-                # 从场景描述生成提示词
-                scene_description = scene_data.get("description", "") or scene_data.get("capabilities", {}).get("description", "")
-                scene_prompt = f"你是{scene_name}专家助手。{scene_description}请以专业、友好的方式为用户提供帮助。"
-                logger.info(f"[Scene] Auto-generated scene system prompt: {scene_prompt[:100]}...")
             
             # ⭐ 将场景身份注入到 agent_config
             if scene_id and scene_prompt:
