@@ -1,29 +1,32 @@
 /* 设置页面样式 */
 
-.container {
+.settingsPage {
   padding: 24px;
   max-width: 1400px;
   margin: 0 auto;
-}
-
-.header {
-  margin-bottom: 32px;
-}
-
-.header h2 {
-  margin-bottom: 8px;
 }
 
 .section {
   margin-bottom: 40px;
 }
 
-.section h4 {
+.sectionTitle {
+  margin-bottom: 8px !important;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.sectionDesc {
+  display: block;
   margin-bottom: 16px;
-  color: #1890ff;
+}
+
+.cardGrid {
+  margin-top: 16px;
 }
 
 .featureCard {
+  width: 90px;
+  height: 90px;
   transition: all 0.3s ease;
   cursor: pointer;
   display: flex;
@@ -44,6 +47,16 @@
   justify-content: center;
   width: 100%;
   height: 100%;
+  padding: 12px;
+}
+
+.cardContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 
 .iconWrapper {
@@ -53,32 +66,51 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 40px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
+}
+
+.textWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 .cardTitle {
-  margin: 4px 0 0 0 !important;
+  margin: 0 !important;
   font-size: 14px !important;
   font-weight: 500;
   color: rgba(0, 0, 0, 0.85);
   text-align: center;
   width: 100%;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 响应式：移动端 */
 @media (max-width: 768px) {
-  .container {
+  .settingsPage {
     padding: 16px;
+  }
+
+  .featureCard {
+    width: 80px;
+    height: 80px;
   }
 
   .iconWrapper {
     font-size: 28px;
-    height: 36px;
+    margin-bottom: 4px;
   }
 
   .cardTitle {
     font-size: 13px !important;
+  }
+
+  .featureCard .ant-card-body {
+    padding: 8px;
   }
 }

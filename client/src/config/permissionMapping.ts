@@ -14,11 +14,12 @@
  */
 export const MENU_TO_PERMISSION_MODULE: Record<string, string> = {
   // ── 主菜单（社区版）──
-  'chat': 'chat',
-  'workbench': 'chat',  // 办公 = 聊天权限
-  'my-scenes': 'chat',  // 我的场景 = 聊天权限
-  'myspace': 'myspace',
-  'settings': 'config',  // 设置页面本身不需要权限，但子模块需要
+  // 主菜单项不涉及权限，对所有用户开放，不在此映射中
+  // 'chat': 'chat',        // 主菜单，所有用户可见
+  // 'workbench': 'chat',   // 主菜单，所有用户可见
+  // 'my-scenes': 'chat',   // 主菜单，所有用户可见
+  // 'myspace': 'myspace',  // 主菜单，所有用户可见
+  // 'settings': 'config',  // ❌ 设置是主菜单，所有用户可见，不应映射权限
 
   // ── 用户管理（用户级功能）──
   'agents': 'agents',
