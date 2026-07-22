@@ -1230,8 +1230,6 @@ export default function ChatPage() {
               type: lastMsg.type,
               content: rewrittenContent,
               session: lastMsg.session,
-              // ⭐ 嵌入式模式：传递场景ID到 metadata（后端从 request.input[0].metadata.scene_id 读取）
-              ...(isEmbeddedMode && sceneId && { metadata: { scene_id: sceneId } }),
               // 注意：不复制 cards 等只读属性
             },
           ]
@@ -1251,10 +1249,18 @@ export default function ChatPage() {
           // 添加文件引用（用于后端动态注入提示，避免污染用户消息）
           ...(fileRefs && { selected_files: fileRefs }),
         },
+        // ⭐ 嵌入式模式：场景ID传递到 meta 中（后端从 channel_meta.scene_id 读取）
+        ...(isEmbeddedMode && sceneId && { meta: { scene_id: sceneId } }),
         // Pass chat_id (UUID) so backend can persist messages to the correct chat
         // instead of matching by session_id (which is shared across all console chats).
         chat_id: chatIdRef.current || undefined,
       };
+
+      // 🔍 调试：打印场景代入信息
+      if (isEmbeddedMode && sceneId) {
+        console.log('[Chat] Scene mode - sceneId:', sceneId, 'isEmbeddedMode:', isEmbeddedMode);
+        console.log('[Chat] Request meta:', requestBody.meta);
+      }
 
       // Record current session_id for SSE filtering
       const currentSessionId = requestBody.session_id || requestBody.chat_id || null;
