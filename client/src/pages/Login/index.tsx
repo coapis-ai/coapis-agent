@@ -5,7 +5,6 @@ import { Button, Form, Input } from "antd";
 import { useAppMessage } from "../../hooks/useAppMessage";
 import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import { authApi } from "../../api/modules/auth";
-import { setAuthToken } from "../../api/config";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTheme } from "../../contexts/ThemeContext";
 
@@ -45,11 +44,18 @@ export default function LoginPage() {
 
       // 记住我: expires_in=0 表示永久 token（100年），不勾选则用默认7天
       const expires_in = values.remember_me ? 0 : undefined;
+      
+      // 使用 AuthStorage 统一管理登录状态
+      const { AuthStorage } = await import('../../utils/authStorage');
 
       if (isRegister) {
         const res = await authApi.register(values.username, values.password);
         if (res.token) {
-          setAuthToken(res.token);
+          // 使用 AuthStorage 登录
+          AuthStorage.login(res.token, values.username, {
+            remember: values.remember_me || false,
+            display_name: values.username,
+          });
           window.currentUserId = values.username;
           window.currentChannel = "";  // 控制台不设 channel，显示所有来源聊天
           // 用后端返回的 default_agent_id 重设 selectedAgent，断开旧 localStorage 污染链
@@ -66,7 +72,11 @@ export default function LoginPage() {
       } else {
         const res = await authApi.login(values.username, values.password, expires_in);
         if (res.token) {
-          setAuthToken(res.token);
+          // 使用 AuthStorage 登录
+          AuthStorage.login(res.token, values.username, {
+            remember: values.remember_me || false,
+            display_name: values.username,
+          });
           window.currentUserId = values.username;
           window.currentChannel = "";  // 控制台不设 channel，显示所有来源聊天
           // 用后端返回的 default_agent_id 重设 selectedAgent，断开旧 localStorage 污染链

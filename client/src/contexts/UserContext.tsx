@@ -83,6 +83,9 @@ export default function UserProvider({ children }: UserProviderProps) {
       return;
     }
 
+    // 使用 AuthStorage 统一管理用户名
+    const { AuthStorage } = require('../utils/authStorage');
+    
     // Detect user change and clear old data to prevent cross-user data leakage
     const oldUsername = localStorage.getItem('coapis-current-username');
     const newUsername = getCurrentUsername();
@@ -98,8 +101,8 @@ export default function UserProvider({ children }: UserProviderProps) {
       sessionStorage.clear();
     }
 
-    // Save current username for next login detection
-    localStorage.setItem('coapis-current-username', newUsername || '');
+    // Save current username for next login detection（使用 AuthStorage）
+    AuthStorage.saveUsername(newUsername || '');
 
     // Use direct fetch to bypass the global 401 handler in request.ts
     // which would clearAuthToken() and redirect to /login on any 401
