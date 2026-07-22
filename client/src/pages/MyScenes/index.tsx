@@ -55,7 +55,7 @@ export default function MyScenes() {
       
       // 并行加载系统场景和用户场景
       const [scenesData, userScenesData] = await Promise.all([
-        api.get('/api/scenes/workbench/menu'),
+        api.get('/api/scenes'),
         api.get('/api/user-scenes/my-scenes').catch(() => ({
           enabled_scenes: [],
           custom_scenes: [],
@@ -64,14 +64,7 @@ export default function MyScenes() {
       ]);
       
       // 提取所有场景
-      const scenes: Scene[] = [];
-      if (scenesData && (scenesData as any).sections) {
-        (scenesData as any).sections.forEach((section: any) => {
-          if (section.scenes) {
-            scenes.push(...section.scenes);
-          }
-        });
-      }
+      const scenes: Scene[] = (scenesData as any)?.scenes || [];
       
       setAllScenes(scenes);
       setUserScenes((userScenesData as UserScenesData) || {
