@@ -1229,8 +1229,11 @@ export default function ChatPage() {
               role: lastMsg.role,
               type: lastMsg.type,
               content: rewrittenContent,
-              session: lastMsg.session,
-              // 注意：不复制 cards 等只读属性
+              // 深拷贝 session 对象，避免引用只读属性（如 cards）
+              session: lastMsg.session ? {
+                ...lastMsg.session,
+                // 不复制只读属性
+              } : lastMsg.session,
             },
           ]
         : lastInput;
