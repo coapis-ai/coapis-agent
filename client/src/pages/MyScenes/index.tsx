@@ -55,7 +55,7 @@ export default function MyScenes() {
       
       // 并行加载系统场景和用户场景
       const [scenesData, userScenesData] = await Promise.all([
-        api.get('/api/scenes/workbench'),
+        api.get('/api/scenes/workbench/menu'),
         api.get('/api/user-scenes/my-scenes').catch(() => ({
           enabled_scenes: [],
           custom_scenes: [],
