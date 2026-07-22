@@ -971,9 +971,6 @@ class AgentRunner(Runner):
             
             # ⭐ 将场景身份注入到 agent_config
             if scene_id and scene_prompt:
-
-            # ⭐ 将场景身份注入到 agent_config
-            if scene_id and scene_prompt:
                 # 1. 场景系统提示词作为"最重要的要求"前置
                 if hasattr(agent_config, "scene_system_prompt"):
                     agent_config.scene_system_prompt = scene_prompt
