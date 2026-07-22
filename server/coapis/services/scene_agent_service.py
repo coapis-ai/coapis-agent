@@ -666,6 +666,7 @@ class SceneAgentService:
                     "icon": s.icon,
                     "short_description": s.short_description,
                     "usage_count": s.usage_count,
+                    "tag_ids": s.tag_ids or [],  # 添加交叉标签
                 }
                 for s in active_scenes
             ]
