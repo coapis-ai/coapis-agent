@@ -1,0 +1,555 @@
+{
+  "version": "1.0",
+  "description": "办公类场景完整数据",
+  "created_at": "2026-07-22",
+  "author": "蜜总裁 🐝💼",
+  
+  "categories": [
+    {
+      "id": "oa-office",
+      "name": "OA办公",
+      "icon": "🏢",
+      "description": "日常办公协作：邮件、日程、会议等",
+      "scene_count": 8
+    },
+    {
+      "id": "document-processing",
+      "name": "文档处理",
+      "icon": "📄",
+      "description": "公文起草、文档编辑、格式规范等",
+      "scene_count": 8
+    },
+    {
+      "id": "report-compilation",
+      "name": "报告编制",
+      "icon": "📊",
+      "description": "工作报告、调研报告、项目报告等",
+      "scene_count": 5
+    },
+    {
+      "id": "approval-process",
+      "name": "审批流程",
+      "icon": "✅",
+      "description": "费用审批、项目审批、合同审批等",
+      "scene_count": 8
+    },
+    {
+      "id": "knowledge-management",
+      "name": "知识管理",
+      "icon": "📚",
+      "description": "FAQ生成、知识库管理、培训资料等",
+      "scene_count": 4
+    },
+    {
+      "id": "data-analysis",
+      "name": "数据分析",
+      "icon": "📈",
+      "description": "数据统计、报表生成、KPI监控等",
+      "scene_count": 4
+    },
+    {
+      "id": "project-management",
+      "name": "项目管理",
+      "icon": "📋",
+      "description": "项目立项、进度跟踪、风险管理等",
+      "scene_count": 4
+    },
+    {
+      "id": "hr-management",
+      "name": "人力资源",
+      "icon": "👥",
+      "description": "考勤记录、职位发布、培训计划等",
+      "scene_count": 4
+    },
+    {
+      "id": "financial-management",
+      "name": "财务管理",
+      "icon": "💰",
+      "description": "预算执行、发票管理、税务申报等",
+      "scene_count": 3
+    }
+  ],
+  
+  "scenes": [
+    {
+      "id": "email-composing",
+      "name": "邮件撰写",
+      "category": "oa-office",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "商务邮件撰写辅助，支持模板、语气调整、格式优化",
+      "skills": ["email-template", "tone-adjustment"],
+      "welcome_message": "您好！我可以帮您：\n• 撰写商务邮件\n• 调整邮件语气\n• 优化邮件格式\n\n请告诉我邮件的主题和主要内容。"
+    },
+    {
+      "id": "schedule-planning",
+      "name": "日程安排",
+      "category": "oa-office",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "工作日程规划，日历管理、冲突检测、提醒设置",
+      "skills": ["calendar-management", "reminder"],
+      "welcome_message": "您好！我可以帮您：\n• 安排工作日程\n• 设置会议提醒\n• 检测时间冲突\n\n请告诉我您的日程安排需求。"
+    },
+    {
+      "id": "task-management",
+      "name": "任务管理",
+      "category": "oa-office",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "任务分解、进度跟踪、协作分配",
+      "skills": ["task-breakdown", "progress-tracking"],
+      "welcome_message": "您好！我可以帮您：\n• 分解复杂任务\n• 跟踪任务进度\n• 协调团队协作\n\n请告诉我您的任务需求。"
+    },
+    {
+      "id": "reminder-service",
+      "name": "提醒服务",
+      "category": "oa-office",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "定时提醒、重复提醒、重要事项提醒",
+      "skills": ["reminder", "notification"],
+      "welcome_message": "您好！我可以帮您：\n• 设置定时提醒\n• 创建重复提醒\n• 管理重要事项\n\n请告诉我您需要提醒的事项。"
+    },
+    {
+      "id": "meeting-organization",
+      "name": "会议安排",
+      "category": "oa-office",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "会议通知、参会提醒、会议室预约",
+      "skills": ["meeting-scheduling", "notification"],
+      "welcome_message": "您好！我可以帮您：\n• 发送会议通知\n• 协调参会时间\n• 预约会议室\n\n请告诉我会议的类型和参会人员。"
+    },
+    {
+      "id": "meeting-minutes",
+      "name": "会议纪要",
+      "category": "oa-office",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "录音转写、纪要生成、待办提取",
+      "skills": ["audio-transcription", "docx", "summary-generation"],
+      "welcome_message": "您好！我可以帮您：\n• 转写会议录音\n• 生成会议纪要\n• 提取待办事项\n\n请上传会议录音或告诉我会议内容。"
+    },
+    {
+      "id": "meeting-follow-up",
+      "name": "会议跟进",
+      "category": "oa-office",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "待办跟踪、决议落实、进度同步",
+      "skills": ["task-tracking", "progress-report"],
+      "welcome_message": "您好！我可以帮您：\n• 跟踪待办事项\n• 督促决议落实\n• 同步执行进度\n\n请告诉我需要跟进的会议决议。"
+    },
+    {
+      "id": "meeting-summary",
+      "name": "会议总结",
+      "category": "oa-office",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "会议要点提炼、决议跟踪、效果评估",
+      "skills": ["summary-generation", "action-item-extraction"],
+      "welcome_message": "您好！我可以帮您：\n• 提炼会议要点\n• 跟踪会议决议\n• 评估会议效果\n\n请告诉我会议的主题和内容。"
+    },
+    {
+      "id": "document-drafting",
+      "name": "公文起草",
+      "category": "document-processing",
+      "frequency": "high",
+      "organization_type": ["government"],
+      "description": "公文写作辅助，模板库、格式规范、内容生成",
+      "skills": ["docx", "document-templates", "format-standardization"],
+      "welcome_message": "您好！我可以帮您：\n• 起草各类公文\n• 应用公文模板\n• 规范公文格式\n\n请告诉我公文的类型和主要内容。"
+    },
+    {
+      "id": "business-document",
+      "name": "商务文档",
+      "category": "document-processing",
+      "frequency": "high",
+      "organization_type": ["enterprise"],
+      "description": "商务模板、合同起草、方案编写",
+      "skills": ["docx", "contract-template", "proposal-generation"],
+      "welcome_message": "您好！我可以帮您：\n• 起草商务合同\n• 编写商业方案\n• 生成商务文档\n\n请告诉我文档的类型和主要内容。"
+    },
+    {
+      "id": "document-editing",
+      "name": "文档编辑",
+      "category": "document-processing",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "格式调整、内容优化、语法纠错",
+      "skills": ["docx", "grammar-check", "format-adjustment"],
+      "welcome_message": "您好！我可以帮您：\n• 调整文档格式\n• 优化文档内容\n• 修正语法错误\n\n请上传需要编辑的文档。"
+    },
+    {
+      "id": "document-review",
+      "name": "文档审核",
+      "category": "document-processing",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "格式检查、合规审查、修改建议",
+      "skills": ["format-check", "compliance-review"],
+      "welcome_message": "您好！我可以帮您：\n• 检查文档格式\n• 审查合规性\n• 提供修改建议\n\n请上传需要审核的文档。"
+    },
+    {
+      "id": "document-format",
+      "name": "格式规范",
+      "category": "document-processing",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "格式检查、标准化、排版优化",
+      "skills": ["format-standardization", "docx"],
+      "welcome_message": "您好！我可以帮您：\n• 检查文档格式\n• 统一排版风格\n• 优化文档样式\n\n请上传需要格式化的文档。"
+    },
+    {
+      "id": "document-archive",
+      "name": "文档归档",
+      "category": "document-processing",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "自动分类、元数据提取、检索优化",
+      "skills": ["document-classification", "metadata-extraction"],
+      "welcome_message": "您好！我可以帮您：\n• 自动分类文档\n• 提取文档元数据\n• 优化检索关键词\n\n请上传需要归档的文档。"
+    },
+    {
+      "id": "contact-management",
+      "name": "联系人管理",
+      "category": "document-processing",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "联系人整理、分组管理、快速查询",
+      "skills": ["contact-organization", "group-management"],
+      "welcome_message": "您好！我可以帮您：\n• 整理联系人信息\n• 创建联系人分组\n• 快速查询联系人\n\n请告诉我您的联系人管理需求。"
+    },
+    {
+      "id": "org-chart",
+      "name": "组织架构",
+      "category": "document-processing",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "组织架构图、人员信息、汇报关系",
+      "skills": ["org-chart-generation", "personnel-info"],
+      "welcome_message": "您好！我可以帮您：\n• 生成组织架构图\n• 查询人员信息\n• 明确汇报关系\n\n请告诉我组织架构的需求。"
+    },
+    {
+      "id": "work-report",
+      "name": "工作报告",
+      "category": "report-compilation",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "结构化写作、数据整合、模板库",
+      "skills": ["docx", "report-template", "data-integration"],
+      "welcome_message": "您好！我可以帮您：\n• 撰写工作报告\n• 整合工作数据\n• 应用报告模板\n\n请告诉我报告的类型和主要内容。"
+    },
+    {
+      "id": "research-report",
+      "name": "调研报告",
+      "category": "report-compilation",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education"],
+      "description": "调查研究、数据分析、结论提炼",
+      "skills": ["survey-analysis", "data-analysis", "conclusion-generation"],
+      "welcome_message": "您好！我可以帮您：\n• 设计调研方案\n• 分析调研数据\n• 提炼调研结论\n\n请告诉我调研的主题和范围。"
+    },
+    {
+      "id": "annual-report",
+      "name": "年度报告",
+      "category": "report-compilation",
+      "frequency": "low",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "数据统计、成绩总结、规划展望",
+      "skills": ["data-statistics", "summary-generation", "planning"],
+      "welcome_message": "您好！我可以帮您：\n• 统计年度数据\n• 总结年度成绩\n• 制定年度规划\n\n请告诉我年度报告的主要内容。"
+    },
+    {
+      "id": "project-report",
+      "name": "项目报告",
+      "category": "report-compilation",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "进度跟踪、风险预警、成果总结",
+      "skills": ["progress-tracking", "risk-assessment", "achievement-summary"],
+      "welcome_message": "您好！我可以帮您：\n• 跟踪项目进度\n• 预警项目风险\n• 总结项目成果\n\n请告诉我项目的名称和进展情况。"
+    },
+    {
+      "id": "performance-report",
+      "name": "绩效报告",
+      "category": "report-compilation",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "业绩统计、考核总结、改进建议",
+      "skills": ["performance-statistics", "improvement-suggestion"],
+      "welcome_message": "您好！我可以帮您：\n• 统计业绩数据\n• 总结考核结果\n• 提出改进建议\n\n请告诉我绩效报告的主要内容。"
+    },
+    {
+      "id": "expense-approval",
+      "name": "费用审批",
+      "category": "approval-process",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "票据识别、合规检查、预算审核",
+      "skills": ["ocr", "compliance-check", "budget-review"],
+      "welcome_message": "您好！我可以帮您：\n• 识别票据信息\n• 检查费用合规性\n• 审核预算执行\n\n请上传费用票据或告诉我费用详情。"
+    },
+    {
+      "id": "reimbursement-approval",
+      "name": "报销审批",
+      "category": "approval-process",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "票据识别、预算审核、财务核算",
+      "skills": ["ocr", "budget-review", "financial-accounting"],
+      "welcome_message": "您好！我可以帮您：\n• 识别报销票据\n• 审核报销预算\n• 进行财务核算\n\n请上传报销票据或告诉我报销详情。"
+    },
+    {
+      "id": "leave-approval",
+      "name": "请假审批",
+      "category": "approval-process",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "政策查询、流程指引、假期统计",
+      "skills": ["policy-query", "workflow-guidance"],
+      "welcome_message": "您好！我可以帮您：\n• 查询请假政策\n• 指引请假流程\n• 统计假期余额\n\n请告诉我您的请假类型和时长。"
+    },
+    {
+      "id": "travel-approval",
+      "name": "出差审批",
+      "category": "approval-process",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "出差申请、行程安排、费用预算",
+      "skills": ["travel-arrangement", "budget-planning"],
+      "welcome_message": "您好！我可以帮您：\n• 办理出差申请\n• 安排出差行程\n• 编制费用预算\n\n请告诉我出差的目的地和时间。"
+    },
+    {
+      "id": "project-approval",
+      "name": "项目审批",
+      "category": "approval-process",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise"],
+      "description": "要件审查、流程指引、风险评估",
+      "skills": ["document-review", "risk-assessment"],
+      "welcome_message": "您好！我可以帮您：\n• 审查项目要件\n• 指引审批流程\n• 评估项目风险\n\n请告诉我项目的名称和主要内容。"
+    },
+    {
+      "id": "contract-approval",
+      "name": "合同审批",
+      "category": "approval-process",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise"],
+      "description": "条款审查、风险提示、合规检查",
+      "skills": ["contract-review", "risk-warning", "compliance-check"],
+      "welcome_message": "您好！我可以帮您：\n• 审查合同条款\n• 提示合同风险\n• 检查合规性\n\n请上传合同文件或告诉我合同的主要内容。"
+    },
+    {
+      "id": "procurement-approval",
+      "name": "采购审批",
+      "category": "approval-process",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare"],
+      "description": "采购申请、预算审核、流程指引",
+      "skills": ["procurement-request", "budget-review"],
+      "welcome_message": "您好！我可以帮您：\n• 办理采购申请\n• 审核采购预算\n• 指引审批流程\n\n请告诉我采购物品和预算金额。"
+    },
+    {
+      "id": "seal-application",
+      "name": "用印申请",
+      "category": "approval-process",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "用印申请、印章管理、审批流程",
+      "skills": ["seal-management", "workflow"],
+      "welcome_message": "您好！我可以帮您：\n• 办理用印申请\n• 管理印章使用\n• 跟踪审批流程\n\n请告诉我用印的类型和事由。"
+    },
+    {
+      "id": "faq-generation",
+      "name": "FAQ生成",
+      "category": "knowledge-management",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "问题识别、答案生成、知识沉淀",
+      "skills": ["question-identification", "answer-generation"],
+      "welcome_message": "您好！我可以帮您：\n• 识别常见问题\n• 生成标准答案\n• 沉淀知识库\n\n请告诉我您的业务领域和常见问题。"
+    },
+    {
+      "id": "knowledge-base-management",
+      "name": "知识库管理",
+      "category": "knowledge-management",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "知识整理、检索优化、知识分享",
+      "skills": ["knowledge-organization", "search-optimization"],
+      "welcome_message": "您好！我可以帮您：\n• 整理知识内容\n• 优化检索效率\n• 促进知识分享\n\n请告诉我知识库的主题和内容。"
+    },
+    {
+      "id": "training-materials",
+      "name": "培训资料",
+      "category": "knowledge-management",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "课件制作、学习资料、考试题库",
+      "skills": ["courseware-generation", "learning-materials"],
+      "welcome_message": "您好！我可以帮您：\n• 制作培训课件\n• 整理学习资料\n• 生成考试题库\n\n请告诉我培训的主题和目标。"
+    },
+    {
+      "id": "document-archiving",
+      "name": "文档归档",
+      "category": "knowledge-management",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "自动分类、元数据提取、检索优化",
+      "skills": ["document-classification", "metadata-extraction"],
+      "welcome_message": "您好！我可以帮您：\n• 自动分类文档\n• 提取元数据\n• 优化检索\n\n请上传需要归档的文档。"
+    },
+    {
+      "id": "data-statistics",
+      "name": "数据统计",
+      "category": "data-analysis",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "数据采集、数据清洗、数据汇总",
+      "skills": ["data-collection", "data-cleaning", "data-summarization"],
+      "welcome_message": "您好！我可以帮您：\n• 采集数据\n• 清洗数据\n• 汇总统计\n\n请告诉我数据统计的需求。"
+    },
+    {
+      "id": "report-generation",
+      "name": "报表生成",
+      "category": "data-analysis",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "自动化报表、定制报表、报表模板",
+      "skills": ["report-automation", "report-template"],
+      "welcome_message": "您好！我可以帮您：\n• 自动生成报表\n• 定制报表格式\n• 应用报表模板\n\n请告诉我报表的类型和内容。"
+    },
+    {
+      "id": "trend-analysis",
+      "name": "趋势分析",
+      "category": "data-analysis",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "趋势预测、异常监测、关联分析",
+      "skills": ["trend-prediction", "anomaly-detection"],
+      "welcome_message": "您好！我可以帮您：\n• 预测发展趋势\n• 监测异常情况\n• 分析关联关系\n\n请告诉我分析的数据和目标。"
+    },
+    {
+      "id": "kpi-monitoring",
+      "name": "KPI监控",
+      "category": "data-analysis",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "指标定义、实时监控、达成分析",
+      "skills": ["kpi-definition", "real-time-monitoring"],
+      "welcome_message": "您好！我可以帮您：\n• 定义KPI指标\n• 实时监控指标\n• 分析达成情况\n\n请告诉我需要监控的KPI指标。"
+    },
+    {
+      "id": "project-initiation",
+      "name": "项目立项",
+      "category": "project-management",
+      "frequency": "low",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "可行性分析、项目申报、资源评估",
+      "skills": ["feasibility-analysis", "project-application"],
+      "welcome_message": "您好！我可以帮您：\n• 分析项目可行性\n• 准备申报材料\n• 评估资源需求\n\n请告诉我项目的名称和主要内容。"
+    },
+    {
+      "id": "progress-tracking",
+      "name": "进度跟踪",
+      "category": "project-management",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "任务分解、进度监控、延期预警",
+      "skills": ["task-breakdown", "progress-monitoring", "delay-warning"],
+      "welcome_message": "您好！我可以帮您：\n• 分解项目任务\n• 监控项目进度\n• 预警延期风险\n\n请告诉我项目的名称和当前进展。"
+    },
+    {
+      "id": "risk-management",
+      "name": "风险管理",
+      "category": "project-management",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "风险识别、风险评估、应对策略",
+      "skills": ["risk-identification", "risk-assessment"],
+      "welcome_message": "您好！我可以帮您：\n• 识别项目风险\n• 评估风险等级\n• 制定应对策略\n\n请告诉我项目的名称和主要风险。"
+    },
+    {
+      "id": "project-reporting",
+      "name": "项目报告",
+      "category": "project-management",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "进度报告、阶段总结、结项报告",
+      "skills": ["progress-report", "stage-summary"],
+      "welcome_message": "您好！我可以帮您：\n• 撰写进度报告\n• 总结阶段成果\n• 编制结项报告\n\n请告诉我项目的名称和报告类型。"
+    },
+    {
+      "id": "attendance-record",
+      "name": "考勤记录",
+      "category": "hr-management",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "打卡记录、出勤统计、异常处理",
+      "skills": ["attendance-tracking", "exception-handling"],
+      "welcome_message": "您好！我可以帮您：\n• 记录打卡信息\n• 统计出勤数据\n• 处理异常情况\n\n请告诉我考勤管理的需求。"
+    },
+    {
+      "id": "job-posting",
+      "name": "职位发布",
+      "category": "hr-management",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "职位描述、招聘渠道、简历收集",
+      "skills": ["job-description-generation", "recruitment-channel"],
+      "welcome_message": "您好！我可以帮您：\n• 生成职位描述\n• 选择招聘渠道\n• 收集简历信息\n\n请告诉我招聘的职位和要求。"
+    },
+    {
+      "id": "training-planning",
+      "name": "培训计划",
+      "category": "hr-management",
+      "frequency": "low",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "培训需求、课程安排、预算编制",
+      "skills": ["training-needs-analysis", "course-scheduling"],
+      "welcome_message": "您好！我可以帮您：\n• 分析培训需求\n• 安排培训课程\n• 编制培训预算\n\n请告诉我培训的对象和目标。"
+    },
+    {
+      "id": "performance-goal",
+      "name": "目标管理",
+      "category": "hr-management",
+      "frequency": "medium",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "目标设定、目标分解、进度跟踪",
+      "skills": ["goal-setting", "goal-breakdown", "progress-tracking"],
+      "welcome_message": "您好！我可以帮您：\n• 设定绩效目标\n• 分解目标任务\n• 跟踪目标进度\n\n请告诉我绩效管理需求。"
+    },
+    {
+      "id": "budget-execution",
+      "name": "预算执行",
+      "category": "financial-management",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "预算控制、执行监控、预警提醒",
+      "skills": ["budget-control", "execution-monitoring"],
+      "welcome_message": "您好！我可以帮您：\n• 控制预算支出\n• 监控预算执行\n• 预警超支风险\n\n请告诉我预算管理的需求。"
+    },
+    {
+      "id": "invoice-management",
+      "name": "发票管理",
+      "category": "financial-management",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "发票开具、发票查验、进项抵扣",
+      "skills": ["invoice-generation", "invoice-verification"],
+      "welcome_message": "您好！我可以帮您：\n• 开具发票\n• 查验发票真伪\n• 管理进项抵扣\n\n请告诉我发票管理的需求。"
+    },
+    {
+      "id": "tax-declaration",
+      "name": "税务申报",
+      "category": "financial-management",
+      "frequency": "high",
+      "organization_type": ["government", "enterprise", "education", "healthcare", "finance"],
+      "description": "申报表生成、在线申报、缴款通知",
+      "skills": ["tax-form-generation", "online-declaration"],
+      "welcome_message": "您好！我可以帮您：\n• 生成申报表\n• 在线申报税务\n• 发送缴款通知\n\n请告诉我税务申报的类型和周期。"
+    }
+  ]
+}
