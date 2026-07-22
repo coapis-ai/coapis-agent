@@ -235,12 +235,12 @@ async def enter_scene(
         logger.info(f"[enter_scene] Using ChatManager for user {user_id}")
         
         # ⭐ 查找已有会话
-        existing_chat = await repo.get_chat(chat_id)
+        existing_chat = await chat_manager.get_chat(chat_id)
         
         # ⭐ 处理 force_new：删除旧的聊天记录
         if force_new and existing_chat:
             logger.info(f"Force new session for scene {scene_id}, deleting old chat {chat_id}")
-            await repo.delete_chats([chat_id])
+            await chat_manager.delete_chats([chat_id])
             existing_chat = None
         
         # ⭐ 如果已存在，返回已有的会话
