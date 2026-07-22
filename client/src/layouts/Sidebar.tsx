@@ -133,12 +133,17 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     if (!permissionsLoaded) return true; // Allow while loading (prevent flicker)
     if (allowedModules.includes("all")) return true; // Admin
     
-    // First check direct match
-    if (allowedModules.includes(menuKey)) return true;
-    
-    // Then check mapping (menu key -> permission module key)
+    // ⭐ 新菜单项（workbench, my-scenes, settings）不在 MENU_TO_PERMISSION_KEY 映射中
+    // 如果菜单项不在映射中，默认允许（因为用户说"菜单不涉及权限，对所有用户开放"）
     const permKey = MENU_TO_PERMISSION_KEY[menuKey];
-    if (permKey && allowedModules.includes(permKey)) return true;
+    if (!permKey) {
+      // 不在权限映射中，默认允许
+      return true;
+    }
+    
+    // 在权限映射中，检查权限
+    if (allowedModules.includes(menuKey)) return true;
+    if (allowedModules.includes(permKey)) return true;
     
     return false;
   };
