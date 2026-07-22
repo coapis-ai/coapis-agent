@@ -1,6 +1,7 @@
-import { Card, Row, Col, Typography } from 'antd';
+import { Card, Row, Col, Typography, Spin } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useState, useEffect } from 'react';
 import {
   RobotOutlined,
   ApiOutlined,
@@ -17,14 +18,16 @@ import {
   SaveOutlined,
   PlayCircleOutlined,
   TagOutlined,
-  BugOutlined,
   RocketOutlined,
-  CrownOutlined,
   UserOutlined,
   SafetyOutlined,
   FileTextOutlined,
   AreaChartOutlined,
+  BugOutlined,
 } from '@ant-design/icons';
+import { permissionsApi } from '../../api/modules/permissions';
+import { useUser } from '../../contexts/UserContext';
+import { MENU_TO_PERMISSION_MODULE } from '../../config/permissionMapping';
 import styles from './index.module.css';
 
 const { Title, Text } = Typography;
@@ -32,10 +35,60 @@ const { Title, Text } = Typography;
 /**
  * 设置页面
  * 整合所有管理功能，分为两组：用户管理、系统管理
+ * 
+ * 权限控制：
+ * - 每个功能模块对应一个权限模块
+ * - 只有用户有权限的模块才显示
+ * - admin 角色拥有所有权限
  */
 export default function Settings() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { user } = useUser();
+  
+  // 权限状态
+  const [allowedModules, setAllowedModules] = useState<string[]>([]);
+  const [permissionsLoaded, setPermissionsLoaded] = useState(false);
+
+  // 加载权限
+  useEffect(() => {
+    if (!user) {
+      setPermissionsLoaded(true);
+      return;
+    }
+    
+    permissionsApi.getAllowedModules()
+      .then((res) => {
+        setAllowedModules(res.modules || []);
+        setPermissionsLoaded(true);
+      })
+      .catch(() => {
+        // Fallback: 如果权限API失败，允许所有模块
+        setAllowedModules(['all']);
+        setPermissionsLoaded(true);
+      });
+  }, [user]);
+
+  // 检查模块权限
+  const isModuleAllowed = (menuKey: string): boolean => {
+    if (!permissionsLoaded) return true; // 加载中显示
+    if (allowedModules.includes('all')) return true; // admin 角色
+    
+    // 获取对应的权限模块
+    const permModule = MENU_TO_PERMISSION_MODULE[menuKey];
+    if (!permModule) {
+      // 不在权限映射中，默认允许（如设置页面本身）
+      return true;
+    }
+    
+    // 检查权限
+    return allowedModules.includes(permModule);
+  };
+
+  // 过滤功能模块
+  const filterFeatures = (features: any[]) => {
+    return features.filter(feature => isModuleAllowed(feature.key));
+  };
 
   // 用户管理（用户级功能）
   const userFeatures = [
@@ -114,49 +167,49 @@ export default function Settings() {
   // 系统管理（系统级功能）
   const adminFeatures = [
     {
-      key: 'admin-overview',
+      key: 'overview',
       title: '概览',
       description: '系统概览和统计数据',
       icon: <AreaChartOutlined />,
       path: '/admin/overview',
     },
     {
-      key: 'admin-users',
+      key: 'users',
       title: '用户管理',
       description: '系统用户管理',
       icon: <UserOutlined />,
       path: '/admin/users',
     },
     {
-      key: 'admin-permissions',
+      key: 'permissions',
       title: '权限管理',
       description: '角色和权限配置',
       icon: <SafetyOutlined />,
       path: '/admin/permissions',
     },
     {
-      key: 'admin-audit',
+      key: 'audit',
       title: '审计日志',
       description: '系统操作审计日志',
       icon: <FileTextOutlined />,
       path: '/admin/audit',
     },
     {
-      key: 'admin-config',
+      key: 'config',
       title: '系统配置',
       description: '系统配置和配额管理',
       icon: <SettingOutlined />,
       path: '/admin/config',
     },
     {
-      key: 'scene-management',
+      key: 'scenes',
       title: '场景管理',
       description: '管理系统场景',
       icon: <PlayCircleOutlined />,
       path: '/admin/scenes',
     },
     {
-      key: 'tag-management',
+      key: 'tags',
       title: '标签管理',
       description: '管理系统标签',
       icon: <TagOutlined />,
@@ -199,58 +252,94 @@ export default function Settings() {
     },
     {
       key: 'debug',
-      title: t('nav.debug', 'Debug'),
+      title: t('nav.debug', '调试'),
       description: '调试工具和日志',
       icon: <BugOutlined />,
       path: '/debug',
     },
   ];
 
-  const renderFeatureCard = (feature: any) => (
-    <Col key={feature.key} style={{ marginBottom: 16 }}>
-      <Card
-        className={styles.featureCard}
-        hoverable
-        onClick={() => navigate(feature.path, { state: { from: '/settings' } })}
-        style={{ textAlign: 'center', width: 90, height: 90 }}
-        bodyStyle={{ padding: '12px 8px' }}
-      >
-        <div className={styles.iconWrapper}>
-          {feature.icon}
-        </div>
-        <Title level={5} className={styles.cardTitle}>{feature.title}</Title>
-      </Card>
-    </Col>
-  );
+  // 过滤后的功能模块
+  const filteredUserFeatures = filterFeatures(userFeatures);
+  const filteredAdminFeatures = filterFeatures(adminFeatures);
+
+  // 点击卡片导航
+  const handleCardClick = (path: string) => {
+    navigate(path, { state: { from: '/settings' } });
+  };
+
+  // 加载中显示
+  if (!permissionsLoaded) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+        <Spin tip="加载中..." />
+      </div>
+    );
+  }
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <Title level={2}>设置</Title>
-        <Text type="secondary">管理您的智能体、工具和系统配置</Text>
-      </div>
-
-      {/* 用户设置 */}
-      <div className={styles.section}>
-        <Title level={4}>
-          <TeamOutlined style={{ marginRight: 8 }} />
-          用户设置
-        </Title>
-        <Row gutter={[16, 16]}>
-          {userFeatures.map(renderFeatureCard)}
-        </Row>
-      </div>
+    <div className={styles.settingsPage}>
+      {/* 用户管理 */}
+      {filteredUserFeatures.length > 0 && (
+        <div className={styles.section}>
+          <Title level={4} className={styles.sectionTitle}>用户管理</Title>
+          <Text type="secondary" className={styles.sectionDesc}>
+            管理您的个人资源和配置
+          </Text>
+          <Row gutter={[16, 16]} className={styles.cardGrid}>
+            {filteredUserFeatures.map((feature) => (
+              <Col key={feature.key}>
+                <Card
+                  className={styles.featureCard}
+                  hoverable
+                  onClick={() => handleCardClick(feature.path)}
+                >
+                  <div className={styles.cardContent}>
+                    <div className={styles.iconWrapper}>
+                      {feature.icon}
+                    </div>
+                    <div className={styles.textWrapper}>
+                      <Text strong className={styles.cardTitle}>{feature.title}</Text>
+                      <Text type="secondary" className={styles.cardDesc}>{feature.description}</Text>
+                    </div>
+                  </div>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+        </div>
+      )}
 
       {/* 系统管理 */}
-      <div className={styles.section}>
-        <Title level={4}>
-          <CrownOutlined style={{ marginRight: 8 }} />
-          系统管理
-        </Title>
-        <Row gutter={[16, 16]}>
-          {adminFeatures.map(renderFeatureCard)}
-        </Row>
-      </div>
+      {filteredAdminFeatures.length > 0 && (
+        <div className={styles.section}>
+          <Title level={4} className={styles.sectionTitle}>系统管理</Title>
+          <Text type="secondary" className={styles.sectionDesc}>
+            系统级管理和配置（需要管理员权限）
+          </Text>
+          <Row gutter={[16, 16]} className={styles.cardGrid}>
+            {filteredAdminFeatures.map((feature) => (
+              <Col key={feature.key}>
+                <Card
+                  className={styles.featureCard}
+                  hoverable
+                  onClick={() => handleCardClick(feature.path)}
+                >
+                  <div className={styles.cardContent}>
+                    <div className={styles.iconWrapper}>
+                      {feature.icon}
+                    </div>
+                    <div className={styles.textWrapper}>
+                      <Text strong className={styles.cardTitle}>{feature.title}</Text>
+                      <Text type="secondary" className={styles.cardDesc}>{feature.description}</Text>
+                    </div>
+                  </div>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+        </div>
+      )}
     </div>
   );
 }

@@ -29,9 +29,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { KEY_TO_PATH } from "./constants";
 // import { DEFAULT_OPEN_KEYS } from "./constants";  // unused — 2026-07-21
 import { getAgentDisplayName, isDefaultAgent } from "../utils/agentDisplayName";
-import {
-  MENU_TO_PERMISSION,
-} from "../config/menuModules";
+import { MENU_TO_PERMISSION_MODULE } from "../config/permissionMapping";
 import { MAIN_MENU_ITEMS } from "../config/menuConfig";
 
 // ── Layout ────────────────────────────────────────────────────────────────
@@ -120,10 +118,10 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
    */
   /**
    * Reverse map: sidebar menu key -> permission module key.
-   * Uses unified config from menuModules.ts as single source of truth.
+   * Uses unified permission mapping.
    */
   const MENU_TO_PERMISSION_KEY: Record<string, string> = {
-    ...MENU_TO_PERMISSION,
+    ...MENU_TO_PERMISSION_MODULE,
     // collapsedNavItems uses "workspace" key for myspace module
     workspace: "myspace",
   };
