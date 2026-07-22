@@ -169,19 +169,49 @@ async def sso_login_get(
     # 5. 构建响应（设置 cookie 或返回 HTML）
     from fastapi.responses import HTMLResponse
     
+    # 清除所有旧的 localStorage 数据
+    clear_script = """
+        // 清除旧的登录状态
+        localStorage.removeItem('coapis_auth_token');
+        localStorage.removeItem('coapis_token');
+        localStorage.removeItem('coapis_username');
+        localStorage.removeItem('coapis-current-username');
+        localStorage.removeItem('selected_agent');
+        localStorage.removeItem('coapis_first_login');
+        
+        // 清除所有 session 相关数据
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('chat_') || key.startsWith('session_') || key.startsWith('agent_')) {
+                localStorage.removeItem(key);
+            }
+        });
+    """
+    
     html = f"""
     <!DOCTYPE html>
     <html>
     <head><title>SSO Login</title></head>
     <body>
     <script>
-        // 存储 token 到 localStorage
-        localStorage.setItem('coapis_token', '{coapis_token}');
-        localStorage.setItem('coapis_username', '{username}');
-        // 跳转到目标页面
-        window.location.href = '{redirect or "/"}';
+        // 1. 清除旧的登录状态
+        {clear_script}
+        
+        // 2. 设置新的登录状态（使用正确的 key）
+        localStorage.setItem('coapis_auth_token', '{coapis_token}');
+        localStorage.setItem('coapis-current-username', '{username}');
+        
+        // 3. 设置全局变量
+        window.currentUserId = '{username}';
+        window.currentChannel = '';
+        
+        // 4. 强制刷新并跳转（使用 replace 避免回退）
+        if ('{redirect}' && '{redirect}' !== '/') {{
+            window.location.replace('{redirect}');
+        }} else {{
+            window.location.replace('/chat');
+        }}
     </script>
-    <p>登录中...</p>
+    <p>登录中，请稍候...</p>
     </body>
     </html>
     """
