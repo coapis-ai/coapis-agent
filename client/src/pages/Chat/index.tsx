@@ -1232,8 +1232,8 @@ export default function ChatPage() {
               role: lastMsg.role,
               type: lastMsg.type,
               content: rewrittenContent,
-              session: lastMsg.session,
-              // ✅ 只复制需要的属性，不复制 cards
+              // ⭐ session 也可能是 frozen 对象，创建新对象避免引用
+              ...(lastMsg.session ? { session: { ...lastMsg.session } } : {}),
             },
           ]
         : lastInput;
