@@ -509,6 +509,8 @@ PUBLIC_PATHS: frozenset = frozenset({
     "/api/plugins",
     # SSE streaming endpoints — BaseHTTPMiddleware deadlocks with async generators
     "/api/console/chat",
+    # Scene list (read-only, for workbench)
+    "/api/scenes",
 })
 
 # Public prefixes (static assets + frontend)
@@ -521,10 +523,10 @@ PUBLIC_PREFIXES: tuple = (
     "/logo.png",
     "/coapis-symbol.svg",
     # Workbench public APIs (no auth required)
-    "/api/scenes/workbench",
-    "/api/scenes",  # Scene list for workbench (read-only)
-    "/api/admin/tags",  # Tag list for workbench (read-only)
+    "/api/scenes/workbench",  # Scene list for workbench (read-only)
     "/api/scenes/categories/grouped",  # Categories for workbench
+    # ⚠️ 注意：/api/scenes/{scene_id}/enter 需要认证，不能放在 PUBLIC_PREFIXES
+    "/api/admin/tags",  # Tag list for workbench (read-only)
     # Model management APIs (read-only, for default model selector)
     "/api/models/by-type",  # Get models by type
     "/api/models/default-models",  # Get/set default models
