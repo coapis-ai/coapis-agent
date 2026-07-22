@@ -1589,10 +1589,16 @@ export default function ChatPage() {
               setTimeout(() => { resetLoading(); }, 500);
             }
 
+            // ⭐ 深拷贝 output，解除 React state 的冻结
+            // AgentScope 库会尝试修改消息对象的 cards 属性
+            // 但 React state 中的对象是 frozen 的，直接修改会报 TypeError
+            // 解决方案：使用 JSON 序列化/反序列化创建全新的对象
+            const thawedOutput = JSON.parse(JSON.stringify(builderOutput));
+            
             return {
               object: "response",
               status: payload.status || "completed",
-              output: builderOutput,
+              output: thawedOutput,
             } as any;
           }
 
