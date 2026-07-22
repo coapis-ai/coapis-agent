@@ -969,6 +969,13 @@ class AgentRunner(Runner):
                 except Exception as e:
                     logger.warning(f"[Scene] Failed to load scene config from file: {e}")
             
+            # ⭐ 自动生成场景系统提示词（如果配置中没有）
+            if scene_id and not scene_prompt and scene_name:
+                # 从场景描述生成提示词
+                scene_description = scene_data.get("description", "") or scene_data.get("capabilities", {}).get("description", "")
+                scene_prompt = f"你是{scene_name}专家助手。{scene_description}请以专业、友好的方式为用户提供帮助。"
+                logger.info(f"[Scene] Auto-generated scene system prompt: {scene_prompt[:100]}...")
+            
             # ⭐ 将场景身份注入到 agent_config
             if scene_id and scene_prompt:
                 # 1. 场景系统提示词作为"最重要的要求"前置
