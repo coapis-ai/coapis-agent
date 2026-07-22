@@ -39,7 +39,7 @@ router = APIRouter(tags=["admin/audit"])
 
 @router.get("/admin/audit")
 @router.get("/admin/audit-logs")
-@require_permission("admin:admin")
+@require_permission("audit:read")
 async def list_all_audit_logs(
     request: Request,
     username: Optional[str] = Query(None, description="筛选用户"),

@@ -89,7 +89,7 @@ _load_audit_entries()
 
 
 @router.get("/audit/logs")
-@require_permission("admin:admin")
+@require_permission("audit:read")
 async def get_audit_logs(
     request: Request,
     limit: int = Query(100, ge=1, le=1000),
