@@ -913,19 +913,38 @@ class AgentRunner(Runner):
             scene_prompt = None
             scene_skills = []
             
-            # 从 request.input[0].metadata 中获取 scene_id
+            # ⭐ 优先从 ChatSpec.scene_config 读取场景配置快照
+            # 如果 ChatSpec 没有 scene_config，才从 request.input[0].metadata.scene_id 读取（向后兼容）
             try:
-                if request and hasattr(request, "input") and request.input:
-                    first_msg = request.input[0]
-                    if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
-                        scene_id = first_msg.metadata.get("scene_id")
-                        if scene_id:
-                            logger.info(f"[Scene] Detected scene_id={scene_id}, loading scene agent config")
+                # 尝试从 request.chat_id 获取 ChatSpec
+                from ...config.session_context import get_current_chat_id
+                ctx_chat_id = getattr(request, 'chat_id', None) or get_current_chat_id()
+                if ctx_chat_id and self._chat_manager:
+                    temp_chat = await self._chat_manager.get_chat(ctx_chat_id)
+                    if temp_chat and hasattr(temp_chat, 'scene_config') and temp_chat.scene_config:
+                        scene_config_snapshot = temp_chat.scene_config
+                        scene_id = temp_chat.scene_id
+                        scene_name = scene_config_snapshot.get("name", "")
+                        scene_prompt = scene_config_snapshot.get("system_prompt", "")
+                        scene_skills = scene_config_snapshot.get("skills", [])
+                        logger.info(f"[Scene] Loaded scene config from ChatSpec: scene_id={scene_id}, name={scene_name}, skills={scene_skills}")
             except Exception as e:
-                logger.warning(f"[Scene] Failed to get scene_id from request: {e}")
+                logger.warning(f"[Scene] Failed to get scene_config from ChatSpec: {e}")
+            
+            # ⭐ 向后兼容：如果没有从 ChatSpec 获取到，尝试从 request.input[0].metadata 读取
+            if not scene_id:
+                try:
+                    if request and hasattr(request, "input") and request.input:
+                        first_msg = request.input[0]
+                        if hasattr(first_msg, "metadata") and isinstance(first_msg.metadata, dict):
+                            scene_id = first_msg.metadata.get("scene_id")
+                            if scene_id:
+                                logger.info(f"[Scene] Detected scene_id={scene_id} from request metadata (fallback)")
+                except Exception as e:
+                    logger.warning(f"[Scene] Failed to get scene_id from request metadata: {e}")
 
-            # 如果有 scene_id，加载场景智能体配置并融合到 agent_config
-            if scene_id:
+            # ⭐ 如果有 scene_id，但没有场景配置快照，才加载场景智能体配置文件
+            if scene_id and not scene_prompt:
                 try:
                     from pathlib import Path
                     from ...constant import WORKING_DIR
@@ -944,36 +963,36 @@ class AgentRunner(Runner):
                         
                         # 场景技能（优选，不是替换）
                         scene_skills = capabilities.get("skills", []) or scene_data.get("skills", []) or []
-                        
-                        # ── 核心：将场景身份注入到 agent_config ──
-                        # 1. 场景系统提示词作为"最重要的要求"前置
-                        if scene_prompt and hasattr(agent_config, "scene_system_prompt"):
-                            agent_config.scene_system_prompt = scene_prompt
-                            logger.info(f"[Scene] Injected scene system prompt into agent_config")
-                        
-                        # 2. 场景名称（用于前端显示）
-                        if scene_name and hasattr(agent_config, "display_name"):
-                            agent_config.display_name = scene_name
-                            logger.info(f"[Scene] Set display name to '{scene_name}'")
-                        
-                        # 3. 场景技能优选（合并到用户技能，场景技能优先）
-                        if scene_skills and hasattr(agent_config, "preferred_skills"):
-                            existing_skills = getattr(agent_config, "preferred_skills", []) or []
-                            # 场景技能在前，用户技能在后（去重）
-                            merged_skills = scene_skills + [s for s in existing_skills if s not in scene_skills]
-                            agent_config.preferred_skills = merged_skills
-                            logger.info(f"[Scene] Merged skills: {merged_skills}")
-                        
-                        # 4. 场景欢迎消息（可选）
-                        welcome_msg = scene_data.get("welcome_message", "")
-                        if welcome_msg and hasattr(agent_config, "welcome_message"):
-                            agent_config.welcome_message = welcome_msg
-                        
-                        logger.info(f"[Scene] Scene identity merged: name={scene_name}, skills={scene_skills}, prompt_len={len(scene_prompt)}")
+                        logger.info(f"[Scene] Loaded scene config from file: name={scene_name}, skills={scene_skills}")
                     else:
                         logger.warning(f"[Scene] Scene agent config not found: {scene_agent_path}")
                 except Exception as e:
-                    logger.warning(f"[Scene] Failed to load scene config: {e}")
+                    logger.warning(f"[Scene] Failed to load scene config from file: {e}")
+            
+            # ⭐ 将场景身份注入到 agent_config
+            if scene_id and scene_prompt:
+
+            # ⭐ 将场景身份注入到 agent_config
+            if scene_id and scene_prompt:
+                # 1. 场景系统提示词作为"最重要的要求"前置
+                if hasattr(agent_config, "scene_system_prompt"):
+                    agent_config.scene_system_prompt = scene_prompt
+                    logger.info(f"[Scene] Injected scene system prompt into agent_config")
+                
+                # 2. 场景名称（用于前端显示）
+                if scene_name and hasattr(agent_config, "display_name"):
+                    agent_config.display_name = scene_name
+                    logger.info(f"[Scene] Set display name to '{scene_name}'")
+                
+                # 3. 场景技能优选（合并到用户技能，场景技能优先）
+                if scene_skills and hasattr(agent_config, "preferred_skills"):
+                    existing_skills = getattr(agent_config, "preferred_skills", []) or []
+                    # 场景技能在前，用户技能在后（去重）
+                    merged_skills = scene_skills + [s for s in existing_skills if s not in scene_skills]
+                    agent_config.preferred_skills = merged_skills
+                    logger.info(f"[Scene] Merged skills: {merged_skills}")
+                
+                logger.info(f"[Scene] Scene identity merged: name={scene_name}, skills={scene_skills}, prompt_len={len(scene_prompt)}")
 
             # Override agent language with user's language preference
             # This ensures LLM outputs in the user's preferred language

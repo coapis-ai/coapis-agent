@@ -59,6 +59,11 @@ class ChatSpec(BaseModel):
         default=None,
         description="Composed agent ID (scene-agent-id:user-id format)",
     )
+    # Scene config snapshot - 完整的场景配置快照（代入时保存）
+    scene_config: Dict[str, Any] | None = Field(
+        default=None,
+        description="Scene configuration snapshot (system_prompt, skills, tools, knowledge_bases, etc.)",
+    )
     # NOTE: messages removed — history now stored in sessions/{session_id}.json
     # via AgentScope memory state, matching CoApis's architecture.
     # Use GET /chats/{chat_id} to load messages on-demand.

@@ -267,7 +267,25 @@ async def enter_scene(
         
         logger.info(f"🔍 [enter_scene] scene_id={scene_id}, user_id={user_id}, chat_id={result.chat_id}, session_id={result.session_id}")
         
-        # Create chat spec
+        # ⭐ 获取场景智能体的完整配置（用于保存快照）
+        scene_agent = service.get_scene_agent(scene_id)
+        scene_config_snapshot = None
+        if scene_agent:
+            # 保存场景配置快照到 ChatSpec（用于运行时叠加）
+            capabilities = scene_agent.capabilities
+            scene_config_snapshot = {
+                "id": scene_id,
+                "name": scene_agent.name,
+                "icon": scene_agent.scene.icon if scene_agent.scene else "",
+                "system_prompt": capabilities.system_prompt if capabilities else "",
+                "skills": capabilities.skills if capabilities else [],
+                "tools": capabilities.tools if capabilities else [],
+                "knowledge_bases": capabilities.knowledge_bases if capabilities else [],
+                "welcome_message": scene_agent.welcome_message or "",
+            }
+            logger.info(f"[enter_scene] Scene config snapshot: skills={scene_config_snapshot['skills']}, prompt_len={len(scene_config_snapshot['system_prompt'])}")
+        
+        # Create chat spec with scene config snapshot
         chat_spec = ChatSpec(
             id=result.chat_id,
             name=f"场景: {scene_config.name}",
@@ -276,6 +294,7 @@ async def enter_scene(
             channel="console",
             agent_id=result.agent["id"],
             scene_id=scene_id,
+            scene_config=scene_config_snapshot,  # ⭐ 保存完整的场景配置快照
             meta={
                 "scene_id": scene_id,
                 "scene_name": scene_config.name,
