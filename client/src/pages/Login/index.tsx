@@ -7,6 +7,7 @@ import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import { authApi } from "../../api/modules/auth";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTheme } from "../../contexts/ThemeContext";
+import { AuthStorage } from "../../utils/authStorage";
 
 export default function LoginPage() {
   const { t } = useTranslation();
@@ -44,9 +45,6 @@ export default function LoginPage() {
 
       // 记住我: expires_in=0 表示永久 token（100年），不勾选则用默认7天
       const expires_in = values.remember_me ? 0 : undefined;
-      
-      // 使用 AuthStorage 统一管理登录状态
-      const { AuthStorage } = await import('../../utils/authStorage');
 
       if (isRegister) {
         const res = await authApi.register(values.username, values.password);

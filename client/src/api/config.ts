@@ -1,13 +1,60 @@
 declare const VITE_API_BASE_URL: string;
 declare const TOKEN: string;
 
-// 不再直接使用常量，改用 AuthStorage 统一管理
-// const AUTH_TOKEN_KEY = "coapis_auth_token";
+// ==================== AuthStorage 内联实现 ====================
+// 由于浏览器环境不支持 require，直接在此文件实现核心功能
+
+const STORAGE_KEYS = {
+  CURRENT_TOKEN: 'coapis_auth_token',
+  CURRENT_USERNAME: 'coapis_current_username',
+  SAVED_ACCOUNTS: 'coapis_saved_accounts',
+  CURRENT_USERNAME_GLOBAL: 'coapis-current-username',
+};
+
+/**
+ * 保存认证 token
+ */
+function saveToken(token: string, remember: boolean = false): void {
+  sessionStorage.setItem(STORAGE_KEYS.CURRENT_TOKEN, token);
+  if (remember) {
+    localStorage.setItem(STORAGE_KEYS.CURRENT_TOKEN, token);
+  }
+}
+
+/**
+ * 获取认证 token
+ * 优先级：sessionStorage > localStorage
+ */
+function getToken(): string | null {
+  const sessionToken = sessionStorage.getItem(STORAGE_KEYS.CURRENT_TOKEN);
+  if (sessionToken) return sessionToken;
+  return localStorage.getItem(STORAGE_KEYS.CURRENT_TOKEN);
+}
+
+/**
+ * 保存当前用户名
+ */
+function saveUsername(username: string, remember: boolean = false): void {
+  sessionStorage.setItem(STORAGE_KEYS.CURRENT_USERNAME, username);
+  localStorage.setItem(STORAGE_KEYS.CURRENT_USERNAME_GLOBAL, username);
+  if (remember) {
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USERNAME, username);
+  }
+}
+
+/**
+ * 获取当前用户名
+ */
+function getUsername(): string | null {
+  const sessionUsername = sessionStorage.getItem(STORAGE_KEYS.CURRENT_USERNAME);
+  if (sessionUsername) return sessionUsername;
+  return localStorage.getItem(STORAGE_KEYS.CURRENT_USERNAME);
+}
+
+// ==================== API 配置 ====================
 
 /**
  * Get the full API URL with /api prefix
- * @param path - API path (e.g., "/models", "/skills")
- * @returns Full API URL (e.g., "http://localhost:8088/api/models" or "/api/models")
  */
 export function getApiUrl(path: string): string {
   const base = VITE_API_BASE_URL || "";
@@ -17,53 +64,39 @@ export function getApiUrl(path: string): string {
 }
 
 /**
- * Get the API token - 使用 AuthStorage 统一管理
- * 优先级：sessionStorage（当前标签页） > localStorage（记住的账号）
- * @returns API token string or empty string
+ * Get the API token - 使用混合存储方案
+ * 优先级：sessionStorage > localStorage > 构建时TOKEN
  */
 export function getApiToken(): string {
-  // 使用 AuthStorage 统一管理
-  const { AuthStorage } = require('../utils/authStorage');
-  const stored = AuthStorage.getToken();
+  const stored = getToken();
   if (stored) return stored;
-  
-  // 向后兼容：如果 AuthStorage 没有，尝试从旧的 localStorage 读取
-  const legacyToken = localStorage.getItem("coapis_auth_token");
-  if (legacyToken) return legacyToken;
-  
-  // 最后尝试构建时的 TOKEN 常量
   return typeof TOKEN !== "undefined" ? TOKEN : "";
 }
 
 /**
- * Store the auth token - 使用 AuthStorage 统一管理
- * 默认保存到 sessionStorage（不记住），如果需要"记住我"，使用 AuthStorage.login()
- * @param token - JWT token
- * @param remember - 是否"记住我"（可选，默认 false）
+ * Store the auth token - 使用混合存储方案
  */
 export function setAuthToken(token: string, remember: boolean = false): void {
-  const { AuthStorage } = require('../utils/authStorage');
-  AuthStorage.saveToken(token, remember);
+  saveToken(token, remember);
 }
 
 /**
- * Remove the auth token - 使用 AuthStorage 统一管理
- * @param clearAll - 是否清除所有（包括记住的账号）
+ * Remove the auth token
  */
 export function clearAuthToken(clearAll: boolean = false): void {
-  const { AuthStorage } = require('../utils/authStorage');
-  AuthStorage.clearToken(clearAll);
+  sessionStorage.removeItem(STORAGE_KEYS.CURRENT_TOKEN);
+  if (clearAll) {
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USERNAME);
+    localStorage.removeItem(STORAGE_KEYS.SAVED_ACCOUNTS);
+  }
 }
 
 /**
- * Get the current username from the JWT auth token.
- * 优先使用 AuthStorage，如果失败则从 token 解析
- * @returns username string or empty string
+ * Get the current username
  */
 export function getCurrentUsername(): string {
-  // 优先从 AuthStorage 读取
-  const { AuthStorage } = require('../utils/authStorage');
-  const username = AuthStorage.getUsername();
+  const username = getUsername();
   if (username) return username;
   
   // 如果 AuthStorage 没有，尝试从 token 解析（向后兼容）
@@ -78,8 +111,14 @@ export function getCurrentUsername(): string {
 }
 
 /**
+ * Save current username（导出供其他模块使用）
+ */
+export function setCurrentUsername(username: string, remember: boolean = false): void {
+  saveUsername(username, remember);
+}
+
+/**
  * User-scoped localStorage key for agent store.
- * Prevents agent leakage between different users sharing the same browser.
  */
 export function getAgentStorageKey(): string {
   const username = getCurrentUsername();
