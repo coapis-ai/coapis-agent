@@ -47,6 +47,7 @@ const VoiceTranscriptionPage = lazyImportWithRetry(
 const AgentsPage = lazyImportWithRetry("../../pages/Settings/Agents");
 const DebugPage = lazyImportWithRetry("../../pages/Settings/Debug");
 const BackupsPage = lazyImportWithRetry("../../pages/Settings/Backups");
+const MyScenesPage = lazyImportWithRetry("../../pages/MyScenes/index");
 const MySpacePage = lazyImportWithRetry("../../pages/MySpace/index");
 const UserSystemPage = lazyImportWithRetry("../../pages/UserSystem/index");
 const UserProfilePage = lazyImportWithRetry("../../pages/UserProfile/index");
@@ -91,6 +92,7 @@ const pathToKey: Record<string, string> = {
   "/voice-transcription": "voice-transcription",
   "/debug": "debug",
   "/backups": "backups",
+  "/my-scenes": "my-scenes",
   "/workspace/myspace": "myspace",
   "/user-system": "user-system",
   "/user/profile": "user-profile",
@@ -216,6 +218,7 @@ export default function MainLayout() {
                   />
                   <Route path="/debug" element={<DebugPage />} />
                   <Route path="/backups" element={<BackupsPage />} />
+                  <Route path="/my-scenes" element={<MyScenesPage />} />
                   <Route path="/workspace/myspace" element={<MySpacePage />} />
                   <Route path="/user-system" element={<UserSystemPage />} />
                   <Route path="/user/profile" element={<UserProfilePage />} />
