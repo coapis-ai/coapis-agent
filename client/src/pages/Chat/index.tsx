@@ -1230,6 +1230,8 @@ export default function ChatPage() {
               type: lastMsg.type,
               content: rewrittenContent,
               session: lastMsg.session,
+              // ⭐ 嵌入式模式：传递场景ID到 metadata（后端从 request.input[0].metadata.scene_id 读取）
+              ...(isEmbeddedMode && sceneId && { metadata: { scene_id: sceneId } }),
               // 注意：不复制 cards 等只读属性
             },
           ]
@@ -1244,8 +1246,6 @@ export default function ChatPage() {
         biz_params: {
           agent_id: selectedAgent,
           ...biz_params,
-          // ⭐ 嵌入式模式：传递场景ID
-          ...(isEmbeddedMode && sceneId && { scene_id: sceneId }),
           // 添加知识库引用
           ...(knowledgeRefs && { knowledge_bases: knowledgeRefs }),
           // 添加文件引用（用于后端动态注入提示，避免污染用户消息）
