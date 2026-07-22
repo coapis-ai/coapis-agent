@@ -217,18 +217,20 @@ async def enter_scene(
         
         # CRITICAL: Create chat session in database
         # This is necessary so that sessionApi.getSessionList() can find the new chat
-        from ..runner.manager import ChatManager
         from ..runner.models import ChatSpec
-        from ..runner.repo.json_repo import JsonChatRepository
         from ...constant import WORKING_DIR
         from pathlib import Path
         
-        # Create chat repository and manager
-        data_dir = Path(WORKING_DIR)
-        chats_file = data_dir / "workspaces" / user_id / "chat" / "chats.json"
-        chats_file.parent.mkdir(parents=True, exist_ok=True)
-        repo = JsonChatRepository(chats_file)
-        chat_manager = ChatManager(repo=repo)
+        # Get or create user's ChatManager from multi_agent_manager
+        manager = getattr(request.app.state, "multi_agent_manager", None)
+        if not manager:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Multi-agent manager not initialized"
+            )
+        
+        chat_manager = manager.get_user_chat_manager(user_id)
+        logger.info(f"[enter_scene] Using ChatManager for user {user_id}")
         
         # ⭐ 查找已有会话
         existing_chat = await repo.get_chat(chat_id)
