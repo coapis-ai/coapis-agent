@@ -1243,7 +1243,20 @@ export default function ChatPage() {
               } : {}),
             },
           ]
-        : lastInput;
+        : lastInput.map((msg: any) => ({
+            // 同样过滤 lastInput 中的消息，确保不传递只读属性
+            role: msg.role,
+            type: msg.type,
+            content: msg.content,
+            ...(msg.session && typeof msg.session === 'object' && 'session_id' in msg.session ? {
+              session: {
+                session_id: msg.session.session_id,
+                user_id: msg.session.user_id,
+                channel: msg.session.channel,
+                agent_id: msg.session.agent_id,
+              }
+            } : {}),
+          }));
 
       const requestBody = {
         input: rewrittenInput,
