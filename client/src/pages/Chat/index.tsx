@@ -1248,9 +1248,9 @@ export default function ChatPage() {
           ...(knowledgeRefs && { knowledge_bases: knowledgeRefs }),
           // 添加文件引用（用于后端动态注入提示，避免污染用户消息）
           ...(fileRefs && { selected_files: fileRefs }),
+          // ⭐ 嵌入式模式：场景ID传递到 biz_params 中（后端从 biz_params.scene_id 读取）
+          ...(isEmbeddedMode && sceneId && { scene_id: sceneId }),
         },
-        // ⭐ 嵌入式模式：场景ID传递到 meta 中（后端从 channel_meta.scene_id 读取）
-        ...(isEmbeddedMode && sceneId && { meta: { scene_id: sceneId } }),
         // Pass chat_id (UUID) so backend can persist messages to the correct chat
         // instead of matching by session_id (which is shared across all console chats).
         chat_id: chatIdRef.current || undefined,
@@ -1259,7 +1259,7 @@ export default function ChatPage() {
       // 🔍 调试：打印场景代入信息
       if (isEmbeddedMode && sceneId) {
         console.log('[Chat] Scene mode - sceneId:', sceneId, 'isEmbeddedMode:', isEmbeddedMode);
-        console.log('[Chat] Request meta:', requestBody.meta);
+        console.log('[Chat] Request biz_params:', requestBody.biz_params);
       }
 
       // Record current session_id for SSE filtering
