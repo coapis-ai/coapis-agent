@@ -619,6 +619,13 @@
   }
 }
 
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+}
+
 .addProviderBtn {
   flex-shrink: 0;
   margin-right: 8px;
@@ -633,6 +640,18 @@
 .providersPageHeader {
   border-bottom: none;
   padding: 10px 16px;
+  margin-bottom: 0;
+  flex: 0 0 auto; // 不占据剩余空间
+  
+  :global {
+    .leading {
+      flex: 0 0 auto; // 不占据剩余空间
+    }
+    
+    .breadcrumbHeader {
+      flex: 0 0 auto; // 不占据剩余空间
+    }
+  }
 }
 
 /* ---- Search Row ---- */
@@ -1615,20 +1634,20 @@
 
 /* ---- Model Type Tabs ---- */
 
-.model-type-tabs {
+.modelTypeTabs {
   display: flex;
-  gap: 6px;
-  margin: 12px 8px 8px;
-  border-bottom: 1px solid #e8e8e8;
-  padding-bottom: 8px;
-  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border-bottom: none;
+  flex-wrap: nowrap;
 }
 
-.model-type-tab {
+.modelTypeTab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
+  gap: 4px;
+  padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
@@ -1646,19 +1665,19 @@
     color: #1677ff;
     font-weight: 500;
   }
+}
 
-  .tab-icon {
-    font-size: 16px;
-  }
+.tabIcon {
+  font-size: 14px;
+}
 
-  .tab-label {
-    font-size: 13px;
-  }
+.tabLabel {
+  font-size: 13px;
+}
 
-  .tab-count {
-    font-size: 12px;
-    color: #999;
-  }
+.tabCount {
+  font-size: 12px;
+  color: #999;
 }
 
 :global(.dark-mode) {
@@ -1671,11 +1690,11 @@
     color: rgba(255, 255, 255, 0.85);
   }
 
-  .model-type-tabs {
+  .modelTypeTabs {
     border-bottom-color: rgba(255, 255, 255, 0.08);
   }
 
-  .model-type-tab {
+  .modelTypeTab {
     color: rgba(255, 255, 255, 0.5);
 
     &:hover {
@@ -1687,9 +1706,9 @@
       background: rgba(22, 119, 255, 0.15);
       color: #4096ff;
     }
+  }
 
-    .tab-count {
-      color: rgba(255, 255, 255, 0.35);
-    }
+  .tabCount {
+    color: rgba(255, 255, 255, 0.35);
   }
 }

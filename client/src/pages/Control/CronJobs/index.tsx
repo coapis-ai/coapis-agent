@@ -219,7 +219,7 @@ function CronJobsPage() {
   return (
     <div className={styles.cronJobsPage}>
       <PageHeader
-        items={[{ title: t("nav.control") }, { title: t("cronJobs.title") }]}
+        items={[{ title: "设置" }, { title: t("cronJobs.title") }]}
         extra={
           <PermissionGuard module="cron-jobs" action="create">
             <Button type="primary" onClick={handleCreate}>

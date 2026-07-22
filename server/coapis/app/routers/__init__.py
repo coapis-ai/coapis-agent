@@ -69,6 +69,7 @@ from .agent_stats import router as agent_stats_router
 from .local_models import router as local_models_router
 from .voice import voice_router
 from .approval import router as approval_router
+from .user_scenes import router as user_scenes_router
 from .user import router as user_router
 from .admin import router as admin_router
 from ...user_system.routers import users_router, points_router, tokens_router
@@ -142,6 +143,7 @@ router.include_router(root_router)
 router.include_router(commands_router)
 router.include_router(voice_router)
 router.include_router(approval_router)
+router.include_router(user_scenes_router)
 router.include_router(user_router)
 router.include_router(admin_router)
 router.include_router(users_router)

@@ -705,3 +705,28 @@ class SceneAgentService:
         scenes = sorted(scenes, key=lambda x: -x.usage_count)
         
         return SceneListResponse(scenes=scenes, total=len(scenes))
+    
+    def get_hot_scenes(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get hot scenes by usage count.
+        
+        Args:
+            limit: Maximum number of scenes to return
+            
+        Returns:
+            List of scene dictionaries
+        """
+        scenes_file = self._load_scenes_file()
+        scenes = scenes_file.scenes
+        
+        # Filter active scenes
+        active_scenes = [s for s in scenes if s.status == "active"]
+        
+        # Sort by usage_count descending
+        sorted_scenes = sorted(active_scenes, key=lambda x: -x.usage_count)
+        
+        # Take top N
+        top_scenes = sorted_scenes[:limit]
+        
+        # Convert to dict for JSON serialization
+        return [scene.model_dump(exclude_none=True) for scene in top_scenes]
+

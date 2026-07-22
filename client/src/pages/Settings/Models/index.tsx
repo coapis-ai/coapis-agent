@@ -6,7 +6,6 @@ import {
   LoadingState,
   ProviderCard,
   CustomProviderModal,
-  ModelsSection,
 } from "./components";
 import { DefaultModelSelector } from "./components/DefaultModelSelector";
 import { ModelTypeTabs } from "./components/ModelTypeTabs";
@@ -34,9 +33,13 @@ function ModelsPage() {
 
   // Load default models
   useEffect(() => {
-    api.get("/models/default-models").then((res: any) => {
+    api.get("/models/default-models").then((data: any) => {
+      if (!data || typeof data !== 'object') {
+        console.error('Invalid default models response:', data);
+        return;
+      }
       const models: Record<string, any> = {};
-      Object.entries(res.data).forEach(([type, value]: [string, any]) => {
+      Object.entries(data).forEach(([type, value]: [string, any]) => {
         if (value) {
           models[type] = {
             providerId: value.provider_id,
@@ -45,6 +48,8 @@ function ModelsPage() {
         }
       });
       setDefaultModels(models);
+    }).catch((err) => {
+      console.error('Failed to load default models:', err);
     });
   }, []);
 
@@ -161,19 +166,12 @@ function ModelsPage() {
         <LoadingState message={error} error onRetry={fetchAll} />
       ) : (
         <>
-          {/* ---- LLM Section (top) ---- */}
           <PageHeader
             parent={t("nav.settings")}
             current={t("models.llmTitle")}
           />
           {/* ---- Scrollable Content ---- */}
           <div className={styles.content}>
-            <ModelsSection
-              providers={providers}
-              activeModels={activeModels}
-              onSaved={fetchAll}
-            />
-            
             {/* ---- Default Models Section ---- */}
             <div className={styles.defaultModelsSection}>
               <PageHeader current={t("models.defaultModelsTitle")} />
@@ -206,16 +204,31 @@ function ModelsPage() {
                   value={defaultModels.audio}
                   onChange={(value) => handleDefaultModelChange("audio", value)}
                 />
+                <DefaultModelSelector
+                  modelType="vision"
+                  label={t("models.visionModels")}
+                  icon="👁"
+                  value={defaultModels.vision}
+                  onChange={(value) => handleDefaultModelChange("vision", value)}
+                />
               </div>
             </div>
             
             {/* ---- Providers Section ---- */}
             <div className={styles.providersBlock}>
               <div className={styles.sectionHeaderRow}>
-                <PageHeader
-                  current={t("models.providersTitle")}
-                  className={styles.providersPageHeader}
-                />
+                <div className={styles.headerLeft}>
+                  <PageHeader
+                    current={t("models.providersTitle")}
+                    className={styles.providersPageHeader}
+                  />
+                  {/* ---- Model Type Tabs ---- */}
+                  <ModelTypeTabs
+                    activeType={modelTypeFilter}
+                    onChange={setModelTypeFilter}
+                    providers={providers}
+                  />
+                </div>
                 <div className={styles.headerRight}>
                   {/* ---- Search ---- */}
                   <div className={styles.searchRow}>
@@ -244,13 +257,6 @@ function ModelsPage() {
                   </Button>
                 </div>
               </div>
-
-              {/* ---- Model Type Tabs ---- */}
-              <ModelTypeTabs
-                activeType={modelTypeFilter}
-                onChange={setModelTypeFilter}
-                providers={providers}
-              />
 
               {sortedProviders.length > 0 && (
                 <div className={styles.providerGroup}>

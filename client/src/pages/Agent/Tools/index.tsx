@@ -285,7 +285,7 @@ export default function ToolsPage() {
   return (
     <div className={styles.toolsPage}>
       <PageHeader
-        items={[{ title: t("nav.agent") }, { title: t("tools.title") }]}
+        items={[{ title: "设置" }, { title: t("tools.title") }]}
       />
 
       {/* Tools content (directly rendered, no tabs) */}

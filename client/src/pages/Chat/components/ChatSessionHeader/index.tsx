@@ -19,7 +19,7 @@ interface ChatSessionHeaderProps {
 const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({ 
   onToolbarToggle,
   isEmbeddedMode = false,
-  onClose,
+  onClose: onCloseProp,
   sceneName,
 }) => {
   const { t } = useTranslation();
@@ -27,6 +27,7 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
   const [isPinned, setIsPinned] = useState(false);
   const [onTogglePin, setOnTogglePin] = useState<(() => void) | null>(null);
   const [onDragStart, setOnDragStart] = useState<((e: React.MouseEvent) => void) | null>(null);
+  const [onClose, setOnClose] = useState<(() => void) | null>(null);
 
   // 从 window 对象读取嵌入式模式参数
   useEffect(() => {
@@ -34,6 +35,7 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
       const windowOnTogglePin = (window as any).__CHAT_ON_TOGGLE_PIN__;
       const windowIsPinned = (window as any).__CHAT_IS_PINNED__;
       const windowOnDragStart = (window as any).__CHAT_ON_DRAG_START__;
+      const windowOnClose = (window as any).__CHAT_ON_CLOSE__;
       
       if (typeof windowOnTogglePin === 'function') {
         setOnTogglePin(() => windowOnTogglePin);
@@ -43,6 +45,9 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
       }
       if (typeof windowOnDragStart === 'function') {
         setOnDragStart(() => windowOnDragStart);
+      }
+      if (typeof windowOnClose === 'function') {
+        setOnClose(() => windowOnClose);
       }
     }
   }, [isEmbeddedMode]);
@@ -125,13 +130,20 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
                 />
               </Tooltip>
             )}
-            {onClose && (
+            {(onClose || onCloseProp) && (
               <Tooltip title="关闭" mouseEnterDelay={0.5}>
                 <Button
                   type="text"
                   size="small"
                   icon={<CloseOutlined />}
-                  onClick={onClose}
+                  onClick={() => {
+                    // 优先使用从 window 读取的 onClose
+                    if (onClose) {
+                      onClose();
+                    } else if (onCloseProp) {
+                      onCloseProp();
+                    }
+                  }}
                 />
               </Tooltip>
             )}

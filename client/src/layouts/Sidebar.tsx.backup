@@ -1,0 +1,740 @@
+import {
+  Layout,
+  Menu,
+  Button,
+  Tooltip,
+  Select,
+  type MenuProps,
+} from "antd";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import {
+  SparkChatTabFill,
+  SparkWifiLine,
+  SparkUserGroupLine,
+  SparkDateLine,
+  SparkVoiceChat01Line,
+  SparkMagicWandLine,
+  SparkLocalFileLine,
+  SparkModePlazaLine,
+  // SparkInternetLine,  // unused — 2026-07-06
+  SparkModifyLine,
+  SparkBrowseLine,
+  SparkMcpMcpLine,
+  // SparkScanLine,  // ACP 模块已隐藏 — 2026-06-28
+  SparkToolLine,
+  SparkDataLine,
+  SparkMicLine,
+  SparkAgentLine,
+  SparkMenuExpandLine,
+  SparkMenuFoldLine,
+  SparkBarChartLine,
+  SparkDebugLine,
+  SparkSaveLine,
+} from "@agentscope-ai/icons";
+import { ThunderboltOutlined, CrownOutlined, BookOutlined } from "@ant-design/icons";
+import { agentsApi } from "../api/modules/agents";
+import { permissionsApi } from "../api/modules/permissions";
+import { usePlugins } from "../plugins/PluginContext";
+import { useAgentStore } from "../stores/agentStore";
+import { useUser } from "../contexts/UserContext";
+import styles from "./index.module.less";
+import { useTheme } from "../contexts/ThemeContext";
+import { KEY_TO_PATH, DEFAULT_OPEN_KEYS } from "./constants";
+import { getAgentDisplayName, isDefaultAgent } from "../utils/agentDisplayName";
+import {
+  MENU_TO_PERMISSION,
+} from "../config/menuModules";
+import { getApiToken } from "../api/config";
+
+// ── Layout ────────────────────────────────────────────────────────────────
+
+const { Sider } = Layout;
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+interface SidebarProps {
+  selectedKey: string;
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────
+
+export default function Sidebar({ selectedKey }: SidebarProps) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { t } = useTranslation();
+  const { isDark } = useTheme();
+  const { pluginRoutes } = usePlugins();
+  const { selectedAgent, agents, setSelectedAgent, setAgents } = useAgentStore();
+  const { user } = useUser();
+  const [collapsed, setCollapsed] = useState(false);
+  
+  // Category data for dynamic workbench menu
+  const [categoryData, setCategoryData] = useState<any>(null);
+  
+  // Workbench menu open state (controlled)
+  const [workbenchOpenKeys, setWorkbenchOpenKeys] = useState<string[]>([]);
+  
+  // Check if we're on workbench route
+  const isWorkbench = location.pathname === '/workbench';
+  
+  // For workbench, get category from URL and use it as selectedKey
+  const workbenchSelectedKey = useMemo(() => {
+    if (!isWorkbench) return selectedKey;
+    
+    const params = new URLSearchParams(location.search);
+    const category = params.get('category');
+    const management = params.get('management');
+    
+    if (management === 'scenes') {
+      return 'scene-management';
+    } else if (management === 'tags') {
+      return 'tag-management';
+    } else if (category) {
+      return `category-${category}`;
+    }
+    
+    return 'category-all';
+  }, [isWorkbench, selectedKey, location.search]);
+  
+  // Permission state
+  const [allowedModules, setAllowedModules] = useState<string[]>([]);
+  const [permissionsLoaded, setPermissionsLoaded] = useState(false);
+
+  // ── Effects ──────────────────────────────────────────────────────────────
+
+  // Load agents on mount
+  useEffect(() => {
+    agentsApi
+      .listAgents()
+      .then((res) => {
+        const agentList = Array.isArray(res) ? res : (res as any).agents || [];
+        // Sort: user's default agent (user:*) first, then by API order (creation time)
+        const sorted = [...agentList].sort((a, b) => {
+          const aDefault = isDefaultAgent(a.id) ? 0 : 1;
+          const bDefault = isDefaultAgent(b.id) ? 0 : 1;
+          return aDefault - bDefault;
+        });
+        setAgents(sorted);
+
+        // Auto-select: if no valid agent selected, pick the user's default agent
+        const current = useAgentStore.getState().selectedAgent;
+        const currentValid = sorted.some((a) => a.id === current);
+        if (!currentValid) {
+          const defaultAgent = sorted.find((a) => isDefaultAgent(a.id));
+          if (defaultAgent) {
+            setSelectedAgent(defaultAgent.id);
+          } else if (sorted.length > 0) {
+            setSelectedAgent(sorted[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [setAgents, setSelectedAgent]);
+  
+  // Load tag data for workbench menu
+  useEffect(() => {
+    if (!isWorkbench) return;
+    
+    const token = getApiToken();
+    fetch('/api/admin/tags/menu', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    })
+      .then(res => res.json())
+      .then(data => {
+        setCategoryData(data);
+      })
+      .catch(err => {
+        console.error('Failed to load tags:', err);
+      });
+  }, [isWorkbench]);
+  
+  // Load permissions on mount and when user changes
+  useEffect(() => {
+    if (!user) {
+      // No user logged in, allow all modules (anonymous mode)
+      setAllowedModules(["all"]);
+      setPermissionsLoaded(true);
+      return;
+    }
+    
+    permissionsApi
+      .getAllowedModules()
+      .then((res) => {
+        setAllowedModules(res.modules || []);
+        setPermissionsLoaded(true);
+      })
+      .catch(() => {
+        // Fallback: allow all modules if permission API fails
+        setAllowedModules(["all"]);
+        setPermissionsLoaded(true);
+      });
+  }, [user]);
+  
+  // ── Permission helpers ───────────────────────────────────────────────────
+
+  /**
+   * Maps permission module keys to sidebar menu keys.
+   * Uses unified config from menuModules.ts as single source of truth.
+   */
+  /**
+   * Reverse map: sidebar menu key -> permission module key.
+   * Uses unified config from menuModules.ts as single source of truth.
+   */
+  const MENU_TO_PERMISSION_KEY: Record<string, string> = {
+    ...MENU_TO_PERMISSION,
+    // collapsedNavItems uses "workspace" key for myspace module
+    workspace: "myspace",
+  };
+
+  /** Check if a module is allowed for current user */
+  const isModuleAllowed = (menuKey: string): boolean => {
+    if (!permissionsLoaded) return true; // Allow while loading (prevent flicker)
+    if (allowedModules.includes("all")) return true; // Admin
+    
+    // First check direct match
+    if (allowedModules.includes(menuKey)) return true;
+    
+    // Then check mapping (menu key -> permission module key)
+    const permKey = MENU_TO_PERMISSION_KEY[menuKey];
+    if (permKey && allowedModules.includes(permKey)) return true;
+    
+    return false;
+  };
+  
+  /** Filter menu items based on permissions */
+  const filterMenuItems = (items: any[]): any[] => {
+    if (allowedModules.includes("all")) {
+      return items; // Admin: allow all
+    }
+    if (!permissionsLoaded) {
+      return items; // Loading: show all (prevent menu flicker)
+    }
+    
+    return items.flatMap((item: any) => {
+      // If item has children, filter children recursively
+      if (item.children) {
+        const filteredChildren = filterMenuItems(item.children);
+        // Keep group if at least one child is allowed
+        if (filteredChildren.length > 0) {
+          return [{ ...item, children: filteredChildren }];
+        }
+        return []; // Remove group if no children allowed
+      }
+      
+      // Leaf item: check if module is allowed
+      return isModuleAllowed(item.key) ? [item] : [];
+    });
+  };
+
+  // ── Collapsed nav items (all leaf pages) ──────────────────────────────
+
+  // ── 一级菜单（按设计方案v4，社区版5项）──────────────────────────────────
+  // 首页、办公、我的场景、我的空间、设置
+  // 对话功能改用浮动聊天图标（不占菜单）
+  
+  const collapsedNavItems = [
+    // 1. 首页 - 暂时指向聊天页面，未来扩展为Dashboard
+    {
+      key: "home",
+      icon: <SparkChatTabFill size={18} />,
+      path: "/chat",
+      label: t("nav.home", "首页"),
+    },
+    // 2. 办公 - 原工作台
+    {
+      key: "workbench",
+      icon: <SparkModePlazaLine size={18} />,
+      path: "/workbench",
+      label: t("nav.workbench", "办公"),
+    },
+    // 3. 我的场景 - 专业标签 + 个性化推荐
+    {
+      key: "my-scenes",
+      icon: <SparkUserGroupLine size={18} />,
+      path: "/my-scenes",
+      label: t("nav.myScenes", "我的场景"),
+    },
+    // 4. 我的空间 - 文件 + 个人资源
+    {
+      key: "myspace",
+      icon: <SparkLocalFileLine size={18} />,
+      path: "/workspace/myspace",
+      label: t("nav.myspace", "我的空间"),
+    },
+    // 5. 设置 - 个人管理中心（二级菜单）
+    {
+      key: "settings-group",
+      label: t("nav.settings", "设置"),
+      icon: <SparkModifyLine size={18} />,
+      children: [
+        {
+          key: "agents",
+          label: t("nav.agents"),
+          icon: <SparkAgentLine size={16} />,
+        },
+        {
+          key: "models",
+          label: t("nav.models"),
+          icon: <SparkModePlazaLine size={16} />,
+        },
+        {
+          key: "channels",
+          label: t("nav.channels"),
+          icon: <SparkWifiLine size={16} />,
+        },
+        {
+          key: "sessions",
+          label: t("nav.sessions"),
+          icon: <SparkUserGroupLine size={16} />,
+        },
+        {
+          key: "cron-jobs",
+          label: t("nav.cronJobs"),
+          icon: <SparkDateLine size={16} />,
+        },
+        {
+          key: "heartbeat",
+          label: t("nav.heartbeat"),
+          icon: <SparkVoiceChat01Line size={16} />,
+        },
+        {
+          key: "skills",
+          label: t("nav.skills"),
+          icon: <SparkMagicWandLine size={16} />,
+        },
+        {
+          key: "tools",
+          label: t("nav.tools"),
+          icon: <SparkToolLine size={16} />,
+        },
+        {
+          key: "mcp",
+          label: t("nav.mcp"),
+          icon: <SparkMcpMcpLine size={16} />,
+        },
+        {
+          key: "agent-config",
+          label: t("nav.agentConfig"),
+          icon: <SparkModifyLine size={16} />,
+        },
+        {
+          key: "agent-stats",
+          label: t("nav.agentStats"),
+          icon: <SparkBarChartLine size={16} />,
+        },
+        {
+          key: "security",
+          label: t("nav.security"),
+          icon: <SparkBrowseLine size={16} />,
+        },
+        {
+          key: "token-usage",
+          label: t("nav.tokenUsage"),
+          icon: <SparkDataLine size={16} />,
+        },
+        {
+          key: "backups",
+          label: t("nav.backups"),
+          icon: <SparkSaveLine size={16} />,
+        },
+        {
+          key: "voice-transcription",
+          label: t("nav.voiceTranscription"),
+          icon: <SparkMicLine size={16} />,
+        },
+        {
+          key: "debug",
+          label: t("nav.debug", "Debug"),
+          icon: <SparkDebugLine size={16} />,
+        },
+        {
+          key: "evolution",
+          label: t("nav.evolution", "Evolution"),
+          icon: <ThunderboltOutlined />,
+        },
+        {
+          key: "admin",
+          label: t("nav.adminPanel", "后台管理"),
+          icon: <CrownOutlined />,
+        },
+      ],
+    },
+    // 企业版专属：知识库（未来）
+    // {
+    //   key: "knowledge",
+    //   icon: <BookOutlined />,
+    //   path: "/knowledge",
+    //   label: t("nav.knowledge", "知识库"),
+    // },
+  ];
+
+  // ── Menu items — agent-scoped (Chat + Control + Workspace) ──────────────
+
+  const agentMenuItems: MenuProps["items"] = [
+    {
+      key: "chat",
+      label: collapsed ? null : t("nav.chat"),
+      icon: <SparkChatTabFill size={16} />,
+    },
+    {
+      key: "control-group",
+      label: collapsed ? null : t("nav.control"),
+      children: [
+        {
+          key: "channels",
+          label: collapsed ? null : t("nav.channels"),
+          icon: <SparkWifiLine size={16} />,
+        },
+        {
+          key: "sessions",
+          label: collapsed ? null : t("nav.sessions"),
+          icon: <SparkUserGroupLine size={16} />,
+        },
+        {
+          key: "cron-jobs",
+          label: collapsed ? null : t("nav.cronJobs"),
+          icon: <SparkDateLine size={16} />,
+        },
+        {
+          key: "heartbeat",
+          label: collapsed ? null : t("nav.heartbeat"),
+          icon: <SparkVoiceChat01Line size={16} />,
+        },
+      ],
+    },
+    {
+      key: "agent-group",
+      label: collapsed ? null : t("nav.agent"),
+      children: [
+        // "文件"菜单已移至"我的空间"Tab中
+        // {
+        //   key: "workspace",
+        //   label: collapsed ? null : t("nav.workspace"),
+        //   icon: <SparkLocalFileLine size={16} />,
+        // },
+        {
+          key: "myspace",
+          label: collapsed ? null : t("nav.myspace"),
+          icon: <SparkLocalFileLine size={16} />,
+        },
+        {
+          key: "skills",
+          label: collapsed ? null : t("nav.skills"),
+          icon: <SparkMagicWandLine size={16} />,
+        },
+        {
+          key: "tools",
+          label: collapsed ? null : t("nav.tools"),
+          icon: <SparkToolLine size={16} />,
+        },
+        {
+          key: "mcp",
+          label: collapsed ? null : t("nav.mcp"),
+          icon: <SparkMcpMcpLine size={16} />,
+        },
+        // ACP 模块已隐藏 — 2026-06-28
+        // {
+        //   key: "acp",
+        //   label: collapsed ? null : t("nav.acp"),
+        //   icon: <SparkScanLine size={16} />,
+        // },
+        {
+          key: "agent-config",
+          label: collapsed ? null : t("nav.agentConfig"),
+          icon: <SparkModifyLine size={16} />,
+        },
+        {
+          key: "agent-stats",
+          label: collapsed ? null : t("nav.agentStats"),
+          icon: <SparkBarChartLine size={16} />,
+        },
+        {
+          key: "knowledge",
+          label: collapsed ? null : t("nav.knowledge", "知识库"),
+          icon: <BookOutlined />,
+        },
+      ],
+    },
+  ];
+
+  // ── Menu items — global settings ──────────────────────────────────────
+
+  const settingsMenuItems: MenuProps["items"] = [
+    {
+      key: "settings-group",
+      label: collapsed ? null : t("nav.settings"),
+      children: [
+        {
+          key: "agents",
+          label: collapsed ? null : t("nav.agents"),
+          icon: <SparkAgentLine size={16} />,
+        },
+        {
+          key: "models",
+          label: collapsed ? null : t("nav.models"),
+          icon: <SparkModePlazaLine size={16} />,
+        },
+        // {
+        //   key: "environments",
+        //   label: collapsed ? null : t("nav.environments"),
+        //   icon: <SparkInternetLine size={16} />,
+        // },
+        {
+          key: "security",
+          label: collapsed ? null : t("nav.security"),
+          icon: <SparkBrowseLine size={16} />,
+        },
+        {
+          key: "token-usage",
+          label: collapsed ? null : t("nav.tokenUsage"),
+          icon: <SparkDataLine size={16} />,
+        },
+        {
+          key: "backups",
+          label: collapsed ? null : t("nav.backups"),
+          icon: <SparkSaveLine size={16} />,
+        },
+        {
+          key: "voice-transcription",
+          label: collapsed ? null : t("nav.voiceTranscription"),
+          icon: <SparkMicLine size={16} />,
+        },
+        {
+          key: "evolution",
+          label: collapsed ? null : t("nav.evolution", "进化"),
+          icon: <ThunderboltOutlined />,
+        },
+        {
+          key: "admin",
+          label: collapsed ? null : t("nav.adminPanel", "后台管理"),
+          icon: <CrownOutlined />,
+        },
+      ],
+    },
+  ];
+
+  // Append plugin menu items as a group (only when there are plugins)
+  if (pluginRoutes.length > 0) {
+    settingsMenuItems.push({
+      key: "plugins-group",
+      label: collapsed ? null : t("nav.plugins"),
+      children: pluginRoutes.map((route) => ({
+        key: route.path.replace(/^\//, ""),
+        label: collapsed ? null : route.label,
+        icon: <span style={{ fontSize: 16 }}>{route.icon}</span>,
+      })),
+    } as any);
+  }
+
+  // ── Menu items — workbench ──────────────────────────────────────
+
+  const workbenchMenuItems: MenuProps["items"] = useMemo(() => {
+    // Base items: "全部场景"
+    const items: MenuProps["items"] = [
+      {
+        key: "category-all",
+        label: collapsed ? null : "全部场景",
+        icon: <SparkModePlazaLine size={16} />,
+      },
+    ];
+    
+    // Add dynamic tags from API
+    if (categoryData && Array.isArray(categoryData)) {
+      // Add divider
+      items.push({ type: 'divider' });
+      
+      // Render dimension tags with children
+      categoryData.forEach((dimension: any) => {
+        if (dimension.children && dimension.children.length > 0) {
+          items.push({
+            key: dimension.id,
+            label: collapsed ? null : dimension.name,
+            icon: <span style={{ fontSize: 16 }}>{dimension.icon}</span>,
+            children: dimension.children.map((category: any) => ({
+              key: `category-${category.id}`,
+              label: collapsed ? null : category.name,
+              icon: <span style={{ fontSize: 16 }}>{category.icon}</span>,
+            })),
+          });
+        }
+      });
+    }
+    
+    // Add management section
+    items.push({ type: 'divider' });
+    items.push({
+      key: "management-group",
+      label: collapsed ? null : "管理",
+      icon: <CrownOutlined />,
+      children: [
+        {
+          key: "scene-management",
+          label: collapsed ? null : "场景管理",
+          icon: <SparkModePlazaLine size={16} />,
+        },
+        {
+          key: "tag-management",
+          label: collapsed ? null : "标签管理",
+          icon: <SparkLocalFileLine size={16} />,
+        },
+      ],
+    });
+    
+    return items;
+  }, [collapsed, categoryData]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <Sider
+      width={collapsed ? 72 : 240}
+      className={`${styles.sider}${
+        collapsed ? ` ${styles.siderCollapsed}` : ""
+      }${isDark ? ` ${styles.siderDark}` : ""}`}
+    >
+      {collapsed ? (
+        <nav className={styles.collapsedNav}>
+          {filterMenuItems(collapsedNavItems).map((item) => {
+            const isActive = selectedKey === item.key;
+            return (
+              <Tooltip
+                key={item.key}
+                title={item.label}
+                placement="right"
+                overlayInnerStyle={{
+                  background: "rgba(0,0,0,0.75)",
+                  color: "#fff",
+                }}
+              >
+                <button
+                  className={`${styles.collapsedNavItem} ${
+                    isActive ? styles.collapsedNavItemActive : ""
+                  }`}
+                  onClick={() => navigate(item.path)}
+                >
+                  {item.icon}
+                </button>
+              </Tooltip>
+            );
+          })}
+        </nav>
+      ) : (
+        <>
+          {/* Agent selector at top - always show when user has at least one agent */}
+          {agents.length >= 1 && (
+            <div className={styles.agentSelectorWrapper}>
+              <Select
+                value={selectedAgent}
+                onChange={(val) => {
+                  setSelectedAgent(val);
+                  navigate("/chat");
+                }}
+                size="small"
+                style={{ width: "100%", marginBottom: 8 }}
+                options={agents.map((a) => ({
+                  value: a.id,
+                  label: getAgentDisplayName(a, t),
+                }))}
+                placeholder={t("nav.selectAgent", "Select Agent")}
+              />
+            </div>
+          )}
+
+          {/* Workbench menu or Agent-scoped menu */}
+          {isWorkbench ? (
+            <Menu
+              key={`workbench-menu-${workbenchOpenKeys.join('-')}`}
+              mode="inline"
+              selectedKeys={[workbenchSelectedKey]}
+              openKeys={workbenchOpenKeys}
+              onOpenChange={(openKeys) => {
+                // 手风琴模式：同一时间只展开一个一级菜单
+                // 找出新增的 key（在 openKeys 中但不在当前 state 中）
+                const addedKey = openKeys.find(key => !workbenchOpenKeys.includes(key));
+                
+                if (addedKey) {
+                  // 有新展开的菜单：只保留这个，实现手风琴效果
+                  setWorkbenchOpenKeys([addedKey]);
+                } else {
+                  // 没有新增，说明是收起操作
+                  setWorkbenchOpenKeys(openKeys);
+                }
+              }}
+              onClick={({ key }) => {
+                // Handle workbench menu clicks
+                if (key === 'category-all') {
+                  navigate('/workbench');
+                } else if (key.startsWith('category-')) {
+                  // Filter scenes by category
+                  const category = key.replace('category-', '');
+                  navigate(`/workbench?category=${category}`);
+                } else if (key === 'scene-management') {
+                  navigate('/workbench?management=scenes');
+                } else if (key === 'tag-management') {
+                  navigate('/workbench?management=tags');
+                }
+              }}
+              items={workbenchMenuItems}
+              theme={isDark ? "dark" : "light"}
+              className={styles.sideMenu}
+            />
+          ) : (
+            <>
+              {/* Agent-scoped section: Chat + Control + Workspace */}
+              <div className={styles.agentScopedSection}>
+                <Menu
+                  mode="inline"
+                  selectedKeys={[selectedKey]}
+                  openKeys={DEFAULT_OPEN_KEYS}
+                  onClick={({ key }) => {
+                    const path = KEY_TO_PATH[String(key)];
+                    if (path) navigate(path);
+                  }}
+                  items={filterMenuItems(agentMenuItems)}
+                  theme={isDark ? "dark" : "light"}
+                  className={styles.sideMenu}
+                />
+              </div>
+
+              {/* Global settings section */}
+              <Menu
+                mode="inline"
+                selectedKeys={[selectedKey]}
+                openKeys={[
+                  ...DEFAULT_OPEN_KEYS,
+                  ...(pluginRoutes.length > 0 ? ["plugins-group"] : []),
+                ]}
+                onClick={({ key }) => {
+                  const path = KEY_TO_PATH[String(key)] ?? `/${String(key)}`;
+                  navigate(path);
+                }}
+                items={filterMenuItems(settingsMenuItems)}
+                theme={isDark ? "dark" : "light"}
+                className={styles.sideMenu}
+              />
+            </>
+          )}
+
+          <div className={styles.collapseToggleContainer}>
+            <Button
+              type="text"
+              icon={
+                collapsed ? (
+                  <SparkMenuExpandLine size={20} />
+                ) : (
+                  <SparkMenuFoldLine size={20} />
+                )
+              }
+              onClick={() => setCollapsed(!collapsed)}
+              className={styles.collapseToggle}
+            />
+          </div>
+        </>
+      )}
+    </Sider>
+  );
+}

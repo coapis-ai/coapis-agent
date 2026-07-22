@@ -3,12 +3,12 @@ import { Row, Col, Input, Select, Tag, Empty, Spin, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import SceneCard from './SceneCard';
-import FloatingChatWindow from '../../components/FloatingChatWindow';
 import TagManagement from '../Admin/TagManagement';
 import SceneManagement from '../Admin/SceneManagement';
 import type { SceneConfig, SceneListResponse } from './types';
 import styles from './index.module.less';
 import { getApiToken } from '../../api/config';
+import { useChatWindow } from '../../contexts/ChatWindowContext';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -31,9 +31,8 @@ const Workbench: React.FC = () => {
   const categoryParam = searchParams.get('category') || 'all';
   const managementMode = searchParams.get('management'); // 'scenes' | 'tags'
   
-  // Embedded chat state
-  const [drawerVisible, setDrawerVisible] = useState(false);
-  const [selectedScene, setSelectedScene] = useState<SceneConfig | null>(null);
+  // 使用全局聊天窗口状态
+  const { openChat } = useChatWindow();
 
   // Load scenes
   useEffect(() => {
@@ -92,14 +91,8 @@ const Workbench: React.FC = () => {
   };
 
   const handleEnterScene = (scene: SceneConfig) => {
-    // Open embedded chat drawer
-    setSelectedScene(scene);
-    setDrawerVisible(true);
-  };
-  
-  const handleCloseDrawer = () => {
-    setDrawerVisible(false);
-    setSelectedScene(null);
+    // 打开全局聊天窗口，传入场景
+    openChat(scene);
   };
 
   // Get unique tags
@@ -211,13 +204,6 @@ const Workbench: React.FC = () => {
           </Tag>
         </div>
       )}
-      
-      {/* Floating Chat Window */}
-      <FloatingChatWindow
-        visible={drawerVisible}
-        scene={selectedScene}
-        onClose={handleCloseDrawer}
-      />
     </div>
   );
 };

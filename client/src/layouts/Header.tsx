@@ -1,7 +1,6 @@
-import { Layout, Space, Badge, Spin, Drawer, Button as AntButton } from "antd";
+import { Layout, Space, Badge, Spin, Drawer } from "antd";
 import { useTranslation } from "react-i18next";
 import { Button, Modal } from "@agentscope-ai/design";
-import { useNavigate, useLocation } from "react-router-dom";
 import styles from "./index.module.less";
 import api from "../api";
 import {
@@ -12,7 +11,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CopyOutlined, CheckOutlined, TagOutlined, MenuOutlined, AppstoreOutlined, MessageOutlined } from "@ant-design/icons";
+import { CopyOutlined, CheckOutlined, TagOutlined, MenuOutlined } from "@ant-design/icons";
 
 // Mobile hook
 import useIsMobile from "../hooks/useIsMobile";
@@ -54,16 +53,11 @@ function UpdateCodeBlock({ code }: { code: string }) {
 export default function Header() {
   const { t, i18n } = useTranslation();
   const { isDark: _isDark } = useTheme();
-  const navigate = useNavigate();
-  const location = useLocation();
   const [version, setVersion] = useState<string>("");
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateMarkdown, setUpdateMarkdown] = useState<string>("");
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  
-  // Determine active tab based on current path
-  const activeTab = location.pathname === '/workbench' ? 'workbench' : 'console';
 
   useEffect(() => {
     api
@@ -163,28 +157,10 @@ export default function Header() {
                 </span>
               </Badge>
             )}
-            
+
             <div className={styles.logoDivider} />
-            
-            {/* 工作台 / 控制台 切换按钮 */}
-            <div className={styles.navTabs}>
-              <AntButton
-                type={activeTab === 'workbench' ? 'primary' : 'text'}
-                icon={<AppstoreOutlined />}
-                onClick={() => navigate('/workbench')}
-                className={activeTab === 'workbench' ? styles.navTabActive : styles.navTab}
-              >
-                工作台
-              </AntButton>
-              <AntButton
-                type={activeTab === 'console' ? 'primary' : 'text'}
-                icon={<MessageOutlined />}
-                onClick={() => navigate('/chat')}
-                className={activeTab === 'console' ? styles.navTabActive : styles.navTab}
-              >
-                控制台
-              </AntButton>
-            </div>
+
+            {/* 工作台/控制台切换按钮已移除 - 功能已整合到菜单 */}
           </div>
         )}
         {isMobile ? null : (

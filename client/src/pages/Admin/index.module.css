@@ -22,3 +22,17 @@
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
+
+/* 独立页面样式 */
+.pageContainer {
+  padding: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+/* 响应式：移动端 */
+@media (max-width: 768px) {
+  .adminContainer {
+    padding: 16px;
+  }
+}

@@ -39,7 +39,10 @@
     "reload": "刷新页面"
   },
   "nav": {
+    "home": "首页",
     "chat": "聊天",
+    "workbench": "办公",
+    "myScenes": "我的场景",
     "control": "控制",
     "channels": "频道",
     "sessions": "会话",

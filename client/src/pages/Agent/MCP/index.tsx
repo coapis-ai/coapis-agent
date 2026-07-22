@@ -224,7 +224,7 @@ function MCPPage() {
   return (
     <div className={styles.mcpPage}>
       <PageHeader
-        items={[{ title: t("nav.agent") }, { title: t("mcp.title") }]}
+        items={[{ title: "设置" }, { title: t("mcp.title") }]}
         extra={
           canWrite ? (
             <Button

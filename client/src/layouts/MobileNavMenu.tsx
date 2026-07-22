@@ -7,44 +7,11 @@ import { useUser } from "../contexts/UserContext";
 import { GlobalOutlined, LogoutOutlined } from "@ant-design/icons";
 import { languageApi } from "../api/modules/language";
 import ModelSelector from "../pages/Chat/ModelSelector";
-import {
-  SparkChatTabFill,
-  SparkWifiLine,
-  SparkUserGroupLine,
-  SparkDateLine,
-  SparkVoiceChat01Line,
-  SparkMagicWandLine,
-  SparkToolLine,
-  SparkMcpMcpLine,
-  // SparkScanLine,  // ACP 模块已隐藏 — 2026-06-28
-  SparkModifyLine,
-  SparkModePlazaLine,
-  SparkBarChartLine,
-  SparkAgentLine,
-  SparkSaveLine,
-} from "@agentscope-ai/icons";
+import { MAIN_MENU_ITEMS } from "../config/menuConfig";
 
 interface MobileNavMenuProps {
   onNavigate?: () => void;
 }
-
-const NAV_ITEMS = [
-  { key: "/chat", icon: <SparkChatTabFill size={16} />, labelKey: "nav.chat" },
-  { key: "/channels", icon: <SparkWifiLine size={16} />, labelKey: "nav.channels" },
-  { key: "/sessions", icon: <SparkUserGroupLine size={16} />, labelKey: "nav.sessions" },
-  { key: "/cron-jobs", icon: <SparkDateLine size={16} />, labelKey: "nav.cronJobs" },
-  { key: "/heartbeat", icon: <SparkVoiceChat01Line size={16} />, labelKey: "nav.heartbeat" },
-  { key: "/skills", icon: <SparkMagicWandLine size={16} />, labelKey: "nav.skills" },
-  { key: "/tools", icon: <SparkToolLine size={16} />, labelKey: "nav.tools" },
-  { key: "/mcp", icon: <SparkMcpMcpLine size={16} />, labelKey: "nav.mcp" },
-  // ACP 模块已隐藏 — 2026-06-28
-  // { key: "/acp", icon: <SparkScanLine size={16} />, labelKey: "nav.acp" },
-  { key: "/agent-config", icon: <SparkModifyLine size={16} />, labelKey: "nav.agentConfig" },
-  { key: "/agent-stats", icon: <SparkBarChartLine size={16} />, labelKey: "nav.agentStats" },
-  { key: "/agents", icon: <SparkAgentLine size={16} />, labelKey: "nav.agents" },
-  { key: "/models", icon: <SparkModePlazaLine size={16} />, labelKey: "nav.models" },
-  { key: "/backups", icon: <SparkSaveLine size={16} />, labelKey: "nav.backups" },
-];
 
 export default function MobileNavMenu({ onNavigate }: MobileNavMenuProps) {
   const navigate = useNavigate();
@@ -109,10 +76,10 @@ export default function MobileNavMenu({ onNavigate }: MobileNavMenuProps) {
       <Menu
         mode="inline"
         selectedKeys={[location.pathname]}
-        items={NAV_ITEMS.map((item) => ({
-          key: item.key,
+        items={MAIN_MENU_ITEMS.map((item) => ({
+          key: item.path,
           icon: item.icon,
-          label: t(item.labelKey),
+          label: item.label,
         }))}
         onClick={({ key }) => {
           navigate(key);

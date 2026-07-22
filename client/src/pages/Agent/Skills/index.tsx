@@ -80,7 +80,7 @@ function SkillsPage() {
   return (
     <div className={styles.skillsPage}>
       <PageHeader
-        items={[{ title: t("nav.agent") }, { title: t("skills.title") }]}
+        items={[{ title: "设置" }, { title: t("skills.title") }]}
       />
 
       <Tabs

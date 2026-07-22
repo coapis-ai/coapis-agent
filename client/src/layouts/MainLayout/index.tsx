@@ -2,6 +2,7 @@ import { Suspense, useEffect } from "react";
 import { Layout, Spin } from "antd";
 import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { MessageOutlined, CloseOutlined } from "@ant-design/icons";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
 import useIsMobile from "../../hooks/useIsMobile";
@@ -12,6 +13,8 @@ import { usePlugins } from "../../plugins/PluginContext";
 import { agentsApi } from "../../api/modules/agents";
 import { useAgentStore } from "../../stores/agentStore";
 import { isDefaultAgent } from "../../utils/agentDisplayName";
+import FloatingChatWindow from "../../components/FloatingChatWindow";
+import { useChatWindow } from "../../contexts/ChatWindowContext";
 import styles from "../index.module.less";
 
 // Chat is eagerly loaded (default landing page)
@@ -29,6 +32,7 @@ const WorkspacePage = lazyImportWithRetry("../../pages/Agent/Workspace");
 const MCPPage = lazyImportWithRetry("../../pages/Agent/MCP");
 // ACP 模块已隐藏 — 2026-06-28
 // const ACPPage = lazyImportWithRetry("../../pages/Agent/ACP");
+const SettingsPage = lazyImportWithRetry("../../pages/Settings");
 const ModelsPage = lazyImportWithRetry("../../pages/Settings/Models");
 // 环境变量功能已隐藏 — 2026-07-05
 // const EnvironmentsPage = lazyImportWithRetry(
@@ -97,6 +101,9 @@ export default function MainLayout() {
   const { pluginRoutes } = usePlugins();
   const isMobile = useIsMobile();
   const { setAgents, setSelectedAgent } = useAgentStore();
+  
+  // 使用全局聊天窗口状态
+  const { visible: chatVisible, scene: chatScene, openChat, closeChat } = useChatWindow();
 
   // Load agents globally (works on both desktop and mobile)
   useEffect(() => {
@@ -195,6 +202,7 @@ export default function MainLayout() {
                   <Route path="/workspace/myspace" element={<MySpacePage />} />
                   <Route path="/user-system" element={<UserSystemPage />} />
                   <Route path="/user/profile" element={<UserProfilePage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/admin" element={<AdminPage />} />
                   <Route path="/evolution" element={<MultiLayerEvolutionPage />} />
                   <Route path="/workbench" element={<WorkbenchPage />} />
@@ -219,6 +227,65 @@ export default function MainLayout() {
           </div>
         </Content>
       </Layout>
+      
+      {/* 浮动聊天按钮 - 在聊天界面时隐藏 */}
+      {!isChatRoute && (
+        <>
+          {/* 浮动按钮 */}
+          <div 
+            style={{
+              position: 'fixed',
+              right: 24,
+              bottom: 24,
+              zIndex: 1000,
+            }}
+          >
+            <div
+              onClick={() => {
+                if (chatVisible) {
+                  closeChat();
+                } else {
+                  openChat(null); // 无场景，使用默认智能体
+                }
+              }}
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                transition: 'all 0.3s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.1)';
+                e.currentTarget.style.boxShadow = '0 6px 16px rgba(102, 126, 234, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
+              }}
+            >
+              {chatVisible ? (
+                <CloseOutlined style={{ fontSize: 20 }} />
+              ) : (
+                <MessageOutlined style={{ fontSize: 24 }} />
+              )}
+            </div>
+          </div>
+          
+          {/* 全局浮动聊天窗口 */}
+          <FloatingChatWindow
+            visible={chatVisible}
+            scene={chatScene}
+            onClose={closeChat}
+          />
+        </>
+      )}
     </Layout>
   );
 }

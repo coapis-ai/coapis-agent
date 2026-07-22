@@ -35,8 +35,8 @@ export function DefaultModelSelector({
     setLoading(true);
     api
       .get(`/models/by-type/${modelType}`)
-      .then((res: any) => {
-        setModels(res.data);
+      .then((data: any) => {
+        setModels(Array.isArray(data) ? data : []);
       })
       .catch((err) => {
         console.error(`Failed to load ${modelType} models:`, err);

@@ -39,7 +39,10 @@
     "reload": "Reload"
   },
   "nav": {
+    "home": "Home",
     "chat": "Chat",
+    "workbench": "Office",
+    "myScenes": "My Scenes",
     "control": "Control",
     "channels": "Channels",
     "sessions": "Sessions",

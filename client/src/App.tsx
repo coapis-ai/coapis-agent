@@ -25,6 +25,7 @@ import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import UserProvider from "./contexts/UserContext";
 import { PluginProvider, usePlugins } from "./plugins/PluginContext";
 import { ApprovalProvider } from "./contexts/ApprovalContext";
+import { ChatWindowProvider } from "./contexts/ChatWindowContext";
 import { Suspense } from "react";
 import { lazyImportWithRetry } from "./utils/lazyWithRetry";
 
@@ -245,7 +246,9 @@ function App() {
     <ThemeProvider>
       <UserProvider>
         <PluginProvider>
-          <AppInner />
+          <ChatWindowProvider>
+            <AppInner />
+          </ChatWindowProvider>
         </PluginProvider>
       </UserProvider>
     </ThemeProvider>

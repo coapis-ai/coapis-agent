@@ -1118,6 +1118,7 @@ async def filter_openrouter_models(
     description="Get all models of a specific type across all providers",
 )
 async def get_models_by_type(
+    request: Request,
     model_type: str = Path(
         ...,
         description="Model type: chat, embedding, rerank, audio, or vision",
@@ -1127,7 +1128,7 @@ async def get_models_by_type(
         description="Only return models from configured providers",
     ),
     manager: ProviderManager = Depends(get_provider_manager),
-) -> List[Dict[str, Any]]:
+):
     """Get all models of a specific type.
     
     This API is used by:
@@ -1154,7 +1155,7 @@ async def get_models_by_type(
 )
 async def get_default_models(
     manager: ProviderManager = Depends(get_provider_manager),
-) -> Dict[str, Any]:
+):
     """Get default models configuration."""
     return manager.get_default_models().to_dict()
 
@@ -1170,7 +1171,7 @@ async def get_default_model_by_type(
         description="Model type: chat, embedding, rerank, audio, or vision",
     ),
     manager: ProviderManager = Depends(get_provider_manager),
-) -> Optional[Dict[str, str]]:
+):
     """Get default model for a specific type."""
     # Validate model type
     valid_types = ["chat", "embedding", "rerank", "audio", "vision"]

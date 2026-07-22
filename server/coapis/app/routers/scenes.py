@@ -63,12 +63,11 @@ def get_scene_service() -> SceneAgentService:
 # User API Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("", response_model=SceneListResponse)
+@router.get("", response_model=SceneListResponse, dependencies=[])
 async def list_scenes(
     status: Optional[str] = Query(None, description="Filter by status"),
     category: Optional[str] = Query(None, description="Filter by category"),
     tag: Optional[str] = Query(None, description="Filter by tag"),
-    current_user: dict = Depends(get_current_user),
     service: SceneAgentService = Depends(get_scene_service),
 ) -> SceneListResponse:
     """List all available scenes.
@@ -83,7 +82,7 @@ async def list_scenes(
     Returns:
         SceneListResponse with scene list
     """
-    logger.info(f"User {current_user.get('username')} listing scenes")
+    logger.info("Listing scenes (public API)")
     return service.list_scenes(status=status or "active", category=category, tag=tag)
 
 

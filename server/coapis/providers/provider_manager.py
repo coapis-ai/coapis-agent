@@ -1879,7 +1879,11 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         provider_id: str,
         model_id: str,
     ) -> None:
-        """Set default model for a specific type."""
+        """Set default model for a specific type.
+        
+        Also syncs to active_model.json for backward compatibility when
+        setting chat model.
+        """
         # Verify the model exists
         provider = self.get_provider(provider_id)
         if not provider:
@@ -1911,6 +1915,18 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         )
         self.default_models.set_by_type(model_type, slot)
         self._save_default_models()
+        
+        # Sync to active_model for backward compatibility (chat only)
+        if model_type == "chat":
+            self.active_model = ModelSlotConfig(
+                provider_id=provider_id,
+                model=model_id,
+            )
+            self.save_active_model(self.active_model)
+            logger.info(
+                f"✓ Synced active_model with default_models.chat: "
+                f"{provider_id}/{model_id}"
+            )
         
         logger.info(
             f"✓ Set default {model_type} model: {provider_id}/{model_id}"

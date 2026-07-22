@@ -7,6 +7,7 @@ import {
   SafetyOutlined, StopOutlined, PlayCircleOutlined, TagOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import PermissionMatrix from './components/PermissionMatrix';
 import SceneManagement from './SceneManagement';
@@ -54,7 +55,21 @@ export default function AdminPage() {
 
 function AdminDashboard() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState('overview');
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  // 从 URL 参数读取 tab
+  const pathParts = location.pathname.split('/');
+  const urlTab = pathParts[2] || 'overview';
+  const [activeTab, setActiveTab] = useState(urlTab);
+
+  // 监听 URL 变化
+  useEffect(() => {
+    const newTab = pathParts[2] || 'overview';
+    if (newTab !== activeTab) {
+      setActiveTab(newTab);
+    }
+  }, [location.pathname]);
 
   const tabItems = [
     {
@@ -97,7 +112,10 @@ function AdminDashboard() {
   return (
     <Tabs
       activeKey={activeTab}
-      onChange={setActiveTab}
+      onChange={(key) => {
+        setActiveTab(key);
+        navigate(`/admin/${key}`);
+      }}
       type="card"
       size="large"
       className={styles.adminTabs}
@@ -108,7 +126,7 @@ function AdminDashboard() {
 
 // ── Overview Tab ──────────────────────────────────────────────────────────
 
-function OverviewTab() {
+export function OverviewTab() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<any>(null);
@@ -186,7 +204,7 @@ function OverviewTab() {
 
 // ── Users Tab ─────────────────────────────────────────────────────────────
 
-function UsersTab() {
+export function UsersTab() {
   const { t } = useTranslation();
   const [users, setUsers] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -616,7 +634,7 @@ function UsersTab() {
 
 // ── Audit Tab ─────────────────────────────────────────────────────────────
 
-function AuditTab() {
+export function AuditTab() {
   const { t } = useTranslation();
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -659,7 +677,7 @@ function AuditTab() {
 
 // ── Config Tab ────────────────────────────────────────────────────────────
 
-function ConfigTab() {
+export function ConfigTab() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<any>(null);
@@ -702,7 +720,7 @@ function ConfigTab() {
 
 // ── Permissions Tab ───────────────────────────────────────────────────────
 
-function PermissionsTab() {
+export function PermissionsTab() {
   const { t } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState('roles');
   const [loading, setLoading] = useState(false);

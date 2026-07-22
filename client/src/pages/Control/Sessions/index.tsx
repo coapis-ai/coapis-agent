@@ -165,7 +165,7 @@ function SessionsPage() {
   return (
     <div className={styles.sessionsPage}>
       <PageHeader
-        items={[{ title: t("nav.control") }, { title: t("sessions.title") }]}
+        items={[{ title: "设置" }, { title: t("sessions.title") }]}
         extra={
           <div className={styles.headerRight}>
             <FilterBar

@@ -90,8 +90,14 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
 
   // 加载场景数据
   useEffect(() => {
-    if (visible && scene) {
-      enterScene();
+    if (visible) {
+      if (scene) {
+        // 场景聊天：调用 enterScene API
+        enterScene();
+      } else {
+        // 普通聊天：清空场景数据，使用默认智能体
+        setChatData(null);
+      }
     }
   }, [visible, scene]);
 
@@ -288,7 +294,8 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
     };
   }, [isResizing, resizeCorner, minWidth, minHeight]);
 
-  if (!scene) return null;
+  // 如果不可见，不渲染
+  if (!visible) return null;
 
   return (
     <div
@@ -309,7 +316,8 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
           <div className={styles.loading}>
             <Spin size="large" tip="加载中..." />
           </div>
-        ) : chatData ? (
+        ) : scene && chatData ? (
+          // 场景聊天
           <ChatWrapper
             mode="embedded"
             sessionId={chatData.chat_id}
@@ -326,6 +334,19 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
               console.error('Chat error:', error);
               message.error('聊天发生错误');
             }}
+          >
+            <ChatPage />
+          </ChatWrapper>
+        ) : !scene ? (
+          // 无场景模式：默认智能体聊天
+          <ChatWrapper
+            mode="embedded"
+            showToolbar={true}
+            compactLayout={true}
+            onClose={onClose}
+            onTogglePin={() => setIsPinned(!isPinned)}
+            isPinned={isPinned}
+            onDragStart={handleDragStart}
           >
             <ChatPage />
           </ChatWrapper>

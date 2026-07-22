@@ -522,6 +522,12 @@ PUBLIC_PREFIXES: tuple = (
     "/coapis-symbol.svg",
     # Workbench public APIs (no auth required)
     "/api/scenes/workbench",
+    "/api/scenes",  # Scene list for workbench (read-only)
+    "/api/admin/tags",  # Tag list for workbench (read-only)
+    "/api/scenes/categories/grouped",  # Categories for workbench
+    # Model management APIs (read-only, for default model selector)
+    "/api/models/by-type",  # Get models by type
+    "/api/models/default-models",  # Get/set default models
     "/favicon.ico",
     "/robots.txt",
 )

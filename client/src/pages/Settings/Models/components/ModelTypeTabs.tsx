@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { ProviderInfo } from "@/api/types/provider";
+import styles from "../index.module.less";
 
 interface ModelTypeTabsProps {
   activeType: string | undefined;
@@ -56,16 +57,16 @@ export function ModelTypeTabs({
   }, [providers]);
 
   return (
-    <div className="model-type-tabs">
+    <div className={styles.modelTypeTabs}>
       {typeCounts.map(({ type, icon, labelKey, count }) => (
         <div
           key={type}
-          className={`model-type-tab ${activeType === type ? "active" : ""}`}
+          className={`${styles.modelTypeTab} ${activeType === type ? styles.active : ""}`}
           onClick={() => onChange(activeType === type ? undefined : type)}
         >
-          <span className="tab-icon">{icon}</span>
-          <span className="tab-label">{t(labelKey)}</span>
-          <span className="tab-count">({count})</span>
+          <span className={styles.tabIcon}>{icon}</span>
+          <span className={styles.tabLabel}>{t(labelKey)}</span>
+          <span className={styles.tabCount}>({count})</span>
         </div>
       ))}
     </div>
