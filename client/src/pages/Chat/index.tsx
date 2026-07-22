@@ -1222,7 +1222,7 @@ export default function ChatPage() {
             type: f.type 
           }))
         : undefined;
-      
+
       // ⭐ 构建消息对象：只保留必要字段，避免传递只读属性（如 cards）
       // AgentScope 运行时会尝试修改消息对象的 cards 属性
       // 如果传递了包含 cards 的冻结对象，会报 TypeError
@@ -1232,31 +1232,11 @@ export default function ChatPage() {
               role: lastMsg.role,
               type: lastMsg.type,
               content: rewrittenContent,
-              // 只保留 session 的必要字段，不传递可能包含 cards 的整个对象
-              ...(lastMsg.session && typeof lastMsg.session === 'object' && 'session_id' in lastMsg.session ? {
-                session: {
-                  session_id: (lastMsg.session as any).session_id,
-                  user_id: (lastMsg.session as any).user_id,
-                  channel: (lastMsg.session as any).channel,
-                  agent_id: (lastMsg.session as any).agent_id,
-                }
-              } : {}),
+              session: lastMsg.session,
+              // ✅ 只复制需要的属性，不复制 cards
             },
           ]
-        : lastInput.map((msg: any) => ({
-            // 同样过滤 lastInput 中的消息，确保不传递只读属性
-            role: msg.role,
-            type: msg.type,
-            content: msg.content,
-            ...(msg.session && typeof msg.session === 'object' && 'session_id' in msg.session ? {
-              session: {
-                session_id: msg.session.session_id,
-                user_id: msg.session.user_id,
-                channel: msg.session.channel,
-                agent_id: msg.session.agent_id,
-              }
-            } : {}),
-          }));
+        : lastInput;
 
       const requestBody = {
         input: rewrittenInput,
