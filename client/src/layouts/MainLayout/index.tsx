@@ -51,6 +51,13 @@ const MySpacePage = lazyImportWithRetry("../../pages/MySpace/index");
 const UserSystemPage = lazyImportWithRetry("../../pages/UserSystem/index");
 const UserProfilePage = lazyImportWithRetry("../../pages/UserProfile/index");
 const AdminPage = lazyImportWithRetry("../../pages/Admin/index");
+const AdminOverviewPage = lazyImportWithRetry("../../pages/Admin/Overview");
+const AdminUsersPage = lazyImportWithRetry("../../pages/Admin/Users");
+const AdminPermissionsPage = lazyImportWithRetry("../../pages/Admin/Permissions");
+const AdminAuditPage = lazyImportWithRetry("../../pages/Admin/Audit");
+const AdminConfigPage = lazyImportWithRetry("../../pages/Admin/Config");
+const AdminScenesPage = lazyImportWithRetry("../../pages/Admin/Scenes");
+const AdminTagsPage = lazyImportWithRetry("../../pages/Admin/Tags");
 const MultiLayerEvolutionPage = lazyImportWithRetry("../../pages/MultiLayerEvolution/index");
 const WorkbenchPage = lazyImportWithRetry("../../pages/Workbench/index");
 // 知识库功能 - 企业版扩展
@@ -86,6 +93,16 @@ const pathToKey: Record<string, string> = {
   "/backups": "backups",
   "/workspace/myspace": "myspace",
   "/user-system": "user-system",
+  "/user/profile": "user-profile",
+  "/settings": "settings",
+  "/admin": "admin",
+  "/admin/overview": "admin-overview",
+  "/admin/users": "admin-users",
+  "/admin/permissions": "admin-permissions",
+  "/admin/audit": "admin-audit",
+  "/admin/config": "admin-config",
+  "/admin/scenes": "admin-scenes",
+  "/admin/tags": "admin-tags",
   "/evolution": "evolution",
   "/workbench": "workbench",
   // "/knowledge": "knowledge",
@@ -204,6 +221,13 @@ export default function MainLayout() {
                   <Route path="/user/profile" element={<UserProfilePage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/admin" element={<AdminPage />} />
+                  <Route path="/admin/overview" element={<AdminOverviewPage />} />
+                  <Route path="/admin/users" element={<AdminUsersPage />} />
+                  <Route path="/admin/permissions" element={<AdminPermissionsPage />} />
+                  <Route path="/admin/audit" element={<AdminAuditPage />} />
+                  <Route path="/admin/config" element={<AdminConfigPage />} />
+                  <Route path="/admin/scenes" element={<AdminScenesPage />} />
+                  <Route path="/admin/tags" element={<AdminTagsPage />} />
                   <Route path="/evolution" element={<MultiLayerEvolutionPage />} />
                   <Route path="/workbench" element={<WorkbenchPage />} />
                   <Route path="/knowledge" element={<KnowledgeBasePage />} />
