@@ -28,7 +28,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from ...models.scene import (
@@ -178,8 +178,8 @@ async def get_scene(
 @router.post("/{scene_id}/enter", response_model=EnterSceneResponse)
 async def enter_scene(
     scene_id: str,
-    http_request: Request,
-    enter_request: Optional[EnterSceneRequest] = None,
+    request: Request,
+    enter_request: Optional[EnterSceneRequest] = Body(None),
     current_user: dict = Depends(get_current_user),
     service: SceneAgentService = Depends(get_scene_service),
 ) -> EnterSceneResponse:
@@ -194,7 +194,7 @@ async def enter_scene(
     
     Args:
         scene_id: Scene ID (e.g., meeting-minutes)
-        http_request: FastAPI Request object (for app.state access)
+        request: FastAPI Request object (for app.state access)
         enter_request: Optional enter scene request (force_new: force create new session)
     
     Returns:
@@ -224,7 +224,7 @@ async def enter_scene(
         from pathlib import Path
         
         # Get or create user's ChatManager from multi_agent_manager
-        manager = getattr(http_request.app.state, "multi_agent_manager", None)
+        manager = getattr(request.app.state, "multi_agent_manager", None)
         if not manager:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
