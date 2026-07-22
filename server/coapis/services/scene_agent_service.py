@@ -343,6 +343,14 @@ class SceneAgentService:
         with open(agent_file, "w", encoding="utf-8") as f:
             json.dump(agent_config.model_dump(), f, indent=2, ensure_ascii=False)
         
+        # Create AGENTS.md (scene-specific system prompt)
+        # ⭐ 场景智能体的 AGENTS.md 只包含场景特定的内容
+        # 通用内容（安全、协作等）在用户智能体的 AGENTS.md 中
+        agents_md_file = agent_dir / "AGENTS.md"
+        if scene_config.system_prompt:
+            agents_md_file.write_text(scene_config.system_prompt, encoding="utf-8")
+            logger.info(f"Created AGENTS.md for scene agent: {agent_id}")
+        
         # Create MEMORY.md (shared evolution memory)
         memory_file = agent_dir / "MEMORY.md"
         if not memory_file.exists():
@@ -389,6 +397,12 @@ class SceneAgentService:
         agent_file = self.agents_dir / f"scene-{scene_config.id}" / "agent.json"
         with open(agent_file, "w", encoding="utf-8") as f:
             json.dump(agent_config.model_dump(), f, indent=2, ensure_ascii=False)
+        
+        # Update AGENTS.md (scene-specific system prompt)
+        agents_md_file = self.agents_dir / f"scene-{scene_config.id}" / "AGENTS.md"
+        if scene_config.system_prompt:
+            agents_md_file.write_text(scene_config.system_prompt, encoding="utf-8")
+            logger.info(f"Updated AGENTS.md for scene agent: scene-{scene_config.id}")
         
         logger.info(f"Updated scene agent: {agent_config.id}")
     

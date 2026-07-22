@@ -950,23 +950,42 @@ class AgentRunner(Runner):
                     from pathlib import Path
                     from ...constant import WORKING_DIR
                     
-                    scene_agent_path = Path(WORKING_DIR) / "agents" / f"scene-{scene_id}" / "agent.json"
-                    if scene_agent_path.exists():
-                        with open(scene_agent_path, "r", encoding="utf-8") as f:
-                            scene_data = json.load(f)
-                        
-                        # 场景基本信息
-                        scene_name = scene_data.get("name", "")
-                        
-                        # 场景智能体的 system_prompt 在 capabilities 下
-                        capabilities = scene_data.get("capabilities", {})
-                        scene_prompt = capabilities.get("system_prompt", "") or scene_data.get("system_prompt", "") or ""
-                        
-                        # 场景技能（优选，不是替换）
-                        scene_skills = capabilities.get("skills", []) or scene_data.get("skills", []) or []
-                        logger.info(f"[Scene] Loaded scene config from file: name={scene_name}, skills={scene_skills}")
+                    scene_agent_dir = Path(WORKING_DIR) / "agents" / f"scene-{scene_id}"
+                    
+                    # 优先从 AGENTS.md 读取场景系统提示词
+                    agents_md_path = scene_agent_dir / "AGENTS.md"
+                    if agents_md_path.exists():
+                        scene_prompt = agents_md_path.read_text(encoding="utf-8")
+                        logger.info(f"[Scene] Loaded scene prompt from AGENTS.md: {len(scene_prompt)} chars")
+                    
+                    # 如果 AGENTS.md 不存在或为空，从 agent.json 读取（向后兼容）
+                    if not scene_prompt:
+                        scene_agent_path = scene_agent_dir / "agent.json"
+                        if scene_agent_path.exists():
+                            with open(scene_agent_path, "r", encoding="utf-8") as f:
+                                scene_data = json.load(f)
+                            
+                            # 场景基本信息
+                            scene_name = scene_data.get("name", "")
+                            
+                            # 场景智能体的 system_prompt 在 capabilities 下
+                            capabilities = scene_data.get("capabilities", {})
+                            scene_prompt = capabilities.get("system_prompt", "") or scene_data.get("system_prompt", "") or ""
+                            
+                            # 场景技能（优选，不是替换）
+                            scene_skills = capabilities.get("skills", []) or scene_data.get("skills", []) or []
+                            logger.info(f"[Scene] Loaded scene config from agent.json: name={scene_name}, skills={scene_skills}")
                     else:
-                        logger.warning(f"[Scene] Scene agent config not found: {scene_agent_path}")
+                        # 从 agent.json 读取场景名称和技能
+                        scene_agent_path = scene_agent_dir / "agent.json"
+                        if scene_agent_path.exists():
+                            with open(scene_agent_path, "r", encoding="utf-8") as f:
+                                scene_data = json.load(f)
+                            scene_name = scene_data.get("name", "")
+                            scene_skills = scene_data.get("skills", []) or scene_data.get("capabilities", {}).get("skills", []) or []
+                    
+                    if not scene_prompt:
+                        logger.warning(f"[Scene] Scene agent has no system prompt: {scene_id}")
                 except Exception as e:
                     logger.warning(f"[Scene] Failed to load scene config from file: {e}")
             
