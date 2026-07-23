@@ -523,6 +523,7 @@ PUBLIC_PREFIXES: tuple = (
     "/logo.png",
     "/coapis-symbol.svg",
     # Workbench public APIs (no auth required)
+    "/api/scenes",  # Scene list (read-only)
     "/api/scenes/workbench",  # Scene list for workbench (read-only)
     "/api/scenes/categories/grouped",  # Categories for workbench
     # ⚠️ 注意：/api/scenes/{scene_id}/enter 需要认证，不能放在 PUBLIC_PREFIXES

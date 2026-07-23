@@ -17,7 +17,7 @@ import FloatingChatWindow from "../../components/FloatingChatWindow";
 import { useChatWindow } from "../../contexts/ChatWindowContext";
 import styles from "../index.module.less";
 
-// Chat is eagerly loaded (default landing page)
+// Chat is eagerly loaded (used by floating chat window)
 import Chat from "../../pages/Chat";
 
 // All other pages are lazily loaded with automatic retry on chunk failure
@@ -192,7 +192,9 @@ export default function MainLayout() {
                 }
               >
                 <Routes>
+                  {/* 根路径和 home 路径都重定向到聊天页面（首页已隐藏） */}
                   <Route path="/" element={<Navigate to="/chat" replace />} />
+                  <Route path="/home" element={<Navigate to="/chat" replace />} />
                   <Route path="/chat/*" element={<div />} />
                   <Route path="/channels" element={<ChannelsPage />} />
                   <Route path="/sessions" element={<SessionsPage />} />
@@ -233,6 +235,7 @@ export default function MainLayout() {
                   <Route path="/admin/tags" element={<AdminTagsPage />} />
                   <Route path="/evolution" element={<MultiLayerEvolutionPage />} />
                   <Route path="/workbench" element={<WorkbenchPage />} />
+                  <Route path="/workbench/:category" element={<WorkbenchPage />} />
                   <Route path="/knowledge" element={<KnowledgeBasePage />} />
                   <Route path="/cross-agent" element={<Navigate to="/evolution" replace />} />
 

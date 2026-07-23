@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Row, Col, Input, Select, Tag, Empty, Spin, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import SceneCard from './SceneCard';
 import TagManagement from '../Admin/TagManagement';
 import SceneManagement from '../Admin/SceneManagement';
@@ -13,22 +13,15 @@ import { useChatWindow } from '../../contexts/ChatWindowContext';
 const { Search } = Input;
 const { Option } = Select;
 
-interface CategoryInfo {
-  id: string;
-  name: string;
-  icon: string;
-}
-
 const Workbench: React.FC = () => {
+  const { category: categoryParam } = useParams<{ category?: string }>();
   const [searchParams] = useSearchParams();
   const [scenes, setScenes] = useState<SceneConfig[]>([]);
-  const [categoryMap, setCategoryMap] = useState<Record<string, string>>({}); // id -> name
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>();
   
-  // Get category and management mode from URL
-  const categoryParam = searchParams.get('category') || 'all';
+  // Get management mode from URL
   const managementMode = searchParams.get('management'); // 'scenes' | 'tags'
   
   // 使用全局聊天窗口状态
@@ -55,33 +48,6 @@ const Workbench: React.FC = () => {
       }
       const scenesData: SceneListResponse = await scenesRes.json();
       setScenes(scenesData.scenes);
-      
-      // Load categories
-      const categoriesRes = await fetch('/api/scenes/categories/grouped', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      if (categoriesRes.ok) {
-        const categoriesData = await categoriesRes.json();
-        
-        // Build category map: id -> name
-        const map: Record<string, string> = {};
-        if (categoriesData?.dimensions) {
-          // Add nature categories
-          const natureCats = categoriesData.dimensions.nature?.categories || [];
-          natureCats.forEach((cat: CategoryInfo) => {
-            map[cat.id] = cat.name;
-          });
-          
-          // Add domain categories
-          const domainCats = categoriesData.dimensions.domain?.categories || [];
-          domainCats.forEach((cat: CategoryInfo) => {
-            map[cat.id] = cat.name;
-          });
-        }
-        setCategoryMap(map);
-      }
     } catch (error) {
       console.error('Failed to load scenes:', error);
       message.error('加载场景失败');
@@ -103,11 +69,11 @@ const Workbench: React.FC = () => {
     return scenes.filter(scene => {
       if (scene.status !== 'active') return false;
       
-      // Filter by category from URL
-      if (categoryParam !== 'all') {
-        // categoryParam是分类ID（如office-common），需要转换为分类名称进行匹配
-        const categoryName = categoryMap[categoryParam];
-        if (categoryName && scene.category !== categoryName) {
+      // Filter by category from URL (使用 primary_tag_id 和 tag_ids 匹配)
+      if (categoryParam && categoryParam !== 'all') {
+        const matchPrimaryTag = scene.primary_tag_id === categoryParam;
+        const matchTagIds = scene.tag_ids && scene.tag_ids.includes(categoryParam);
+        if (!matchPrimaryTag && !matchTagIds) {
           return false;
         }
       }
@@ -125,7 +91,7 @@ const Workbench: React.FC = () => {
       
       return true;
     });
-  }, [scenes, categoryParam, categoryMap, searchText, selectedTag]);
+  }, [scenes, categoryParam, searchText, selectedTag]);
 
   if (loading) {
     return (

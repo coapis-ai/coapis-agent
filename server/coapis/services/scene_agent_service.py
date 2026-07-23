@@ -521,7 +521,7 @@ class SceneAgentService:
     def get_categories_with_dimensions(self) -> Dict[str, Any]:
         """Get categories with dimension grouping.
         
-        Reads from categories.json and returns structured data:
+        Reads from tags.json and returns structured data:
         {
             "dimensions": {
                 "nature": {
@@ -538,24 +538,64 @@ class SceneAgentService:
         Returns:
             Dict with dimension-grouped categories
         """
-        # Read categories.json
-        categories_file = self.data_dir / "categories.json"
+        # Load tags from tag service
+        from ..app.services.tag_service import TagService
+        from ..models.tag import TagType
+        tag_service = TagService(data_dir=self.data_dir)
         
-        if not categories_file.exists():
-            logger.warning(f"categories.json not found at {categories_file}")
-            return {"dimensions": {}}
+        # Get all tags
+        all_tags = tag_service.list_tags(enabled=True)
         
-        try:
-            with open(categories_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+        # Group categories by parent_id (dimension)
+        dimensions = {}
+        
+        # Find all dimension tags (type="dimension")
+        dimension_tags = [t for t in all_tags.tags if t.type == "dimension"]
+        
+        for dim_tag in dimension_tags:
+            # Find all category tags with this parent_id
+            categories = [
+                {
+                    "id": t.id,
+                    "name": t.name,
+                    "icon": t.icon or "",
+                    "description": t.description or "",
+                    "sort_order": t.sort_order or 0,
+                    "scene_count": self._count_scenes_by_tag(t.id)
+                }
+                for t in all_tags.tags
+                if t.type == "category" and t.parent_id == dim_tag.id
+            ]
             
-            # Return dimensions structure
-            return {
-                "dimensions": data.get("dimensions", {})
+            # Sort by sort_order
+            categories.sort(key=lambda x: x["sort_order"])
+            
+            dimensions[dim_tag.id] = {
+                "name": dim_tag.name,
+                "description": dim_tag.description or "",
+                "categories": categories
             }
-        except Exception as e:
-            logger.error(f"Failed to load categories.json: {e}")
-            return {"dimensions": {}}
+        
+        return {"dimensions": dimensions}
+    
+    def _count_scenes_by_tag(self, tag_id: str) -> int:
+        """Count scenes by primary_tag_id or tag_ids.
+        
+        Args:
+            tag_id: Tag ID to count
+            
+        Returns:
+            Number of active scenes with this tag
+        """
+        scenes_file = self._load_scenes_file()
+        count = 0
+        for scene in scenes_file.scenes:
+            if scene.status == "active":
+                if scene.primary_tag_id == tag_id:
+                    count += 1
+                elif scene.tag_ids and tag_id in scene.tag_ids:
+                    count += 1
+        return count
     
     def get_scene_tags(self) -> List[str]:
         """Get all unique scene tags.

@@ -1,0 +1,53 @@
+/**
+ * 企业版前端入口
+ * 基于社区版，加载企业版插件
+ */
+
+import { createRoot } from "react-dom/client";
+import App from "./App.tsx";
+import "./i18n";
+import { installHostExternals } from "./plugins/hostExternals";
+import { registerHostModulesEager } from "./plugins/dynamicModuleRegistry";
+import { initLanguages } from "./utils/preloadLanguages";
+
+// Expose host dependencies (React, antd, etc.) on window
+// so that plugin UI modules can use them without bundling their own copies.
+installHostExternals();
+
+// Dynamic module registration - no generated files needed!
+// Automatically discovers all modules in src/pages at build time
+registerHostModulesEager();
+
+// Preload syntax highlighter languages
+// This fixes dynamic import failures in @ant-design/x CodeHighlighter
+initLanguages();
+
+// 🚀 加载企业版插件（企业版入口会自动注册路由）
+// import("@enterprise/enterprise-entry.ts"); // 企业版插件在 coapis-pro 中，社区版构建时注释掉
+
+if (typeof window !== "undefined") {
+  const originalError = console.error;
+  const originalWarn = console.warn;
+
+  console.error = function (...args: unknown[]) {
+    const msg = args[0]?.toString() || "";
+    if (msg.includes(":first-child") || msg.includes("pseudo class")) {
+      return;
+    }
+    originalError.apply(console, args as []);
+  };
+
+  console.warn = function (...args: unknown[]) {
+    const msg = args[0]?.toString() || "";
+    if (
+      msg.includes(":first-child") ||
+      msg.includes("pseudo class") ||
+      msg.includes("potentially unsafe")
+    ) {
+      return;
+    }
+    originalWarn.apply(console, args as []);
+  };
+}
+
+createRoot(document.getElementById("root")!).render(<App />);

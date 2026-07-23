@@ -57,7 +57,24 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   const [allowedModules, setAllowedModules] = useState<string[]>([]);
   const [permissionsLoaded, setPermissionsLoaded] = useState(false);
 
+  // 工作场景二级菜单（从标签管理系统动态加载）
+  const [workbenchCategories, setWorkbenchCategories] = useState<any[]>([]);
+
   // ── Effects ──────────────────────────────────────────────────────────────
+
+  // Load workbench categories from tag system (nature dimension)
+  useEffect(() => {
+    fetch('/api/scenes/categories/grouped')
+      .then(res => res.json())
+      .then(data => {
+        // 使用 nature 维度的分类（通用分类）
+        const natureCategories = data?.dimensions?.nature?.categories || [];
+        setWorkbenchCategories(natureCategories);
+      })
+      .catch(err => {
+        console.error('Failed to load workbench categories:', err);
+      });
+  }, []);
 
   // Load agents on mount
   useEffect(() => {
@@ -174,16 +191,30 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   // ── Collapsed nav items (all leaf pages) ──────────────────────────────
 
   // ── 一级菜单（按设计方案v4，社区版5项）──────────────────────────────────
-  // 首页、办公、我的场景、我的空间、设置
+  // 首页、工作场景、我的空间、设置
   // 对话功能改用浮动聊天图标（不占菜单）
   
-  // 使用统一的菜单配置
-  const collapsedNavItems = MAIN_MENU_ITEMS.map(item => ({
-    key: item.key,
-    icon: item.icon,
-    path: item.path,
-    label: t(item.labelKey, item.label),
-  }));
+  // 使用统一的菜单配置，并动态添加工作场景二级菜单
+  const collapsedNavItems = MAIN_MENU_ITEMS.map(item => {
+    const menuItem: any = {
+      key: item.key,
+      icon: item.icon,
+      path: item.path,
+      label: t(item.labelKey, item.label),
+    };
+
+    // 工作场景二级菜单（从标签管理系统动态加载）
+    if (item.key === 'workbench' && workbenchCategories.length > 0) {
+      menuItem.children = workbenchCategories.map(cat => ({
+        key: cat.id,
+        icon: <span>{cat.icon}</span>,
+        path: `/workbench/${cat.id}`,
+        label: cat.name,
+      }));
+    }
+
+    return menuItem;
+  });
 
   // ── DEPRECATED: 旧菜单定义（已废弃，保留仅供参考）──────────────────────
   // 按设计方案v4，现在统一使用 collapsedNavItems（5个一级菜单）
@@ -411,12 +442,30 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
             selectedKeys={[selectedKey]}
             defaultOpenKeys={["settings-group"]}
             onClick={({ key }) => {
-              // 处理菜单点击：根据 key 导航到对应路径
-              const menuItem = MAIN_MENU_ITEMS.find(item => item.key === key);
-              if (menuItem) {
-                navigate(menuItem.path);
+              // 处理菜单点击：从 collapsedNavItems 中查找菜单项（包括子菜单）
+              let targetPath: string | undefined;
+              
+              // 先查找一级菜单
+              for (const item of collapsedNavItems) {
+                if (item.key === key) {
+                  targetPath = item.path;
+                  break;
+                }
+                // 再查找二级菜单
+                if (item.children) {
+                  const child = item.children.find((child: any) => child.key === key);
+                  if (child) {
+                    targetPath = child.path;
+                    break;
+                  }
+                }
+              }
+              
+              // 如果找到了路径，导航到该路径
+              if (targetPath) {
+                navigate(targetPath);
               } else {
-                // 设置子菜单项
+                // 回退：使用 KEY_TO_PATH 映射或默认路径
                 const path = KEY_TO_PATH[String(key)] ?? `/${String(key)}`;
                 navigate(path);
               }
