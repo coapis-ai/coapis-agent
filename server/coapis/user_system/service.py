@@ -114,9 +114,15 @@ def _create_default_workspace(username: str) -> None:
     ws_dir = WORKSPACES_DIR / username
     ws_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create minimal agent.json
+    # Get user.id for generating ASCII-safe agent_id
+    user = get_user_by_username(username)
+    internal_agent_id = f"agent:{user.id}" if user else f"agent:{username}"
+    semantic_agent_id = f"user:{username}"
+
+    # Create minimal agent.json with both semantic ID and ASCII-safe agent_id
     agent_config = {
-        "id": f"user:{username}",
+        "id": semantic_agent_id,  # Semantic ID for display
+        "agent_id": internal_agent_id,  # ASCII-safe internal ID for HTTP headers
         "name": f"User:{username}",
         "description": "",
         "workspace_dir": ".",

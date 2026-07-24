@@ -155,6 +155,7 @@ def create_user(
 
     pw_hash, salt = _hash_password(password)
     data["users"][username] = {
+        "username": username,  # 保存用户名
         "display_name": display_name or username,
         "password_hash": pw_hash,
         "salt": salt,

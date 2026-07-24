@@ -65,12 +65,15 @@ export function getApiUrl(path: string): string {
 
 /**
  * Get the API token - 使用混合存储方案
- * 优先级：sessionStorage > localStorage > 构建时TOKEN
+ * 优先级：sessionStorage > localStorage
+ * 
+ * 注意：不再使用构建时TOKEN作为fallback
+ * 原因：构建时TOKEN可能导致前端误判为"已登录"，产生不必要的401错误
  */
 export function getApiToken(): string {
   const stored = getToken();
   if (stored) return stored;
-  return typeof TOKEN !== "undefined" ? TOKEN : "";
+  return "";
 }
 
 /**

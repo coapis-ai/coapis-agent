@@ -103,6 +103,7 @@ from .init import router as init_router
 from .scenes import router as scenes_router
 from .admin_scenes import router as admin_scenes_router
 from .tags import router as tags_router
+from .menus import router as menus_router
 
 router = APIRouter()
 
@@ -165,6 +166,9 @@ router.include_router(admin_scenes_router)
 
 # Tag management router
 router.include_router(tags_router)
+
+# Menu management router
+router.include_router(menus_router)
 
 # Session Execution Manager API
 from .session_execution import router as session_execution_router

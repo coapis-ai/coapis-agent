@@ -449,3 +449,48 @@ class TagService:
             tree.append(tree_item)
         
         return tree
+    
+    def get_main_menu(self) -> List[dict]:
+        """Get main menu configuration from tags.
+        
+        Returns tags with type='menu' and converts them to menu items.
+        
+        Returns:
+            List of menu item dictionaries
+        """
+        tags = self._load_tags()
+        
+        # Get menu tags
+        menu_tags = [
+            t for t in tags 
+            if t.type == TagType.MENU and t.enabled
+        ]
+        
+        # Sort by sortOrder in metadata
+        menu_tags.sort(
+            key=lambda t: t.metadata.get("sortOrder", 0) if t.metadata else 0
+        )
+        
+        # Convert to menu items
+        menu_items = []
+        for tag in menu_tags:
+            metadata = tag.metadata or {}
+            
+            menu_item = {
+                "key": tag.id,
+                "label": tag.name,
+                "labelKey": metadata.get("labelKey", f"nav.{tag.id}"),
+                "icon": tag.icon,
+                "path": metadata.get("path", "/"),
+                "permission": metadata.get("permission"),
+                "sortOrder": metadata.get("sortOrder", 0),
+                "isActive": metadata.get("isActive", True),
+            }
+            
+            # Handle children source (for workbench)
+            if "childrenSource" in metadata:
+                menu_item["childrenSource"] = metadata["childrenSource"]
+            
+            menu_items.append(menu_item)
+        
+        return menu_items

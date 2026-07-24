@@ -386,6 +386,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 is_public = True
                 break
         if is_public:
+            # ⭐ 即使是public路径，也尝试从token中解析用户信息
+            # 这样可以区分"未登录访问"和"已登录访问"
+            auth_header = request.headers.get("authorization", "")
+            username = "anonymous"
+            role = "user"
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+                username = verify_token(token) or "anonymous"
+                if username != "anonymous":
+                    user_info = get_user(username)
+                    if user_info:
+                        role = user_info.get("role", "user")
+            request.state.username = username
+            request.state.role = role
+            request.state.user_info = {"username": username, "role": role}
             return await call_next(request)
 
         # Extract token

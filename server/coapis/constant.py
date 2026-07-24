@@ -523,14 +523,17 @@ PUBLIC_PREFIXES: tuple = (
     "/logo.png",
     "/coapis-symbol.svg",
     # Workbench public APIs (no auth required)
-    "/api/scenes",  # Scene list (read-only)
+    # ⚠️ 注意：只开放只读API，enter需要认证
     "/api/scenes/workbench",  # Scene list for workbench (read-only)
     "/api/scenes/categories/grouped",  # Categories for workbench
-    # ⚠️ 注意：/api/scenes/{scene_id}/enter 需要认证，不能放在 PUBLIC_PREFIXES
+    "/api/scenes/recommendations",  # Scene recommendations (read-only)
+    "/api/scenes/hot",  # Hot scenes (read-only)
     "/api/admin/tags",  # Tag list for workbench (read-only)
     # Model management APIs (read-only, for default model selector)
     "/api/models/by-type",  # Get models by type
     "/api/models/default-models",  # Get/set default models
+    # SSO login APIs (for external system integration)
+    "/api/external",  # SSO login endpoint (no auth required, it's for getting token)
     "/favicon.ico",
     "/robots.txt",
 )

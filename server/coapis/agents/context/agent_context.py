@@ -58,6 +58,8 @@ class AgentContext(InMemoryMemory):
         self._dialog_path: Path | None = (
             Path(dialog_path) if dialog_path else None
         )
+        # Initialize compressed summary
+        self._compressed_summary: str = ""
 
     async def _append_messages_to_dialog(self, messages: list[Msg]) -> int:
         """Append messages to dialog storage file.
@@ -186,6 +188,14 @@ class AgentContext(InMemoryMemory):
     def get_compressed_summary(self) -> str:
         """Get the compressed summary of the memory."""
         return self._compressed_summary
+
+    def update_compressed_summary(self, summary: str) -> None:
+        """Update the compressed summary of the memory.
+
+        Args:
+            summary: The compressed summary text to store.
+        """
+        self._compressed_summary = summary
 
     def state_dict(self) -> dict:
         """Get the state dictionary for serialization."""

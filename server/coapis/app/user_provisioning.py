@@ -78,9 +78,17 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
         request: Optional FastAPI Request for runtime registration with MultiAgentManager
 
     Returns:
-        The agent_id for the user's default agent (e.g., "user:admin")
+        The agent_id for the user's default agent (e.g., "agent:20")
     """
-    agent_id = f"user:{username}"
+    # Get user info for generating ASCII-safe agent_id
+    from .user_system.service import get_user_by_username
+    user = get_user_by_username(username)
+    
+    # Generate ASCII-safe internal agent_id
+    internal_agent_id = f"agent:{user.id}" if user else f"agent:{username}"
+    
+    # Keep semantic ID for backward compatibility
+    semantic_agent_id = f"user:{username}"
     agent_name = display_name or f"Default（{username}）"
 
     # 1. Create workspace directory (unified path: workspaces/{username}/)
@@ -103,13 +111,13 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
     _create_workspace_json_files(workspace_dir, username)
 
     # 3. Build and save agent config
-    _create_agent_config(username, agent_id, agent_name, workspace_dir)
+    _create_agent_config(username, internal_agent_id, semantic_agent_id, agent_name, workspace_dir)
 
     # 3b. Register default agent in user's config.json agents registry
     from coapis.config.config import add_agent_to_registry
     add_agent_to_registry(
         username=username,
-        agent_id=agent_id,
+        agent_id=internal_agent_id,  # Use internal_agent_id for registry
         name=agent_name,
         description="默认智能体",
         workspace_dir="",
@@ -136,10 +144,10 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
 
     # 6. Register agent in MultiAgentManager (if request provided) — critical for runtime visibility
     if request is not None:
-        _register_with_multi_agent_manager(request, agent_id, username, workspace_dir)
+        _register_with_multi_agent_manager(request, internal_agent_id, username, workspace_dir)
 
-    logger.info(f"User workspace initialized for {username} (agent: {agent_id})")
-    return agent_id
+    logger.info(f"User workspace initialized for {username} (agent: {internal_agent_id})")
+    return internal_agent_id
 
 
 def _register_with_multi_agent_manager(request: Any, agent_id: str, username: str, workspace_dir: Path) -> None:
@@ -228,18 +236,28 @@ def _create_workspace_json_files(workspace_dir: Path, username: str) -> None:
 
 def _create_agent_config(
     username: str,
-    agent_id: str,
+    internal_agent_id: str,
+    semantic_agent_id: str,
     agent_name: str,
     workspace_dir: Path,
 ) -> None:
-    """Create agent.json for user's default agent."""
+    """Create agent.json for user's default agent.
+    
+    Args:
+        username: Username (may contain non-ASCII)
+        internal_agent_id: ASCII-safe internal ID (e.g., "agent:20")
+        semantic_agent_id: Semantic ID for display (e.g., "user:张三")
+        agent_name: Display name
+        workspace_dir: Workspace directory path
+    """
     config = load_config()
     fallback_language = config.agents.language or "zh"
 
     template_result = build_agent_template(
         DEFAULT_AGENT_TEMPLATE,
         name=agent_name,
-        agent_id=agent_id,
+        agent_id=internal_agent_id,
+        semantic_agent_id=semantic_agent_id,
         workspace_dir=workspace_dir,
         fallback_language=fallback_language,
         description=f"Default agent for user {username}",
@@ -249,8 +267,8 @@ def _create_agent_config(
     template_result.agent_config.owner = username
 
     # Save agent.json (pass workspace_dir for dynamic agent support)
-    save_agent_config(agent_id, template_result.agent_config, workspace_dir=workspace_dir)
-    logger.info(f"Created agent.json for {username} (agent: {agent_id}, owner: {username})")
+    save_agent_config(internal_agent_id, template_result.agent_config, workspace_dir=workspace_dir)
+    logger.info(f"Created agent.json for {username} (agent_id: {internal_agent_id}, owner: {username})")
 
 
 def ensure_user_workspace_exists(username: str) -> bool:

@@ -49,7 +49,8 @@ export default function AgentSelector({
   };
 
   const handleChange = (value: string) => {
-    const targetAgent = agents?.find((a) => a.id === value);
+    // value should be ASCII-safe agent_id
+    const targetAgent = agents?.find((a) => (a.agent_id || a.id) === value);
 
     // Prevent switching to disabled agent
     if (targetAgent && !targetAgent.enabled) {
@@ -65,16 +66,16 @@ export default function AgentSelector({
   useEffect(() => {
     if (!agents?.length || !selectedAgent) return;
 
-    const currentAgent = agents.find((a) => a.id === selectedAgent);
+    const currentAgent = agents.find((a) => (a.agent_id || a.id) === selectedAgent);
     const fallback = agents.find((a) => isDefaultAgent(a.id)) || agents[0];
 
     if (!currentAgent) {
       // Agent was deleted — no longer in the list
-      if (fallback) setSelectedAgent(fallback.id);
+      if (fallback) setSelectedAgent(fallback.agent_id || fallback.id);
       message.warning(t("agent.currentAgentDeleted"));
     } else if (!currentAgent.enabled) {
       // Agent exists but was disabled
-      if (fallback) setSelectedAgent(fallback.id);
+      if (fallback) setSelectedAgent(fallback.agent_id || fallback.id);
       message.warning(t("agent.currentAgentDisabled"));
     }
   }, [agents, selectedAgent, setSelectedAgent, t]);
@@ -147,7 +148,7 @@ export default function AgentSelector({
         {agents?.map((agent) => (
           <Select.Option
             key={agent.id}
-            value={agent.id}
+            value={agent.agent_id || agent.id}
             disabled={!agent.enabled}
             label={
               <div className={styles.selectedAgentLabel}>

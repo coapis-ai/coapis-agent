@@ -4,6 +4,7 @@ import type { ModelSlotConfig } from "./provider";
 
 export interface AgentSummary {
   id: string;
+  agent_id?: string;  // ASCII-safe internal ID (e.g., "agent:20")
   name: string;
   description: string;
   workspace_dir: string;
@@ -24,6 +25,7 @@ export interface ReorderAgentsResponse {
 
 export interface AgentProfileConfig {
   id: string;
+  agent_id?: string;  // ASCII-safe internal ID (e.g., "agent:20")
   name: string;
   description?: string;
   workspace_dir?: string;

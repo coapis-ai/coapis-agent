@@ -37,6 +37,7 @@ class TagType(str, Enum):
     CATEGORY = "category"     # 分类标签（二级菜单）
     INDUSTRY = "industry"     # 行业标签（场景属性）
     FREQUENCY = "frequency"   # 频率标签（场景属性）
+    MENU = "menu"            # 菜单标签（主菜单配置）
 
 
 class TagConfig(BaseModel):
@@ -54,6 +55,8 @@ class TagConfig(BaseModel):
     enabled: bool = Field(default=True, description="Tag enabled status")
     created_at: Optional[datetime] = Field(default=None, description="Creation timestamp")
     updated_at: Optional[datetime] = Field(default=None, description="Update timestamp")
+    metadata: Optional[dict] = Field(default=None, description="Additional metadata (e.g., menu configuration)")
+    category: Optional[str] = Field(default=None, description="Tag category (business, tech, system)")
     
     class Config:
         json_schema_extra = {

@@ -331,6 +331,9 @@ async def enter_scene(
     user_id = current_user.get("username", "anonymous")
     force_new = enter_request.force_new if enter_request else False
     
+    # ⭐ 调试日志：显示实际获取到的用户
+    logger.info(f"🔍 [enter_scene] scene_id={scene_id}, user_id={user_id}, current_user={current_user}")
+    
     try:
         # Get scene config first (for scene name)
         scene_config = service.get_scene(scene_id)

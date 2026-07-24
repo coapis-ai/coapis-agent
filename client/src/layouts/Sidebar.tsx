@@ -92,13 +92,18 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
 
         // Auto-select: if no valid agent selected, pick the user's default agent
         const current = useAgentStore.getState().selectedAgent;
-        const currentValid = sorted.some((a) => a.id === current);
+        // Check if current selection is valid (match by id or agent_id)
+        const currentValid = sorted.some(
+          (a) => a.id === current || a.agent_id === current
+        );
         if (!currentValid) {
           const defaultAgent = sorted.find((a) => isDefaultAgent(a.id));
           if (defaultAgent) {
-            setSelectedAgent(defaultAgent.id);
+            // Use agent_id (ASCII-safe) if available, fallback to id
+            setSelectedAgent(defaultAgent.agent_id || defaultAgent.id);
           } else if (sorted.length > 0) {
-            setSelectedAgent(sorted[0].id);
+            const first = sorted[0];
+            setSelectedAgent(first.agent_id || first.id);
           }
         }
       })

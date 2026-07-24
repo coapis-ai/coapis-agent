@@ -9,7 +9,9 @@ from pydantic import BaseModel
 from typing import Optional
 
 from .auth import create_token
-from .user_store import create_user, get_user
+from ..user_system.service import create_user as create_user_in_db
+from ..user_system.service import get_user_by_username
+from ..user_system.models import UserCreate
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/external", tags=["external-login"])
@@ -75,25 +77,40 @@ async def sso_login(request: Request, body: SSOLoginRequest):
         raise HTTPException(status_code=401, detail="Invalid SSO token")
     
     # 2. 检查/创建用户
-    user = get_user(body.username)
+    user = get_user_by_username(body.username)
     is_new_user = False
     
     if not user:
         # 自动创建用户（随机密码，用户通过 SSO 登录）
         random_password = secrets.token_urlsafe(32)
-        created = create_user(
-            username=body.username,
-            password=random_password,
-            display_name=body.display_name or body.username,
-            role="user",
-        )
+        try:
+            user_create = UserCreate(
+                username=body.username,
+                password=random_password,
+                display_name=body.display_name or body.username,
+                role="user",
+            )
+            user = create_user_in_db(user_create)
+            is_new_user = True
+            logger.info(f"SSO auto-created user: {body.username} (id={user.id})")
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create user: {e}")
         
-        if not created:
-            raise HTTPException(status_code=500, detail="Failed to create user")
-        
-        user = get_user(body.username)
-        is_new_user = True
-        logger.info(f"SSO auto-created user: {body.username}")
+        # 初始化用户工作空间（agent, skills, workflows等）
+        try:
+            from .user_provisioning import init_user_workspace
+            agent_id = init_user_workspace(
+                body.username,
+                display_name=body.display_name or body.username,
+                request=request
+            )
+            logger.info(f"User {body.username} workspace initialized (agent: {agent_id})")
+        except Exception as e:
+            logger.error(
+                f"Failed to initialize workspace for {body.username}: {e}. "
+                "User created but workspace may be incomplete.",
+                exc_info=True,
+            )
     
     # 3. 更新登录时间（如果函数存在）
     try:
@@ -108,7 +125,7 @@ async def sso_login(request: Request, body: SSOLoginRequest):
     return SSOLoginResponse(
         token=coapis_token,
         username=body.username,
-        display_name=user["display_name"],
+        display_name=user.display_name,
         is_new_user=is_new_user,
     )
 
@@ -137,24 +154,39 @@ async def sso_login_get(
         raise HTTPException(status_code=401, detail="Invalid SSO token")
     
     # 2. 检查/创建用户
-    user = get_user(username)
+    user = get_user_by_username(username)
     is_new_user = False
     
     if not user:
         random_password = secrets.token_urlsafe(32)
-        created = create_user(
-            username=username,
-            password=random_password,
-            display_name=display_name or username,
-            role="user",
-        )
+        try:
+            user_create = UserCreate(
+                username=username,
+                password=random_password,
+                display_name=display_name or username,
+                role="user",
+            )
+            user = create_user_in_db(user_create)
+            is_new_user = True
+            logger.info(f"SSO auto-created user: {username} (id={user.id})")
+        except ValueError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create user: {e}")
         
-        if not created:
-            raise HTTPException(status_code=500, detail="Failed to create user")
-        
-        user = get_user(username)
-        is_new_user = True
-        logger.info(f"SSO auto-created user: {username}")
+        # 初始化用户工作空间（agent, skills, workflows等）
+        try:
+            from .user_provisioning import init_user_workspace
+            agent_id = init_user_workspace(
+                username,
+                display_name=display_name or username,
+                request=request
+            )
+            logger.info(f"User {username} workspace initialized (agent: {agent_id})")
+        except Exception as e:
+            logger.error(
+                f"Failed to initialize workspace for {username}: {e}. "
+                "User created but workspace may be incomplete.",
+                exc_info=True,
+            )
     
     # 3. 更新登录时间（如果函数存在）
     try:

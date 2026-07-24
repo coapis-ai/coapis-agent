@@ -1208,7 +1208,11 @@ class AgentProfileConfig(BaseModel):
     Each agent has its own configuration file with all settings.
     """
 
-    id: str = Field(..., description="Unique agent ID")
+    id: str = Field(..., description="Unique agent ID (semantic, may contain non-ASCII for display)")
+    agent_id: Optional[str] = Field(
+        default=None,
+        description="Internal agent ID (ASCII-safe, used in HTTP headers and runtime). Auto-generated from user.id.",
+    )
     name: str = Field(..., description="Human-readable agent name")
     description: str = Field(default="", description="Agent description")
     workspace_dir: str = Field(

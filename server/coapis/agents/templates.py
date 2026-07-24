@@ -78,15 +78,25 @@ def build_agent_template(
     name: str | None = None,
     description: str | None = None,
     language: str | None = None,
+    semantic_agent_id: str | None = None,
 ) -> AgentTemplateBuildResult:
-    """Build a builtin template into a concrete agent configuration."""
+    """Build a builtin template into a concrete agent configuration.
+    
+    Args:
+        agent_id: ASCII-safe internal agent ID (e.g., "agent:20")
+        semantic_agent_id: Optional semantic ID for display (e.g., "user:张三")
+    """
     resolved_language = language or fallback_language or "zh"
+    
+    # Use semantic_agent_id for display, agent_id for runtime
+    display_id = semantic_agent_id or agent_id
 
     if template_id == DEFAULT_AGENT_TEMPLATE:
         if name is None:
             raise ValueError("Default template requires a name")
         agent_config = AgentProfileConfig(
-            id=agent_id,
+            id=display_id,  # Semantic ID for display
+            agent_id=agent_id,  # ASCII-safe internal ID
             name=name,
             description=description or "",
             workspace_dir=str(workspace_dir),
@@ -104,7 +114,8 @@ def build_agent_template(
 
     if template_id == LOCAL_AGENT_TEMPLATE:
         agent_config = AgentProfileConfig(
-            id=agent_id,
+            id=display_id,  # Semantic ID for display
+            agent_id=agent_id,  # ASCII-safe internal ID
             name=name or "Local Agent",
             description=(
                 description or "An agent running on local deployed models."
@@ -124,7 +135,8 @@ def build_agent_template(
 
     if template_id == QA_AGENT_TEMPLATE:
         agent_config = AgentProfileConfig(
-            id=agent_id,
+            id=display_id,  # Semantic ID for display
+            agent_id=agent_id,  # ASCII-safe internal ID
             name=name or BUILTIN_QA_AGENT_NAME,
             description=description or QA_TEMPLATE_DESCRIPTION,
             workspace_dir=str(workspace_dir),

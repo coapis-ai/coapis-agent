@@ -1081,7 +1081,9 @@ export default function ChatPage() {
 
       // Restore last chat ID for the agent we're switching to
       const restored = getLastChatId(selectedAgent);
-      if (restored) {
+      // ⭐ 场景聊天的chat_id以"scene-"开头，不应该从localStorage恢复
+      // 场景聊天的chat_id是固定的：scene-{scene_id}-{user_id}，由enter_scene API管理
+      if (restored && !restored.startsWith("scene-")) {
         console.log(`[Agent Switch] Restoring chat ${restored} for agent ${selectedAgent}`);
         // Validate that this chat belongs to the current user AND agent before restoring
         // This prevents cross-user and cross-agent data leakage from stale localStorage data
