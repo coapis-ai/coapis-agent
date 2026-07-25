@@ -2,237 +2,190 @@
 
 # CoApis
 
-[![License](https://img.shields.io/badge/License-AGPL%203.0-red.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.9.11-green.svg)](CHANGELOG.md)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/r/coapis/server)
+[![GitHub Stars](https://img.shields.io/github/stars/coapis-ai/coapis-agent?style=social)](https://github.com/coapis-ai/coapis-agent)
+[![GitHub Forks](https://img.shields.io/github/forks/coapis-ai/coapis-agent?style=social)](https://github.com/coapis-ai/coapis-agent)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Version](https://img.shields.io/badge/Version-0.11.0-green.svg)](https://github.com/coapis-ai/coapis-agent/releases)
+[![Docker Pulls](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://github.com/coapis-ai/coapis-agent/pkgs/container/server)
+[![Contributors](https://img.shields.io/badge/Contributors-Welcome-orange.svg)](CONTRIBUTING.md)
 
-**中文** | [English](./README_en.md)
+[中文](./README_zh.md) | **English**
 
 <img src="https://img.icons8.com/color/96/bee.png" alt="CoApis Logo" width="120">
 
-# 企业级 Agent Harness
+# Enterprise Agent Harness Platform
 
-> 一套部署，全团队可用
+> Unified orchestration, security governance, continuous evolution
+> 
+> Amplify your team's AI capabilities
 
-[官网](https://coapis.cn) · [快速开始](#-快速开始)
+[Website](https://coapis.cn) · [Documentation](https://coapis.cn/docs) · [Quick Start](#-quick-start)
 
 ---
 
 </div>
 
-## 🎯 核心价值
+## 📊 Key Metrics
 
-### 企业安装一套，全体可用
-
-企业只需部署一次，全体员工立即使用。零技术门槛——不用懂配置、不用装环境、不用买账号。打开浏览器就能工作，就像用企业微信一样简单。
-
-### 多用户协作，独立空间
-
-团队成员共用同一套系统，但每人有独立的工作空间。你的对话、文件、积累的经验，别人看不到。既共享资源，又保护隐私。
-
-### 多层自主进化
-
-系统会记住你的习惯和偏好，自动学会你常用的操作流程。智能体在交互中持续成长，技能在复用中不断优化。你摸索出的好方法，能沉淀为可复用的技能模板；同事的经验，你也能一键继承。整个团队的智慧在流动、在积累、在进化。
-
-### 企业级七层纵深安全防护
-
-七道防线层层把关：命令风险分级、危险操作拦截、行为实时监控、敏感文件保护、沙箱隔离运行、资源配额控制、操作全程审计。就像给企业装了一套保险箱，既让员工能干活，又防止出乱子。
-
-### 多层记忆与知识提炼
-
-系统会记住关键信息、提取有价值的知识、沉淀可复用的经验。短期对话上下文、长期偏好积累、核心工作理念——项目背景、客户偏好、操作技巧都妥善保存，随时能调出来。就像有个永不疲倦的助手在帮你整理笔记，把零散的信息变成可检索的知识库。
-
-### 办公与业务系统融合赋能
-
-连接企业现有系统，打通数据和工作流。不是另起炉灶，而是增强现有工具，让AI成为工作的一部分，构建真正的企业级 Agent Harness。
+| 🎯 **Rich** | 🔒 **7-Layer** | 📈 **50%-75%** | 🏢 **Multi-User** |
+|------------|---------------|---------------|------------------|
+| Tools & Scenarios | Security Defense | Efficiency Gain | Private Workspaces |
 
 ---
 
-## 🏗️ 核心能力架构
+## 🎯 What is CoApis?
 
-### 工具能力
+**CoApis is your enterprise's agent orchestrator.**
 
-智能体能做什么。提供文件操作、Shell 执行、浏览器自动化、文档处理、网络搜索等工具，自动识别可复用模式并沉淀为技能。
-
-### 连接能力
-
-智能体怎么连接外部系统。通过 API、MCP（Model Context Protocol）等标准协议集成企业现有系统，打通数据和工作流。
-
-### 编排能力
-
-智能体怎么组织和协作。配置角色、风格、安全边界；编排多智能体协同流程；沉淀知识、持续进化、跨智能体共享经验。
-
-### 管控能力
-
-智能体怎么稳定运转。完整的执行环境、多层记忆体系、安全边界、审计追溯——让智能体长期、可控地运行。
-
-**这是核心能力**
+Not just a single AI assistant, but an enterprise platform to manage, orchestrate, and govern multiple agents.
 
 ---
 
-## 🚀 快速开始
+## 💎 Core Value
 
-### 方式一：一键安装（推荐 ⭐）
+| Feature | Description | Value |
+|---------|-------------|-------|
+| 🤝 **Collective Intelligence** | Multi-agent collaboration, experience sharing | 1+1>2 synergistic effects |
+| 🧠 **Continuous Evolution** | Gets smarter over time, auto-crystallizes skills | Reduces repetitive work |
+| 🛡️ **Secure & Controllable** | 7-layer defense, full audit trail | Enterprise-grade security |
+| 🚀 **Zero Barrier** | Browser-ready, no technical background | Everyone can use |
 
-**使用安装脚本自动部署**：
+**🌟 Gets Smarter Over Time** - Agents remember your habits, project context, customer preferences, and automatically crystallize reusable skills
+
+---
+
+## 🆚 Key Differentiators
+
+**Not a single AI assistant**, but a platform managing multiple agents
+
+**Not a development framework**, but an out-of-the-box product
+
+**Not an application platform**, but an orchestration & governance framework
+
+**CoApis = Agent Harness = The orchestration and governance platform for AI agents**
+
+---
+
+## 🏗️ Core Capability Architecture
+
+**Four Pillars**
+
+### 🎭 Orchestration - 智能编排
+
+- Multi-Agent lifecycle management
+- Scene Agent + User Agent composition
+- Workflow orchestration and scheduling
+- Agent collaboration and coordination
+
+### 🔧 Harness - 工具支撑
+
+- Rich tools and business scenarios
+- Unified LLM integration (OpenAI, Claude, Qwen, etc.)
+- MCP (Model Context Protocol) support
+- Extensible tool ecosystem
+
+### 🧠 Evolution - 持续进化
+
+- Multi-layer memory system
+- Auto-crystallize reusable patterns into skills
+- Knowledge accumulation and sharing
+- Continuous learning and improvement
+
+### 🛡️ Governance - 安全治理
+
+- Seven-layer security defense
+- Permission and quota management
+- Full audit trail and compliance
+- Enterprise-grade reliability
+
+---
+
+## 🚀 Quick Start
+
+### One-Click Install (Recommended ⭐)
 
 ```bash
-# 默认版本（v0.9.11）
+# Default version
 curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
 
-# 指定版本
-COAPIS_VERSION=v0.9.12 curl -fsSL https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/install.sh | bash
-
-# 访问服务
-# 地址：http://<server-ip>:4208
-# 账号：admin / admin123
+# Access: http://<server-ip>:4208
+# Account: admin / admin123
 ```
 
-**安装脚本功能**：
-- ✅ 自动检测并安装 Docker
-- ✅ 自动下载 docker-compose.yml 和 .env 配置
-- ✅ 自动拉取镜像并启动服务
-- ✅ 支持源码构建、包含浏览器服务等选项
-
-**查看可用版本**：[GitHub Packages](https://github.com/coapis-ai/coapis-agent/pkgs/container/server)
-
----
-
-### 方式二：手动部署（生产推荐 ⭐）
-
-**指定版本部署**：
+### Docker Deploy
 
 ```bash
-# 1. 设置镜像版本（必填，与 GitHub tag 同步）
-export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.9.12
-
-# 2. 下载 docker-compose.yml
+export COAPIS_IMAGE=ghcr.io/coapis-ai/coapis-agent/server:v0.11.0
 wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml
-
-# 3. 启动服务
-docker compose up -d
-
-# 4. 访问服务
-# 地址：http://<server-ip>:4208
-# 账号：admin / admin123
-```
-
-**版本说明**：
-- `v0.9.12` - 正式版本（与 GitHub tag 同步，推荐生产使用）
-- `dev-20260713-abc1234` - 开发版本（每次推送到 main 自动构建）
-
----
-
-### 方式三：完整配置部署
-
-```bash
-# 1. 下载配置文件
-wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/docker-compose.yml
-wget https://raw.githubusercontent.com/coapis-ai/coapis-agent/main/.env.example -O .env
-
-# 2. 编辑配置（设置镜像版本）
-nano .env
-
-# 3. 启动服务
 docker compose up -d
 ```
 
----
-
-### 方式四：源码构建（开发者）
-
-```bash
-# 克隆仓库
-git clone https://github.com/coapis-ai/coapis-agent.git
-cd coapis-agent
-
-# 配置环境变量
-cp docker/.env.example docker/.env
-
-# 编辑配置
-nano docker/.env  # 填写 API Key 等
-
-# 构建并启动
-cd docker
-docker compose -f docker-compose.build.yml up -d --build
-```
+📖 **Detailed Installation**: [Installation Guide](https://coapis.cn/docs/#/help/install) · [Build from Source](./docs/SOURCE_INSTALL_MANUAL.md)
 
 ---
 
-### 访问服务
+## 💼 Use Cases
 
-- **地址**：`http://<server-ip>:4208`
-- **账号**：`admin` / `admin123`
-- ⚠️ **请立即修改默认密码**
+**Empowers enterprises, organizations, institutions, and teams** - Covers document processing, data analysis, knowledge management, and more
 
----
+**Industry Validation**: Environmental consulting (75% efficiency gain), research institutions (60% efficiency gain), legal services, and more
 
-## 💡 适用场景
-
-**研发团队** — 代码审查、文档生成、技术调研、自动化测试
-
-**运营团队** — 数据分析、内容创作、自动化流程、报告生成
-
-**客服团队** — 知识库问答、工单处理、话术建议、情绪分析
-
-**行政团队** — 会议纪要、邮件起草、日程管理、合同审查
+📖 **Learn More**: [Official Website](https://coapis.cn)
 
 ---
 
-## 💡 为什么选择 CoApis？
+## 📚 Documentation
 
-### 对于管理者
-
-成本可控（按角色分配配额）、安全合规（数据不离开企业）、降低门槛（无需单独配置）
-
-### 对于 IT 部门
-
-一键部署（5 分钟完成）、权限管理（四级角色）、易于维护（统一管理）
-
-### 对于团队成员
-
-开箱即用（浏览器访问）、个性空间（独立对话和记忆）、持续进化（越用越懂你）
+- **Website**: [coapis.cn](https://coapis.cn) - Product overview, online demo
+- **Quick Start**: [30-second guide](https://coapis.cn/docs/#/help/guide)
+- **Installation**: [Docker deploy, source installation](https://coapis.cn/docs/#/help/install)
+- **Configuration**: [Environment variables, model configuration](https://coapis.cn/docs/#/help/config)
 
 ---
 
-## 📚 文档
+## 🤝 Contributing
 
-[官网](https://coapis.cn) — 产品介绍、版本对比、在线体验
+Contributions welcome! Code, documentation, bug reports all appreciated.
 
-[快速入门](https://coapis.cn/docs/#/help/guide) — 30 秒上手
-
-[安装部署](https://coapis.cn/docs/#/help/install) — Docker 部署、源码安装
-
-[配置指南](https://coapis.cn/docs/#/help/config) — 环境变量、模型配置
-
-[源码安装](./docs/SOURCE_INSTALL_MANUAL.md) — 从源码编译
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
-## 参与贡献
+## 🌟 Star History
 
-欢迎贡献代码、文档、Bug 报告。请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## 社区
-
-官网：[coapis.cn](https://coapis.cn)
-
-Gitee：[ouerlai/coapis-agent](https://gitee.com/ouerlai/coapis-agent)
-
-GitHub：[coapis-ai/coapis-agent](https://github.com/coapis-ai/coapis-agent)
+[![Star History Chart](https://api.star-history.com/svg?repos=coapis-ai/coapis-agent&type=Date)](https://star-history.com/#coapis-ai/coapis-agent&Date)
 
 ---
 
-## 🙏 特别鸣谢
+## 💬 Community
 
-前端聊天组件基于 [agentscope-ai](https://github.com/modelscope/agentscope) 项目构建，感谢阿里巴巴达摩院 ModelScope 团队的开源贡献。
-
----
-
-## 许可证
-
-GNU Affero General Public License v3.0 · Copyright 2026 蜜蜂 & CoApis Contributors
+- **Website**: [coapis.cn](https://coapis.cn)
+- **GitHub**: [coapis-ai/coapis-agent](https://github.com/coapis-ai/coapis-agent)
+- **Gitee**: [ouerlai/coapis-agent](https://gitee.com/ouerlai/coapis-agent) (For Chinese users)
+- **Discussions**: [GitHub Discussions](https://github.com/coapis-ai/coapis-agent/discussions)
 
 ---
 
-**为什么叫 CoApis？** — Co（协作）-Apis（拉丁语"蜜蜂"）组合，寓意蜂群式的团队协作，构建企业级 AI Agent Harness，体现"企业协作、群体智能、分工进化、全链管控"的理念。🐝
+## 🙏 Acknowledgments
+
+Frontend chat components built on [agentscope-ai](https://github.com/modelscope/agentscope). Thanks to Alibaba DAMO Academy ModelScope team for their open-source contribution.
+
+---
+
+## 📄 License
+
+Apache License 2.0 · Copyright 2026 蜜蜂 & CoApis Contributors
+
+---
+
+<div align="center">
+
+**Why "CoApis"?**
+
+**Co** (Collaboration) + **Apis** (Latin for "bee")
+
+Symbolizing swarm-style team collaboration, building enterprise-grade AI Agent Harness
+
+**If you find CoApis useful, please give us a ⭐ Star!**
+
+</div>

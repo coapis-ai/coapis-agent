@@ -114,3 +114,6 @@ server/restart_backend.py
 # --- Technical documentation ---
 # tech_docs/ is now versioned (design documents, architecture, etc.)
 # tech_docs/
+
+# --- Marketing documents (local only, not for git) ---
+tech_docs/go/
