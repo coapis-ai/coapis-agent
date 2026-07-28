@@ -6,7 +6,7 @@ import {
   Select,
   type MenuProps,
 } from "antd";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -52,6 +52,9 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   const { selectedAgent, agents, setSelectedAgent, setAgents } = useAgentStore();
   const { user } = useUser();
   const [collapsed, setCollapsed] = useState(false);
+  
+  // 受控的菜单展开状态（避免 items 引用变化时丢失展开/收缩状态）
+  const [openKeys, setOpenKeys] = useState<string[]>(["settings-group"]);
   
   // Permission state
   const [allowedModules, setAllowedModules] = useState<string[]>([]);
@@ -200,7 +203,8 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   // 对话功能改用浮动聊天图标（不占菜单）
   
   // 使用统一的菜单配置，并动态添加工作场景二级菜单
-  const collapsedNavItems = MAIN_MENU_ITEMS.map(item => {
+  // useMemo 避免每次 render 创建新数组导致 Menu 重置内部状态
+  const collapsedNavItems = useMemo(() => MAIN_MENU_ITEMS.map(item => {
     const menuItem: any = {
       key: item.key,
       icon: item.icon,
@@ -219,7 +223,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     }
 
     return menuItem;
-  });
+  }), [t, workbenchCategories]);
 
   // ── DEPRECATED: 旧菜单定义（已废弃，保留仅供参考）──────────────────────
   // 按设计方案v4，现在统一使用 collapsedNavItems（5个一级菜单）
@@ -445,7 +449,8 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           <Menu
             mode="inline"
             selectedKeys={[selectedKey]}
-            defaultOpenKeys={["settings-group"]}
+            openKeys={openKeys}
+            onOpenChange={(keys) => setOpenKeys(keys as string[])}
             onClick={({ key }) => {
               // 查找点击的菜单项
               let targetPath: string | undefined;
