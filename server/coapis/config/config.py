@@ -1002,7 +1002,7 @@ class PlanConfig(BaseModel):
     """Plan mode configuration (stored in agent.json)."""
 
     enabled: bool = Field(
-        default=False,
+        default=True,
         description="Whether plan mode is enabled for this agent",
     )
 

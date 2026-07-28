@@ -256,6 +256,23 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self.model = model
         self._sys_prompt = sys_prompt  # property getter reads from _sys_prompt
         self.toolkit = toolkit
+
+        # ── 注册 plan 工具（补齐父类 __init__ 跳过的注册逻辑）──
+        # 父类 ReActAgent.__init__ 会在传入 plan_notebook 时自动注册 plan 工具，
+        # 但 CoApisAgent 用最小化参数调 super().__init__()（不传 plan_notebook），
+        # 所以必须在这里补注册，否则 create_plan 等工具不会出现在 toolkit 中。
+        if self.plan_notebook is not None:
+            for tool_fn in self.plan_notebook.list_tools():
+                self.toolkit.register_tool_function(
+                    tool_fn,
+                    namesake_strategy=self._namesake_strategy,
+                )
+            logger.info(
+                "Registered %d plan tools for agent '%s'",
+                len(self.plan_notebook.list_tools()),
+                agent_config.id,
+            )
+
         self.formatter = formatter
         self.max_iters = running_config.max_iters
         self._loop_protection_threshold = running_config.loop_protection_threshold
@@ -1645,6 +1662,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             scene_header = f"# 🎯 场景身份：{scene_name}\n\n" if scene_name else "# 🎯 场景身份\n\n"
             sys_prompt = scene_header + scene_prompt + "\n\n---\n\n" + sys_prompt
             logger.info(f"[Scene] Injected scene prompt at the beginning of system prompt (scene: {scene_name})")
+
+        # ── Plan 引导：告诉 LLM 有规划工具可用 ──
+        if self.plan_notebook is not None:
+            sys_prompt = sys_prompt + "\n\n## 任务规划\n\n" + (
+                "你拥有 create_plan、view_subtasks、update_subtask_state、"
+                "finish_subtask、finish_plan 等规划工具。\n\n"
+                "- **简单任务**（问答、单步操作、闲聊）：直接执行，不需要规划\n"
+                "- **复杂任务**（多步骤、涉及代码修改、需要分析后执行、需要跨多个文件操作）："
+                "先调用 create_plan 拆解为子任务，逐步执行并跟踪进度\n"
+                "- 由你自主判断是否需要规划，不必询问用户"
+            )
 
         return sys_prompt
 

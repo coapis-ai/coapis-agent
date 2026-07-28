@@ -1029,6 +1029,8 @@
     "selectProtocol": "请选择协议",
     "protocolOpenAI": "OpenAI 兼容（Chat Completions）",
     "protocolAnthropic": "Anthropic（Messages API）",
+    "requireApiKeyLabel": "需要 API Key",
+    "requireApiKeyHint": "如使用 vLLM 等本地推理服务且无需认证，请关闭此选项。",
     "currentKey": "当前密钥：{{key}}",
     "startsWith": "以 \"{{prefix}}\" 开头",
     "optionalSelfHosted": "自托管服务可选",

@@ -25,6 +25,7 @@ export function DefaultModelSelector({
   icon,
   value,
   onChange,
+  refreshKey,
 }: DefaultModelSelectorProps) {
   const { t } = useTranslation();
   const [models, setModels] = useState<ModelByType[]>([]);
@@ -45,7 +46,7 @@ export function DefaultModelSelector({
       .finally(() => {
         setLoading(false);
       });
-  }, [modelType]);
+  }, [modelType, refreshKey]);
 
   // Build grouped options
   const options = useMemo(() => {

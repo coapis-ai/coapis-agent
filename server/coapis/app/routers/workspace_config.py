@@ -607,14 +607,14 @@ async def update_language(
 # ── Audio Mode (user+) ──────────────────────────────────────────────────
 
 @router.get("/workspace/audio-mode")
-@require_permission("voice:read")
+@require_permission("voice-transcription:read")
 async def get_audio_mode(request: Request) -> Dict[str, Any]:
     """Get audio mode setting."""
     return {"audio_mode": "off"}
 
 
 @router.put("/workspace/audio-mode")
-@require_permission("voice:write")
+@require_permission("voice-transcription:write")
 async def update_audio_mode(
     request: Request,
     payload: Dict[str, Any] = Body(...),
@@ -626,7 +626,7 @@ async def update_audio_mode(
 # ── Transcription Providers (user+) ─────────────────────────────────────
 
 @router.get("/workspace/transcription-providers")
-@require_permission("voice:read")
+@require_permission("voice-transcription:read")
 async def get_transcription_providers(request: Request) -> Dict[str, Any]:
     """Get transcription providers."""
     return {
@@ -636,14 +636,14 @@ async def get_transcription_providers(request: Request) -> Dict[str, Any]:
 
 
 @router.get("/workspace/transcription-provider")
-@require_permission("voice:read")
+@require_permission("voice-transcription:read")
 async def get_transcription_provider(request: Request) -> Dict[str, Any]:
     """Get transcription provider."""
     return {"provider_id": ""}
 
 
 @router.put("/workspace/transcription-provider")
-@require_permission("voice:write")
+@require_permission("voice-transcription:write")
 async def update_transcription_provider(
     request: Request,
     payload: Dict[str, Any] = Body(...),
@@ -653,14 +653,14 @@ async def update_transcription_provider(
 
 
 @router.get("/workspace/transcription-provider-type")
-@require_permission("voice:read")
+@require_permission("voice-transcription:read")
 async def get_transcription_provider_type(request: Request) -> Dict[str, Any]:
     """Get transcription provider type."""
     return {"transcription_provider_type": ""}
 
 
 @router.put("/workspace/transcription-provider-type")
-@require_permission("voice:write")
+@require_permission("voice-transcription:write")
 async def update_transcription_provider_type(
     request: Request,
     payload: Dict[str, Any] = Body(...),
@@ -670,7 +670,7 @@ async def update_transcription_provider_type(
 
 
 @router.get("/workspace/local-whisper-status")
-@require_permission("voice:read")
+@require_permission("voice-transcription:read")
 async def get_local_whisper_status(request: Request) -> Dict[str, Any]:
     """Get local whisper status."""
     return {

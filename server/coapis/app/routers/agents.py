@@ -344,12 +344,16 @@ async def list_agents(request: Request) -> Dict[str, Any]:
     agents = []
     for entry in registry:
         # Resolve absolute workspace_dir from relative path
-        ws_abs = str((user_ws_base / entry.workspace_dir).resolve()) if entry.workspace_dir else ""
+        # Empty workspace_dir means the user's root workspace
+        if entry.workspace_dir:
+            ws_abs = str((user_ws_base / entry.workspace_dir).resolve())
+        else:
+            ws_abs = str(user_ws_base.resolve())
 
-        # Load channels from agent.json if it exists (for display purposes)
+        # Load channels from agent.json if it exists
         channels = []
-        agent_json = Path(ws_abs) / "agent.json" if ws_abs else None
-        if agent_json and agent_json.exists():
+        agent_json = Path(ws_abs) / "agent.json"
+        if agent_json.exists():
             try:
                 meta = json.loads(agent_json.read_text(encoding='utf-8'))
                 if isinstance(meta.get('channels'), dict):

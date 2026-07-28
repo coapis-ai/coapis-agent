@@ -1,31 +1,88 @@
 {
-  "version": "2.0",
-  "description": "CoApis permission system — CRUD matrix format.",
-  "user_overrides": {},
-  "modules": {
-    "chat": {"description": "AI chat functionality"},
-    "skills": {"description": "Skill management"},
-    "models": {"description": "Model configuration"},
-    "agents": {"description": "Agent management"},
-    "admin": {"description": "System administration"},
-    "system": {"description": "System configuration"},
-    "audit": {"description": "Audit logs"},
-    "token_usage": {"description": "Token usage statistics"},
-    "cron": {"description": "Scheduled tasks"},
-    "heartbeat": {"description": "Heartbeat configuration"},
-    "channels": {"description": "Channel management"},
-    "config": {"description": "Configuration management"},
-    "workspace": {"description": "Workspace management"},
-    "myspace": {"description": "Personal space"},
-    "security": {"description": "Security settings"},
-    "backups": {"description": "Backup management"},
-    "debug": {"description": "Debug tools"},
-    "evolution": {"description": "Agent evolution"},
-    "knowledge": {"description": "Knowledge base"},
-    "user_system": {"description": "User system management"},
-    "sessions": {"description": "Session management"},
-    "files": {"description": "File management"},
-    "settings": {"description": "Settings management"},
-    "scene": {"description": "Scene management"}
-  }
+    "version": "2.0",
+    "description": "Permission module definitions. Module keys must match require_permission() calls in backend code.",
+    "user_overrides": {},
+    "modules": {
+        "chat": {
+            "description": "聊天"
+        },
+        "myspace": {
+            "description": "我的空间"
+        },
+        "skills": {
+            "description": "技能"
+        },
+        "models": {
+            "description": "模型管理"
+        },
+        "channels": {
+            "description": "频道"
+        },
+        "sessions": {
+            "description": "会话"
+        },
+        "cron-jobs": {
+            "description": "定时任务"
+        },
+        "heartbeat": {
+            "description": "心跳检查"
+        },
+        "tools": {
+            "description": "工具"
+        },
+        "mcp": {
+            "description": "MCP"
+        },
+        "agent-config": {
+            "description": "运行配置"
+        },
+        "agent-stats": {
+            "description": "运行统计"
+        },
+        "agents": {
+            "description": "智能体管理"
+        },
+        "voice-transcription": {
+            "description": "语音转写"
+        },
+        "skill-pool": {
+            "description": "技能池"
+        },
+        "security": {
+            "description": "安全"
+        },
+        "token-usage": {
+            "description": "Token用量"
+        },
+        "backups": {
+            "description": "备份恢复"
+        },
+        "evolution": {
+            "description": "进化"
+        },
+        "admin": {
+            "description": "管理面板"
+        },
+        "audit": {
+            "description": "审计日志"
+        },
+        "scene": {
+            "description": "场景管理"
+        },
+        "tag": {
+            "description": "标签管理"
+        },
+        "debug": {
+            "description": "调试"
+        },
+        "system": {
+            "description": "系统配置"
+        },
+        "profile": {
+            "description": "个人资料"
+        },
+        "acp": {
+            "description": "ACP配置"
+        }
+    }
 }

@@ -3,10 +3,14 @@
  * 
  * 前端菜单 key → 后端权限模块 key
  * 
- * 权限模块列表（来自 permissions.json）：
- * - chat, skills, models, agents, admin, system, audit, token_usage
- * - cron, heartbeat, channels, config, workspace, myspace, security
- * - backups, debug, evolution, knowledge, user_system, sessions, files
+ * 权限模块列表（来自 permissions.json，共 27 个）：
+ * 后端 require_permission key（21个）：
+ * - chat, skills, models, agents, admin, system, audit, scene, tag
+ * - cron-jobs, heartbeat, channels, myspace, security, sessions
+ * - backups, debug, evolution, mcp, tools, voice-transcription
+ * - profile, acp
+ * 前端菜单专用（6个，后端通过其他方式保护）：
+ * - agent-config, agent-stats, skill-pool, token-usage
  */
 
 /**
@@ -47,8 +51,6 @@ export const MENU_TO_PERMISSION_MODULE: Record<string, string> = {
   'security': 'security',
   'debug': 'debug',
   'evolution': 'evolution',
-  'knowledge': 'knowledge',
-  'user-system': 'user_system',
   'agent-config': 'agents',
   'agent-stats': 'agents',
   'voice-transcription': 'agents',

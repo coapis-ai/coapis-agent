@@ -27,15 +27,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# 复制 pyproject.toml 和 setup.py
+# 先 COPY 依赖描述文件（很少变，缓存稳定）
 COPY server/pyproject.toml ./pyproject.toml
 COPY server/setup.py ./setup.py
 
-# 复制源码（setup.py 需要读取版本）
-COPY server/coapis ./coapis
+# 创建最小包结构，让 pip install 能读取动态版本号
+# 版本号为临时值，仅用于安装依赖；运行时使用 COPY 的完整源码
+RUN mkdir -p coapis && \
+    echo "__version__ = '0.0.0'" > coapis/__version__.py && \
+    echo "" > coapis/__init__.py
 
-# 安装到独立前缀，后续 COPY 到运行阶段
-RUN pip install --prefix=/install --no-cache-dir -e .
+# 安装依赖到独立前缀（改源码不触发重新安装）
+RUN pip install --prefix=/install --no-cache-dir . && \
+    rm -rf /install/lib/python3.11/site-packages/coapis*
 
 
 # ───────────────────────────────────────────────────────────────────

@@ -530,8 +530,7 @@ PUBLIC_PREFIXES: tuple = (
     "/api/scenes/hot",  # Hot scenes (read-only)
     "/api/admin/tags",  # Tag list for workbench (read-only)
     # Model management APIs (read-only, for default model selector)
-    "/api/models/by-type",  # Get models by type
-    "/api/models/default-models",  # Get/set default models
+    "/api/models/by-type",  # Get models by type (read-only)
     # SSO login APIs (for external system integration)
     "/api/external",  # SSO login endpoint (no auth required, it's for getting token)
     "/favicon.ico",

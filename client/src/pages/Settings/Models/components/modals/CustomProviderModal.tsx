@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Form, Input, Modal, Select } from "@agentscope-ai/design";
+import { Form, Input, Modal, Select, Switch } from "@agentscope-ai/design";
 import api from "../../../../../api";
 import { useTranslation } from "react-i18next";
 import { useAppMessage } from "../../../../../hooks/useAppMessage";
@@ -36,6 +36,7 @@ export function CustomProviderModal({
         default_base_url: values.default_base_url?.trim() || "",
         api_key_prefix: values.api_key_prefix?.trim() || "",
         chat_model: values.chat_model || "OpenAIChatModel",
+        require_api_key: values.require_api_key ?? true,
       });
       message.success(
         t("models.providerCreated", { name: values.name.trim() }),
@@ -69,7 +70,7 @@ export function CustomProviderModal({
         form={form}
         layout="vertical"
         style={{ marginTop: 16 }}
-        initialValues={{ chat_model: "OpenAIChatModel" }}
+        initialValues={{ chat_model: "OpenAIChatModel", require_api_key: true }}
       >
         <Form.Item
           name="id"
@@ -124,6 +125,15 @@ export function CustomProviderModal({
               },
             ]}
           />
+        </Form.Item>
+
+        <Form.Item
+          name="require_api_key"
+          label={t("models.requireApiKeyLabel")}
+          extra={t("models.requireApiKeyHint")}
+          valuePropName="checked"
+        >
+          <Switch />
         </Form.Item>
       </Form>
     </Modal>

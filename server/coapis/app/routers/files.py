@@ -30,6 +30,7 @@ CoApis MySpace - 用户个人文件管理 API
 """
 import os
 import shutil
+import logging
 import mimetypes
 from pathlib import Path
 from typing import Optional, List
@@ -42,6 +43,8 @@ from ..auth import get_current_user
 from ..permissions import require_permission
 from ...constant import WORKSPACES_DIR
 from ..services.file_service import FileServiceFactory, FileInfo as ServiceFileInfo
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/myfiles", tags=["MySpace"])
 

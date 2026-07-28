@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
     description=(
         "记录重要事件到每日笔记。"
         "参数：event（事件描述）、category（可选分类：决策/偏好/任务/问题/其他）。"
-        "当用户说"记住这个"、做出重要决策、发现有价值的信息时调用此工具。"
+        "当用户说「记住这个」、做出重要决策、发现有价值的信息时调用此工具。"
     ),
     category="builtin",
     tags=['memory', 'daily'],

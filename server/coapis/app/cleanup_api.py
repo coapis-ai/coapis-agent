@@ -77,7 +77,7 @@ class ArchivedQueryRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/overview")
-@require_permission("backup:read")
+@require_permission("backups:read")
 async def storage_overview(request: Request) -> dict:
     """Get storage overview with hot/warm/cold breakdown."""
     engine = _get_engine(request)
@@ -88,7 +88,7 @@ async def storage_overview(request: Request) -> dict:
 
 
 @router.post("/run")
-@require_permission("backup:write")
+@require_permission("backups:write")
 async def run_cleanup(request: Request, body: CleanupRunRequest = CleanupRunRequest()) -> dict:
     """Execute full cleanup. Returns per-type stats."""
     engine = _get_engine(request)
@@ -118,7 +118,7 @@ async def run_cleanup(request: Request, body: CleanupRunRequest = CleanupRunRequ
 
 
 @router.post("/run/{data_type}")
-@require_permission("backup:write")
+@require_permission("backups:write")
 async def run_cleanup_single(request: Request, data_type: str) -> dict:
     """Execute a single cleanup task by data type."""
     engine = _get_engine(request)
@@ -152,7 +152,7 @@ async def run_cleanup_single(request: Request, data_type: str) -> dict:
 
 
 @router.get("/rules")
-@require_permission("backup:read")
+@require_permission("backups:read")
 async def get_rules(request: Request) -> dict:
     """Get current cleanup rules."""
     engine = _get_engine(request)
@@ -166,7 +166,7 @@ async def get_rules(request: Request) -> dict:
 
 
 @router.put("/rules")
-@require_permission("backup:write")
+@require_permission("backups:write")
 async def update_rules(request: Request, body: RulesUpdateRequest) -> dict:
     """Update cleanup rules."""
     engine = _get_engine(request)
@@ -190,7 +190,7 @@ async def update_rules(request: Request, body: RulesUpdateRequest) -> dict:
 
 
 @router.get("/history")
-@require_permission("backup:read")
+@require_permission("backups:read")
 async def cleanup_history(request: Request, limit: int = Query(default=20, ge=1, le=100)) -> dict:
     """Get cleanup execution history."""
     engine = _get_engine(request)
@@ -201,7 +201,7 @@ async def cleanup_history(request: Request, limit: int = Query(default=20, ge=1,
 
 
 @router.post("/archived")
-@require_permission("backup:read")
+@require_permission("backups:read")
 async def search_archived(request: Request, body: ArchivedQueryRequest) -> dict:
     """Search archived messages."""
     engine = _get_engine(request)

@@ -1,25 +1,83 @@
 {
-  "chat": {"name": "Chat"},
-  "skills": {"name": "Skills"},
-  "models": {"name": "Models"},
-  "agents": {"name": "Agents"},
-  "admin": {"name": "Admin"},
-  "system": {"name": "System"},
-  "audit": {"name": "Audit"},
-  "token_usage": {"name": "Token Usage"},
-  "cron": {"name": "Cron Jobs"},
-  "heartbeat": {"name": "Heartbeat"},
-  "channels": {"name": "Channels"},
-  "config": {"name": "Config"},
-  "workspace": {"name": "Workspace"},
-  "myspace": {"name": "My Space"},
-  "security": {"name": "Security"},
-  "backups": {"name": "Backups"},
-  "debug": {"name": "Debug"},
-  "evolution": {"name": "Evolution"},
-  "knowledge": {"name": "Knowledge"},
-  "user_system": {"name": "User System"},
-  "sessions": {"name": "Sessions"},
-  "files": {"name": "Files"},
-  "settings": {"name": "Settings"}
+    "chat": {
+        "name": "Chat"
+    },
+    "myspace": {
+        "name": "Myspace"
+    },
+    "skills": {
+        "name": "Skills"
+    },
+    "models": {
+        "name": "Models"
+    },
+    "channels": {
+        "name": "Channels"
+    },
+    "sessions": {
+        "name": "Sessions"
+    },
+    "cron-jobs": {
+        "name": "Cron Jobs"
+    },
+    "heartbeat": {
+        "name": "Heartbeat"
+    },
+    "tools": {
+        "name": "Tools"
+    },
+    "mcp": {
+        "name": "Mcp"
+    },
+    "agent-config": {
+        "name": "Agent Config"
+    },
+    "agent-stats": {
+        "name": "Agent Stats"
+    },
+    "agents": {
+        "name": "Agents"
+    },
+    "voice-transcription": {
+        "name": "Voice Transcription"
+    },
+    "skill-pool": {
+        "name": "Skill Pool"
+    },
+    "security": {
+        "name": "Security"
+    },
+    "token-usage": {
+        "name": "Token Usage"
+    },
+    "backups": {
+        "name": "Backups"
+    },
+    "evolution": {
+        "name": "Evolution"
+    },
+    "admin": {
+        "name": "Admin"
+    },
+    "audit": {
+        "name": "Audit"
+    },
+    "scene": {
+        "name": "Scene"
+    },
+    "tag": {
+        "name": "Tag"
+    },
+    "debug": {
+        "name": "Debug"
+    },
+    "system": {
+        "name": "System"
+    },
+    "profile": {
+        "name": "Profile"
+    },
+    "acp": {
+        "name": "Acp"
+    }
 }

@@ -106,7 +106,8 @@ const ChatSessionInitializer: React.FC<ChatSessionInitializerProps> = ({
         sessions.length === 0 &&
         !currentSessionIdRef.current &&
         !creatingRef.current &&
-        sessionApi._sessionListLoaded
+        sessionApi._sessionListLoaded &&
+        selectedAgentRef.current          // Wait for agent list to load (e.g. SSO auto-login)
       ) {
         // Brand-new agent with no sessions: create one up-front so the first
         // message is sent in a stable session context.
@@ -149,9 +150,11 @@ const ChatSessionInitializer: React.FC<ChatSessionInitializerProps> = ({
     }
     // Intentionally exclude currentSessionId from deps: only react to URL / session list changes.
     // currentSessionId is read via ref to avoid circular triggers.
-    // selectedAgent is read via ref because agent changes already trigger remount of this component.
+    // selectedAgent is included so the effect re-runs when the agent list
+    // finishes loading (e.g. SSO auto-login where listAgents() resolves after
+    // the initial render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, sessions, setCurrentSessionId]);
+  }, [chatId, sessions, setCurrentSessionId, selectedAgent]);
 
   return null;
 };

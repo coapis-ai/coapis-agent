@@ -39,26 +39,52 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_ATTEMPTS = 3
 
-# Conversational prompts appended to assistant response after streaming.
-# Indexed by attempt number (0-based).
-# Using Markdown for better visibility.
+# ── Click prompts (user voice) ─────────────────────────────────────────
+# Sent as user message when user clicks the recommendation button.
+# Should be natural user-style questions that invite the LLM to respond.
+BOOTSTRAP_CLICK_PROMPTS_ZH = [
+    "你好，我们认识一下吧",
+    "我想了解一下你能帮我做些什么",
+    "你有什么特别的功能吗？",
+]
+
+BOOTSTRAP_CLICK_PROMPTS_EN = [
+    "Hi, let's get to know each other",
+    "I'd like to know what you can help me with",
+    "Do you have any special features?",
+]
+
+# ── Append prompts (assistant voice) ───────────────────────────────────
+# Appended to assistant response AFTER streaming ends, to guide the
+# conversation forward.  Must NOT repeat what the LLM already said.
 BOOTSTRAP_PROMPTS_ZH = [
-    "\n\n---\n\n**初次见面，让我先自我介绍一下** 👋\n\n我是 CoApis 智能助手，很高兴认识你！我可以帮你处理各种任务、回答问题、管理日程，甚至帮你写代码。\n\n**请问我该怎么称呼你呢？**",
-    "\n\n---\n\n**想更好地为你服务** 💡\n\n了解你的偏好能让我更好地协助你。**你希望我用什么样的风格跟你交流？** 比如：\n- 简洁高效 vs 详细解释\n- 正式专业 vs 轻松友好\n- 或者你有其他想法？",
-    "\n\n---\n\n**让我更懂你** 🎯\n\n每个人都有独特的工作方式和偏好。**有什么我可以为你定制的吗？** 比如称呼、交流风格、或者你希望我优先关注的事情？",
+    "\n\n---\n\n**请问我该怎么称呼你呢？** 👋",
+    "\n\n---\n\n**你希望我用什么样的风格跟你交流？** 💡\n\n比如：\n- 简洁高效 vs 详细解释\n- 正式专业 vs 轻松友好\n- 或者你有其他想法？",
+    "\n\n---\n\n**有什么我可以为你定制的吗？** 🎯\n\n比如称呼、交流风格、或者你希望我优先关注的事情？",
 ]
 
 BOOTSTRAP_PROMPTS_EN = [
-    "\n\n---\n\n**Let me introduce myself first** 👋\n\nI'm your CoApis assistant, nice to meet you! I can help with tasks, answer questions, manage schedules, and even write code for you.\n\n**What should I call you?**",
-    "\n\n---\n\n**Let me serve you better** 💡\n\nUnderstanding your preferences helps me assist you better. **What communication style do you prefer?** For example:\n- Concise & efficient vs Detailed explanations\n- Formal & professional vs Casual & friendly\n- Or do you have other ideas?",
-    "\n\n---\n\n**Making it about you** 🎯\n\nEveryone has unique work styles and preferences. **Is there anything I can customize for you?** Like how to address you, communication style, or things you'd like me to prioritize?",
+    "\n\n---\n\n**What should I call you?** 👋",
+    "\n\n---\n\n**What communication style do you prefer?** 💡\n\nFor example:\n- Concise & efficient vs Detailed explanations\n- Formal & professional vs Casual & friendly\n- Or do you have other ideas?",
+    "\n\n---\n\n**Is there anything I can customize for you?** 🎯\n\nLike how to address you, communication style, or things you'd like me to prioritize?",
 ]
 
 
 def get_bootstrap_prompt(attempt: int, language: str = "zh") -> str:
-    """Get the conversational prompt for the given attempt."""
+    """Get the append prompt (assistant voice) for the given attempt."""
     prompts = BOOTSTRAP_PROMPTS_ZH if language == "zh" else BOOTSTRAP_PROMPTS_EN
     idx = min(attempt - 1, len(prompts) - 1)
+    return prompts[idx]
+
+
+def get_bootstrap_click_prompt(attempt: int, language: str = "zh") -> str:
+    """Get the click prompt (user voice) for the given attempt (0-based)."""
+    prompts = (
+        BOOTSTRAP_CLICK_PROMPTS_ZH
+        if language == "zh"
+        else BOOTSTRAP_CLICK_PROMPTS_EN
+    )
+    idx = min(attempt, len(prompts) - 1)
     return prompts[idx]
 
 

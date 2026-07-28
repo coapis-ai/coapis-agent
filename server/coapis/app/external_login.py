@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/external", tags=["external-login"])
 external_login_router = router  # 别名，供 routers/__init__.py 导入
 
+# SSO 自动创建用户的默认密码（用户后续可在设置中修改）
+SSO_DEFAULT_PASSWORD = "123456"
+
 
 class SSOLoginRequest(BaseModel):
     """SSO 登录请求"""
@@ -82,11 +85,10 @@ async def sso_login(request: Request, body: SSOLoginRequest):
     
     if not user:
         # 自动创建用户（随机密码，用户通过 SSO 登录）
-        random_password = secrets.token_urlsafe(32)
         try:
             user_create = UserCreate(
                 username=body.username,
-                password=random_password,
+                password=SSO_DEFAULT_PASSWORD,
                 display_name=body.display_name or body.username,
                 role="user",
             )
@@ -158,11 +160,10 @@ async def sso_login_get(
     is_new_user = False
     
     if not user:
-        random_password = secrets.token_urlsafe(32)
         try:
             user_create = UserCreate(
                 username=username,
-                password=random_password,
+                password=SSO_DEFAULT_PASSWORD,
                 display_name=display_name or username,
                 role="user",
             )

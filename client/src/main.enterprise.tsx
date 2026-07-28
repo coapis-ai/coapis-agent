@@ -23,7 +23,7 @@ registerHostModulesEager();
 initLanguages();
 
 // 🚀 加载企业版插件（企业版入口会自动注册路由）
-import("@enterprise/enterprise-entry.ts"); // 企业版插件，注册路由和注入菜单
+// import("@enterprise/enterprise-entry.ts"); // 企业版插件在 coapis-pro 中，社区版构建时注释掉
 
 if (typeof window !== "undefined") {
   const originalError = console.error;

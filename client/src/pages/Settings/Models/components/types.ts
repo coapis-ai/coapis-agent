@@ -6,6 +6,8 @@ export interface DefaultModelSelectorProps {
   icon: ReactNode;
   value?: { providerId: string; modelId: string } | null;
   onChange: (value: { providerId: string; modelId: string } | null) => void;
+  /** Increment to force-reload model list (e.g. after provider config changes) */
+  refreshKey?: number;
 }
 
 export interface ModelTypeTabsProps {

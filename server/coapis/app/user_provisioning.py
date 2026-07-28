@@ -81,7 +81,7 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
         The agent_id for the user's default agent (e.g., "agent:20")
     """
     # Get user info for generating ASCII-safe agent_id
-    from .user_system.service import get_user_by_username
+    from ..user_system.service import get_user_by_username
     user = get_user_by_username(username)
     
     # Generate ASCII-safe internal agent_id
@@ -114,10 +114,13 @@ def init_user_workspace(username: str, display_name: Optional[str] = None, reque
     _create_agent_config(username, internal_agent_id, semantic_agent_id, agent_name, workspace_dir)
 
     # 3b. Register default agent in user's config.json agents registry
+    # Use semantic_agent_id (e.g., "user:zrsz_156") because that's what
+    # MultiAgentManager and derive_workspace_dir() use to locate agent.json.
+    # HTTP header encoding (encodeURIComponent) handles non-ASCII usernames.
     from coapis.config.config import add_agent_to_registry
     add_agent_to_registry(
         username=username,
-        agent_id=internal_agent_id,  # Use internal_agent_id for registry
+        agent_id=semantic_agent_id,  # Use semantic_agent_id for registry
         name=agent_name,
         description="默认智能体",
         workspace_dir="",
@@ -272,24 +275,61 @@ def _create_agent_config(
 
 
 def ensure_user_workspace_exists(username: str) -> bool:
-    """Check and initialize user workspace if it doesn't exist.
+    """Check and initialize user workspace if it doesn't exist or is incomplete.
+
+    A workspace is considered complete only when:
+    1. agent.json exists
+    2. config.json (agents registry) exists
+    3. The registry's default agent id starts with "user:" (semantic id)
+
+    If any condition fails, the workspace is re-initialized (idempotent —
+    init_user_workspace skips files that already exist).
 
     Args:
         username: The username to check
 
     Returns:
-        True if workspace was created, False if it already existed
+        True if workspace was (re-)initialized, False if it already existed and was complete
     """
     workspace_dir = Path(f"{WORKING_DIR}/workspaces/{username}")
     agent_json = workspace_dir / "agent.json"
+    config_json = workspace_dir / "config.json"
 
-    if agent_json.exists():
-        logger.debug(f"User workspace already exists for {username}")
-        return False
+    # Check 1: agent.json must exist
+    if not agent_json.exists():
+        logger.info(f"Initializing missing workspace for existing user {username}")
+        init_user_workspace(username)
+        return True
 
-    logger.info(f"Initializing missing workspace for existing user {username}")
-    init_user_workspace(username)
-    return True
+    # Check 2: config.json must exist
+    if not config_json.exists():
+        logger.warning(
+            f"Incomplete workspace for {username}: agent.json exists but config.json is missing. "
+            "Re-initializing to repair."
+        )
+        init_user_workspace(username)
+        return True
+
+    # Check 3: registry's default agent id must use semantic format ("user:{username}")
+    # (Old code used internal_agent_id like "agent:24" which doesn't match
+    #  derive_workspace_dir's routing logic)
+    try:
+        from ..config.config import load_agents_registry
+        registry = load_agents_registry(username)
+        expected_prefix = f"user:{username}"
+        default_entry = next((e for e in registry if e.is_default), None)
+        if default_entry and not default_entry.id.startswith("user:"):
+            logger.warning(
+                f"Stale registry for {username}: default agent id is '{default_entry.id}' "
+                f"(expected to start with 'user:'). Re-initializing to repair."
+            )
+            init_user_workspace(username)
+            return True
+    except Exception as e:
+        logger.warning(f"Failed to check registry for {username}: {e}")
+
+    logger.debug(f"User workspace already complete for {username}")
+    return False
 
 
 def _copy_base_templates(workspace_dir: Path, username: str, level: str = "user", language: str = "zh") -> None:

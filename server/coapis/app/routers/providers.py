@@ -130,6 +130,10 @@ class CreateCustomProviderRequest(BaseModel):
     api_key_prefix: str = Field(default="")
     chat_model: ChatModelName = Field(default="OpenAIChatModel")
     models: List[ModelInfo] = Field(default_factory=list)
+    require_api_key: bool = Field(
+        default=True,
+        description="Whether this provider requires an API key to connect",
+    )
 
 
 class AddModelRequest(BaseModel):
@@ -300,6 +304,7 @@ async def create_custom_provider_endpoint(
                 chat_model=body.chat_model,
                 models=body.models,
                 owner=username,
+                require_api_key=body.require_api_key,
             ),
         )
     except (ValueError, AppBaseException) as exc:
@@ -1202,7 +1207,7 @@ async def set_default_model(
     body: SetDefaultModelRequest,
     manager: ProviderManager = Depends(get_provider_manager),
     current_user: dict = Depends(get_current_user),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Set default model for a specific type.
     
     Requires 'models:write' permission.

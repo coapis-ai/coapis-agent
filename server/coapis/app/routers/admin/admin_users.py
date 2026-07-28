@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # This program is free software: you can redistribute it and/or modify
@@ -18,6 +17,10 @@
 """Admin users router - global user management.
 
 管理员可查看所有用户、修改角色、重置积分等。
+
+数据源策略（企业版优先）：
+- 企业版：RepositoryFactory → PostgreSQL（UUID 主键）
+- 社区版 fallback：UserSystemDB → SQLite/JSON（int 主键）
 """
 from __future__ import annotations
 
@@ -25,8 +28,9 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body
 from pydantic import BaseModel
@@ -68,7 +72,46 @@ class AdminUserListResponse(BaseModel):
     page_size: int
 
 
+class UserDeleteRequest(BaseModel):
+    """用户删除请求体."""
+    backup: bool = False  # 是否备份用户数据
+
+
 # ── Helper functions ─────────────────────────────────────────────────────
+
+
+def _get_user_repo():
+    """尝试获取 RepositoryFactory 的 UserRepository（企业版 PostgreSQL）。
+    
+    Returns:
+        UserRepository 实例，或 None（社区版 fallback）
+    """
+    try:
+        from ....foundation.repository_factory import RepositoryFactory
+        return RepositoryFactory.get_user_repository()
+    except RuntimeError:
+        return None
+    except Exception as e:
+        logger.debug(f"RepositoryFactory not available: {e}")
+        return None
+
+
+def _adapt_pg_user(user: Dict[str, Any]) -> Dict[str, Any]:
+    """将 PostgreSQL 返回的用户字典适配为前端期望的格式。
+    
+    PG 字段 → 前端字段映射：
+    - status("active"/"inactive") → is_active(bool)
+    - id(UUID string) → id(string)
+    - 其余字段保持不变
+    """
+    adapted = dict(user)
+    # status → is_active
+    if "status" in adapted:
+        adapted["is_active"] = adapted.get("status") == "active"
+    # 确保关键字段存在
+    adapted.setdefault("is_active", True)
+    adapted.setdefault("role", "user")
+    return adapted
 
 
 def _ensure_admin_in_db(db: UserSystemDB, admin_username: str) -> int:
@@ -104,6 +147,85 @@ def _ensure_admin_in_db(db: UserSystemDB, admin_username: str) -> int:
     return -1
 
 
+def _sync_user_store_role(username: str, role: str):
+    """同步角色变更到 JSON user_store（认证系统依赖）。"""
+    try:
+        from ...user_store import _load_users, _save_users
+        data = _load_users()
+        if username in data.get("users", {}):
+            data["users"][username]["role"] = role
+            _save_users(data)
+            logger.info(f"Synced role change for {username} to JSON user_store: {role}")
+    except Exception as e:
+        logger.error(f"Failed to sync role change to JSON user_store for {username}: {e}")
+
+
+def _sync_user_store_password(username: str, password: str):
+    """同步密码变更到 JSON user_store。"""
+    try:
+        from ...user_store import _load_users, _save_users, _hash_password
+        data = _load_users()
+        if username in data.get("users", {}):
+            pw_hash, salt = _hash_password(password)
+            data["users"][username]["password_hash"] = pw_hash
+            data["users"][username]["salt"] = salt
+            _save_users(data)
+            logger.info(f"Synced password change for {username} to JSON user_store")
+    except Exception as e:
+        logger.error(f"Failed to sync password change to JSON user_store for {username}: {e}")
+
+
+def _remove_user_store_user(username: str):
+    """从 JSON user_store 删除用户。"""
+    try:
+        from ...user_store import _load_users, _save_users
+        data = _load_users()
+        if username in data.get("users", {}):
+            del data["users"][username]
+            _save_users(data)
+            logger.info(f"Removed {username} from JSON user_store")
+    except Exception as e:
+        logger.error(f"Failed to remove {username} from JSON user_store: {e}")
+
+
+async def _create_user_fallback(payload: "AdminUserCreate") -> Dict[str, Any]:
+    """社区版 fallback：当 RepositoryFactory 不可用时，用 UserSystemDB + user_store 创建用户。
+    
+    注意：此函数是原代码中引用但未定义的 _create_user_fallback 的补全实现。
+    """
+    db = UserSystemDB()
+    
+    # 检查用户名是否已存在
+    if db.get_user_by_username(payload.username):
+        raise ValueError(f"Username '{payload.username}' already exists")
+    
+    # 哈希密码
+    from ...user_store import _hash_password
+    pw_hash, salt = _hash_password(payload.password)
+    
+    # 插入 UserSystemDB
+    new_id = db.insert_user({
+        "username": payload.username,
+        "email": payload.email,
+        "display_name": payload.display_name or payload.username,
+        "password_hash": pw_hash,
+        "salt": salt,
+        "role": payload.role,
+        "is_active": 1,
+    })
+    
+    logger.info(f"Admin created user {payload.username} via UserSystemDB fallback (id={new_id})")
+    
+    return {
+        "id": new_id,
+        "username": payload.username,
+        "email": payload.email,
+        "display_name": payload.display_name or payload.username,
+        "role": payload.role,
+        "is_active": True,
+    }
+
+
 # ── Routes ───────────────────────────────────────────────────────────────
 
 @router.get("/admin/users")
@@ -115,11 +237,30 @@ async def list_all_users(
     search: Optional[str] = Query(None, description="搜索用户名"),
 ) -> AdminUserListResponse:
     """列出所有用户."""
-    db = UserSystemDB()
+    # ⭐ 企业版：优先走 PostgreSQL
+    user_repo = _get_user_repo()
+    if user_repo:
+        try:
+            users, total = await user_repo.list_users_page(page=page, page_size=page_size, search=search)
+            safe_users = []
+            for u in users:
+                safe_user = _adapt_pg_user(u)
+                safe_user.pop("password_hash", None)
+                safe_user.pop("salt", None)
+                safe_users.append(safe_user)
+            return AdminUserListResponse(
+                users=safe_users,
+                total=total,
+                page=page,
+                page_size=page_size,
+            )
+        except Exception as e:
+            logger.warning(f"PG list_users failed, falling back to UserSystemDB: {e}")
 
+    # 社区版 fallback：UserSystemDB
+    db = UserSystemDB()
     users, total = db.list_users_page(page=page, page_size=page_size, search=search)
 
-    # 移除敏感字段
     safe_users = []
     for u in users:
         safe_user = dict(u)
@@ -143,59 +284,63 @@ async def create_user_admin(
 ) -> Dict[str, Any]:
     """管理员创建用户（含角色分配）。
     
-    同时创建：
-    1. SQLite user_system 记录
-    2. JSON user_store 认证记录
-    3. 用户工作区目录
+    使用Repository模式：
+    - 社区版：JSON存储
+    - 企业版：PostgreSQL存储
     """
 
-    # 1. 创建到 SQLite user_system
+    # ⭐ 使用RepositoryFactory获取UserRepository
     try:
-        from ....user_system.service import create_user as create_user_sql
-        from ....user_system.models import UserCreate
-        user_create = UserCreate(
-            username=payload.username,
-            password=payload.password,
-            email=payload.email,
-            display_name=payload.display_name,
-            role=payload.role,
-        )
-        user = create_user_sql(user_create)
+        from ....foundation.repository_factory import RepositoryFactory
+        user_repo = RepositoryFactory.get_user_repository()
+        
+        # 准备用户数据
+        user_data = {
+            "username": payload.username,
+            "password": payload.password,
+            "email": payload.email,
+            "display_name": payload.display_name,
+            "role": payload.role,
+        }
+        
+        # 创建用户
+        user = await user_repo.create_user(user_data)
+        logger.info(f"Admin created user {user.get('username')} via Repository")
+        
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Failed to create user in SQLite: {e}")
-        raise HTTPException(status_code=500, detail=f"创建用户失败: {e}")
+    except RuntimeError as e:
+        # RepositoryFactory未初始化，回退到旧方式
+        logger.warning(f"RepositoryFactory not initialized, falling back to SQLite: {e}")
+        user = await _create_user_fallback(payload)
     
     # 2. 同步到 JSON user_store（认证用）
     try:
         from ...user_store import create_user as auth_create_user
         auth_create_user(
-            username=user.username,
+            username=user['username'],
             password=payload.password,
-            display_name=payload.display_name or user.username,
-            role=user.role,
+            display_name=payload.display_name or user.get('display_name') or user['username'],
+            role=payload.role,
         )
-        logger.info(f"Admin created user {user.username} synced to auth user_store")
+        logger.info(f"Admin created user {user['username']} synced to auth user_store")
     except Exception as e:
-        logger.warning(f"Failed to sync user {user.username} to auth store: {e}")
-        # 不阻断主流程，仅记录警告
+        logger.warning(f"Failed to sync user {user['username']} to auth store: {e}")
     
-    # 3. 初始化用户工作区 (pass request for runtime MultiAgentManager registration)
+    # 3. 初始化用户工作区
     try:
         from ...user_provisioning import init_user_workspace
         init_user_workspace(
-            username=user.username,
-            display_name=payload.display_name or user.username,
+            username=user['username'],
+            display_name=payload.display_name or user.get('display_name') or user['username'],
             request=request,
         )
-        logger.info(f"Admin created user {user.username} workspace initialized")
+        logger.info(f"Admin created user {user['username']} workspace initialized")
     except Exception as e:
-        logger.warning(f"Failed to initialize workspace for {user.username}: {e}")
-        # 不阻断主流程，仅记录警告
+        logger.warning(f"Failed to initialize workspace for {user['username']}: {e}")
     
     # 返回用户信息（不含密码）
-    safe_user = user.model_dump()
+    safe_user = user.copy() if isinstance(user, dict) else user.model_dump()
     safe_user.pop("password_hash", None)
     safe_user.pop("salt", None)
 
@@ -204,9 +349,9 @@ async def create_user_admin(
         try:
             from ...permissions.manager import PermissionManager
             pm = PermissionManager.get_instance()
-            pm.update_user_overrides(user.username, payload.permission_overrides)
+            pm.update_user_overrides(user['username'], payload.permission_overrides)
         except Exception as e:
-            logger.warning(f"Failed to save permission_overrides for {user.username}: {e}")
+            logger.warning(f"Failed to save permission_overrides for {user['username']}: {e}")
 
     return {
         "id": safe_user.get("id"),
@@ -222,12 +367,37 @@ async def create_user_admin(
 @require_permission("admin:admin")
 async def get_user_by_id(
     request: Request,
-    user_id: int,
+    user_id: str,
 ) -> Dict[str, Any]:
     """获取用户详情."""
-    db = UserSystemDB()
+    # ⭐ 企业版：优先走 PostgreSQL
+    user_repo = _get_user_repo()
+    if user_repo:
+        try:
+            uid = uuid.UUID(user_id)
+            user = await user_repo.get_user_by_id(uid)
+            if user:
+                safe_user = _adapt_pg_user(user)
+                safe_user.pop("password_hash", None)
+                safe_user.pop("salt", None)
+                return safe_user
+            raise HTTPException(status_code=404, detail="用户不存在")
+        except ValueError:
+            # user_id 不是有效 UUID，可能是社区版的 int ID
+            logger.debug(f"user_id '{user_id}' is not a valid UUID, trying UserSystemDB")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"PG get_user failed, falling back to UserSystemDB: {e}")
 
-    user = db.get_user_by_id(user_id)
+    # 社区版 fallback：UserSystemDB
+    db = UserSystemDB()
+    try:
+        int_id = int(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    user = db.get_user_by_id(int_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -241,18 +411,75 @@ async def get_user_by_id(
 @require_permission("admin:admin")
 async def update_user(
     request: Request,
-    user_id: int,
+    user_id: str,
     payload: AdminUserUpdate = Body(...),
 ) -> Dict[str, Any]:
     """更新用户信息（管理员操作）.
     
-    同时更新 SQLite user_system 和 JSON user_store，
-    确保角色变更对认证系统生效。
+    企业版：更新 PostgreSQL users 表 + 同步 JSON user_store（认证系统依赖）
+    社区版：更新 SQLite user_system + 同步 JSON user_store
     """
     admin_username = getattr(request.state, "username", "anonymous")
+
+    # ⭐ 企业版：优先走 PostgreSQL
+    user_repo = _get_user_repo()
+    if user_repo:
+        try:
+            uid = uuid.UUID(user_id)
+            user = await user_repo.get_user_by_id(uid)
+            if not user:
+                raise HTTPException(status_code=404, detail="用户不存在")
+
+            username = user["username"]
+            update_data: Dict[str, Any] = {}
+
+            if payload.role is not None:
+                update_data["role"] = payload.role
+            if payload.display_name is not None:
+                update_data["display_name"] = payload.display_name
+            if payload.is_active is not None:
+                update_data["status"] = "active" if payload.is_active else "inactive"
+
+            if update_data:
+                await user_repo.update_user(uid, update_data)
+                logger.info(f"Admin updated user {username} via PG Repository")
+
+            # 同步到 JSON user_store（认证系统依赖）
+            if payload.role is not None:
+                _sync_user_store_role(username, payload.role)
+            if payload.password is not None:
+                _sync_user_store_password(username, payload.password)
+
+            # Save permission_overrides if provided
+            if payload.permission_overrides is not None:
+                try:
+                    from ...permissions.manager import PermissionManager
+                    pm = PermissionManager.get_instance()
+                    if payload.permission_overrides:
+                        pm.update_user_overrides(username, payload.permission_overrides)
+                    else:
+                        pm.delete_user_overrides(username)
+                except Exception as e:
+                    logger.warning(f"Failed to save permission_overrides for {username}: {e}")
+
+            return {"success": True, "user_id": user_id, "username": username}
+
+        except ValueError:
+            logger.debug(f"user_id '{user_id}' is not a valid UUID, trying UserSystemDB")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"PG update_user failed, falling back to UserSystemDB: {e}")
+
+    # 社区版 fallback：UserSystemDB
     db = UserSystemDB()
 
-    user = db.get_user_by_id(user_id)
+    try:
+        int_id = int(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    user = db.get_user_by_id(int_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -269,33 +496,13 @@ async def update_user(
         update_data["is_active"] = int(payload.is_active)
 
     if update_data:
-        db.update_user_by_id(user_id, update_data)
+        db.update_user_by_id(int_id, update_data)
         
-        # ── 同步到 JSON user_store（认证系统依赖） ──
+        # 同步到 JSON user_store（认证系统依赖）
         if payload.role is not None:
-            try:
-                from ...user_store import _load_users, _save_users
-                data = _load_users()
-                if username in data.get("users", {}):
-                    data["users"][username]["role"] = payload.role
-                    _save_users(data)
-                    logger.info(f"Synced role change for {username} to JSON user_store: {payload.role}")
-            except Exception as e:
-                logger.error(f"Failed to sync role change to JSON user_store for {username}: {e}")
-        
-        # ── 如果修改了密码，同步到 JSON user_store ──
-        if hasattr(payload, 'password') and payload.password is not None:
-            try:
-                from ...user_store import _load_users, _save_users, _hash_password
-                data = _load_users()
-                if username in data.get("users", {}):
-                    pw_hash, salt = _hash_password(payload.password)
-                    data["users"][username]["password_hash"] = pw_hash
-                    data["users"][username]["salt"] = salt
-                    _save_users(data)
-                    logger.info(f"Synced password change for {username} to JSON user_store")
-            except Exception as e:
-                logger.error(f"Failed to sync password change to JSON user_store for {username}: {e}")
+            _sync_user_store_role(username, payload.role)
+        if payload.password is not None:
+            _sync_user_store_password(username, payload.password)
         
         # Audit log
         admin_user_id = _ensure_admin_in_db(db, admin_username)
@@ -323,27 +530,84 @@ async def update_user(
     return {"success": True, "user_id": user_id, "username": username}
 
 
-class UserDeleteRequest(BaseModel):
-    """用户删除请求体."""
-    backup: bool = False  # 是否备份用户数据
-
-
 @router.delete("/admin/users/{user_id}")
 @require_permission("admin:admin")
 async def delete_user(
     request: Request,
-    user_id: int,
+    user_id: str,
     body: UserDeleteRequest = Body(default=UserDeleteRequest()),
 ) -> Dict[str, Any]:
     """删除用户（支持软删除和硬删除）.
     
-    - 默认软删除：标记为非活跃
-    - backup=True 时硬删除：先备份用户数据，然后从数据库和文件系统中删除
+    企业版：
+    - 软删除（默认）：PG 软删除（deleted_at + status=inactive）+ 清理 JSON user_store
+    - 硬删除（backup=True）：备份工作区 → PG 硬删除 → 清理 JSON user_store → 删除工作区
+    社区版：同原逻辑
     """
     admin_username = getattr(request.state, "username", "anonymous")
+
+    # ⭐ 企业版：优先走 PostgreSQL
+    user_repo = _get_user_repo()
+    if user_repo:
+        try:
+            uid = uuid.UUID(user_id)
+            user = await user_repo.get_user_by_id(uid)
+            if not user:
+                raise HTTPException(status_code=404, detail="用户不存在")
+
+            username = user["username"]
+
+            if body.backup:
+                # 硬删除 - 先备份
+                from ....constant import WORKING_DIR
+                backup_dir = WORKING_DIR / "backups" / "users"
+                backup_dir.mkdir(parents=True, exist_ok=True)
+
+                timestamp = int(time.time())
+                backup_path = backup_dir / f"{username}_{timestamp}"
+
+                workspace_dir = WORKING_DIR / "workspaces" / username
+                if workspace_dir.exists():
+                    shutil.copytree(workspace_dir, backup_path / "workspace")
+                    logger.info(f"Backed up workspace for {username} to {backup_path}")
+
+                # PG 硬删除（设 deleted_at）
+                await user_repo.delete_user(uid)
+
+                # 从 JSON user_store 删除
+                _remove_user_store_user(username)
+
+                if workspace_dir.exists():
+                    shutil.rmtree(workspace_dir)
+                    logger.info(f"Deleted workspace for {username}")
+
+                return {"success": True, "user_id": user_id, "username": username, "backup_path": str(backup_path)}
+            else:
+                # 软删除 - PG 软删除
+                await user_repo.delete_user(uid)
+
+                # 从 JSON user_store 删除（软删除也清理认证信息）
+                _remove_user_store_user(username)
+
+                logger.info(f"Admin soft-deleted user {username} (PG + user_store)")
+                return {"success": True, "user_id": user_id, "username": username}
+
+        except ValueError:
+            logger.debug(f"user_id '{user_id}' is not a valid UUID, trying UserSystemDB")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"PG delete_user failed, falling back to UserSystemDB: {e}")
+
+    # 社区版 fallback：UserSystemDB
     db = UserSystemDB()
 
-    user = db.get_user_by_id(user_id)
+    try:
+        int_id = int(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    user = db.get_user_by_id(int_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -368,18 +632,10 @@ async def delete_user(
             shutil.copytree(chats_dir, backup_path / "chat", dirs_exist_ok=True)
 
         # 从数据库删除
-        db.delete_user_by_id(user_id)
+        db.delete_user_by_id(int_id)
 
         # 从 JSON user_store 删除
-        try:
-            from ...user_store import _load_users, _save_users
-            data = _load_users()
-            if username in data.get("users", {}):
-                del data["users"][username]
-                _save_users(data)
-                logger.info(f"Removed {username} from JSON user_store")
-        except Exception as e:
-            logger.error(f"Failed to remove {username} from JSON user_store: {e}")
+        _remove_user_store_user(username)
 
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir)
@@ -398,7 +654,10 @@ async def delete_user(
         return {"success": True, "user_id": user_id, "username": username, "backup_path": str(backup_path)}
     else:
         # 软删除 - 标记为非活跃
-        db.update_user_by_id(user_id, {"is_active": 0})
+        db.update_user_by_id(int_id, {"is_active": 0})
+
+        # 从 JSON user_store 删除
+        _remove_user_store_user(username)
 
         admin_user_id = _ensure_admin_in_db(db, admin_username)
         db.insert_audit_log(
@@ -409,24 +668,55 @@ async def delete_user(
             resource_id=str(user_id),
         )
 
-        return {"success": True, "user_id": user_id}
+        return {"success": True, "user_id": user_id, "username": username}
 
 
 @router.post("/admin/users/{user_id}/reset-tokens")
 @require_permission("admin:admin")
 async def reset_user_tokens(
     request: Request,
-    user_id: int,
+    user_id: str,
 ) -> Dict[str, Any]:
     """重置用户 Token 用量."""
     admin_username = getattr(request.state, "username", "anonymous")
+
+    # ⭐ 企业版：优先走 PostgreSQL
+    user_repo = _get_user_repo()
+    if user_repo:
+        try:
+            uid = uuid.UUID(user_id)
+            user = await user_repo.get_user_by_id(uid)
+            if not user:
+                raise HTTPException(status_code=404, detail="用户不存在")
+
+            # 更新 quota（清零 token 使用量）
+            quota = user.get("quota", {})
+            quota["token_used_monthly"] = 0
+            await user_repo.update_user(uid, {"quota": quota})
+
+            logger.info(f"Admin reset tokens for {user['username']}")
+            return {"success": True, "user_id": user_id, "username": user["username"]}
+
+        except ValueError:
+            logger.debug(f"user_id '{user_id}' is not a valid UUID, trying UserSystemDB")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"PG reset_tokens failed, falling back to UserSystemDB: {e}")
+
+    # 社区版 fallback：UserSystemDB
     db = UserSystemDB()
 
-    user = db.get_user_by_id(user_id)
+    try:
+        int_id = int(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    user = db.get_user_by_id(int_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    db.update_user_by_id(user_id, {"token_used_monthly": 0})
+    db.update_user_by_id(int_id, {"token_used_monthly": 0})
 
     admin_user = db.get_user_by_username(admin_username)
     if admin_user:

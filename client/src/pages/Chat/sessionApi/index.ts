@@ -1107,7 +1107,15 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     // This prevents race conditions where getSessionList() is called before
     // backend session is created, causing duplicate entries.
     try {
-      const agentId = useAgentStore.getState().selectedAgent;
+      let agentId = useAgentStore.getState().selectedAgent;
+      if (!agentId) {
+        // Agent list may still be loading (e.g. SSO auto-login race).
+        // Wait up to 5s for it to resolve before giving up.
+        for (let i = 0; i < 50 && !agentId; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          agentId = useAgentStore.getState().selectedAgent;
+        }
+      }
       if (!agentId) {
         throw new Error("Cannot create chat: no agent selected");
       }

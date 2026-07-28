@@ -16,8 +16,8 @@ class RepositoryFactory:
     
     This factory provides dependency injection for repositories,
     allowing different implementations based on edition:
-        - Community: JsonKnowledgeBaseRepository
-        - Enterprise: PostgresKnowledgeBaseRepository (loaded dynamically)
+        - Community: JsonKnowledgeBaseRepository, JsonUserRepository
+        - Enterprise: PostgresKnowledgeBaseRepository, PostgresUserRepository (loaded dynamically)
     
     Usage:
         # Community edition (default)
@@ -29,14 +29,17 @@ class RepositoryFactory:
         # Enterprise edition
         RepositoryFactory.initialize(
             edition="enterprise",
-            database_url="postgresql://..."
+            session=db_session,
+            user_repository=postgres_user_repo  # 注入企业版Repository
         )
         
         # Get repository instance
         kb_repo = RepositoryFactory.get_kb_repository()
+        user_repo = RepositoryFactory.get_user_repository()
     """
     
     _kb_repo: Optional[KnowledgeBaseRepository] = None
+    _user_repo = None  # User repository (injected by enterprise)
     _edition: Optional[str] = None
     _initialized: bool = False
     
@@ -52,7 +55,7 @@ class RepositoryFactory:
             edition: "community" or "enterprise"
             **kwargs: Edition-specific configuration
                 - Community: data_dir (Path)
-                - Enterprise: database_url, session_pool, etc.
+                - Enterprise: session, user_repository (injected)
         
         Raises:
             ValueError: If invalid edition or missing required config
@@ -60,34 +63,62 @@ class RepositoryFactory:
         if cls._initialized:
             logger.warning("RepositoryFactory already initialized, re-initializing...")
         
+        cls._edition = edition
+        
         if edition == "community":
             data_dir = kwargs.get("data_dir", Path.cwd() / "data")
             cls._kb_repo = JsonKnowledgeBaseRepository(data_dir)
             logger.info(f"Initialized Community edition repositories (data_dir={data_dir})")
+            
+            # 社区版：使用JSON User Repository
+            try:
+                from .user_repository_json import JsonUserRepository
+                cls._user_repo = JsonUserRepository()
+                logger.info("Initialized Community User repository (JSON)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize JsonUserRepository: {e}")
         
         elif edition == "enterprise":
-            # Dynamically import enterprise implementation
-            try:
-                from coapis.enterprise.repository_postgres import PostgresKnowledgeBaseRepository
-                
-                session = kwargs.get("session")
-                if not session:
-                    raise ValueError("Enterprise edition requires 'session' parameter")
-                
-                cls._kb_repo = PostgresKnowledgeBaseRepository(session)
-                logger.info("Initialized Enterprise edition repositories (PostgreSQL)")
+            # 企业版：注入Repository（由企业版plugin提供）
             
-            except ImportError as e:
-                logger.error(f"Failed to import enterprise repositories: {e}")
-                raise ValueError(
-                    "Enterprise edition requires 'coapis.enterprise' package. "
-                    "Install it with: pip install coapis-enterprise"
-                )
+            # 1. KnowledgeBase Repository（可选）
+            session = kwargs.get("session")
+            kb_repo = kwargs.get("kb_repository")
+            
+            if kb_repo:
+                cls._kb_repo = kb_repo
+                logger.info("Enterprise KB repository injected")
+            elif session:
+                try:
+                    from coapis.enterprise.repository_postgres import PostgresKnowledgeBaseRepository
+                    cls._kb_repo = PostgresKnowledgeBaseRepository(session)
+                    logger.info("Enterprise KB repository initialized (PostgreSQL)")
+                except ImportError:
+                    logger.info("Enterprise KB repository not available, using JSON")
+                    data_dir = kwargs.get("data_dir", Path.cwd() / "data")
+                    cls._kb_repo = JsonKnowledgeBaseRepository(data_dir)
+            else:
+                # 默认使用JSON
+                data_dir = kwargs.get("data_dir", Path.cwd() / "data")
+                cls._kb_repo = JsonKnowledgeBaseRepository(data_dir)
+                logger.info("Using JSON KB repository (default)")
+            
+            # 2. User Repository（企业版注入）
+            user_repo = kwargs.get("user_repository")
+            if user_repo:
+                cls._user_repo = user_repo
+                logger.info("✅ Enterprise User repository injected")
+            else:
+                logger.info("Enterprise User repository not injected, using JSON")
+                try:
+                    from .user_repository_json import JsonUserRepository
+                    cls._user_repo = JsonUserRepository()
+                except Exception as e:
+                    logger.warning(f"Failed to initialize JsonUserRepository: {e}")
         
         else:
             raise ValueError(f"Invalid edition: {edition}. Must be 'community' or 'enterprise'")
         
-        cls._edition = edition
         cls._initialized = True
     
     @classmethod
@@ -109,11 +140,35 @@ class RepositoryFactory:
         return cls._kb_repo
     
     @classmethod
+    def get_user_repository(cls):
+        """Get user repository instance.
+        
+        Returns:
+            UserRepository implementation (JSON or PostgreSQL)
+            
+        Raises:
+            RuntimeError: If factory not initialized
+        """
+        if not cls._initialized:
+            raise RuntimeError(
+                "RepositoryFactory not initialized. "
+                "Call RepositoryFactory.initialize() first."
+            )
+        
+        if cls._user_repo is None:
+            raise RuntimeError(
+                "User repository not available. "
+                "Ensure RepositoryFactory.initialize() was called with user_repository."
+            )
+        
+        return cls._user_repo
+    
+    @classmethod
     def get_edition(cls) -> Optional[str]:
         """Get current edition.
         
         Returns:
-            "community" or "enterprise", None if not initialized
+            "community" or "enterprise" or None if not initialized
         """
         return cls._edition
     
@@ -125,10 +180,3 @@ class RepositoryFactory:
             True if initialized, False otherwise
         """
         return cls._initialized
-    
-    @classmethod
-    def reset(cls):
-        """Reset factory (mainly for testing)."""
-        cls._kb_repo = None
-        cls._edition = None
-        cls._initialized = False

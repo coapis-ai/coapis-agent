@@ -31,6 +31,14 @@ function ModelsPage() {
   // Default models configuration
   const [defaultModels, setDefaultModels] = useState<Record<string, { providerId: string; modelId: string } | null>>({});
 
+  // Refresh key: bump when providers change so DefaultModelSelector reloads its model list
+  const [modelRefreshKey, setModelRefreshKey] = useState(0);
+  useEffect(() => {
+    if (providers.length > 0) {
+      setModelRefreshKey((k) => k + 1);
+    }
+  }, [providers]);
+
   // Load default models
   useEffect(() => {
     api.get("/models/default-models").then((data: any) => {
@@ -182,6 +190,7 @@ function ModelsPage() {
                   icon="💬"
                   value={defaultModels.chat}
                   onChange={(value) => handleDefaultModelChange("chat", value)}
+                  refreshKey={modelRefreshKey}
                 />
                 <DefaultModelSelector
                   modelType="embedding"
@@ -189,6 +198,7 @@ function ModelsPage() {
                   icon="🔢"
                   value={defaultModels.embedding}
                   onChange={(value) => handleDefaultModelChange("embedding", value)}
+                  refreshKey={modelRefreshKey}
                 />
                 <DefaultModelSelector
                   modelType="rerank"
@@ -196,6 +206,7 @@ function ModelsPage() {
                   icon="🔄"
                   value={defaultModels.rerank}
                   onChange={(value) => handleDefaultModelChange("rerank", value)}
+                  refreshKey={modelRefreshKey}
                 />
                 <DefaultModelSelector
                   modelType="audio"
@@ -203,6 +214,7 @@ function ModelsPage() {
                   icon="🎵"
                   value={defaultModels.audio}
                   onChange={(value) => handleDefaultModelChange("audio", value)}
+                  refreshKey={modelRefreshKey}
                 />
                 <DefaultModelSelector
                   modelType="vision"
@@ -210,6 +222,7 @@ function ModelsPage() {
                   icon="👁"
                   value={defaultModels.vision}
                   onChange={(value) => handleDefaultModelChange("vision", value)}
+                  refreshKey={modelRefreshKey}
                 />
               </div>
             </div>

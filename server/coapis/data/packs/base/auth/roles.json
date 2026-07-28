@@ -1,35 +1,175 @@
 {
-  "user": {
-    "level": 0,
-    "is_default": true,
-    "modules": {
-      "chat": {"read": true, "create": true, "update": true, "delete": false},
-      "skills": {"read": true, "create": true, "update": true, "delete": false},
-      "models": {"read": true, "create": true, "update": true, "delete": true},
-      "agents": {"read": true, "create": true, "update": false, "delete": false},
-      "admin": {"read": false, "create": false, "update": false, "delete": false},
-      "system": {"read": false, "create": false, "update": false, "delete": false},
-      "audit": {"read": true, "create": false, "update": false, "delete": false},
-      "token_usage": {"read": true, "create": false, "update": false, "delete": false},
-      "cron": {"read": true, "create": true, "update": true, "delete": true},
-      "heartbeat": {"read": true, "create": true, "update": true, "delete": false},
-      "channels": {"read": true, "create": true, "update": true, "delete": false},
-      "config": {"read": true, "create": false, "update": false, "delete": false},
-      "workspace": {"read": true, "create": true, "update": true, "delete": true},
-      "myspace": {"read": true, "create": true, "update": true, "delete": true},
-      "security": {"read": true, "create": false, "update": false, "delete": false},
-      "backups": {"read": true, "create": true, "update": false, "delete": false},
-      "debug": {"read": true, "create": false, "update": false, "delete": false},
-      "evolution": {"read": true, "create": true, "update": true, "delete": false},
-      "knowledge": {"read": true, "create": true, "update": true, "delete": false},
-      "user_system": {"read": true, "create": false, "update": false, "delete": false},
-      "sessions": {"read": true, "create": true, "update": true, "delete": true},
-      "files": {"read": true, "create": true, "update": true, "delete": true}
+    "user": {
+        "level": 0,
+        "is_default": true,
+        "modules": {
+            "chat": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": true
+            },
+            "myspace": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": true
+            },
+            "skills": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": true
+            },
+            "models": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "channels": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": true
+            },
+            "sessions": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": true
+            },
+            "cron-jobs": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": true
+            },
+            "heartbeat": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": true
+            },
+            "tools": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "mcp": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "agent-config": {
+                "read": false,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "agent-stats": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "agents": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": true
+            },
+            "voice-transcription": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": false
+            },
+            "skill-pool": {
+                "read": false,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "security": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "token-usage": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "backups": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "evolution": {
+                "read": false,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "admin": {
+                "read": false,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "audit": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "scene": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "tag": {
+                "read": true,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "debug": {
+                "read": false,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "system": {
+                "read": false,
+                "create": false,
+                "update": false,
+                "delete": false
+            },
+            "profile": {
+                "read": true,
+                "create": true,
+                "update": true,
+                "delete": false
+            },
+            "acp": {
+                "read": false,
+                "create": false,
+                "update": false,
+                "delete": false
+            }
+        }
+    },
+    "admin": {
+        "level": 2,
+        "is_default": false,
+        "modules": "*"
     }
-  },
-  "admin": {
-    "level": 2,
-    "is_default": false,
-    "modules": "*"
-  }
 }

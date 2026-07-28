@@ -111,7 +111,7 @@ async def get_recommendations_endpoint(
         # If bootstrap is pending, replace recommendations with remaining bootstrap questions
         if scene == "chat_welcome":
             from ..agents.utils import has_pending_bootstrap
-            from ..agents.hooks.bootstrap import BOOTSTRAP_PROMPTS_ZH
+            from ..agents.hooks.bootstrap import BOOTSTRAP_CLICK_PROMPTS_ZH
             from ..constant import WORKSPACES_DIR
             
             # Check if bootstrap is pending for this user
@@ -129,14 +129,19 @@ async def get_recommendations_endpoint(
                         pass
                 
                 # Show only the NEXT unanswered bootstrap prompt
-                prompts = BOOTSTRAP_PROMPTS_ZH
+                # Use click prompts (user voice) — the append prompt (assistant
+                # voice) is handled separately by the runner after LLM responds.
+                prompts = BOOTSTRAP_CLICK_PROMPTS_ZH
+                titles = ["认识一下", "了解能力", "个性化定制"]
                 if prompts_sent < len(prompts):
-                    clean_prompt = prompts[prompts_sent].strip()
+                    idx = min(prompts_sent, len(prompts) - 1)
+                    click_prompt = prompts[idx]
+                    title = titles[idx] if idx < len(titles) else "帮助我了解您"
                     bootstrap_items = [{
                         "id": f"bootstrap_q{prompts_sent+1}",
-                        "title": "帮助我了解您",
+                        "title": title,
                         "description": "点击开始对话",
-                        "prompt": clean_prompt,
+                        "prompt": click_prompt,
                         "category": "context",
                         "icon": "🐝",
                         "score": 100,

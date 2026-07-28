@@ -70,6 +70,7 @@ export interface CreateCustomProviderRequest {
   api_key_prefix?: string;
   chat_model?: string;
   models?: ModelInfo[];
+  require_api_key?: boolean;
 }
 
 export interface AddModelRequest {

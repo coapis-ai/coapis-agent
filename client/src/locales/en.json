@@ -1163,6 +1163,8 @@
     "selectProtocol": "Please select a protocol",
     "protocolOpenAI": "OpenAI-compatible (Chat Completions)",
     "protocolAnthropic": "Anthropic (Messages API)",
+    "requireApiKeyLabel": "Require API Key",
+    "requireApiKeyHint": "Turn off for local inference servers (e.g. vLLM) that don't require authentication.",
     "currentKey": "Current: {{key}}",
     "startsWith": "Starts with \"{{prefix}}\"",
     "optionalSelfHosted": "Optional for self-hosted services",
