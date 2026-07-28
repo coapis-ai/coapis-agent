@@ -39,7 +39,6 @@ logger = logging.getLogger(__name__)
     ),
     category="builtin",
     tags=['memory', 'daily'],
-    scene="chat",
 )
 async def record_daily_memory(
     event: str,

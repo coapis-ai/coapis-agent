@@ -115,8 +115,7 @@ TODO_TOOL_SCHEMA = {
     name="todo_tool",
     description="管理当前会话的任务清单。支持 add/update/remove/complete/list 操作。",
     category="builtin",
-    tags=["task", "todo"],
-    scene="core"
+    tags=["task", "todo"]
 )
 async def todo_tool(
     action: str = "list",

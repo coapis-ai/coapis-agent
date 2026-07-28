@@ -34,6 +34,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body
 from pydantic import BaseModel
+from uuid import UUID
 
 from ....user_system.database import UserSystemDB
 from ....user_system.models import UserResponse
@@ -367,7 +368,7 @@ async def create_user_admin(
 @require_permission("admin:admin")
 async def get_user_by_id(
     request: Request,
-    user_id: str,
+    user_id: UUID,
 ) -> Dict[str, Any]:
     """获取用户详情."""
     # ⭐ 企业版：优先走 PostgreSQL
@@ -411,7 +412,7 @@ async def get_user_by_id(
 @require_permission("admin:admin")
 async def update_user(
     request: Request,
-    user_id: str,
+    user_id: UUID,
     payload: AdminUserUpdate = Body(...),
 ) -> Dict[str, Any]:
     """更新用户信息（管理员操作）.
@@ -534,7 +535,7 @@ async def update_user(
 @require_permission("admin:admin")
 async def delete_user(
     request: Request,
-    user_id: str,
+    user_id: UUID,
     body: UserDeleteRequest = Body(default=UserDeleteRequest()),
 ) -> Dict[str, Any]:
     """删除用户（支持软删除和硬删除）.
@@ -675,7 +676,7 @@ async def delete_user(
 @require_permission("admin:admin")
 async def reset_user_tokens(
     request: Request,
-    user_id: str,
+    user_id: UUID,
 ) -> Dict[str, Any]:
     """重置用户 Token 用量."""
     admin_username = getattr(request.state, "username", "anonymous")

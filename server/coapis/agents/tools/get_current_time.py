@@ -35,7 +35,6 @@ logger = logging.getLogger(__name__)
     description="获取当前时间",
     category="builtin",
     tags=['time'],
-    scene="system",
 )
 async def get_current_time() -> ToolResponse:
     """Get the current time in format `%Y-%m-%d %H:%M:%S TZ (Day)`,
@@ -77,7 +76,6 @@ async def get_current_time() -> ToolResponse:
     description="设置用户时区",
     category="builtin",
     tags=['time', 'config'],
-    scene="system",
 )
 async def set_user_timezone(timezone_name: str) -> ToolResponse:
     """Set the user timezone.

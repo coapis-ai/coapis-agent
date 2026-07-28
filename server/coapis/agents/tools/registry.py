@@ -38,7 +38,6 @@ class ToolRegistration:
     async_execution: bool = False
     category: str = "builtin"  # builtin, plugin, custom
     tags: list[str] = field(default_factory=list)
-    scene: str = "general"  # coding/ops/data/security/ai/collaboration/general
 
 
 # Global registry
@@ -53,7 +52,6 @@ def register_tool(
     async_execution: bool = False,
     category: str = "builtin",
     tags: list[str] | None = None,
-    scene: str = "general",
 ) -> Callable:
     """Decorator to register a tool function.
 
@@ -74,7 +72,6 @@ def register_tool(
             async_execution=async_execution,
             category=category,
             tags=tags or [],
-            scene=scene,
         )
         _registry[tool_name] = reg
         logger.debug("Registered tool: %s (category=%s)", tool_name, category)

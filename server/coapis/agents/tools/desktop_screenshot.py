@@ -122,7 +122,6 @@ def _capture_macos_screencapture(
     description="截取桌面截图",
     category="builtin",
     tags=['screenshot'],
-    scene="system",
 )
 async def desktop_screenshot(
     output_path: str = "",

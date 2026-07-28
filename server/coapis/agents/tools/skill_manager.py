@@ -49,8 +49,7 @@ def _save_index(data: dict[str, Any]):
     name="skill_manager",
     description="动态技能管理：加载/卸载/热更新/列表动态技能，与 registry 联动注册到工具系统，与 memory_manager 记录技能版本。",
     category="builtin",
-    tags=["ai", "skill", "dynamic", "plugin"],
-    scene="ai"
+    tags=["ai", "skill", "dynamic", "plugin"]
 )
 async def skill_manager(
     action: str = "list",

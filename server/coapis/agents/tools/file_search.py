@@ -497,7 +497,6 @@ def _walk_and_glob(
     description="按模式搜索文件内容",
     category="builtin",
     tags=['file', 'search'],
-    scene="search",
 )
 async def grep_search(
     pattern: str,
@@ -612,7 +611,6 @@ async def grep_search(
     description="按 glob 模式搜索文件",
     category="builtin",
     tags=['file', 'search'],
-    scene="search",
 )
 async def glob_search(
     pattern: str,

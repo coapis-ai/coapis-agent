@@ -231,8 +231,7 @@ def _extract_date_from_filename(filename: str) -> str:
     name="session_search",
     description="搜索历史会话和记忆文件。支持关键词搜索 JSONL 历史、workspace 聊天记录、memory markdown 文件。",
     category="builtin",
-    tags=["search", "history", "memory"],
-    scene="coding"
+    tags=["search", "history", "memory"]
 )
 async def session_search(
     query: str = "",

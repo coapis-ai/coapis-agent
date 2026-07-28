@@ -220,7 +220,6 @@ async def _run_code_file(file_path: str, args: list[str], timeout: int) -> dict[
     description="代码执行：运行测试套件（pytest/unittest/npm）或执行代码片段（Python/Node），支持沙箱隔离。test_runner + code_runner 合并。",
     category="builtin",
     tags=["code", "exec", "test", "run"],
-    scene="coding",
 )
 async def code_exec(
     action: str = "run_test",

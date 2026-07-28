@@ -1261,14 +1261,6 @@ class AgentProfileConfig(BaseModel):
         default="zh",
         description="Language setting for this agent",
     )
-    scene: Optional[str] = Field(
-        default=None,
-        description=(
-            "Agent's working scene for dynamic tool injection. "
-            "Options: coding, ops, data, security, ai, collaboration. "
-            "If None, auto-detected from user messages."
-        ),
-    )
     approval_level: str = Field(
         default="AUTO",
         description=(

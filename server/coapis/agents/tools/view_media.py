@@ -317,7 +317,6 @@ def _get_multimodal_fallback_hint(media_type: str, path: str) -> str:
     description="查看图片文件",
     category="builtin",
     tags=['media', 'image'],
-    scene="media",
 )
 async def view_image(file_path: str) -> ToolResponse:
     """Load an image file into the LLM context so the model can see it.
@@ -398,7 +397,6 @@ async def view_image(file_path: str) -> ToolResponse:
     description="查看视频文件",
     category="builtin",
     tags=['media', 'video'],
-    scene="media",
 )
 async def view_video(file_path: str) -> ToolResponse:
     """Load a video file into the LLM context so the model can see it.

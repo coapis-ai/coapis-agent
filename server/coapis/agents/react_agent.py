@@ -215,16 +215,6 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         running_config = agent_config.running
         self._language = agent_config.language
 
-        # ── Auto-detect scene from first user message ──
-        if not getattr(self._agent_config, "scene", None):
-            user_msg = self._request_context.get("first_message", "")
-            if user_msg:
-                from .tools.scene_classifier import classify_scene
-                detected = classify_scene(user_msg)
-                if detected:
-                    self._agent_config.scene = detected
-                    logger.info("Auto-detected scene: %s", detected)
-
         # Initialize toolkit with built-in tools
         toolkit = self._create_toolkit(namesake_strategy=namesake_strategy)
 
@@ -462,28 +452,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         registered = get_registered_tools()
         tool_functions = {name: reg.func for name, reg in registered.items()}
 
-        # ── Scene-based dynamic injection ──
-        # core tools are always injected; others require matching scene
-        CORE_SCENE = "core"
-        agent_scene = getattr(self._agent_config, "scene", None) or self._request_context.get("scene", None)
-        # If agent_scene is set, only inject core + matching scene tools
-        # If not set, inject all tools (backward compatible fallback)
-        scene_filter = agent_scene is not None
-
         # Register only enabled tools
         for tool_name, tool_func in tool_functions.items():
             # If tool not in config, enable by default (backward compatibility)
             if not enabled_tools.get(tool_name, True):
                 logger.debug("Skipped disabled tool: %s", tool_name)
                 continue
-
-            # Scene-based filtering: skip non-core tools that don't match scene
-            if scene_filter:
-                reg = registered.get(tool_name)
-                tool_scene = getattr(reg, "scene", "general") if reg else "general"
-                if tool_scene != CORE_SCENE and tool_scene != agent_scene:
-                    logger.debug("Skipped scene-mismatched tool: %s (scene=%s, agent_scene=%s)", tool_name, tool_scene, agent_scene)
-                    continue
 
             # Get async_execution setting (default to False for backward
             # compatibility)

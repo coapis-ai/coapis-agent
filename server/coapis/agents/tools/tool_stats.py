@@ -153,8 +153,7 @@ def record_tool_call(
     name="tool_stats",
     description="工具使用追踪：查看/查询/重置工具调用统计（次数/成功率/耗时），为进化系统提供数据基础。",
     category="builtin",
-    tags=["analytics", "stats", "evolution"],
-    scene="ops"
+    tags=["analytics", "stats", "evolution"]
 )
 async def tool_stats(
     action: str = "list",

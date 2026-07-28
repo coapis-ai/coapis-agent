@@ -68,8 +68,7 @@ async def _run_git(args: list[str], cwd: str, timeout: int = _TIMEOUT) -> dict[s
     name="git_ops",
     description="Git 操作：status/diff/log/commit/branch/merge/stash/add/push/pull/fetch。",
     category="builtin",
-    tags=["git", "version-control", "ops"],
-    scene="general"
+    tags=["git", "version-control", "ops"]
 )
 async def git_ops(
     action: str = "status",

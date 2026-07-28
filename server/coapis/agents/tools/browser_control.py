@@ -3834,7 +3834,6 @@ async def _action_connect_cdp(state: dict, cdp_url: str) -> ToolResponse:
     description="浏览器自动化：网页浏览、信息检索、网页搜索、填表、截图、数据抓取。当需要搜索网页、获取网页内容、浏览网站时使用此工具。",
     category="builtin",
     tags=['browser', 'web'],
-    scene="browser",
 )
 async def browser_use(  # pylint: disable=R0911,R0912
     action: str,

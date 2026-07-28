@@ -58,8 +58,7 @@ def _get_cron_manager():
     name="cron_scheduler",
     description="定时任务管理：创建/列表/暂停/恢复/删除定时任务。基于内部调度系统，无需系统 cron 服务。",
     category="builtin",
-    tags=["cron", "scheduling", "automation"],
-    scene="ops"
+    tags=["cron", "scheduling", "automation"]
 )
 async def cron_scheduler(
     action: str = "list",

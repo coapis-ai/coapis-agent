@@ -83,7 +83,6 @@ def _auto_as_type(mt: str) -> str:
     description="发送文件给用户",
     category="builtin",
     tags=['file', 'send'],
-    scene="core",
 )
 async def send_file_to_user(
     file_path: str,

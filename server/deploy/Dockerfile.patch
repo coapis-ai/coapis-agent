@@ -1,0 +1,15 @@
+FROM coapis-agent:latest
+
+# SSO & user workspace fixes (v0.11.0+ patches)
+COPY server/coapis/app/user_provisioning.py /app/coapis/app/user_provisioning.py
+COPY server/coapis/app/external_login.py /app/coapis/app/external_login.py
+COPY server/coapis/app/routers/agents.py /app/coapis/app/routers/agents.py
+COPY server/coapis/app/routers/files.py /app/coapis/app/routers/files.py
+COPY server/coapis/config/config.py /app/coapis/config/config.py
+COPY server/coapis/agents/react_agent.py /app/coapis/agents/react_agent.py
+COPY server/coapis/agents/tools/daily_memory.py /app/coapis/agents/tools/daily_memory.py
+COPY server/coapis/agents/hooks/bootstrap.py /app/coapis/agents/hooks/bootstrap.py
+COPY server/coapis/recommendation/router.py /app/coapis/recommendation/router.py
+
+# cron_scheduler import path fix
+COPY server/coapis/agents/tools/cron_scheduler.py /app/coapis/agents/tools/cron_scheduler.py

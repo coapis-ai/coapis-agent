@@ -124,7 +124,6 @@ def _get_encoding_for_file(file_path: str) -> str:
     description="读取文件内容。必需参数：file_path（文件路径）。可选参数：start_line、end_line（行号范围）。",
     category="builtin",
     tags=['file', 'read'],
-    scene="core",
 )
 async def read_file(  # pylint: disable=too-many-return-statements
     file_path: str,
@@ -287,7 +286,6 @@ async def read_file(  # pylint: disable=too-many-return-statements
     description="写入文件内容。必需参数：file_path（文件路径）、content（文件内容）。",
     category="builtin",
     tags=['file', 'write'],
-    scene="core",
 )
 async def write_file(
     file_path: str,
@@ -362,7 +360,6 @@ async def write_file(
     description="查找替换文件内容。必需参数：file_path（文件路径）、old_text（原文本）、new_text（新文本）。",
     category="builtin",
     tags=['file', 'edit'],
-    scene="core",
 )
 async def edit_file(
     file_path: str,
@@ -476,7 +473,6 @@ async def edit_file(
     description="追加内容到文件末尾。必需参数：file_path（文件路径）、content（追加内容）。",
     category="builtin",
     tags=["file", "append"],
-    scene="core",
 )
 async def append_file(
     file_path: str,
