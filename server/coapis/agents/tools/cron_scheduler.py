@@ -39,7 +39,7 @@ def _get_cron_manager():
     multi_agent_manager's cron_registry.
     """
     # Import here to avoid circular imports
-    from ..app.crons.registry import get_registry
+    from ...app.crons.registry import get_registry
 
     registry = get_registry()
     if registry is None:
