@@ -2008,7 +2008,6 @@ def load_agent_config(agent_id: str, workspace_dir: Path = None, username: str =
 
 
 _AGENT_GLOBAL_INHERITED_FIELDS = frozenset({
-    "mcp",
     "acp",
     "security",
     "running",
