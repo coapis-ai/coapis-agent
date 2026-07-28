@@ -571,15 +571,16 @@ async def list_mcp_tools(
     # Try to get tools from the running MCP client manager
     try:
         from ..mcp import MCPClientManager
-        from ...config.config import load_config as _load_sys_config
+        from ...config.utils import load_config as _load_sys_config
 
         sys_config = _load_sys_config()
         # Find workspace with this MCP client connected
         manager = getattr(request.app.state, "multi_agent_manager", None)
         if manager:
-            ws = manager.get_workspace(agent_id)
-            if ws and ws.mcp_manager:
-                clients = await ws.mcp_manager.get_clients()
+            ws = manager.get_workspace(agent_id, username=user_id)
+            mcp_mgr = getattr(ws, "_mcp_manager", None) if ws else None
+            if mcp_mgr:
+                clients = await mcp_mgr.get_clients()
                 for c in clients:
                     if getattr(c, "name", None) == client_key:
                         tools = await c.list_tools()
@@ -594,7 +595,7 @@ async def list_mcp_tools(
                             for t in tools
                         ]
     except Exception as e:
-        logger.warning(f"Failed to list tools for MCP '{client_key}': {e}")
+        logger.warning(f"Failed to list tools for MCP '{client_key}': {e}", exc_info=True)
 
     # Fallback: return empty list (client not connected yet)
     return []
