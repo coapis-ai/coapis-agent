@@ -5,7 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [v0.9.11] - 2026-07-10
+## [v0.11.1] - 2026-07-28
+
+### Bug Fixes
+
+- **cron_scheduler import path** — Line 159 still used 2 dots (`..app`), causing `ModuleNotFoundError` on `action=add`
+- **MCP not persisted** — `mcp` was mistakenly in `_AGENT_GLOBAL_INHERITED_FIELDS`, removed so configs save correctly
+- **MCP tools list API** — Fixed wrong import path, missing `username` in `get_workspace`, and wrong attribute name (`mcp_manager` → `_mcp_manager`)
+- **Sidebar submenu won't collapse** — Removed CSS `!important` rule that overrode Ant Design's `display: none`
+
+### Infrastructure
+
+- **Node.js 20.x LTS in Docker** — Enables `npx`/`node`-based stdio MCP servers (e.g. Gitee MCP)
+
+### Refactor
+
+- **Removed scene_filter dead code** — 26 files, -238/+28 lines
+- **Aligned 27 permission modules** — Backend keys matched with runtime config
+
+### Features
+
+- **PlanNotebook enabled by default** — LLM decides autonomously whether to plan
+- **SSO default password** — `123456`, changeable by users
+- **UserRepository abstraction** — Interface for enterprise PostgreSQL implementation
+
+## [v0.11.0] - 2026-07-24
 
 ### 工具系统统一
 - **删除冗余工具** — 移除 8 个低价值工具（agent_optimizer, ast_search, delegate_external_agent, knowledge_rag, materialize_skill, security_scan, structured_logger, workflow_engine）
