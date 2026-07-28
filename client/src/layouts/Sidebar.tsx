@@ -447,16 +447,21 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
             selectedKeys={[selectedKey]}
             defaultOpenKeys={["settings-group"]}
             onClick={({ key }) => {
-              // 处理菜单点击：从 collapsedNavItems 中查找菜单项（包括子菜单）
+              // 查找点击的菜单项
               let targetPath: string | undefined;
+              let hasChildren = false;
               
-              // 先查找一级菜单
               for (const item of collapsedNavItems) {
                 if (item.key === key) {
+                  // 父级菜单（有 children）：不导航，只让 Menu 处理展开/收缩
+                  if (item.children) {
+                    hasChildren = true;
+                    break;
+                  }
                   targetPath = item.path;
                   break;
                 }
-                // 再查找二级菜单
+                // 二级菜单（叶子节点）：导航
                 if (item.children) {
                   const child = item.children.find((child: any) => child.key === key);
                   if (child) {
@@ -466,10 +471,10 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
                 }
               }
               
-              // 如果找到了路径，导航到该路径
-              if (targetPath) {
+              // 只有叶子节点才导航
+              if (!hasChildren && targetPath) {
                 navigate(targetPath);
-              } else {
+              } else if (!hasChildren) {
                 // 回退：使用 KEY_TO_PATH 映射或默认路径
                 const path = KEY_TO_PATH[String(key)] ?? `/${String(key)}`;
                 navigate(path);
