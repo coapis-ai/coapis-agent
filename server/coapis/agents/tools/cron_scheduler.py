@@ -156,7 +156,7 @@ async def cron_scheduler(
         target_session_id = session_id or f"{channel}:{owner_user_id}"
 
         # Build the CronJobSpec
-        from ..app.crons.models import (
+        from ...app.crons.models import (
             CronJobSpec,
             CronJobRequest,
             DispatchSpec,
