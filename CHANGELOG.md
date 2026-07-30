@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.11.3] - 2026-07-30
+
+### Features
+
+- **QwenPaw Runtime Hook System** — 8-phase topological hook framework (CONTINUE/SHORT_CIRCUIT/SKIP_AGENT) for dispatch/build/execute/post-process stages; enables audit logging, governance, and custom injects without modifying core agent logic.
+- **AgentMode Declarative Profiles** — Packs commands, tools, hooks, and prompt contributors into scene-specific modes activated by `is_active(ctx)`; supports per-user personalization.
+- **ToolDescriptor Governance** — Adds `requires_modes/requires_skills/requires_features/requires_sandbox/governance` metadata plus two-layer policy engine (builtin_rules + user_rules).
+- **Audit Logging (SQLite)** — Structured 5W audit trail (who/what/when/outcome/why) with auto-cleanup and indexed queries.
+
+### Refactor
+
+- **Permission module alignment** — Backend `require_permission` keys now match 27 runtime modules exactly.
+- **scene_filter dead code removal** — 26 files, -238/+28 lines.
+
+### Infrastructure
+
+- **Node.js 20.x LTS in Docker** — Enables `npx`/`node`-based stdio MCP servers (e.g. Gitee MCP).
+
+### Bug Fixes
+
+- **MCP persistence** — Removed `mcp` from `_AGENT_GLOBAL_INHERITED_FIELDS` so configs save correctly.
+- **MCP tools list API** — Fixed wrong import path, missing `username` in `get_workspace`, wrong attribute name (`mcp_manager` → `_mcp_manager`).
+- **Sidebar submenu collapse** — Removed CSS `!important` rule that blocked Ant Design's `display: none`.
+- **Scene creation 500** — Fixed `@require_permission` receiving Pydantic model instead of `Request`; corrected `create_scene` signature.
+- **Tag selector API** — Consolidated parallel API calls into single `/api/admin/tags?enabled=true` query with `useMemo` tree computation.
+- **cron_scheduler import path** — Fixed 2-dot relative import on line 159 that caused `ModuleNotFoundError` on `action=add`.
+- **daily_memory syntax error** — Replaced invalid Chinese curly quotes `""` with `「」` to fix `SyntaxError` that broke all 30 builtin tools registration.
+- **SSO default password** — Set to `123456`, changeable by users.
+
+### Features
+
+- **PlanNotebook enabled by default** — LLM decides autonomously whether to plan.
+- **Security policy relaxation** — Workspace-level demotion for `python/python3`, fixed inline interpreter regex; package managers and git/wget/curl relaxed to audit mode.
+
 ## [v0.11.2] - 2026-07-30
 
 ### Infrastructure
