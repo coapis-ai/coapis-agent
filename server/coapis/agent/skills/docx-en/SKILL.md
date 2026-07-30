@@ -73,60 +73,72 @@ python scripts/accept_changes.py input.docx output.docx
 
 ## Creating New Documents
 
-Generate .docx files with JavaScript, then validate. Install: `npm install -g docx`
+Use Python `python-docx` library to generate .docx files (preinstalled in the container, no npm install needed, no L2 approval blocking).
 
 ### Setup
-```javascript
-const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageRun,
-        Header, Footer, AlignmentType, PageOrientation, LevelFormat, ExternalHyperlink,
-        TableOfContents, HeadingLevel, BorderStyle, WidthType, ShadingType,
-        VerticalAlign, PageNumber, PageBreak } = require('docx');
+```python
+from docx import Document
+from docx.shared import Inches, Pt, Cm, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.style import WD_STYLE_TYPE
 
-const doc = new Document({ sections: [{ children: [/* content */] }] });
-Packer.toBuffer(doc).then(buffer => fs.writeFileSync("doc.docx", buffer));
+doc = Document()
+
+# Set default font
+style = doc.styles['Normal']
+font = style.font
+font.name = 'Arial'
+font.size = Pt(11)
 ```
 
 ### Validation
-After creating the file, validate it. If validation fails, unpack, fix the XML, and repack.
+After creating the file, validate it:
 ```bash
-python scripts/office/validate.py doc.docx
+python3 -c "
+from docx import Document
+doc = Document('doc.docx')
+print(f'Paragraphs: {len(doc.paragraphs)}')
+print(f'Tables: {len(doc.tables)}')
+assert len(doc.paragraphs) > 0, 'Document is empty'
+print('✓ Document valid')
+"
 ```
 
 ### Page Size
 
-```javascript
-// CRITICAL: docx-js defaults to A4, not US Letter
-// Always set page size explicitly for consistent results
-sections: [{
-  properties: {
-    page: {
-      size: {
-        width: 12240,   // 8.5 inches in DXA
-        height: 15840   // 11 inches in DXA
-      },
-      margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } // 1 inch margins
-    }
-  },
-  children: [/* content */]
-}]
+python-docx sets page size via the `Sections` object. A4 is the standard default; US Letter or landscape must be set explicitly.
+
+```python
+from docx.shared import Cm
+from docx.enum.section import WD_ORIENT
+
+# A4 page (default: 21cm x 29.7cm)
+section = doc.sections[0]
+section.page_width = Cm(21)
+section.page_height = Cm(29.7)
+section.top_margin = Cm(2.5)
+section.bottom_margin = Cm(2.5)
+section.left_margin = Cm(2.5)
+section.right_margin = Cm(2.5)
+
+# US Letter (8.5 x 11 inches)
+section.page_width = Cm(21.59)
+section.page_height = Cm(27.94)
+
+# Landscape: swap width/height and set orientation
+section.page_width = Cm(29.7)
+section.page_height = Cm(21)
+section.orientation = WD_ORIENT.LANDSCAPE
 ```
 
-**Common page sizes (DXA units, 1440 DXA = 1 inch):**
+**Common page sizes (millimeters):**
 
-| Paper | Width | Height | Content Width (1" margins) |
-|-------|-------|--------|---------------------------|
-| US Letter | 12,240 | 15,840 | 9,360 |
-| A4 (default) | 11,906 | 16,838 | 9,026 |
-
-**Landscape orientation:** docx-js swaps width/height internally, so pass portrait dimensions and let it handle the swap:
-```javascript
-size: {
-  width: 12240,   // Pass SHORT edge as width
-  height: 15840,  // Pass LONG edge as height
-  orientation: PageOrientation.LANDSCAPE  // docx-js swaps them in the XML
-},
-// Content width = 15840 - left margin - right margin (uses the long edge)
-```
+| Paper | Width | Height |
+|-------|-------|--------|
+| US Letter | 215.9 | 279.4 |
+| A4 (default) | 210 | 297 |
+| A3 | 297 | 420 |
 
 ### Styles (Override Built-in Headings)
 
