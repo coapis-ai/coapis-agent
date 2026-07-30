@@ -73,167 +73,181 @@ python scripts/accept_changes.py input.docx output.docx
 
 ## 创建新文档
 
-使用 JavaScript 生成 .docx 文件，然后进行验证。安装: `npm install -g docx`
+使用 Python `python-docx` 库生成 .docx 文件（容器已预装，无需额外安装，无 L2 审批阻塞）。
 
 ### 初始设置
-```javascript
-const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageRun,
-        Header, Footer, AlignmentType, PageOrientation, LevelFormat, ExternalHyperlink,
-        TableOfContents, HeadingLevel, BorderStyle, WidthType, ShadingType,
-        VerticalAlign, PageNumber, PageBreak } = require('docx');
+```python
+from docx import Document
+from docx.shared import Inches, Pt, Cm, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.style import WD_STYLE_TYPE
 
-const doc = new Document({ sections: [{ children: [/* content */] }] });
-Packer.toBuffer(doc).then(buffer => fs.writeFileSync("doc.docx", buffer));
+doc = Document()
+
+# 设置默认字体
+style = doc.styles['Normal']
+font = style.font
+font.name = 'Arial'
+font.size = Pt(11)
 ```
 
 ### 验证
-创建文件后进行验证。如果验证失败，解压、修复 XML 并重新打包。
+创建文件后进行验证：
 ```bash
-python scripts/office/validate.py doc.docx
+python3 -c "
+from docx import Document
+doc = Document('doc.docx')
+print(f'Paragraphs: {len(doc.paragraphs)}')
+print(f'Tables: {len(doc.tables)}')
+assert len(doc.paragraphs) > 0, 'Document is empty'
+print('✓ Document valid')
+"
 ```
 
 ### 页面尺寸
 
-```javascript
-// 关键: docx-js 默认为 A4，而非 US Letter
-// 始终显式设置页面尺寸以获得一致的结果
-sections: [{
-  properties: {
-    page: {
-      size: {
-        width: 12240,   // 8.5 英寸（DXA 单位）
-        height: 15840   // 11 英寸（DXA 单位）
-      },
-      margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } // 1 英寸边距
-    }
-  },
-  children: [/* content */]
-}]
+python-docx 通过 `Sections` 对象设置页面尺寸。A4 是标准默认尺寸，如需 US Letter 或横向需显式设置。
+
+```python
+from docx.shared import Cm
+from docx.enum.section import WD_ORIENT
+
+# A4 页面（默认，21cm x 29.7cm）
+section = doc.sections[0]
+section.page_width = Cm(21)
+section.page_height = Cm(29.7)
+section.top_margin = Cm(2.5)
+section.bottom_margin = Cm(2.5)
+section.left_margin = Cm(2.5)
+section.right_margin = Cm(2.5)
+
+# US Letter（8.5 x 11 英寸）
+section.page_width = Cm(21.59)
+section.page_height = Cm(27.94)
+
+# 横向：交换宽高并设置 orientation
+section.page_width = Cm(29.7)
+section.page_height = Cm(21)
+section.orientation = WD_ORIENT.LANDSCAPE
 ```
 
-**常见页面尺寸（DXA 单位，1440 DXA = 1 英寸）:**
+**常见尺寸（毫米）:**
 
-| 纸张 | 宽度 | 高度 | 内容宽度（1 英寸边距） |
-|------|------|------|----------------------|
-| US Letter | 12,240 | 15,840 | 9,360 |
-| A4（默认） | 11,906 | 16,838 | 9,026 |
-
-**横向方向:** docx-js 在内部会交换宽度/高度，因此传入纵向尺寸并让其处理交换:
-```javascript
-size: {
-  width: 12240,   // 将短边作为 width 传入
-  height: 15840,  // 将长边作为 height 传入
-  orientation: PageOrientation.LANDSCAPE  // docx-js 会在 XML 中交换它们
-},
-// 内容宽度 = 15840 - 左边距 - 右边距（使用长边）
-```
+| 纸张 | 宽度 | 高度 |
+|------|------|------|
+| US Letter | 215.9 | 279.4 |
+| A4（默认） | 210 | 297 |
+| A3 | 297 | 420 |
 
 ### 样式（覆盖内置标题）
 
-使用 Arial 作为默认字体（通用支持）。标题保持黑色以确保可读性。
+使用 python-docx 的样式系统定义标题层级和默认字体。
 
-```javascript
-const doc = new Document({
-  styles: {
-    default: { document: { run: { font: "Arial", size: 24 } } }, // 默认 12pt
-    paragraphStyles: [
-      // 重要: 使用精确的 ID 来覆盖内置样式
-      { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true,
-        run: { size: 32, bold: true, font: "Arial" },
-        paragraph: { spacing: { before: 240, after: 240 }, outlineLevel: 0 } }, // outlineLevel 是目录所必需的
-      { id: "Heading2", name: "Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true,
-        run: { size: 28, bold: true, font: "Arial" },
-        paragraph: { spacing: { before: 180, after: 180 }, outlineLevel: 1 } },
-    ]
-  },
-  sections: [{
-    children: [
-      new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Title")] }),
-    ]
-  }]
-});
+```python
+from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+# 修改 Normal 样式默认字体
+style = doc.styles['Normal']
+style.font.name = 'Arial'
+style.font.size = Pt(11)
+
+# 定义 Heading 1 样式
+h1_style = doc.styles['Heading 1']
+h1_style.font.name = 'Arial'
+h1_style.font.size = Pt(24)
+h1_style.font.bold = True
+h1_style.font.color.rgb = RGBColor(0, 0, 0)
+h1_style.paragraph_format.space_before = Pt(12)
+h1_style.paragraph_format.space_after = Pt(12)
+
+# 定义 Heading 2 样式
+h2_style = doc.styles['Heading 2']
+h2_style.font.name = 'Arial'
+h2_style.font.size = Pt(18)
+h2_style.font.bold = True
+h2_style.paragraph_format.space_before = Pt(8)
+h2_style.paragraph_format.space_after = Pt(6)
 ```
 
 ### 列表（绝对不要使用 Unicode 符号）
 
-```javascript
-// ❌ 错误 - 绝不手动插入项目符号字符
-new Paragraph({ children: [new TextRun("• Item")] })  // 错误
-new Paragraph({ children: [new TextRun("\u2022 Item")] })  // 错误
+```python
+# ✅ 正确 - 使用 python-docx 的编号/列表功能
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-// ✅ 正确 - 使用 LevelFormat.BULLET 的编号配置
-const doc = new Document({
-  numbering: {
-    config: [
-      { reference: "bullets",
-        levels: [{ level: 0, format: LevelFormat.BULLET, text: "•", alignment: AlignmentType.LEFT,
-          style: { paragraph: { indent: { left: 720, hanging: 360 } } } }] },
-      { reference: "numbers",
-        levels: [{ level: 0, format: LevelFormat.DECIMAL, text: "%1.", alignment: AlignmentType.LEFT,
-          style: { paragraph: { indent: { left: 720, hanging: 360 } } } }] },
-    ]
-  },
-  sections: [{
-    children: [
-      new Paragraph({ numbering: { reference: "bullets", level: 0 },
-        children: [new TextRun("Bullet item")] }),
-      new Paragraph({ numbering: { reference: "numbers", level: 0 },
-        children: [new TextRun("Numbered item")] }),
-    ]
-  }]
-});
+# 项目符号列表
+doc.styles['List Bullet'].font.name = 'Arial'
+doc.styles['List Bullet'].font.size = Pt(11)
 
-// ⚠️ 每个 reference 创建独立的编号序列
-// 相同 reference = 继续编号（1,2,3 然后 4,5,6）
-// 不同 reference = 重新开始（1,2,3 然后 1,2,3）
+p = doc.add_paragraph(style='List Bullet')
+p.add_run('项目符号项')
+
+# 编号列表
+doc.styles['List Number'].font.name = 'Arial'
+doc.styles['List Number'].font.size = Pt(11)
+
+p = doc.add_paragraph(style='List Number')
+p.add_run('编号列表项')
+```
+
+// ⚠️ python-docx 自动管理编号序列
+// 相同样式的连续段落自动延续编号
+// 不同样式重新开始编号
+
 ```
 
 ### 表格
 
-**关键: 表格需要双重宽度设置** - 必须同时在表格上设置 `columnWidths` 和在每个单元格上设置 `width`。缺少任一设置，表格在某些平台上会渲染不正确。
+**关键: 表格需要双重宽度设置** - 必须同时在表格上设置列宽和在每个单元格上设置宽度。缺少任一设置，表格在某些平台上会渲染不正确。
 
-```javascript
-// 关键: 始终设置表格宽度以确保一致的渲染效果
-// 关键: 使用 ShadingType.CLEAR（而非 SOLID）以防止黑色背景
-const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
-const borders = { top: border, bottom: border, left: border, right: border };
+```python
+from docx.shared import Cm, Inches
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.ns import qn
 
-new Table({
-  width: { size: 9360, type: WidthType.DXA }, // 始终使用 DXA（百分比在 Google Docs 中会出问题）
-  columnWidths: [4680, 4680], // 必须加起来等于表格宽度（DXA: 1440 = 1 英寸）
-  rows: [
-    new TableRow({
-      children: [
-        new TableCell({
-          borders,
-          width: { size: 4680, type: WidthType.DXA }, // 同样需要在每个单元格上设置
-          shading: { fill: "D5E8F0", type: ShadingType.CLEAR }, // 用 CLEAR 而非 SOLID
-          margins: { top: 80, bottom: 80, left: 120, right: 120 }, // 单元格内边距（内部的，不会增加宽度）
-          children: [new Paragraph({ children: [new TextRun("Cell")] })]
-        })
-      ]
-    })
-  ]
+table = doc.add_table(rows=1, cols=2, width=Inches(6.5))
+table.style = 'Table Grid'
+table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+# 设置列宽
+for cell in table.columns[0].cells:
+    cell.width = Inches(3.0)
+for cell in table.columns[1].cells:
+    cell.width = Inches(3.5)
+
+# 添加数据行（含样式）
+hdr_cells = table.rows[0].cells
+hdr_cells[0].text = '列1'
+hdr_cells[1].text = '列2'
+# 表头加粗
+for cell in hdr_cells:
+    for p in cell.paragraphs:
+        for run in p.runs:
+            run.bold = True
+
+# 添加数据行
+row = table.add_row()
+row.cells[0].text = '数据1'
+row.cells[1].text = '数据2'
+
+# 单元格背景色
+shading_elm = row.cells[0]._tc.get_or_add_tcPr()
+shading = shading_elm.makeelement(qn('w:shd'), {
+    qn('w:fill'): 'D5E8F0',
+    qn('w:val'): 'clear',
 })
+shading_elm.append(shading)
 ```
 
 **表格宽度计算:**
 
-始终使用 `WidthType.DXA` -- `WidthType.PERCENTAGE` 在 Google Docs 中会出问题。
+始终使用 Inches 或 Cm（绝对单位），避免百分比（在 Google Docs 中会出问题）。
 
-```javascript
-// 表格宽度 = columnWidths 之和 = 内容宽度
-// US Letter 配合 1 英寸边距: 12240 - 2880 = 9360 DXA
-width: { size: 9360, type: WidthType.DXA },
-columnWidths: [7000, 2360]  // 必须加起来等于表格宽度
-```
-
-**宽度规则:**
-- **始终使用 `WidthType.DXA`** -- 绝不使用 `WidthType.PERCENTAGE`（与 Google Docs 不兼容）
-- 表格宽度必须等于 `columnWidths` 之和
+- 表格宽度必须等于 `columnWidth` 之和
 - 单元格 `width` 必须与对应的 `columnWidth` 匹配
-- 单元格 `margins` 是内部边距 - 它们减少内容区域，而不是增加单元格宽度
-- 全宽表格: 使用内容宽度（页面宽度减去左右边距）
+- 全屏表格: 使用内容宽度（页面宽度减去左右边距）
 
 ### 图片
 
