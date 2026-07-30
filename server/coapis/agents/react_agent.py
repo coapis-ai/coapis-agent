@@ -1051,10 +1051,9 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
     def _load_on_demand_skills(self, user_message: str) -> None:
         """Load on-demand skills matching user intent.
 
-        Classification strategy (hybrid):
-        1. Try LLM intent classification first (natural language understanding)
-        2. Fall back to keyword matching if LLM fails or unavailable
-        3. Both methods can trigger skills independently
+        Two-phase keyword-first strategy (no LLM round-trip needed):
+        Phase 1: Keyword matching via IntentClassifier (instant, zero cost)
+        Phase 2: LLM classification only if Phase 1 found nothing (best-effort)
 
         All skills pass through security scanning before registration.
         Unsafe skills are blocked per the configured scan mode.
@@ -1065,28 +1064,50 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         if not hasattr(self, "_on_demand_skills") or not self._on_demand_skills:
             return
 
+        # Register on-demand skills in keyword classifier for fast matching
+        from .utils.intent_classifier import register_on_demand_skills
+        _intent_summaries = {}
+        for skill_name, (skill_dir, _keywords) in self._on_demand_skills.items():
+            summary = ""
+            try:
+                summary = self._get_skill_summary(skill_dir)
+            except Exception:
+                pass
+            _intent_summaries[skill_name] = summary
+            register_on_demand_skills({
+                skill_name: {
+                    "trigger_keywords": list(self._on_demand_skills[skill_name][1]),
+                    "description": summary,
+                }
+            })
+
         ctx = getattr(self, "_request_context", None) or {}
         tracker = get_trigger_tracker()
         loaded = []
 
-        # ── 详细触发日志 ──
-        all_on_demand = list(self._on_demand_skills.keys())
+        # ── Phase 1: Keyword matching (fast, zero LLM cost) ──
+        from .utils.intent_classifier import classify_intent_keywords
+        keyword_summaries = {}
+        for name, (_, _kw) in self._on_demand_skills.items():
+            try:
+                keyword_summaries[name] = self._get_skill_summary(
+                    self._on_demand_skills[name][0],
+                )
+            except Exception:
+                keyword_summaries[name] = ""
+
+        keyword_matched = classify_intent_keywords(
+            user_message, keyword_summaries,
+        )
         logger.info(
-            "[TriggerDebug] Start on-demand skill analysis | msg=%s | available_skills=%s",
-            user_message[:80], all_on_demand,
+            "[TriggerDebug] Keyword classification result: matched=%s",
+            keyword_matched if keyword_matched else "[]",
         )
 
-        # ── Phase 1: LLM intent classification (async, best-effort) ──
-        llm_matched_names = self._llm_classify_skills(user_message)
-        logger.info(
-            "[TriggerDebug] LLM classification result: matched=%s",
-            llm_matched_names if llm_matched_names else "[]",
-        )
-
-        for skill_name in llm_matched_names:
+        for skill_name in keyword_matched:
             if skill_name not in self._on_demand_skills:
                 logger.debug(
-                    "[TriggerDebug] LLM matched '%s' but not in on-demand pool, skip",
+                    "[TriggerDebug] Keyword matched '%s' but not in on-demand pool, skip",
                     skill_name,
                 )
                 continue
@@ -1095,8 +1116,8 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 if self._scan_and_register_skill(
                     skill_name=skill_name,
                     skill_dir=skill_dir,
-                    trigger_method="llm",
-                    matched_keywords=["llm_classify"],
+                    trigger_method="keyword",
+                    matched_keywords=keywords or ["keyword_match"],
                     user_message=user_message,
                     tracker=tracker,
                     ctx=ctx,
@@ -1104,11 +1125,46 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     loaded.append(skill_name)
                     del self._on_demand_skills[skill_name]
                     logger.info(
-                        "[TriggerDebug] ✓ Loaded skill '%s' via LLM classification",
+                        "[TriggerDebug] ✓ Loaded skill '%s' via keyword match",
                         skill_name,
                     )
             except Exception as e:
                 logger.error("Failed to load on-demand skill '%s': %s", skill_name, e)
+
+        # ── Phase 2: LLM classification (best-effort, for edge cases) ──
+        if not loaded:
+            llm_matched_names = self._llm_classify_skills(user_message)
+            logger.info(
+                "[TriggerDebug] LLM classification result: matched=%s",
+                llm_matched_names if llm_matched_names else "[]",
+            )
+
+            for skill_name in llm_matched_names:
+                if skill_name not in self._on_demand_skills:
+                    logger.debug(
+                        "[TriggerDebug] LLM matched '%s' but not in on-demand pool, skip",
+                        skill_name,
+                    )
+                    continue
+                skill_dir, keywords = self._on_demand_skills[skill_name]
+                try:
+                    if self._scan_and_register_skill(
+                        skill_name=skill_name,
+                        skill_dir=skill_dir,
+                        trigger_method="llm",
+                        matched_keywords=["llm_classify"],
+                        user_message=user_message,
+                        tracker=tracker,
+                        ctx=ctx,
+                    ):
+                        loaded.append(skill_name)
+                        del self._on_demand_skills[skill_name]
+                        logger.info(
+                            "[TriggerDebug] ✓ Loaded skill '%s' via LLM classification",
+                            skill_name,
+                        )
+                except Exception as e:
+                    logger.error("Failed to load on-demand skill '%s': %s", skill_name, e)
 
         # ── Phase 2: Keyword matching via SkillSelector index (fast) ──
         # Use the inverted index built in _register_skills() for O(1) keyword lookup

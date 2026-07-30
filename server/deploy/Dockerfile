@@ -82,6 +82,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# 预装文档处理库（python-docx 用于生成 Word 文档，免 L2 审批阻塞）
+RUN pip install --no-cache-dir python-docx==1.1.0 && \
+    rm -rf /root/.cache/pip
+
 # 从 builder 阶段复制编译好的 Python 包
 COPY --from=builder /install /usr/local
 

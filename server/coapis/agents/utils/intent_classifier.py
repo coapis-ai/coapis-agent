@@ -1,14 +1,12 @@
-"""LLM-based intent classifier for on-demand skill triggering.
+"""Intent classifier for on-demand skill triggering.
 
-Uses a lightweight LLM call to classify user intent and match
-to available on-demand skills. Falls back to keyword matching
-if the LLM call fails or is unavailable.
+Two-tier strategy:
+1. Keyword matching (fast, zero cost, no LLM dependency)
+2. LLM classification (richer semantics, higher cost)
 
-Design:
-- Fast: single short prompt, max_tokens=50, no streaming
-- Cheap: uses the same LLM provider as the main agent
-- Fallback: keyword matching always available as backup
-- Cache: caches results for repeated similar queries
+Keyword matching is the primary method. LLM fallback only
+runs when the keyword index returns no matches. This eliminates
+the 5-second LLM latency for the majority of skill triggers.
 """
 
 from __future__ import annotations
@@ -17,6 +15,7 @@ import json
 import logging
 import os
 import hashlib
+import re
 import time
 import threading
 from pathlib import Path
@@ -31,6 +30,10 @@ _CACHE_LOCK = threading.Lock()
 
 # Provider config cache
 _PROVIDER_CONFIG: dict | None = None
+
+# On-demand skills registry (set by _load_on_demand_skills)
+_ON_DEMAND_SKILLS_REGISTRY: dict[str, dict] = {}
+_REGISTRY_LOCK = threading.Lock()
 
 
 def _get_provider_config() -> dict | None:
@@ -115,24 +118,86 @@ def _build_classify_prompt(
 相关技能 (仅 JSON 数组):"""
 
 
+def classify_intent_keywords(
+    user_message: str,
+    skill_summaries: dict[str, str],
+) -> list[str]:
+    """Keyword-based intent classification as primary method.
+
+    Matches user message against registered on-demand skill trigger
+    keywords and descriptions. Fast, free, and available without
+    an LLM provider.
+
+    Args:
+        user_message: The user's input message.
+        skill_summaries: Dict of skill_name -> short description.
+
+    Returns:
+        List of matching skill names, or empty list if no match.
+    """
+    if not user_message or not skill_summaries:
+        return []
+
+    msg_lower = user_message.lower()
+    matched: list[str] = []
+
+    with _REGISTRY_LOCK:
+        for skill_name, skill_data in _ON_DEMAND_SKILLS_REGISTRY.items():
+            trigger_keywords = skill_data.get("trigger_keywords", [])
+            summary = skill_summaries.get(skill_name, "")
+            all_keywords = trigger_keywords + [summary.lower()]
+
+            for kw in all_keywords:
+                kw_lower = kw.lower().strip()
+                if not kw_lower:
+                    continue
+                if kw_lower in msg_lower:
+                    matched.append(skill_name)
+                    break
+
+    return matched
+
+
+def register_on_demand_skills(skills: dict[str, dict]) -> None:
+    """Register on-demand skills in the keyword classifier registry.
+
+    Called during skill registration to populate the keyword index.
+    Idempotent — safe to call repeatedly.
+
+    Args:
+        skills: Dict of skill_name -> {"trigger_keywords": [...], "description": "..."}
+    """
+    with _REGISTRY_LOCK:
+        for skill_name, data in skills.items():
+            _ON_DEMAND_SKILLS_REGISTRY[skill_name] = data
+
+
 async def classify_intent_llm(
     user_message: str,
     skill_summaries: dict[str, str],
     timeout: float = 5.0,
 ) -> list[str] | None:
-    """Use LLM to classify user intent and return matching skill names.
+    """Classify user intent and return matching skill names.
 
-    Args:
-        user_message: The user's input message.
-        skill_summaries: Dict of skill_name -> short description.
-        timeout: Max seconds to wait for LLM response.
+    Primary: keyword matching (instant, no LLM cost).
+    Fallback: LLM classification (richer semantics).
 
     Returns:
-        List of matching skill names, or None if classification failed.
+        List of matching skill names, or None if both methods failed.
     """
     if not skill_summaries:
         return []
 
+    # Phase 1: keyword matching (cheap, instant)
+    keyword_matches = classify_intent_keywords(user_message, skill_summaries)
+    if keyword_matches:
+        logger.debug(
+            "Intent classifier: keyword match: user_msg=%s -> skills=%s",
+            user_message[:50], keyword_matches,
+        )
+        return keyword_matches
+
+    # Phase 2: no keyword matches, try LLM classification
     config = _get_provider_config()
     if not config:
         logger.debug("No LLM provider configured for intent classification")
