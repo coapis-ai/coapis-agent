@@ -431,11 +431,25 @@ commands:
   ssh:
     level: L2
     desc: 远程登录
-    action: block
+    action: confirm
+    demotion_rules:
+    - &id_in_workspace_ssh
+      id: in_workspace
+      desc: 仅在自己的 workspace 内操作
+      level: L0
+      action: allow
+      scope: workspace
   scp:
     level: L2
     desc: 远程复制
-    action: block
+    action: confirm
+    demotion_rules:
+    - &id_in_workspace_scp
+      id: in_workspace
+      desc: 仅在自己的 workspace 内操作
+      level: L0
+      action: audit
+      scope: workspace
   rsync:
     level: L2
     desc: 远程同步
@@ -449,7 +463,14 @@ commands:
   crontab:
     level: L2
     desc: 定时任务管理
-    action: block
+    action: confirm
+    demotion_rules:
+    - &id_in_workspace_cron
+      id: in_workspace
+      desc: 仅在自己的 workspace 内操作
+      level: L0
+      action: allow
+      scope: workspace
   at:
     level: L2
     desc: 定时执行
@@ -636,17 +657,33 @@ commands:
     desc: 磁盘检查
     action: block
   docker:
-    level: L4
+    level: L2
     desc: 容器管理
-    action: block
+    action: confirm
+    demotion_rules:
+    - &id_in_workspace_docker
+      id: in_workspace
+      desc: 仅在自己的 workspace 内操作
+      level: L0
+      action: allow
+      scope: workspace
   docker-compose:
-    level: L4
+    level: L2
     desc: 容器编排
     action: confirm
+    demotion_rules:
+    - *id_in_workspace_docker
   podman:
-    level: L4
+    level: L2
     desc: 容器管理
     action: confirm
+    demotion_rules:
+    - &id_in_workspace_podman
+      id: in_workspace
+      desc: 仅在自己的 workspace 内操作
+      level: L0
+      action: allow
+      scope: workspace
   systemctl:
     level: L4
     desc: 系统服务管理
@@ -878,15 +915,14 @@ global_rules:
   category: sensitive_file_access
   severity: HIGH
   patterns:
-  - \bcrontab\b
   - \bauthorized_keys\b
   - \/etc\/sudoers
   - \/etc\/crontab
   exclude_patterns: []
-  description: Detects access to cron jobs, SSH keys, or sudo permissions (including
+  description: Detects access to SSH keys or sudo permissions (including
     reads and modifications)
-  remediation: Confirm with user. Treat any access to credential and scheduling files
-    as sensitive and restrict when possible.
+  remediation: Confirm with user. Treat any access to credential files as
+    sensitive and restrict when possible.
   action: block
 - id: TOOL_CMD_UNSAFE_PERMISSIONS
   category: privilege_escalation
@@ -925,27 +961,6 @@ global_rules:
   remediation: Block destructive SQL. Confirm with user and use WHERE clauses to limit
     scope.
   action: block
-- id: TOOL_CMD_ENV_DUMP
-  category: sensitive_file_access
-  severity: MEDIUM
-  patterns:
-  - \benv\b\s*$
-  - \bprintenv\b\s*$
-  exclude_patterns:
-  - ^\s*#
-  description: Command dumps all environment variables which may contain secrets
-  remediation: Avoid dumping full environment. Use specific variable names instead.
-  action: block
-- id: TOOL_CMD_CHMOD_RECURSIVE
-  category: privilege_escalation
-  severity: MEDIUM
-  patterns:
-  - \bchmod\s+.*-R\s+(777|a\+rwx)\b
-  exclude_patterns:
-  - ^\s*#
-  description: Command recursively sets dangerous permissions (777 or a+rwx)
-  remediation: Confirm with user. Use least-privilege permissions.
-  action: block
 - id: TOOL_CMD_DANGEROUS_CP
   category: command_injection
   severity: HIGH
@@ -959,6 +974,6 @@ global_rules:
   - ^\s*#
   description: Command copies files to sensitive system directories (/etc, /usr, /bin,
     /sbin)
-  remediation: Confirm with user. Copying files to system directories may alter system
-    behavior.
+  remediation: Confirm with user. Copying files to system directories may alter
+    system behavior.
   action: block

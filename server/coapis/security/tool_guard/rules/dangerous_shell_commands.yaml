@@ -1,32 +1,18 @@
 # Dangerous Shell Command Detection Rules
 # =========================================================================
 
-- id: TOOL_CMD_DANGEROUS_RM
-  tools:
-  - execute_shell_command
-  params:
-  - command
-  category: command_injection
-  severity: HIGH
-  patterns:
-  - \brm\b
-  - \bdel\b
-  - \bRemove-Item\b
-  exclude_patterns:
-  - ^\s*#
-  description: Shell command contains 'rm' which may cause data loss
-  remediation: Confirm with the user before removing files or directories
 - id: TOOL_CMD_DANGEROUS_MV
   tools:
   - execute_shell_command
   params:
   - command
   category: command_injection
-  severity: HIGH
+  severity: MEDIUM
   patterns:
   - \bmv\b
   description: Shell command contains 'mv' which may move or overwrite files unexpectedly
   remediation: Confirm with the user before moving or renaming files
+  action: audit
 - id: TOOL_CMD_FS_DESTRUCTION
   tools:
   - execute_shell_command
@@ -316,21 +302,22 @@
   params:
   - command
   category: command_injection
-  severity: CRITICAL
+  severity: HIGH
   patterns:
   - \brm\s+.*-rf\b
   - \brm\s+.*-fr\b
   exclude_patterns:
   - ^\s*#
   description: Command uses rm -rf which recursively deletes without confirmation
-  remediation: Block rm -rf. Use trash or ask user to confirm specific files.
+  remediation: Confirm with user before using rm -rf. Suggest using trash or removing individual files.
+  action: confirm
 - id: TOOL_CMD_ENV_DUMP
   tools:
   - execute_shell_command
   params:
   - command
   category: sensitive_file_access
-  severity: MEDIUM
+  severity: LOW
   patterns:
   - \benv\b\s*$
   - \bprintenv\b\s*$
@@ -338,19 +325,21 @@
   - ^\s*#
   description: Command dumps all environment variables which may contain secrets
   remediation: Avoid dumping full environment. Use specific variable names instead.
+  action: audit
 - id: TOOL_CMD_CHMOD_RECURSIVE
   tools:
   - execute_shell_command
   params:
   - command
   category: privilege_escalation
-  severity: MEDIUM
+  severity: LOW
   patterns:
   - \bchmod\s+.*-R\s+(777|a\+rwx)\b
   exclude_patterns:
   - ^\s*#
   description: Command recursively sets dangerous permissions (777 or a+rwx)
   remediation: Confirm with user. Use least-privilege permissions.
+  action: audit
 # ── Newly added rules (Phase 1: docker/yum/apt/cp/git) ──
 - id: TOOL_CMD_DOCKER_DANGEROUS
   tools:
@@ -358,7 +347,7 @@
   params:
   - command
   category: container_management
-  severity: HIGH
+  severity: MEDIUM
   patterns:
   - \bdocker\s+(rm|rmi|kill|stop|pause|unpause|rename|update)\b
   - \bdocker\s+container\s+(rm|kill|stop|pause|unpause)\b
@@ -372,13 +361,14 @@
     prune)
   remediation: Confirm with user. Destructive Docker operations may cause data loss
     or service disruption.
+  action: confirm
 - id: TOOL_CMD_PACKAGE_MANAGER
   tools:
   - execute_shell_command
   params:
   - command
   category: package_management
-  severity: HIGH
+  severity: MEDIUM
   patterns:
   - \bapt(-get)?\s+(install|remove|purge|autoremove|upgrade|dist-upgrade)\b
   - \byum\s+(install|remove|erase|autoremove|update|upgrade)\b
@@ -391,13 +381,14 @@
   description: Package manager command installs or removes software packages
   remediation: Confirm with user. Installing packages may introduce vulnerabilities
     or break dependencies.
+  action: audit
 - id: TOOL_CMD_DANGEROUS_CP
   tools:
   - execute_shell_command
   params:
   - command
   category: command_injection
-  severity: HIGH
+  severity: MEDIUM
   patterns:
   - \bcp\s+.*(-r|--recursive)\b.*/etc/
   - \bcp\s+.*/etc/\s+
@@ -406,17 +397,18 @@
   - \bcp\s+.*\s+/sbin/
   exclude_patterns:
   - ^\s*#
-  description: Command copies files to sensitive system directories (/etc, /usr, /bin,
-    /sbin)
-  remediation: Confirm with user. Copying files to system directories may alter system
-    behavior.
+  description: Command copies files to sensitive system directories (/etc, /usr,
+    /bin, /sbin)
+  remediation: Confirm with user. Copying files to system directories may alter
+    system behavior.
+  action: confirm
 - id: TOOL_CMD_GIT_DESTRUCTIVE
   tools:
   - execute_shell_command
   params:
   - command
   category: version_control
-  severity: HIGH
+  severity: MEDIUM
   patterns:
   - \bgit\s+push\b
   - \bgit\s+reset\s+--hard\b
@@ -426,15 +418,16 @@
   exclude_patterns:
   - ^\s*#
   description: Git command performs destructive or remote-affecting operations
-  remediation: Confirm with user. Destructive git operations may cause data loss or
-    push unintended changes.
+  remediation: Confirm with user. Destructive git operations may cause data loss
+    or push unintended changes.
+  action: confirm
 - id: TOOL_CMD_WGET_CURL_DATA
   tools:
   - execute_shell_command
   params:
   - command
   category: network_abuse
-  severity: HIGH
+  severity: MEDIUM
   patterns:
   - \bcurl\s+.*(-d|--data|--data-raw|--data-binary)\b
   - \bwget\s+.*--post-file\b
@@ -443,5 +436,6 @@
   exclude_patterns:
   - ^\s*#
   description: HTTP client uploads data to a remote server
-  remediation: Block or confirm. Agents should not upload data to external endpoints
-    without explicit user consent.
+  remediation: Confirm with user. Agents should not upload data to external
+    endpoints without explicit user consent.
+  action: confirm
