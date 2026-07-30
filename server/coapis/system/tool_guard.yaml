@@ -475,6 +475,13 @@ commands:
     level: L2
     desc: 定时执行
     action: confirm
+    demotion_rules:
+    - &id_in_workspace_at
+      id: in_workspace
+      desc: 仅在自己的 workspace 内操作
+      level: L0
+      action: allow
+      scope: workspace
   jq:
     level: L2
     desc: JSON 处理
