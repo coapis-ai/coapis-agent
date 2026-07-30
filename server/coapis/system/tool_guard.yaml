@@ -252,7 +252,20 @@ commands:
     desc: Python 解释器
     action: confirm
     demotion_rules:
-    - *id003
+    - &id_tmp
+      id: id_tmp
+      desc: 仅在自己的 workspace 内操作
+      level: L0
+      action: allow
+      scope: workspace
+    - &id_tmp_paths
+      id: id_tmp_paths
+      desc: 仅在临时目录中操作
+      level: L0
+      action: allow
+      safe_paths:
+      - /tmp
+      - /var/tmp
     exceptions:
     - &id004
       id: inline_interpreter
@@ -260,14 +273,15 @@ commands:
       level: L4
       action: block
       patterns:
-      - \b(python|python3|node|ruby|perl)\s+.*\s+-(c|e|E|i|I)\b
-      - \b(python|python3|node|ruby|perl)\s+.*\s+--(command|eval|execute|interactive)
+      - \b(python|python3|node|ruby|perl)\s+(?:[^\s-]*\s)*-(c|e|E|i|I)\b
+      - \b(python|python3|node|ruby|perl)\s+(?:[^\s-]*\s)*--(command|eval|execute|interactive)
   python3:
     level: L2
     desc: Python3 解释器
     action: confirm
     demotion_rules:
-    - *id003
+    - *id_tmp
+    - *id_tmp_paths
     exceptions:
     - *id004
   pip:
