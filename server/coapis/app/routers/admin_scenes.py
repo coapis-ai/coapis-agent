@@ -29,7 +29,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 
 from ...models.scene import (
     SceneConfig,
@@ -90,7 +90,8 @@ async def admin_list_scenes(
 @router.post("", response_model=SceneConfig, status_code=status.HTTP_201_CREATED)
 @require_permission("scene:create")
 async def create_scene(
-    request: SceneConfigCreate,
+    request: Request,
+    scene_create: SceneConfigCreate = Body(...),
     current_user: dict = Depends(get_current_user),
     service: SceneAgentService = Depends(get_scene_service),
 ) -> SceneConfig:
@@ -103,7 +104,8 @@ async def create_scene(
     2. Creates scene agent directory and configuration
     
     Args:
-        request: Scene creation request
+        request: FastAPI request object (required by @require_permission)
+        scene_create: Scene creation request
     
     Returns:
         Created SceneConfig
@@ -115,7 +117,7 @@ async def create_scene(
     
     try:
         result = service.create_scene(
-            scene_create=request,
+            scene_create=scene_create,
             created_by=username,
         )
         
@@ -164,7 +166,8 @@ async def admin_get_scene(
 @require_permission("scene:update")
 async def update_scene(
     scene_id: str,
-    request: SceneConfigUpdate,
+    request: Request,
+    scene_update: SceneConfigUpdate = Body(...),
     current_user: dict = Depends(get_current_user),
     service: SceneAgentService = Depends(get_scene_service),
 ) -> SceneConfig:
@@ -174,7 +177,8 @@ async def update_scene(
     
     Args:
         scene_id: Scene ID
-        request: Scene update request
+        request: FastAPI request object (required by @require_permission)
+        scene_update: Scene update request
     
     Returns:
         Updated SceneConfig
@@ -182,7 +186,7 @@ async def update_scene(
     Raises:
         HTTPException: 404 if scene not found
     """
-    result = service.update_scene(scene_id, request)
+    result = service.update_scene(scene_id, scene_update)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -196,6 +200,7 @@ async def update_scene(
 @router.delete("/{scene_id}")
 @require_permission("scene:delete")
 async def delete_scene(
+    request: Request,
     scene_id: str,
     hard_delete: bool = Query(False, description="Permanently delete scene"),
     current_user: dict = Depends(get_current_user),
@@ -206,6 +211,7 @@ async def delete_scene(
     Requires 'scene:delete' permission.
     
     Args:
+        request: FastAPI request object (required by @require_permission)
         scene_id: Scene ID
         hard_delete: If True, permanently delete scene and agent
     
@@ -234,6 +240,7 @@ async def delete_scene(
 @router.get("/{scene_id}/agent", response_model=SceneAgentConfig)
 @require_permission("scene:read")
 async def get_scene_agent(
+    request: Request,
     scene_id: str,
     current_user: dict = Depends(get_current_user),
     service: SceneAgentService = Depends(get_scene_service),
@@ -243,6 +250,7 @@ async def get_scene_agent(
     Requires 'scene:read' permission.
     
     Args:
+        request: FastAPI request object (required by @require_permission)
         scene_id: Scene ID
     
     Returns:

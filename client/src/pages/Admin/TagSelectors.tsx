@@ -1,5 +1,5 @@
 // Tag selector components for scene management
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Select, Spin, TreeSelect } from 'antd';
 import { getApiToken } from '../../api/config';
 
@@ -20,7 +20,7 @@ interface TagListResponse {
 }
 
 /**
- * Primary tag selector - only shows category tags
+ * Primary tag selector - shows category tags organized by dimension
  * Used to determine which menu section the scene belongs to
  */
 export const PrimaryTagSelector: React.FC<{
@@ -33,17 +33,17 @@ export const PrimaryTagSelector: React.FC<{
   placeholder = '选择主标签',
 }) => {
   const [loading, setLoading] = useState(false);
-  const [tags, setTags] = useState<TagConfig[]>([]);
+  const [allTags, setAllTags] = useState<TagConfig[]>([]);
 
   useEffect(() => {
-    loadTags();
+    loadAllTags();
   }, []);
 
-  const loadTags = async () => {
+  const loadAllTags = async () => {
     try {
       setLoading(true);
       const token = getApiToken();
-      const response = await fetch('/api/admin/tags?tag_type=category&enabled=true', {
+      const response = await fetch('/api/admin/tags?enabled=true', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -54,7 +54,7 @@ export const PrimaryTagSelector: React.FC<{
       }
       
       const data: TagListResponse = await response.json();
-      setTags(data.tags);
+      setAllTags(data.tags);
     } catch (error) {
       console.error('Failed to load tags:', error);
     } finally {
@@ -62,11 +62,10 @@ export const PrimaryTagSelector: React.FC<{
     }
   };
 
-  // Build tree data for TreeSelect
-  const buildTreeData = () => {
-    // Group tags by parent_id
-    const dimensionTags = tags.filter(t => t.type === 'dimension');
-    const categoryTags = tags.filter(t => t.type === 'category');
+  // Build tree data: dimension tags as parents, category tags as children
+  const treeData = useMemo(() => {
+    const dimensionTags = allTags.filter(t => t.type === 'dimension');
+    const categoryTags = allTags.filter(t => t.type === 'category');
     
     return dimensionTags.map(dim => ({
       value: dim.id as string,
@@ -79,7 +78,7 @@ export const PrimaryTagSelector: React.FC<{
           title: `${cat.icon} ${cat.name}`,
         })),
     }));
-  };
+  }, [allTags]);
 
   if (loading) {
     return <Spin size="small" />;
@@ -89,7 +88,7 @@ export const PrimaryTagSelector: React.FC<{
     <TreeSelect
       value={value}
       onChange={onChange}
-      treeData={buildTreeData()}
+      treeData={treeData}
       placeholder={placeholder}
       showSearch
       treeDefaultExpandAll
@@ -99,7 +98,7 @@ export const PrimaryTagSelector: React.FC<{
 };
 
 /**
- * Other tags selector - shows industry and frequency tags
+ * Other tags selector - shows industry and frequency tags (category tags under industry/frequency dimensions)
  * Used for scene attributes
  */
 export const OtherTagsSelector: React.FC<{
@@ -123,20 +122,23 @@ export const OtherTagsSelector: React.FC<{
       setLoading(true);
       const token = getApiToken();
       
-      // Load industry and frequency tags
-      const [industryRes, frequencyRes] = await Promise.all([
-        fetch('/api/admin/tags?tag_type=industry&enabled=true', {
-          headers: { 'Authorization': `Bearer ${token}` },
-        }),
-        fetch('/api/admin/tags?tag_type=frequency&enabled=true', {
-          headers: { 'Authorization': `Bearer ${token}` },
-        }),
-      ]);
+      // Load ALL enabled tags, then filter for category tags under industry and frequency dimensions
+      const response = await fetch('/api/admin/tags?enabled=true', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
       
-      const industryData: TagListResponse = await industryRes.json();
-      const frequencyData: TagListResponse = await frequencyRes.json();
+      if (!response.ok) {
+        throw new Error('Failed to load tags');
+      }
       
-      setTags([...industryData.tags, ...frequencyData.tags]);
+      const data: TagListResponse = await response.json();
+      
+      // Filter: category tags whose parent_id is 'industry' or 'frequency'
+      const industryAndFrequencyTags = data.tags.filter(
+        t => t.type === 'category' && (t.parent_id === 'industry' || t.parent_id === 'frequency')
+      );
+      
+      setTags(industryAndFrequencyTags);
     } catch (error) {
       console.error('Failed to load tags:', error);
     } finally {
