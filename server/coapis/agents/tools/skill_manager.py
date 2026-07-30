@@ -18,6 +18,7 @@ import asyncio, json, logging, os, time, importlib, importlib.util
 from pathlib import Path
 from typing import Any
 from .registry import register_tool
+from coapis.constant import WORKING_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ def _save_index(data: dict[str, Any]):
 
 @register_tool(
     name="skill_manager",
-    description="动态技能管理：加载/卸载/热更新/列表动态技能，与 registry 联动注册到工具系统，与 memory_manager 记录技能版本。",
+    description="动态技能管理：加载/卸载/热更新/列表动态技能，与 registry 联动注册到工具系统，与 memory_manager 记录技能版本。列表操作支持 scope 参数查询全局技能池（docx/pptx/xlsx 等全局技能需用 scope=all 或 scope=pool 查看）。",
     category="builtin",
     tags=["ai", "skill", "dynamic", "plugin"]
 )
@@ -59,6 +60,7 @@ async def skill_manager(
     version: str = "1.0.0",
     tags: str = "",
     enable: bool = True,
+    scope: str = "dynamic",
 ) -> dict[str, Any]:
     """动态技能管理。
 
@@ -70,6 +72,7 @@ async def skill_manager(
         version: 版本号
         tags: 标签（逗号分隔）
         enable: 是否启用
+        scope: 查询范围，仅在 action=list 时有效。可选 dynamic（默认，只查动态技能）、pool（全局技能池）、all（动态+全局技能池）。全局技能如 docx/pptx/xlsx 需用 pool 或 all 才能列出。
 
     Returns:
         操作结果
@@ -79,12 +82,45 @@ async def skill_manager(
 
     if action == "list":
         skills = []
-        for name, info in index.get("skills", {}).items():
-            skills.append({
-                "name": name, "description": info.get("description", ""),
-                "version": info.get("version", ""), "enabled": info.get("enabled", True),
-                "tags": info.get("tags", []),
-            })
+        seen: set[str] = set()
+        scope_norm = str(scope or "dynamic").strip().lower()
+
+        # Dynamic skills (legacy behavior, default scope)
+        if scope_norm in ("dynamic", "all"):
+            for name, info in index.get("skills", {}).items():
+                if name in seen:
+                    continue
+                seen.add(name)
+                skills.append({
+                    "name": name, "description": info.get("description", ""),
+                    "version": info.get("version", ""), "enabled": info.get("enabled", True),
+                    "tags": info.get("tags", []),
+                    "source": "dynamic",
+                })
+
+        # Global skill pool (built-ins synced into $WORKING_DIR/skill_pool)
+        if scope_norm in ("pool", "all"):
+            try:
+                pool_manifest_path = WORKING_DIR / "skill_pool" / "skill.json"
+                if pool_manifest_path.exists():
+                    pool_data = json.loads(
+                        pool_manifest_path.read_text(encoding="utf-8"),
+                    )
+                    for name, info in pool_data.get("skills", {}).items():
+                        if name in seen:
+                            continue
+                        seen.add(name)
+                        skills.append({
+                            "name": name,
+                            "description": info.get("description", ""),
+                            "version": info.get("version_text", ""),
+                            "enabled": True,
+                            "tags": info.get("tags", []) or [],
+                            "source": info.get("source", "pool"),
+                        })
+            except Exception:
+                pass
+
         return {"action": "list", "count": len(skills), "skills": skills}
 
     elif action == "load":
