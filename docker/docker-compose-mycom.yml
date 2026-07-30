@@ -9,15 +9,13 @@ name: coapis-mycom
 services:
   # ── 后端 API 服务 ──
   server:
-    image: ${COAPIS_IMAGE:-coapis-agent:latest}
+    image: coapis-agent:0.11.2
     container_name: coapis-mycom-server
     ports:
       - "${COAPIS_SERVER_PORT:-4888}:8000"
     volumes:
       - ${COAPIS_WORKING_DIR}:${COAPIS_WORKING_DIR}
       - ./volume/playwright:/app/volume/playwright:ro
-      # MCP包缓存持久化
-      - ./volume/mcp:/root/.cache/pip
     env_file:
       - .env.mycom
       - .env.mycom
@@ -25,7 +23,7 @@ services:
       - COAPIS_WORKING_DIR=${COAPIS_WORKING_DIR}
       - COAPIS_WORKSPACES_DIR=${COAPIS_WORKSPACES_DIR:-${COAPIS_WORKING_DIR}/workspaces}
       - BROWSER_CDP_URL=http://playwright:3000
-      - PIP_CACHE_DIR=/root/.cache/pip
+      - COAPIS_VERSION=0.11.2
     restart: unless-stopped
     networks:
       - frontend

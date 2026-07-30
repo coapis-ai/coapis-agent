@@ -253,7 +253,7 @@ class MCPClientManager:
             "headers": client_config.headers or None,
             "command": client_config.command,
             "args": list(client_config.args),
-            "env": dict(client_config.env),
+            "env": {**os.environ, **dict(client_config.env or {})},
             "cwd": client_config.cwd or None,
         }
 
@@ -262,7 +262,7 @@ class MCPClientManager:
                 name=client_config.name,
                 command=client_config.command,
                 args=client_config.args,
-                env=client_config.env,
+                env={**os.environ, **(client_config.env or {})},
                 cwd=client_config.cwd or None,
             )
             setattr(client, "_coapis_rebuild_info", rebuild_info)

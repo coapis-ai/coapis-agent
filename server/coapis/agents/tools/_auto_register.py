@@ -25,6 +25,9 @@ from . import doc_reader
 from . import skill_manager
 from . import daily_memory  # Daily memory recording tool
 
+# ── Runtime / dependency ──
+from . import install_dependency  # Shared Runtime Pool package installer
+
 # ── Code tools ──
 from . import git_ops
 from . import cron_scheduler

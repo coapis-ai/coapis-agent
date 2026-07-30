@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [v0.11.1] - 2026-07-30
+## [v0.11.2] - 2026-07-30
+
+### Infrastructure
+
+- **Shared Runtime Pool** — All runtime-installed Python/Node packages share a single directory (`shared_runtime/`), persisted in `WORKING_DIR` and shared across all users and containers. Packages installed via `pip install --user` or `npm install -g` now go to the shared pool and survive container restarts and rebuilds.
+- **MCP client environment merge** — `StdIOStatefulClient` and `StatefulMCPClient` configurations now merge the container's base environment with the MCP-specific env, so PATH, NODE_PATH, and other variables are inherited correctly.
+
+### Features
+
+- **install_dependency tool** — A new builtin tool that lets LLM agents install Python (`pip`) or Node (`npm`) packages into the shared runtime pool. Supports optional version pinning and global npm installs. Full audit logging.
+
+### Version
+
+- **Version bump** — `__version__` bumped to `0.11.2`
 
 ### Bug Fixes
 
