@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [v0.11.1] - 2026-07-28
+## [v0.11.1] - 2026-07-30
 
 ### Bug Fixes
 
@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **MCP not persisted** — `mcp` was mistakenly in `_AGENT_GLOBAL_INHERITED_FIELDS`, removed so configs save correctly
 - **MCP tools list API** — Fixed wrong import path, missing `username` in `get_workspace`, and wrong attribute name (`mcp_manager` → `_mcp_manager`)
 - **Sidebar submenu won't collapse** — Removed CSS `!important` rule that overrode Ant Design's `display: none`
+- **Scene creation 500 error** — Fixed `@require_permission` decorator receiving Pydantic model instead of `Request` object; corrected `create_scene` signature to `request: Request` + `Body(...)` for scene body parameter
+- **Tag selector optimization** — Consolidated two parallel API calls into single `/api/admin/tags?enabled=true` query; added `useMemo` for tree data computation; reorganized dimension tags as tree parents with category children
 
 ### Infrastructure
 
