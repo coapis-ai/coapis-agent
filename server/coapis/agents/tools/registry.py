@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ class ToolRegistration:
     requires_features: list[str] = field(default_factory=list)
     requires_sandbox: bool = False
     governance: dict[str, Any] = field(default_factory=dict)
+    dependencies: list[dict[str, Any]] = field(default_factory=list)
 
 
 # Global registry
@@ -62,6 +63,7 @@ def register_tool(
     requires_features: list[str] | None = None,
     requires_sandbox: bool = False,
     governance: dict[str, Any] | None = None,
+    dependencies: list[dict[str, Any]] | None = None,
 ) -> Callable:
     """Decorator to register a tool function.
 
@@ -87,6 +89,7 @@ def register_tool(
             requires_features=requires_features or [],
             requires_sandbox=requires_sandbox,
             governance=governance or {},
+            dependencies=dependencies or [],
         )
         _registry[tool_name] = reg
         logger.debug("Registered tool: %s (category=%s)", tool_name, category)
@@ -145,6 +148,11 @@ def get_registered_tools(
             continue
         result[name] = reg
     return result
+
+
+def get_registered_tool(tool_name: str) -> ToolRegistration | None:
+    """Return a single tool registration by name."""
+    return _registry.get(tool_name)
 
 
 def get_tool_names() -> list[str]:

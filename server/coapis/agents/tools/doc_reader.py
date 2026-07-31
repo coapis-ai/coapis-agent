@@ -149,7 +149,12 @@ async def _read_xlsx(filepath: str) -> dict[str, Any]:
     name="doc_reader",
     description="多格式文档解析：PDF/DOCX/PPTX/XLSX/CSV/图片OCR → 结构化文本，支持自动格式检测。",
     category="builtin",
-    tags=["file", "reader", "document", "ocr"]
+    tags=["file", "reader", "document", "ocr"],
+    dependencies=[
+        {"name": "python-docx", "manager": "pip", "required": False, "reason": "DOCX/DOC 解析"},
+        {"name": "python-pptx", "manager": "pip", "required": False, "reason": "PPTX/PPT 解析"},
+        {"name": "openpyxl", "manager": "pip", "required": False, "reason": "XLSX/XLS 解析"},
+    ],
 )
 async def doc_reader(
     action: str = "read",

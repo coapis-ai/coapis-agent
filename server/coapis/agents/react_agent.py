@@ -61,6 +61,7 @@ from .utils.tool_result_cache import get_cache, is_idempotent
 # Tool functions are now accessed via the registry system (get_registered_tools())
 # Direct imports are no longer needed — the framework auto-discovers tools.
 from .utils import process_file_and_media_blocks_in_message
+from .runtime_dependency import RuntimeDependencyManager, _install_dependency_from_error
 from ..constant import (
     MEDIA_UNSUPPORTED_PLACEHOLDER,
     WORKING_DIR,
@@ -2221,13 +2222,40 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 logger.debug("Cache hit for %s", tool_name)
                 return _cached
 
+        # ── Runtime dependency pre-check / recovery ──
+        _recovery_hint = ""
+        try:
+            ensure = await RuntimeDependencyManager.ensure_for_tool(tool_name)
+            if not ensure.ok:
+                _recovery_hint = ensure.hint
+        except Exception as _dep_exc:
+            logger.debug("Dependency pre-check skipped for %s: %s", tool_name, _dep_exc)
+
         # ── Usage tracking: record tool call timing ──
         _t0 = _time.monotonic()
         _success = True
         _error_msg = None
         _output_len = 0
         try:
-            result = await super()._acting(tool_call)
+            if _recovery_hint:
+                from agentscope.message import ToolResultBlock
+                from agentscope.message import TextBlock
+                return {
+                    "content": [TextBlock(type="text", text=_recovery_hint)],
+                    "metadata": {"tool_call_id": getattr(tool_call, "id", "")},
+                }
+            try:
+                result = await super()._acting(tool_call)
+            except ImportError as _import_exc:
+                _recovered = False
+                try:
+                    _recovered = await _install_dependency_from_error(_import_exc, tool_name)
+                except Exception:
+                    pass
+                if _recovered:
+                    result = await super()._acting(tool_call)
+                else:
+                    raise
             # Estimate output length from result
             if result is not None:
                 try:

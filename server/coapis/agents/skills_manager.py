@@ -36,7 +36,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, Optional, TypeVar
 
 import frontmatter
 from pydantic import BaseModel, Field
@@ -121,11 +121,32 @@ class SkillInfo(BaseModel):
     emoji: str = ""
 
 
+class PackageRequirement(BaseModel):
+    """Declared runtime package requirement for a skill or tool."""
+
+    model_config = {"defer_build": False}
+
+    name: str
+    manager: Literal["pip", "npm", "apt"] = "pip"
+    version: Optional[str] = None
+    required: bool = True
+    reason: str = ""
+
+
+PackageRequirement.model_rebuild()
+
+
 class SkillRequirements(BaseModel):
     """System-managed requirements declared by a skill."""
 
+    model_config = {"defer_build": False}
+
     require_bins: list[str] = Field(default_factory=list)
     require_envs: list[str] = Field(default_factory=list)
+    require_packages: list[PackageRequirement] = Field(default_factory=list)
+
+
+SkillRequirements.model_rebuild()
 
 
 _ACTIVE_SKILL_ENV_ENTRIES: dict[str, dict[str, Any]] = {}
@@ -752,9 +773,27 @@ def _extract_requirements(post: dict[str, Any]) -> SkillRequirements:
         if not isinstance(requires, dict):
             return SkillRequirements()
 
+        packages: list[PackageRequirement] = []
+        for pkg in requires.get("packages", []):
+            if isinstance(pkg, dict):
+                packages.append(
+                    PackageRequirement(
+                        name=str(pkg.get("name", "")),
+                        manager=str(pkg.get("manager", "pip")),
+                        version=pkg.get("version"),
+                        required=bool(pkg.get("required", True)),
+                        reason=str(pkg.get("reason", "")),
+                    ),
+                )
+            elif isinstance(pkg, str):
+                packages.append(
+                    PackageRequirement(name=pkg, manager="pip", required=True, reason=""),
+                )
+
         return SkillRequirements(
             require_bins=list(requires.get("bins", [])),
             require_envs=list(requires.get("env", [])),
+            require_packages=packages,
         )
     except Exception as e:
         logger.warning(
@@ -762,6 +801,22 @@ def _extract_requirements(post: dict[str, Any]) -> SkillRequirements:
             "Falling back to empty requirements.",
             e,
         )
+        return SkillRequirements()
+
+
+def get_skill_requirements(skill_name: str) -> SkillRequirements:
+    """Return parsed requirements for a skill by name."""
+    skill_dir = _resolve_skill_dir(skill_name)
+    if skill_dir is None:
+        return SkillRequirements()
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        return SkillRequirements()
+    try:
+        post = frontmatter.load(str(skill_md))
+        return _extract_requirements(post.to_dict())
+    except Exception as e:
+        logger.debug("Failed to load skill requirements for %s: %s", skill_name, e)
         return SkillRequirements()
 
 

@@ -358,7 +358,10 @@ _BACKENDS = {
     name="web_search",
     description="网络搜索工具，无需 API Key 即可使用。默认通过浏览器（Bing）搜索，自动 fallback 到其他后端。返回 results 数组含 title/url/snippet。参数 query 为必填项。",
     category="builtin",
-    tags=["search", "web"]
+    tags=["search", "web"],
+    dependencies=[
+        {"name": "duckduckgo-search", "manager": "pip", "required": False, "reason": "搜索引擎后端"},
+    ],
 )
 async def web_search(
     query: str = _REQUIRED,    # Sentinel 标记必填

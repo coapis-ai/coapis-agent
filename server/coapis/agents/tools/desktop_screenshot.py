@@ -122,6 +122,9 @@ def _capture_macos_screencapture(
     description="截取桌面截图",
     category="builtin",
     tags=['screenshot'],
+    dependencies=[
+        {"name": "mss", "manager": "pip", "required": False, "reason": "桌面截图依赖"},
+    ],
 )
 async def desktop_screenshot(
     output_path: str = "",
