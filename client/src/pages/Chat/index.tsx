@@ -903,6 +903,10 @@ export default function ChatPage() {
   const chatRef = useRef<IAgentScopeRuntimeWebUIRef>(null);
   const pendingClearHistoryRef = useRef(false);
   const requestSessionIdRef = useRef<string | null>(null);
+  // ⭐ 方案2：请求级 ID + 取消上下文，避免旧请求流污染新会话
+  const requestIdRef = useRef(0);
+  const activeRequestIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useMessageHistoryNavigation(chatRef, isChatActive, isComposingRef);
   chatIdRef.current = chatId;
@@ -1044,6 +1048,13 @@ export default function ChatPage() {
     };
 
     return () => {
+      // ⭐ 方案2：组件卸载时取消进行中的请求
+      if (abortControllerRef.current) {
+        console.log("[Request] Aborting request on unmount:", activeRequestIdRef.current);
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+        activeRequestIdRef.current = null;
+      }
       sessionApi.onSessionIdResolved = null;
       sessionApi.onSessionRemoved = null;
       sessionApi.onSessionSelected = null;
@@ -1061,6 +1072,13 @@ export default function ChatPage() {
   useEffect(() => {
     const prevAgent = prevSelectedAgentRef.current;
     if (prevAgent !== selectedAgent && prevAgent !== undefined) {
+      // ⭐ 方案2：切换 agent 时取消进行中的旧请求，防止旧 SSE 流污染新会话
+      if (abortControllerRef.current) {
+        console.log("[Request] Aborting previous request on agent switch:", activeRequestIdRef.current);
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+        activeRequestIdRef.current = null;
+      }
       // Save current chat ID for the agent we're leaving
       // Priority: URL chatId > lastSessionIdRef > currentSession.id
       const currentSession = sessionApi.currentSession;
@@ -1270,13 +1288,20 @@ export default function ChatPage() {
       // Record current session_id for SSE filtering
       const currentSessionId = requestBody.session_id || requestBody.chat_id || null;
       requestSessionIdRef.current = currentSessionId;
-      console.log("[Chat] Request session_id:", currentSessionId);
+
+      // ⭐ 方案2：创建新的 AbortController + 请求级 ID，用于取消旧请求和过滤 SSE 事件
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const requestId = `req_${++requestIdRef.current}_${Date.now()}`;
+      activeRequestIdRef.current = requestId;
+      console.log("[Request] Starting:", requestId, "session:", currentSessionId);
 
       const response = await fetch(getApiUrl("/console/chat"), {
         method: "POST",
         headers,
         body: JSON.stringify(requestBody),
-        signal: data.signal,
+        // 优先使用新 controller 的 signal，退回到外部传入的 signal
+        signal: controller.signal,
       });
 
       // Schedule a delayed session list refresh after the SSE stream completes.
@@ -1284,6 +1309,12 @@ export default function ChatPage() {
       // finally block (after the stream ends), so we need to refresh the
       // session list to pick up the new name.
       sessionApi.scheduleSessionListRefresh(2000);
+
+      // ⭐ 清理：如果这不是当前活跃请求，说明已被取消/覆盖
+      if (activeRequestIdRef.current !== requestId) {
+        console.log("[Request] Discarding stale response:", requestId);
+        return buildModelError();
+      }
 
       return response;
     },
@@ -1632,12 +1663,19 @@ export default function ChatPage() {
           }
         },
         async reconnect(data: { session_id: string; signal?: AbortSignal }) {
+          // ⭐ 方案2：reconnect 也创建新的 AbortController，与 customFetch 保持一致
+          const controller = new AbortController();
+          abortControllerRef.current = controller;
+          const requestId = `req_reconnect_${++requestIdRef.current}_${Date.now()}`;
+          activeRequestIdRef.current = requestId;
+          console.log("[Request] Reconnect:", requestId, "session:", data.session_id);
+
           const headers: Record<string, string> = {
             "Content-Type": "application/json",
             ...buildAuthHeaders(),
           };
 
-          return fetch(getApiUrl("/console/chat"), {
+          const response = await fetch(getApiUrl("/console/chat"), {
             method: "POST",
             headers,
             body: JSON.stringify({
@@ -1646,8 +1684,16 @@ export default function ChatPage() {
               user_id: window.currentUserId || DEFAULT_USER_ID,
               channel: window.currentChannel || DEFAULT_CHANNEL,
             }),
-            signal: data.signal,
+            signal: controller.signal,
           });
+
+          // 清理：如果这不是当前活跃请求，说明已被取消/覆盖
+          if (activeRequestIdRef.current !== requestId) {
+            console.log("[Request] Discarding stale reconnect:", requestId);
+            return buildModelError();
+          }
+
+          return response;
         },
       },
       cards: {
