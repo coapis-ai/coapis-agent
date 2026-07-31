@@ -212,7 +212,13 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self._task_tracker = task_tracker
         self.plan_notebook = plan_notebook  # Connect PlanNotebook to agent
 
-        # Extract configuration from agent_config
+        # Governance policy engine
+        try:
+            from .tools.policy_engine import ToolPolicyEngine
+            self._policy_engine = ToolPolicyEngine()
+            self._register_policy_rules()
+        except Exception:
+            self._policy_engine = None
         running_config = agent_config.running
         self._language = agent_config.language
 
@@ -2100,8 +2106,39 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         """Check plan tool gate before delegating to ToolGuardMixin."""
         import time as _time
         from ..plan.hints import check_plan_tool_gate
+        from .policy_engine import PolicyContext
 
         tool_name = str(tool_call.get("name", ""))
+
+        # ── Policy engine / tool governance ──
+        if self._policy_engine is not None:
+            reg = getattr(self.toolkit, "registry", {}).get(tool_name)
+            if reg is not None:
+                ctx = PolicyContext(
+                    registration=reg,
+                    user_modes=list(getattr(self._agent_config, "modes", []) or []),
+                    user_skills=list(getattr(self._agent_config, "skills", []) or []),
+                    features=list(getattr(self._agent_config, "features", []) or []),
+                    sandbox_enabled=bool(getattr(getattr(self._agent_config, "running", None), "sandbox", False)),
+                )
+                allowed, reason = self._policy_engine.evaluate(ctx)
+                if not allowed:
+                    from agentscope.message import ToolResultBlock
+                    tool_res_msg = Msg(
+                        "system",
+                        [
+                            ToolResultBlock(
+                                type="tool_result",
+                                id=tool_call["id"],
+                                name=tool_name,
+                                output=[{"type": "text", "text": f"[PolicyDenied] {reason}"}],
+                            ),
+                        ],
+                        "system",
+                    )
+                    await self.print(tool_res_msg, True)
+                    await self.memory.add(tool_res_msg)
+                    return None
 
         # ── SEM check: intervene if needed ──
         if self._session_execution_manager is not None:

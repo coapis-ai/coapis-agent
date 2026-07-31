@@ -38,6 +38,11 @@ class ToolRegistration:
     async_execution: bool = False
     category: str = "builtin"  # builtin, plugin, custom
     tags: list[str] = field(default_factory=list)
+    requires_modes: list[str] = field(default_factory=list)
+    requires_skills: list[str] = field(default_factory=list)
+    requires_features: list[str] = field(default_factory=list)
+    requires_sandbox: bool = False
+    governance: dict[str, Any] = field(default_factory=dict)
 
 
 # Global registry
@@ -52,6 +57,11 @@ def register_tool(
     async_execution: bool = False,
     category: str = "builtin",
     tags: list[str] | None = None,
+    requires_modes: list[str] | None = None,
+    requires_skills: list[str] | None = None,
+    requires_features: list[str] | None = None,
+    requires_sandbox: bool = False,
+    governance: dict[str, Any] | None = None,
 ) -> Callable:
     """Decorator to register a tool function.
 
@@ -72,6 +82,11 @@ def register_tool(
             async_execution=async_execution,
             category=category,
             tags=tags or [],
+            requires_modes=requires_modes or [],
+            requires_skills=requires_skills or [],
+            requires_features=requires_features or [],
+            requires_sandbox=requires_sandbox,
+            governance=governance or {},
         )
         _registry[tool_name] = reg
         logger.debug("Registered tool: %s (category=%s)", tool_name, category)
