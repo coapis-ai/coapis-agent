@@ -143,10 +143,12 @@ async def audit_log(
     since: int = 0,
     filters: str = "",
     limit: int = 50,
+    max_chain_entries: int = 50000,
 ) -> dict[str, Any]:
     """操作审计日志。
 
     不可篡改的操作记录，SHA-256 链式哈希防篡改。
+    超过 max_chain_entries 时自动清理旧记录，避免无限增长。
 
     Args:
         action: 操作类型 (log/query/verify/stats)
@@ -158,6 +160,7 @@ async def audit_log(
         since: 查询起始时间戳
         filters: 查询过滤 JSON（actor/action/resource/result）
         limit: 查询限制
+        max_chain_entries: 链文件最大条目数，超过后清理最旧记录
 
     Returns:
         审计结果
@@ -198,6 +201,23 @@ async def audit_log(
                 f.write(json.dumps({"ts": timestamp, "actor": actor, "action": operation.strip(),
                                     "resource": resource, "result": result, "hash": entry_hash},
                                    ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+        # Auto-cleanup when chain exceeds max_chain_entries
+        try:
+            if CHAIN_FILE.exists() and max_chain_entries > 0:
+                with open(CHAIN_FILE, "r") as f:
+                    lines = [line for line in f if line.strip()]
+                if len(lines) > max_chain_entries:
+                    keep = lines[-max_chain_entries:]
+                    with open(CHAIN_FILE, "w") as f:
+                        f.writelines(keep)
+                    logger.info(
+                        "Audit chain auto-cleaned: %d -> %d entries",
+                        len(lines),
+                        len(keep),
+                    )
         except Exception:
             pass
 

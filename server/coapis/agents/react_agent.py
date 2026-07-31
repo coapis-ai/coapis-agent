@@ -370,25 +370,27 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         )
         manager = self._hook_manager
 
-        class _AuditHook(BaseHook):
+        class _AuditLogHook(BaseHook):
             builtin = True
             phase = HookPhase.POST_POST_PROCESS
 
             async def run(self, ctx):
                 try:
                     data = ctx.data or {}
-                    msg = (
-                        f"[AuditHook] phase={ctx.phase.value} "
-                        f"user={data.get('user_id')} agent={data.get('agent_id')} "
-                        f"latency={data.get('latency_ms')}ms "
-                        f"response_len={len(data.get('response', '') or '')}"
+                    from ..tools.audit_log import audit_log
+                    await audit_log(
+                        action="log",
+                        actor=str(data.get("user_id") or data.get("agent_id") or "system"),
+                        operation=f"agent.{ctx.phase.value.lower()}",
+                        resource=str(data.get("agent_id") or ""),
+                        result="success",
+                        detail=f"latency_ms={data.get('latency_ms')} response_len={len(data.get('response', '') or '')}",
                     )
-                    print(msg, flush=True)
                 except Exception:
                     pass
                 return HookState.CONTINUE
 
-        manager.register(_AuditHook())
+        manager.register(_AuditLogHook())
 
     async def _run_hook(self, phase, data: dict | None = None) -> None:
         """Run runtime hooks for a given phase; ignore short-circuit/skip."""
