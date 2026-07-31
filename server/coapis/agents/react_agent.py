@@ -2106,7 +2106,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         """Check plan tool gate before delegating to ToolGuardMixin."""
         import time as _time
         from ..plan.hints import check_plan_tool_gate
-        from .policy_engine import PolicyContext
+        from .tools.policy_engine import PolicyContext
 
         tool_name = str(tool_call.get("name", ""))
 
