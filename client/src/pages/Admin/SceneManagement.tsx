@@ -25,6 +25,7 @@ import type { SceneConfig } from '../Workbench/types';
 import styles from './SceneManagement.module.less';
 import { getApiToken } from '../../api/config';
 import { PrimaryTagSelector, OtherTagsSelector } from './TagSelectors';
+import { skillApi } from '../../api/modules/skill';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -47,6 +48,7 @@ const SceneManagement: React.FC = () => {
   const [editingScene, setEditingScene] = useState<SceneConfig | null>(null);
   const [filterTag, setFilterTag] = useState<string>('all');
   const [form] = Form.useForm();
+  const [skillOptions, setSkillOptions] = useState<{ label: string; value: string }[]>([]);
 
   // Build tag id -> name map
   const tagNameMap = useMemo(() => {
@@ -85,7 +87,7 @@ const SceneManagement: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    await Promise.all([loadScenes(), loadTags()]);
+    await Promise.all([loadScenes(), loadTags(), loadSkills()]);
   };
 
   const loadScenes = async () => {
@@ -125,6 +127,20 @@ const SceneManagement: React.FC = () => {
       setTags(data.tags);
     } catch (error) {
       console.error('Failed to load tags:', error);
+    }
+  };
+
+  const loadSkills = async () => {
+    try {
+      const skills = await skillApi.listSkillPoolSkills();
+      const options = skills.map((skill: { name: string; description?: string }) => ({
+        label: skill.name + (skill.description ? ` — ${skill.description.slice(0, 60)}` : ''),
+        value: skill.name,
+      }));
+      setSkillOptions(options);
+    } catch (error) {
+      console.error('Failed to load skills:', error);
+      // Non-blocking: skill selector still allows manual input in tags mode
     }
   };
 
@@ -580,8 +596,15 @@ const SceneManagement: React.FC = () => {
           <Form.Item
             name="skills"
             label="关联技能"
+            extra="可选择已有技能或输入新技能ID后回车"
           >
-            <Select mode="tags" placeholder="输入技能ID后回车" />
+            <Select
+              mode="tags"
+              placeholder="选择已有技能或输入技能ID后回车"
+              options={skillOptions}
+              optionFilterProp="label"
+              showSearch
+            />
           </Form.Item>
 
           <Form.Item
