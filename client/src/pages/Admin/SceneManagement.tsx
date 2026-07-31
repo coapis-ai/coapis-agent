@@ -147,6 +147,7 @@ const SceneManagement: React.FC = () => {
   const handleCreate = () => {
     setEditingScene(null);
     form.resetFields();
+    void loadSkills();
     setModalVisible(true);
   };
 
@@ -164,6 +165,7 @@ const SceneManagement: React.FC = () => {
       welcome_message: scene.welcome_message,
       status: scene.status,
     });
+    void loadSkills();
     setModalVisible(true);
   };
 
