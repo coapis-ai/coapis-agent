@@ -40,6 +40,7 @@ from pydantic import BaseModel
 from ..app.mcp import HttpStatefulClient, StdIOStatefulClient
 from .command_handler import CommandHandler
 from .hooks import BootstrapHook
+from .runtime.hooks import HookManager, HookPhase, HookState
 from .model_factory import create_model_and_formatter
 from .prompt import (
     build_multimodal_hint,
@@ -207,7 +208,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self._request_context = dict(request_context or {})
         self._mcp_clients = mcp_clients or []
         self._namesake_strategy = namesake_strategy
-        self._workspace_dir = workspace_dir
+        self._workspace_dir = workspace_dir or WORKING_DIR
         self._task_tracker = task_tracker
         self.plan_notebook = plan_notebook  # Connect PlanNotebook to agent
 
@@ -350,8 +351,52 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             context_manager=self.context_manager,
         )
 
+        # ── Runtime Hook Manager (QwenPaw 8-Phase system) ──
+        self._hook_manager = HookManager()
+        self._register_runtime_hooks()
+
         # Register hooks
         self._register_hooks()
+
+    def _register_runtime_hooks(self) -> None:
+        """Register builtin runtime hooks into the 8-Phase HookManager.
+
+        Builtin hooks run before any user-registered hooks of the same phase.
+        """
+        from .runtime.hooks import (
+            HookPhase,
+            BaseHook,
+            default_manager,
+        )
+        manager = self._hook_manager
+
+        class _AuditHook(BaseHook):
+            builtin = True
+            phase = HookPhase.POST_POST_PROCESS
+
+            async def run(self, ctx):
+                try:
+                    data = ctx.data or {}
+                    msg = (
+                        f"[AuditHook] phase={ctx.phase.value} "
+                        f"user={data.get('user_id')} agent={data.get('agent_id')} "
+                        f"latency={data.get('latency_ms')}ms "
+                        f"response_len={len(data.get('response', '') or '')}"
+                    )
+                    print(msg, flush=True)
+                except Exception:
+                    pass
+                return HookState.CONTINUE
+
+        manager.register(_AuditHook())
+
+    async def _run_hook(self, phase, data: dict | None = None) -> None:
+        """Run runtime hooks for a given phase; ignore short-circuit/skip."""
+        ctx = await self._hook_manager.run(phase, data or {})
+        if ctx.state == HookState.SKIP_AGENT:
+            raise RuntimeError("Hook requested SKIP_AGENT; not yet implemented")
+        if ctx.errors:
+            logger.debug("Hook errors in %s: %s", phase, ctx.errors)
 
     def _build_compression_config(
         self, running_config, model
@@ -2968,6 +3013,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         Returns:
             Response message
         """
+        import time as _time
+        self._reply_started_at = _time.time()
+        self._reply_finished_at = None
+
         # Set workspace_dir and recent_max_bytes in context for tool functions
         from ..config.context import (
             set_current_workspace_dir,
@@ -2984,6 +3033,16 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         set_current_shell_command_timeout(
             self._agent_config.running.shell_command_timeout,
         )
+
+        # ── Hook: PRE_DISPATCH ──
+        try:
+            await self._run_hook(HookPhase.PRE_DISPATCH, {
+                "agent_id": self._agent_config.id,
+                "user_id": self._request_context.get("user_id"),
+                "message": query,
+            })
+        except Exception:
+            pass
 
         # Process file and media blocks in messages
         if msg is not None:
@@ -3041,6 +3100,16 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         if query:
             self._load_on_demand_skills(query)
 
+        # ── Hook: POST_DISPATCH ──
+        try:
+            await self._run_hook(HookPhase.POST_DISPATCH, {
+                "agent_id": self._agent_config.id,
+                "user_id": self._request_context.get("user_id"),
+                "message": query,
+            })
+        except Exception:
+            pass
+
         # P5: Store current query for _build_sys_prompt experience filtering
         self._current_query = query or ""
 
@@ -3050,6 +3119,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             semantic_memories = await self._async_reme_search(query)
         # Store for _build_sys_prompt to consume
         self._pre_fetched_memories = semantic_memories
+
+        # ── Hook: PRE_BUILD ──
+        try:
+            await self._run_hook(HookPhase.PRE_BUILD, {
+                "agent_id": self._agent_config.id,
+                "user_id": self._request_context.get("user_id"),
+                "message": query,
+                "tools": [name for name in getattr(self.toolkit, '_tool_functions', {}).keys()],
+            })
+        except Exception:
+            pass
 
         request_context = getattr(self, "_request_context", {}) or {}
         channel_name = request_context.get("channel", "console")
@@ -3073,16 +3153,58 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             len(self.memory.content) if self.memory else 0,
         )
 
+        # ── Hook: POST_BUILD ──
+        try:
+            await self._run_hook(HookPhase.POST_BUILD, {
+                "agent_id": self._agent_config.id,
+                "user_id": self._request_context.get("user_id"),
+                "message": query,
+            })
+        except Exception:
+            pass
+
+        # ── Hook: PRE_EXECUTE ──
+        try:
+            await self._run_hook(HookPhase.PRE_EXECUTE, {
+                "agent_id": self._agent_config.id,
+                "user_id": self._request_context.get("user_id"),
+                "message": query,
+            })
+        except Exception:
+            pass
+
         with apply_skill_config_env_overrides(workspace_dir, channel_name):
             response = await super().reply(
                 msg=msg,
                 structured_model=structured_model,
             )
 
+        # ── Hook: POST_EXECUTE ──
+        try:
+            await self._run_hook(HookPhase.POST_EXECUTE, {
+                "agent_id": self._agent_config.id,
+                "user_id": self._request_context.get("user_id"),
+                "message": query,
+                "response": response.get_text_content() if response else None,
+            })
+        except Exception:
+            pass
+
         # ── Global auto-assist: if response is uncertain, consult global knowledge ──
         if not is_global and query and response:
             response_text = response.get_text_content() or ""
             if self._detect_uncertainty(response_text):
+                # ── Hook: PRE_POST_PROCESS ──
+                try:
+                    await self._run_hook(HookPhase.PRE_POST_PROCESS, {
+                        "agent_id": self._agent_config.id,
+                        "user_id": self._request_context.get("user_id"),
+                        "message": query,
+                        "response": response_text,
+                    })
+                except Exception:
+                    pass
+
                 global_knowledge = self._query_global_memory(query)
                 if global_knowledge:
                     logger.info(
@@ -3113,6 +3235,19 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                             structured_model=structured_model,
                         )
                     logger.info("[GlobalAssist] Replied with global knowledge context")
+
+        # ── Hook: POST_POST_PROCESS ──
+        try:
+            import time as _time
+            await self._run_hook(HookPhase.POST_POST_PROCESS, {
+                "agent_id": self._agent_config.id,
+                "user_id": self._request_context.get("user_id"),
+                "message": query,
+                "response": response.get_text_content() if response else None,
+                "latency_ms": int(getattr(self, "_reply_started_at", 0) and (_time.time() - self._reply_started_at) * 1000),
+            })
+        except Exception:
+            pass
 
         return response
 
