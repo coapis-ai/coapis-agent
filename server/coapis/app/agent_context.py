@@ -114,9 +114,14 @@ async def get_agent_for_request(
     # Load config once for fallback and validation
     config = None
     if not target_agent_id:
-        # Fallback to active agent from config
+        # Fallback to active agent from config, or user's default agent
         config = load_config()
-        target_agent_id = config.agents.active_agent or "global_default"
+        caller = getattr(request.state, "username", None)
+        if caller:
+            # Use user's default agent (user:{username}) instead of global_default
+            target_agent_id = config.agents.active_agent or f"user:{caller}"
+        else:
+            target_agent_id = config.agents.active_agent or "global_default"
 
     # Check if agent exists and is enabled
     # Check if agent exists by scanning workspace directories
