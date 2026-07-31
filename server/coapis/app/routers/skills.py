@@ -1063,7 +1063,7 @@ async def import_skill_pool_from_hub(request: Request,
     return {
         "installed": True,
         "name": result.name,
-        "enabled": False,
+        "enabled": result.enabled,
         "source_url": result.source_url,
     }
 

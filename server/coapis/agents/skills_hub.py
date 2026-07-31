@@ -1615,7 +1615,7 @@ def install_skill_from_hub(
     workspace_dir: Path,
     bundle_url: str,
     version: str = "",
-    enable: bool = False,
+    enable: bool = True,
     target_name: str | None = None,
     cancel_checker: Any | None = None,
 ) -> HubInstallResult:
@@ -1708,6 +1708,6 @@ def import_pool_skill_from_hub(
 
     return HubInstallResult(
         name=created,
-        enabled=False,
+        enabled=True,
         source_url=source_url,
     )

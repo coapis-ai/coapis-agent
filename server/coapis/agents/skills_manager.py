@@ -935,6 +935,8 @@ def _build_skill_metadata(
         "protected": protected,
         "requirements": requirements.model_dump(),
         "updated_at": _get_skill_mtime(skill_dir),
+        "enabled": True,
+        "channels": ["all"],
     }
 
 
@@ -1577,7 +1579,7 @@ def reconcile_workspace_manifest(workspace_dir: Path) -> dict[str, Any]:
 
         for skill_name, skill_dir in sorted(discovered.items()):
             existing = skills.get(skill_name) or {}
-            enabled = bool(existing.get("enabled", False))
+            enabled = bool(existing.get("enabled", True))
             channels = existing.get("channels") or ["all"]
 
             # Inherit source from manifest when the entry already exists.
@@ -1823,7 +1825,7 @@ def resolve_effective_skills(
         search_dirs = [skills_dir, skill_pool_dir]
 
     for skill_name, entry in sorted(manifest.get("skills", {}).items()):
-        if not entry.get("enabled", False):
+        if not entry.get("enabled", True):
             continue
         channels = entry.get("channels") or ["all"]
         if "all" not in channels and channel_name not in channels:
@@ -2379,7 +2381,7 @@ class SkillService:
         scripts: dict[str, Any] | None = None,
         extra_files: dict[str, Any] | None = None,
         config: dict[str, Any] | None = None,
-        enable: bool = False,
+        enable: bool = True,
     ) -> str | None:
         _validate_skill_content(content)
         skill_name = _normalize_skill_dir_name(name)
@@ -2692,7 +2694,7 @@ class SkillService:
     def import_from_zip(
         self,
         data: bytes,
-        enable: bool = False,
+        enable: bool = True,
         target_name: str | None = None,
         rename_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
