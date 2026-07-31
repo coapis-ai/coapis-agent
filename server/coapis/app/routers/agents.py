@@ -598,7 +598,8 @@ async def update_agent(
         raise HTTPException(status_code=404, detail="Agent not found")
     
     # Non-admin users can only update their own agents
-    if not is_admin and workspace.username and workspace.username != username:
+    # Global agents have workspace.username=None, must be blocked for non-admin
+    if not is_admin and (not workspace.username or workspace.username != username):
         raise HTTPException(status_code=403, detail="No permission to update this agent")
 
     # Save agent config to file
@@ -700,8 +701,8 @@ async def delete_agent(
                     cleaned = True
                     break
 
-            # Try global agents directory
-            if not cleaned:
+            # Try global agents directory (admin only)
+            if not cleaned and user_role in ("admin", "superadmin"):
                 global_dir = AGENTS_DIR / agent_id
                 if global_dir.exists():
                     shutil.rmtree(global_dir)
