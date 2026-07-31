@@ -1,19 +1,12 @@
 # ───────────────────────────────────────────────────────────────────
-# CoApis 快速 Patch 镜像 —— 只覆盖本次改动文件
-# 基于当前 coapis-agent:latest，秒级构建
-# 改动内容：v0.11.2 Shared Runtime Pool + install_dependency + MCP env 合并
+# CoApis 快速 Patch 镜像 —— 基于 0.11.3 覆盖本次后端改动文件
+# 构建：docker build -f server/deploy/Dockerfile.patch -t coapis-agent:0.11.3 ..
 # ───────────────────────────────────────────────────────────────────
-FROM coapis-agent:latest
+FROM coapis-agent:0.11.3 AS patch
 
-# 1. 更新 entrypoint（共享运行时池初始化、min 镜像渠道包路径迁移）
-COPY server/deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# 覆盖 0.11.3 之后合并的后端修复
+COPY server/coapis/agents/skills_manager.py /app/coapis/agents/skills_manager.py
+COPY server/coapis/app/routers/skills.py /app/coapis/app/routers/skills.py
 
-# 2. 更新源码文件
-COPY server/coapis/__version__.py /app/coapis/__version__.py
-COPY server/coapis/agents/tools/install_dependency.py /app/coapis/agents/tools/install_dependency.py
-COPY server/coapis/agents/tools/_auto_register.py /app/coapis/agents/tools/_auto_register.py
-COPY server/coapis/app/mcp/manager.py /app/coapis/app/mcp/manager.py
-
-# 3. 保持原镜像入口点不变
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["uvicorn", "coapis.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
