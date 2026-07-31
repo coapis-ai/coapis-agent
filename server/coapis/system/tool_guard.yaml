@@ -118,6 +118,10 @@ commands:
     level: L0
     desc: 流编辑器
     action: allow
+  strings:
+    level: L0
+    desc: 查看二进制文件可打印字符串
+    action: allow
   mkdir:
     level: L1
     desc: 创建目录
@@ -125,10 +129,13 @@ commands:
     demotion_rules:
     - &id002
       id: in_workspace
-      desc: 仅在自己的 workspace 内操作
+      desc: 仅在自己的 workspace 或临时目录内操作
       level: L0
       action: allow
       scope: workspace
+      safe_paths:
+      - /tmp
+      - /var/tmp
     exceptions:
     - *id001
   touch:
@@ -212,7 +219,7 @@ commands:
       id: in_workspace
       desc: 仅在自己的 workspace 内操作
       level: L0
-      action: audit
+      action: allow
       scope: workspace
     exceptions:
     - id: network_post
@@ -289,7 +296,8 @@ commands:
     desc: Python 包管理
     action: confirm
     demotion_rules:
-    - *id003
+    - *id_tmp
+    - *id_tmp_paths
     exceptions:
     - &id005
       id: system_packages
@@ -303,7 +311,8 @@ commands:
     desc: Python3 包管理
     action: confirm
     demotion_rules:
-    - *id003
+    - *id_tmp
+    - *id_tmp_paths
     exceptions:
     - *id005
   node:
@@ -311,7 +320,8 @@ commands:
     desc: Node.js 运行时
     action: confirm
     demotion_rules:
-    - *id003
+    - *id_tmp
+    - *id_tmp_paths
     exceptions:
     - *id004
   npm:
@@ -319,7 +329,8 @@ commands:
     desc: Node 包管理
     action: confirm
     demotion_rules:
-    - *id003
+    - *id_tmp
+    - *id_tmp_paths
     exceptions:
     - *id005
   npx:
@@ -327,7 +338,8 @@ commands:
     desc: Node 包执行
     action: confirm
     demotion_rules:
-    - *id003
+    - *id_tmp
+    - *id_tmp_paths
     exceptions:
     - *id005
   java:
@@ -622,11 +634,11 @@ commands:
   iptables:
     level: L3
     desc: 防火墙规则
-    action: block
+    action: confirm
   ufw:
     level: L3
     desc: 防火墙管理
-    action: block
+    action: confirm
   nc:
     level: L3
     desc: 网络调试
@@ -636,7 +648,7 @@ commands:
   nmap:
     level: L3
     desc: 端口扫描
-    action: block
+    action: confirm
   tcpdump:
     level: L3
     desc: 抓包分析
@@ -694,83 +706,83 @@ commands:
   systemctl:
     level: L4
     desc: 系统服务管理
-    action: block
+    action: confirm
   service:
     level: L4
     desc: 服务管理
-    action: block
+    action: confirm
   apt:
     level: L4
     desc: Debian 包管理
-    action: block
+    action: confirm
   apt-get:
     level: L4
     desc: Debian 包管理
-    action: block
+    action: confirm
   yum:
     level: L4
     desc: RPM 包管理
-    action: block
+    action: confirm
   dnf:
     level: L4
     desc: RPM 包管理
-    action: block
+    action: confirm
   pacman:
     level: L4
     desc: Arch 包管理
-    action: block
+    action: confirm
   rpm:
     level: L4
     desc: RPM 包操作
-    action: block
+    action: confirm
   dpkg:
     level: L4
     desc: Debian 包操作
-    action: block
+    action: confirm
   snap:
     level: L4
     desc: Snap 包管理
-    action: block
+    action: confirm
   flatpak:
     level: L4
     desc: Flatpak 包管理
-    action: block
+    action: confirm
   reboot:
     level: L4
     desc: 重启系统
-    action: block
+    action: confirm
   shutdown:
     level: L4
     desc: 关机
-    action: block
+    action: confirm
   halt:
     level: L4
     desc: 停机
-    action: block
+    action: confirm
   poweroff:
     level: L4
     desc: 断电关机
-    action: block
+    action: confirm
   useradd:
     level: L4
     desc: 添加用户
-    action: block
+    action: confirm
   userdel:
     level: L4
     desc: 删除用户
-    action: block
+    action: confirm
   groupadd:
     level: L4
     desc: 添加用户组
-    action: block
+    action: confirm
   groupdel:
     level: L4
     desc: 删除用户组
-    action: block
+    action: confirm
   passwd:
     level: L4
     desc: 修改密码
-    action: block
+    action: confirm
   sudo:
     level: L4
     desc: 提权执行
@@ -802,11 +814,11 @@ commands:
   init:
     level: L4
     desc: 系统初始化
-    action: block
+    action: confirm
   telinit:
     level: L4
     desc: 切换运行级别
-    action: block
+    action: confirm
   taskkill:
     level: L3
     desc: Windows终止进程
@@ -832,7 +844,7 @@ commands:
   brew:
     level: L4
     desc: Homebrew包管理
-    action: block
+    action: confirm
   chattr:
     level: L1
     desc: 修改文件属性
