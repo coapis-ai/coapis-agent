@@ -1724,31 +1724,6 @@ def read_skill_pool_manifest() -> dict[str, Any]:
     return _read_json_mtime_cached(path, _default_pool_manifest())
 
 
-_GLOBAL_DEFAULTS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-
-
-def _read_global_defaults() -> dict[str, Any]:
-    """Read global_defaults.json with mtime-based caching."""
-    from ..constant import SYSTEM_DIR
-
-    path = SYSTEM_DIR / "global_defaults.json"
-    if not path.exists():
-        return {"defaults": {}}
-
-    try:
-        mtime = path.stat().st_mtime
-        cached = _GLOBAL_DEFAULTS_CACHE.get(path)
-        if cached and cached[0] == mtime:
-            return cached[1]
-
-        data = json.loads(path.read_text(encoding="utf-8"))
-        _GLOBAL_DEFAULTS_CACHE[path] = (mtime, data)
-        return data
-    except (json.JSONDecodeError, OSError):
-        logger.warning("Failed to read global_defaults.json, returning empty")
-        return {"defaults": {}}
-
-
 def _is_agent_workspace(workspace_dir: Path) -> bool:
     """Check if workspace_dir is an agent-level workspace (has agents/ parent)."""
     return workspace_dir.name != "workspaces" and "agents" in workspace_dir.parts
@@ -1772,13 +1747,13 @@ def _resolve_agent_manifest(workspace_dir: Path) -> dict[str, Any]:
 
 
 def _merge_manifests(
-    global_defaults: dict[str, Any],
+    pool_manifest: dict[str, Any],
     user_manifest: dict[str, Any],
     agent_manifest: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge three-level manifests: global → user → agent.
+    """Merge two-level manifests: pool → user → agent.
 
-    Priority: agent > user > global.
+    Priority: agent > user > pool.
     Same-name skill: lower level completely overrides upper level.
     """
     merged: dict[str, Any] = {
@@ -1787,19 +1762,16 @@ def _merge_manifests(
         "skills": {},
     }
 
-    # 1. Start with global defaults
-    for skill_name, entry in global_defaults.get("defaults", {}).items():
+    # 1. Start with pool manifest (replaces global_defaults)
+    for skill_name, entry in pool_manifest.get("skills", {}).items():
         merged["skills"][skill_name] = dict(entry)
-        merged["skills"][skill_name]["source"] = "global"
+        merged["skills"][skill_name].setdefault("source", "pool")
 
-    # 2. User manifest overrides global (same name = complete override)
+    # 2. User manifest overrides pool (same name = complete override)
     for skill_name, entry in user_manifest.get("skills", {}).items():
         if entry.get("enabled") is not None:
             merged["skills"][skill_name] = dict(entry)
-            if skill_name in global_defaults.get("defaults", {}):
-                merged["skills"][skill_name]["source"] = "user"
-            else:
-                merged["skills"][skill_name].setdefault("source", "user")
+            merged["skills"][skill_name]["source"] = "user"
 
     # 3. Agent manifest overrides user (same name = complete override)
     for skill_name, entry in agent_manifest.get("skills", {}).items():
@@ -1814,13 +1786,13 @@ def resolve_effective_skills(
     workspace_dir: Path,
     channel_name: str,
 ) -> list[str]:
-    """Resolve enabled skills using three-level manifest merge.
+    """Resolve enabled skills using two-level manifest merge.
 
-    Merge order: global_defaults → user manifest → agent manifest.
+    Merge order: skill_pool/skill.json → user manifest → agent manifest.
     Lower level completely overrides upper level for same-named skills.
     """
-    # 1. Read global defaults
-    global_data = _read_global_defaults()
+    # 1. Read pool manifest (replaces global_defaults)
+    pool_manifest = read_skill_pool_manifest()
 
     # 2. Determine user vs agent workspace and read manifests
     if _is_agent_workspace(workspace_dir):
@@ -1831,8 +1803,8 @@ def resolve_effective_skills(
         user_manifest = read_skill_manifest(workspace_dir)
         agent_manifest = _default_workspace_manifest()
 
-    # 3. Merge three levels
-    manifest = _merge_manifests(global_data, user_manifest, agent_manifest)
+    # 3. Merge two levels
+    manifest = _merge_manifests(pool_manifest, user_manifest, agent_manifest)
 
     # 4. Resolve enabled skills
     resolved = []
@@ -1868,57 +1840,11 @@ def resolve_effective_skills(
 def ensure_skills_initialized(workspace_dir: Path) -> None:
     """Ensure workspace manifests exist before runtime use.
 
-    Reconciles workspace manifest with on-disk skills only.
-    Global defaults are NOT injected into user manifests — they are
-    resolved at runtime via resolve_effective_skills() which merges
-    global_defaults.json → user manifest → agent manifest.
+    Reconciles workspace manifest with the filesystem.
+    Pool-level defaults are resolved at runtime via resolve_effective_skills()
+    which merges skill_pool/skill.json → user manifest → agent manifest.
     """
     reconcile_workspace_manifest(workspace_dir)
-    # _sync_global_defaults removed: global skills are resolved at runtime
-    # from global_defaults.json, no need to persist them in user skill.json.
-
-
-def _sync_global_defaults(workspace_dir: Path) -> None:
-    """Sync global_defaults.json entries into workspace manifest.
-
-    Only adds entries that don't already exist in the manifest.
-    Existing entries are never overwritten (user intent preserved).
-    New entries get source='global' and priority from defaults.
-    """
-    global_data = _read_global_defaults()
-    defaults = global_data.get("defaults", {})
-    if not defaults:
-        return
-
-    manifest_path = get_workspace_skill_manifest_path(workspace_dir)
-
-    def _inject(payload: dict[str, Any]) -> dict[str, Any]:
-        skills = payload.setdefault("skills", {})
-        # Guard: old manifests may store skills as a list; normalise to dict
-        if isinstance(skills, list):
-            payload["skills"] = {}
-            skills = payload["skills"]
-        injected = 0
-        for skill_name, global_entry in defaults.items():
-            if skill_name in skills:
-                # Already exists — user/agent configured it, don't touch
-                continue
-            skills[skill_name] = {
-                "enabled": bool(global_entry.get("enabled", True)),
-                "priority": global_entry.get("priority", "core"),
-                "category": global_entry.get("category", ""),
-                "channels": ["all"],
-                "source": "global",
-            }
-            injected += 1
-        if injected:
-            logger.info(
-                "Injected %d global default skills into %s",
-                injected, workspace_dir,
-            )
-        return payload
-
-    _mutate_json(manifest_path, _default_workspace_manifest(), _inject)
 
 
 def get_pool_builtin_sync_status(

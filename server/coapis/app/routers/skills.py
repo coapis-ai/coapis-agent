@@ -573,12 +573,12 @@ def _build_workspace_skill_specs(workspace_dir: Path) -> list[SkillSpec]:
         skill = _read_skill_from_dir(skill_dir, entry_source)
         if skill is None:
             continue
-        # Category fallback: if entry has no category, try global defaults
+        # Category fallback: if entry has no category, try pool manifest
         entry_category = entry.get("category", "")
         if not entry_category:
-            from coapis.agents.skills_manager import _read_global_defaults
-            gdefs = _read_global_defaults()
-            entry_category = gdefs.get("defaults", {}).get(skill_name, {}).get("category", "")
+            from coapis.agents.skills_manager import read_skill_pool_manifest
+            pool_manifest = read_skill_pool_manifest()
+            entry_category = pool_manifest.get("skills", {}).get(skill_name, {}).get("category", "")
         dump = skill.model_dump()
         # Remove fields that will be explicitly set to avoid duplicate kwargs
         for conflict_key in ("source", "enabled", "channels", "config", "category", "priority"):
