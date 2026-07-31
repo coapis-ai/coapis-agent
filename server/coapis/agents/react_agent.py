@@ -2111,6 +2111,22 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                         except (ValueError, TypeError):
                             pass
 
+    async def _ensure_tool_registered(self, tool_name: str) -> bool:
+        """Import the tool module on-demand so ``@register_tool`` fires.
+
+        This allows low-frequency tools built into the repo but excluded
+        from auto-discovery to be registered the first time a model asks
+        for them.
+        """
+        try:
+            module_path = f"coapis.agents.tools.{tool_name}"
+            import importlib
+            importlib.import_module(module_path)
+            return True
+        except Exception as exc:
+            logger.debug("On-demand tool import failed for %s: %s", tool_name, exc)
+            return False
+
     async def _acting(self, tool_call) -> dict | None:
         """Check plan tool gate before delegating to ToolGuardMixin."""
         import time as _time
@@ -2229,6 +2245,15 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             if _cached is not None:
                 logger.debug("Cache hit for %s", tool_name)
                 return _cached
+
+        # ── On-demand tool registration for low-frequency tools ──
+        _registered_now = False
+        try:
+            from .tools.registry import is_registered
+            if not is_registered(tool_name):
+                _registered_now = await self._ensure_tool_registered(tool_name)
+        except Exception as _reg_exc:
+            logger.debug("On-demand registration skipped for %s: %s", tool_name, _reg_exc)
 
         # ── Runtime dependency pre-check / recovery ──
         _recovery_hint = ""
