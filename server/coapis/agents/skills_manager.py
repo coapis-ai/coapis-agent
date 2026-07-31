@@ -3502,6 +3502,7 @@ class SkillPoolService:
                 source="customized",
                 protected=False,
             )
+            pool_entry["enabled"] = True
             if ws_config:
                 pool_entry["config"] = ws_config
             if ws_tags is not None:
