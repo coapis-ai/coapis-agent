@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.12.0] - 2026-07-31
+
+### Fixed
+
+- **Tool-call crash** — Corrected `PolicyContext` import path in `react_agent._acting` (`from .policy_engine` → `from .tools.policy_engine`). The broken import caused `ModuleNotFoundError` on every tool call, which was surfaced as `MODEL_EXECUTION_FAILED` and aborted the chat stream.
+- **Skills default enabled** — Newly created/imported skills now default to `enabled=True` across all entry points (upload, import, frontend save, skills manager), so agents can discover them immediately without manual activation.
+
+### Infrastructure
+
+- **Full image release** — `coapis-agent:0.12.0` is now built from the full Dockerfile instead of a patch layer. The `Dockerfile.patch` workflow is retired; future releases use clean tagged images.
+
 ## [v0.11.3] - 2026-07-30
 
 ### Features

@@ -12,12 +12,12 @@ name: coapis-dev
 services:
   # ── 后端 API 服务 ──
   server:
-    image: coapis-agent:0.11.2
+    image: coapis-agent:0.12.0
     container_name: coapis-server-dev
     ports:
       - "4308:8000"
     volumes:
-      # 运行数据（开发环境独立目录）
+      # 运行数据（开发环境独立目录：宿主机 /apps/ai/coapis-dev -> 容器内 /apps/ai/coapis）
       - /apps/ai/coapis-dev:/apps/ai/coapis
       # 源码热更新（开发模式）
       - ../../server/coapis:/app/coapis
@@ -31,8 +31,10 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app
-      - COAPIS_VERSION=0.11.2
-      - COAPIS_SHARED_RUNTIME_DIR=${COAPIS_WORKING_DIR}/shared_runtime
+      - COAPIS_VERSION=0.12.0
+      - COAPIS_WORKING_DIR=/apps/ai/coapis
+      - COAPIS_WORKSPACES_DIR=/apps/ai/coapis/workspaces
+      - COAPIS_SHARED_RUNTIME_DIR=/apps/ai/coapis/shared_runtime
       - COAPIS_AUTH_ENABLED=true
       - COAPIS_USER_SYSTEM_ENABLED=true
       # 共享生产 Playwright（Linux Docker bridge gateway）
