@@ -5,8 +5,9 @@
 FROM coapis-agent:0.11.3 AS patch
 
 # 覆盖 0.11.3 之后合并的后端修复
-COPY server/coapis/agents/skills_manager.py /app/coapis/agents/skills_manager.py
-COPY server/coapis/app/routers/skills.py /app/coapis/app/routers/skills.py
+COPY coapis-agent/server/coapis/agents/skills_hub.py /app/coapis/agents/skills_hub.py
+COPY coapis-agent/server/coapis/agents/skills_manager.py /app/coapis/agents/skills_manager.py
+COPY coapis-agent/server/coapis/app/routers/skills.py /app/coapis/app/routers/skills.py
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "coapis.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
