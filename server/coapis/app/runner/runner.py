@@ -557,24 +557,11 @@ class AgentRunner(Runner):
                     idx, getattr(m, "role", "?"), block_types, marks,
                 )
 
-            # ── Sync compaction state from agent.memory (authoritative) ──
-            # compression / mark_messages_compacted mutates the in-memory
-            # AgentContext, but _persist_chat_messages reconstructed
-            # isolated_mem from the old session state dict which lacks
-            # compacted marks and the latest _compressed_summary.
-            # Use agent.memory.state_dict() as the source of truth here.
-            if agent is not None and getattr(agent, "memory", None) is not None:
-                try:
-                    fresh_memory_state = agent.memory.state_dict()
-                    memory_state = fresh_memory_state
-                except Exception:
-                    pass
-
             # Save updated memory state back to session using chat_id as key
             await session.update_session_state(
                 session_id=user_chat.id,
                 key="agent.memory",
-                value=memory_state,
+                value=isolated_mem.state_dict(),
                 user_id=effective_user_id,
             )
 
