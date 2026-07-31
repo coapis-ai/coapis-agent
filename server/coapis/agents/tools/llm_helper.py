@@ -123,6 +123,12 @@ _LLM_PROMPTS = {
 }
 
 
+@register_tool(
+    name="llm_helper",
+    description="LLM 辅助：文本总结、翻译、分类、信息提取、提示词模板渲染。",
+    category="builtin",
+    tags=["llm", "prompt", "summarize", "translate", "classify"],
+)
 async def llm_helper(
     action: str = "summarize",
     text: str = "",

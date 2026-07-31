@@ -137,6 +137,15 @@ async def _local_fallback(prompt: str, width: int, height: int) -> dict[str, Any
     }
 
 
+@register_tool(
+    name="image_gen",
+    description="文本生成图像（FAL API 或本地占位 SVG）。",
+    category="builtin",
+    tags=["image", "generation", "fal", "svg"],
+    dependencies=[
+        {"name": "httpx", "manager": "pip", "required": True, "reason": "FAL API 调用"},
+    ],
+)
 async def image_gen(
     prompt: str = "",
     size: str = "1024x1024",

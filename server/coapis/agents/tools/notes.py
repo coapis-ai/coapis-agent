@@ -68,6 +68,12 @@ def _save_notes(notes: list[dict[str, Any]]) -> None:
     )
 
 
+@register_tool(
+    name="notes",
+    description="轻量级会话笔记：创建/列出/搜索/删除笔记。",
+    category="builtin",
+    tags=["notes", "memory", "lightweight"],
+)
 async def notes(
     action: str = "list",
     content: str = "",

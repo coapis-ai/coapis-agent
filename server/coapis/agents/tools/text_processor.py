@@ -57,6 +57,12 @@ def _text_stats(text: str) -> dict[str, Any]:
     }
 
 
+@register_tool(
+    name="text_processor",
+    description="文本处理：统计、查找替换、编码转换。",
+    category="builtin",
+    tags=["text", "process", "regex", "encoding"],
+)
 async def text_processor(
     action: str = "stats",
     text: str = "",

@@ -104,6 +104,12 @@ def _save_state(data: dict[str, Any]):
     (STATE_DIR / "state.json").write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
 
+@register_tool(
+    name="collab_ops",
+    description="协作操作：消息通知、共享状态、频道管理。",
+    category="builtin",
+    tags=["collab", "channel", "notification", "state"],
+)
 async def collab_ops(
     action: str = "notify_send",
     # Notification params

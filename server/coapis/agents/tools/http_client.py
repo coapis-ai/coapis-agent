@@ -161,6 +161,15 @@ async def _do_request(
     return {"error": last_error or "请求失败", "attempt": retries}
 
 
+@register_tool(
+    name="http_client",
+    description="通用 HTTP 客户端，支持 GET/POST/PUT/DELETE，带超时和重试。",
+    category="builtin",
+    tags=["http", "request", "api", "curl"],
+    dependencies=[
+        {"name": "httpx", "manager": "pip", "required": True, "reason": "HTTP 请求"},
+    ],
+)
 async def http_client(
     method: str = "GET",
     url: str = "",

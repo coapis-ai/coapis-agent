@@ -97,6 +97,16 @@ def _add_span(trace_id: str, name: str) -> dict:
     return {"trace_id": trace_id, "span_name": name}
 
 
+@register_tool(
+    name="sys_monitor",
+    description="系统监控：CPU/内存/磁盘/网络/进程/trace，支持 TCP/HTTP 探活。",
+    category="builtin",
+    tags=["system", "monitor", "diagnostics"],
+    dependencies=[
+        {"name": "psutil", "manager": "pip", "required": False, "reason": "系统性能 metrics"},
+        {"name": "httpx", "manager": "pip", "required": False, "reason": "HTTP 探活"},
+    ],
+)
 async def sys_monitor(
     action: str = "perf",
     host: str = "127.0.0.1",

@@ -207,6 +207,12 @@ def _match_files(
     return results
 
 
+@register_tool(
+    name="data_ops",
+    description="数据操作：CSV/JSON 读写、筛选、统计、批量文件匹配。",
+    category="builtin",
+    tags=["data", "csv", "json", "batch"],
+)
 async def data_ops(
     action: str = "read",
     # Data processor params

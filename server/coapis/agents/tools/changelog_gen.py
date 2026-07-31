@@ -106,6 +106,12 @@ def _generate_markdown(commits: list[dict[str, Any]], title: str = "") -> str:
     return "\n".join(lines)
 
 
+@register_tool(
+    name="changelog_gen",
+    description="自动生成 CHANGELOG：从 Git commit 提取并分类。",
+    category="builtin",
+    tags=["changelog", "git", "release", "docs"],
+)
 async def changelog_gen(
     action: str = "generate",
     project_path: str = ".",

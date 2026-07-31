@@ -45,6 +45,12 @@ def _save_tasks(data: dict[str, Any]):
     (TASK_DIR / "tasks.json").write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
 
+@register_tool(
+    name="task_delegation",
+    description="任务分派：创建/更新/列出/委派任务。",
+    category="builtin",
+    tags=["task", "delegate", "project"],
+)
 async def task_delegation(
     action: str = "create",
     task_id: str = "",

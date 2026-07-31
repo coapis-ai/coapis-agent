@@ -114,6 +114,12 @@ def _validate_openapi(spec_text: str) -> dict:
     return {"valid": len([i for i in issues if i["severity"] == "error"]) == 0, "issues": issues, "total": len(issues), "status": "ok"}
 
 
+@register_tool(
+    name="api_tools",
+    description="API 开发辅助：Mock 服务器、Schema/OpenAPI 验证。",
+    category="builtin",
+    tags=["api", "mock", "validation", "openapi"],
+)
 async def api_tools(
     action: str = "validate",
     config: str = "",

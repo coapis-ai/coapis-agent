@@ -88,6 +88,12 @@ def _parse_env_file(path: Path) -> list[dict[str, str]]:
     return entries
 
 
+@register_tool(
+    name="env_manager",
+    description="环境变量管理：读取/写入 .env 文件，支持脱敏。",
+    category="builtin",
+    tags=["env", "config", "dotenv"],
+)
 async def env_manager(
     action: str = "list",
     key: str = "",

@@ -116,6 +116,12 @@ def _queue_list() -> dict:
     return {"queues": {k: len(v) for k, v in _queues.items()}, "total": len(_queues)}
 
 
+@register_tool(
+    name="data_store",
+    description="轻量数据存储：SQLite 查询/执行、KV 缓存、队列操作。",
+    category="builtin",
+    tags=["data", "store", "sqlite", "cache", "queue"],
+)
 async def data_store(
     action: str = "db",
     sql: str = "",

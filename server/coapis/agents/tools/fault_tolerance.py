@@ -122,6 +122,12 @@ def _auto_fix(pattern: str) -> dict:
     return {"pattern": pattern, "status": "no_auto_fix", "note": "Manual intervention required"}
 
 
+@register_tool(
+    name="fault_tolerance",
+    description="容错与自愈：checkpoint 快照、错误诊断、自动修复建议。",
+    category="builtin",
+    tags=["fault", "tolerance", "healing", "checkpoint"],
+)
 async def fault_tolerance(
     action: str = "checkpoint",
     name: str = "",
