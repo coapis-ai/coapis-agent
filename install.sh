@@ -15,7 +15,7 @@ VERSION="2.1"
 REPO="coapis-ai/coapis-agent"
 INSTALL_DIR="${COAPIS_INSTALL_DIR:-/opt/coapis}"
 COMPOSE_URL="https://raw.githubusercontent.com/${REPO}/main/docker-compose.yml"
-ENV_EXAMPLE_URL="https://raw.githubusercontent.com/${REPO}/main/.env.example"
+ENV_EXAMPLE_URL="https://raw.githubusercontent.com/${REPO}/main/docker/_common/.env.example"
 
 # ── 镜像版本配置 ──────────────────────────────────────────────────
 # 查看可用版本: https://github.com/coapis-ai/coapis-agent/pkgs/container/server
@@ -421,7 +421,7 @@ install_source() {
     # 配置
     if [ ! -f ".env" ]; then
         info "配置环境变量..."
-        cp docker/.env.example .env 2>/dev/null || true
+        cp docker/_common/.env.example .env 2>/dev/null || true
         # 使用主 .env
         cp "${INSTALL_DIR}/.env" .env 2>/dev/null || true
     fi
@@ -463,7 +463,7 @@ install_dev() {
     
     # 配置
     if [ ! -f ".env" ]; then
-        cp docker/.env.example .env 2>/dev/null || true
+        cp docker/_common/.env.example .env 2>/dev/null || true
         cp "${INSTALL_DIR}/.env" .env 2>/dev/null || true
     fi
     

@@ -2,8 +2,8 @@
 
 ## 📁 文件说明
 
-- `docker-compose-mycom.yml` - 企业内部生产环境 Docker Compose 配置
-- `.env.mycom` - 环境变量配置文件
+- `mycom/docker-compose.yml` - 企业内部生产环境 Docker Compose 配置
+- `mycom/.env` - 环境变量配置文件（已包含在 compose 目录）
 
 ## 🚀 快速部署
 
@@ -13,27 +13,27 @@
 
 ```bash
 # ⚠️ 必须修改为实际路径
-COAPIS_WORKING_DIR=/path/to/your/coapis-data
+COAPIS_WORKING_DIR=/apps/ai/sz-coapis
 COAPIS_WORKSPACES_DIR=${COAPIS_WORKING_DIR}/workspaces
 ```
 
 ### 2. 启动服务
 
 ```bash
-cd coapis-agent/docker
-docker compose -f docker-compose-mycom.yml up -d
+cd coapis-agent/docker/mycom
+docker compose up -d
 ```
 
 ### 3. 查看日志
 
 ```bash
-docker compose -f docker-compose-mycom.yml logs -f
+docker compose logs -f
 ```
 
 ### 4. 停止服务
 
 ```bash
-docker compose -f docker-compose-mycom.yml down
+docker compose down
 ```
 
 ## 🌐 服务端口
@@ -49,7 +49,7 @@ docker compose -f docker-compose-mycom.yml down
 ### 企业环境推荐配置
 
 ```bash
-# .env.mycom
+# .env（mycom 目录下已包含）
 
 # 文件上传（企业版建议更大限制）
 COAPIS_UPLOAD_MAX_FILES=20
@@ -80,20 +80,20 @@ COAPIS_LOG_LEVEL=INFO
 
 ```bash
 # 重启服务
-docker compose -f docker-compose-mycom.yml restart
+docker compose restart
 
 # 查看服务状态
-docker compose -f docker-compose-mycom.yml ps
+docker compose ps
 
 # 查看特定服务日志
-docker compose -f docker-compose-mycom.yml logs -f server
+docker compose logs -f server
 
 # 进入容器
 docker exec -it coapis-mycom-server bash
 
 # 清理并重启（⚠️ 会删除容器）
-docker compose -f docker-compose-mycom.yml down
-docker compose -f docker-compose-mycom.yml up -d
+docker compose down
+docker compose up -d
 ```
 
 ## 📊 资源监控
@@ -125,7 +125,7 @@ netstat -tlnp | grep 488
 ls -la /path/to/your/coapis-data
 
 # 查看详细日志
-docker compose -f docker-compose-mycom.yml logs --tail=100
+docker compose logs --tail=100
 ```
 
 ### 健康检查失败

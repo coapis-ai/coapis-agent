@@ -118,8 +118,8 @@ docker compose up -d
 
 ```bash
 git clone https://github.com/coapis-ai/coapis-agent.git
-cd coapis-agent/docker
-cp .env.example .env
+cd coapis-agent/docker/prod
+cp ../_common/.env.example .env
 nano .env  # 填写 API Key
 docker compose -f docker-compose.build.yml up -d --build
 ```

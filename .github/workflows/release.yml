@@ -92,10 +92,10 @@ jobs:
           cp docker-compose.yml release-assets/docker-compose.yml
 
           # .env 示例
-          cp .env.example release-assets/.env.example
+          cp docker/_common/.env.example release-assets/.env.example
 
           # 源码 compose
-          cp docker-compose.build.yml release-assets/docker-compose.build.yml
+          cp docker/prod/docker-compose.build.yml release-assets/docker-compose.build.yml
 
           # 生成 checksums
           cd release-assets

@@ -37,11 +37,15 @@ node_modules/
 *.pfx
 
 # --- Docker ---
-docker/.env.dev
-docker/docker-compose.playwright.yml
+docker/.env.*
+!docker/.env.template
+!docker/dev/.env.template
+!docker/mycom/.env.template
+!docker/prod/.env.template
+!docker/_common/.env.example
+docker/_common/docker-compose.playwright.yml
+docker/_common/volume/
 docker/test_cron.py
-docker/volume/
-docker/dev-overrides/
 *.log
 
 # --- OS ---
@@ -56,8 +60,7 @@ Thumbs.db
 *_bak_*
 
 # --- Local config (use *.example as template) ---
-docker/config/config.json
-docker/config/providers.json
+
 
 # --- Runtime data (bind mounted from host) ---
 workspaces/
@@ -105,7 +108,7 @@ server/deploy/chromium-cache/
 
 # --- Dev-only docker compose ---
 docker/docker-compose.dev.yaml
-docker/dev-overrides/
+docker/docker-compose-mycom.yml
 
 # --- Standalone dev/ops scripts (not part of coapis package) ---
 server/configure_llm.py
