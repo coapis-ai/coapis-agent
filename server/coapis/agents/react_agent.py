@@ -1758,6 +1758,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 "- 由你自主判断是否需要规划，不必询问用户"
             )
 
+        # ── 运行时依赖自愈：告诉 LLM 缺包时自动安装 ──
+        sys_prompt = sys_prompt + "\n\n## 运行时依赖\n\n" + (
+            "如果工具因缺少 Python 或 Node 包而返回依赖错误，优先使用 "
+            "`install_dependency` 工具自动安装（manager 取 `pip` 或 `npm`），"
+            "安装成功后直接重试原工具，不要中止任务。\n\n"
+            "如果自动安装失败，再向用户报告缺失的包名和手动安装命令。"
+        )
+
         return sys_prompt
 
     def _register_hooks(self) -> None:

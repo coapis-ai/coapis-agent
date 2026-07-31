@@ -84,8 +84,8 @@ async def _fal_generate(prompt: str, width: int, height: int) -> dict[str, Any]:
             if not images:
                 return {"error": "FAL API 未返回图像"}
             return {"url": images[0].get("url", ""), "backend": "fal"}
-    except ImportError:
-        return {"error": "httpx 未安装，无法调用 FAL API（pip install httpx）"}
+    except ImportError as exc:
+        raise
     except Exception as e:
         return {"error": f"FAL API 调用失败: {e}"}
 

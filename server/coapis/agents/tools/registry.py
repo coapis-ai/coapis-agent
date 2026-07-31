@@ -18,15 +18,154 @@ Usage:
 
     4. Tools can be enabled/disabled via agent config (builtin_tools).
        If a tool is not in config, it's enabled by default.
+
+    5. ``@register_tool`` now merges automatically inferred top-level imports
+       into ``dependencies`` so that :class:`RuntimeDependencyManager` can
+       pre-install missing packages without requiring manual declarations.
 """
 
 from __future__ import annotations
 
+import ast
+import importlib.util
 import logging
+import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Auto-inference helpers
+# ---------------------------------------------------------------------------
+
+_INTERNAL_PACKAGES = {
+    "agentscope",
+    "coapis",
+    "fastapi",
+    "pydantic",
+    "starlette",
+    "uvicorn",
+    "aiohttp",
+    "sqlalchemy",
+    "redis",
+    "weaviate",
+    "chromadb",
+    "qdrant",
+    "sentence_transformers",
+    "transformers",
+    "torch",
+    "tensorrt",
+    "vllm",
+    "accelerate",
+    "bitsandbytes",
+    "xformers",
+    "flash_attn",
+    "deepspeed",
+    "peft",
+    "trl",
+}
+
+_IMPORT_TO_PIP = {
+    "PIL": "Pillow",
+    "cv2": "opencv-python",
+    "sklearn": "scikit-learn",
+    "yaml": "pyyaml",
+    "dotenv": "python-dotenv",
+    "dateutil": "python-dateutil",
+    "pymupdf": "pymupdf",
+    "pymupdf4llm": "pymupdf4llm",
+    "docx": "python-docx",
+    "pptx": "python-pptx",
+    "xlsx": "openpyxl",
+    "mss": "mss",
+    "psutil": "psutil",
+    "aiofiles": "aiofiles",
+    "httpx": "httpx",
+    "httpcore": "httpcore",
+    "tiktoken": "tiktoken",
+    "numpy": "numpy",
+    "pandas": "pandas",
+    "soundfile": "soundfile",
+    "librosa": "librosa",
+    "pydub": "pydub",
+    "speech_recognition": "SpeechRecognition",
+    "openpyxl": "openpyxl",
+}
+
+
+def _is_stdlib(module_name: str) -> bool:
+    top = module_name.split(".")[0]
+    if top in sys.stdlib_module_names:
+        return True
+    if top in _INTERNAL_PACKAGES:
+        return True
+    return False
+
+
+def _infer_requirements_from_source(source: str) -> list[dict[str, Any]]:
+    reqs: dict[str, dict[str, Any]] = {}
+    try:
+        tree = ast.parse(source)
+    except Exception:
+        return []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if _is_stdlib(top):
+                    continue
+                pkg = _IMPORT_TO_PIP.get(top, top)
+                reqs[pkg] = {
+                    "name": pkg,
+                    "manager": "pip",
+                    "required": True,
+                    "reason": f"auto-inferred from import {top!r}",
+                }
+        elif isinstance(node, ast.ImportFrom):
+            # Skip relative imports (from .xxx import ...)
+            if getattr(node, "level", 0) > 0:
+                continue
+            if node.module is None:
+                continue
+            top = node.module.split(".")[0]
+            if _is_stdlib(top):
+                continue
+            pkg = _IMPORT_TO_PIP.get(top, top)
+            reqs[pkg] = {
+                "name": pkg,
+                "manager": "pip",
+                "required": True,
+                "reason": f"auto-inferred from from {top!r} import",
+            }
+    return list(reqs.values())
+
+
+def _infer_requirements_from_file(file_path: str) -> list[dict[str, Any]]:
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return _infer_requirements_from_source(f.read())
+    except Exception:
+        return []
+
+
+def _normalize_dependencies(
+    declared: list[dict[str, Any]] | None,
+    inferred: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for dep in (declared or []) + inferred:
+        key = dep.get("manager", "pip") + ":" + str(dep.get("name", ""))
+        if key not in merged or dep.get("reason", "").startswith("auto-inferred"):
+            merged[key] = dep
+    return list(merged.values())
+
+
+# ---------------------------------------------------------------------------
+# Core registration dataclasses
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -74,9 +213,23 @@ def register_tool(
     Or with options:
         @register_tool(name="custom_name", description="...")
         async def my_tool(...): ...
+
+    Dependencies are merged with automatically inferred top-level imports so
+    :class:`RuntimeDependencyManager` can pre-install missing packages.
     """
     def decorator(fn: Callable) -> Callable:
         tool_name = name or fn.__name__
+        inferred = []
+        try:
+            mod_name = getattr(fn, "__module__", None)
+            if mod_name:
+                spec = importlib.util.find_spec(mod_name)
+                if spec and spec.origin and spec.origin.endswith(".py"):
+                    inferred = _infer_requirements_from_file(spec.origin)
+        except Exception:
+            inferred = []
+
+        merged_deps = _normalize_dependencies(dependencies, inferred)
         reg = ToolRegistration(
             name=tool_name,
             func=fn,
@@ -89,16 +242,14 @@ def register_tool(
             requires_features=requires_features or [],
             requires_sandbox=requires_sandbox,
             governance=governance or {},
-            dependencies=dependencies or [],
+            dependencies=merged_deps,
         )
         _registry[tool_name] = reg
-        logger.debug("Registered tool: %s (category=%s)", tool_name, category)
+        logger.debug("Registered tool: %s (category=%s, deps=%s)", tool_name, category, merged_deps)
         return fn
 
     if func is not None:
-        # @register_tool without parentheses
         return decorator(func)
-    # @register_tool(...) with arguments
     return decorator
 
 
@@ -131,15 +282,7 @@ def get_registered_tools(
     category: str | None = None,
     tags: list[str] | None = None,
 ) -> dict[str, ToolRegistration]:
-    """Return registered tools, optionally filtered by category or tags.
-
-    Args:
-        category: If set, only return tools in this category.
-        tags: If set, only return tools that have ALL of these tags.
-
-    Returns:
-        Dict of tool_name -> ToolRegistration
-    """
+    """Return registered tools, optionally filtered by category or tags."""
     result = {}
     for name, reg in _registry.items():
         if category and reg.category != category:
