@@ -597,6 +597,14 @@ async def update_agent(
     if not workspace:
         raise HTTPException(status_code=404, detail="Agent not found")
     
+    # Prevent editing default agents (global_default or user:{username})
+    # Default agents are the runtime root; editing them breaks the system
+    if agent_id == "global_default" or (username and agent_id == f"user:{username}"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cannot edit the default agent ({agent_id})",
+        )
+    
     # Non-admin users can only update their own agents
     # Global agents have workspace.username=None, must be blocked for non-admin
     if not is_admin and (not workspace.username or workspace.username != username):
