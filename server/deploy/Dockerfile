@@ -56,7 +56,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ffmpeg \
     xclip \
-    # Playwright Chromium 运行时依赖（min 镜像可选，full 镜像必需）
+    # Chromium 浏览器（供 browser_use / Playwright 使用）
+    chromium \
+    fonts-liberation \
+    fonts-noto-cjk \
+    # Playwright Chromium 运行时依赖
     libnss3 \
     libnspr4 \
     libatk1.0-0 \
