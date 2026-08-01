@@ -490,10 +490,11 @@ class TagService:
                         exc_info=True,
                     )
         
-        # Sort by sortOrder in metadata (support both TagConfig objects and dicts)
+        # Sort by sort_order (support both TagConfig objects and dicts)
         def _get_sort_order(tag) -> int:
-            metadata = getattr(tag, 'metadata', None) or tag.get('metadata') if isinstance(tag, dict) else None
-            return metadata.get("sortOrder", 0) if metadata else 0
+            if isinstance(tag, dict):
+                return tag.get('sort_order', 0) or tag.get('sortOrder', 0) or 0
+            return getattr(tag, 'sort_order', 0) or 0
         
         menu_tags.sort(key=_get_sort_order)
         
@@ -506,11 +507,13 @@ class TagService:
                 name = tag.get('name', '')
                 icon = tag.get('icon', '')
                 metadata = tag.get('metadata') or {}
+                sort_order = tag.get('sort_order', 0) or 0
             else:
                 tag_id = tag.id
                 name = tag.name
                 icon = tag.icon
                 metadata = tag.metadata or {}
+                sort_order = getattr(tag, 'sort_order', 0) or 0
             
             menu_item = {
                 "key": tag_id,
@@ -519,7 +522,7 @@ class TagService:
                 "icon": icon,
                 "path": metadata.get("path", "/"),
                 "permission": metadata.get("permission"),
-                "sortOrder": metadata.get("sortOrder", 0),
+                "sortOrder": sort_order,
                 "isActive": metadata.get("isActive", True),
             }
             

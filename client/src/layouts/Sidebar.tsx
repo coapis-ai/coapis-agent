@@ -30,7 +30,7 @@ import { KEY_TO_PATH } from "./constants";
 // import { DEFAULT_OPEN_KEYS } from "./constants";  // unused — 2026-07-21
 import { getAgentDisplayName, isDefaultAgent } from "../utils/agentDisplayName";
 import { MENU_TO_PERMISSION_MODULE } from "../config/permissionMapping";
-import { MAIN_MENU_ITEMS } from "../config/menuConfig";
+import { useMenuItems, FALLBACK_MENU_ITEMS } from "../config/menuConfig";
 
 // ── Layout ────────────────────────────────────────────────────────────────
 
@@ -202,28 +202,35 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   // 首页、工作场景、我的空间、设置
   // 对话功能改用浮动聊天图标（不占菜单）
   
+  // Load menu items from API (tags with type='menu')
+  const { menuItems: dynamicMenuItems, loading: menuLoading } = useMenuItems();
+  
   // 使用统一的菜单配置，并动态添加工作场景二级菜单
   // useMemo 避免每次 render 创建新数组导致 Menu 重置内部状态
-  const collapsedNavItems = useMemo(() => MAIN_MENU_ITEMS.map(item => {
-    const menuItem: any = {
-      key: item.key,
-      icon: item.icon,
-      path: item.path,
-      label: t(item.labelKey, item.label),
-    };
+  const collapsedNavItems = useMemo(() => {
+    const menuSource = dynamicMenuItems.length > 0 ? dynamicMenuItems : FALLBACK_MENU_ITEMS;
+    
+    return menuSource.map(item => {
+      const menuItem: any = {
+        key: item.key,
+        icon: item.icon,
+        path: item.path,
+        label: t(item.labelKey, item.label),
+      };
 
-    // 工作场景二级菜单（从标签管理系统动态加载）
-    if (item.key === 'workbench' && workbenchCategories.length > 0) {
-      menuItem.children = workbenchCategories.map(cat => ({
-        key: cat.id,
-        icon: <span>{cat.icon}</span>,
-        path: `/workbench/${cat.id}`,
-        label: cat.name,
-      }));
-    }
+      // 工作场景二级菜单（从标签管理系统动态加载）
+      if (item.key === 'workbench' && workbenchCategories.length > 0) {
+        menuItem.children = workbenchCategories.map(cat => ({
+          key: cat.id,
+          icon: <span>{cat.icon}</span>,
+          path: `/workbench/${cat.id}`,
+          label: cat.name,
+        }));
+      }
 
-    return menuItem;
-  }), [t, workbenchCategories]);
+      return menuItem;
+    });
+  }, [t, workbenchCategories, dynamicMenuItems]);
 
   // ── DEPRECATED: 旧菜单定义（已废弃，保留仅供参考）──────────────────────
   // 按设计方案v4，现在统一使用 collapsedNavItems（5个一级菜单）

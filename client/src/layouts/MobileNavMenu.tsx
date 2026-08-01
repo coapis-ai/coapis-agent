@@ -7,7 +7,7 @@ import { useUser } from "../contexts/UserContext";
 import { GlobalOutlined, LogoutOutlined } from "@ant-design/icons";
 import { languageApi } from "../api/modules/language";
 import ModelSelector from "../pages/Chat/ModelSelector";
-import { MAIN_MENU_ITEMS } from "../config/menuConfig";
+import { useMenuItems, FALLBACK_MENU_ITEMS } from "../config/menuConfig";
 
 interface MobileNavMenuProps {
   onNavigate?: () => void;
@@ -19,6 +19,7 @@ export default function MobileNavMenu({ onNavigate }: MobileNavMenuProps) {
   const { t, i18n } = useTranslation();
   const { selectedAgent, agents, setSelectedAgent } = useAgentStore();
   const { user, logout } = useUser();
+  const { menuItems } = useMenuItems();
 
   const changeLanguage = (lang: string) => {
     i18n.changeLanguage(lang);
@@ -76,7 +77,7 @@ export default function MobileNavMenu({ onNavigate }: MobileNavMenuProps) {
       <Menu
         mode="inline"
         selectedKeys={[location.pathname]}
-        items={MAIN_MENU_ITEMS.map((item) => ({
+        items={(menuItems.length > 0 ? menuItems : FALLBACK_MENU_ITEMS).map((item) => ({
           key: item.path,
           icon: item.icon,
           label: item.label,

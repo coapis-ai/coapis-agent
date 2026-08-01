@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  // HomeOutlined,  // 首页功能暂时隐藏
+  HomeOutlined,
   AppstoreOutlined,
   FolderOutlined,
   SettingOutlined,
   MessageOutlined,
 } from '@ant-design/icons';
+import { menusApi } from '../api/modules/menus';
 
 export interface MenuItem {
   key: string;
@@ -14,9 +15,13 @@ export interface MenuItem {
   icon: React.ReactNode;
   path: string;
   children?: MenuItem[];  // 支持二级菜单
+  permission?: string;
+  sortOrder?: number;
+  isActive?: boolean;
 }
 
-export const MAIN_MENU_ITEMS: MenuItem[] = [
+// Fallback menu items (hardcoded, used when API fails)
+export const FALLBACK_MENU_ITEMS: MenuItem[] = [
   // 首页功能暂时隐藏，待完善后再开放
   // {
   //   key: 'home',
@@ -55,3 +60,54 @@ export const MAIN_MENU_ITEMS: MenuItem[] = [
     path: '/settings',
   },
 ];
+
+// Icon map for converting string icon names to React components
+const ICON_MAP: Record<string, React.ReactNode> = {
+  'MessageOutlined': <MessageOutlined />,
+  'AppstoreOutlined': <AppstoreOutlined />,
+  'FolderOutlined': <FolderOutlined />,
+  'SettingOutlined': <SettingOutlined />,
+  'HomeOutlined': <HomeOutlined />,  // 如果将来启用首页
+};
+
+// Hook to load menu items from API
+export function useMenuItems() {
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const loadMenuItems = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await menusApi.getMainMenu();
+      const items = response.items.map((item) => ({
+        ...item,
+        icon: ICON_MAP[item.icon] || <AppstoreOutlined />,
+      }));
+      setMenuItems(items);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to load menu'));
+      // Fallback to hardcoded items on error
+      setMenuItems(FALLBACK_MENU_ITEMS);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMenuItems();
+  }, [loadMenuItems]);
+
+  return { menuItems, loading, error, refresh: loadMenuItems };
+}
+
+// Legacy export for backward compatibility
+// This will be empty initially and populated by useMenuItems hook
+export let MAIN_MENU_ITEMS: MenuItem[] = [];
+
+// Sync MAIN_MENU_ITEMS with the hook (for components that don't use the hook)
+// This is a simple approach - components should migrate to useMenuItems hook
+export function setMainMenuItems(items: MenuItem[]) {
+  MAIN_MENU_ITEMS = items;
+}
