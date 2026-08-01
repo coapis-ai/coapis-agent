@@ -654,6 +654,14 @@ async def delete_agent(
     # │ Prevent deletion of default agents (registry-based check)       │
     # └──────────────────────────────────────────────────────────────────┘
     from ...config.config import load_agents_registry
+    
+    # Direct check for global_default (not in any user registry)
+    if agent_id == "global_default":
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cannot delete the default agent ({agent_id})",
+        )
+    
     registry = load_agents_registry(username or "")
     for entry in registry:
         if entry.id == agent_id and entry.is_default:
