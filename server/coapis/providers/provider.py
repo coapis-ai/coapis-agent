@@ -233,17 +233,26 @@ class Provider(ProviderInfo, ABC):
         model_id: str,
         timeout: float = 10,  # pylint: disable=unused-argument
     ) -> tuple[bool, str]:
-        """Delete a user-added model from the provider's model list.
+        """Delete a model from the provider's model list.
 
-        Only models with source='added' can be deleted.
+        For custom providers, any model can be deleted.
+        For builtin providers, only models with source='added' can be deleted.
         """
         model_id = model_id.strip()
         original_len = len(self.models)
-        self.models = [
-            model
-            for model in self.models
-            if not (model.id.strip() == model_id and model.source == "added")
-        ]
+        if self.is_custom:
+            # Custom provider: allow deleting any model
+            self.models = [
+                model for model in self.models
+                if model.id.strip() != model_id
+            ]
+        else:
+            # Builtin provider: only allow deleting user-added models
+            self.models = [
+                model
+                for model in self.models
+                if not (model.id.strip() == model_id and model.source == "added")
+            ]
         if len(self.models) == original_len:
             return False, f"Model '{model_id}' not found or not deletable"
         return True, ""
