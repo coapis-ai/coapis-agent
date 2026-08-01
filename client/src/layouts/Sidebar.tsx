@@ -203,7 +203,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   // 对话功能改用浮动聊天图标（不占菜单）
   
   // Load menu items from API (tags with type='menu')
-  const { menuItems: dynamicMenuItems, loading: menuLoading } = useMenuItems();
+  const { menuItems: dynamicMenuItems } = useMenuItems();
   
   // 使用统一的菜单配置，并动态添加工作场景二级菜单
   // useMemo 避免每次 render 创建新数组导致 Menu 重置内部状态
