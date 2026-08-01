@@ -81,6 +81,19 @@ class EnterprisePlugin(Protocol):
     def get_upgrade_prompt(self, feature: EnterpriseFeature) -> Dict[str, Any]:
         """Get upgrade prompt for a blocked feature."""
         ...
+    
+    def get_menu_tags(self) -> List[Any]:
+        """Return enterprise-specific menu tags.
+        
+        Each tag should be compatible with TagConfig schema:
+        - type: TagType.MENU
+        - id: unique key
+        - name: display name
+        - icon: icon name or emoji
+        - metadata: dict with path, permission, sortOrder, labelKey, etc.
+        - enabled: true
+        """
+        ...
 
 
 # ═══════════════════════════════════════════════════════════
@@ -189,3 +202,23 @@ def get_enterprise_routers() -> List[Any]:
             routers.append(router)
     
     return routers
+
+
+def get_enterprise_menu_tags() -> List[Any]:
+    """Get enterprise menu tags (if available).
+    
+    Returns:
+        List of menu tag dicts from enterprise plugin, or empty list
+    """
+    plugin = get_enterprise_plugin()
+    if not plugin or not hasattr(plugin, 'get_menu_tags'):
+        return []
+    
+    try:
+        return plugin.get_menu_tags()
+    except Exception:
+        logger.warning(
+            "Failed to get enterprise menu tags",
+            exc_info=True,
+        )
+        return []

@@ -1,0 +1,5 @@
+# Patch image: copy only changed files onto coapis-agent:0.12.0
+FROM coapis-agent:0.12.0
+
+# Copy the fixed runner module
+COPY server/coapis/app/runner/runner.py /app/coapis/app/runner/runner.py

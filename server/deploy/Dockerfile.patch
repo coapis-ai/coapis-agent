@@ -1,0 +1,5 @@
+FROM coapis-agent:0.12.0
+
+COPY --chown=root:root server/coapis/app/routers/agents.py /app/coapis/app/routers/agents.py
+
+CMD ["uvicorn", "coapis.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
