@@ -171,7 +171,7 @@ async def get_tag(
 @router.post("", response_model=TagConfig)
 @require_permission("tag:create")
 async def create_tag(
-    request: TagCreateRequest,
+    tag_request: TagCreateRequest,
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -185,7 +185,7 @@ async def create_tag(
     """
     try:
         service = get_tag_service()
-        tag = service.create_tag(request)
+        tag = service.create_tag(tag_request)
         logger.info(f"Admin {current_user.get('username')} created tag: {tag.id} ({tag.name})")
         return tag
     except ValueError as e:
@@ -199,7 +199,7 @@ async def create_tag(
 @require_permission("tag:update")
 async def update_tag(
     tag_id: str,
-    request: TagUpdateRequest,
+    tag_request: TagUpdateRequest,
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -214,7 +214,7 @@ async def update_tag(
     """
     try:
         service = get_tag_service()
-        tag = service.update_tag(tag_id, request)
+        tag = service.update_tag(tag_id, tag_request)
         if not tag:
             raise HTTPException(status_code=404, detail=f"Tag not found: {tag_id}")
         logger.info(f"Admin {current_user.get('username')} updated tag: {tag_id}")

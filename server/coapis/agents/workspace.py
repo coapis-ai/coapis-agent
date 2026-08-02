@@ -735,9 +735,39 @@ class Workspace:
         ))
 
         # ContextCompressor (priority=20, 依赖 core)
+        # Config-driven: reads from agent_config.running.light_context_config
+        def _make_compressor(ws):
+            from .context_compressor import ContextCompressor
+            from ..config import load_agent_config
+            try:
+                agent_config = load_agent_config(ws.agent_id, workspace_dir=ws.workspace_dir)
+                running = agent_config.running
+                lcc = running.light_context_config.context_compact_config
+                trc = running.light_context_config.tool_result_pruning_config
+                history_budget = int(running.max_input_length * lcc.compact_threshold_ratio)
+                return ContextCompressor(
+                    core=ws.core,
+                    min_tokens=8000,
+                    max_tokens=12000,
+                    history_token_budget=history_budget,
+                    tier1_threshold=5,
+                    tier2_threshold=15,
+                    tier3_threshold=30,
+                    pruning_recent_n=trc.pruning_recent_n,
+                    pruning_old_msg_max_bytes=trc.pruning_old_msg_max_bytes,
+                    pruning_recent_msg_max_bytes=trc.pruning_recent_msg_max_bytes,
+                    large_tool_result_threshold=trc.pruning_recent_msg_max_bytes,
+                    offload_retention_days=trc.offload_retention_days,
+                    exempt_extensions=set(trc.exempt_file_extensions),
+                    exempt_tools=set(trc.exempt_tool_names),
+                )
+            except Exception as e:
+                logger.warning("Failed to load agent config for compressor, using defaults: %s", e)
+                return ContextCompressor(core=ws.core)
+
         self._service_mgr.register(ServiceDescriptor(
             name="compressor",
-            factory=lambda ws: ContextCompressor(core=ws.core),
+            factory=_make_compressor,
             priority=20,
             dependencies=["core"],
             attr_name="compressor",

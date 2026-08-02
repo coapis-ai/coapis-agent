@@ -56,7 +56,7 @@ SUMMARY_PREFIX = (
     "Respond ONLY to the latest user message after this summary."
 )
 
-# Tier thresholds — lowered for earlier intervention
+# Tier thresholds — configurable, defaults lowered for earlier intervention
 TIER1_THRESHOLD = 5    # Below this: no compression
 TIER2_THRESHOLD = 15   # 5-15: prune tool outputs only
 TIER3_THRESHOLD = 30   # 15-30: prune + rule-based summary
@@ -67,6 +67,7 @@ _MAX_SUMMARY_TOKENS = 12000
 # Token-based trigger: compress history when it exceeds this budget (tokens)
 # Note: this counts ONLY history tokens, not system prompt.
 # System prompt (~3000-3500 tokens) is handled separately by prefix caching.
+# Default: 500 tokens; overridden by config.max_input_length * config.compact_threshold_ratio
 HISTORY_TOKEN_BUDGET = 500  # Trigger compression when history alone exceeds this
 
 
@@ -109,6 +110,15 @@ class ContextCompressor:
         exempt_extensions: Set[str] = None,
         exempt_tools: Set[str] = None,
         offload_retention_days: int = 7,
+        # Config-driven parameters
+        history_token_budget: int = None,
+        tier1_threshold: int = None,
+        tier2_threshold: int = None,
+        tier3_threshold: int = None,
+        pruning_recent_n: int = None,
+        pruning_old_msg_max_bytes: int = None,
+        pruning_recent_msg_max_bytes: int = None,
+        large_tool_result_threshold: int = None,
     ):
         self.core = core
         self.min_tokens = min_tokens
@@ -126,6 +136,16 @@ class ContextCompressor:
         self._exempt_extensions = exempt_extensions or self.DEFAULT_EXEMPT_EXTENSIONS
         self._exempt_tools = (exempt_tools or self.DEFAULT_EXEMPT_TOOLS)
         self._offload_retention_days = offload_retention_days
+
+        # Config-driven parameters (override class defaults)
+        self._history_token_budget = history_token_budget if history_token_budget is not None else HISTORY_TOKEN_BUDGET
+        self._tier1_threshold = tier1_threshold if tier1_threshold is not None else TIER1_THRESHOLD
+        self._tier2_threshold = tier2_threshold if tier2_threshold is not None else TIER2_THRESHOLD
+        self._tier3_threshold = tier3_threshold if tier3_threshold is not None else TIER3_THRESHOLD
+        self._pruning_recent_n = pruning_recent_n if pruning_recent_n is not None else 2
+        self._pruning_old_msg_max_bytes = pruning_old_msg_max_bytes if pruning_old_msg_max_bytes is not None else self.DEFAULT_TOOL_RESULT_MAX_BYTES
+        self._pruning_recent_msg_max_bytes = pruning_recent_msg_max_bytes if pruning_recent_msg_max_bytes is not None else self.LARGE_TOOL_RESULT_THRESHOLD
+        self._large_tool_result_threshold = large_tool_result_threshold if large_tool_result_threshold is not None else self.LARGE_TOOL_RESULT_THRESHOLD
 
     async def compress(self, messages: List[Dict], model: str) -> List[Dict]:
         """Compress messages using tiered strategy.
@@ -145,20 +165,20 @@ class ContextCompressor:
             # Check if new messages alone exceeded token budget
             new_msgs = messages[self._last_message_count:]
             new_tokens = self._estimate_tokens(new_msgs)
-            if new_tokens <= HISTORY_TOKEN_BUDGET:
+            if new_tokens <= self._history_token_budget:
                 # Safe to reuse cached result + new messages
                 return self._last_compressed + new_msgs
             else:
-                logger.info(f"Cache bypass: new msgs ({len(new_msgs)}) have {new_tokens} tokens (budget={HISTORY_TOKEN_BUDGET})")
+                logger.info(f"Cache bypass: new msgs ({len(new_msgs)}) have {new_tokens} tokens (budget={self._history_token_budget})")
                 # Fall through to full compression
 
         # --- Token-based trigger: compress even with few messages if tokens are high ---
         estimated_tokens = self._estimate_tokens(messages)
         # Trigger earlier: 3+ messages AND tokens > budget, OR 5+ messages regardless of tokens
-        if (estimated_tokens > HISTORY_TOKEN_BUDGET and msg_count >= 3) or msg_count >= 5:
+        if (estimated_tokens > self._history_token_budget and msg_count >= 3) or msg_count >= 5:
             # History is getting heavy — compress regardless of exact token count
             # Use rule-based summary (zero LLM cost) for short conversations
-            if msg_count < TIER3_THRESHOLD:
+            if msg_count < self._tier3_threshold:
                 result = self._compress_rule_based(messages)
             else:
                 result = await self._compress_llm(messages, model)
@@ -169,17 +189,17 @@ class ContextCompressor:
             return result
 
         # --- Tier 1: No compression needed ---
-        if msg_count < TIER1_THRESHOLD:
+        if msg_count < self._tier1_threshold:
             return messages
 
         # --- Tier 2: Prune tool outputs only (zero LLM cost) ---
-        if msg_count < TIER2_THRESHOLD:
+        if msg_count < self._tier2_threshold:
             result = self._prune_tool_outputs(messages)
             self._cache_result(messages, result)
             return result
 
         # --- Tier 3: Prune + rule-based summary (zero LLM cost) ---
-        if TIER2_THRESHOLD <= msg_count <= TIER3_THRESHOLD:
+        if self._tier2_threshold <= msg_count <= self._tier3_threshold:
             result = self._compress_rule_based(messages)
             self._cache_result(messages, result)
             logger.info(f"Tier 3 compression: {msg_count} -> {len(result)} messages (rule-based)")
@@ -279,7 +299,7 @@ class ContextCompressor:
 
         Enhanced: uses prune_tool_outputs_with_truncation for smarter pruning.
         """
-        return self.prune_tool_outputs_with_truncation(messages, keep_recent=2)
+        return self.prune_tool_outputs_with_truncation(messages, keep_recent=self._pruning_recent_n)
 
     def _compress_rule_based(self, messages: List[Dict]) -> List[Dict]:
         """Rule-based compression without LLM call.
@@ -531,13 +551,13 @@ class ContextCompressor:
 
         Args:
             content: Tool output text
-            max_bytes: Maximum bytes (default: DEFAULT_TOOL_RESULT_MAX_BYTES)
+            max_bytes: Maximum bytes (default from config: pruning_old_msg_max_bytes)
 
         Returns:
             Truncated content with notice, or original if within limit
         """
         if max_bytes is None:
-            max_bytes = self.DEFAULT_TOOL_RESULT_MAX_BYTES
+            max_bytes = self._pruning_old_msg_max_bytes
         if not content or len(content.encode("utf-8")) <= max_bytes:
             return content
         # Truncate at character boundary
@@ -569,14 +589,14 @@ class ContextCompressor:
 
         Args:
             content: Tool output text
-            max_bytes: Maximum bytes (default: DEFAULT_TOOL_RESULT_MAX_BYTES)
+            max_bytes: Maximum bytes (default from config: pruning_recent_msg_max_bytes)
             encoding: Character encoding
 
         Returns:
             Truncated content with offload notice, or original if within limit
         """
         if max_bytes is None:
-            max_bytes = self.DEFAULT_TOOL_RESULT_MAX_BYTES
+            max_bytes = self._pruning_recent_msg_max_bytes
         if not content:
             return content
 
@@ -639,24 +659,6 @@ class ContextCompressor:
                 deleted, failed,
             )
         return deleted
-
-    def _is_valid_summary(self, content: str) -> bool:
-        """Check if the summary content is valid.
-
-        Borrowed from CoApis LightContextManager._is_valid_summary().
-
-        Args:
-            content: The summary content to validate.
-
-        Returns:
-            True if valid, False otherwise.
-        """
-        if not content or not content.strip():
-            return False
-        # Must have some structure (## header or bullet points)
-        if "##" not in content and "- " not in content:
-            return False
-        return True
 
     def prune_tool_outputs_with_truncation(
         self,
@@ -725,7 +727,7 @@ class ContextCompressor:
 
             content = str(m.get("content", ""))
             content_bytes = len(content.encode("utf-8"))
-            if content_bytes > self.LARGE_TOOL_RESULT_THRESHOLD:
+            if content_bytes > self._large_tool_result_threshold:
                 # Large tool output → truncate with offloading
                 result.append({
                     **m,
