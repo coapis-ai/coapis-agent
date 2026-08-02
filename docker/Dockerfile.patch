@@ -3,3 +3,10 @@ FROM coapis-agent:0.12.0
 
 # Copy the fixed runner module
 COPY server/coapis/app/runner/runner.py /app/coapis/app/runner/runner.py
+
+# Fix: ContextCompressor now reads config from agent_config.running.light_context_config
+COPY server/coapis/agents/context_compressor.py /app/coapis/agents/context_compressor.py
+COPY server/coapis/agents/workspace.py /app/coapis/agents/workspace.py
+
+# Fix: rename request param to avoid @require_permission decorator conflict
+COPY server/coapis/app/routers/tags.py /app/coapis/app/routers/tags.py
