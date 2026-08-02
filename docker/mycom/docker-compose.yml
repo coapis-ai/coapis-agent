@@ -9,7 +9,7 @@ name: coapis-mycom
 services:
   # ── 后端 API 服务 ──
   server:
-    image: coapis-agent:0.12.0
+    image: coapis-agent:0.12.1
     container_name: coapis-mycom-server
     ports:
       - "${COAPIS_SERVER_PORT:-4888}:8000"
