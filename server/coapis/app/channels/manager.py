@@ -73,6 +73,12 @@ class ChannelManager:
         registry = get_channel_registry()
         channels_section = getattr(config, "channels", {}) or {}
 
+        # Convert Pydantic model to dict if needed
+        if hasattr(channels_section, "model_dump"):
+            channels_section = channels_section.model_dump()
+        elif hasattr(channels_section, "__dict__"):
+            channels_section = vars(channels_section)
+
         created: List[BaseChannel] = []
 
         # Always create ConsoleChannel
