@@ -109,6 +109,29 @@ class ChannelManager:
                 )
                 continue
 
+            # ── P0: Check + install dependencies on-demand ──
+            try:
+                from .dependencies import get_channel_dependencies
+                from .utils import ensure_packages_installed
+
+                deps = get_channel_dependencies(channel_key)
+                if deps:
+                    logger.info(
+                        "Checking dependencies for enabled channel '%s': %s",
+                        channel_key, deps,
+                    )
+                    if not ensure_packages_installed(deps, timeout=120):
+                        logger.error(
+                            "Failed to install dependencies for channel '%s', skipping",
+                            channel_key,
+                        )
+                        continue
+            except Exception as e:
+                logger.warning(
+                    "Dependency check failed for channel '%s': %s",
+                    channel_key, e,
+                )
+
             # Check if channel has from_config classmethod
             if not hasattr(channel_cls, "from_config"):
                 logger.warning(

@@ -63,6 +63,7 @@ def _load_builtin_channels() -> dict[str, type[BaseChannel]]:
     """Load built-in channels safely.
 
     A single optional dependency failure should not break CLI startup.
+    If import fails, attempt on-demand dependency installation.
     """
     out: dict[str, type[BaseChannel]] = {}
     for key, (module_name, class_name) in _BUILTIN_SPECS.items():
@@ -77,6 +78,49 @@ def _load_builtin_channels() -> dict[str, type[BaseChannel]]:
                 raise TypeError(
                     f"{module_name}.{class_name} is not a BaseChannel subtype",
                 )
+        except ImportError as exc:
+            # ── P0: Attempt on-demand dependency installation ──
+            if key not in _REQUIRED_CHANNEL_KEYS:
+                try:
+                    from .dependencies import get_channel_dependencies
+                    from .utils import ensure_packages_installed
+
+                    deps = get_channel_dependencies(key)
+                    if deps:
+                        logger.info(
+                            "Channel '%s' import failed, attempting to install dependencies: %s",
+                            key, deps,
+                        )
+                        if ensure_packages_installed(deps, timeout=120):
+                            # Retry import after installation
+                            try:
+                                mod = importlib.import_module(module_name, package=__package__)
+                                cls = getattr(mod, class_name)
+                                if (
+                                    isinstance(cls, type)
+                                    and issubclass(cls, BaseChannel)
+                                    and cls is not BaseChannel
+                                ):
+                                    out[key] = cls
+                                    logger.info(
+                                        "Channel '%s' loaded after dependency installation",
+                                        key,
+                                    )
+                                    continue
+                            except ImportError:
+                                pass
+                except Exception as install_exc:
+                    logger.warning(
+                        "Dependency installation failed for channel '%s': %s",
+                        key, install_exc,
+                    )
+                logger.debug(
+                    "built-in channel unavailable: %s (import error: %s)",
+                    key, exc,
+                )
+                continue
+            else:
+                raise
         except Exception:
             if key in _REQUIRED_CHANNEL_KEYS:
                 logger.error(
