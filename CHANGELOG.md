@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.12.2] - 2026-08-04
+
+### Fixed
+
+- **Skill upload context reload** — Skill uploads now synchronously reload the agent's skills context instead of using a background async task, ensuring newly uploaded skills are immediately available in LLM conversations without silent failures or cache issues.
+
 ## [v0.12.0] - 2026-07-31
 
 ### Fixed

@@ -9,7 +9,7 @@ name: coapis-mycom
 services:
   # ── 后端 API 服务 ──
   server:
-    image: coapis-agent:0.12.1
+    image: coapis-agent:0.12.2
     container_name: coapis-mycom-server
     ports:
       - "${COAPIS_SERVER_PORT:-4888}:8000"
@@ -24,7 +24,7 @@ services:
       - COAPIS_WORKSPACES_DIR=/apps/ai/coapis/workspaces
       - COAPIS_SHARED_RUNTIME_DIR=/apps/ai/coapis/shared_runtime
       - BROWSER_CDP_URL=http://playwright:3000
-      - COAPIS_VERSION=0.12.0
+      - COAPIS_VERSION=0.12.2
     restart: unless-stopped
     networks:
       - frontend

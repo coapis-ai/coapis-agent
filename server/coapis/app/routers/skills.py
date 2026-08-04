@@ -892,7 +892,16 @@ async def upload_skill_zip(
     if result.get("conflicts"):
         raise HTTPException(status_code=409, detail=result)
     if enable and result.get("count", 0) > 0:
-        schedule_agent_reload(request, workspace.agent_id)
+        # Synchronously reload agent to ensure skills context is updated immediately
+        manager = getattr(
+            request.app.state,
+            "multi_agent_manager",
+            None,
+        )
+        if manager:
+            await manager.reload_agent(workspace.agent_id)
+        else:
+            schedule_agent_reload(request, workspace.agent_id)
     return result
 
 
