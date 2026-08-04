@@ -65,6 +65,7 @@ def get_scene_service() -> SceneAgentService:
 @router.get("", response_model=SceneListResponse)
 @require_permission("scene:read")
 async def admin_list_scenes(
+    request: Request,
     status: Optional[str] = Query(None, description="Filter by status"),
     category: Optional[str] = Query(None, description="Filter by category"),
     tag: Optional[str] = Query(None, description="Filter by tag"),
@@ -134,6 +135,7 @@ async def create_scene(
 @router.get("/{scene_id}", response_model=SceneConfig)
 @require_permission("scene:read")
 async def admin_get_scene(
+    request: Request,
     scene_id: str,
     current_user: dict = Depends(get_current_user),
     service: SceneAgentService = Depends(get_scene_service),
@@ -165,8 +167,8 @@ async def admin_get_scene(
 @router.patch("/{scene_id}", response_model=SceneConfig)
 @require_permission("scene:update")
 async def update_scene(
-    scene_id: str,
     request: Request,
+    scene_id: str,
     scene_update: SceneConfigUpdate = Body(...),
     current_user: dict = Depends(get_current_user),
     service: SceneAgentService = Depends(get_scene_service),
