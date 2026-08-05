@@ -1871,11 +1871,39 @@ def resolve_effective_skills(
     skill_pool_dir = get_skill_pool_dir()
     if _is_agent_workspace(workspace_dir):
         user_ws = _get_user_workspace_dir(workspace_dir)
-        search_dirs = [
-            skills_dir,
-            get_workspace_skills_dir(user_ws),
-            skill_pool_dir,
-        ]
+        
+        # Extract username and agent_id from workspace_dir if it's under workspaces/{username}/agents/{agent_id}
+        parts = workspace_dir.parts
+        username_part = None
+        agent_id_part = None
+        
+        try:
+            agents_idx = -1
+            workspaces_idx = -1
+            for i, p in enumerate(parts):
+                if p == "agents":
+                    agents_idx = i
+                if p == "workspaces":
+                    workspaces_idx = i
+            
+            if agents_idx != -1 and workspaces_idx != -1 and agents_idx > workspaces_idx:
+                # Check if pattern is .../workspaces/{username}/agents/{agent_id}
+                # parts[workspaces_idx+1] should be username, parts[agents_idx+1] should be agent_id
+                if agents_idx == workspaces_idx + 2:
+                    username_part = parts[workspaces_idx + 1]
+                    agent_id_part = parts[agents_idx + 1] if agents_idx + 1 < len(parts) else None
+        except ValueError:
+            pass
+            
+        search_dirs = [skills_dir]
+        
+        if username_part and agent_id_part:
+            # Add user-level per-agent skills dir: workspaces/{username}/skills/{agent_id}
+            user_skills_agent_dir = get_workspace_skills_dir(user_ws) / agent_id_part
+            search_dirs.append(user_skills_agent_dir)
+            
+        search_dirs.append(get_workspace_skills_dir(user_ws)) # workspaces/{username}/skills
+        search_dirs.append(skill_pool_dir) # WORKING_DIR/skill_pool
     else:
         search_dirs = [skills_dir, skill_pool_dir]
 
