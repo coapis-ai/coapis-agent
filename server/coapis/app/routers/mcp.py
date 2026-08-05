@@ -578,7 +578,7 @@ async def list_mcp_tools(
         manager = getattr(request.app.state, "multi_agent_manager", None)
         if manager:
             ws = manager.get_workspace(agent_id, username=user_id)
-            mcp_mgr = getattr(ws, "_mcp_manager", None) if ws else None
+            mcp_mgr = ws.mcp_manager if (ws and hasattr(ws, 'mcp_manager')) else None
             if mcp_mgr:
                 clients = await mcp_mgr.get_clients()
                 for c in clients:
