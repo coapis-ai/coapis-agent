@@ -5,6 +5,7 @@ import {
   FolderOutlined,
   SettingOutlined,
   MessageOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { menusApi } from '../api/modules/menus';
 
@@ -53,6 +54,13 @@ export const FALLBACK_MENU_ITEMS: MenuItem[] = [
     path: '/workspace/myspace',
   },
   {
+    key: 'knowledge',
+    label: '知识库',
+    labelKey: 'nav.knowledge',
+    icon: <BookOutlined />,
+    path: '/knowledge/bases',
+  },
+  {
     key: 'settings',
     label: '设置',
     labelKey: 'nav.settings',
@@ -68,6 +76,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   'FolderOutlined': <FolderOutlined />,
   'SettingOutlined': <SettingOutlined />,
   'HomeOutlined': <HomeOutlined />,  // 如果将来启用首页
+  'BookOutlined': <BookOutlined />,
 };
 
 // Hook to load menu items from API

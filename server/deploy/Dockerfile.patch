@@ -1,5 +1,9 @@
 FROM coapis-agent:0.12.0
 
-COPY --chown=root:root server/coapis/app/routers/agents.py /app/coapis/app/routers/agents.py
+COPY --chown=root:root ../coapis/app/routers/agents.py /app/coapis/app/routers/agents.py
+COPY --chown=root:root ../coapis/app/routers/admin_scenes.py /app/coapis/app/routers/admin_scenes.py
+COPY --chown=root:root ../coapis/app/mcp/manager.py /app/coapis/app/mcp/manager.py
+COPY --chown=root:root ../coapis/app/routers/mcp.py /app/coapis/app/routers/mcp.py
+COPY --chown=root:root ../coapis/agents/react_agent.py /app/coapis/agents/react_agent.py
 
 CMD ["uvicorn", "coapis.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -10,3 +10,9 @@ COPY server/coapis/agents/workspace.py /app/coapis/agents/workspace.py
 
 # Fix: rename request param to avoid @require_permission decorator conflict
 COPY server/coapis/app/routers/tags.py /app/coapis/app/routers/tags.py
+
+# Fix: 修复场景管理API @require_permission装饰器参数签名问题
+COPY server/coapis/app/routers/admin_scenes.py /app/coapis/app/routers/admin_scenes.py
+
+# Fix: 修复用户子智能体/场景智能体找不到技能的问题 - 在resolve_effective_skills中补充workspaces/{username}/skills/{agent_id}搜索路径
+COPY server/coapis/agents/skills_manager.py /app/coapis/agents/skills_manager.py

@@ -101,9 +101,11 @@ class ToolCallGuard:
                         tool_name, hit_count,
                     )
                     return (
-                        f"[系统提示] 你已经用完全相同的参数调用过 "
-                        f"{tool_name} {hit_count + 1} 次，结果不会变化。"
-                        f"请勿重复调用，直接使用已有信息继续。\n\n"
+                        f"[策略提示] 检测到您已用完全相同的参数调用过工具 '{tool_name}' {hit_count + 1} 次，"
+                        f"结果不会发生变化。为避免无效循环，建议您：\n"
+                        f"1. 调整输入参数或查询条件；\n"
+                        f"2. 尝试使用其他相关工具或替代方法；\n"
+                        f"3. 检查前置步骤的数据是否已更新或存在错误。\n\n"
                         f"上次结果（截断）:\n{cached[:800]}"
                     )
                 # First re-hit: return cached but don't block
@@ -117,8 +119,11 @@ class ToolCallGuard:
                     tool_name, self._consecutive_empty,
                 )
                 return (
-                    f"[系统阻断] {tool_name} 已连续 {self._consecutive_empty} 次返回空结果，"
-                    f"已触发空结果保护。禁止继续调用此工具，请直接基于已有信息给出结论。"
+                    f"[策略阻断] 工具 '{tool_name}' 已连续 {self._consecutive_empty} 次返回空结果或无输出，"
+                    f"已触发防循环保护。建议：\n"
+                    f"1. 停止调用此工具；\n"
+                    f"2. 基于已有信息给出结论，或尝试其他相关工具和思路；\n"
+                    f"3. 检查前置步骤的数据是否正确获取。"
                 )
 
             # ── Layer 4: Session-level count warning (non-blocking) ──

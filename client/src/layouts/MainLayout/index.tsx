@@ -63,6 +63,9 @@ const MultiLayerEvolutionPage = lazyImportWithRetry("../../pages/MultiLayerEvolu
 const WorkbenchPage = lazyImportWithRetry("../../pages/Workbench/index");
 // 知识库功能 - 企业版扩展
 const KnowledgeBasePage = lazyImportWithRetry("../../pages/KnowledgeBase/index");
+const KnowledgeBaseCreatePage = lazyImportWithRetry("../../pages/KnowledgeBase/Create");
+const KnowledgeDocumentsPage = lazyImportWithRetry("../../pages/KnowledgeBase/Documents");
+const KnowledgeTestPage = lazyImportWithRetry("../../pages/KnowledgeBase/Test");
 
 // P2 Enterprise Features
 const MonitoringPage = lazyImportWithRetry("../../pages/Monitoring/index");
@@ -107,7 +110,11 @@ const pathToKey: Record<string, string> = {
   "/admin/tags": "admin-tags",
   "/evolution": "evolution",
   "/workbench": "workbench",
-  // "/knowledge": "knowledge",
+  // Knowledge Base routes
+  "/knowledge/bases": "knowledge-bases",
+  "/knowledge/bases/create": "knowledge-create",
+  "/knowledge/bases/:id/documents": "knowledge-documents",
+  "/knowledge/bases/:id/test": "knowledge-test",
   // P2 Enterprise Features
   "/monitoring": "monitoring",
   "/sso": "sso",
@@ -241,7 +248,13 @@ export default function MainLayout() {
                   <Route path="/evolution" element={<MultiLayerEvolutionPage />} />
                   <Route path="/workbench" element={<WorkbenchPage />} />
                   <Route path="/workbench/:category" element={<WorkbenchPage />} />
-                  <Route path="/knowledge" element={<KnowledgeBasePage />} />
+                  
+                  {/* Knowledge Base routes */}
+                  <Route path="/knowledge/bases" element={<KnowledgeBasePage />} />
+                  <Route path="/knowledge/bases/create" element={<KnowledgeBaseCreatePage />} />
+                  <Route path="/knowledge/bases/:id/documents" element={<KnowledgeDocumentsPage />} />
+                  <Route path="/knowledge/bases/:id/test" element={<KnowledgeTestPage />} />
+                  
                   <Route path="/cross-agent" element={<Navigate to="/evolution" replace />} />
 
                   {/* P2 Enterprise Features */}

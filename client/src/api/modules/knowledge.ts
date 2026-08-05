@@ -37,6 +37,34 @@ export interface KnowledgeSearchResult {
   category: string;
 }
 
+// ── RAG Configuration Types (Enterprise Edition) ──────────────
+
+export interface ChunkingStrategy {
+  splitter_type: 'recursive_character' | 'markdown_header' | 'token';
+  chunk_size?: number;
+  chunk_overlap?: number;
+  separators?: string[];
+}
+
+export interface RetrievalConfig {
+  enable_hybrid_search: boolean;
+  use_parent_document_retriever: boolean;
+}
+
+export interface KnowledgeBaseConfig {
+  embedding_model_provider: string;
+  embedding_model_name: string;
+  chunking_strategy: ChunkingStrategy;
+  retrieval_config: RetrievalConfig;
+}
+
+// Model Provider types for UI selection
+export interface ModelProvider {
+  provider_id: string;
+  name: string;
+  models?: Array<{ model_id: string; name: string }>;
+}
+
 // ── API ────────────────────────────────────────────────
 
 export const knowledgeApi = {
@@ -114,4 +142,46 @@ export const knowledgeApi = {
 
   health: () =>
     request<{ status: string; knowledge_bases: number }>("/knowledge/health"),
+
+  // ── RAG Configuration & Models (Enterprise Edition) ──
+
+  getModels: () =>
+    request<Array<ModelProvider | { provider_id: string; name: string }>>("/api/models"),
+
+  createBaseWithConfig: (data: {
+    name: string;
+    description?: string;
+    scope?: string;
+    config: KnowledgeBaseConfig;
+  }) => {
+    const form = new FormData();
+    form.append("name", data.name);
+    if (data.description) form.append("description", data.description);
+    if (data.scope) form.append("scope", data.scope);
+    // Append config as JSON string
+    form.append("config", JSON.stringify(data.config));
+    
+    return request<KnowledgeBase>("/knowledge/bases", {
+      method: "POST",
+      body: form,
+      headers: {} as HeadersInit,
+    });
+  },
+
+  updateBaseConfig: (kbId: string, config: KnowledgeBaseConfig) =>
+    request<{ success: boolean }>(`/knowledge/bases/${encodeURIComponent(kbId)}/config`, {
+      method: "PUT",
+      body: JSON.stringify({ config }),
+    }),
+
+  // ── RAG Test / QA ──
+
+  testRagQuery: (kbIds: string[], query: string, top_k?: number) =>
+    request<{ 
+      answer: string; 
+      sources: Array<{ chunk_id: string; text: string; source_title: string; score: number }>;
+    }>("/knowledge/rag/test", {
+      method: "POST",
+      body: JSON.stringify({ kb_ids: kbIds, query, top_k }),
+    }),
 };

@@ -33,6 +33,11 @@ from pydantic import BaseModel
 from ...constant import DATA_DIR
 
 from ..permissions.decorators import require_permission
+from ...security.skill_scanner import (
+    get_blocked_history as _get_blocked_history,
+    clear_blocked_history as _clear_blocked_history,
+    remove_blocked_entry as _remove_blocked_entry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -227,15 +232,16 @@ async def update_skill_scanner(
 @router.get("/config/security/skill-scanner/blocked-history")
 @require_permission("admin:admin")
 async def get_blocked_history(request: Request) -> List[Dict[str, Any]]:
-    """Get blocked skill history."""
-    return _load_json(BLOCKED_HISTORY_FILE, [])
+    """Get blocked skill history from skill scanner."""
+    records = _get_blocked_history()
+    return [r.to_dict() for r in records]
 
 
 @router.delete("/config/security/skill-scanner/blocked-history")
 @require_permission("admin:admin")
 async def clear_blocked_history(request: Request) -> Dict[str, Any]:
     """Clear blocked skill history."""
-    _save_json(BLOCKED_HISTORY_FILE, [])
+    _clear_blocked_history()
     return {"cleared": True}
 
 
@@ -246,10 +252,8 @@ async def remove_blocked_entry(
     index: int,
 ) -> Dict[str, Any]:
     """Remove a specific entry from blocked history."""
-    history = _load_json(BLOCKED_HISTORY_FILE, [])
-    if isinstance(history, list) and 0 <= index < len(history):
-        history.pop(index)
-        _save_json(BLOCKED_HISTORY_FILE, history)
+    success = _remove_blocked_entry(index)
+    if success:
         return {"removed": True}
     raise HTTPException(status_code=404, detail="Entry not found")
 

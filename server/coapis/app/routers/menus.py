@@ -32,7 +32,7 @@ def get_tag_service() -> TagService:
     """Get tag service instance."""
     global _tag_service
     if _tag_service is None:
-        working_dir = os.getenv("WORKING_DIR", "/apps/ai/coapis")
+        working_dir = os.getenv("COAPIS_WORKING_DIR") or os.getenv("WORKING_DIR", "/apps/ai/coapis")
         _tag_service = TagService(data_dir=Path(working_dir))
     return _tag_service
 

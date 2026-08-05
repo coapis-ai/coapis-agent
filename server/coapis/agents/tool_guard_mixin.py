@@ -213,20 +213,23 @@ class ToolGuardMixin:
                 from agentscope.message import TextBlock
                 from agentscope.tool import ToolResponse
 
-                # If this is a hard block (阻断), inject a strong system
-                # prompt into memory so the LLM sees it in next reasoning
-                if "[系统阻断]" in dedup_result:
+                # If this is a strategy block or dedup warning, inject a structured system
+                # prompt into memory so the LLM sees it in next reasoning and can adjust its plan
+                if "[策略阻断]" in dedup_result or "[策略提示]" in dedup_result:
                     try:
                         from agentscope.message import Msg
                         block_hint = Msg(
                             "system",
-                            f"[系统提示] 工具 {tool_name} 连续返回空结果，"
-                            f"请换个思路或换个工具继续，不要重复相同的调用。",
+                            f"[策略提示] 检测到工具 '{tool_name}' 的连续调用未产生有效结果或触发去重/限流保护。"
+                            f"为避免无效循环，建议您：\n"
+                            f"1. 调整输入参数或查询条件；\n"
+                            f"2. 尝试使用其他相关工具或替代方法；\n"
+                            f"3. 检查前置步骤的数据是否已更新或存在错误。",
                             "system",
                         )
                         await self.memory.add(block_hint)
                         logger.info(
-                            "ToolCallGuard: injected empty-result hint for %s into memory",
+                            "ToolCallGuard: injected strategy hint for %s into memory",
                             tool_name,
                         )
                     except Exception:
@@ -364,6 +367,7 @@ class ToolGuardMixin:
         # ── InputGuardEngine: input content detection (ALL tools) ──
         # Detects prompt injection, data exfiltration, path traversal
         # across ALL tool inputs — not just shell commands.
+        # Tool context awareness: non-shell tools skip command injection detection.
         ctx = getattr(self, "_request_context", None) or {}
         _ig_user = ctx.get("username", "")
         _ig_agent = ctx.get("agent_id", "")
@@ -374,7 +378,7 @@ class ToolGuardMixin:
             _ig_text = _json.dumps(tool_input, ensure_ascii=False) if tool_input else ""
             if _ig_text:
                 _ig_result = self._input_guard_engine.check(
-                    _ig_text, username=_ig_user, agent_id=_ig_agent,
+                    _ig_text, username=_ig_user, agent_id=_ig_agent, tool_name=tool_name,
                 )
                 if not _ig_result.is_safe:
                     _ig_findings = []

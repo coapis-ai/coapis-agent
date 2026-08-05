@@ -29,6 +29,12 @@ function normalizeTransport(raw?: unknown): MCPTransport | undefined {
   }
 }
 
+function sanitizeClientKey(key: string): string {
+  // Replace invalid characters with hyphen, ensure only letters, digits, underscores, and hyphens
+  const sanitized = key.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
+  return sanitized || 'mcp-client-' + Math.random().toString(36).substr(2, 9);
+}
+
 function normalizeClientData(key: string, rawData: any) {
   const transport =
     normalizeTransport(rawData.transport ?? rawData.type) ??
@@ -159,9 +165,10 @@ function MCPPage() {
       if (parsed.mcpServers) {
         Object.entries(parsed.mcpServers).forEach(
           ([key, data]: [string, any]) => {
+            const sanitizedKey = sanitizeClientKey(key);
             clientsToCreate.push({
-              key,
-              data: normalizeClientData(key, data),
+              key: sanitizedKey,
+              data: normalizeClientData(sanitizedKey, data),
             });
           },
         );
@@ -170,9 +177,10 @@ function MCPPage() {
         (parsed.command || parsed.url || parsed.baseUrl)
       ) {
         const { key, ...clientData } = parsed;
+        const sanitizedKey = sanitizeClientKey(key);
         clientsToCreate.push({
-          key,
-          data: normalizeClientData(key, clientData),
+          key: sanitizedKey,
+          data: normalizeClientData(sanitizedKey, clientData),
         });
       } else {
         Object.entries(parsed).forEach(([key, data]: [string, any]) => {
@@ -180,9 +188,10 @@ function MCPPage() {
             typeof data === "object" &&
             (data.command || data.url || data.baseUrl)
           ) {
+            const sanitizedKey = sanitizeClientKey(key);
             clientsToCreate.push({
-              key,
-              data: normalizeClientData(key, data),
+              key: sanitizedKey,
+              data: normalizeClientData(sanitizedKey, data),
             });
           }
         });

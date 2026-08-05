@@ -582,7 +582,8 @@ async def list_mcp_tools(
             if mcp_mgr:
                 clients = await mcp_mgr.get_clients()
                 for c in clients:
-                    if getattr(c, "name", None) == client_key:
+                    c_key = getattr(c, "client_key", None) or getattr(c, "name", None)
+                    if c_key == client_key:
                         tools = await c.list_tools()
                         return [
                             {
@@ -900,7 +901,7 @@ async def list_mcp_gateway_tools(request: Request) -> List[Dict[str, Any]]:
             except Exception:
                 ws = None
 
-        mcp_manager = getattr(ws, "_mcp_manager", None) if ws else None
+        mcp_manager = getattr(ws, "mcp_manager", None) if ws else None
         if mcp_manager is None:
             return []
 
@@ -950,7 +951,7 @@ async def call_mcp_gateway_tool(
             except Exception:
                 ws = None
 
-        mcp_manager = getattr(ws, "_mcp_manager", None) if ws else None
+        mcp_manager = getattr(ws, "mcp_manager", None) if ws else None
         if mcp_manager is None:
             raise HTTPException(404, detail="MCP manager not initialized for this workspace")
 

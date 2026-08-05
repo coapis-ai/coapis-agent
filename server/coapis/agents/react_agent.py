@@ -2038,6 +2038,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         transport = rebuild_info.get("transport")
         name = rebuild_info.get("name")
+        client_key = rebuild_info.get("client_key")
 
         try:
             if transport == "stdio":
@@ -2049,6 +2050,8 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     cwd=rebuild_info.get("cwd"),
                 )
                 setattr(rebuilt_client, "_coapis_rebuild_info", rebuild_info)
+                if client_key:
+                    setattr(rebuilt_client, "client_key", client_key)
                 return rebuilt_client
 
             raw_headers = rebuild_info.get("headers") or {}
@@ -2064,6 +2067,8 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 headers=headers,
             )
             setattr(rebuilt_client, "_coapis_rebuild_info", rebuild_info)
+            if client_key:
+                setattr(rebuilt_client, "client_key", client_key)
             return rebuilt_client
         except Exception:  # pylint: disable=broad-except
             return None

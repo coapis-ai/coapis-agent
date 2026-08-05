@@ -67,7 +67,7 @@ class EvolutionConfig:
     trajectory_retention_days: int = 30      # 轨迹保留天数
     max_trajectory_per_session: int = 50     # 每会话最大轨迹数
     # 采样策略：避免每个会话都调用 LLM 提取
-    extraction_cooldown_seconds: int = 300   # 两次提取最短间隔（秒）
+    extraction_cooldown_seconds: int = 120   # 两次提取最短间隔（秒）
     extraction_min_total_chars: int = 200    # 对话总字符数低于此跳过提取
     # 梦境优化：定期整理 MEMORY.md
     dream_interval_sessions: int = 5         # 每 N 次会话触发一次梦境优化
