@@ -237,6 +237,19 @@ def _get_agent_id_for_user(user_id: str) -> str:
     return config.agents.active_agent or "user:admin"
 
 
+def _get_ws_mcp_manager(ws):
+    """Return an MCP manager from a workspace, supporting both workspace types.
+
+    The app-level Workspace exposes ``mcp_manager`` via ServiceManager, while
+    the agents-level Workspace stores the manager in ``_mcp_manager``. This
+    helper unifies access so callers don't need to know which workspace
+    implementation is in use.
+    """
+    if ws is None:
+        return None
+    return getattr(ws, "mcp_manager", None) or getattr(ws, "_mcp_manager", None)
+
+
 def _trigger_reload(request: Request, agent_id: str) -> None:
     """Trigger MCP config hot-reload.
 
@@ -252,7 +265,8 @@ def _trigger_reload(request: Request, agent_id: str) -> None:
             async def _reload():
                 try:
                     ws = manager.get_workspace(agent_id)
-                    if ws and ws.mcp_manager:
+                    mcp_mgr = _get_ws_mcp_manager(ws)
+                    if mcp_mgr:
                         from ..mcp import MCPClientManager
                         from ...config.config import MCPConfig
 
@@ -266,7 +280,7 @@ def _trigger_reload(request: Request, agent_id: str) -> None:
                         )
                         active = {k: v for k, v in merged.items() if v.enabled}
                         if active:
-                            await ws.mcp_manager.init_from_config(
+                            await mcp_mgr.init_from_config(
                                 MCPConfig(clients=active),
                             )
                 except Exception as e:
@@ -578,7 +592,7 @@ async def list_mcp_tools(
         manager = getattr(request.app.state, "multi_agent_manager", None)
         if manager:
             ws = manager.get_workspace(agent_id, username=user_id)
-            mcp_mgr = ws.mcp_manager if (ws and hasattr(ws, 'mcp_manager')) else None
+            mcp_mgr = _get_ws_mcp_manager(ws)
             if mcp_mgr:
                 clients = await mcp_mgr.get_clients()
                 for c in clients:
@@ -901,7 +915,7 @@ async def list_mcp_gateway_tools(request: Request) -> List[Dict[str, Any]]:
             except Exception:
                 ws = None
 
-        mcp_manager = getattr(ws, "mcp_manager", None) if ws else None
+        mcp_manager = _get_ws_mcp_manager(ws)
         if mcp_manager is None:
             return []
 
@@ -951,7 +965,7 @@ async def call_mcp_gateway_tool(
             except Exception:
                 ws = None
 
-        mcp_manager = getattr(ws, "mcp_manager", None) if ws else None
+        mcp_manager = _get_ws_mcp_manager(ws)
         if mcp_manager is None:
             raise HTTPException(404, detail="MCP manager not initialized for this workspace")
 

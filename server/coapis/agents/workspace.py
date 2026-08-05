@@ -326,6 +326,16 @@ class Workspace:
         }
 
     @property
+    def mcp_manager(self):
+        """Expose the internal MCP manager for API compatibility.
+
+        The app-level Workspace exposes this via ServiceManager; the
+        agents Workspace keeps the manager in _mcp_manager. This property
+        unifies the interface so routers can access either workspace type.
+        """
+        return getattr(self, "_mcp_manager", None)
+
+    @property
     def runner(self):
         """Get or create AgentRunner for this workspace.
 
