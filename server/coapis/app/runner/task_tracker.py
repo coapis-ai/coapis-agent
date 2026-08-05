@@ -203,14 +203,28 @@ class TaskTracker:
                     "[STOP] Cannot stop run_key=%s (not running)",
                     run_key,
                 )
+                # Ensure any existing buffer/queues are cleared for this run_key
+                if state and hasattr(state, 'queues'):
+                    for q in state.queues:
+                        q.put_nowait(_SENTINEL)
                 return False
+            
             logger.debug(
                 "[STOP] Calling task.cancel() for run_key=%s",
                 run_key,
             )
             state.stopped = True
+            # Clear buffer to prevent old events from being replayed
+            state.buffer.clear()
+            # Put sentinel to all existing queues so they stop immediately
+            for q in state.queues:
+                q.put_nowait(_SENTINEL)
+            
             state.task.cancel()
             logger.debug("[STOP] task.cancel() called for run_key=%s", run_key)
+            
+            # Immediately remove from _runs to prevent new attachments from seeing old state
+            self._runs.pop(run_key, None)
             return True
 
     async def attach_or_start(
