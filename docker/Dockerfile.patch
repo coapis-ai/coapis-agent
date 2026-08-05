@@ -1,5 +1,5 @@
-# Patch image: copy only changed files onto coapis-agent:0.12.0
-FROM coapis-agent:0.12.0
+# Patch image: copy only changed files onto coapis-agent:latest
+FROM coapis-agent:latest
 
 # Copy the fixed runner module
 COPY server/coapis/app/runner/runner.py /app/coapis/app/runner/runner.py
@@ -16,3 +16,6 @@ COPY server/coapis/app/routers/admin_scenes.py /app/coapis/app/routers/admin_sce
 
 # Fix: 修复用户子智能体/场景智能体找不到技能的问题 - 在resolve_effective_skills中补充workspaces/{username}/skills/{agent_id}搜索路径
 COPY server/coapis/agents/skills_manager.py /app/coapis/agents/skills_manager.py
+
+# Fix: unify MCP manager access across workspace implementations
+COPY server/coapis/app/routers/mcp.py /app/coapis/app/routers/mcp.py

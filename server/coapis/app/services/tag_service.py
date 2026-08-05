@@ -455,6 +455,50 @@ class TagService:
             tree.append(tree_item)
         
         return tree
+
+    def get_workbench_categories(self) -> List[dict]:
+        """Get workbench category tags for second-level menu.
+        
+        Returns tags with type='category' and show_in_menu=True, enabled=True.
+        
+        Returns:
+            List of category item dictionaries
+        """
+        tags = self._load_tags()
+        
+        # Get category tags with show_in_menu=True and enabled
+        categories = [
+            t for t in tags 
+            if t.type == TagType.CATEGORY and t.show_in_menu and t.enabled
+        ]
+        
+        # Sort by sort_order
+        def _get_sort_order(tag) -> int:
+            if isinstance(tag, dict):
+                return tag.get('sort_order', 0) or tag.get('sortOrder', 0) or 0
+            return getattr(tag, 'sort_order', 0) or 0
+        
+        categories.sort(key=_get_sort_order)
+        
+        # Convert to menu items
+        category_items = []
+        for cat in categories:
+            if isinstance(cat, dict):
+                cat_id = cat.get('id', '')
+                name = cat.get('name', '')
+                icon = cat.get('icon', '🏷️')
+            else:
+                cat_id = cat.id
+                name = cat.name
+                icon = cat.icon or '🏷️'
+            
+            category_items.append({
+                "id": cat_id,
+                "name": name,
+                "icon": icon,
+            })
+        
+        return category_items
     
     def get_main_menu(self) -> List[dict]:
         """Get main menu configuration from tags.

@@ -529,6 +529,7 @@ PUBLIC_PREFIXES: tuple = (
     "/api/scenes/recommendations",  # Scene recommendations (read-only)
     "/api/scenes/hot",  # Hot scenes (read-only)
     "/api/admin/tags",  # Tag list for workbench (read-only)
+    "/api/menus",  # Main menu configuration (read-only from tags.json)
     # Model management APIs (read-only, for default model selector)
     "/api/models/by-type",  # Get models by type (read-only)
     # SSO login APIs (for external system integration)

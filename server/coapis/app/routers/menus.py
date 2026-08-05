@@ -67,3 +67,24 @@ async def get_menus(
     return {
         "items": menu_items
     }
+
+
+@router.get("/workbench-categories")
+async def get_workbench_categories(
+    tag_service: TagService = Depends(get_tag_service)
+) -> List[dict]:
+    """Get workbench category tags for second-level menu.
+    
+    Returns tags with type='category' and show_in_menu=True, enabled=True.
+    
+    Returns:
+        [
+            {
+                "id": "office-common",
+                "name": "办公通用",
+                "icon": "📄"
+            },
+            ...
+        ]
+    """
+    return tag_service.get_workbench_categories()

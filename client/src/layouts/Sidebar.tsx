@@ -65,14 +65,12 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
 
   // ── Effects ──────────────────────────────────────────────────────────────
 
-  // Load workbench categories from tag system (nature dimension)
+  // Load workbench categories from tag system (workbench-categories API)
   useEffect(() => {
-    fetch('/api/scenes/categories/grouped')
+    fetch('/api/menus/workbench-categories')
       .then(res => res.json())
       .then(data => {
-        // 使用 nature 维度的分类（通用分类）
-        const natureCategories = data?.dimensions?.nature?.categories || [];
-        setWorkbenchCategories(natureCategories);
+        setWorkbenchCategories(data || []);
       })
       .catch(err => {
         console.error('Failed to load workbench categories:', err);
