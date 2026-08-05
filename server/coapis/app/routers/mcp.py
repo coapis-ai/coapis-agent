@@ -43,6 +43,7 @@ from ...config.config import (
     save_agent_config,
 )
 from ...constant import WORKSPACES_DIR
+from ..auth import create_mcp_context_token
 from ..permissions.decorators import require_permission
 
 logger = logging.getLogger(__name__)
@@ -972,7 +973,20 @@ async def call_mcp_gateway_tool(
         from ..mcp.gateway import MCPGateway
 
         gateway = MCPGateway(mcp_manager)
-        result = await gateway.call_tool(body.gateway_name, body.arguments or {})
+        
+        # Generate internal context token for multi-tenant security
+        user_context_token = None
+        if user_id and agent_id:
+            try:
+                user_context_token = create_mcp_context_token(user_id, agent_id)
+            except Exception:
+                pass  # Token generation failure is non-fatal
+                
+        result = await gateway.call_tool(
+            body.gateway_name, 
+            body.arguments or {},
+            user_context_token=user_context_token,
+        )
         return result
     except HTTPException:
         raise

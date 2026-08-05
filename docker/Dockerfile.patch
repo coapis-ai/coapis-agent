@@ -19,3 +19,7 @@ COPY server/coapis/agents/skills_manager.py /app/coapis/agents/skills_manager.py
 
 # Fix: unify MCP manager access across workspace implementations
 COPY server/coapis/app/routers/mcp.py /app/coapis/app/routers/mcp.py
+
+# feat: unify workbench second-level menu using tags system
+COPY server/coapis/app/services/tag_service.py /app/coapis/app/services/tag_service.py
+COPY server/coapis/app/routers/menus.py /app/coapis/app/routers/menus.py

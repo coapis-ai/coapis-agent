@@ -127,6 +127,9 @@ class StdIOStatefulClient(StatefulClientBase):
         self._cached_tools = None
 
         self.timeout = kwargs.get("timeout")
+        
+        # User context token for MCP gateway authentication
+        self._user_context_token: str | None = None
 
     async def _run_lifecycle(self) -> None:
         """Run MCP client lifecycle in a dedicated task.
@@ -407,6 +410,17 @@ class HttpStatefulClient(StatefulClientBase):
 
         # Tool cache
         self._cached_tools = None
+        
+        # User context token for MCP gateway authentication
+        self._user_context_token: str | None = None
+
+    def set_user_context_token(self, token: str | None) -> None:
+        """Set the user context token for this client.
+        
+        This token is used when making HTTP requests to external MCP servers
+        through the gateway for multi-tenant authentication and authorization.
+        """
+        self._user_context_token = token
 
     async def _run_lifecycle(self) -> None:
         """Run MCP client lifecycle in a dedicated task."""
