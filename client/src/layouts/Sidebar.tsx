@@ -7,7 +7,7 @@ import {
   type MenuProps,
 } from "antd";
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   SparkAgentLine,
@@ -46,6 +46,8 @@ interface SidebarProps {
 
 export default function Sidebar({ selectedKey }: SidebarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const currentPath = location.pathname;
   const { t } = useTranslation();
   const { isDark } = useTheme();
   const { pluginRoutes } = usePlugins();
@@ -60,22 +62,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   const [allowedModules, setAllowedModules] = useState<string[]>([]);
   const [permissionsLoaded, setPermissionsLoaded] = useState(false);
 
-  // 工作场景二级菜单（从标签管理系统动态加载）
-  const [workbenchCategories, setWorkbenchCategories] = useState<any[]>([]);
-
   // ── Effects ──────────────────────────────────────────────────────────────
-
-  // Load workbench categories from tag system (workbench-categories API)
-  useEffect(() => {
-    fetch('/api/menus/workbench-categories')
-      .then(res => res.json())
-      .then(data => {
-        setWorkbenchCategories(data || []);
-      })
-      .catch(err => {
-        console.error('Failed to load workbench categories:', err);
-      });
-  }, []);
 
   // Load agents on mount
   useEffect(() => {
@@ -216,19 +203,38 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
         label: t(item.labelKey, item.label),
       };
 
-      // 工作场景二级菜单（从标签管理系统动态加载）
-      if ((item.key === 'workbench' || item.key === 'menu-workbench') && workbenchCategories.length > 0) {
-        menuItem.children = workbenchCategories.map(cat => ({
-          key: cat.id,
-          icon: <span>{cat.icon}</span>,
-          path: `/workbench/${cat.id}`,
-          label: cat.name,
+      // 子菜单直接使用 API 返回的 children
+      if (item.children && item.children.length > 0) {
+        menuItem.children = item.children.map((child: any) => ({
+          key: child.key,
+          icon: child.icon ? <span>{child.icon}</span> : undefined,
+          path: child.path,
+          label: t(child.labelKey || `nav.${child.key}`, child.label),
         }));
       }
 
       return menuItem;
     });
-  }, [t, workbenchCategories, dynamicMenuItems]);
+  }, [t, dynamicMenuItems]);
+
+  // 根据当前路径和菜单配置计算真正高亮的 key
+  // 叶子菜单（含子菜单中的子项）优先匹配自身 key；
+  // 如果命中的是某个父菜单下的子项，折叠导航栏高亮该父菜单。
+  const { activeMenuKey, activeTopKey } = useMemo(() => {
+    for (const item of collapsedNavItems) {
+      if (item.path === currentPath) {
+        return { activeMenuKey: item.key, activeTopKey: item.key };
+      }
+      if (item.children) {
+        for (const child of item.children) {
+          if (child.path === currentPath) {
+            return { activeMenuKey: child.key, activeTopKey: item.key };
+          }
+        }
+      }
+    }
+    return { activeMenuKey: selectedKey, activeTopKey: selectedKey };
+  }, [collapsedNavItems, currentPath, selectedKey]);
 
   // ── DEPRECATED: 旧菜单定义（已废弃，保留仅供参考）──────────────────────
   // 按设计方案v4，现在统一使用 collapsedNavItems（5个一级菜单）
@@ -405,7 +411,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       {collapsed ? (
         <nav className={styles.collapsedNav}>
           {filterMenuItems(collapsedNavItems).map((item) => {
-            const isActive = selectedKey === item.key;
+            const isActive = activeTopKey === item.key;
             return (
               <Tooltip
                 key={item.key}
@@ -453,7 +459,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           {/* 统一的5个一级菜单（首页、办公、我的场景、我的空间、设置） */}
           <Menu
             mode="inline"
-            selectedKeys={[selectedKey]}
+            selectedKeys={[activeMenuKey]}
             openKeys={openKeys}
             onOpenChange={(keys) => setOpenKeys(keys as string[])}
             onClick={({ key }) => {

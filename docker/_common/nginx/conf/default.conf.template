@@ -37,21 +37,8 @@ server {
 
     # /api/ — 所有后端 API（REST + WebSocket）
     # ^~ 确保优先于静态资源正则（如 .jpg/.png），避免文件预览URL被拦截
+    # 注意：CORS 头由后端 FastAPI CORSMiddleware 统一处理，nginx 不再重复添加
     location ^~ /api/ {
-        # ── CORS：OPTIONS 预检由 nginx 直接响应，不转发到后端 ──
-        if ($request_method = 'OPTIONS') {
-            add_header 'Access-Control-Allow-Origin' '$http_origin' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, PATCH, DELETE, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, X-Requested-With' always;
-            add_header 'Access-Control-Allow-Credentials' 'true' always;
-            add_header 'Access-Control-Max-Age' 86400 always;
-            add_header 'Content-Type' 'text/plain; charset=utf-8';
-            add_header 'Content-Length' 0;
-            return 204;
-        }
-        add_header 'Access-Control-Allow-Origin' '$http_origin' always;
-        add_header 'Access-Control-Allow-Credentials' 'true' always;
-
         proxy_pass http://server:8000/api/;
         proxy_http_version 1.1;
         proxy_set_header Host              $host;

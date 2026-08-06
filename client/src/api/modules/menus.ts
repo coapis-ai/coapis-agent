@@ -10,6 +10,7 @@ export interface MenuItem {
   sortOrder: number;
   isActive: boolean;
   childrenSource?: string;
+  children?: MenuItem[];
 }
 
 export interface MenuResponse {

@@ -25,6 +25,7 @@ import {
   DashboardOutlined,
   DownloadOutlined,
   UploadOutlined,
+  MenuOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import styles from './SceneManagement.module.less';
@@ -34,7 +35,11 @@ const { Option } = Select;
 const { TextArea } = Input;
 
 // Tag types
-type TagType = 'dimension' | 'category' | 'industry' | 'frequency';
+// - menu: 独立菜单项（如聊天、我的空间、知识库）
+// - dimension: 维度分组（如工作场景），可展开显示分类子菜单
+// - category: 分类项，依附 dimension
+// - industry/frequency: 场景属性标签
+type TagType = 'dimension' | 'category' | 'industry' | 'frequency' | 'menu';
 
 // Tag config interface
 interface TagConfig {
@@ -112,10 +117,11 @@ const TagManagement: React.FC = () => {
       return flatTags.filter(t => t.type === filterType);
     }
     
-    // Build tree: dimension tags with children
+    // Build tree: menu tags first, then dimension tags with children, then others
+    const menuTags = flatTags.filter(t => t.type === 'menu');
     const dimensionTags = flatTags.filter(t => t.type === 'dimension');
     const categoryTags = flatTags.filter(t => t.type === 'category');
-    const otherTags = flatTags.filter(t => t.type !== 'dimension' && t.type !== 'category');
+    const otherTags = flatTags.filter(t => !['dimension', 'category', 'menu'].includes(t.type));
     
     // Map children to dimensions
     const tree = dimensionTags.map(dim => {
@@ -126,8 +132,8 @@ const TagManagement: React.FC = () => {
       };
     });
     
-    // Add other tags (industry, frequency) at the end
-    return [...tree, ...otherTags];
+    // Menu tags first, then dimension tree, then other tags (industry, frequency)
+    return [...menuTags, ...tree, ...otherTags];
   };
 
   const handleCreate = () => {
@@ -158,6 +164,7 @@ const TagManagement: React.FC = () => {
       sort_order: tag.sort_order,
       show_in_menu: tag.show_in_menu,
       enabled: tag.enabled,
+      metadata: tag.metadata || {},
     });
     setModalVisible(true);
   };
@@ -321,6 +328,7 @@ const TagManagement: React.FC = () => {
 
   const getTagTypeLabel = (type: TagType) => {
     const labels: Record<TagType, string> = {
+      menu: '菜单',
       dimension: '维度',
       category: '分类',
       industry: '行业',
@@ -331,6 +339,7 @@ const TagManagement: React.FC = () => {
 
   const getTagTypeIcon = (type: TagType) => {
     const icons: Record<TagType, React.ReactNode> = {
+      menu: <MenuOutlined />,
       dimension: <FolderOutlined />,
       category: <TagOutlined />,
       industry: <AppstoreOutlined />,
@@ -367,11 +376,21 @@ const TagManagement: React.FC = () => {
       dataIndex: 'type',
       key: 'type',
       width: 100,
-      render: (type: TagType) => (
-        <Tag color={type === 'dimension' ? 'blue' : type === 'category' ? 'green' : 'orange'}>
-          {getTagTypeIcon(type)} {getTagTypeLabel(type)}
-        </Tag>
-      ),
+      render: (type: TagType) => {
+        const color =
+          type === 'menu'
+            ? 'purple'
+            : type === 'dimension'
+            ? 'blue'
+            : type === 'category'
+            ? 'green'
+            : 'orange';
+        return (
+          <Tag color={color}>
+            {getTagTypeIcon(type)} {getTagTypeLabel(type)}
+          </Tag>
+        );
+      },
     },
     {
       title: '父级',
@@ -463,6 +482,7 @@ const TagManagement: React.FC = () => {
         <Space>
           <Radio.Group value={filterType} onChange={e => setFilterType(e.target.value)}>
             <Radio.Button value="all">全部（树形）</Radio.Button>
+            <Radio.Button value="menu">菜单</Radio.Button>
             <Radio.Button value="dimension">维度</Radio.Button>
             <Radio.Button value="category">分类</Radio.Button>
             <Radio.Button value="industry">行业</Radio.Button>
@@ -563,17 +583,20 @@ const TagManagement: React.FC = () => {
             rules={[{ required: true, message: '请选择类型' }]}
           >
             <Select>
+              <Option value="menu">
+                <Space><MenuOutlined /> 菜单（独立导航项）</Space>
+              </Option>
               <Option value="dimension">
-                <Space><FolderOutlined /> 维度</Space>
+                <Space><FolderOutlined /> 维度（可展开的菜单分组）</Space>
               </Option>
               <Option value="category">
-                <Space><TagOutlined /> 分类</Space>
+                <Space><TagOutlined /> 分类（维度下的子项）</Space>
               </Option>
               <Option value="industry">
-                <Space><AppstoreOutlined /> 行业</Space>
+                <Space><AppstoreOutlined /> 行业（场景属性）</Space>
               </Option>
               <Option value="frequency">
-                <Space><DashboardOutlined /> 频率</Space>
+                <Space><DashboardOutlined /> 频率（场景属性）</Space>
               </Option>
             </Select>
           </Form.Item>
@@ -583,7 +606,7 @@ const TagManagement: React.FC = () => {
             shouldUpdate={(prevValues, currentValues) => prevValues.type !== currentValues.type}
           >
             {({ getFieldValue }) => {
-              const type = getFieldValue('type');
+              const type = getFieldValue('type') as TagType;
               return type === 'category' ? (
                 <Form.Item
                   name="parent_id"
@@ -602,7 +625,48 @@ const TagManagement: React.FC = () => {
             }}
           </Form.Item>
 
-
+          {/* 路由配置：仅 menu / dimension 类型需要 */}
+          <Form.Item
+            noStyle
+            shouldUpdate={(prevValues, currentValues) => prevValues.type !== currentValues.type}
+          >
+            {({ getFieldValue }) => {
+              const type = getFieldValue('type') as TagType;
+              return type === 'menu' || type === 'dimension' ? (
+                <>
+                  <Form.Item
+                    name={['metadata', 'path']}
+                    label="路由路径"
+                    rules={[{ required: true, message: '请输入路由路径' }]}
+                    extra={type === 'menu' ? '例如：/chat、/workspace' : '例如：/workbench、/domain'}
+                  >
+                    <Input placeholder="例如: /workbench" />
+                  </Form.Item>
+                  <Form.Item
+                    name={['metadata', 'permission']}
+                    label="权限模块 Key"
+                    extra="与权限系统模块 key 对应，如 chat、scene、workspace"
+                  >
+                    <Input placeholder="例如: scene" />
+                  </Form.Item>
+                  <Form.Item
+                    name={['metadata', 'labelKey']}
+                    label="国际化 Key"
+                    extra="留空则使用 nav.{标签ID}"
+                  >
+                    <Input placeholder="例如: nav.workbench" />
+                  </Form.Item>
+                  <Form.Item
+                    name={['metadata', 'isActive']}
+                    label="启用菜单"
+                    valuePropName="checked"
+                  >
+                    <Switch checkedChildren="是" unCheckedChildren="否" />
+                  </Form.Item>
+                </>
+              ) : null;
+            }}
+          </Form.Item>
 
           <Form.Item
             name="description"

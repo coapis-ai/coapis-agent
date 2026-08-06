@@ -6,6 +6,17 @@ import {
   SettingOutlined,
   MessageOutlined,
   BookOutlined,
+  CrownOutlined,
+  ThunderboltOutlined,
+  BarChartOutlined,
+  SafetyOutlined,
+  FileOutlined,
+  CloudOutlined,
+  RobotOutlined,
+  ToolOutlined,
+  LinkOutlined,
+  TeamOutlined,
+  MenuOutlined,
 } from '@ant-design/icons';
 import { menusApi } from '../api/modules/menus';
 
@@ -14,6 +25,7 @@ export interface MenuItem {
   label: string;
   labelKey: string;  // 国际化key
   icon: React.ReactNode;
+  iconName?: string;  // 原始图标名称/emoji
   path: string;
   children?: MenuItem[];  // 支持二级菜单
   permission?: string;
@@ -60,9 +72,36 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   'AppstoreOutlined': <AppstoreOutlined />,
   'FolderOutlined': <FolderOutlined />,
   'SettingOutlined': <SettingOutlined />,
-  'HomeOutlined': <HomeOutlined />,  // 如果将来启用首页
+  'HomeOutlined': <HomeOutlined />,
   'BookOutlined': <BookOutlined />,
+  'CrownOutlined': <CrownOutlined />,
+  'ThunderboltOutlined': <ThunderboltOutlined />,
+  'BarChartOutlined': <BarChartOutlined />,
+  'SafetyOutlined': <SafetyOutlined />,
+  'FileOutlined': <FileOutlined />,
+  'CloudOutlined': <CloudOutlined />,
+  'RobotOutlined': <RobotOutlined />,
+  'ToolOutlined': <ToolOutlined />,
+  'LinkOutlined': <LinkOutlined />,
+  'TeamOutlined': <TeamOutlined />,
+  'MenuOutlined': <MenuOutlined />,
 };
+
+/**
+ * Render a menu icon from backend string.
+ * - Known Ant Design icon names → mapped React component
+ * - Emoji / other string → wrapped in <span>
+ * - Empty / unknown → fallback icon
+ */
+function renderIcon(iconName: string | undefined, fallback: React.ReactNode = <AppstoreOutlined />): React.ReactNode {
+  if (!iconName) return fallback;
+  if (ICON_MAP[iconName]) return ICON_MAP[iconName];
+  // Emoji detection: emoji are outside basic ASCII range
+  if (/[^\x00-\x7F]/.test(iconName)) {
+    return <span style={{ fontSize: 16 }}>{iconName}</span>;
+  }
+  return fallback;
+}
 
 // Hook to load menu items from API
 export function useMenuItems() {
@@ -77,7 +116,13 @@ export function useMenuItems() {
       const response = await menusApi.getMainMenu();
       const items = response.items.map((item) => ({
         ...item,
-        icon: ICON_MAP[item.icon] || <AppstoreOutlined />,
+        iconName: item.icon,
+        icon: renderIcon(item.icon),
+        children: item.children?.map((child: any) => ({
+          ...child,
+          iconName: child.icon,
+          icon: renderIcon(child.icon, <AppstoreOutlined /> as any),
+        })),
       }));
       setMenuItems(items);
     } catch (err) {
