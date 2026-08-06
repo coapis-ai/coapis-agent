@@ -1766,13 +1766,6 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             "如果自动安装失败，再向用户报告缺失的包名和手动安装命令。"
         )
 
-        # ── 全局语言指令：始终使用中文 ──
-        sys_prompt = sys_prompt + "\n\n## 语言要求\n\n" + (
-            "请全部使用中文思考和回答。无论用户使用何种语言提问，"
-            "你的内部推理过程和最终回复都必须使用中文。"
-            "代码注释、变量命名等编程惯例可保留英文。"
-        )
-
         return sys_prompt
 
     def _register_hooks(self) -> None:
