@@ -101,7 +101,12 @@ export async function request<T = unknown>(
   if (!response.ok) {
     if (response.status === 401) {
       clearAuthToken();
-      if (window.location.pathname !== "/login") {
+      // In embedded/iframe mode, don't force redirect to /login —
+      // the embedded page handles auth errors itself via EmbeddedChatPage.
+      const isEmbedded =
+        window.self !== window.top ||
+        window.location.pathname === "/chat/embedded";
+      if (!isEmbedded && window.location.pathname !== "/login") {
         window.location.href = "/login";
       }
       throw new Error("Not authenticated");

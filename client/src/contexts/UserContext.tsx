@@ -115,7 +115,14 @@ export default function UserProvider({ children }: UserProviderProps) {
         setUser((await meRes.json()) as User);
       } else {
         // Token invalid or expired — clear silently, no redirect
-        clearAuthToken();
+        // In embedded/iframe mode, don't clear the token —
+        // the embedded page manages its own auth lifecycle.
+        const isEmbedded =
+          window.self !== window.top ||
+          window.location.pathname === "/chat/embedded";
+        if (!isEmbedded) {
+          clearAuthToken();
+        }
         setUser(null);
       }
 
