@@ -6,7 +6,6 @@ import type {
   MCPToolInfo,
   MCPInstallRequest,
   MCPInstallResponse,
-  MCPAccessPolicy,
 } from "../types";
 
 export const mcpApi = {
@@ -83,21 +82,6 @@ export const mcpApi = {
    */
   listMCPTools: (clientKey: string) =>
     request<MCPToolInfo[]>(`/mcp/${encodeURIComponent(clientKey)}/tools`),
-
-  /**
-   * Get access policy for an MCP client
-   */
-  getMCPAccessPolicy: (clientKey: string) =>
-    request<MCPAccessPolicy>(`/mcp/${encodeURIComponent(clientKey)}/access-policy`),
-
-  /**
-   * Update access policy for an MCP client
-   */
-  updateMCPAccessPolicy: (clientKey: string, body: MCPAccessPolicy) =>
-    request<MCPAccessPolicy>(`/mcp/${encodeURIComponent(clientKey)}/access-policy`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
 
   /**
    * Install an MCP server package

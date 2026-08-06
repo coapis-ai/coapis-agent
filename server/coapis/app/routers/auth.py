@@ -45,6 +45,7 @@ from ..auth import (
     require_admin,
 )
 from ..user_store import list_users, get_user, update_user, delete_user
+from ...constant import WORKSPACES_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -403,7 +404,7 @@ async def complete_onboarding(request: Request, req: OnboardingCompleteRequest):
 
     # Write to PROFILE.md if identity settings provided
     try:
-        from ..constant import WORKSPACES_DIR
+        import re as _re
         workspace_dir = WORKSPACES_DIR / username
         profile_path = workspace_dir / "PROFILE.md"
 
@@ -412,36 +413,47 @@ async def complete_onboarding(request: Request, req: OnboardingCompleteRequest):
         else:
             content = "# PROFILE.md\n\n## 用户资料\n\n- **名字：**\n\n## 身份\n\n- **名字：**\n- **定位：**\n- **风格：**\n"
 
-        # Update identity section
+        def _replace_label(content: str, zh_label: str, en_label: str, value: str) -> str:
+            """Replace a label line regardless of Chinese or English variant."""
+            lines = content.split("\n")
+            replaced = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped == f"- **{zh_label}**" or stripped == f"- **{en_label}**":
+                    lines[i] = f"- **{zh_label}** {value}"
+                    replaced = True
+                    break
+            if not replaced:
+                lines.append(f"- **{zh_label}** {value}")
+            return "\n".join(lines)
+
+        # Update identity section (support both Chinese and English labels)
         if req.agent_name:
-            if "- **名字：**" in content:
-                content = content.replace("- **名字：**", f"- **名字：** {req.agent_name}")
-            else:
-                content += f"\n- **名字：** {req.agent_name}"
+            content = _replace_label(content, "名字：", "Name:", req.agent_name)
 
         if req.agent_style:
-            if "- **风格：**" in content:
-                content = content.replace("- **风格：**", f"- **风格：** {req.agent_style}")
-            else:
-                content += f"\n- **风格：** {req.agent_style}"
+            content = _replace_label(content, "风格：", "Style:", req.agent_style)
 
         if req.agent_role:
-            if "- **定位：**" in content:
-                content = content.replace("- **定位：**", f"- **定位：** {req.agent_role}")
-            else:
-                content += f"\n- **定位：** {req.agent_role}"
+            content = _replace_label(content, "定位：", "Role:", req.agent_role)
 
         if req.user_name:
-            if "- **名字：**" in content.split("## 用户资料")[1] if "## 用户资料" in content else "":
-                content = content.replace("- **名字：**", f"- **名字：** {req.user_name}", 1)
-            else:
-                content += f"\n- **名字：** {req.user_name}"
+            # User name goes into ## 用户资料 section
+            content = _replace_label(content, "名字：", "Name:", req.user_name)
 
         profile_path.write_text(content, encoding="utf-8")
         logger.info(f"Onboarding completed for {username}, PROFILE.md updated")
 
     except Exception as e:
-        logger.error(f"Failed to update PROFILE.md for {username}: {e}")
+        import traceback as _tb
+        _tb_str = _tb.format_exc()
+        logger.error("Failed to update PROFILE.md for %s: %s", username, e)
+        # Write full traceback to a temp file for debugging
+        try:
+            from pathlib import Path as _P
+            _P("/tmp/auth_debug.txt").write_text(_tb_str, encoding="utf-8")
+        except Exception:
+            pass
         # Don't fail the request if PROFILE.md update fails
 
     return {"ok": True, "message": "Onboarding completed"}

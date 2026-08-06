@@ -128,6 +128,7 @@ class TagService:
         
         # Add type suffix
         type_suffix = {
+            TagType.MENU: "-menu",
             TagType.DIMENSION: "",
             TagType.CATEGORY: "",
             TagType.INDUSTRY: "-industry",
@@ -229,9 +230,15 @@ class TagService:
             if parent.type != TagType.DIMENSION:
                 raise ValueError(f"Parent must be a dimension tag, got: {parent.type}")
         
-        # Validate that dimension tags don't have parent_id
-        if request.type == TagType.DIMENSION and request.parent_id:
-            raise ValueError("Dimension tag cannot have a parent_id")
+        # Validate that dimension and menu tags don't have parent_id
+        if request.type in (TagType.DIMENSION, TagType.MENU) and request.parent_id:
+            raise ValueError(f"{request.type} tag cannot have a parent_id")
+        
+        # Validate that menu tags must have metadata.path for routing
+        if request.type == TagType.MENU:
+            metadata = request.metadata or {}
+            if not metadata.get("path"):
+                raise ValueError("Menu tag must have metadata.path for navigation")
         
         # Generate ID
         tag_id = self._generate_id(request.name, request.type)
@@ -302,8 +309,13 @@ class TagService:
                         raise ValueError(f"Parent tag not found: {request.parent_id}")
                     if parent.type != TagType.DIMENSION:
                         raise ValueError(f"Parent must be a dimension tag, got: {parent.type}")
-            elif tag.type == TagType.DIMENSION:
-                raise ValueError("Dimension tag cannot have a parent_id")
+            elif tag.type in (TagType.DIMENSION, TagType.MENU):
+                raise ValueError(f"{tag.type} tag cannot have a parent_id")
+        
+        # Validate that menu tags still have metadata.path after update
+        if tag.type == TagType.MENU and request.metadata is not None:
+            if not request.metadata.get("path"):
+                raise ValueError("Menu tag must have metadata.path for navigation")
         
         # Update fields
         update_data = request.model_dump(exclude_unset=True)

@@ -71,10 +71,16 @@ const KnowledgeTestPage = lazyImportWithRetry("../../pages/KnowledgeBase/Test");
 const MonitoringPage = lazyImportWithRetry("../../pages/Monitoring/index");
 const SSOPage = lazyImportWithRetry("../../pages/SSO/index");
 
+// Messages - Intelligent Message System (placeholder)
+const MessagesPage = lazyImportWithRetry("../../pages/Messages/index");
+
 const { Content } = Layout;
 
 const pathToKey: Record<string, string> = {
-  "/chat": "chat",
+  // 动态菜单标签对应的 key 由 /menus API 决定：
+  // chat-menu、workspace-menu、knowledge-menu、settings-menu、nature、domain
+  // 这里保留部分静态路由，避免插件或独立页面找不到 key
+  "/chat": "chat-menu",
   "/channels": "channels",
   "/sessions": "sessions",
   "/cron-jobs": "cron-jobs",
@@ -84,7 +90,7 @@ const pathToKey: Record<string, string> = {
   "/mcp": "mcp",
   // ACP 模块已隐藏 — 2026-06-28
   // "/acp": "acp",
-  "/workspace": "workspace",
+  "/workspace": "workspace-menu",
   "/agents": "agents",
   "/models": "models",
   // "/environments": "environments",
@@ -99,7 +105,7 @@ const pathToKey: Record<string, string> = {
   "/workspace/myspace": "myspace",
   "/user-system": "user-system",
   "/user/profile": "user-profile",
-  "/settings": "settings",
+  "/settings": "settings-menu",
   "/admin": "admin",
   "/admin/overview": "admin-overview",
   "/admin/users": "admin-users",
@@ -109,15 +115,18 @@ const pathToKey: Record<string, string> = {
   "/admin/scenes": "admin-scenes",
   "/admin/tags": "admin-tags",
   "/evolution": "evolution",
-  "/workbench": "workbench",
+  // 工作场景：默认高亮 nature 维度；Sidebar 会根据实际子菜单再做精确匹配
+  "/workbench": "nature",
   // Knowledge Base routes
-  "/knowledge/bases": "knowledge-bases",
-  "/knowledge/bases/create": "knowledge-create",
-  "/knowledge/bases/:id/documents": "knowledge-documents",
-  "/knowledge/bases/:id/test": "knowledge-test",
+  "/knowledge/bases": "knowledge-menu",
+  "/knowledge/bases/create": "knowledge-menu",
+  "/knowledge/bases/:id/documents": "knowledge-menu",
+  "/knowledge/bases/:id/test": "knowledge-menu",
   // P2 Enterprise Features
   "/monitoring": "monitoring",
   "/sso": "sso",
+  // Messages - Intelligent Message System
+  "/messages": "menu-messages",
 };
 
 export default function MainLayout() {
@@ -166,12 +175,19 @@ export default function MainLayout() {
   // Resolve selected key: check static routes first, then plugin routes
   let selectedKey = pathToKey[currentPath] || "";
   if (!selectedKey) {
-    const matchedPlugin = pluginRoutes.find(
-      (route) => currentPath === route.path,
-    );
-    selectedKey = matchedPlugin
-      ? matchedPlugin.path.replace(/^\//, "")
-      : "chat";
+    // 动态路径前缀匹配：/workbench/* 工作场景、/knowledge/* 知识库
+    if (currentPath.startsWith("/workbench/")) {
+      selectedKey = "nature";
+    } else if (currentPath.startsWith("/knowledge/")) {
+      selectedKey = "knowledge-menu";
+    } else {
+      const matchedPlugin = pluginRoutes.find(
+        (route) => currentPath === route.path,
+      );
+      selectedKey = matchedPlugin
+        ? matchedPlugin.path.replace(/^\//, "")
+        : "chat-menu";
+    }
   }
 
   // Keep Chat always mounted to preserve SSE streams during navigation.
@@ -260,6 +276,9 @@ export default function MainLayout() {
                   {/* P2 Enterprise Features */}
                   <Route path="/monitoring" element={<MonitoringPage />} />
                   <Route path="/sso" element={<SSOPage />} />
+                  
+                  {/* Messages - Intelligent Message System */}
+                  <Route path="/messages" element={<MessagesPage />} />
 
                   {/* Plugin routes — dynamically injected at runtime */}
                   {pluginRoutes.map((route) => (

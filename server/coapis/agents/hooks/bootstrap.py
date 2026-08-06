@@ -131,7 +131,7 @@ class BootstrapHook:
                         "Skipping bootstrap for non-default agent: %s", agent_id,
                     )
                     return None
-            
+
             if not has_pending_bootstrap(self.working_dir):
                 return None
 
@@ -173,8 +173,124 @@ class BootstrapHook:
                 logger.info(
                     "Bootstrap auto-completed after %d prompts sent", max_att,
                 )
+                # Save user identity from bootstrap conversation to PROFILE.md
+                self._save_identity_from_conversation(agent)
 
         except Exception as e:
             logger.error("Bootstrap hook failed: %s", e, exc_info=True)
 
         return None
+
+    def _save_identity_from_conversation(self, agent) -> None:
+        """Extract user identity from bootstrap conversation and save to PROFILE.md.
+
+        Reads the last few user messages from session state files,
+        extracts name and style preferences, and writes them to PROFILE.md.
+        """
+        try:
+            # Find the most recent session file in sessions/ directory
+            sessions_dir = self.working_dir / "sessions"
+            if not sessions_dir.exists():
+                # Also try the workspace root for legacy layout
+                sessions_dir = self.working_dir
+            if not sessions_dir.exists():
+                logger.debug("No sessions directory found for identity extraction")
+                return
+
+            # Find the most recently modified session file
+            session_files = sorted(
+                sessions_dir.glob("*.json"),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+            if not session_files:
+                logger.debug("No session files found for identity extraction")
+                return
+
+            # Read the most recent session file
+            session_file = session_files[0]
+            try:
+                session_data = json.loads(session_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                logger.debug("Failed to read session file: %s", session_file)
+                return
+
+            # Extract user messages from the session state
+            # Session state format: {"memory": {"content": [...]}, ...}
+            memory_state = session_data.get("memory", {})
+            content_blocks = memory_state.get("content", [])
+
+            user_answers = []
+            for block in content_blocks:
+                # Block format: {"role": "user", "content": [...]}
+                if not isinstance(block, dict):
+                    continue
+                if block.get("role") != "user":
+                    continue
+                # Extract text from content blocks
+                msg_content = block.get("content", [])
+                if isinstance(msg_content, str):
+                    text = msg_content
+                elif isinstance(msg_content, list):
+                    texts = []
+                    for item in msg_content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            texts.append(item.get("text", ""))
+                    text = " ".join(texts)
+                else:
+                    continue
+                if text and not text.startswith("---"):
+                    user_answers.append(text.strip())
+
+            if not user_answers:
+                logger.debug("No user answers found in session")
+                return
+
+            # Parse answers: answer1=name, answer2=style, answer3=customization
+            name = user_answers[0] if len(user_answers) >= 1 else ""
+            style = user_answers[1] if len(user_answers) >= 2 else ""
+            customization = user_answers[2] if len(user_answers) >= 3 else ""
+
+            # Clean up: remove very long answers (likely not a name)
+            if len(name) > 50:
+                name = ""
+            # Remove trailing punctuation from name
+            name = _re.sub(r"[，。！？,.!?]+$", "", name).strip()
+
+            if not name and not style and not customization:
+                return
+
+            # Read existing PROFILE.md
+            profile_path = self.working_dir / "PROFILE.md"
+            if profile_path.exists():
+                content = profile_path.read_text(encoding="utf-8")
+            else:
+                content = "# PROFILE.md\n\n## 用户资料\n\n- **名字：**\n\n## 身份\n\n- **名字：**\n- **定位：**\n- **风格：**\n"
+
+            def _replace_label(content, zh_label, en_label, value):
+                lines = content.split("\n")
+                replaced = False
+                for i, line in enumerate(lines):
+                    stripped = line.strip()
+                    if stripped == f"- **{zh_label}**" or stripped == f"- **{en_label}**":
+                        lines[i] = f"- **{zh_label}** {value}"
+                        replaced = True
+                        break
+                if not replaced:
+                    lines.append(f"- **{zh_label}** {value}")
+                return "\n".join(lines)
+
+            if name:
+                content = _replace_label(content, "名字：", "Name:", name)
+            if style:
+                content = _replace_label(content, "风格：", "Style:", style)
+            if customization:
+                content = _replace_label(content, "定位：", "Role:", customization)
+
+            profile_path.write_text(content, encoding="utf-8")
+            logger.info(
+                "Bootstrap identity saved: name=%s, style=%s", name, style,
+            )
+
+        except Exception as e:
+            logger.warning("Failed to save bootstrap identity: %s", e)

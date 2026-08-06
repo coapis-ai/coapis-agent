@@ -33,8 +33,9 @@ from datetime import datetime
 
 class TagType(str, Enum):
     """Tag type enumeration."""
-    DIMENSION = "dimension"   # 维度标签（一级菜单）
-    CATEGORY = "category"     # 分类标签（二级菜单）
+    MENU = "menu"             # 菜单标签（独立一级导航，如聊天、我的空间）
+    DIMENSION = "dimension"   # 维度标签（一级菜单/场景分组，如工作场景）
+    CATEGORY = "category"     # 分类标签（二级菜单/场景分类，依附维度）
     INDUSTRY = "industry"     # 行业标签（场景属性）
     FREQUENCY = "frequency"   # 频率标签（场景属性）
 
