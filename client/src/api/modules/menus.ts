@@ -18,6 +18,6 @@ export interface MenuResponse {
 
 // Menu API
 export const menusApi = {
-  // Get main menu configuration from tags with type='menu'
+  // Get main menu configuration from /menus endpoint
   getMainMenu: () => request<MenuResponse>("/menus"),
 };

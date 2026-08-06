@@ -51,6 +51,7 @@ interface TagConfig {
   enabled: boolean;
   created_at: string;
   updated_at: string;
+  metadata?: Record<string, any>;
 }
 
 // Tag list response
@@ -600,6 +601,8 @@ const TagManagement: React.FC = () => {
               ) : null;
             }}
           </Form.Item>
+
+
 
           <Form.Item
             name="description"

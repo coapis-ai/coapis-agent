@@ -37,7 +37,6 @@ class TagType(str, Enum):
     CATEGORY = "category"     # 分类标签（二级菜单）
     INDUSTRY = "industry"     # 行业标签（场景属性）
     FREQUENCY = "frequency"   # 频率标签（场景属性）
-    MENU = "menu"            # 菜单标签（主菜单配置）
 
 
 class TagConfig(BaseModel):
@@ -88,12 +87,14 @@ class TagCreateRequest(BaseModel):
     sort_order: int = Field(default=0, description="Sort order")
     show_in_menu: bool = Field(default=True, description="Show in menu")
     enabled: bool = Field(default=True, description="Enabled status")
+    metadata: Optional[dict] = Field(default=None, description="Additional metadata (e.g., menu configuration)")
 
 
 class TagUpdateRequest(BaseModel):
     """Request model for updating a tag."""
     name: Optional[str] = Field(default=None, description="Tag name", min_length=1, max_length=50)
     icon: Optional[str] = Field(default=None, description="Tag icon")
+    type: Optional[TagType] = Field(default=None, description="Tag type")
     parent_id: Optional[str] = Field(default=None, description="Parent tag ID")
     description: Optional[str] = Field(default=None, description="Tag description")
     keywords: Optional[List[str]] = Field(default=None, description="Keywords")
@@ -101,6 +102,7 @@ class TagUpdateRequest(BaseModel):
     sort_order: Optional[int] = Field(default=None, description="Sort order")
     show_in_menu: Optional[bool] = Field(default=None, description="Show in menu")
     enabled: Optional[bool] = Field(default=None, description="Enabled status")
+    metadata: Optional[dict] = Field(default=None, description="Additional metadata (e.g., menu configuration)")
 
 
 class TagListResponse(BaseModel):

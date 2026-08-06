@@ -254,6 +254,7 @@ class TagService:
             sort_order=request.sort_order,
             show_in_menu=request.show_in_menu,
             enabled=request.enabled,
+            metadata=getattr(request, 'metadata', None),
             created_at=now,
             updated_at=now,
         )
@@ -500,80 +501,4 @@ class TagService:
         
         return category_items
     
-    def get_main_menu(self) -> List[dict]:
-        """Get main menu configuration from tags.
-        
-        Returns tags with type='menu' and converts them to menu items.
-        If enterprise plugin is installed, merges enterprise menu tags.
-        
-        Returns:
-            List of menu item dictionaries
-        """
-        tags = self._load_tags()
-        
-        # Get menu tags
-        menu_tags = [
-            t for t in tags 
-            if t.type == TagType.MENU and t.enabled
-        ]
-        
-        # Merge enterprise menu tags (if plugin installed)
-        if is_enterprise_installed():
-            plugin = get_enterprise_plugin()
-            if plugin and hasattr(plugin, 'get_menu_tags'):
-                try:
-                    enterprise_tags = plugin.get_menu_tags()
-                    logger.info(
-                        "Merging %d enterprise menu tags into main menu",
-                        len(enterprise_tags),
-                    )
-                    menu_tags.extend(enterprise_tags)
-                except Exception:
-                    logger.warning(
-                        "Failed to load enterprise menu tags",
-                        exc_info=True,
-                    )
-        
-        # Sort by sort_order (support both TagConfig objects and dicts)
-        def _get_sort_order(tag) -> int:
-            if isinstance(tag, dict):
-                return tag.get('sort_order', 0) or tag.get('sortOrder', 0) or 0
-            return getattr(tag, 'sort_order', 0) or 0
-        
-        menu_tags.sort(key=_get_sort_order)
-        
-        # Convert to menu items
-        menu_items = []
-        for tag in menu_tags:
-            # Support both TagConfig objects and plain dicts
-            if isinstance(tag, dict):
-                tag_id = tag.get('id', '')
-                name = tag.get('name', '')
-                icon = tag.get('icon', '')
-                metadata = tag.get('metadata') or {}
-                sort_order = tag.get('sort_order', 0) or 0
-            else:
-                tag_id = tag.id
-                name = tag.name
-                icon = tag.icon
-                metadata = tag.metadata or {}
-                sort_order = getattr(tag, 'sort_order', 0) or 0
-            
-            menu_item = {
-                "key": tag_id,
-                "label": name,
-                "labelKey": metadata.get("labelKey", f"nav.{tag_id}"),
-                "icon": icon,
-                "path": metadata.get("path", "/"),
-                "permission": metadata.get("permission"),
-                "sortOrder": sort_order,
-                "isActive": metadata.get("isActive", True),
-            }
-            
-            # Handle children source (for workbench)
-            if "childrenSource" in metadata:
-                menu_item["childrenSource"] = metadata["childrenSource"]
-            
-            menu_items.append(menu_item)
-        
-        return menu_items
+

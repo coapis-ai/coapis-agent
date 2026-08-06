@@ -43,7 +43,7 @@ async def get_menus(
 ) -> Dict[str, Any]:
     """Get main menu configuration.
     
-    Returns menu items from tags with type='menu'.
+    Returns hardcoded core menu items plus dynamic workbench categories.
     
     Returns:
         {
@@ -58,11 +58,65 @@ async def get_menus(
                     "sortOrder": 1,
                     "isActive": true
                 },
+                {
+                    "key": "nature",
+                    "label": "工作场景",
+                    "labelKey": "nav.workbench",
+                    "icon": "📁",
+                    "path": "/workbench",
+                    "permission": "scene",
+                    "sortOrder": 100,
+                    "isActive": true,
+                    "childrenSource": "tag: nature"
+                },
                 ...
             ]
         }
     """
-    menu_items = tag_service.get_main_menu()
+    # Core menu items (hardcoded for stability)
+    menu_items = [
+        {
+            "key": "menu-chat",
+            "label": "聊天",
+            "labelKey": "nav.chat",
+            "icon": "MessageOutlined",
+            "path": "/chat",
+            "permission": "chat",
+            "sortOrder": 1,
+            "isActive": True,
+        },
+        {
+            "key": "nature",
+            "label": "工作场景",
+            "labelKey": "nav.workbench",
+            "icon": "📁",
+            "path": "/workbench",
+            "permission": "scene",
+            "sortOrder": 100,
+            "isActive": True,
+            "childrenSource": "tag: nature",
+        },
+        {
+            "key": "menu-myspace",
+            "label": "我的空间",
+            "labelKey": "nav.myspace",
+            "icon": "FolderOutlined",
+            "path": "/workspace/myspace",
+            "permission": "myspace",
+            "sortOrder": 3,
+            "isActive": True,
+        },
+        {
+            "key": "menu-settings",
+            "label": "设置",
+            "labelKey": "nav.settings",
+            "icon": "SettingOutlined",
+            "path": "/settings",
+            "permission": "settings",
+            "sortOrder": 4,
+            "isActive": True,
+        },
+    ]
     
     return {
         "items": menu_items

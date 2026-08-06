@@ -23,14 +23,6 @@ export interface MenuItem {
 
 // Fallback menu items (hardcoded, used when API fails)
 export const FALLBACK_MENU_ITEMS: MenuItem[] = [
-  // 首页功能暂时隐藏，待完善后再开放
-  // {
-  //   key: 'home',
-  //   label: '首页',
-  //   labelKey: 'nav.home',
-  //   icon: <HomeOutlined />,
-  //   path: '/home',
-  // },
   {
     key: 'chat',
     label: '聊天',
@@ -52,13 +44,6 @@ export const FALLBACK_MENU_ITEMS: MenuItem[] = [
     labelKey: 'nav.myspace',
     icon: <FolderOutlined />,
     path: '/workspace/myspace',
-  },
-  {
-    key: 'knowledge',
-    label: '知识库',
-    labelKey: 'nav.knowledge',
-    icon: <BookOutlined />,
-    path: '/knowledge/bases',
   },
   {
     key: 'settings',

@@ -200,7 +200,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   // 首页、工作场景、我的空间、设置
   // 对话功能改用浮动聊天图标（不占菜单）
   
-  // Load menu items from API (tags with type='menu')
+  // Load menu items from API (/menus endpoint)
   const { menuItems: dynamicMenuItems } = useMenuItems();
   
   // 使用统一的菜单配置，并动态添加工作场景二级菜单
@@ -217,7 +217,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       };
 
       // 工作场景二级菜单（从标签管理系统动态加载）
-      if (item.key === 'workbench' && workbenchCategories.length > 0) {
+      if ((item.key === 'workbench' || item.key === 'menu-workbench') && workbenchCategories.length > 0) {
         menuItem.children = workbenchCategories.map(cat => ({
           key: cat.id,
           icon: <span>{cat.icon}</span>,
