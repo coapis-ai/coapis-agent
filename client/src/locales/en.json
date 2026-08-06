@@ -777,7 +777,20 @@
     "noTools": "No tools available from this MCP server",
     "toolsLoadError": "Failed to load tools from MCP server",
     "toolsConnecting": "MCP server is still connecting, please try again in a moment",
-    "toolSchema": "Input Schema"
+    "toolSchema": "Input Schema",
+    "accessPolicy": "Access Policy",
+    "policyDefaultEffect": "Default Access Effect",
+    "effectAllow": "Allow",
+    "effectAsk": "Ask",
+    "effectDeny": "Deny",
+    "policySummary": "Current policy summary: default effect is 「{default_effect}」, override rules count: {overrides_count}",
+    "toolWhitelist": "Tool Whitelist",
+    "noToolWhitelist": "No tool whitelist set (all tools allowed)",
+    "oauthStatus": "OAuth Status",
+    "oauthAuthorized": "Authorized",
+    "oauthNotAuthorized": "Not Authorized",
+    "expiresAt": "Expires At",
+    "accessPolicySaveError": "Failed to save access policy"
   },
   "heartbeat": {
     "title": "Heartbeat",

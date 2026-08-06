@@ -45,6 +45,22 @@ function normalizeClientData(key: string, rawData: any) {
   const command =
     transport === "stdio" ? (rawData.command ?? "").toString() : "";
 
+  // Normalize tools whitelist if provided
+  let tools: string[] | null = null;
+  if (Array.isArray(rawData.tools)) {
+    tools = rawData.tools.filter((t: any) => typeof t === 'string' && t.trim());
+  } else if (rawData.tools !== undefined && rawData.tools !== null) {
+    // Try to parse as JSON string or convert to array
+    try {
+      const parsed = JSON.parse(String(rawData.tools));
+      if (Array.isArray(parsed)) {
+        tools = parsed.filter((t: any) => typeof t === 'string' && t.trim());
+      }
+    } catch {
+      // Ignore parse errors, keep tools as null
+    }
+  }
+
   return {
     name: rawData.name || key,
     description: rawData.description || "",
@@ -56,6 +72,7 @@ function normalizeClientData(key: string, rawData: any) {
     args: Array.isArray(rawData.args) ? rawData.args : [],
     env: rawData.env || {},
     cwd: (rawData.cwd || "").toString(),
+    tools,
   };
 }
 

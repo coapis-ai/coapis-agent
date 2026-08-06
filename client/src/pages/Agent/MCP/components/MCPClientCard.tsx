@@ -6,9 +6,12 @@ import {
   Input,
   Empty,
   Tag,
+  Form,
+  Select,
+  Space,
 } from "@agentscope-ai/design";
 import { Spin } from "antd";
-import type { MCPClientInfo, MCPToolInfo } from "../../../../api/types";
+import type { MCPClientInfo, MCPToolInfo, MCPAccessPolicy } from "../../../../api/types";
 import { useTranslation } from "react-i18next";
 import React, { useState, useCallback } from "react";
 import { useTheme } from "../../../../contexts/ThemeContext";
@@ -16,6 +19,7 @@ import {
   EyeOutlined,
   EyeInvisibleOutlined,
   ToolOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import api from "../../../../api";
 import styles from "../index.module.less";
@@ -31,6 +35,7 @@ interface MCPClientUpdate {
   args?: string[];
   env?: Record<string, string>;
   cwd?: string;
+  tools?: string[] | null;
 }
 
 interface MCPClientCardProps {
@@ -54,11 +59,16 @@ export const MCPClientCard = React.memo(function MCPClientCard({
   const [jsonModalOpen, setJsonModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [toolsModalOpen, setToolsModalOpen] = useState(false);
+  const [accessPolicyModalOpen, setAccessPolicyModalOpen] = useState(false);
   const [tools, setTools] = useState<MCPToolInfo[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [editedJson, setEditedJson] = useState("");
   const [isEditing, setIsEditing] = useState(false);
+
+  // Access policy state
+  const [accessPolicy, setAccessPolicy] = useState<MCPAccessPolicy | null>(null);
+  const [loadingPolicy, setLoadingPolicy] = useState(false);
 
   // Determine if MCP client is remote or local based on command
   const isRemote =
@@ -127,6 +137,34 @@ export const MCPClientCard = React.memo(function MCPClientCard({
     [client.key, t],
   );
 
+  const handleShowAccessPolicy = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setAccessPolicyModalOpen(true);
+      setLoadingPolicy(true);
+      try {
+        const data = await api.getMCPAccessPolicy(client.key);
+        setAccessPolicy(data);
+      } catch (err: any) {
+        console.error("Failed to load access policy:", err);
+      } finally {
+        setLoadingPolicy(false);
+      }
+    },
+    [client.key],
+  );
+
+  const handleSaveAccessPolicy = async (policy: MCPAccessPolicy) => {
+    try {
+      await api.updateMCPAccessPolicy(client.key, policy);
+      setAccessPolicy(policy);
+      setAccessPolicyModalOpen(false);
+    } catch (err: any) {
+      console.error("Failed to save access policy:", err);
+      alert(t("mcp.accessPolicySaveError") || "保存访问策略失败");
+    }
+  };
+
   const clientJson = JSON.stringify(client, null, 2);
 
   return (
@@ -173,6 +211,15 @@ export const MCPClientCard = React.memo(function MCPClientCard({
           >
             {t("mcp.tools")}
           </Button>
+          {!readOnly && (
+            <Button
+              className={styles.policyButton}
+              onClick={handleShowAccessPolicy}
+              icon={<SettingOutlined />}
+            >
+              {t("mcp.accessPolicy", "访问策略")}
+            </Button>
+          )}
           {!readOnly && (
             <>
               <Button
@@ -309,6 +356,130 @@ export const MCPClientCard = React.memo(function MCPClientCard({
           </pre>
         )}
       </Modal>
+
+      <Modal
+        title={`${client.name} - ${t("mcp.accessPolicy", "访问策略")}`}
+        open={accessPolicyModalOpen}
+        onCancel={() => !loadingPolicy && setAccessPolicyModalOpen(false)}
+        footer={
+          <div style={{ textAlign: "right" }}>
+            <Button
+              onClick={() => setAccessPolicyModalOpen(false)}
+              style={{ marginRight: 8 }}
+              disabled={loadingPolicy}
+            >
+              {t("common.cancel")}
+            </Button>
+            {!readOnly && accessPolicy ? (
+              <Button
+                type="primary"
+                onClick={() => handleSaveAccessPolicy(accessPolicy)}
+                loading={loadingPolicy}
+              >
+                {t("common.save")}
+              </Button>
+            ) : null}
+          </div>
+        }
+        width={800}
+      >
+        {loadingPolicy ? (
+          <div className={styles.toolsLoading}>
+            <Spin />
+          </div>
+        ) : accessPolicy ? (
+          <AccessPolicyEditor
+            policy={accessPolicy}
+            clientInfo={client}
+            onChange={(p) => setAccessPolicy(p)}
+            readOnly={readOnly}
+            t={t}
+          />
+        ) : null}
+      </Modal>
     </>
+  );
+});
+
+// Access Policy Editor Component
+interface AccessPolicyEditorProps {
+  policy: MCPAccessPolicy;
+  clientInfo?: MCPClientInfo;
+  onChange: (policy: MCPAccessPolicy) => void;
+  readOnly?: boolean;
+  t: any;
+}
+
+const AccessPolicyEditor = React.memo(function AccessPolicyEditor({
+  policy,
+  clientInfo,
+  onChange,
+  readOnly,
+  t,
+}: AccessPolicyEditorProps) {
+  const updateDefaultEffect = (effect: "allow" | "ask" | "deny") => {
+    onChange({ ...policy, default_effect: effect });
+  };
+
+  return (
+    <div className={styles.accessPolicyEditor}>
+      <Form layout="vertical">
+        <Form.Item label={t("mcp.policyDefaultEffect", "默认访问效果")} required>
+          <Select
+            value={policy.default_effect}
+            onChange={updateDefaultEffect}
+            disabled={readOnly}
+            options={[
+              { label: t("mcp.effectAllow", "允许"), value: "allow" },
+              { label: t("mcp.effectAsk", "询问"), value: "ask" },
+              { label: t("mcp.effectDeny", "拒绝"), value: "deny" },
+            ]}
+          />
+        </Form.Item>
+
+        <div className={styles.policySummary}>
+          <p>
+            {t(
+              "mcp.policySummary",
+              "当前策略摘要：默认效果为「{default_effect}」，覆盖规则数：{overrides_count}",
+            )
+              .replace("{default_effect}", policy.default_effect)
+              .replace("{overrides_count}", String(policy.access_summary?.overrides_count || 0))}
+          </p>
+        </div>
+
+        <div className={styles.toolsWhitelistSection}>
+          <h4>{t("mcp.toolWhitelist", "工具白名单")}</h4>
+          {clientInfo && clientInfo.tools && clientInfo.tools.length > 0 ? (
+            <Tag.Group>
+              {clientInfo.tools.map((tool) => (
+                <Tag key={tool} color="blue">
+                  {tool}
+                </Tag>
+              ))}
+            </Tag.Group>
+          ) : (
+            <p style={{ color: "#999" }}>{t("mcp.noToolWhitelist", "未设置工具白名单（允许所有工具）")}</p>
+          )}
+        </div>
+
+        {clientInfo && clientInfo.oauth_status && (
+          <div className={styles.oauthStatusSection}>
+            <h4>{t("mcp.oauthStatus", "OAuth 状态")}</h4>
+            <Tag color={clientInfo.oauth_status.authorized ? "green" : "default"}>
+              {clientInfo.oauth_status.authorized
+                ? t("mcp.oauthAuthorized", "已授权")
+                : t("mcp.oauthNotAuthorized", "未授权")}
+            </Tag>
+            {clientInfo.oauth_status.expires_at > 0 && (
+              <span style={{ marginLeft: 8, color: "#666" }}>
+                {t("mcp.expiresAt", "过期时间")}:{" "}
+                {new Date(clientInfo.oauth_status.expires_at * 1000).toLocaleString()}
+              </span>
+            )}
+          </div>
+        )}
+      </Form>
+    </div>
   );
 });
