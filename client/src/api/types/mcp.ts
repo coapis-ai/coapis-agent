@@ -2,6 +2,18 @@
  * MCP (Model Context Protocol) client types
  */
 
+export interface MCPClientOAuthStatus {
+  authorized: boolean;
+  expires_at: number;
+  scope: string;
+  client_id: string;
+}
+
+export interface MCPAccessSummary {
+  default_effect: "allow" | "ask" | "deny";
+  overrides_count: number;
+}
+
 export interface MCPClientInfo {
   /** Unique client key identifier */
   key: string;
@@ -27,6 +39,12 @@ export interface MCPClientInfo {
   cwd: string;
   /** Configuration source: 'global' (from admin) or 'user' (personal) */
   source: "global" | "user";
+  /** Tool whitelist. Only listed tools will be loaded. */
+  tools?: string[] | null;
+  /** OAuth status */
+  oauth_status?: MCPClientOAuthStatus | null;
+  /** Summarised MCP access policy */
+  access_summary: MCPAccessSummary;
 }
 
 export interface MCPClientCreateRequest {
@@ -54,6 +72,8 @@ export interface MCPClientCreateRequest {
     env?: Record<string, string>;
     /** Working directory for stdio command */
     cwd?: string;
+    /** Tool whitelist. Only listed tools will be loaded. */
+    tools?: string[] | null;
   };
 }
 
@@ -87,6 +107,33 @@ export interface MCPClientUpdateRequest {
   env?: Record<string, string>;
   /** Working directory for stdio command */
   cwd?: string;
+  /** Tool whitelist (omit to leave unchanged). Set to null to remove. */
+  tools?: string[] | null;
+}
+
+export interface MCPAccessRule {
+  source_type: "channel" | "role" | "user";
+  source_value: string;
+  subject_type: "all" | "user" | "role";
+  subject_value: string;
+  effect: "allow" | "ask" | "deny";
+}
+
+export interface MCPToolDefaultPolicy {
+  tool_name: string;
+  effect: "allow" | "ask" | "deny";
+}
+
+export interface MCPToolAccessOverride extends MCPAccessRule {
+  tool_name: string;
+}
+
+export interface MCPAccessPolicy {
+  default_effect: "allow" | "ask" | "deny";
+  client_overrides: MCPAccessRule[];
+  tool_defaults: MCPToolDefaultPolicy[];
+  tool_overrides: MCPToolAccessOverride[];
+  unmanaged_rules_count: number;
 }
 
 export interface MCPInstallRequest {

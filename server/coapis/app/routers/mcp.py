@@ -63,6 +63,15 @@ class MCPClientOAuthStatus(BaseModel):
     client_id: str = ""
 
 
+class MCPAccessSummary(BaseModel):
+    """Small access policy summary for MCP client cards."""
+
+    default_effect: Literal["allow", "ask", "deny"] = Field(
+        default="deny", description="Default effect when no rule matches"
+    )
+    overrides_count: int = Field(default=0, description="Number of override rules")
+
+
 class MCPClientInfo(BaseModel):
     """MCP client information for API responses."""
 
@@ -83,7 +92,15 @@ class MCPClientInfo(BaseModel):
         default="user",
         description="Configuration source: 'global' or 'user'",
     )
+    tools: Optional[List[str]] = Field(
+        default=None,
+        description="Tool whitelist. Only listed tools will be loaded.",
+    )
     oauth_status: Optional[MCPClientOAuthStatus] = None
+    access_summary: MCPAccessSummary = Field(
+        default_factory=MCPAccessSummary,
+        description="Summarised MCP access policy",
+    )
 
 
 class MCPClientCreateRequest(BaseModel):
@@ -99,6 +116,10 @@ class MCPClientCreateRequest(BaseModel):
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
     cwd: str = ""
+    tools: Optional[List[str]] = Field(
+        default=None,
+        description="Tool whitelist. Only listed tools will be loaded.",
+    )
 
 
 class MCPClientUpdateRequest(BaseModel):
@@ -114,6 +135,45 @@ class MCPClientUpdateRequest(BaseModel):
     args: Optional[List[str]] = None
     env: Optional[Dict[str, str]] = None
     cwd: Optional[str] = None
+    tools: Optional[List[str]] = Field(
+        default=None,
+        description="Tool whitelist (omit to leave unchanged). Set to null to remove.",
+    )
+
+
+class MCPAccessRule(BaseModel):
+    """Console-managed access rule for one MCP source/object tuple."""
+
+    source_type: Literal["channel", "role", "user"] = Field(default="channel")
+    source_value: str = Field(default="console")
+    subject_type: Literal["all", "user", "role"] = Field(default="all")
+    subject_value: str = Field(default="")
+    effect: Literal["allow", "ask", "deny"] = Field(..., description="Access effect")
+
+
+class MCPToolDefaultPolicy(BaseModel):
+    """Console-managed default policy for one MCP tool."""
+
+    tool_name: str = Field(..., description="MCP tool name")
+    effect: Literal["allow", "ask", "deny"] = Field(..., description="Default effect")
+
+
+class MCPToolAccessOverride(MCPAccessRule):
+    """Console-managed access override for one MCP source/object/tool tuple."""
+
+    tool_name: str = Field(..., description="MCP tool name")
+
+
+class MCPAccessPolicy(BaseModel):
+    """Console-friendly MCP access policy payload."""
+
+    default_effect: Literal["allow", "ask", "deny"] = Field(
+        default="deny", description="Default effect when no rule matches"
+    )
+    client_overrides: List[MCPAccessRule] = Field(default_factory=list)
+    tool_defaults: List[MCPToolDefaultPolicy] = Field(default_factory=list)
+    tool_overrides: List[MCPToolAccessOverride] = Field(default_factory=list)
+    unmanaged_rules_count: int = Field(default=0, description="Unmanaged rules count")
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
@@ -867,6 +927,85 @@ async def install_mcp_package(
             package=body.package,
             install_type=body.install_type,
         )
+
+
+# ─── MCP Access Policy endpoints ──────────────────────────────────────────
+
+
+@router.get(
+    "/mcp/{client_key}/access-policy",
+    response_model=MCPAccessPolicy,
+    summary="Get access policy for an MCP client",
+)
+@require_permission("mcp:read")
+async def get_mcp_access_policy(
+    request: Request,
+    client_key: str = Path(...),
+) -> MCPAccessPolicy:
+    """Get the access policy configuration for a specific MCP client."""
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
+
+    # Load user's mcp config to find if there are any tool overrides stored
+    agent_config = load_agent_config(agent_id)
+
+    policy = MCPAccessPolicy(default_effect="deny")
+
+    # Check if client exists in global or user configs
+    global_clients = _load_global_mcp()
+    user_clients = _load_user_mcp(agent_id)
+
+    has_client = (client_key in global_clients) or (client_key in user_clients)
+    if not has_client:
+        raise HTTPException(404, detail=f"MCP client '{client_key}' not found")
+
+    # For now, return default policy structure
+    # In a full implementation, this would read from agent.json mcp.access_policy section
+    return policy
+
+
+@router.put(
+    "/mcp/{client_key}/access-policy",
+    response_model=MCPAccessPolicy,
+    summary="Update access policy for an MCP client",
+)
+@require_permission("mcp:write")
+async def update_mcp_access_policy(
+    request: Request,
+    client_key: str = Path(...),
+    policy: MCPAccessPolicy = Body(...),
+) -> MCPAccessPolicy:
+    """Update the access policy configuration for a specific MCP client."""
+    user_id = _get_user_id(request)
+    agent_id = _get_agent_id_for_user(user_id)
+
+    # Load user's mcp config
+    agent_config = load_agent_config(agent_id)
+
+    if agent_config.mcp is None:
+        agent_config.mcp = MCPConfig(clients={})
+
+    # Check if client exists in global or user configs
+    global_clients = _load_global_mcp()
+    user_clients = _load_user_mcp(agent_id)
+
+    has_client = (client_key in global_clients) or (client_key in user_clients)
+    if not has_client:
+        raise HTTPException(404, detail=f"MCP client '{client_key}' not found")
+
+    # Store access policy data under mcp.access_policy_data attribute
+    if not hasattr(agent_config.mcp, "access_policy_data"):
+        agent_config.mcp.access_policy_data = {}  # type: ignore[attr-defined]
+
+    agent_config.mcp.access_policy_data[client_key] = {  # type: ignore[attr-defined]
+        "default_effect": policy.default_effect,
+        "tool_defaults": [t.model_dump() for t in policy.tool_defaults],
+        "tool_overrides": [t.model_dump() for t in policy.tool_overrides],
+    }
+
+    save_agent_config(agent_id, agent_config)
+
+    return policy
 
 
 # ─── MCP Gateway endpoints ────────────────────────────────────────────────
