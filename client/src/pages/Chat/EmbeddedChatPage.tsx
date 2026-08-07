@@ -45,15 +45,25 @@ function postToParent(event: CoapisOutboundEvent) {
 }
 
 /**
- * 从 JWT token 解析 username（sub 字段）。
- * iframe 由父窗口传入 token 时不会带 username，需要自行解析，
- * 否则 agentStorage 的 key 会退化成通用 key，读到上一个用户的 selectedAgent。
+ * 从 CoApis token 解析 username。
+ *
+ * CoApis 使用自定义 token 格式：base64url(payload_json).hex_signature
+ * 其中 payload 包含 {"sub": username, ...}。
+ * 同时兼容标准 JWT 的 "header.payload.signature" 格式。
  */
 function parseUsernameFromToken(token: string): string | null {
   try {
-    const payload = token.split('.')[1];
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+
+    // CoApis 自定义格式：payload 在第 0 段；标准 JWT：payload 在第 1 段
+    const payload = parts.length >= 3 ? parts[1] : parts[0];
     if (!payload) return null;
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = base64.length % 4;
+    const padded = pad ? base64 + '='.repeat(4 - pad) : base64;
+    const json = atob(padded);
     const obj = JSON.parse(json);
     return obj.sub || obj.username || obj.preferred_username || null;
   } catch {

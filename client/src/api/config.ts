@@ -96,6 +96,26 @@ export function clearAuthToken(clearAll: boolean = false): void {
 }
 
 /**
+ * 从 CoApis 自定义 token 或标准 JWT 解析 username。
+ * CoApis token 格式：base64url(payload).hex_signature
+ */
+function parseUsernameFromToken(token: string): string | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const payload = parts.length >= 3 ? parts[1] : parts[0];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = base64.length % 4;
+    const padded = pad ? base64 + "=".repeat(4 - pad) : base64;
+    const obj = JSON.parse(atob(padded));
+    return obj?.sub || obj?.username || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get the current username
  */
 export function getCurrentUsername(): string {
@@ -113,8 +133,8 @@ export function getCurrentUsername(): string {
   try {
     const sessionToken = sessionStorage.getItem("coapis_auth_token");
     if (sessionToken) {
-      const payload = JSON.parse(atob(sessionToken.split(".")[1] || ""));
-      if (payload?.sub || payload?.username) return payload.sub || payload.username;
+      const parsed = parseUsernameFromToken(sessionToken);
+      if (parsed) return parsed;
     }
   } catch { /* ignore */ }
 
@@ -122,8 +142,7 @@ export function getCurrentUsername(): string {
   try {
     const token = localStorage.getItem("coapis_auth_token");
     if (token) {
-      const payload = JSON.parse(atob(token.split(".")[1] || ""));
-      return payload?.sub || payload?.username || "";
+      return parseUsernameFromToken(token) || "";
     }
   } catch { /* ignore */ }
   return "";
