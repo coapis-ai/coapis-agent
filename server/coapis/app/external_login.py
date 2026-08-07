@@ -34,6 +34,7 @@ class SSOLoginResponse(BaseModel):
     username: str        # 用户名
     display_name: str    # 显示名称
     is_new_user: bool    # 是否新用户
+    default_agent_id: str = ""  # 默认智能体ID
 
 
 def _get_sso_secret() -> str:
@@ -123,12 +124,13 @@ async def sso_login(request: Request, body: SSOLoginRequest):
     
     # 4. 生成 CoApis token (7天有效)
     coapis_token = create_token(body.username, expiry_seconds=86400 * 7)
-    
+
     return SSOLoginResponse(
         token=coapis_token,
         username=body.username,
         display_name=user.display_name,
         is_new_user=is_new_user,
+        default_agent_id=f"user:{body.username}",
     )
 
 
@@ -201,7 +203,10 @@ async def sso_login_get(
     
     # 5. 构建响应（设置 cookie 或返回 HTML）
     from fastapi.responses import HTMLResponse
-    
+
+    # 默认智能体ID
+    default_agent_id = f"user:{username}"
+
     # 使用 AuthStorage 统一管理登录状态
     # 外部登录默认不"记住我"，只保存到 sessionStorage
     html = f"""
@@ -216,11 +221,23 @@ async def sso_login_get(
             login: function(token, username, options) {{
                 options = options || {{}};
                 const remember = options.remember || false;
+                const defaultAgentId = options.default_agent_id || ('user:' + username);
                 
                 // 始终保存到 sessionStorage（当前标签页）
                 sessionStorage.setItem('coapis_auth_token', token);
                 sessionStorage.setItem('coapis_current_username', username);
-                
+
+                // 保存用户作用域的 agent 存储（user:username）
+                const agentStorageKey = 'coapis-agent-storage-' + username;
+                const lastUsedAgentKey = 'coapis-last-used-agent-' + username;
+                const agentState = JSON.stringify({{
+                    state: {{ selectedAgent: defaultAgentId }},
+                    version: 0
+                }});
+                sessionStorage.setItem(agentStorageKey, agentState);
+                localStorage.setItem(agentStorageKey, agentState);
+                localStorage.setItem(lastUsedAgentKey, defaultAgentId);
+
                 // 如果勾选"记住我"，同时保存到 localStorage
                 if (remember) {{
                     localStorage.setItem('coapis_auth_token', token);
@@ -277,7 +294,8 @@ async def sso_login_get(
         // 2. 使用 AuthStorage 登录（默认不记住）
         AuthStorage.login('{coapis_token}', '{username}', {{
             remember: false,
-            display_name: '{display_name or username}'
+            display_name: '{display_name or username}',
+            default_agent_id: '{default_agent_id}'
         }});
         
         // 3. 强制刷新并跳转（使用 replace 避免回退）

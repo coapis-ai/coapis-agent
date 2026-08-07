@@ -97,6 +97,7 @@ export default function Settings() {
       title: t('nav.agents', '智能体管理'),
       description: '管理和配置您的智能体',
       icon: <RobotOutlined />,
+      color: '#1890ff',
       path: '/agents',
     },
     {
@@ -104,6 +105,7 @@ export default function Settings() {
       title: t('nav.channels', '频道'),
       description: '频道管理和配置',
       icon: <WifiOutlined />,
+      color: '#52c41a',
       path: '/channels',
     },
     {
@@ -111,6 +113,7 @@ export default function Settings() {
       title: t('nav.sessions', '会话'),
       description: '会话管理和监控',
       icon: <TeamOutlined />,
+      color: '#722ed1',
       path: '/sessions',
     },
     {
@@ -118,6 +121,7 @@ export default function Settings() {
       title: t('nav.cronJobs', '定时任务'),
       description: '定时任务管理',
       icon: <ClockCircleOutlined />,
+      color: '#fa8c16',
       path: '/cron-jobs',
     },
     {
@@ -125,6 +129,7 @@ export default function Settings() {
       title: t('nav.heartbeat', '心跳'),
       description: '心跳监控和管理',
       icon: <HeartOutlined />,
+      color: '#eb2f96',
       path: '/heartbeat',
     },
     {
@@ -132,6 +137,7 @@ export default function Settings() {
       title: t('nav.skills', '技能'),
       description: '技能管理和技能池',
       icon: <ThunderboltOutlined />,
+      color: '#faad14',
       path: '/skills',
     },
     {
@@ -139,6 +145,7 @@ export default function Settings() {
       title: t('nav.tools', '工具'),
       description: '工具管理和配置',
       icon: <ToolOutlined />,
+      color: '#13c2c2',
       path: '/tools',
     },
     {
@@ -146,6 +153,7 @@ export default function Settings() {
       title: t('nav.mcp', 'MCP'),
       description: 'MCP协议管理',
       icon: <ApiOutlined />,
+      color: '#2f54eb',
       path: '/mcp',
     },
     {
@@ -153,6 +161,7 @@ export default function Settings() {
       title: t('nav.tokenUsage', 'Token消耗'),
       description: 'Token使用量统计',
       icon: <DollarOutlined />,
+      color: '#a0d911',
       path: '/token-usage',
     },
     {
@@ -160,6 +169,7 @@ export default function Settings() {
       title: t('nav.backups', '备份与清理'),
       description: '数据备份和清理管理',
       icon: <SaveOutlined />,
+      color: '#8c8c8c',
       path: '/backups',
     },
   ];
@@ -171,6 +181,7 @@ export default function Settings() {
       title: '概览',
       description: '系统概览和统计数据',
       icon: <AreaChartOutlined />,
+      color: '#1890ff',
       path: '/admin/overview',
     },
     {
@@ -178,6 +189,7 @@ export default function Settings() {
       title: '用户管理',
       description: '系统用户管理',
       icon: <UserOutlined />,
+      color: '#722ed1',
       path: '/admin/users',
     },
     {
@@ -185,6 +197,7 @@ export default function Settings() {
       title: '权限管理',
       description: '角色和权限配置',
       icon: <SafetyOutlined />,
+      color: '#fa541c',
       path: '/admin/permissions',
     },
     {
@@ -192,6 +205,7 @@ export default function Settings() {
       title: '审计日志',
       description: '系统操作审计日志',
       icon: <FileTextOutlined />,
+      color: '#595959',
       path: '/admin/audit',
     },
     {
@@ -199,6 +213,7 @@ export default function Settings() {
       title: '系统配置',
       description: '系统配置和配额管理',
       icon: <SettingOutlined />,
+      color: '#8c8c8c',
       path: '/admin/config',
     },
     {
@@ -206,6 +221,7 @@ export default function Settings() {
       title: '场景管理',
       description: '管理系统场景',
       icon: <PlayCircleOutlined />,
+      color: '#52c41a',
       path: '/admin/scenes',
     },
     {
@@ -213,6 +229,7 @@ export default function Settings() {
       title: '标签管理',
       description: '管理系统标签',
       icon: <TagOutlined />,
+      color: '#13c2c2',
       path: '/admin/tags',
     },
     {
@@ -220,6 +237,7 @@ export default function Settings() {
       title: t('nav.models', '模型'),
       description: '模型配置和默认模型管理',
       icon: <ApiOutlined />,
+      color: '#2f54eb',
       path: '/models',
     },
     {
@@ -227,6 +245,7 @@ export default function Settings() {
       title: t('nav.agentConfig', '运行配置'),
       description: '智能体运行时配置',
       icon: <SettingOutlined />,
+      color: '#fa8c16',
       path: '/agent-config',
     },
     {
@@ -234,6 +253,7 @@ export default function Settings() {
       title: t('nav.agentStats', '智能体统计'),
       description: '智能体使用统计和分析',
       icon: <BarChartOutlined />,
+      color: '#eb2f96',
       path: '/agent-stats',
     },
     {
@@ -241,6 +261,7 @@ export default function Settings() {
       title: t('nav.security', '安全'),
       description: '安全设置和密钥管理',
       icon: <SecurityScanOutlined />,
+      color: '#f5222d',
       path: '/security',
     },
     {
@@ -248,6 +269,7 @@ export default function Settings() {
       title: t('nav.evolution', 'Evolution'),
       description: '智能体进化管理',
       icon: <RocketOutlined />,
+      color: '#faad14',
       path: '/evolution',
     },
     {
@@ -255,6 +277,7 @@ export default function Settings() {
       title: t('nav.debug', '调试'),
       description: '调试工具和日志',
       icon: <BugOutlined />,
+      color: '#a0d911',
       path: '/debug',
     },
   ];
@@ -296,7 +319,7 @@ export default function Settings() {
                     onClick={() => handleCardClick(feature.path)}
                   >
                     <div className={styles.cardContent}>
-                      <div className={styles.iconWrapper}>
+                      <div className={styles.iconWrapper} style={{ color: feature.color }}>
                         {feature.icon}
                       </div>
                       <div className={styles.textWrapper}>
@@ -328,7 +351,7 @@ export default function Settings() {
                     onClick={() => handleCardClick(feature.path)}
                   >
                     <div className={styles.cardContent}>
-                      <div className={styles.iconWrapper}>
+                      <div className={styles.iconWrapper} style={{ color: feature.color }}>
                         {feature.icon}
                       </div>
                       <div className={styles.textWrapper}>

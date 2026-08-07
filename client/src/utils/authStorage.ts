@@ -101,7 +101,11 @@ export class AuthStorage {
     const sessionUsername = sessionStorage.getItem(STORAGE_KEYS.CURRENT_USERNAME);
     if (sessionUsername) return sessionUsername;
     
-    return localStorage.getItem(STORAGE_KEYS.CURRENT_USERNAME);
+    const localUsername = localStorage.getItem(STORAGE_KEYS.CURRENT_USERNAME);
+    if (localUsername) return localUsername;
+    
+    // 兼容外部 SSO 登录后写入的全局键（不含 remember 语义，仅作为兜底）
+    return localStorage.getItem(STORAGE_KEYS.CURRENT_USERNAME_GLOBAL);
   }
   
   /**
@@ -175,14 +179,29 @@ export class AuthStorage {
       remember?: boolean;
       display_name?: string;
       avatar?: string;
+      default_agent_id?: string;
     } = {}
   ): void {
-    const { remember = false, display_name, avatar } = options;
-    
+    const { remember = false, display_name, avatar, default_agent_id } = options;
+
     // 保存 token 和用户名
     this.saveToken(token, remember);
     this.saveUsername(username, remember);
-    
+
+    // 保存用户作用域的 agent 存储（user:{username}）
+    // 确保新用户不会继承旧用户的 selectedAgent
+    if (default_agent_id) {
+      const agentStorageKey = `coapis-agent-storage-${username}`;
+      const lastUsedAgentKey = `coapis-last-used-agent-${username}`;
+      const agentState = JSON.stringify({
+        state: { selectedAgent: default_agent_id },
+        version: 0,
+      });
+      sessionStorage.setItem(agentStorageKey, agentState);
+      localStorage.setItem(agentStorageKey, agentState);
+      localStorage.setItem(lastUsedAgentKey, default_agent_id);
+    }
+
     // 如果勾选"记住我"，保存到账号列表
     if (remember) {
       this.saveAccount({

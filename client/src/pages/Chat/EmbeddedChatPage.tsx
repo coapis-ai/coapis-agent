@@ -7,6 +7,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ChatWrapper } from '../../components/ChatWrapper';
 import ChatPage from '../Chat';
 import { setAuthToken, getApiToken } from '../../api/config';
+import { useAgentStore } from '../../stores/agentStore';
 import type { SceneConfig, EnterSceneResponse } from '../Workbench/types';
 import styles from './EmbeddedChatPage.module.less';
 
@@ -41,6 +42,53 @@ function postToParent(event: CoapisOutboundEvent) {
   if (window.parent !== window) {
     window.parent.postMessage(event, '*');
   }
+}
+
+/**
+ * 从 JWT token 解析 username（sub 字段）。
+ * iframe 由父窗口传入 token 时不会带 username，需要自行解析，
+ * 否则 agentStorage 的 key 会退化成通用 key，读到上一个用户的 selectedAgent。
+ */
+function parseUsernameFromToken(token: string): string | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    const obj = JSON.parse(json);
+    return obj.sub || obj.username || obj.preferred_username || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 为 iframe 模式初始化用户身份：写 username 到 storage，
+ * 并把 selectedAgent 强制指向 user:{username}，避免污染。
+ */
+function bootstrapEmbeddedUser(token: string): string | null {
+  const username = parseUsernameFromToken(token);
+  if (!username) return null;
+
+  // 写 sessionStorage（iframe 内有效）和 localStorage（全局 fallback）
+  sessionStorage.setItem('coapis_current_username', username);
+  localStorage.setItem('coapis-current-username', username);
+
+  const defaultAgentId = `user:${username}`;
+  const agentStorageKey = `coapis-agent-storage-${username}`;
+  const lastUsedAgentKey = `coapis-last-used-agent-${username}`;
+  const agentState = JSON.stringify({
+    state: { selectedAgent: defaultAgentId },
+    version: 0,
+  });
+  sessionStorage.setItem(agentStorageKey, agentState);
+  localStorage.setItem(agentStorageKey, agentState);
+  localStorage.setItem(lastUsedAgentKey, defaultAgentId);
+
+  // 同步设置全局 currentUserId
+  (window as any).currentUserId = username;
+  (window as any).currentChannel = '';
+
+  return username;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -100,7 +148,13 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
   minHeight = 300,
 }) => {
   const [searchParams] = useSearchParams();
-  const [loading, setLoading] = useState(false);
+
+  // URL 参数必须在 state 初始化前读取，因为 iframe 模式默认进入 loading
+  const token = searchParams.get('token');
+  const urlSceneId = searchParams.get('scene_id');
+  const urlSceneName = searchParams.get('scene_name') || 'AI 助手';
+
+  const [loading, setLoading] = useState(() => mode === 'iframe' && !!token);
   const [chatData, setChatData] = useState<EnterSceneResponse | null>(null);
   
   // iframe 模式状态
@@ -136,10 +190,6 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
   // iframe 模式：认证检查
   // ═══════════════════════════════════════════════════════════════════
   
-  const token = searchParams.get('token');
-  const urlSceneId = searchParams.get('scene_id');
-  const urlSceneName = searchParams.get('scene_name') || 'AI 助手';
-
   useEffect(() => {
     if (mode !== 'iframe') return;
     
@@ -153,6 +203,13 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
     }
 
     setAuthToken(token);
+
+    // ⭐ iframe 模式下必须自行从 token 恢复用户名，否则 sessionStorage 为空
+    // 会导致 agent storage 读到通用 key 上的旧用户 selectedAgent（如 user:admin）
+    const embeddedUsername = bootstrapEmbeddedUser(token);
+    if (embeddedUsername) {
+      useAgentStore.getState().setSelectedAgent(`user:${embeddedUsername}`);
+    }
 
     const verifyToken = async () => {
       try {
@@ -200,6 +257,12 @@ const EmbeddedChat: React.FC<EmbeddedChatProps> = ({
 
       const data: EnterSceneResponse = await response.json();
       setChatData(data);
+      
+      // ⭐ 场景进入后，强制使用后端返回的 user:{username} 作为当前智能体
+      // 防止 ChatPage / ChatSessionInitializer 使用 storage 中的 stale selectedAgent
+      if (data.agent?.id) {
+        useAgentStore.getState().setSelectedAgent(data.agent.id);
+      }
       
       if (mode === 'drawer') {
         message.success(`已进入场景: ${sceneName}`);

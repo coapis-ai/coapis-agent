@@ -99,10 +99,26 @@ export function clearAuthToken(clearAll: boolean = false): void {
  * Get the current username
  */
 export function getCurrentUsername(): string {
+  // 1. 优先从专用用户名缓存读取
   const username = getUsername();
   if (username) return username;
-  
-  // 如果 AuthStorage 没有，尝试从 token 解析（向后兼容）
+
+  // 2. 兼容 SSO 登录时写入的全局用户名
+  try {
+    const globalUsername = localStorage.getItem("coapis-current-username");
+    if (globalUsername) return globalUsername;
+  } catch { /* ignore */ }
+
+  // 3. 从 sessionStorage 中的 token 解析（iframe 场景 sessionStorage 隔离）
+  try {
+    const sessionToken = sessionStorage.getItem("coapis_auth_token");
+    if (sessionToken) {
+      const payload = JSON.parse(atob(sessionToken.split(".")[1] || ""));
+      if (payload?.sub || payload?.username) return payload.sub || payload.username;
+    }
+  } catch { /* ignore */ }
+
+  // 4. 从 localStorage 中的 token 解析（向后兼容）
   try {
     const token = localStorage.getItem("coapis_auth_token");
     if (token) {

@@ -49,14 +49,14 @@ export default function LoginPage() {
       if (isRegister) {
         const res = await authApi.register(values.username, values.password);
         if (res.token) {
-          // 使用 AuthStorage 登录
+          // 使用 AuthStorage 登录，传入后端返回的默认智能体 ID
           AuthStorage.login(res.token, values.username, {
             remember: values.remember_me || false,
             display_name: values.username,
+            default_agent_id: res.default_agent_id,
           });
           window.currentUserId = values.username;
           window.currentChannel = "";  // 控制台不设 channel，显示所有来源聊天
-          // 用后端返回的 default_agent_id 重设 selectedAgent，断开旧 localStorage 污染链
           if (res.default_agent_id) {
             setSelectedAgent(res.default_agent_id);
           }
@@ -66,18 +66,21 @@ export default function LoginPage() {
           }
           message.success(t("login.registerSuccess"));
           navigate(redirect, { replace: true });
+        } else {
+          message.info(t("login.authNotEnabled"));
+          navigate(redirect, { replace: true });
         }
       } else {
         const res = await authApi.login(values.username, values.password, expires_in);
         if (res.token) {
-          // 使用 AuthStorage 登录
+          // 使用 AuthStorage 登录，传入后端返回的默认智能体 ID
           AuthStorage.login(res.token, values.username, {
             remember: values.remember_me || false,
             display_name: values.username,
+            default_agent_id: res.default_agent_id,
           });
           window.currentUserId = values.username;
           window.currentChannel = "";  // 控制台不设 channel，显示所有来源聊天
-          // 用后端返回的 default_agent_id 重设 selectedAgent，断开旧 localStorage 污染链
           if (res.default_agent_id) {
             setSelectedAgent(res.default_agent_id);
           }
@@ -85,6 +88,7 @@ export default function LoginPage() {
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");
           }
+          message.success(t("login.success"));
           navigate(redirect, { replace: true });
         } else {
           message.info(t("login.authNotEnabled"));
