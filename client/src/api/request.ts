@@ -100,14 +100,24 @@ export async function request<T = unknown>(
 
   if (!response.ok) {
     if (response.status === 401) {
-      clearAuthToken();
-      // In embedded/iframe mode, don't force redirect to /login —
-      // the embedded page handles auth errors itself via EmbeddedChatPage.
-      const isEmbedded =
-        window.self !== window.top ||
-        window.location.pathname === "/chat/embedded";
-      if (!isEmbedded && window.location.pathname !== "/login") {
-        window.location.href = "/login";
+      // In embedded/iframe mode, don't clear token or redirect —
+      // the embedded page manages its own auth lifecycle.
+      // Note: sandboxed iframes may restrict window.top access,
+      // so wrap in try-catch and also check pathname as fallback.
+      let isEmbedded = window.location.pathname === "/chat/embedded";
+      if (!isEmbedded) {
+        try {
+          isEmbedded = window.self !== window.top;
+        } catch {
+          // window.top access blocked by sandbox → treat as embedded
+          isEmbedded = true;
+        }
+      }
+      if (!isEmbedded) {
+        clearAuthToken();
+        if (window.location.pathname !== "/login") {
+          window.location.href = "/login";
+        }
       }
       throw new Error("Not authenticated");
     }

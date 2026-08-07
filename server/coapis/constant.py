@@ -482,7 +482,8 @@ PUBLIC_PATHS: frozenset = frozenset({
     "/auth/login",
     "/auth/status",
     "/auth/register",
-    "/auth/verify",
+    # /auth/verify NOT in PUBLIC_PATHS — must validate token to prevent
+    # AuthGuard from always passing even with invalid tokens.
     "/auth/logout",
     "/api/auth/login",
     "/api/auth/status",

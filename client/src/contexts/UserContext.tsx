@@ -75,6 +75,13 @@ export default function UserProvider({ children }: UserProviderProps) {
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
 
   const refreshUser = useCallback(async () => {
+    // Iframe 嵌入模式：URL 中的 token 需要在读取前先存入 sessionStorage
+    // 否则 UserContext 初始化时 getApiToken() 为空，导致 401
+    const urlToken = new URLSearchParams(window.location.search).get('token');
+    if (urlToken && !getApiToken()) {
+      sessionStorage.setItem('coapis_auth_token', urlToken);
+    }
+
     const token = getApiToken();
     if (!token) {
       setUser(null);
@@ -95,7 +102,27 @@ export default function UserProvider({ children }: UserProviderProps) {
       localStorage.removeItem(oldKey);
       localStorage.removeItem(oldLastUsedKey);
       // Clear sessionStorage (may contain old user's selectedAgent)
-      sessionStorage.clear();
+      // But preserve auth token in embedded/iframe mode — the embedded page
+      // manages its own auth lifecycle and clearing the token here causes 401.
+      // Note: sandboxed iframes may restrict window.top access.
+      let isEmbeddedUser = window.location.pathname === "/chat/embedded";
+      if (!isEmbeddedUser) {
+        try {
+          isEmbeddedUser = window.self !== window.top;
+        } catch {
+          isEmbeddedUser = true;
+        }
+      }
+      if (isEmbeddedUser) {
+        // Selective clear: remove chat/session/agent keys but keep auth token
+        const authToken = sessionStorage.getItem('coapis_auth_token');
+        const authUser = sessionStorage.getItem('coapis_current_username');
+        sessionStorage.clear();
+        if (authToken) sessionStorage.setItem('coapis_auth_token', authToken);
+        if (authUser) sessionStorage.setItem('coapis_current_username', authUser);
+      } else {
+        sessionStorage.clear();
+      }
     }
 
     // Save current username for next login detection
@@ -117,9 +144,17 @@ export default function UserProvider({ children }: UserProviderProps) {
         // Token invalid or expired — clear silently, no redirect
         // In embedded/iframe mode, don't clear the token —
         // the embedded page manages its own auth lifecycle.
-        const isEmbedded =
-          window.self !== window.top ||
-          window.location.pathname === "/chat/embedded";
+        // Note: sandboxed iframes may restrict window.top access,
+        // so wrap in try-catch and also check pathname as fallback.
+        let isEmbedded = window.location.pathname === "/chat/embedded";
+        if (!isEmbedded) {
+          try {
+            isEmbedded = window.self !== window.top;
+          } catch {
+            // window.top access blocked by sandbox → treat as embedded
+            isEmbedded = true;
+          }
+        }
         if (!isEmbedded) {
           clearAuthToken();
         }
