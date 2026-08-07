@@ -2528,7 +2528,22 @@
     "searchPlaceholder": "Search files...",
     "textFiles": "Text Files",
     "uploadFailed": "Upload failed",
-    "uploadSuccess": "Upload successful"
+    "uploadSuccess": "Upload successful",
+    "webdavLink": "WebDAV Network Drive Mapping",
+    "username": "Username",
+    "password": "Password",
+    "close": "Close",
+    "webdavUrl": "WebDAV URL",
+    "webdavSetupWin": "Windows Mapping Steps",
+    "winStep1": "Open 'This PC', click 'Computer' -> 'Map network drive' in the top menu",
+    "winStep2": "Choose a drive letter (e.g. Z:), enter the WebDAV URL above in the 'Folder' field",
+    "winStep3": "Check 'Connect using other credentials', then click Finish",
+    "winStep4": "Enter your username and API Token/password for authentication",
+    "webdavSetupMac": "macOS Mapping Steps",
+    "macStep1": "In Finder, click 'Go' -> 'Connect to Server...' (Cmd+K)",
+    "macStep2": "Enter the WebDAV URL (format: dav://serverIP or domain)",
+    "macStep3": "Click 'Connect', select 'Registered User', enter username and password/Token",
+    "webdavTip": "After WebDAV mapping, you can directly view, edit, upload/download content in 'My Space - Files' from your local file manager, with real-time cloud sync."
   },
   "monitoring": {
     "title": "System Monitoring",

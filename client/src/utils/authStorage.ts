@@ -116,6 +116,18 @@ export class AuthStorage {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USERNAME_GLOBAL);
     // 不清除 localStorage 中的记住的用户名（保留用于快速切换）
   }
+
+  /**
+   * 从 token 中解析用户名
+   */
+  static getUsernameFromToken(token: string): string | null {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1] || ""));
+      return (payload?.sub || payload?.username || null) as string;
+    } catch {
+      return null;
+    }
+  }
   
   // ==================== 账号列表管理 ====================
   

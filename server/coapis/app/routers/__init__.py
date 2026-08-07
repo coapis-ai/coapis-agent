@@ -104,6 +104,7 @@ from .scenes import router as scenes_router
 from .admin_scenes import router as admin_scenes_router
 from .tags import router as tags_router
 from .menus import router as menus_router
+from .webdav import router as webdav_router
 
 router = APIRouter()
 
@@ -196,6 +197,7 @@ router.include_router(access_control_router)
 router.include_router(license_router)
 router.include_router(files_router)
 router.include_router(file_preview_router)  # /files/preview/{path} — chat media serving
+router.include_router(webdav_router)  # WebDAV API for workspace file access
 
 # ═══════════════════════════════════════════════════════════
 # Enterprise stubs (always loaded for upgrade prompts)

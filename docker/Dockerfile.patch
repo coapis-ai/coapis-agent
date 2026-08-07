@@ -31,5 +31,4 @@ COPY server/coapis/app/mcp/gateway.py /app/coapis/app/mcp/gateway.py
 # Fix: onboarding/complete API - use module-level WORKSPACES_DIR import
 COPY server/coapis/app/routers/auth.py /app/coapis/app/routers/auth.py
 
-# Fix: bootstrap identity extraction from conversation
-COPY server/coapis/agents/hooks/bootstrap.py /app/coapis/agents/hooks/bootstrap.py
+

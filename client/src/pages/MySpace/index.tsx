@@ -41,6 +41,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   MinusCircleOutlined,
+  LinkOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { api, getApiUrl } from '@/api';
@@ -118,6 +119,9 @@ const MySpacePage: React.FC = () => {
   const [copyTarget, setCopyTarget] = useState('');
   const [copySource, setCopySource] = useState<any>(null);
   
+  // WebDAV 模态框状态
+  const [webdavModalVisible, setWebdavModalVisible] = useState(false);
+
   // MySpace 配置（文件大小限制等）
   const [myspaceConfig, setMySpaceConfig] = useState<{ max_file_size: number; max_file_size_mb: number; max_upload_files: number } | null>(null);
   
@@ -697,6 +701,20 @@ const MySpacePage: React.FC = () => {
             />
           </Tooltip>
         </Space>
+
+        {/* 本地访问方式 */}
+        <Divider type="vertical" style={{ margin: '0 8px' }} />
+        {!isReadOnly && (
+          <Space>
+            <Tooltip title={t('myspace.webdavLink') || 'WebDAV 网络驱动器映射'}>
+              <Button
+                icon={<LinkOutlined />}
+                size="small"
+                onClick={() => setWebdavModalVisible(true)}
+              />
+            </Tooltip>
+          </Space>
+        )}
         
         {/* 操作按钮 (仅文件 Tab 显示) */}
         {!isReadOnly && (
@@ -1137,6 +1155,50 @@ const MySpacePage: React.FC = () => {
           <Empty description="暂无上传任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         )}
       </Drawer>
+
+      {/* WebDAV 网络驱动器映射模态框 */}
+      <Modal
+        title={`${t('myspace.webdavLink') || 'WebDAV 网络驱动器映射'}`}
+        open={webdavModalVisible}
+        onCancel={() => setWebdavModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setWebdavModalVisible(false)}>
+            {t('myspace.close') || '关闭'}
+          </Button>,
+        ]}
+      >
+        <div style={{ lineHeight: 1.8 }}>
+          <p><strong>{t('myspace.webdavUrl') || 'WebDAV URL'}:</strong></p>
+          <div style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, fontFamily: 'monospace', fontSize: 13, marginBottom: 16 }}>
+            {`${window.location.origin}/webdav/${localStorage.getItem('username') || t('myspace.currentUsername')}`}
+          </div>
+
+          <Divider />
+          
+          <h4 style={{ marginBottom: 8 }}>{t('myspace.webdavSetupWin') || 'Windows 映射步骤'}:</h4>
+          <ol style={{ paddingLeft: 20, margin: 0 }}>
+            <li>{t('myspace.winStep1') || '打开"此电脑"，点击顶部菜单的"计算机" -> "映射网络驱动器"'}</li>
+            <li>{t('myspace.winStep2') || '选择一个盘符（如 Z:），在"文件夹"中输入上述 WebDAV URL'} </li>
+            <li>{t('myspace.winStep3') || '勾选"使用其他凭据连接"，点击完成'} </li>
+            <li>{t('myspace.winStep4') || '输入您的用户名和 API Token/密码进行认证'} </li>
+          </ol>
+
+          <Divider />
+          
+          <h4 style={{ marginBottom: 8 }}>{t('myspace.webdavSetupMac') || 'macOS 映射步骤'}:</h4>
+          <ol style={{ paddingLeft: 20, margin: 0 }}>
+            <li>{t('myspace.macStep1') || '在 Finder 中点击"前往" -> "连接服务器..." (Cmd+K)'} </li>
+            <li>{t('myspace.macStep2') || '输入 WebDAV URL（格式：dav://服务器IP或域名）'} </li>
+            <li>{t('myspace.macStep3') || '点击"连接"，选择"注册用户"，输入用户名和密码/Token'} </li>
+          </ol>
+
+          <Divider />
+          
+          <p style={{ color: '#1890ff', fontSize: 13 }}>
+            💡 {t('myspace.webdavTip') || 'WebDAV 映射后，您可以在本地文件管理器中直接查看、编辑、上传/下载"我的空间 - 文件"中的内容，与云端实时同步。'}
+          </p>
+        </div>
+      </Modal>
 
       {/* 预览弹窗已移除 — 2026-06-28 */}
     </div>

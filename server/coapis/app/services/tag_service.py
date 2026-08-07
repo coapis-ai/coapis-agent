@@ -59,7 +59,6 @@ class TagService:
         """
         self.data_dir = data_dir
         self.tags_file = data_dir / "tags.json"
-        self._tags: Optional[List[TagConfig]] = None
     
     def _load_tags(self) -> List[TagConfig]:
         """Load tags from file.
@@ -67,9 +66,6 @@ class TagService:
         Returns:
             List of tag configurations
         """
-        if self._tags is not None:
-            return self._tags
-        
         if not self.tags_file.exists():
             logger.warning(f"Tags file not found: {self.tags_file}")
             return []
@@ -82,7 +78,6 @@ class TagService:
             for tag_data in data.get("tags", []):
                 tags.append(TagConfig(**tag_data))
             
-            self._tags = tags
             return tags
         except Exception as e:
             logger.error(f"Failed to load tags: {e}")
@@ -108,8 +103,6 @@ class TagService:
         with open(self.tags_file, 'w', encoding='utf-8') as f:
             json.dump(tags_data, f, ensure_ascii=False, indent=2)
         
-        # Update cache
-        self._tags = tags
         logger.info(f"Saved {len(tags)} tags to {self.tags_file}")
     
     def _generate_id(self, name: str, tag_type: TagType) -> str:
