@@ -1,4 +1,8 @@
 FROM coapis-agent:0.12.0
 
-# Copy updated MCP router with access policy endpoints
+# Copy updated server files
+COPY server/coapis/agents/hooks/bootstrap.py /app/coapis/agents/hooks/bootstrap.py
+COPY server/coapis/app/routers/auth.py /app/coapis/app/routers/auth.py
 COPY server/coapis/app/routers/mcp.py /app/coapis/app/routers/mcp.py
+COPY server/coapis/app/services/tag_service.py /app/coapis/app/services/tag_service.py
+COPY server/coapis/models/tag.py /app/coapis/models/tag.py
