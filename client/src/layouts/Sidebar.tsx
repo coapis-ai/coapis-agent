@@ -200,7 +200,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
         key: item.key,
         icon: item.icon,
         path: item.path,
-        label: t(item.labelKey, item.label),
+        label: item.label,
       };
 
       // 子菜单直接使用 API 返回的 children
@@ -209,7 +209,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: child.key,
           icon: child.icon ? <span>{child.icon}</span> : undefined,
           path: child.path,
-          label: t(child.labelKey || `nav.${child.key}`, child.label),
+          label: child.label,
         }));
       }
 

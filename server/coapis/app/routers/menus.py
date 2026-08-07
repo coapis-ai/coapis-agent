@@ -56,22 +56,18 @@ async def get_menus(
                 {
                     "key": "chat-menu",
                     "label": "聊天",
-                    "labelKey": "nav.chat",
                     "icon": "MessageOutlined",
                     "path": "/chat",
                     "permission": "chat",
-                    "sortOrder": 1,
-                    "isActive": true
+                    "sortOrder": 1
                 },
                 {
                     "key": "nature",
                     "label": "工作场景",
-                    "labelKey": "nav.workbench",
                     "icon": "📁",
                     "path": "/workbench",
                     "permission": "scene",
                     "sortOrder": 50,
-                    "isActive": true,
                     "children": [
                         {
                             "key": "office-common",
@@ -88,8 +84,8 @@ async def get_menus(
     """
     tags = tag_service._load_tags()
     
-    # 1. Menu tags: leaf top-level navigation items
-    menu_tags = [t for t in tags if t.type == TagType.MENU and t.enabled]
+    # 1. Menu tags: leaf top-level navigation items (must be enabled AND show_in_menu)
+    menu_tags = [t for t in tags if t.type == TagType.MENU and t.enabled and t.show_in_menu]
     menu_tags.sort(key=lambda t: (t.sort_order, t.name))
     
     # 2. Dimension tags: group menu items with category children
@@ -104,31 +100,27 @@ async def get_menus(
         menu_item: Dict[str, Any] = {
             "key": menu_tag.id,
             "label": menu_tag.name,
-            "labelKey": metadata.get("labelKey", f"nav.{menu_tag.id}"),
             "icon": menu_tag.icon or "📁",
             "path": metadata.get("path", f"/{menu_tag.id}"),
             "permission": metadata.get("permission"),
             "sortOrder": menu_tag.sort_order,
-            "isActive": metadata.get("isActive", True),
         }
         menu_items.append(menu_item)
     
     # Add dimension tags with children
     for dim in dimension_tags:
-        # Get category children for this dimension
-        children = [t for t in tags if t.type == TagType.CATEGORY and t.parent_id == dim.id and t.enabled]
+        # Get category children for this dimension (must be enabled AND show_in_menu)
+        children = [t for t in tags if t.type == TagType.CATEGORY and t.parent_id == dim.id and t.enabled and t.show_in_menu]
         children.sort(key=lambda t: (t.sort_order, t.name))
         
         metadata = dim.metadata or {}
         menu_item: Dict[str, Any] = {
             "key": dim.id,
             "label": dim.name,
-            "labelKey": metadata.get("labelKey", f"nav.{dim.id}"),
             "icon": dim.icon or "📁",
             "path": metadata.get("path", f"/{dim.id}"),
             "permission": metadata.get("permission"),
             "sortOrder": dim.sort_order,
-            "isActive": metadata.get("isActive", True),
         }
         
         # Add children if any
@@ -139,7 +131,6 @@ async def get_menus(
                     "label": cat.name,
                     "path": f"{metadata.get('path', f'/{dim.id}')}/{cat.id}",
                     "icon": cat.icon or "📄",
-                    "labelKey": f"nav.{cat.id}",
                 }
                 for cat in children
             ]

@@ -23,14 +23,12 @@ import { menusApi } from '../api/modules/menus';
 export interface MenuItem {
   key: string;
   label: string;
-  labelKey: string;  // 国际化key
   icon: React.ReactNode;
   iconName?: string;  // 原始图标名称/emoji
   path: string;
   children?: MenuItem[];  // 支持二级菜单
   permission?: string;
   sortOrder?: number;
-  isActive?: boolean;
 }
 
 // Fallback menu items (hardcoded, used when API fails)
@@ -38,14 +36,12 @@ export const FALLBACK_MENU_ITEMS: MenuItem[] = [
   {
     key: 'chat',
     label: '聊天',
-    labelKey: 'nav.chat',
     icon: <MessageOutlined />,
     path: '/chat',
   },
   {
     key: 'workbench',
     label: '工作场景',
-    labelKey: 'nav.workbench',
     icon: <AppstoreOutlined />,
     path: '/workbench',
     // 二级菜单从 API 动态加载，不在此硬编码
@@ -53,14 +49,12 @@ export const FALLBACK_MENU_ITEMS: MenuItem[] = [
   {
     key: 'myspace',
     label: '我的空间',
-    labelKey: 'nav.myspace',
     icon: <FolderOutlined />,
     path: '/workspace/myspace',
   },
   {
     key: 'settings',
     label: '设置',
-    labelKey: 'nav.settings',
     icon: <SettingOutlined />,
     path: '/settings',
   },

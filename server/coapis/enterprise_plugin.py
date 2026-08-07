@@ -90,7 +90,7 @@ class EnterprisePlugin(Protocol):
         - id: unique key
         - name: display name
         - icon: icon name or emoji
-        - metadata: dict with path, permission, sortOrder, labelKey, etc.
+        - metadata: dict with path, permission, etc.
         - enabled: true
         """
         ...

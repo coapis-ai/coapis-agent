@@ -649,20 +649,6 @@ const TagManagement: React.FC = () => {
                   >
                     <Input placeholder="例如: scene" />
                   </Form.Item>
-                  <Form.Item
-                    name={['metadata', 'labelKey']}
-                    label="国际化 Key"
-                    extra="留空则使用 nav.{标签ID}"
-                  >
-                    <Input placeholder="例如: nav.workbench" />
-                  </Form.Item>
-                  <Form.Item
-                    name={['metadata', 'isActive']}
-                    label="启用菜单"
-                    valuePropName="checked"
-                  >
-                    <Switch checkedChildren="是" unCheckedChildren="否" />
-                  </Form.Item>
                 </>
               ) : null;
             }}
