@@ -358,6 +358,140 @@ async def list_global_mcp_clients(request: Request) -> List[MCPClientInfo]:
     ]
 
 
+# ─── MCP Gateway (must be defined BEFORE /mcp/{client_key} to avoid route conflict) ────
+
+
+class MCPGatewayCallRequest(BaseModel):
+    """Request body for calling an MCP tool via gateway."""
+    gateway_name: str = Field(
+        ...,
+        description="Gateway tool name in the form mcp:{client_key}::{tool_name}",
+        examples=["mcp:gitee::search_repos"],
+    )
+    arguments: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Tool arguments dict",
+    )
+
+
+@router.get(
+    "/mcp/gateway/tools",
+    summary="List all MCP tools across all enabled clients (aggregated view).",
+)
+@require_permission("mcp:read")
+async def list_mcp_gateway_tools(request: Request) -> List[Dict[str, Any]]:
+    """Aggregate tools from every enabled MCP client.
+
+    Returns a flat list with extra `client_key` so callers can route calls.
+    """
+    try:
+        manager = getattr(request.app.state, "multi_agent_manager", None)
+        if not manager:
+            return []
+
+        user_id = getattr(request.state, "username", None)
+        agent_id = None
+        if user_id:
+            try:
+                agent_id = _get_agent_id_for_user(user_id)
+            except Exception:
+                agent_id = None
+
+        ws = None
+        if agent_id:
+            try:
+                # Use get_agent() to trigger lazy workspace start + MCP init
+                ws = await manager.get_agent(agent_id, username=user_id)
+            except Exception:
+                # Fallback: try get_workspace (may not have MCP initialized)
+                try:
+                    ws = manager.get_workspace(agent_id, username=user_id)
+                except Exception:
+                    ws = None
+
+        mcp_manager = _get_ws_mcp_manager(ws)
+        if mcp_manager is None:
+            return []
+
+        from ..mcp.gateway import MCPGateway
+
+        gateway = MCPGateway(mcp_manager)
+        return await gateway.list_gateway_tools()
+    except Exception as exc:
+        logger.debug("list_mcp_gateway_tools failed: %s", exc)
+        return []
+
+
+@router.post(
+    "/mcp/gateway/call",
+    summary="Call an MCP tool through the unified gateway.",
+)
+@require_permission("mcp:write")
+async def call_mcp_gateway_tool(
+    request: Request,
+    body: MCPGatewayCallRequest,
+) -> Dict[str, Any]:
+    """Call any MCP tool by gateway name.
+
+    Example body:
+    {
+      "gateway_name": "mcp:gitee::search_repos",
+      "arguments": {"query": "coapis"}
+    }
+    """
+    try:
+        manager = getattr(request.app.state, "multi_agent_manager", None)
+        if not manager:
+            raise HTTPException(500, detail="Multi-agent manager not available")
+
+        user_id = getattr(request.state, "username", None)
+        agent_id = None
+        if user_id:
+            try:
+                agent_id = _get_agent_id_for_user(user_id)
+            except Exception:
+                agent_id = None
+
+        ws = None
+        if agent_id:
+            try:
+                # Use get_agent() to trigger lazy workspace start + MCP init
+                ws = await manager.get_agent(agent_id, username=user_id)
+            except Exception:
+                try:
+                    ws = manager.get_workspace(agent_id, username=user_id)
+                except Exception:
+                    ws = None
+
+        mcp_manager = _get_ws_mcp_manager(ws)
+        if mcp_manager is None:
+            raise HTTPException(404, detail="MCP manager not initialized for this workspace")
+
+        from ..mcp.gateway import MCPGateway
+
+        gateway = MCPGateway(mcp_manager)
+        
+        # Generate internal context token for multi-tenant security
+        user_context_token = None
+        if user_id and agent_id:
+            try:
+                user_context_token = create_mcp_context_token(user_id, agent_id)
+            except Exception:
+                pass  # Token generation failure is non-fatal
+                
+        result = await gateway.call_tool(
+            body.gateway_name, 
+            body.arguments or {},
+            user_context_token=user_context_token,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("call_mcp_gateway_tool failed: %s", exc)
+        raise HTTPException(500, detail=str(exc))
+
+
 @router.get(
     "/mcp/{client_key}",
     response_model=MCPClientInfo,
@@ -878,129 +1012,3 @@ async def install_mcp_package(
             package=body.package,
             install_type=body.install_type,
         )
-
-
-# ─── MCP Gateway endpoints ────────────────────────────────────────────────
-
-
-class MCPGatewayCallRequest(BaseModel):
-    """Unified MCP tool call through the gateway."""
-
-    gateway_name: str = Field(
-        ...,
-        description="Gateway tool name in the form mcp:{client_key}::{tool_name}",
-        examples=["mcp:gitee::search_repos"],
-    )
-    arguments: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Tool arguments dict",
-    )
-
-
-@router.get(
-    "/mcp/gateway/tools",
-    summary="List all MCP tools across all enabled clients (aggregated view).",
-)
-@require_permission("mcp:read")
-async def list_mcp_gateway_tools(request: Request) -> List[Dict[str, Any]]:
-    """Aggregate tools from every enabled MCP client.
-
-    Returns a flat list with extra `client_key` so callers can route calls.
-    """
-    try:
-        manager = getattr(request.app.state, "multi_agent_manager", None)
-        if not manager:
-            return []
-
-        user_id = getattr(request.state, "username", None)
-        agent_id = None
-        if user_id:
-            try:
-                agent_id = _get_agent_id_for_user(user_id)
-            except Exception:
-                agent_id = None
-
-        ws = None
-        if agent_id:
-            try:
-                ws = manager.get_workspace(agent_id, username=user_id)
-            except Exception:
-                ws = None
-
-        mcp_manager = _get_ws_mcp_manager(ws)
-        if mcp_manager is None:
-            return []
-
-        from ..mcp.gateway import MCPGateway
-
-        gateway = MCPGateway(mcp_manager)
-        return await gateway.list_gateway_tools()
-    except Exception as exc:
-        logger.debug("list_mcp_gateway_tools failed: %s", exc)
-        return []
-
-
-@router.post(
-    "/mcp/gateway/call",
-    summary="Call an MCP tool through the unified gateway.",
-)
-@require_permission("mcp:write")
-async def call_mcp_gateway_tool(
-    request: Request,
-    body: MCPGatewayCallRequest,
-) -> Dict[str, Any]:
-    """Call any MCP tool by gateway name.
-
-    Example body:
-    {
-      "gateway_name": "mcp:gitee::search_repos",
-      "arguments": {"query": "coapis"}
-    }
-    """
-    try:
-        manager = getattr(request.app.state, "multi_agent_manager", None)
-        if not manager:
-            raise HTTPException(500, detail="Multi-agent manager not available")
-
-        user_id = getattr(request.state, "username", None)
-        agent_id = None
-        if user_id:
-            try:
-                agent_id = _get_agent_id_for_user(user_id)
-            except Exception:
-                agent_id = None
-
-        ws = None
-        if agent_id:
-            try:
-                ws = manager.get_workspace(agent_id, username=user_id)
-            except Exception:
-                ws = None
-
-        mcp_manager = _get_ws_mcp_manager(ws)
-        if mcp_manager is None:
-            raise HTTPException(404, detail="MCP manager not initialized for this workspace")
-
-        from ..mcp.gateway import MCPGateway
-
-        gateway = MCPGateway(mcp_manager)
-        
-        # Generate internal context token for multi-tenant security
-        user_context_token = None
-        if user_id and agent_id:
-            try:
-                user_context_token = create_mcp_context_token(user_id, agent_id)
-            except Exception:
-                pass  # Token generation failure is non-fatal
-                
-        result = await gateway.call_tool(
-            body.gateway_name, 
-            body.arguments or {},
-            user_context_token=user_context_token,
-        )
-        return result
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("call_mcp_gateway_tool failed: %s", exc)
-        raise HTTPException(500, detail=str(exc))
