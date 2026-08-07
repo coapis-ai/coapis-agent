@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.13.0] - 2026-08-06
+
+### Fixed
+
+- **Onboarding API** — Fixed `complete_onboarding` endpoint using module-level `WORKSPACES_DIR` import (`from ...constant`) to resolve `No module named 'coapis.app.constant'` error caused by stale `.pyc` cache. Profile identity now correctly writes to `PROFILE.md`.
+- **Bootstrap identity extraction** — Added `_save_identity_from_conversation` to `BootstrapHook` so user identity (name, style, role) from bootstrap conversation is automatically saved to `PROFILE.md` when onboarding completes.
+- **Scene management API** — Verified all `@require_permission` decorated endpoints (`create_scene`, `update_scene`, `delete_scene`) have `request: Request` as first parameter, preventing `AttributeError` on Pydantic model.
+
+### Infrastructure
+
+- **Mycom deployment** — Switched to `docker compose build` + `--force-recreate` workflow for reliable image replacement. Dockerfile.patch now includes auth.py and bootstrap.py fixes.
+- **Node.js 20.x LTS** — Container image includes Node.js for stdio-class MCP servers (e.g., Gitee MCP via npx).
+
 ## [v0.12.2] - 2026-08-04
 
 ### Fixed
