@@ -43,15 +43,29 @@ def _get_workspace_dir(username: str) -> str:
 
 
 def _path_to_local(workspace_dir: str, webdav_path: str) -> str:
-    """将 WebDAV 路径转换为本地文件系统路径"""
+    """将 WebDAV 路径转换为本地文件系统路径，防止目录遍历"""
     # webdav_path 类似 /webdav/username/docs/file.txt
     # 移除前缀 /webdav/<username>/
     parts = webdav_path.strip("/").split("/", 2)
     if len(parts) < 3:
-        return workspace_dir
+        local_rel_path = ""
+    else:
+        local_rel_path = parts[2] if len(parts) > 2 else ""
     
-    local_rel_path = parts[2] if len(parts) > 2 else ""
-    return os.path.join(workspace_dir, local_rel_path.lstrip("/"))
+    # Join path
+    local_path = os.path.join(workspace_dir, local_rel_path.lstrip("/"))
+    
+    # Resolve to absolute path and check against workspace_dir to prevent ../ traversal
+    from pathlib import Path
+    
+    resolved_local = Path(local_path).resolve()
+    resolved_workspace = Path(workspace_dir).resolve()
+    
+    # Ensure the resolved path is within the workspace directory
+    if not str(resolved_local).startswith(str(resolved_workspace) + os.sep):
+        raise HTTPException(status_code=403, detail="Invalid path - directory traversal detected")
+        
+    return str(resolved_local)
 
 
 def _is_directory(local_path: str) -> bool:

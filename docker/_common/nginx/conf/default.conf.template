@@ -80,23 +80,12 @@ server {
     }
 
     # ═══════════════════════════════════════════════════════
-    # 4. WebDAV 服务：/webdav/<username>/ → 用户工作空间文件目录
+    # 4. WebDAV 服务：/webdav/<username>/ → FastAPI WebDAV API
     # ═══════════════════════════════════════════════════════
     
     location ^~ /webdav/ {
-        # 启用 dav 方法
-        dav_methods PUT DELETE MKCOL COPY MOVE;
-        dav_ext_methods PROPFIND OPTIONS;
-        
-        # 创建文件权限
-        create_file_mode 0644;
-        create_dir_mode 0755;
-        
-        # WebDAV 认证：使用 basic auth 或代理到后端验证
-        # 注意：实际用户目录映射需要通过 fastapi 后端处理或在 nginx 层通过 map 实现
-        
         # 将 webdav 请求代理到后端的 webdav API 进行处理和权限验证
-        proxy_pass http://server:8000/api/webdav/;
+        proxy_pass http://server:8000/webdav/;
         proxy_set_header Host $host;
         proxy_set_header Authorization $http_authorization;
         proxy_set_header X-Real-IP $remote_addr;
