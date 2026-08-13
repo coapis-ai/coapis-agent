@@ -105,10 +105,26 @@ class RepositoryFactory:
             
             # 2. User Repository（企业版注入）
             user_repo = kwargs.get("user_repository")
+            session = kwargs.get("session")
+            
             if user_repo:
                 cls._user_repo = user_repo
                 logger.info("✅ Enterprise User repository injected")
+            elif session:
+                # 尝试从数据库创建 PostgresUserRepository
+                try:
+                    from coapis.enterprise.repository_postgres import PostgresUserRepository
+                    cls._user_repo = PostgresUserRepository(session)
+                    logger.info("Enterprise User repository initialized (PostgreSQL)")
+                except ImportError:
+                    try:
+                        from coapis.database.repositories.user_repository import PostgresUserRepository
+                        cls._user_repo = PostgresUserRepository(session)
+                        logger.info("Enterprise User repository initialized (PostgreSQL)")
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize PostgresUserRepository: {e}")
             else:
+                # 没有 session 也没有 user_repository，使用 JSON fallback
                 logger.info("Enterprise User repository not injected, using JSON")
                 try:
                     from .user_repository_json import JsonUserRepository

@@ -59,7 +59,13 @@ class JsonUserRepository(UserRepository):
                 raise ValueError(f"Failed to create user: {user_data.get('username')}")
 
             logger.info(f"Created user: {user_data.get('username')} (JSON storage)")
-            return result
+            
+            # Return the created user dictionary instead of boolean
+            from ..app.user_store import _load_users
+            data = _load_users()
+            user_dict = data["users"].get(user_data.get("username"), {})
+            user_dict["username"] = user_data.get("username")
+            return user_dict
 
         except Exception as e:
             logger.error(f"Error creating user: {e}")

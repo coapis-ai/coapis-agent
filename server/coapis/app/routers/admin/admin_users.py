@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from uuid import UUID
 
 from ....user_system.database import UserSystemDB
@@ -58,6 +58,8 @@ class AdminUserCreate(BaseModel):
 
 
 class AdminUserUpdate(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    
     role: Optional[str] = None
     display_name: Optional[str] = None
     token_quota_monthly: Optional[int] = None
@@ -295,10 +297,15 @@ async def create_user_admin(
         from ....foundation.repository_factory import RepositoryFactory
         user_repo = RepositoryFactory.get_user_repository()
         
+        # Hash password for PostgreSQL storage
+        from ...user_store import _hash_password
+        pw_hash, salt = _hash_password(payload.password)
+        
         # 准备用户数据
         user_data = {
             "username": payload.username,
-            "password": payload.password,
+            "password_hash": pw_hash,
+            "salt": salt,
             "email": payload.email,
             "display_name": payload.display_name,
             "role": payload.role,
@@ -375,8 +382,8 @@ async def get_user_by_id(
     user_repo = _get_user_repo()
     if user_repo:
         try:
-            uid = uuid.UUID(user_id)
-            user = await user_repo.get_user_by_id(uid)
+            # user_id is already a UUID object from FastAPI type hint
+            user = await user_repo.get_user_by_id(user_id)
             if user:
                 safe_user = _adapt_pg_user(user)
                 safe_user.pop("password_hash", None)
@@ -426,8 +433,8 @@ async def update_user(
     user_repo = _get_user_repo()
     if user_repo:
         try:
-            uid = uuid.UUID(user_id)
-            user = await user_repo.get_user_by_id(uid)
+            # user_id is already a UUID object from FastAPI type hint
+            user = await user_repo.get_user_by_id(user_id)
             if not user:
                 raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -440,9 +447,16 @@ async def update_user(
                 update_data["display_name"] = payload.display_name
             if payload.is_active is not None:
                 update_data["status"] = "active" if payload.is_active else "inactive"
+            
+            # Handle password update for PostgreSQL
+            if payload.password is not None:
+                from ...user_store import _hash_password
+                pw_hash, salt = _hash_password(payload.password)
+                update_data["password_hash"] = pw_hash
+                update_data["salt"] = salt
 
             if update_data:
-                await user_repo.update_user(uid, update_data)
+                await user_repo.update_user(user_id, update_data)
                 logger.info(f"Admin updated user {username} via PG Repository")
 
             # 同步到 JSON user_store（认证系统依赖）

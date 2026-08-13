@@ -129,7 +129,7 @@ async def get_menus(
                 {
                     "key": cat.id,
                     "label": cat.name,
-                    "path": f"{metadata.get('path', f'/{dim.id}')}/{cat.id}",
+                    "path": cat.metadata.get('path') if cat.metadata and 'path' in cat.metadata else f"{metadata.get('path', f'/{dim.id}')}/{cat.id}",
                     "icon": cat.icon or "📄",
                 }
                 for cat in children

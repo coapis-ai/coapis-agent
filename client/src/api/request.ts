@@ -155,3 +155,28 @@ export async function request<T = unknown>(
 
   return (await response.json()) as T;
 }
+
+// Helper methods for convenience
+request.get = async <T = unknown>(path: string, options?: RequestInit): Promise<T> => {
+  return request(path, { ...options, method: "GET" });
+};
+
+request.post = async <T = unknown>(path: string, body?: any, options?: RequestInit): Promise<T> => {
+  const opts: RequestInit = { ...options, method: "POST" };
+  if (body !== undefined && body !== null) {
+    opts.body = JSON.stringify(body);
+  }
+  return request(path, opts);
+};
+
+request.put = async <T = unknown>(path: string, body?: any, options?: RequestInit): Promise<T> => {
+  const opts: RequestInit = { ...options, method: "PUT" };
+  if (body !== undefined && body !== null) {
+    opts.body = JSON.stringify(body);
+  }
+  return request(path, opts);
+};
+
+request.delete = async <T = unknown>(path: string, options?: RequestInit): Promise<T> => {
+  return request(path, { ...options, method: "DELETE" });
+};

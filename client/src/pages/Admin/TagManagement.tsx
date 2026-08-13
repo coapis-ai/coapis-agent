@@ -144,6 +144,7 @@ const TagManagement: React.FC = () => {
       type: 'category',
       sort_order: 100,
       show_in_menu: true,
+            metadata: {},
       enabled: true,
       keywords: [],
       related_skills: [],
@@ -433,6 +434,20 @@ const TagManagement: React.FC = () => {
       ),
     },
     {
+      title: '路由路径',
+      key: 'route_path',
+      width: 150,
+      render: (_, record) => {
+        const path = (record.metadata as any)?.path;
+        if (!path) return '-';
+        // 仅对 menu / dimension 类型显示路由路径
+        if (record.type === 'menu' || record.type === 'dimension') {
+          return <Tag color="blue">{path}</Tag>;
+        }
+        return '-';
+      },
+    },
+    {
       title: '描述',
       dataIndex: 'description',
       key: 'description',
@@ -543,6 +558,7 @@ const TagManagement: React.FC = () => {
             type: 'category',
             sort_order: 100,
             show_in_menu: true,
+            metadata: {},
             enabled: true,
           }}
         >

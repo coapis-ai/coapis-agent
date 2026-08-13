@@ -31,4 +31,7 @@ COPY server/coapis/app/mcp/gateway.py /app/coapis/app/mcp/gateway.py
 # Fix: onboarding/complete API - use module-level WORKSPACES_DIR import
 COPY server/coapis/app/routers/auth.py /app/coapis/app/routers/auth.py
 
+# fix: secure WebDAV path traversal and Nginx config conflict
+COPY server/coapis/app/routers/webdav.py /app/coapis/app/routers/webdav.py
+
 

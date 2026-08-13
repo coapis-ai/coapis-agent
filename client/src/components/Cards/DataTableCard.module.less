@@ -1,0 +1,45 @@
+.dataTableCard {
+  border: 1px solid #e8e8e8;
+  background-color: #fff;
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+
+    .icon {
+      color: #52c41a;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+    }
+  }
+
+  .description {
+    display: block;
+    margin-bottom: 12px;
+    color: #666;
+    line-height: 1.5;
+  }
+
+  .tableWrapper {
+    margin-bottom: 16px;
+    max-height: 300px;
+    overflow-y: auto;
+
+    .table {
+      :global(.ant-table) {
+        font-size: 13px;
+      }
+    }
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+}

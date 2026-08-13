@@ -340,7 +340,7 @@ export function UsersTab() {
       // any previously stored overrides — otherwise they'd persist forever.
       // Send non-empty dict to set specific overrides.
       values.permission_overrides = overrides !== null ? overrides : {};
-      await updateUser(editUser.id, values);
+      await updateUser(editUser.username || editUser.id, values);
       message.success(t('admin.userUpdated'));
       setEditModal(false);
       loadUsers();

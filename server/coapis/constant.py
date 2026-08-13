@@ -535,6 +535,8 @@ PUBLIC_PREFIXES: tuple = (
     "/api/models/by-type",  # Get models by type (read-only)
     # SSO login APIs (for external system integration)
     "/api/external",  # SSO login endpoint (no auth required, it's for getting token)
+    # Plugin asset files (enterprise frontend plugins entry JS)
+    "/api/plugins/enterprise/files/",
     "/favicon.ico",
     "/robots.txt",
 )

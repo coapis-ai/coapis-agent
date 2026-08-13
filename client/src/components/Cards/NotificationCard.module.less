@@ -1,0 +1,61 @@
+.notificationCard {
+  border: 1px solid #e8e8e8;
+  background-color: #fff;
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+
+    .icon {
+      color: #faad14;
+
+      &.danger {
+        color: #f5222d;
+      }
+
+      &.warning {
+        color: #faad14;
+      }
+
+      &.success {
+        color: #52c41a;
+      }
+    }
+
+    .title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+    }
+  }
+
+  .priorityRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+
+    .timestamp {
+      font-size: 12px;
+    }
+  }
+
+  .messageBox {
+    background-color: #f5f5f5;
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 16px;
+
+    .message {
+      line-height: 1.6;
+      color: #333;
+    }
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+}

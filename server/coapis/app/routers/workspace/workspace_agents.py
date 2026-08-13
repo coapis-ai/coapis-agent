@@ -103,9 +103,9 @@ def _to_dict(obj: Any) -> Dict[str, Any]:
     return {}
 
 
-def _get_active_model(agent_id: str) -> Optional[ModelSlotConfig]:
+def _get_active_model(agent_id: str, username: str = None) -> Optional[ModelSlotConfig]:
     """获取智能体的活跃模型配置."""
-    agent_config = _to_dict(load_agent_config(agent_id))
+    agent_config = _to_dict(load_agent_config(agent_id, username=username))
     
     active_model = agent_config.get("active_model")
     if isinstance(active_model, dict) and active_model.get("model"):
@@ -126,12 +126,12 @@ def _get_active_model(agent_id: str) -> Optional[ModelSlotConfig]:
     return None
 
 
-def _agent_to_summary(agent_id: str, scope: str = "user") -> Dict[str, Any]:
+def _agent_to_summary(agent_id: str, scope: str = "user", username: str = None) -> Dict[str, Any]:
     """Convert agent_id to AgentSummary format."""
-    agent_config = _to_dict(load_agent_config(agent_id))
+    agent_config = _to_dict(load_agent_config(agent_id, username=username))
     name = agent_config.get("name", agent_id)
     description = agent_config.get("description", "")
-    active_model = _get_active_model(agent_id)
+    active_model = _get_active_model(agent_id, username=username)
     
     # Determine workspace dir based on scope
     if scope == "global":
@@ -168,7 +168,7 @@ async def list_my_agents(request: Request) -> Dict[str, Any]:
     for agent_info in user_agents:
         agent_id = agent_info["id"]
         scope = agent_info.get("scope", "user")
-        agents.append(_agent_to_summary(agent_id, scope))
+        agents.append(_agent_to_summary(agent_id, scope, username=username))
     
     return {
         "agents": agents,
@@ -288,7 +288,7 @@ async def create_my_agent(
                 details={"name": payload.name},
             )
 
-        return _agent_to_summary(agent_id, "user")
+        return _agent_to_summary(agent_id, "user", username=username)
         
     except Exception as e:
         logger.error(f"Failed to create agent: {e}", exc_info=True)
@@ -318,7 +318,7 @@ async def get_my_agent(
     else:
         scope = "user"
     
-    return _agent_to_summary(agent_id, scope)
+    return _agent_to_summary(agent_id, scope, username=username)
 
 
 @router.put("/workspace/agents/{agent_id}")
@@ -344,7 +344,7 @@ async def update_my_agent(
     
     # 加载当前配置（AgentProfileConfig 对象）
     from ....config.config import AgentProfileConfig
-    current_config = load_agent_config(agent_id)
+    current_config = load_agent_config(agent_id, username=username)
     
     # 构建更新数据
     update_data = {}
@@ -398,7 +398,7 @@ async def update_my_agent(
             details={"updated_fields": [k for k, v in payload.model_dump().items() if v is not None]},
         )
     
-    return _agent_to_summary(agent_id, "user")
+    return _agent_to_summary(agent_id, "user", username=username)
 
 
 @router.delete("/workspace/agents/{agent_id}")
@@ -509,9 +509,13 @@ async def toggle_my_agent(
         raise HTTPException(status_code=403, detail="无权操作此智能体")
     
     # 更新配置中的 enabled 字段
-    config = _to_dict(load_agent_config(agent_id))
-    config["enabled"] = payload.enabled
-    save_agent_config(agent_id, config)
+    agent_config_dict = _to_dict(load_agent_config(agent_id, username=username))
+    agent_config_dict["enabled"] = payload.enabled
+    
+    # Convert back to AgentProfileConfig for save_agent_config
+    from ....config.config import AgentProfileConfig
+    agent_config_obj = AgentProfileConfig(**agent_config_dict)
+    save_agent_config(agent_id, agent_config_obj)
     
     if payload.enabled:
         await workspace.start()

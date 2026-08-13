@@ -359,10 +359,17 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
     provider_manager = ProviderManager.get_instance()
     local_model_manager = LocalModelManager.get_instance()
     
-    # Initialize Repository Factory (Community edition)
+    # Initialize Repository Factory based on COAPIS_EDITION environment variable
     from ..foundation.repository_factory import RepositoryFactory
-    RepositoryFactory.initialize(edition="community", data_dir=DATA_DIR)
-    logger.debug("RepositoryFactory initialized (Community edition)")
+    import os
+    
+    edition = os.getenv("COAPIS_EDITION", "community")
+    
+    if edition == "enterprise":
+        logger.debug("RepositoryFactory initialization skipped - Enterprise plugin will inject PostgreSQL repositories")
+    else:
+        RepositoryFactory.initialize(edition=edition, data_dir=DATA_DIR)
+        logger.debug(f"RepositoryFactory initialized ({'Enterprise' if edition == 'enterprise' else 'Community'} edition)")
 
     # Start token usage manager background tasks
     logger.debug("Starting TokenUsageManager background tasks...")

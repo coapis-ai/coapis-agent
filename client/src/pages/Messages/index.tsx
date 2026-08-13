@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { Layout, Spin, message as antdMessage } from "antd";
+import { Layout, Spin } from "antd";
 import MessageStatisticsPanel from "./components/MessageStatisticsPanel";
 import CategoryStatisticsPanel from "./components/CategoryStatisticsPanel";
 import MessageListTable from "./components/MessageListTable";
 import type { MessageStats } from "./components/MessageStatisticsPanel";
 import type { CategoryStats } from "./components/CategoryStatisticsPanel";
 import type { MessageItem } from "./components/MessageListTable";
+import { messageService } from "@/api/modules/message";
 
 const { Content } = Layout;
 
@@ -15,7 +16,7 @@ export default function MessagesPage() {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(false);
 
   // Load statistics
@@ -26,14 +27,13 @@ export default function MessagesPage() {
 
   const loadStats = async () => {
     try {
-      // TODO: Replace with actual API call to /api/messages/stats/personal
-      const mockStats: MessageStats = {
-        total_messages: 156,
-        unread_messages: 23,
-        today_new_messages: 8,
-        processed_messages: 133,
-      };
-      setStats(mockStats);
+      const data = await messageService.getStats();
+      setStats({
+        total_messages: data.total_received,
+        unread_messages: data.unread_count,
+        today_new_messages: data.today_new,
+        processed_messages: data.processing_pending,
+      });
     } catch (error) {
       console.error("Failed to load stats:", error);
     }
@@ -41,14 +41,12 @@ export default function MessagesPage() {
 
   const loadCategories = async () => {
     try {
-      // TODO: Replace with actual API call to /api/messages/categories/stats
-      const mockCategories: CategoryStats[] = [
-        { category_name: "系统通知", unread_count: 5, read_count: 42 },
-        { category_name: "任务分配", unread_count: 8, read_count: 31 },
-        { category_name: "审批提醒", unread_count: 3, read_count: 15 },
-        { category_name: "AI代理消息", unread_count: 7, read_count: 28 },
-        { category_name: "外部系统集成通知", unread_count: 0, read_count: 17 },
-      ];
+      const data = await messageService.getCategoryStats();
+      const mockCategories: CategoryStats[] = data.map((item) => ({
+        category_name: item.category,
+        unread_count: item.count,
+        read_count: 0,
+      }));
       setCategories(mockCategories);
     } catch (error) {
       console.error("Failed to load categories:", error);
@@ -58,16 +56,25 @@ export default function MessagesPage() {
   const loadMessages = async () => {
     setLoading(true);
     try {
-      // TODO: Replace with actual API call to /api/messages?page=&pageSize=...
-      const mockMessages: MessageItem[] = [
-        { id: "msg-001", title: "系统维护通知", content: "今晚23:00进行系统维护", channel: "system", priority: "high", status: "unread", created_at: new Date().toISOString() },
-        { id: "msg-002", title: "任务已完成", content: "数据同步任务已执行完成", channel: "task", priority: "medium", status: "read", created_at: new Date(Date.now() - 3600000).toISOString() },
-      ];
-      setMessages(mockMessages);
-      setTotal(156);
+      const response = await messageService.getList({
+        business_type: undefined,
+        workflow_status: undefined,
+        is_read: undefined,
+        page,
+        size: pageSize,
+      });
+      setMessages(response.items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        content: item.summary,
+        channel: item.business_type,
+        priority: item.priority,
+        status: item.is_read ? 'read' : 'unread',
+        created_at: item.created_at,
+      })));
+      setTotal(response.total);
     } catch (error) {
       console.error("Failed to load messages:", error);
-      antdMessage.error("加载消息列表失败");
     } finally {
       setLoading(false);
     }
