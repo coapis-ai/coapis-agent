@@ -266,7 +266,7 @@ class ContextStrategy(BaseStrategy):
         
         # Weekday scoring
         if "weekday" in metadata:
-            weekday = metadata["weekday"]
+            weekday = metadata.get("weekday", "")
             # Monday planning and Friday summary are valuable
             if weekday in [0, 4]:
                 return 0.8

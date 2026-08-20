@@ -68,7 +68,7 @@ class MCPGateway:
                 continue
 
             for mcp_tool in mcp_tools:
-                tool_name = getattr(mcp_tool, "name", "")
+                tool_name = mcp_tool.get("name", "")
                 if not tool_name:
                     continue
                 gateway_name = f"mcp:{client_key}::{tool_name}"
@@ -76,8 +76,8 @@ class MCPGateway:
                     "gateway_name": gateway_name,
                     "client_key": client_key,
                     "tool_name": tool_name,
-                    "description": getattr(mcp_tool, "description", "") or "",
-                    "input_schema": getattr(mcp_tool, "inputSchema", None) or {},
+                    "description": mcp_tool.get("description", "") or "",
+                    "input_schema": mcp_tool.get("inputSchema", {}) or {},
                     "enabled": getattr(client, "enabled", True),
                 })
 

@@ -9,7 +9,7 @@
 
 import { useState, useEffect } from 'react';
 import { Form, Input, Select, InputNumber, Switch, Button, Space, Card, message, Divider, Row, Col } from 'antd';
-import { SaveOutlined } from '@ant-design/icons';
+import { SaveOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { PageHeader } from '@/components/PageHeader';
 import { knowledgeApi, type KnowledgeBaseConfig, type ModelProvider } from '@/api/modules/knowledge';
@@ -152,6 +152,62 @@ export default function KnowledgeBaseCreatePage() {
               <Select.Option value="user">用户</Select.Option>
               <Select.Option value="agent">智能体</Select.Option>
             </Select>
+          </Form.Item>
+
+          {/* 归属与权限分配 */}
+          <Divider orientation="left">归属与权限分配</Divider>
+          
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="owner_name" label="负责人姓名" tooltip="知识库负责人">
+                <Input prefix={<UserOutlined />} placeholder="请输入负责人姓名" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="owner_id" label="负责人 ID">
+                <Input placeholder="用户/账号 ID" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="department" label="部门">
+                <Input placeholder="所属部门" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="team_id" label="团队 ID">
+                <Input prefix={<TeamOutlined />} placeholder="团队 ID" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            name="visibility"
+            label="可见性"
+            tooltip="控制知识库的访问范围"
+            initialValue="team"
+          >
+            <Select>
+              <Select.Option value="private">私有（仅自己可见）</Select.Option>
+              <Select.Option value="team">团队可见</Select.Option>
+              <Select.Option value="organization">组织可见</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Divider orientation="left">角色权限分配</Divider>
+          
+          <Form.Item name="read_roles" label="读权限角色" tooltip="可读取知识库的角色">
+            <Select mode="tags" placeholder="输入角色，回车添加（默认：team_member）" />
+          </Form.Item>
+
+          <Form.Item name="write_roles" label="写权限角色" tooltip="可向知识库添加/修改文档的角色">
+            <Select mode="tags" placeholder="输入角色，回车添加（默认：team_admin）" />
+          </Form.Item>
+
+          <Form.Item name="admin_roles" label="管理权限角色" tooltip="可管理知识库配置与权限的角色">
+            <Select mode="tags" placeholder="输入角色，回车添加（默认：owner）" />
           </Form.Item>
 
           {/* RAG Configuration */}

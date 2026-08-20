@@ -418,6 +418,67 @@ class ChannelManager:
                 channel, (to_handle or "")[:60],
             )
 
+    async def send_c2a(
+        self,
+        channel: str,
+        user_id: str,
+        session_id: str,
+        c2a_payload: Dict[str, Any],
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Send a C2A (Chat-to-Action) message proactively via the specified channel.
+
+        Delegates to the channel's ``send_c2a()`` or ``send()`` method
+        which each concrete channel implements for structured C2A payloads.
+
+        Args:
+            channel: Channel ID (e.g. 'wecom', 'console').
+            user_id: Target user identifier.
+            session_id: Target session — should carry the channel
+                prefix (e.g. ``wecom:group:xxx``) for proper routing.
+            c2a_payload: C2A protocol structured message payload.
+            meta: Optional metadata forwarded to the channel.
+        """
+        ch = self.get_channel(channel)
+        if ch is None:
+            logger.warning(
+                "send_c2a: channel '%s' not found", channel,
+            )
+            return
+        
+        # Build to_handle using channel's own routing logic (preferred),
+        # falling back to session_id, then to channel:user_id.
+        if hasattr(ch, "to_handle_from_target"):
+            to_handle = ch.to_handle_from_target(
+                user_id=user_id,
+                session_id=session_id or "",
+            )
+        else:
+            to_handle = session_id or f"{channel}:{user_id}"
+        
+        try:
+            # Try send_c2a method first, fallback to send() with JSON payload
+            if hasattr(ch, "send_c2a") and callable(ch.send_c2a):
+                logger.info(
+                    "send_c2a: channel=%s to_handle=%s payload_keys=%s",
+                    channel, (to_handle or "")[:60], list(c2a_payload.keys()),
+                )
+                await ch.send_c2a(to_handle=to_handle, c2a_payload=c2a_payload, meta=meta)
+            else:
+                # Fallback: send as JSON text via standard send()
+                import json
+                payload_str = json.dumps(c2a_payload, ensure_ascii=False)
+                logger.info(
+                    "send_c2a (fallback): channel=%s to_handle=%s len=%s",
+                    channel, (to_handle or "")[:60], len(payload_str),
+                )
+                await ch.send(to_handle=to_handle, text=f"[C2A_MESSAGE]\n{payload_str}", meta=meta)
+        except Exception:
+            logger.exception(
+                "send_c2a failed: channel=%s to_handle=%s",
+                channel, (to_handle or "")[:60],
+            )
+
     async def clear_queue(
         self,
         channel_id: str,

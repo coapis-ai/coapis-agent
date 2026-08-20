@@ -16,9 +16,7 @@ import {
   FileTextOutlined,
   DatabaseOutlined,
   UserOutlined,
-  SettingOutlined,
   BookOutlined,
-  RocketOutlined,
   EyeOutlined,
   EditOutlined,
 } from "@ant-design/icons";
@@ -51,8 +49,6 @@ const IDENTITY_FILES = [
   { key: "SOUL.md", label: "SOUL.md", icon: <FileTextOutlined />, desc: "智能体灵魂 — 性格、准则、行为风格" },
   { key: "PROFILE.md", label: "PROFILE.md", icon: <UserOutlined />, desc: "用户资料 — 身份信息、偏好" },
   { key: "MEMORY.md", label: "MEMORY.md", icon: <DatabaseOutlined />, desc: "长期记忆 — 经验、决策、笔记" },
-  { key: "BOOTSTRAP.md", label: "BOOTSTRAP.md", icon: <RocketOutlined />, desc: "首次引导 — 新用户初始化配置" },
-  { key: "HEARTBEAT.md", label: "HEARTBEAT.md", icon: <SettingOutlined />, desc: "心跳检查 — 定期自检任务" },
 ];
 
 export default function AgentIdentityFiles({

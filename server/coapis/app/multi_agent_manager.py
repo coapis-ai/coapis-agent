@@ -250,6 +250,54 @@ class MultiAgentManager:
         cache_key = f"global:{agent_id}"
         return self._workspaces.get(cache_key)
 
+    async def reload_agent(self, agent_id: str) -> bool:
+        """Reload an agent workspace with zero downtime.
+
+        Stops the workspace if running, then starts it again to pick up
+        any configuration or skill changes. This is used after skill
+        uploads, config changes, or other operations that require the
+        agent to reload its context.
+
+        Args:
+            agent_id: Agent identifier
+
+        Returns:
+            True if agent was reloaded, False if agent was not loaded
+        """
+        # Find workspace by agent_id (support both legacy and composite keys)
+        workspace = None
+        
+        # Try direct key first (legacy compatibility)
+        if agent_id in self._workspaces:
+            workspace = self._workspaces[agent_id]
+        else:
+            # Search by agent_id in composite keys
+            for cache_key, ws in self._workspaces.items():
+                if ws.agent_id == agent_id:
+                    workspace = ws
+                    break
+
+        if workspace is None:
+            logger.info(f"Agent reload skipped: '{agent_id}' is not currently loaded")
+            return False
+
+        try:
+            # Stop if running
+            if getattr(workspace, "status", "") == "running":
+                logger.info(f"Stopping workspace for reload: {agent_id}")
+                await workspace.stop()
+            
+            # Start again
+            logger.info(f"Starting workspace for reload: {agent_id}")
+            await workspace.start()
+            workspace.set_manager(self)
+            
+            logger.info(f"Agent reloaded successfully: {agent_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Agent reload failed for '{agent_id}': {e}", exc_info=True)
+            return False
+
     async def invalidate_workspaces_by_provider(self, provider_id: str) -> int:
         """Remove cached workspaces that reference a deleted provider.
 

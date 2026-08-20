@@ -1660,8 +1660,8 @@ def reconcile_workspace_manifest(workspace_dir: Path) -> dict[str, Any]:
                 "channels": channels,
                 "source": source,
                 "metadata": metadata,
-                "requirements": metadata["requirements"],
-                "updated_at": metadata["updated_at"],
+                "requirements": metadata.get("requirements", ""),
+                "updated_at": metadata.get("updated_at", ""),
             }
             if "config" in existing:
                 next_entry["config"] = existing.get("config")
@@ -2503,15 +2503,15 @@ class SkillService:
             payload["skills"][skill_name] = {
                 "enabled": bool(entry.get("enabled", enable)),
                 "channels": entry.get("channels") or ["all"],
-                "source": metadata["source"],
+                "source": metadata.get("source", ""),
                 "config": (
                     dict(config)
                     if config is not None
                     else dict(entry.get("config") or {})
                 ),
                 "metadata": metadata,
-                "requirements": metadata["requirements"],
-                "updated_at": metadata["updated_at"],
+                "requirements": metadata.get("requirements", ""),
+                "updated_at": metadata.get("updated_at", ""),
             }
 
         _mutate_json(
@@ -2658,11 +2658,11 @@ class SkillService:
             next_entry = {
                 "enabled": bool(current_entry.get("enabled", False)),
                 "channels": current_entry.get("channels") or ["all"],
-                "source": metadata["source"],
+                "source": metadata.get("source", ""),
                 "config": new_config,
                 "metadata": metadata,
-                "requirements": metadata["requirements"],
-                "updated_at": metadata["updated_at"],
+                "requirements": metadata.get("requirements", ""),
+                "updated_at": metadata.get("updated_at", ""),
             }
             existing_tags = current_entry.get("tags")
             if existing_tags is not None:
@@ -2744,11 +2744,11 @@ class SkillService:
             next_entry = {
                 "enabled": bool(current_entry.get("enabled", False)),
                 "channels": current_entry.get("channels") or old_channels,
-                "source": metadata["source"],
+                "source": metadata.get("source", ""),
                 "config": old_config,
                 "metadata": metadata,
-                "requirements": metadata["requirements"],
-                "updated_at": metadata["updated_at"],
+                "requirements": metadata.get("requirements", ""),
+                "updated_at": metadata.get("updated_at", ""),
             }
             existing_tags = current_entry.get("tags")
             if existing_tags is not None:
@@ -3772,11 +3772,11 @@ class SkillPoolService:
             ws_entry: dict[str, Any] = {
                 "enabled": True,
                 "channels": ["all"],
-                "source": metadata["source"],
+                "source": metadata.get("source", ""),
                 "config": pool_config,
                 "metadata": metadata,
-                "requirements": metadata["requirements"],
-                "updated_at": metadata["updated_at"],
+                "requirements": metadata.get("requirements", ""),
+                "updated_at": metadata.get("updated_at", ""),
             }
             pool_lang = str(
                 entry.get("builtin_language", "") or "",

@@ -17,6 +17,10 @@ from . import get_current_time
 from . import get_token_usage
 from . import agent_management
 
+# ── C2A / card rendering tools ──
+from . import card_renderer
+from . import c2a_sender
+
 # ── Skill / memory ──
 from . import todo_tool
 from . import web_search

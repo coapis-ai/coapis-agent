@@ -117,6 +117,52 @@ def _adapt_pg_user(user: Dict[str, Any]) -> Dict[str, Any]:
     return adapted
 
 
+async def _resolve_pg_user(user_repo, user_id: str) -> Tuple[Optional[uuid.UUID], Optional[Dict[str, Any]]]:
+    """按 UUID 字符串或 username 解析企业版（PostgreSQL）用户.
+
+    前端用户管理页传的是 username（updateUser(username, ...)），
+    禁用/删除接口传的是 int id，兼容三种形态。
+
+    Returns:
+        (uuid, user_dict)；未找到时返回 (None, None)
+    """
+    try:
+        uid = uuid.UUID(user_id)
+    except (ValueError, AttributeError, TypeError):
+        uid = None
+
+    if uid is not None:
+        user = await user_repo.get_user_by_id(uid)
+        if user:
+            return uid, user
+
+    user = await user_repo.get_user_by_username(user_id)
+    if user:
+        raw_id = user.get("id")
+        if isinstance(raw_id, str):
+            try:
+                uid = uuid.UUID(raw_id)
+            except ValueError:
+                uid = None
+        return uid, user
+    return None, None
+
+
+def _resolve_community_user(db: UserSystemDB, user_id: str) -> Optional[Dict[str, Any]]:
+    """按 int id 或 username 解析社区版（UserSystemDB）用户."""
+    try:
+        int_id = int(user_id)
+    except (ValueError, TypeError):
+        int_id = None
+
+    if int_id is not None:
+        user = db.get_user_by_id(int_id)
+        if user:
+            return user
+
+    return db.get_user_by_username(user_id)
+
+
 def _ensure_admin_in_db(db: UserSystemDB, admin_username: str) -> int:
     """确保 admin 用户在数据库中存在，返回 user_id.
     
@@ -297,11 +343,10 @@ async def create_user_admin(
         from ....foundation.repository_factory import RepositoryFactory
         user_repo = RepositoryFactory.get_user_repository()
         
-        # Hash password for PostgreSQL storage
+        # 准备用户数据（注意：企业版 PostgreSQL repository 需要 password_hash）
         from ...user_store import _hash_password
         pw_hash, salt = _hash_password(payload.password)
         
-        # 准备用户数据
         user_data = {
             "username": payload.username,
             "password_hash": pw_hash,
@@ -309,6 +354,7 @@ async def create_user_admin(
             "email": payload.email,
             "display_name": payload.display_name,
             "role": payload.role,
+            "tenant_id": "default",  # PostgreSQL users 表要求 tenant_id 不为空（默认租户）
         }
         
         # 创建用户
@@ -321,6 +367,13 @@ async def create_user_admin(
         # RepositoryFactory未初始化，回退到旧方式
         logger.warning(f"RepositoryFactory not initialized, falling back to SQLite: {e}")
         user = await _create_user_fallback(payload)
+    except Exception as e:
+        # 捕获数据库约束错误或其他异常，回退到社区版 fallback
+        logger.error(f"Failed to create user via Repository: {e}", exc_info=True)
+        try:
+            user = await _create_user_fallback(payload)
+        except Exception as fb_e:
+            raise HTTPException(status_code=500, detail=f"创建用户失败: {str(fb_e)}") from e
     
     # 2. 同步到 JSON user_store（认证用）
     try:
@@ -375,15 +428,14 @@ async def create_user_admin(
 @require_permission("admin:admin")
 async def get_user_by_id(
     request: Request,
-    user_id: UUID,
+    user_id: str,
 ) -> Dict[str, Any]:
-    """获取用户详情."""
+    """获取用户详情（支持 UUID / username / int id）."""
     # ⭐ 企业版：优先走 PostgreSQL
     user_repo = _get_user_repo()
     if user_repo:
         try:
-            # user_id is already a UUID object from FastAPI type hint
-            user = await user_repo.get_user_by_id(user_id)
+            uid, user = await _resolve_pg_user(user_repo, user_id)
             if user:
                 safe_user = _adapt_pg_user(user)
                 safe_user.pop("password_hash", None)
@@ -400,12 +452,7 @@ async def get_user_by_id(
 
     # 社区版 fallback：UserSystemDB
     db = UserSystemDB()
-    try:
-        int_id = int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user = db.get_user_by_id(int_id)
+    user = _resolve_community_user(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -419,10 +466,10 @@ async def get_user_by_id(
 @require_permission("admin:admin")
 async def update_user(
     request: Request,
-    user_id: UUID,
+    user_id: str,
     payload: AdminUserUpdate = Body(...),
 ) -> Dict[str, Any]:
-    """更新用户信息（管理员操作）.
+    """更新用户信息（管理员操作，支持 UUID / username / int id）.
     
     企业版：更新 PostgreSQL users 表 + 同步 JSON user_store（认证系统依赖）
     社区版：更新 SQLite user_system + 同步 JSON user_store
@@ -433,8 +480,7 @@ async def update_user(
     user_repo = _get_user_repo()
     if user_repo:
         try:
-            # user_id is already a UUID object from FastAPI type hint
-            user = await user_repo.get_user_by_id(user_id)
+            uid, user = await _resolve_pg_user(user_repo, user_id)
             if not user:
                 raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -489,15 +535,11 @@ async def update_user(
     # 社区版 fallback：UserSystemDB
     db = UserSystemDB()
 
-    try:
-        int_id = int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user = db.get_user_by_id(int_id)
+    user = _resolve_community_user(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    int_id = user["id"]
     username = user["username"]
     update_data = {}
 
@@ -549,10 +591,10 @@ async def update_user(
 @require_permission("admin:admin")
 async def delete_user(
     request: Request,
-    user_id: UUID,
+    user_id: str,
     body: UserDeleteRequest = Body(default=UserDeleteRequest()),
 ) -> Dict[str, Any]:
-    """删除用户（支持软删除和硬删除）.
+    """删除用户（支持软删除和硬删除，支持 UUID / username / int id）.
     
     企业版：
     - 软删除（默认）：PG 软删除（deleted_at + status=inactive）+ 清理 JSON user_store
@@ -565,8 +607,7 @@ async def delete_user(
     user_repo = _get_user_repo()
     if user_repo:
         try:
-            uid = uuid.UUID(user_id)
-            user = await user_repo.get_user_by_id(uid)
+            uid, user = await _resolve_pg_user(user_repo, user_id)
             if not user:
                 raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -617,15 +658,11 @@ async def delete_user(
     # 社区版 fallback：UserSystemDB
     db = UserSystemDB()
 
-    try:
-        int_id = int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user = db.get_user_by_id(int_id)
+    user = _resolve_community_user(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    int_id = user["id"]
     username = user["username"]
 
     if body.backup:
@@ -690,17 +727,16 @@ async def delete_user(
 @require_permission("admin:admin")
 async def reset_user_tokens(
     request: Request,
-    user_id: UUID,
+    user_id: str,
 ) -> Dict[str, Any]:
-    """重置用户 Token 用量."""
+    """重置用户 Token 用量（支持 UUID / username / int id）."""
     admin_username = getattr(request.state, "username", "anonymous")
 
     # ⭐ 企业版：优先走 PostgreSQL
     user_repo = _get_user_repo()
     if user_repo:
         try:
-            uid = uuid.UUID(user_id)
-            user = await user_repo.get_user_by_id(uid)
+            uid, user = await _resolve_pg_user(user_repo, user_id)
             if not user:
                 raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -722,15 +758,11 @@ async def reset_user_tokens(
     # 社区版 fallback：UserSystemDB
     db = UserSystemDB()
 
-    try:
-        int_id = int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user = db.get_user_by_id(int_id)
+    user = _resolve_community_user(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    int_id = user["id"]
     db.update_user_by_id(int_id, {"token_used_monthly": 0})
 
     admin_user = db.get_user_by_username(admin_username)

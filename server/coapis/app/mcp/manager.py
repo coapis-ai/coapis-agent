@@ -279,6 +279,8 @@ class MCPClientManager:
             transport=client_config.transport,
             url=client_config.url,
             headers=headers or None,
+            timeout=getattr(client_config, "timeout", 30.0),
+            sse_read_timeout=getattr(client_config, "sse_read_timeout", 30.0),
         )
         setattr(client, "_coapis_rebuild_info", rebuild_info)
         setattr(client, "client_key", client_key)

@@ -299,7 +299,51 @@ class StdIOStatefulClient(StatefulClientBase):
         """
         self._validate_connection()
 
-        res = await self.session.list_tools()
+        try:
+            res = await self.session.list_tools()
+        except Exception as e:
+            exc_str = str(e).lower()
+            # Check if it's a pydantic validation error due to extra fields like metadata.action_templates
+            if "extra" in exc_str or "forbidden" in exc_str or "invalid field" in exc_str or "extraneous" in exc_str or "validation error" in exc_str:
+                logger.warning(f"MCP client '{self.name}' list_tools encountered Pydantic validation error: {e}. Attempting relaxed parsing.")
+                
+                # Fallback: attempt to get tools via manual JSON-RPC call with relaxed parsing
+                try:
+                    import mcp.types as types
+                    
+                    # Send raw tools/list request and parse as dict to avoid Pydantic strict validation
+                    result = await self.session.send_request(
+                        types.MethodCall(method="tools/list", params={}, id=None),
+                        dict,
+                    )
+                    
+                    # Extract tools from result
+                    tools_data = result.get("result", {}).get("tools", [])
+                    loose_tools = []
+                    for tool_data in tools_data:
+                        if not isinstance(tool_data, dict):
+                            continue
+                        # Create a simple dict-based tool object with required attributes, preserving metadata (including action_templates)
+                        loose_tool = {
+                            "name": tool_data.get("name"),
+                            "description": tool_data.get("description"),
+                            "inputSchema": tool_data.get("inputSchema", {})
+                        }
+                        # Preserve metadata if present (e.g., action_templates)
+                        if "metadata" in tool_data:
+                            loose_tool["metadata"] = tool_data.get("metadata")
+                        
+                        loose_tools.append(loose_tool)
+                    
+                    # Cache and return the loosely parsed tools
+                    self._cached_tools = loose_tools
+                    logger.info(f"MCP client '{self.name}' successfully parsed {len(loose_tools)} tools with relaxed validation.")
+                    return loose_tools
+                    
+                except Exception as fallback_err:
+                    logger.error(f"MCP client '{self.name}' list_tools relaxed parsing failed: {fallback_err}")
+            else:
+                raise
 
         # Cache the tools for later use
         self._cached_tools = res.tools
@@ -592,7 +636,53 @@ class HttpStatefulClient(StatefulClientBase):
         """
         self._validate_connection()
 
-        res = await self.session.list_tools()
+        try:
+            res = await self.session.list_tools()
+        except Exception as e:
+            exc_str = str(e).lower()
+            # Check if it's a pydantic validation error due to extra fields like metadata.action_templates
+            if "extra" in exc_str or "forbidden" in exc_str or "invalid field" in exc_str or "extraneous" in exc_str or "validation error" in exc_str:
+                logger.warning(f"MCP client '{self.name}' list_tools encountered Pydantic validation error: {e}. Attempting relaxed parsing.")
+                
+                # Fallback: attempt to get tools via manual JSON-RPC call with relaxed parsing
+                try:
+                    import mcp.types as types
+                    
+                    # Send raw tools/list request and parse as dict to avoid Pydantic strict validation
+                    result = await self.session.send_request(
+                        types.MethodCall(method="tools/list", params={}, id=None),
+                        dict,
+                    )
+                    
+                    # Extract tools from result
+                    tools_data = result.get("result", {}).get("tools", [])
+                    loose_tools = []
+                    for tool_data in tools_data:
+                        if not isinstance(tool_data, dict):
+                            continue
+                        # Create a simple dict-based tool object with required attributes, preserving metadata (including action_templates)
+                        loose_tool = {
+                            "name": tool_data.get("name"),
+                            "description": tool_data.get("description"),
+                            "inputSchema": tool_data.get("inputSchema", {})
+                        }
+                        # Preserve metadata if present (e.g., action_templates)
+                        if "metadata" in tool_data:
+                            loose_tool["metadata"] = tool_data.get("metadata")
+                        
+                        loose_tools.append(loose_tool)
+                    
+                    # Cache and return the loosely parsed tools
+                    self._cached_tools = loose_tools
+                    logger.info(f"MCP client '{self.name}' successfully parsed {len(loose_tools)} tools with relaxed validation.")
+                    return loose_tools
+                    
+                except Exception as fallback_err:
+                    logger.error(f"MCP client '{self.name}' list_tools relaxed parsing failed: {fallback_err}")
+            else:
+                raise
+
+        # Cache the tools for later use
         self._cached_tools = res.tools
         return res.tools
 

@@ -160,8 +160,8 @@ const TagManagement: React.FC = () => {
       type: tag.type,
       parent_id: tag.parent_id,
       description: tag.description,
-      keywords: tag.keywords?.join(', '),
-      related_skills: tag.related_skills?.join(', '),
+      keywords: Array.isArray(tag.keywords) ? tag.keywords.join(', ') : (tag.keywords || ''),
+      related_skills: Array.isArray(tag.related_skills) ? tag.related_skills.join(', ') : (tag.related_skills || ''),
       sort_order: tag.sort_order,
       show_in_menu: tag.show_in_menu,
       enabled: tag.enabled,
@@ -200,8 +200,8 @@ const TagManagement: React.FC = () => {
 
       const payload = {
         ...values,
-        keywords: values.keywords ? values.keywords.split(',').map((k: string) => k.trim()).filter(Boolean) : [],
-        related_skills: values.related_skills ? values.related_skills.split(',').map((k: string) => k.trim()).filter(Boolean) : [],
+        keywords: typeof values.keywords === 'string' && values.keywords ? values.keywords.split(',').map((k: string) => k.trim()).filter(Boolean) : [],
+        related_skills: typeof values.related_skills === 'string' && values.related_skills ? values.related_skills.split(',').map((k: string) => k.trim()).filter(Boolean) : [],
       };
 
       const url = editingTag

@@ -35,6 +35,7 @@ import { ApprovalCard } from "../../components/ApprovalCard/ApprovalCard";
 import { commandsApi } from "../../api/modules/commands";
 import { useApprovalContext } from "../../contexts/ApprovalContext";
 import { planApi } from "../../api/modules/plan";
+import C2ACardRenderer from "./components/C2ACardRenderer";
 import {
   ChatDisplayConfigContext,
 } from "./components/SimplifiedResponseCard";
@@ -1698,6 +1699,7 @@ export default function ChatPage() {
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
+        C2ACardRenderer: C2ACardRenderer,
       },
       customToolRenderConfig: {
         ..._enhancedToolRenderConfig,

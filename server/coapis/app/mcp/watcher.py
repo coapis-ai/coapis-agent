@@ -345,3 +345,8 @@ class MCPConfigWatcher:
                 "MCPConfigWatcher: failed to remove client '%s'",
                 key,
             )
+
+    def clear_client_failures(self) -> None:
+        """Clear client failure tracking to allow retries."""
+        self._client_failures.clear()
+        logger.debug("MCPConfigWatcher: cleared client failures")

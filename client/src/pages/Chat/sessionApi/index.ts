@@ -249,6 +249,7 @@ const BLOCK_TYPE_MAP: Record<string, { msgType: string; metaType?: string; role?
   component_call_output: { msgType: "component_call_output", metaType: "component_call_output", role: "tool" },
   error:           { msgType: "error", metaType: "error" },
   heartbeat:       { msgType: "heartbeat" },
+  c2a_protocol:    { msgType: "message", metaType: "c2a_protocol" },
 };
 
 const toOutputMessage = (msg: Message): OutputMessage[] => {

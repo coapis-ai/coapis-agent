@@ -100,6 +100,7 @@ class WecomCardHandler:
     def _register_kinds(self) -> None:
         """Register all built-in card kinds."""
         from . import tool_guard
+        from . import c2a_extension  # Universal C2A extension card
 
         self.register(
             CardKind(
@@ -108,6 +109,17 @@ class WecomCardHandler:
                 task_id_prefix=tool_guard.TASK_ID_PREFIX,
                 render=tool_guard.render,
                 handle=tool_guard.handle,
+            )
+        )
+        
+        # Register C2A extension card
+        self.register(
+            CardKind(
+                name=c2a_extension.NAME,
+                message_type=c2a_extension.MESSAGE_TYPE,
+                task_id_prefix=c2a_extension.TASK_ID_PREFIX,
+                render=c2a_extension.render,
+                handle=c2a_extension.handle,
             )
         )
 

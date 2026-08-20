@@ -59,14 +59,10 @@ class SendMessageRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     channel: str = Field(
-        ...,
+        "console",
         description=(
-            "Target channel (e.g., console, dingtalk, feishu, discord)"
+            "Target channel (e.g., console, dingtalk, feishu, discord). Defaults to 'console'."
         ),
-    )
-    target_user: str = Field(
-        ...,
-        description="Target user ID in the channel",
     )
     target_session: str = Field(
         ...,
@@ -120,7 +116,6 @@ async def send_message(
           -H "X-Agent-Id: my_bot" \\
           -d '{
             "channel": "console",
-            "target_user": "alice",
             "target_session": "session_001",
             "text": "Hello from my_bot!"
           }'
@@ -159,10 +154,9 @@ async def send_message(
     # Log the send request
     agent_info = f" (agent: {x_agent_id})" if x_agent_id else ""
     logger.info(
-        "API send_message%s: channel=%s user=%s session=%s text_len=%d",
+        "API send_message%s: channel=%s session=%s text_len=%d",
         agent_info,
         request.channel,
-        request.target_user[:40] if request.target_user else "",
         request.target_session[:40] if request.target_session else "",
         len(request.text),
     )
@@ -171,7 +165,7 @@ async def send_message(
     try:
         await channel_manager.send_text(
             channel=request.channel,
-            user_id=request.target_user,
+            user_id="console",
             session_id=request.target_session,
             text=request.text,
             meta={"agent_id": x_agent_id} if x_agent_id else None,

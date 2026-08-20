@@ -1391,6 +1391,8 @@ class MCPClientConfig(BaseModel):
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
     cwd: str = ""
+    timeout: float = 30.0
+    sse_read_timeout: float = 30.0
 
     @model_validator(mode="before")
     @classmethod

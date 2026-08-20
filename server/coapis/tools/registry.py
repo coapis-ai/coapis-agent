@@ -92,6 +92,10 @@ class ToolInfo:
     parameters: Dict[str, Any] = field(default_factory=dict)
     allowed: bool = True
     tags: List[str] = field(default_factory=list)
+    source: str = "builtin"  # builtin, mcp, c2a_plugin, custom_plugin
+    status: str = "enabled"  # enabled, disabled
+    rules: str = ""          # usage rules or restrictions
+    category: str = "builtin"
 
     @property
     def is_async(self) -> bool:
@@ -114,7 +118,8 @@ class ToolRegistry:
         self._denied_tools: List[str] = []
 
     async def register(self, name: str, func: Callable, description: str = "",
-                     parameters: Dict[str, Any] = None, tags: List[str] = None) -> ToolInfo:
+                     parameters: Dict[str, Any] = None, tags: List[str] = None,
+                     source: str = "builtin", status: str = "enabled", rules: str = "", category: str = "builtin") -> ToolInfo:
         """Register a tool.
 
         If description or parameters are not provided, they are auto-generated
@@ -126,6 +131,10 @@ class ToolRegistry:
             description: Tool description (auto-generated from docstring if empty)
             parameters: Parameter schema (auto-generated from signature if None)
             tags: Tool tags for categorization
+            source: Tool source/origin (builtin, mcp, c2a_plugin, custom_plugin)
+            status: Tool status (enabled, disabled)
+            rules: Usage rules or restrictions
+            category: Tool category (builtin, mcp, plugin, external)
 
         Returns:
             ToolInfo metadata
@@ -156,9 +165,13 @@ class ToolRegistry:
             func=func,
             parameters=final_parameters or {},
             tags=tags or [],
+            source=source,
+            status=status,
+            rules=rules,
+            category=category,
         )
         self._tools[name] = tool
-        logger.debug(f"Registered tool: {name}")
+        logger.debug(f"Registered tool: {name} (source={source}, status={status}, category={category})")
         return tool
 
     async def register_mcp_tools(self, mcp_clients: list) -> int:
@@ -205,9 +218,13 @@ class ToolRegistry:
                         description=mcp_tool.description or f"MCP tool: {mcp_tool.name}",
                         parameters=getattr(mcp_tool, "inputSchema", None) or {},
                         tags=["mcp", client.name],
+                        source="mcp",
+                        status="enabled",
+                        rules=f"External MCP tool from {client.name}. Use with caution and follow MCP server guidelines.",
+                        category="mcp",
                     )
                     count += 1
-                    logger.info(f"Registered MCP tool: {prefixed} (from {client.name})")
+                    logger.info(f"Registered MCP tool: {prefixed} (from {client.name}, source=mcp, status=enabled)")
             except Exception as e:
                 logger.warning(f"Failed to register MCP tools from {client.name}: {e}")
         return count
@@ -334,6 +351,18 @@ class ToolRegistry:
             else:
                 if name not in self._denied_tools:
                     self._denied_tools.append(name)
+
+    def unregister_tool(self, name: str) -> bool:
+        """Remove a tool from the registry. Returns True if it existed."""
+        if name in self._tools:
+            del self._tools[name]
+            if name in self._allowed_tools:
+                self._allowed_tools.remove(name)
+            if name in self._denied_tools:
+                self._denied_tools = [t for t in self._denied_tools if t != name]
+            logger.info(f"Unregistered tool: {name}")
+            return True
+        return False
 
     def get_openai_tools(self, query: str = None, core_only: bool = False) -> List[Dict]:
         """Get tools in OpenAI format for LLM API calls.

@@ -23,6 +23,12 @@ All endpoints are read-only and do not modify any state.
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 
+from ...agents.session_execution.manager import SessionExecutionManager
+from ...agents.session_execution.config import SessionExecutionConfig
+
+# Initialize SEM instance with default config (features disabled by default)
+_sem_manager = SessionExecutionManager(config=SessionExecutionConfig())
+
 router = APIRouter(
     prefix="/sessions",
     tags=["session-execution"],
@@ -37,17 +43,24 @@ async def get_session_stats(session_id: str) -> Dict[str, Any]:
         Session statistics including iteration count, LLM call count,
         tool call count, token usage, and intervention level.
     """
-    from ...agents.session_execution import SessionExecutionManager
-    from ...config.config import AgentsRunningConfig
-
     try:
-        # This is a placeholder - in production, the SEM instance
-        # would be stored in a registry or accessed via the agent
-        return {
-            "session_id": session_id,
-            "status": "SEM not initialized",
-            "message": "Session Execution Manager is not initialized for this session",
-        }
+        stats = _sem_manager.get_session_stats(session_id)
+        if stats is None:
+            # Return initial state if session not found/created yet
+            return {
+                "session_id": session_id,
+                "current_iteration": 0,
+                "llm_call_count": 0,
+                "tool_call_count": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "intervention_level": "none",
+                "warning_count": 0,
+                "degradation_count": 0,
+                "blocking_count": 0,
+            }
+        return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -59,13 +72,25 @@ async def get_token_budget(session_id: str) -> Dict[str, Any]:
     Returns:
         Token budget details including current usage, limits, and thresholds.
     """
-    from ...agents.session_execution import SessionExecutionManager
-
     try:
+        state = _sem_manager.get_or_create_session(session_id)
+        config = _sem_manager.config.resource_budget
+        
         return {
             "session_id": session_id,
-            "status": "SEM not initialized",
-            "message": "Session Execution Manager is not initialized for this session",
+            "current_usage": {
+                "total_tokens": state.total_tokens,
+                "llm_call_count": state.llm_call_count,
+            },
+            "limits": {
+                "max_total_tokens": config.max_total_tokens,
+                "max_llm_calls": config.max_llm_calls,
+            },
+            "thresholds": {
+                "token_warning_threshold": config.token_warning_threshold,
+                "token_block_threshold": config.token_block_threshold,
+            },
+            "budget_enabled": config.token_budget_enabled,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

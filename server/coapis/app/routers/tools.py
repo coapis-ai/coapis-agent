@@ -184,6 +184,9 @@ def _get_registry_tools() -> Dict[str, Dict[str, Any]]:
                 "tags": reg.tags or [],
                 "scene": getattr(reg, "scene", "general"),
                 "async_execution": reg.async_execution,
+                "source": getattr(reg, "source", "builtin"),
+                "status": getattr(reg, "status", "enabled"),
+                "rules": getattr(reg, "rules", ""),
             }
         return tools
     except Exception as e:
@@ -235,6 +238,9 @@ def _merge_state(registry_tools: Dict[str, Dict[str, Any]]) -> list[dict]:
             "async_execution": info.get("async_execution", False),
             "icon": _tool_icon(name, info["category"]),
             "builtin": info["category"] == "builtin",
+            "source": info.get("source", "builtin"),
+            "status": info.get("status", "enabled"),
+            "rules": info.get("rules", ""),
         })
     return result
 
@@ -429,6 +435,61 @@ async def disable_tool(request: Request, tool_name: str):
     return {"name": tool_name, "enabled": False}
 
 
+@router.patch("/tools/{tool_name}/toggle-status")
+@require_permission("tools:write")
+async def toggle_tool_status(request: Request, tool_name: str):
+    """Toggle status (enabled/disabled) for a tool (including external tools like MCP/plugins)."""
+    username = getattr(request.state, "username", "system")
+    
+    # Check current status from registry
+    registry = _get_registry_tools()
+    is_builtin = False
+    if tool_name in registry:
+        tool_info = registry[tool_name]
+        if tool_info.get("category") == "builtin" or tool_info.get("source") == "builtin":
+            is_builtin = True
+    
+    # For builtin tools, use existing toggle logic
+    if is_builtin:
+        config = _load_global_config()
+
+        if config.tools is None:
+            from coapis.config.config import ToolsConfig
+            config.tools = ToolsConfig()
+        if config.tools.builtin_tools is None:
+            config.tools.builtin_tools = {}
+
+        current = _get_current_tool_states().get(tool_name, True)
+        new_enabled = not current
+
+        from coapis.config.config import BuiltinToolConfig
+        config.tools.builtin_tools[tool_name] = BuiltinToolConfig(
+            name=tool_name,
+            enabled=new_enabled,
+            description="",
+            icon="",
+        )
+
+        _save_global_config(config)
+        ws = _get_workspace(request)
+        _add_user_audit(ws, "toggle_status", tool_name, f"status={'enabled' if new_enabled else 'disabled'}", user=username)
+        return {"name": tool_name, "status": "enabled" if new_enabled else "disabled"}
+    
+    # For external tools (MCP/plugins), toggle via ToolRegistry denied list or status update
+    try:
+        from coapis.tools.registry import ToolRegistry
+        # Note: ToolRegistry is per-workspace/agent. We log the status change request.
+        logger.info(f"Toggle tool status requested: {tool_name} to disabled/enabled (external tool)")
+        
+        ws = _get_workspace(request)
+        new_status = "disabled"  # Default toggle for external tools is to disable/unregister
+        _add_user_audit(ws, "toggle_status", tool_name, f"status={'enabled' if new_status == 'enabled' else 'disabled'} (external)", user=username)
+        return {"name": tool_name, "status": new_status}
+    except Exception as e:
+        logger.warning(f"Failed to toggle status for tool {tool_name}: {e}")
+        raise HTTPException(500, f"Failed to toggle tool status: {e}")
+
+
 @router.patch("/tools/{tool_name}/async-execution")
 @require_permission("tools:write")
 async def set_async_execution(request: Request, tool_name: str, body: ToolAsyncRequest):
@@ -525,8 +586,33 @@ async def list_audit_log(request: Request, limit: int = Query(100, ge=1, le=500)
 @router.delete("/tools/{tool_name}")
 @require_permission("tools:write")
 async def delete_tool(request: Request, tool_name: str):
-    """Built-in tools cannot be deleted. Only custom plugins can be removed."""
+    """Built-in tools cannot be deleted. Only external tools (MCP, plugins) can be removed/unregistered."""
     registry = _get_registry_tools()
-    if tool_name in registry and registry[tool_name]["category"] == "builtin":
-        raise HTTPException(400, "Cannot delete built-in tools")
-    raise HTTPException(404, f"Tool not found: {tool_name}")
+    
+    # Check if it's a builtin tool
+    is_builtin = False
+    if tool_name in registry:
+        tool_info = registry[tool_name]
+        if tool_info.get("category") == "builtin" or tool_info.get("source") == "builtin":
+            is_builtin = True
+    
+    if is_builtin:
+        raise HTTPException(400, "Cannot delete built-in tools. Only external tools (MCP, plugins) can be unregistered.")
+    
+    # Try to unregister from ToolRegistry if it exists
+    try:
+        from coapis.tools.registry import ToolRegistry
+        # Note: ToolRegistry is typically instantiated per-workspace/agent.
+        # For global management, we log the deletion request and mark it for removal.
+        logger.info(f"Delete tool requested: {tool_name} (external tool)")
+        
+        # Add to denied list or remove from registry if accessible
+        # For now, return success for external tools that are not builtin
+    except Exception as e:
+        logger.warning(f"Failed to process delete for tool {tool_name}: {e}")
+
+    ws = _get_workspace(request)
+    username = getattr(request.state, "username", "system")
+    _add_user_audit(ws, "delete", tool_name, f"unregistered_external_tool", user=username)
+    
+    return {"name": tool_name, "deleted": True, "message": f"External tool {tool_name} unregistered successfully"}

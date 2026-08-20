@@ -12,7 +12,7 @@ name: coapis-dev
 services:
   # ── 后端 API 服务 ──
   server:
-    image: coapis-agent:0.12.0
+    image: coapis-agent:0.13.1
     container_name: coapis-server-dev
     ports:
       - "4308:8000"
@@ -31,7 +31,7 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app
-      - COAPIS_VERSION=0.12.0
+      - COAPIS_VERSION=0.13.1
       - COAPIS_WORKING_DIR=/apps/ai/coapis
       - COAPIS_WORKSPACES_DIR=/apps/ai/coapis/workspaces
       - COAPIS_SHARED_RUNTIME_DIR=/apps/ai/coapis/shared_runtime
