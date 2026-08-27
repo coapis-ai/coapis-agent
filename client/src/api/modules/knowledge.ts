@@ -51,11 +51,25 @@ export interface RetrievalConfig {
   use_parent_document_retriever: boolean;
 }
 
+export interface ExtractionConfig {
+  enable_auto_tagging?: boolean;
+  enable_summary_extraction?: boolean;
+  summary_max_length?: number;
+  preview_max_length?: number;
+}
+
+export interface UploadLimitConfig {
+  max_file_size_mb?: number;
+  max_batch_count?: number;
+}
+
 export interface KnowledgeBaseConfig {
   embedding_model_provider: string;
   embedding_model_name: string;
   chunking_strategy: ChunkingStrategy;
   retrieval_config: RetrievalConfig;
+  extraction_config?: ExtractionConfig;
+  upload_limit_config?: UploadLimitConfig;
 }
 
 // Model Provider types for UI selection
@@ -71,7 +85,7 @@ export const knowledgeApi = {
   // ── Knowledge Base CRUD ──
 
   listBases: (scope?: string) =>
-    request<{ bases: KnowledgeBase[]; total: number }>(
+    request<{ items: KnowledgeBase[]; total: number }>(
       scope ? `/knowledge/bases?scope=${encodeURIComponent(scope)}` : "/knowledge/bases"
     ),
 
@@ -91,6 +105,12 @@ export const knowledgeApi = {
   getBase: (kbId: string) =>
     request<KnowledgeBase>(`/knowledge/bases/${encodeURIComponent(kbId)}`),
 
+  updateBase: (kbId: string, data: { name?: string; description?: string }) =>
+    request<KnowledgeBase>(`/knowledge/bases/${encodeURIComponent(kbId)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
   deleteBase: (kbId: string) =>
     request<{ success: boolean; message: string }>(
       `/knowledge/bases/${encodeURIComponent(kbId)}`,
@@ -109,7 +129,7 @@ export const knowledgeApi = {
     form.append("file", file);
     if (title) form.append("title", title);
     return request<KnowledgeDocument>(
-      `/knowledge/bases/${encodeURIComponent(kbId)}/documents`,
+      `/knowledge/bases/${encodeURIComponent(kbId)}/documents/upload`,
       {
         method: "POST",
         body: form,
@@ -154,17 +174,10 @@ export const knowledgeApi = {
     scope?: string;
     config: KnowledgeBaseConfig;
   }) => {
-    const form = new FormData();
-    form.append("name", data.name);
-    if (data.description) form.append("description", data.description);
-    if (data.scope) form.append("scope", data.scope);
-    // Append config as JSON string
-    form.append("config", JSON.stringify(data.config));
-    
+    // 统一使用 JSON 提交，避免 FormData 与 Content-Type 自动设置冲突
     return request<KnowledgeBase>("/knowledge/bases", {
       method: "POST",
-      body: form,
-      headers: {} as HeadersInit,
+      body: JSON.stringify(data),
     });
   },
 

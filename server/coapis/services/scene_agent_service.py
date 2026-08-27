@@ -24,7 +24,8 @@ Scene Agent Architecture:
 This service handles:
     - Scene CRUD (create, read, update, delete)
     - Scene Agent lifecycle management
-    - Scene index management (scenes.json)
+    - In community edition: Scenes are stored in a JSON file: {data_dir}/scenes.json
+    - In enterprise edition: Scenes are stored in PostgreSQL database via RepositoryFactory.
 """
 
 from __future__ import annotations
@@ -35,6 +36,12 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    from ...enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
+except ImportError:
+    is_enterprise_installed = lambda: False
+    get_enterprise_plugin = lambda: None
 
 from ..models.scene import (
     SceneConfig,
@@ -84,8 +91,19 @@ class SceneAgentService:
         self.data_dir = Path(data_dir)
         self.scenes_file = self.data_dir / "scenes.json"
         self.agents_dir = self.data_dir / "agents"
+        self._enterprise_repo = None
         
-        # Ensure directories exist
+        # Check if enterprise repository is available
+        if is_enterprise_installed():
+            try:
+                from ...foundation.repository_factory import RepositoryFactory
+                if RepositoryFactory.is_initialized():
+                    self._enterprise_repo = RepositoryFactory.get_scene_repository()
+                    logger.info("SceneAgentService using Enterprise PostgreSQL scene repository")
+            except Exception as e:
+                logger.warning(f"Failed to get enterprise scene repository: {e}, falling back to JSON")
+        
+        # Ensure directories exist (for agent storage)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.agents_dir.mkdir(parents=True, exist_ok=True)
     
@@ -109,6 +127,9 @@ class SceneAgentService:
         Returns:
             SceneListResponse with scene list
         """
+        if self._enterprise_repo:
+            return self._list_scenes_from_repository(status=status, primary_tag_id=tag or None)
+        
         scenes_file = self._load_scenes_file()
         scenes = scenes_file.scenes
         
@@ -121,6 +142,50 @@ class SceneAgentService:
             scenes = [s for s in scenes if tag in s.tags]
         
         return SceneListResponse(scenes=scenes, total=len(scenes))
+
+    def _list_scenes_from_repository(self, status: Optional[str] = None, primary_tag_id: Optional[str] = None) -> SceneListResponse:
+        """List scenes from enterprise PostgreSQL repository.
+        
+        Returns:
+            SceneListResponse with scene list
+        """
+        try:
+            db_scenes = self._enterprise_repo.list_scenes(
+                status=status if status else "active",
+                primary_tag_id=primary_tag_id,
+                limit=1000,
+                offset=0,
+            )
+            
+            scenes = []
+            for db_scene in db_scenes:
+                # Convert SQLAlchemy model to Pydantic SceneConfig
+                scene_config = SceneConfig(
+                    id=db_scene.id,
+                    name=getattr(db_scene, 'name', ''),
+                    icon=getattr(db_scene, 'icon', None),
+                    description=getattr(db_scene, 'description', None) or '',
+                    short_description=getattr(db_scene, 'short_description', None) or '',
+                    primary_tag_id=getattr(db_scene, 'primary_tag_id', None),
+                    tag_ids=getattr(db_scene, 'tag_ids', []) or [],
+                    skills=getattr(db_scene, 'skills', []) or [],
+                    system_prompt=getattr(db_scene, 'system_prompt', None) or '',
+                    welcome_message=getattr(db_scene, 'welcome_message', None) or '',
+                    status=db_scene.status if hasattr(db_scene, 'status') else "active",
+                    category=getattr(db_scene, 'category', None),
+                    created_at=datetime.fromisoformat(getattr(db_scene, 'created_at', datetime.now().isoformat())) if getattr(db_scene, 'created_at', None) else datetime.now(timezone.utc),
+                    updated_at=datetime.fromisoformat(getattr(db_scene, 'updated_at', datetime.now().isoformat())) if getattr(db_scene, 'updated_at', None) else datetime.now(timezone.utc),
+                    created_by=getattr(db_scene, 'created_by', None),
+                    usage_count=getattr(db_scene, 'usage_count', 0),
+                )
+                scenes.append(scene_config)
+            
+            return SceneListResponse(scenes=scenes, total=len(scenes))
+        except Exception as e:
+            logger.error(f"Failed to list scenes from repository: {e}")
+            # Fallback to JSON storage
+            scenes_file = self._load_scenes_file()
+            return SceneListResponse(scenes=scenes_file.scenes, total=len(scenes_file.scenes))
     
     def get_scene(self, scene_id: str) -> Optional[SceneConfig]:
         """Get scene configuration by ID.
@@ -131,6 +196,32 @@ class SceneAgentService:
         Returns:
             SceneConfig or None if not found
         """
+        if self._enterprise_repo:
+            db_scene = self._enterprise_repo.get_scene_by_id(scene_id)
+            if not db_scene:
+                return None
+            
+            # Convert SQLAlchemy model to Pydantic SceneConfig
+            scene_config = SceneConfig(
+                id=db_scene.id,
+                name=getattr(db_scene, 'name', ''),
+                icon=getattr(db_scene, 'icon', None),
+                description=getattr(db_scene, 'description', None) or '',
+                short_description=getattr(db_scene, 'short_description', None) or '',
+                primary_tag_id=getattr(db_scene, 'primary_tag_id', None),
+                tag_ids=getattr(db_scene, 'tag_ids', []) or [],
+                skills=getattr(db_scene, 'skills', []) or [],
+                system_prompt=getattr(db_scene, 'system_prompt', None) or '',
+                welcome_message=getattr(db_scene, 'welcome_message', None) or '',
+                status=db_scene.status if hasattr(db_scene, 'status') else "active",
+                category=getattr(db_scene, 'category', None),
+                created_at=datetime.fromisoformat(getattr(db_scene, 'created_at', datetime.now().isoformat())) if getattr(db_scene, 'created_at', None) else datetime.now(timezone.utc),
+                updated_at=datetime.fromisoformat(getattr(db_scene, 'updated_at', datetime.now().isoformat())) if getattr(db_scene, 'updated_at', None) else datetime.now(timezone.utc),
+                created_by=getattr(db_scene, 'created_by', None),
+                usage_count=getattr(db_scene, 'usage_count', 0),
+            )
+            return scene_config
+        
         scenes_file = self._load_scenes_file()
         for scene in scenes_file.scenes:
             if scene.id == scene_id:
@@ -145,7 +236,7 @@ class SceneAgentService:
         """Create a new scene.
         
         This method:
-        1. Creates scene configuration in scenes.json
+        1. Creates scene configuration in scenes.json or PostgreSQL repository
         2. Creates scene agent directory and configuration
         
         Args:
@@ -158,6 +249,9 @@ class SceneAgentService:
         Raises:
             ValueError: If scene ID already exists
         """
+        if self._enterprise_repo:
+            return self._create_scene_in_repository(scene_create, created_by)
+        
         # Check if scene ID already exists
         if self.get_scene(scene_create.id):
             raise ValueError(f"Scene ID already exists: {scene_create.id}")
@@ -191,6 +285,74 @@ class SceneAgentService:
         
         logger.info(f"Created scene: {scene_config.id} by {created_by}")
         return scene_config
+
+    def _create_scene_in_repository(self, scene_create: SceneConfigCreate, created_by: Optional[str] = None) -> SceneConfig:
+        """Create a new scene in PostgreSQL repository.
+        
+        Args:
+            scene_create: Scene creation request
+            created_by: Creator username
+            
+        Returns:
+            Created SceneConfig
+            
+        Raises:
+            ValueError: If scene ID already exists
+        """
+        # Check if scene ID already exists
+        existing = self._enterprise_repo.get_scene_by_id(scene_create.id)
+        if existing:
+            raise ValueError(f"Scene ID already exists: {scene_create.id}")
+        
+        from ...enterprise.database.models import scene as scene_model
+        
+        now_dt = datetime.now(timezone.utc)
+        db_scene = scene_model.Scene(
+            id=scene_create.id,
+            name=scene_create.name,
+            icon=getattr(scene_create, 'icon', None),
+            description=scene_create.description or '',
+            short_description=scene_create.short_description or '',
+            primary_tag_id=scene_create.primary_tag_id,
+            tag_ids=scene_create.tag_ids or [],
+            skills=scene_create.skills or [],
+            system_prompt=scene_create.system_prompt or '',
+            welcome_message=scene_create.welcome_message or '',
+            status=scene_create.status if scene_create.status else "active",
+            category=getattr(scene_create, 'category', None),
+            created_at=now_dt,
+            updated_at=now_dt,
+            created_by=created_by or "system",
+            usage_count=0,
+        )
+        
+        saved_scene = self._enterprise_repo.create_scene(db_scene)
+        
+        # Convert to Pydantic SceneConfig
+        scene_config = SceneConfig(
+            id=saved_scene.id,
+            name=getattr(saved_scene, 'name', ''),
+            icon=getattr(saved_scene, 'icon', None),
+            description=getattr(saved_scene, 'description', '') or '',
+            short_description=getattr(saved_scene, 'short_description', '') or '',
+            primary_tag_id=getattr(saved_scene, 'primary_tag_id', None),
+            tag_ids=getattr(saved_scene, 'tag_ids', []) or [],
+            skills=getattr(saved_scene, 'skills', []) or [],
+            system_prompt=getattr(saved_scene, 'system_prompt', '') or '',
+            welcome_message=getattr(saved_scene, 'welcome_message', '') or '',
+            status=saved_scene.status if hasattr(saved_scene, 'status') else "active",
+            category=getattr(saved_scene, 'category', None),
+            created_at=datetime.fromisoformat(getattr(saved_scene, 'created_at', datetime.now(timezone.utc).isoformat())) if getattr(saved_scene, 'created_at', None) else datetime.now(timezone.utc),
+            updated_at=datetime.fromisoformat(getattr(saved_scene, 'updated_at', datetime.now(timezone.utc).isoformat())) if getattr(saved_scene, 'updated_at', None) else datetime.now(timezone.utc),
+            created_by=getattr(saved_scene, 'created_by', None),
+            usage_count=getattr(saved_scene, 'usage_count', 0),
+        )
+        
+        # Create scene agent (still stored in agents directory for backward compatibility)
+        self._create_scene_agent(scene_config, created_by or "system")
+        
+        logger.info(f"Created scene in repository: {scene_config.id} by {created_by}")
+        return scene_config
     
     def update_scene(
         self,
@@ -206,6 +368,9 @@ class SceneAgentService:
         Returns:
             Updated SceneConfig or None if not found
         """
+        if self._enterprise_repo:
+            return self._update_scene_in_repository(scene_id, scene_update)
+        
         scenes_file = self._load_scenes_file()
         
         for i, scene in enumerate(scenes_file.scenes):
@@ -230,6 +395,57 @@ class SceneAgentService:
                 return scene
         
         return None
+
+    def _update_scene_in_repository(self, scene_id: str, scene_update: SceneConfigUpdate) -> Optional[SceneConfig]:
+        """Update a scene in PostgreSQL repository.
+        
+        Args:
+            scene_id: Scene ID
+            scene_update: Scene update request
+            
+        Returns:
+            Updated SceneConfig or None if not found
+        """
+        db_scene = self._enterprise_repo.get_scene_by_id(scene_id)
+        if not db_scene:
+            return None
+        
+        # Update fields from scene_update
+        update_data = scene_update.model_dump(exclude_unset=True)
+        
+        for key, value in update_data.items():
+            if hasattr(db_scene, key) and key != 'created_at':
+                setattr(db_scene, key, value)
+        
+        db_scene.updated_at = datetime.now(timezone.utc)
+        
+        saved_scene = self._enterprise_repo.update_scene(db_scene)
+        
+        # Convert to Pydantic SceneConfig
+        scene_config = SceneConfig(
+            id=saved_scene.id,
+            name=getattr(saved_scene, 'name', ''),
+            icon=getattr(saved_scene, 'icon', None),
+            description=getattr(saved_scene, 'description', '') or '',
+            short_description=getattr(saved_scene, 'short_description', '') or '',
+            primary_tag_id=getattr(saved_scene, 'primary_tag_id', None),
+            tag_ids=getattr(saved_scene, 'tag_ids', []) or [],
+            skills=getattr(saved_scene, 'skills', []) or [],
+            system_prompt=getattr(saved_scene, 'system_prompt', '') or '',
+            welcome_message=getattr(saved_scene, 'welcome_message', '') or '',
+            status=saved_scene.status if hasattr(saved_scene, 'status') else "active",
+            category=getattr(saved_scene, 'category', None),
+            created_at=datetime.fromisoformat(getattr(saved_scene, 'created_at', datetime.now(timezone.utc).isoformat())) if getattr(saved_scene, 'created_at', None) else datetime.now(timezone.utc),
+            updated_at=datetime.fromisoformat(getattr(saved_scene, 'updated_at', datetime.now(timezone.utc).isoformat())) if getattr(saved_scene, 'updated_at', None) else datetime.now(timezone.utc),
+            created_by=getattr(saved_scene, 'created_by', None),
+            usage_count=getattr(saved_scene, 'usage_count', 0),
+        )
+        
+        # Update scene agent (still stored in agents directory for backward compatibility)
+        self._update_scene_agent(scene_config)
+        
+        logger.info(f"Updated scene in repository: {scene_id}")
+        return scene_config
     
     def delete_scene(self, scene_id: str, hard_delete: bool = False) -> bool:
         """Delete scene (soft delete by default).
@@ -241,7 +457,24 @@ class SceneAgentService:
         Returns:
             True if deleted, False if not found
         """
+        if self._enterprise_repo:
+            return self._delete_scene_in_repository(scene_id)
+        
         scenes_file = self._load_scenes_file()
+
+    def _delete_scene_in_repository(self, scene_id: str) -> bool:
+        """Delete a scene in PostgreSQL repository (soft delete).
+        
+        Args:
+            scene_id: Scene ID
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        success = self._enterprise_repo.delete_scene(scene_id)
+        logger.info(f"Deleted scene in repository: {scene_id}")
+        return success
+        
         
         for i, scene in enumerate(scenes_file.scenes):
             if scene.id == scene_id:

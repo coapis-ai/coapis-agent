@@ -71,6 +71,9 @@ const KnowledgeTestPage = lazyImportWithRetry("../../pages/KnowledgeBase/Test");
 const MonitoringPage = lazyImportWithRetry("../../pages/Monitoring/index");
 const SSOPage = lazyImportWithRetry("../../pages/SSO/index");
 
+// External Systems Auth Management
+const ExternalSystemAuthPage = lazyImportWithRetry("../../pages/ExternalSystemAuth/index");
+
 // Messages - Intelligent Message System (placeholder)
 const MessagesPage = lazyImportWithRetry("../../pages/Messages/index");
 
@@ -261,6 +264,7 @@ export default function MainLayout() {
                   <Route path="/admin/config" element={<AdminConfigPage />} />
                   <Route path="/admin/scenes" element={<AdminScenesPage />} />
                   <Route path="/admin/tags" element={<AdminTagsPage />} />
+                  <Route path="/admin/external-systems-auth" element={<ExternalSystemAuthPage />} />
                   <Route path="/evolution" element={<MultiLayerEvolutionPage />} />
                   <Route path="/workbench" element={<WorkbenchPage />} />
                   <Route path="/workbench/:category" element={<WorkbenchPage />} />
@@ -281,13 +285,16 @@ export default function MainLayout() {
                   <Route path="/messages" element={<MessagesPage />} />
 
                   {/* Plugin routes — dynamically injected at runtime */}
-                  {pluginRoutes.map((route) => (
-                    <Route
-                      key={route.path}
-                      path={route.path}
-                      element={<route.component />}
-                    />
-                  ))}
+                  {pluginRoutes.map((route) => {
+                    const Component = route.component;
+                    return (
+                      <Route
+                        key={route.path}
+                        path={route.path}
+                        element={Component ? <Component /> : null}
+                      />
+                    );
+                  })}
                 </Routes>
               </Suspense>
             </ChunkErrorBoundary>

@@ -78,7 +78,8 @@
     "monitoring": "系统监控",
     "sso": "SSO 集成",
     "skillMarket": "技能市场",
-    "adminPanel": "后台管理"
+    "adminPanel": "后台管理",
+    "systemAuthorization": "系统授权管理"
   },
   "evolution": {
     "title": "多层 Agent 进化",

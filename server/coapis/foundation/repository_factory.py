@@ -40,6 +40,8 @@ class RepositoryFactory:
     
     _kb_repo: Optional[KnowledgeBaseRepository] = None
     _user_repo = None  # User repository (injected by enterprise)
+    _tag_repo = None   # Tag repository (injected by enterprise)
+    _scene_repo = None # Scene repository (injected by enterprise)
     _edition: Optional[str] = None
     _initialized: bool = False
     
@@ -179,6 +181,66 @@ class RepositoryFactory:
         
         return cls._user_repo
     
+    @classmethod
+    def inject_tag_repository(cls, tag_repo):
+        """Inject tag repository instance."""
+        cls._tag_repo = tag_repo
+        logger.info("✅ Tag repository injected into RepositoryFactory")
+
+    @classmethod
+    def get_tag_repository(cls):
+        """Get tag repository instance.
+        
+        Returns:
+            TagRepository implementation (PostgreSQL in enterprise)
+            
+        Raises:
+            RuntimeError: If factory not initialized or tag repo not available
+        """
+        if not cls._initialized:
+            raise RuntimeError(
+                "RepositoryFactory not initialized. "
+                "Call RepositoryFactory.initialize() first."
+            )
+        
+        if cls._tag_repo is None:
+            raise RuntimeError(
+                "Tag repository not available. "
+                "Ensure RepositoryFactory was configured with tag_repository."
+            )
+        
+        return cls._tag_repo
+
+    @classmethod
+    def inject_scene_repository(cls, scene_repo):
+        """Inject scene repository instance."""
+        cls._scene_repo = scene_repo
+        logger.info("✅ Scene repository injected into RepositoryFactory")
+
+    @classmethod
+    def get_scene_repository(cls):
+        """Get scene repository instance.
+        
+        Returns:
+            SceneRepository implementation (PostgreSQL in enterprise)
+            
+        Raises:
+            RuntimeError: If factory not initialized or scene repo not available
+        """
+        if not cls._initialized:
+            raise RuntimeError(
+                "RepositoryFactory not initialized. "
+                "Call RepositoryFactory.initialize() first."
+            )
+        
+        if cls._scene_repo is None:
+            raise RuntimeError(
+                "Scene repository not available. "
+                "Ensure RepositoryFactory was configured with scene_repository."
+            )
+        
+        return cls._scene_repo
+
     @classmethod
     def get_edition(cls) -> Optional[str]:
         """Get current edition.

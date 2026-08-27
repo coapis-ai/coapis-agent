@@ -1,6 +1,7 @@
 /**
- * 企业版前端入口
- * 基于社区版，加载企业版插件
+ * Enterprise Edition Frontend Entry Point
+ * 
+ * Based on community edition, loaded with enterprise plugins.
  */
 
 import { createRoot } from "react-dom/client";
@@ -11,19 +12,73 @@ import { registerHostModulesEager } from "./plugins/dynamicModuleRegistry";
 import { initLanguages } from "./utils/preloadLanguages";
 
 // Expose host dependencies (React, antd, etc.) on window
-// so that plugin UI modules can use them without bundling their own copies.
 installHostExternals();
 
-// Dynamic module registration - no generated files needed!
-// Automatically discovers all modules in src/pages at build time
+// Dynamic module registration - discovers all modules in src/pages at build time
 registerHostModulesEager();
 
-// Preload syntax highlighter languages
-// This fixes dynamic import failures in @ant-design/x CodeHighlighter
+// Preload syntax highlighter languages for @ant-design/x CodeHighlighter
 initLanguages();
 
-// 🚀 加载企业版插件（企业版入口会自动注册路由）
-// import("@enterprise/enterprise-entry.ts"); // 企业版插件在 coapis-pro 中，社区版构建时注释掉
+/**
+ * Enterprise plugin definition — uses PluginRouteDeclaration format:
+ * { path, component: ComponentType, label, icon?, priority? }
+ */
+const enterprisePlugin = {
+  id: 'enterprise',
+  name: 'CoApis Enterprise',
+  version: '1.0.0',
+
+  routes: [
+    // ✅ PluginRouteDeclaration format (NOT React Router RouteObject!)
+    {
+      path: '/ent/knowledge-bases',
+      component: () => import("@enterprise/pages/KnowledgeBaseList/index").then(m => m.default),
+      label: '知识库列表 📚',
+      icon: '📚',
+      priority: 10,
+    },
+    {
+      path: '/ent/knowledge-bases/create',
+      component: () => import("@enterprise/pages/KnowledgeBaseCreate/index").then(m => m.default),
+      label: '创建知识库 ✏️',
+      icon: '+',
+      priority: 10, // Same level as list page — appears in same menu group
+    },
+  ],
+
+  menuItems: [
+    { key: '/ent/knowledge-bases', path: '/ent/knowledge-bases' as any } as any,
+  ],
+};
+
+// Register enterprise plugin routes with the host's PluginSystem singleton
+import type { PluginRouteDeclaration } from "./plugins/hostExternals";
+
+const registerEnterpriseRoutes = () => {
+  if (typeof window !== 'undefined' && typeof window.CoApis?.registerRoutes === 'function') {
+    // Use dynamic import to avoid tree-shaking and ensure components are loaded at runtime
+    Promise.all(enterprisePlugin.routes.map((route: PluginRouteDeclaration) => 
+      route.component() as any
+    )).then(components => {
+      const registered = enterprisePlugin.routes.map((r, i) => ({
+        ...r,
+        component: (components[i] || r.component), // fallback to original if dynamic import failed
+      }));
+
+      window.CoApis.registerRoutes('enterprise', registered);
+      console.log('[Enterprise Plugin] ✅ Registered routes:', registered.length);
+    }).catch(err => {
+      console.error('[Enterprise Plugin] ❌ Failed to register routes:', err);
+    });
+  } else {
+    console.warn('[Enterprise Plugin] ⚠️ window.CoApis.registerRoutes not available');
+  }
+};
+
+// Register plugin after host externals are installed (after App mounts)
+registerHostModulesEager(); // ensures sidebar is ready to render routes
+setTimeout(() => registerEnterpriseRoutes(), 50);
 
 if (typeof window !== "undefined") {
   const originalError = console.error;
@@ -31,22 +86,16 @@ if (typeof window !== "undefined") {
 
   console.error = function (...args: unknown[]) {
     const msg = args[0]?.toString() || "";
-    if (msg.includes(":first-child") || msg.includes("pseudo class")) {
-      return;
+    if (!msg.includes(":first-child") && !msg.includes("pseudo class")) {
+      return originalError.apply(console, args as []); // only show non-antd warnings
     }
-    originalError.apply(console, args as []);
   };
 
   console.warn = function (...args: unknown[]) {
     const msg = args[0]?.toString() || "";
-    if (
-      msg.includes(":first-child") ||
-      msg.includes("pseudo class") ||
-      msg.includes("potentially unsafe")
-    ) {
-      return;
+    if (!msg.includes(":first-child") && !msg.includes("pseudo class")) {
+      return originalWarn.apply(console, args as []); // only show non-antd warnings
     }
-    originalWarn.apply(console, args as []);
   };
 }
 

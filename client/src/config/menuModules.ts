@@ -47,6 +47,7 @@ export const MENU_MODULES: MenuModuleConfig[] = [
   { key: 'evolution',         name: 'evolution',         group: 'settings', permission: true,  order: 9 },
   // { key: 'knowledge',         name: 'knowledge',         group: 'settings', permission: true,  order: 9 },  // 知识库功能暂时隐藏
   { key: 'admin',             name: 'adminPanel',        group: 'settings', permission: true,  order: 10 },
+  { key: 'system-authorization', name: 'systemAuthorization', group: 'settings', permission: true,  order: 11 },
 ];
 
 /** Get all module keys that require permission checks */

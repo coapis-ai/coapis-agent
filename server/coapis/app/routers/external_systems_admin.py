@@ -1,0 +1,327 @@
+# -*- coding: utf-8 -*-
+"""External Systems Admin Management Router - Community Version (JSON File Storage)
+
+Provides API endpoints for admin to manage external system configurations and identity bindings.
+"""
+import json
+import os
+import tempfile
+import shutil
+import time
+from fastapi import APIRouter, Request, HTTPException
+from typing import Dict, Any, Optional
+
+# Mapping file paths
+SYSTEMS_CONFIG_FILE = "data/external_systems_config.json"
+MAPPINGS_FILE = "data/external_identity_mappings.json"
+
+router_admin = APIRouter(prefix="/admin", tags=["external_systems_admin"])
+
+
+def load_systems_config() -> Dict[str, Any]:
+    """Safely read local external systems config JSON file"""
+    if not os.path.exists(SYSTEMS_CONFIG_FILE):
+        return {"systems": []}
+    with open(SYSTEMS_CONFIG_FILE, 'r', encoding='utf-8') as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {"systems": []}
+
+
+def save_systems_config_atomic(config_data: Dict[str, Any]):
+    """Atomically write back external systems config JSON file to prevent concurrent overwrite"""
+    dir_name = os.path.dirname(SYSTEMS_CONFIG_FILE) or "."
+    fd, temp_path = tempfile.mkstemp(dir=dir_name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2)
+        shutil.move(temp_path, SYSTEMS_CONFIG_FILE)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
+
+
+def load_bindings() -> Dict[str, Any]:
+    """Safely read local identity mappings JSON file"""
+    if not os.path.exists(MAPPINGS_FILE):
+        return {"bindings": []}
+    with open(MAPPINGS_FILE, 'r', encoding='utf-8') as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {"bindings": []}
+
+
+def save_bindings_atomic(mappings_data: Dict[str, Any]):
+    """Atomically write back identity mappings JSON file to prevent concurrent overwrite"""
+    dir_name = os.path.dirname(MAPPINGS_FILE) or "."
+    fd, temp_path = tempfile.mkstemp(dir=dir_name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(mappings_data, f, indent=2)
+        shutil.move(temp_path, MAPPINGS_FILE)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
+
+
+@router_admin.get("/external-systems/config")
+async def get_external_systems_config():
+    """Get list of configured external systems"""
+    config_data = load_systems_config()
+    return {
+        "success": True,
+        "data": config_data.get("systems", [])
+    }
+
+
+@router_admin.post("/external-systems/config")
+async def save_external_systems_config(request: Request):
+    """Add or update an external system configuration"""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    provider_id = data.get("provider_id")
+    name = data.get("name")
+    auth_type = data.get("auth_type", "hmac_callback")
+    client_id = data.get("client_id", "")
+    shared_secret_use_global = data.get("shared_secret_use_global", True)
+    shared_secret = data.get("shared_secret", "") if not shared_secret_use_global else ""
+    callback_url = data.get("callback_url", "/api/auth/external/login")
+    status = data.get("status", 1)
+
+    if not provider_id or not name:
+        raise HTTPException(status_code=400, detail="provider_id and name are required")
+
+    config_data = load_systems_config()
+    systems = config_data.get("systems", [])
+
+    # Check if provider_id exists, update if so, else append
+    found_index = -1
+    for i, sys in enumerate(systems):
+        if sys.get("provider_id") == provider_id:
+            found_index = i
+            break
+
+    new_system_config = {
+        "provider_id": provider_id,
+        "name": name,
+        "auth_type": auth_type,
+        "client_id": client_id,
+        "shared_secret_use_global": shared_secret_use_global,
+        "shared_secret": shared_secret,
+        "callback_url": callback_url,
+        "status": status
+    }
+
+    if found_index >= 0:
+        systems[found_index] = new_system_config
+    else:
+        systems.append(new_system_config)
+
+    config_data["systems"] = systems
+    save_systems_config_atomic(config_data)
+
+    return {
+        "success": True,
+        "message": "External system configuration saved successfully",
+        "data": new_system_config
+    }
+
+
+@router_admin.delete("/external-systems/config/{provider_id}")
+async def delete_external_systems_config(provider_id: str):
+    """Delete an external system configuration"""
+    config_data = load_systems_config()
+    systems = config_data.get("systems", [])
+
+    updated_systems = [sys for sys in systems if sys.get("provider_id") != provider_id]
+
+    if len(updated_systems) == len(systems):
+        raise HTTPException(status_code=404, detail="External system configuration not found")
+
+    config_data["systems"] = updated_systems
+    save_systems_config_atomic(config_data)
+
+    return {
+        "success": True,
+        "message": "External system configuration deleted successfully"
+    }
+
+
+@router_admin.get("/users/identity-bindings")
+async def get_identity_bindings(provider: Optional[str] = None, user_id: Optional[str] = None):
+    """Get all identity binding records with optional filtering"""
+    mappings_data = load_bindings()
+    bindings = mappings_data.get("bindings", [])
+
+    if provider:
+        bindings = [b for b in bindings if b.get("provider") == provider]
+    
+    if user_id:
+        bindings = [b for b in bindings if b.get("user_id") == user_id]
+
+    return {
+        "success": True,
+        "data": bindings
+    }
+
+
+@router_admin.post("/users/identity-bindings/bind")
+async def bind_external_identity_admin(request: Request):
+    """Manual binding endpoint for external identity (Admin version)"""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    user_id = data.get("user_id")
+    provider = data.get("provider")
+    external_id = data.get("external_id")
+
+    if not user_id or not provider or not external_id:
+        raise HTTPException(status_code=400, detail="Missing required parameters: user_id, provider, external_id")
+
+    mappings_data = load_bindings()
+    
+    # Check if the same external ID is already bound to a different user or exists
+    for b in mappings_data.get("bindings", []):
+        if b.get("provider") == provider and b.get("external_id") == external_id:
+            if b.get("user_id") != user_id:
+                raise HTTPException(status_code=400, detail="External ID already bound to another account.")
+            # If bound to the same user, just update status or return success
+            if b.get("status") != 1:
+                b["status"] = 1
+                b["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                save_bindings_atomic(mappings_data)
+            return {"success": True, "message": "Binding already exists and is active."}
+
+    # Add new binding record
+    new_binding = {
+        "user_id": user_id,
+        "provider": provider,
+        "external_id": external_id,
+        "status": 1,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    }
+    
+    mappings_data.setdefault("bindings", []).append(new_binding)
+    save_bindings_atomic(mappings_data)
+
+    return {"success": True, "message": "Admin binding successful"}
+
+
+@router_admin.post("/users/identity-bindings/unbind")
+async def unbind_external_identity_admin(request: Request):
+    """Manual unbinding endpoint for external identity (Admin version)"""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    user_id = data.get("user_id")
+    provider = data.get("provider")
+    external_id = data.get("external_id")
+
+    if not user_id or not provider or not external_id:
+        raise HTTPException(status_code=400, detail="Missing required parameters: user_id, provider, external_id")
+
+    mappings_data = load_bindings()
+    updated_bindings = []
+    found = False
+    
+    for b in mappings_data.get("bindings", []):
+        if b.get("user_id") == user_id and b.get("provider") == provider and b.get("external_id") == external_id:
+            # Unbind: remove the record from the list
+            found = True
+            continue  # Skip this record, do not add to updated_bindings
+        updated_bindings.append(b)
+
+    if not found:
+        raise HTTPException(status_code=404, detail="Binding record not found")
+
+    mappings_data["bindings"] = updated_bindings
+    save_bindings_atomic(mappings_data)
+
+    return {"success": True, "message": "Admin unbinding successful"}
+
+
+@router_admin.post("/users/identity-bindings/import-batch")
+async def import_batch_identity_mappings(request: Request):
+    """Batch import identity mapping records (user_id <-> external_id mappings)"""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    bindings_input = data.get("bindings", [])
+    
+    if not isinstance(bindings_input, list) or len(bindings_input) == 0:
+        raise HTTPException(status_code=400, detail="Invalid 'bindings' array: must be a non-empty list")
+
+    mappings_data = load_bindings()
+    existing_bindings = mappings_data.get("bindings", [])
+    
+    success_count = 0
+    failed_count = 0
+    errors = []
+
+    for idx, item in enumerate(bindings_input):
+        user_id = item.get("user_id")
+        provider = item.get("provider")
+        external_id = item.get("external_id")
+
+        if not user_id or not provider or not external_id:
+            failed_count += 1
+            errors.append(f"Row {idx + 1}: Missing required parameters (user_id, provider, or external_id)")
+            continue
+
+        # Check if the same external ID is already bound to a different user or exists
+        existing_match = None
+        for b in existing_bindings:
+            if b.get("provider") == provider and b.get("external_id") == external_id:
+                existing_match = b
+                break
+
+        if existing_match:
+            if existing_match.get("user_id") != user_id:
+                # External ID already bound to another user
+                failed_count += 1
+                errors.append(f"Row {idx + 1}: External ID '{external_id}' for provider '{provider}' is already bound to user '{existing_match['user_id']}'.")
+            else:
+                # Already bound to the same user, update status if needed
+                if existing_match.get("status") != 1:
+                    existing_match["status"] = 1
+                    existing_match["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                success_count += 1
+        else:
+            # Add new binding record
+            new_binding = {
+                "user_id": user_id,
+                "provider": provider,
+                "external_id": external_id,
+                "status": 1,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            }
+            existing_bindings.append(new_binding)
+            success_count += 1
+
+    # Save updated bindings if there were changes
+    if success_count > 0 or failed_count == 0:
+        mappings_data["bindings"] = existing_bindings
+        save_bindings_atomic(mappings_data)
+
+    return {
+        "success": True,
+        "message": f"Batch import completed. Success: {success_count}, Failed: {failed_count}",
+        "stats": {
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors if len(errors) > 0 else None
+        }
+    }

@@ -12,24 +12,20 @@
 
 import { useState, useEffect } from 'react';
 import { 
-  Table, Button, Modal, Form, Input, Select, Space, Tag, Drawer,
-  Upload, message, Popconfirm, Card, Descriptions, Divider
+  Table, Button, Space, Tag, Drawer, Form, Input, message, Card, Descriptions, Popconfirm, Upload
 } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import { 
-  PlusOutlined, DeleteOutlined, FileTextOutlined, TeamOutlined,
-  GlobalOutlined, LockOutlined, SafetyOutlined, UploadOutlined
+  PlusOutlined, DeleteOutlined, FileTextOutlined, SafetyOutlined, UploadOutlined, EditOutlined
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import { knowledgeApi, type KnowledgeBase, type KnowledgeDocument } from '@/api/modules/knowledge';
 import { PageHeader } from '@/components/PageHeader';
 
-const { TextArea } = Input;
-
 export default function KnowledgeBasePage() {
+  const navigate = useNavigate();
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(false);
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [createForm] = Form.useForm();
   
   // 文档管理抽屉
   const [docDrawerOpen, setDocDrawerOpen] = useState(false);
@@ -39,6 +35,11 @@ export default function KnowledgeBasePage() {
   
   // 权限管理抽屉（企业版功能）
   const [permissionDrawerOpen, setPermissionDrawerOpen] = useState(false);
+  
+  // 编辑知识库抽屉
+  const [editDrawerOpen, setEditDrawerOpen] = useState(false);
+  const [editingKb, setEditingKb] = useState<KnowledgeBase | null>(null);
+  const [editForm] = Form.useForm();
 
   // 加载知识库列表
   useEffect(() => {
@@ -49,27 +50,17 @@ export default function KnowledgeBasePage() {
     setLoading(true);
     try {
       const res = await knowledgeApi.listBases();
-      setBases(res.bases || []);
+      // 后端返回 kb_id，前端组件使用 id，统一映射避免 undefined
+      const mapped = (res.items || []).map((item: any) => ({
+        ...item,
+        id: item.kb_id || item.id || item._id,
+      }));
+      setBases(mapped);
     } catch (error) {
       console.error('加载知识库失败:', error);
       message.error('加载知识库失败');
     } finally {
       setLoading(false);
-    }
-  };
-
-  // 创建知识库
-  const handleCreate = async () => {
-    try {
-      const values = await createForm.validateFields();
-      await knowledgeApi.createBase(values);
-      message.success('创建成功');
-      setCreateModalOpen(false);
-      createForm.resetFields();
-      loadBases();
-    } catch (error) {
-      console.error('创建知识库失败:', error);
-      message.error('创建失败');
     }
   };
 
@@ -82,6 +73,32 @@ export default function KnowledgeBasePage() {
     } catch (error) {
       console.error('删除知识库失败:', error);
       message.error('删除失败');
+    }
+  };
+
+  // 打开编辑抽屉
+  const openEditDrawer = (kb: KnowledgeBase) => {
+    setEditingKb(kb);
+    editForm.setFieldsValue({
+      name: kb.name,
+      description: kb.description,
+    });
+    setEditDrawerOpen(true);
+  };
+
+  // 保存编辑
+  const handleEditSave = async () => {
+    try {
+      const values = await editForm.validateFields();
+      if (!editingKb) return;
+      
+      await knowledgeApi.updateBase(editingKb.id, values);
+      message.success('更新成功');
+      setEditDrawerOpen(false);
+      loadBases();
+    } catch (error) {
+      console.error('更新知识库失败:', error);
+      message.error('更新失败');
     }
   };
 
@@ -215,6 +232,13 @@ export default function KnowledgeBasePage() {
           >
             权限
           </Button>
+          <Button 
+            size="small" 
+            icon={<EditOutlined />}
+            onClick={() => openEditDrawer(record)}
+          >
+            编辑
+          </Button>
           <Popconfirm
             title="确定删除此知识库？"
             onConfirm={() => handleDelete(record.id)}
@@ -289,9 +313,9 @@ export default function KnowledgeBasePage() {
           <Button 
             type="primary" 
             icon={<PlusOutlined />}
-            onClick={() => setCreateModalOpen(true)}
+            onClick={() => navigate('/knowledge/bases/create')}
           >
-            创建知识库
+            创建知识库（高级配置）
           </Button>
         </div>
 
@@ -303,68 +327,6 @@ export default function KnowledgeBasePage() {
           pagination={{ pageSize: 10 }}
         />
       </Card>
-
-      {/* 创建知识库 Modal */}
-      <Modal
-        title="创建知识库"
-        open={createModalOpen}
-        onOk={handleCreate}
-        onCancel={() => {
-          setCreateModalOpen(false);
-          createForm.resetFields();
-        }}
-      >
-        <Form form={createForm} layout="vertical">
-          <Form.Item
-            name="name"
-            label="知识库名称"
-            rules={[{ required: true, message: '请输入知识库名称' }]}
-          >
-            <Input placeholder="例如：产品文档库" />
-          </Form.Item>
-
-          <Form.Item
-            name="description"
-            label="描述"
-          >
-            <TextArea rows={2} placeholder="知识库用途说明" />
-          </Form.Item>
-
-          <Form.Item
-            name="scope"
-            label="作用域"
-            initialValue="user"
-          >
-            <Select>
-              <Select.Option value="global">全局</Select.Option>
-              <Select.Option value="user">用户</Select.Option>
-              <Select.Option value="agent">智能体</Select.Option>
-            </Select>
-          </Form.Item>
-
-          {/* 企业版扩展字段：可见性 */}
-          <Divider>企业版功能</Divider>
-          
-          <Form.Item
-            name="visibility"
-            label="可见性"
-            initialValue="private"
-            tooltip="控制知识库的访问范围"
-          >
-            <Select>
-              <Select.Option value="public">
-                <Space><GlobalOutlined /> 全局可见</Space>
-              </Select.Option>
-              <Select.Option value="department">
-                <Space><TeamOutlined /> 部门可见</Space>
-              </Select.Option>
-              <Select.Option value="private">
-                <Space><LockOutlined /> 仅自己可见</Space>
-              </Select.Option>
-            </Select>
-          </Form.Item>
-        </Form>
-      </Modal>
 
       {/* 文档管理抽屉 */}
       <Drawer
@@ -386,6 +348,38 @@ export default function KnowledgeBasePage() {
           loading={docLoading}
           pagination={{ pageSize: 10 }}
         />
+      </Drawer>
+
+      {/* 编辑知识库抽屉 */}
+      <Drawer
+        title={`编辑知识库 - ${editingKb?.name || ''}`}
+        width={500}
+        open={editDrawerOpen}
+        onClose={() => setEditDrawerOpen(false)}
+        extra={
+          <Button type="primary" onClick={handleEditSave}>
+            保存
+          </Button>
+        }
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item
+            label="知识库名称"
+            name="name"
+            rules={[
+              { required: true, message: '请输入知识库名称' },
+              { min: 2, message: '名称至少需要 2 个字符' },
+            ]}
+          >
+            <Input placeholder="请输入知识库名称" />
+          </Form.Item>
+          <Form.Item
+            label="描述"
+            name="description"
+          >
+            <Input.TextArea rows={4} placeholder="请输入知识库描述" />
+          </Form.Item>
+        </Form>
       </Drawer>
 
       {/* 权限管理抽屉（企业版功能） */}

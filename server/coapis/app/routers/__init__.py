@@ -105,6 +105,8 @@ from .admin_scenes import router as admin_scenes_router
 from .tags import router as tags_router
 from .menus import router as menus_router
 from .webdav import router as webdav_router
+# External systems admin management (identity bindings & external system configs)
+from .external_systems_admin import router_admin as external_systems_admin_router
 
 router = APIRouter()
 
@@ -174,6 +176,8 @@ router.include_router(menus_router)
 # Session Execution Manager API
 from .session_execution import router as session_execution_router
 router.include_router(session_execution_router)
+
+
 router.include_router(inbox_router)
 router.include_router(setup_router)
 router.include_router(onboarding_router)
@@ -198,6 +202,9 @@ router.include_router(license_router)
 router.include_router(files_router)
 router.include_router(file_preview_router)  # /files/preview/{path} — chat media serving
 router.include_router(webdav_router)  # WebDAV API for workspace file access
+
+# External systems admin management (identity bindings & external system configs)
+router.include_router(external_systems_admin_router)
 
 # ═══════════════════════════════════════════════════════════
 # Enterprise stubs (always loaded for upgrade prompts)

@@ -48,7 +48,8 @@ logger = logging.getLogger(__name__)
 class TagService:
     """Service for managing tags.
     
-    Tags are stored in a JSON file: {data_dir}/tags.json
+    In community edition: Tags are stored in a JSON file: {data_dir}/tags.json
+    In enterprise edition: Tags are stored in PostgreSQL database via RepositoryFactory.
     """
     
     def __init__(self, data_dir: Path):
@@ -59,13 +60,27 @@ class TagService:
         """
         self.data_dir = data_dir
         self.tags_file = data_dir / "tags.json"
+        self._enterprise_repo = None
+        
+        # Check if enterprise repository is available
+        if is_enterprise_installed():
+            try:
+                from ...foundation.repository_factory import RepositoryFactory
+                if RepositoryFactory.is_initialized():
+                    self._enterprise_repo = RepositoryFactory.get_tag_repository()
+                    logger.info("TagService using Enterprise PostgreSQL tag repository")
+            except Exception as e:
+                logger.warning(f"Failed to get enterprise tag repository: {e}, falling back to JSON")
     
     def _load_tags(self) -> List[TagConfig]:
-        """Load tags from file.
+        """Load tags from file or enterprise repository.
         
         Returns:
             List of tag configurations
         """
+        if self._enterprise_repo:
+            return self._load_tags_from_repository()
+        
         if not self.tags_file.exists():
             logger.warning(f"Tags file not found: {self.tags_file}")
             return []
@@ -82,13 +97,50 @@ class TagService:
         except Exception as e:
             logger.error(f"Failed to load tags: {e}")
             return []
+
+    def _load_tags_from_repository(self) -> List[TagConfig]:
+        """Load tags from enterprise PostgreSQL repository.
+        
+        Returns:
+            List of TagConfig objects
+        """
+        try:
+            db_tags = self._enterprise_repo.list_tags()
+            tags = []
+            for db_tag in db_tags:
+                # Convert SQLAlchemy model to Pydantic TagConfig
+                tag_config = TagConfig(
+                    id=db_tag.id,
+                    name=db_tag.name,
+                    icon=getattr(db_tag, 'icon', None),
+                    type=TagType(db_tag.type) if hasattr(db_tag, 'type') and db_tag.type else TagType.DIMENSION,
+                    parent_id=getattr(db_tag, 'parent_id', None),
+                    description=getattr(db_tag, 'description', None),
+                    keywords=getattr(db_tag, 'keywords', []),
+                    related_skills=getattr(db_tag, 'related_skills', []),
+                    sort_order=getattr(db_tag, 'sort_order', 0),
+                    show_in_menu=getattr(db_tag, 'show_in_menu', False),
+                    enabled=getattr(db_tag, 'enabled', True),
+                    metadata=getattr(db_tag, 'extra_metadata', None),
+                    created_at=datetime.fromisoformat(getattr(db_tag, 'created_at', datetime.now().isoformat())) if getattr(db_tag, 'created_at', None) else datetime.now(),
+                    updated_at=datetime.fromisoformat(getattr(db_tag, 'updated_at', datetime.now().isoformat())) if getattr(db_tag, 'updated_at', None) else datetime.now(),
+                )
+                tags.append(tag_config)
+            return tags
+        except Exception as e:
+            logger.error(f"Failed to load tags from repository: {e}")
+            return []
     
     def _save_tags(self, tags: List[TagConfig]) -> None:
-        """Save tags to file.
+        """Save tags to file or enterprise repository.
         
         Args:
             tags: List of tag configurations
         """
+        if self._enterprise_repo:
+            self._save_tags_to_repository(tags)
+            return
+        
         # Create data directory if not exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
@@ -104,6 +156,53 @@ class TagService:
             json.dump(tags_data, f, ensure_ascii=False, indent=2)
         
         logger.info(f"Saved {len(tags)} tags to {self.tags_file}")
+
+    def _save_tags_to_repository(self, tags: List[TagConfig]) -> None:
+        """Save tags to enterprise PostgreSQL repository.
+        
+        Args:
+            tags: List of TagConfig objects
+        """
+        try:
+            for tag_config in tags:
+                # Convert Pydantic TagConfig to SQLAlchemy model
+                from ...enterprise.database.models import tag as tag_model
+                
+                db_tag = self._enterprise_repo.get_tag(tag_config.id)
+                if not db_tag:
+                    db_tag = tag_model.Tag(
+                        id=tag_config.id,
+                        name=tag_config.name,
+                        icon=tag_config.icon,
+                        type=str(tag_config.type.value) if hasattr(tag_config.type, 'value') else str(tag_config.type),
+                        parent_id=tag_config.parent_id,
+                        description=tag_config.description,
+                        keywords=tag_config.keywords or [],
+                        related_skills=tag_config.related_skills or [],
+                        sort_order=tag_config.sort_order,
+                        show_in_menu=tag_config.show_in_menu,
+                        enabled=tag_config.enabled,
+                        extra_metadata=getattr(tag_config, 'metadata', None),
+                    )
+                
+                # Update fields
+                db_tag.name = tag_config.name
+                db_tag.icon = tag_config.icon
+                db_tag.type = str(tag_config.type.value) if hasattr(tag_config.type, 'value') else str(tag_config.type)
+                db_tag.parent_id = tag_config.parent_id
+                db_tag.description = tag_config.description
+                db_tag.keywords = tag_config.keywords or []
+                db_tag.related_skills = tag_config.related_skills or []
+                db_tag.sort_order = tag_config.sort_order
+                db_tag.show_in_menu = tag_config.show_in_menu
+                db_tag.enabled = tag_config.enabled
+                db_tag.extra_metadata = getattr(tag_config, 'metadata', None)
+                
+                self._enterprise_repo.save_tag(db_tag)
+            
+            logger.info(f"Saved {len(tags)} tags to PostgreSQL repository")
+        except Exception as e:
+            logger.error(f"Failed to save tags to repository: {e}")
     
     def _generate_id(self, name: str, tag_type: TagType) -> str:
         """Generate tag ID from name.
@@ -162,6 +261,36 @@ class TagService:
         Returns:
             TagListResponse with filtered tags
         """
+        if self._enterprise_repo:
+            # Use enterprise repository
+            db_tags = self._enterprise_repo.list_tags(
+                tag_type=str(tag_type.value) if tag_type and hasattr(tag_type, 'value') else str(tag_type),
+                parent_id=parent_id,
+                enabled=enabled,
+                show_in_menu=show_in_menu,
+            )
+            tags = []
+            for db_tag in db_tags:
+                tag_config = TagConfig(
+                    id=db_tag.id,
+                    name=db_tag.name,
+                    icon=getattr(db_tag, 'icon', None),
+                    type=TagType(db_tag.type) if hasattr(db_tag, 'type') and db_tag.type else TagType.DIMENSION,
+                    parent_id=getattr(db_tag, 'parent_id', None),
+                    description=getattr(db_tag, 'description', None),
+                    keywords=getattr(db_tag, 'keywords', []),
+                    related_skills=getattr(db_tag, 'related_skills', []),
+                    sort_order=getattr(db_tag, 'sort_order', 0),
+                    show_in_menu=getattr(db_tag, 'show_in_menu', False),
+                    enabled=getattr(db_tag, 'enabled', True),
+                    metadata=getattr(db_tag, 'extra_metadata', None),
+                    created_at=datetime.fromisoformat(getattr(db_tag, 'created_at', datetime.now().isoformat())) if getattr(db_tag, 'created_at', None) else datetime.now(),
+                    updated_at=datetime.fromisoformat(getattr(db_tag, 'updated_at', datetime.now().isoformat())) if getattr(db_tag, 'updated_at', None) else datetime.now(),
+                )
+                tags.append(tag_config)
+            return TagListResponse(tags=tags, total=len(tags))
+        
+        # Fallback to JSON storage
         tags = self._load_tags()
         
         # Apply filters
@@ -191,6 +320,28 @@ class TagService:
         Returns:
             TagConfig if found, None otherwise
         """
+        if self._enterprise_repo:
+            db_tag = self._enterprise_repo.get_tag(tag_id)
+            if not db_tag:
+                return None
+            tag_config = TagConfig(
+                id=db_tag.id,
+                name=db_tag.name,
+                icon=getattr(db_tag, 'icon', None),
+                type=TagType(db_tag.type) if hasattr(db_tag, 'type') and db_tag.type else TagType.DIMENSION,
+                parent_id=getattr(db_tag, 'parent_id', None),
+                description=getattr(db_tag, 'description', None),
+                keywords=getattr(db_tag, 'keywords', []),
+                related_skills=getattr(db_tag, 'related_skills', []),
+                sort_order=getattr(db_tag, 'sort_order', 0),
+                show_in_menu=getattr(db_tag, 'show_in_menu', False),
+                enabled=getattr(db_tag, 'enabled', True),
+                metadata=getattr(db_tag, 'extra_metadata', None),
+                created_at=datetime.fromisoformat(getattr(db_tag, 'created_at', datetime.now().isoformat())) if getattr(db_tag, 'created_at', None) else datetime.now(),
+                updated_at=datetime.fromisoformat(getattr(db_tag, 'updated_at', datetime.now().isoformat())) if getattr(db_tag, 'updated_at', None) else datetime.now(),
+            )
+            return tag_config
+        
         tags = self._load_tags()
         for tag in tags:
             if tag.id == tag_id:
@@ -209,6 +360,9 @@ class TagService:
         Raises:
             ValueError: If validation fails
         """
+        if self._enterprise_repo:
+            return self._create_tag_in_repository(request)
+        
         tags = self._load_tags()
         
         # Validate parent_id for category type
@@ -265,6 +419,85 @@ class TagService:
         
         logger.info(f"Created tag: {tag_id} ({tag.name})")
         return tag
+
+    def _create_tag_in_repository(self, request: TagCreateRequest) -> TagConfig:
+        """Create a new tag in PostgreSQL repository.
+        
+        Args:
+            request: Tag creation request
+            
+        Returns:
+            Created TagConfig
+            
+        Raises:
+            ValueError: If validation fails
+        """
+        # Validate parent_id for category type
+        if request.type == TagType.CATEGORY:
+            if not request.parent_id:
+                raise ValueError("Category tag must have a parent_id")
+            
+            # Check if parent exists and is a dimension
+            parent = self.get_tag(request.parent_id)
+            if not parent:
+                raise ValueError(f"Parent tag not found: {request.parent_id}")
+            if parent.type != TagType.DIMENSION:
+                raise ValueError(f"Parent must be a dimension tag, got: {parent.type}")
+        
+        # Validate that dimension and menu tags don't have parent_id
+        if request.type in (TagType.DIMENSION, TagType.MENU) and request.parent_id:
+            raise ValueError(f"{request.type} tag cannot have a parent_id")
+        
+        # Validate that menu tags must have metadata.path for routing
+        if request.type == TagType.MENU:
+            metadata = request.metadata or {}
+            if not metadata.get("path"):
+                raise ValueError("Menu tag must have metadata.path for navigation")
+        
+        # Generate ID
+        tag_id = self._generate_id(request.name, request.type)
+        
+        from ...enterprise.database.models import tag as tag_model
+        
+        now = datetime.now()
+        db_tag = tag_model.Tag(
+            id=tag_id,
+            name=request.name,
+            icon=request.icon,
+            type=str(request.type.value) if hasattr(request.type, 'value') else str(request.type),
+            parent_id=request.parent_id,
+            description=request.description,
+            keywords=request.keywords or [],
+            related_skills=request.related_skills or [],
+            sort_order=request.sort_order,
+            show_in_menu=request.show_in_menu,
+            enabled=request.enabled,
+            extra_metadata=getattr(request, 'metadata', None),
+            created_at=now,
+            updated_at=now,
+        )
+        
+        saved_tag = self._enterprise_repo.save_tag(db_tag)
+        
+        tag_config = TagConfig(
+            id=saved_tag.id,
+            name=saved_tag.name,
+            icon=getattr(saved_tag, 'icon', None),
+            type=TagType(saved_tag.type) if hasattr(saved_tag, 'type') and saved_tag.type else TagType.DIMENSION,
+            parent_id=getattr(saved_tag, 'parent_id', None),
+            description=getattr(saved_tag, 'description', None),
+            keywords=getattr(saved_tag, 'keywords', []),
+            related_skills=getattr(saved_tag, 'related_skills', []),
+            sort_order=getattr(saved_tag, 'sort_order', 0),
+            show_in_menu=getattr(saved_tag, 'show_in_menu', False),
+            enabled=getattr(saved_tag, 'enabled', True),
+            metadata=getattr(saved_tag, 'extra_metadata', None),
+            created_at=datetime.fromisoformat(getattr(saved_tag, 'created_at', datetime.now().isoformat())) if getattr(saved_tag, 'created_at', None) else datetime.now(),
+            updated_at=datetime.fromisoformat(getattr(saved_tag, 'updated_at', datetime.now().isoformat())) if getattr(saved_tag, 'updated_at', None) else datetime.now(),
+        )
+        
+        logger.info(f"Created tag in repository: {tag_id} ({saved_tag.name})")
+        return tag_config
     
     def update_tag(self, tag_id: str, request: TagUpdateRequest) -> TagConfig:
         """Update a tag.
@@ -279,6 +512,9 @@ class TagService:
         Raises:
             ValueError: If tag not found or validation fails
         """
+        if self._enterprise_repo:
+            return self._update_tag_in_repository(tag_id, request)
+        
         tags = self._load_tags()
         
         # Find tag
@@ -324,6 +560,91 @@ class TagService:
         
         logger.info(f"Updated tag: {tag_id}")
         return tag
+
+    def _update_tag_in_repository(self, tag_id: str, request: TagUpdateRequest) -> TagConfig:
+        """Update a tag in PostgreSQL repository.
+        
+        Args:
+            tag_id: Tag ID to update
+            request: Tag update request
+            
+        Returns:
+            Updated TagConfig
+            
+        Raises:
+            ValueError: If tag not found or validation fails
+        """
+        db_tag = self._enterprise_repo.get_tag(tag_id)
+        if not db_tag:
+            raise ValueError(f"Tag not found: {tag_id}")
+        
+        # Validate parent_id if being updated
+        if request.parent_id is not None:
+            if db_tag.type == str(TagType.CATEGORY):
+                if request.parent_id:  # Not empty
+                    parent = self.get_tag(request.parent_id)
+                    if not parent:
+                        raise ValueError(f"Parent tag not found: {request.parent_id}")
+                    if parent.type != TagType.DIMENSION:
+                        raise ValueError(f"Parent must be a dimension tag, got: {parent.type}")
+            elif db_tag.type in (str(TagType.DIMENSION), str(TagType.MENU)):
+                raise ValueError(f"{db_tag.type} tag cannot have a parent_id")
+        
+        # Validate that menu tags still have metadata.path after update
+        if db_tag.type == str(TagType.MENU) and request.metadata is not None:
+            if not request.metadata.get("path"):
+                raise ValueError("Menu tag must have metadata.path for navigation")
+        
+        # Update fields
+        update_data = request.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            if key == 'metadata':
+                # Map 'metadata' field to 'extra_metadata' attribute in SQLAlchemy model
+                setattr(db_tag, 'extra_metadata', value)
+            elif hasattr(db_tag, key) and key != 'type':
+                setattr(db_tag, key, value)
+        
+        if request.type is not None:
+            db_tag.type = str(request.type.value) if hasattr(request.type, 'value') else str(request.type)
+        
+        if request.icon is not None:
+            db_tag.icon = request.icon
+        if request.description is not None:
+            db_tag.description = request.description
+        if request.keywords is not None:
+            db_tag.keywords = request.keywords
+        if request.related_skills is not None:
+            db_tag.related_skills = request.related_skills
+        if request.sort_order is not None:
+            db_tag.sort_order = request.sort_order
+        if request.show_in_menu is not None:
+            db_tag.show_in_menu = request.show_in_menu
+        if request.enabled is not None:
+            db_tag.enabled = request.enabled
+        
+        db_tag.updated_at = datetime.now()
+        
+        saved_tag = self._enterprise_repo.save_tag(db_tag)
+        
+        tag_config = TagConfig(
+            id=saved_tag.id,
+            name=saved_tag.name,
+            icon=getattr(saved_tag, 'icon', None),
+            type=TagType(saved_tag.type) if hasattr(saved_tag, 'type') and saved_tag.type else TagType.DIMENSION,
+            parent_id=getattr(saved_tag, 'parent_id', None),
+            description=getattr(saved_tag, 'description', None),
+            keywords=getattr(saved_tag, 'keywords', []),
+            related_skills=getattr(saved_tag, 'related_skills', []),
+            sort_order=getattr(saved_tag, 'sort_order', 0),
+            show_in_menu=getattr(saved_tag, 'show_in_menu', False),
+            enabled=getattr(saved_tag, 'enabled', True),
+            metadata=getattr(saved_tag, 'extra_metadata', None),
+            created_at=datetime.fromisoformat(getattr(saved_tag, 'created_at', datetime.now().isoformat())) if getattr(saved_tag, 'created_at', None) else datetime.now(),
+            updated_at=datetime.fromisoformat(getattr(saved_tag, 'updated_at', datetime.now().isoformat())) if getattr(saved_tag, 'updated_at', None) else datetime.now(),
+        )
+        
+        logger.info(f"Updated tag in repository: {tag_id}")
+        return tag_config
     
     def delete_tag(self, tag_id: str, check_usage: bool = True) -> bool:
         """Delete a tag.
@@ -338,6 +659,9 @@ class TagService:
         Raises:
             ValueError: If tag not found or in use
         """
+        if self._enterprise_repo:
+            return self._delete_tag_in_repository(tag_id)
+        
         tags = self._load_tags()
         
         # Find tag
@@ -369,6 +693,35 @@ class TagService:
         
         logger.info(f"Deleted tag: {tag_id}")
         return True
+
+    def _delete_tag_in_repository(self, tag_id: str) -> bool:
+        """Delete a tag in PostgreSQL repository.
+        
+        Args:
+            tag_id: Tag ID to delete
+            
+        Returns:
+            True if deleted
+            
+        Raises:
+            ValueError: If tag not found or in use
+        """
+        db_tag = self._enterprise_repo.get_tag(tag_id)
+        if not db_tag:
+            raise ValueError(f"Tag not found: {tag_id}")
+        
+        # Check if tag has children (for dimension tags)
+        if str(db_tag.type) == str(TagType.DIMENSION):
+            children = [t for t in self._enterprise_repo.list_tags() if getattr(t, 'parent_id', None) == tag_id]
+            if children:
+                raise ValueError(
+                    f"Cannot delete dimension tag with {len(children)} category tags. "
+                    "Delete or reassign category tags first."
+                )
+        
+        success = self._enterprise_repo.delete_tag(tag_id)
+        logger.info(f"Deleted tag in repository: {tag_id}")
+        return success
     
     def get_tag_tree(self) -> List[TagTreeItem]:
         """Get tag tree for hierarchical display.
@@ -376,6 +729,9 @@ class TagService:
         Returns:
             List of TagTreeItem (dimension tags with children)
         """
+        if self._enterprise_repo:
+            return self._get_tag_tree_from_repository()
+        
         tags = self._load_tags()
         
         # Get dimension tags
@@ -411,6 +767,48 @@ class TagService:
             tree.append(tree_item)
         
         return tree
+
+    def _get_tag_tree_from_repository(self) -> List[TagTreeItem]:
+        """Get tag tree from PostgreSQL repository.
+        
+        Returns:
+            List of TagTreeItem (dimension tags with children)
+        """
+        db_tags = self._enterprise_repo.list_tags()
+        
+        # Get dimension tags
+        dimensions = [t for t in db_tags if str(t.type) == str(TagType.DIMENSION) and getattr(t, 'enabled', True)]
+        dimensions.sort(key=lambda t: (-getattr(t, 'sort_order', 0), t.name))
+        
+        # Build tree
+        tree = []
+        for dim in dimensions:
+            # Get category tags under this dimension
+            categories = [
+                t for t in db_tags 
+                if str(t.type) == str(TagType.CATEGORY) and getattr(t, 'parent_id', None) == dim.id and getattr(t, 'enabled', True)
+            ]
+            categories.sort(key=lambda t: (-getattr(t, 'sort_order', 0), t.name))
+            
+            tree_item = TagTreeItem(
+                id=dim.id,
+                name=dim.name,
+                icon=getattr(dim, 'icon', None),
+                type=TagType(dim.type) if hasattr(dim, 'type') and dim.type else TagType.DIMENSION,
+                children=[
+                    TagTreeItem(
+                        id=cat.id,
+                        name=cat.name,
+                        icon=getattr(cat, 'icon', None),
+                        type=TagType(cat.type) if hasattr(cat, 'type') and cat.type else TagType.CATEGORY,
+                        children=[],
+                    )
+                    for cat in categories
+                ],
+            )
+            tree.append(tree_item)
+        
+        return tree
     
     def get_menu_tags(self) -> List[TagTreeItem]:
         """Get tags for workbench menu.
@@ -420,6 +818,9 @@ class TagService:
         Returns:
             List of TagTreeItem
         """
+        if self._enterprise_repo:
+            return self._get_menu_tags_from_repository()
+        
         tags = self._load_tags()
         
         # Get dimension tags with show_in_menu=True
@@ -453,6 +854,56 @@ class TagService:
                         name=cat.name,
                         icon=cat.icon,
                         type=cat.type,
+                        children=[],
+                    )
+                    for cat in categories
+                ],
+            )
+            tree.append(tree_item)
+        
+        return tree
+
+    def _get_menu_tags_from_repository(self) -> List[TagTreeItem]:
+        """Get menu tags from PostgreSQL repository.
+        
+        Only returns tags with show_in_menu=True.
+        
+        Returns:
+            List of TagTreeItem
+        """
+        db_tags = self._enterprise_repo.list_tags()
+        
+        # Get dimension tags with show_in_menu=True
+        dimensions = [
+            t for t in db_tags 
+            if str(t.type) == str(TagType.DIMENSION) and getattr(t, 'show_in_menu', False) and getattr(t, 'enabled', True)
+        ]
+        dimensions.sort(key=lambda t: (-getattr(t, 'sort_order', 0), t.name))
+        
+        # Build tree
+        tree = []
+        for dim in dimensions:
+            # Get category tags under this dimension
+            categories = [
+                t for t in db_tags 
+                if (str(t.type) == str(TagType.CATEGORY) and 
+                    getattr(t, 'parent_id', None) == dim.id and 
+                    getattr(t, 'show_in_menu', False) and 
+                    getattr(t, 'enabled', True))
+            ]
+            categories.sort(key=lambda t: (-getattr(t, 'sort_order', 0), t.name))
+            
+            tree_item = TagTreeItem(
+                id=dim.id,
+                name=dim.name,
+                icon=getattr(dim, 'icon', None),
+                type=TagType(dim.type) if hasattr(dim, 'type') and dim.type else TagType.DIMENSION,
+                children=[
+                    TagTreeItem(
+                        id=cat.id,
+                        name=cat.name,
+                        icon=getattr(cat, 'icon', None),
+                        type=TagType(cat.type) if hasattr(cat, 'type') and cat.type else TagType.CATEGORY,
                         children=[],
                     )
                     for cat in categories

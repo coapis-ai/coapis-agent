@@ -153,12 +153,32 @@ function payloadCompletesResponse(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
 
   const record = payload as Record<string, unknown>;
-  if (record.object !== "response") return false;
   
-  // Recognize ALL terminal statuses, not just "completed".
-  // The backend may send "failed" for normal completions in some configurations.
-  const status = record.status as string;
-  return status === "completed" || status === "failed" || status === "canceled";
+  // 1) 标准 response 完成标志
+  if (record.object === "response") {
+    const status = record.status as string;
+    if (status === "completed" || status === "failed" || status === "canceled") {
+      return true;
+    }
+  }
+  
+  // 2) 兜底：message completed 也视为流结束
+  if (record.object === "message") {
+    const status = record.status as string;
+    if (status === "completed" || status === "failed" || status === "canceled") {
+      return true;
+    }
+  }
+  
+  // 3) 兼容：某些实现用 event: done 或 data: [DONE]
+  if (record.object === "event" && (record as any).event === "done") {
+    return true;
+  }
+  if (record.object === "content" && (record as any).text === "[DONE]") {
+    return true;
+  }
+  
+  return false;
 }
 
 // ---------------------------------------------------------------------------

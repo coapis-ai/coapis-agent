@@ -478,6 +478,19 @@ class AgentRunner(Runner):
                         if _last_text.strip() == _first_text.strip():
                             _skip_first = True
                             logger.info("_persist_chat_messages: skipped duplicate user message")
+                    else:
+                        # 方案B：对 assistant / reasoning 也做尾部去重，避免同角色消息整段重复追加
+                        _last_role = getattr(_last_existing, "role", "")
+                        _first_role = getattr(_first_new, "role", "")
+                        if _last_role and _first_role and _last_role == _first_role:
+                            _last_text = getattr(_last_existing, "get_text_content", lambda: "")() or ""
+                            _first_text = getattr(_first_new, "get_text_content", lambda: "")() or ""
+                            if _last_text.strip() == _first_text.strip():
+                                _skip_first = True
+                                logger.info(
+                                    "_persist_chat_messages: skipped duplicate %s message",
+                                    _last_role,
+                                )
 
                 _msgs_to_add = _agent_msgs[1:] if _skip_first else _agent_msgs
 
@@ -790,10 +803,27 @@ class AgentRunner(Runner):
         from datetime import datetime, timezone
 
         created_at = int(datetime.now(timezone.utc).timestamp())
+        completed_response_yielded = False
         async for event in super().stream_query(request, **kwargs):
             if getattr(event, "object", None) == "response":
                 event.created_at = created_at
+                if getattr(event, "status", None) in ("completed", "failed", "canceled"):
+                    completed_response_yielded = True
             yield event
+
+        # 兼容：若底层未显式产出 completed/failed/canceled 的 response，
+        # 这里补发一个完成事件，避免前端 loading 不结束。
+        if not completed_response_yielded:
+            try:
+                from agentscope_runtime.engine.schemas.agent_schemas import Event
+                yield Event(
+                    object="response",
+                    id=f"resp_{created_at}",
+                    status="completed",
+                    created_at=created_at,
+                )
+            except Exception:
+                pass
 
     async def query_handler(
         self,

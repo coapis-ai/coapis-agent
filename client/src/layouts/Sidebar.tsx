@@ -18,7 +18,7 @@ import {
   SparkMenuFoldLine,
   SparkSaveLine,
 } from "@agentscope-ai/icons";
-import { ThunderboltOutlined, CrownOutlined } from "@ant-design/icons";
+import { ThunderboltOutlined, CrownOutlined, SecurityScanOutlined } from "@ant-design/icons";
 import { agentsApi } from "../api/modules/agents";
 import { permissionsApi } from "../api/modules/permissions";
 import { usePlugins } from "../plugins/PluginContext";
@@ -381,6 +381,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: "admin",
           label: collapsed ? null : t("nav.adminPanel", "后台管理"),
           icon: <CrownOutlined />,
+        },
+        {
+          key: "system-authorization",
+          label: collapsed ? null : t("nav.systemAuthorization", "系统授权管理"),
+          icon: <SecurityScanOutlined />,
         },
       ],
     },

@@ -271,6 +271,9 @@ class TaskTracker:
                         if tracker is None:
                             return
                         async with tracker.lock:
+                            # 方案C：相邻 SSE 内容级去重，避免同一事件被重复广播进 buffer/queue
+                            if run.buffer and run.buffer[-1] == sse:
+                                continue
                             run.buffer.append(sse)
                             for q in run.queues:
                                 q.put_nowait(sse)

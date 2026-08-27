@@ -280,6 +280,14 @@ export default function Settings() {
       color: '#a0d911',
       path: '/debug',
     },
+    {
+      key: 'system-authorization',
+      title: t('nav.systemAuthorization', '系统授权管理'),
+      description: '外部系统与身份绑定管理',
+      icon: <SecurityScanOutlined />,
+      color: '#722ed1',
+      path: '/admin/external-systems-auth',
+    },
   ];
 
   // 过滤后的功能模块
