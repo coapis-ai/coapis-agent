@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 
 async def create_mcp_service(ws: "Workspace", mcp):
-    print("MCP_FACTORY_CALLED", flush=True)
     """Initialize MCP manager with merged global+user config and attach to runner.
 
     Merge logic:

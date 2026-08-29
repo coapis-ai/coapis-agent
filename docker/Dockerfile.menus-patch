@@ -1,5 +1,0 @@
-# Patch image: copy only menus.py onto coapis-agent:latest
-FROM coapis-agent:latest
-
-# Fix: sort menus ascending by sortOrder
-COPY server/coapis/app/routers/menus.py /app/coapis/app/routers/menus.py

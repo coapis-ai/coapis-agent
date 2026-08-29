@@ -30,6 +30,8 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
+        // 企业版扩展入口（社区版为空实现，企业版覆盖 src/enterprise/）
+        "@enterprise": path.resolve(__dirname, "./src/enterprise"),
       },
     },
     server: {

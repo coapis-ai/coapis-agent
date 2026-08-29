@@ -225,6 +225,10 @@ class ToolRegistry:
         """List all registered tools."""
         return list(self._tools.values())
 
+    def unregister(self, name: str) -> None:
+        """Remove a tool by name (no-op if not present)."""
+        self._tools.pop(name, None)
+
     def get_allowed_tools(self) -> List[ToolInfo]:
         """Get allowed tools (not in denied list)."""
         return [t for t in self._tools.values() if t.name not in self._denied_tools]

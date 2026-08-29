@@ -79,6 +79,39 @@ const TagManagement: React.FC = () => {
     loadTags();
   }, []);
 
+  // 当 Modal 打开时，根据 editingTag 初始化表单
+  useEffect(() => {
+    if (modalVisible) {
+      if (editingTag) {
+        form.setFieldsValue({
+          name: editingTag.name,
+          icon: editingTag.icon,
+          type: editingTag.type,
+          parent_id: editingTag.parent_id,
+          description: editingTag.description,
+          keywords: editingTag.keywords?.join(', '),
+          related_skills: editingTag.related_skills?.join(', '),
+          sort_order: editingTag.sort_order,
+          show_in_menu: editingTag.show_in_menu,
+          enabled: editingTag.enabled,
+          metadata: editingTag.metadata || {},
+        });
+      } else {
+        form.resetFields();
+        form.setFieldsValue({
+          icon: '📁',
+          type: 'category',
+          sort_order: 100,
+          show_in_menu: true,
+          metadata: {},
+          enabled: true,
+          keywords: '',
+          related_skills: '',
+        });
+      }
+    }
+  }, [modalVisible, editingTag, form]);
+
   const loadTags = async () => {
     try {
       setLoading(true);
@@ -138,35 +171,11 @@ const TagManagement: React.FC = () => {
 
   const handleCreate = () => {
     setEditingTag(null);
-    form.resetFields();
-    form.setFieldsValue({
-      icon: '📁',
-      type: 'category',
-      sort_order: 100,
-      show_in_menu: true,
-            metadata: {},
-      enabled: true,
-      keywords: [],
-      related_skills: [],
-    });
     setModalVisible(true);
   };
 
   const handleEdit = (tag: TagConfig) => {
     setEditingTag(tag);
-    form.setFieldsValue({
-      name: tag.name,
-      icon: tag.icon,
-      type: tag.type,
-      parent_id: tag.parent_id,
-      description: tag.description,
-      keywords: tag.keywords?.join(', '),
-      related_skills: tag.related_skills?.join(', '),
-      sort_order: tag.sort_order,
-      show_in_menu: tag.show_in_menu,
-      enabled: tag.enabled,
-      metadata: tag.metadata || {},
-    });
     setModalVisible(true);
   };
 
@@ -200,8 +209,8 @@ const TagManagement: React.FC = () => {
 
       const payload = {
         ...values,
-        keywords: values.keywords ? values.keywords.split(',').map((k: string) => k.trim()).filter(Boolean) : [],
-        related_skills: values.related_skills ? values.related_skills.split(',').map((k: string) => k.trim()).filter(Boolean) : [],
+        keywords: typeof values.keywords === 'string' ? values.keywords.split(',').map((k: string) => k.trim()).filter(Boolean) : [],
+        related_skills: typeof values.related_skills === 'string' ? values.related_skills.split(',').map((k: string) => k.trim()).filter(Boolean) : [],
       };
 
       const url = editingTag
@@ -546,7 +555,9 @@ const TagManagement: React.FC = () => {
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
-        width={600}
+        width={700}
+        destroyOnClose
+        bodyStyle={{ maxHeight: 'calc(100vh - 200px)', overflow: 'auto' }}
         okText="保存"
         cancelText="取消"
       >

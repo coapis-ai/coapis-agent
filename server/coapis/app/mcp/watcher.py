@@ -50,6 +50,7 @@ class MCPConfigWatcher:
         config_loader: Callable,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         config_path: Optional[Path] = None,
+        on_change: Optional[Callable[[], Any]] = None,
     ):
         """Initialize MCP config watcher.
 
@@ -59,11 +60,15 @@ class MCPConfigWatcher:
                            object with .mcp attribute (or MCPConfig)
             poll_interval: How often to check for changes (seconds)
             config_path: Path to config file (for mtime checking)
+            on_change: Optional callback (sync or async) invoked after a
+                       successful reload, e.g. to re-register MCP tools
+                       into the workspace ToolRegistry.
         """
         self._mcp_manager = mcp_manager
         self._config_loader = config_loader
         self._poll_interval = poll_interval
         self._config_path = config_path
+        self._on_change = on_change
         self._task: Optional[asyncio.Task] = None
 
         # Snapshot of last known MCP config (for diffing)
@@ -87,9 +92,10 @@ class MCPConfigWatcher:
             self._poll_loop(),
             name="mcp_config_watcher",
         )
-        logger.debug(
-            "MCPConfigWatcher started (poll=%.1fs)",
+        logger.info(
+            "MCPConfigWatcher started (poll=%.1fs, path=%s)",
             self._poll_interval,
+            self._config_path,
         )
 
     async def stop(self) -> None:
@@ -165,6 +171,7 @@ class MCPConfigWatcher:
     async def _check(self) -> None:
         """Check for config changes and reload if needed."""
         # 1) Check mtime if config path is provided
+        mtime = None
         if self._config_path:
             try:
                 mtime = self._config_path.stat().st_mtime
@@ -172,18 +179,22 @@ class MCPConfigWatcher:
                 return
             if mtime == self._last_mtime:
                 return
-            self._last_mtime = mtime
+            # Note: _last_mtime is only recorded AFTER the config is
+            # loaded successfully below — otherwise a transient parse
+            # failure would permanently lose this file change.
 
         # 2) Load new config; quick-reject if MCP section unchanged
         try:
             new_mcp = self._load_mcp_config()
         except Exception:
-            logger.debug("MCPConfigWatcher: failed to parse config")
+            logger.warning("MCPConfigWatcher: failed to parse config")
             return
 
         new_hash = self._mcp_hash(new_mcp)
         if new_hash == self._last_mcp_hash:
-            return  # No changes
+            if mtime is not None:
+                self._last_mtime = mtime
+            return  # No changes in the MCP section
 
         # 3) Check if previous reload is still running
         if self._reload_task and not self._reload_task.done():
@@ -194,9 +205,11 @@ class MCPConfigWatcher:
             return
 
         # 4) Trigger non-blocking reload in background task
-        logger.debug(
-            "MCPConfigWatcher: detected config changes, starting reload",
+        logger.info(
+            "MCPConfigWatcher: MCP config changed, starting reload",
         )
+        if mtime is not None:
+            self._last_mtime = mtime
         self._reload_task = asyncio.create_task(
             self._reload_changed_clients_wrapper(new_mcp),
             name="mcp_reload_task",
@@ -222,9 +235,19 @@ class MCPConfigWatcher:
             # Success: update snapshot
             self._last_mcp = new_mcp.model_copy(deep=True)
             self._last_mcp_hash = new_hash
-            logger.debug("MCPConfigWatcher: reload completed successfully")
+            logger.info("MCPConfigWatcher: reload completed successfully")
         except Exception:
             logger.warning("MCPConfigWatcher: reload task failed")
+            return
+
+        # Notify the workspace (e.g. re-register MCP tools)
+        if self._on_change is not None:
+            try:
+                result = self._on_change()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                logger.warning("MCPConfigWatcher: on_change callback failed")
 
     async def _reload_changed_clients(self, new_mcp: "MCPConfig") -> None:
         """Compare old and new MCP configs and reload changed clients.
@@ -271,6 +294,10 @@ class MCPConfigWatcher:
 
         # Client enabled: check if config changed
         if old_cfg != new_cfg:
+            logger.info(
+                "MCPConfigWatcher: client '%s' config changed, reloading",
+                key,
+            )
             await self._reload_single_client(key, new_cfg)
 
     async def _reload_single_client(self, key: str, new_cfg) -> None:

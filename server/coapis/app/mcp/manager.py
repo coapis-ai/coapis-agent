@@ -50,7 +50,53 @@ class MCPClientManager:
     def __init__(self) -> None:
         """Initialize an empty MCP client manager."""
         self._clients: Dict[str, Any] = {}
+        # {client_key: registry-key} for clients shared via
+        # SharedHTTPClientRegistry (http/sse only)
+        self._shared_keys: Dict[str, tuple] = {}
         self._lock = asyncio.Lock()
+
+    @staticmethod
+    def _is_http_transport(transport: str | None) -> bool:
+        """Whether the transport goes through the shared registry."""
+        return (transport or "stdio") in ("streamable_http", "sse")
+
+    @staticmethod
+    def _http_share_key(client_config: "MCPClientConfig") -> tuple:
+        """Sharing key for an http/sse client (after env expansion,
+        matching what _build_client actually connects with)."""
+        from .shared_client import SharedHTTPClientRegistry
+
+        headers = client_config.headers
+        if headers:
+            headers = {
+                k: os.path.expandvars(v) for k, v in headers.items()
+            }
+        return SharedHTTPClientRegistry.make_key(
+            client_config.transport,
+            client_config.url,
+            headers or None,
+        )
+
+    async def _release_client(self, key: str, client: Any) -> None:
+        """Release a client: drops the shared reference (if shared) and
+        closes it only when the last workspace lets go."""
+        registry_key = self._shared_keys.pop(key, None)
+        if registry_key is not None:
+            from .shared_client import SharedHTTPClientRegistry
+
+            closed = await SharedHTTPClientRegistry.get_instance().release(
+                registry_key,
+                client,
+            )
+            if closed:
+                logger.info(
+                    f"Shared MCP connection released: '{client.name}'",
+                )
+            return
+        try:
+            await client.close()
+        except Exception as e:
+            logger.warning(f"Error closing MCP client '{key}': {e}")
 
     async def init_from_config(self, config: "MCPConfig") -> None:
         """Initialize clients from configuration.
@@ -85,10 +131,14 @@ class MCPClientManager:
             List of connected MCP client instances
         """
         async with self._lock:
+            # Only expose connected clients: "pending" clients (whose
+            # lifecycle task is retrying in the background) will show
+            # up here automatically once they connect.
             return [
                 client
                 for client in self._clients.values()
                 if client is not None
+                and getattr(client, "is_connected", False)
             ]
 
     async def get_client(self, key: str) -> Any | None:
@@ -119,32 +169,82 @@ class MCPClientManager:
             client_config: New client configuration
             timeout: Connection timeout in seconds (default 5s)
         """
-        # 1. Create and connect new client outside lock (may be slow)
+        # 1. Build + connect the new client outside the lock (may be
+        #    slow). HTTP/SSE clients go through the shared registry so
+        #    all workspaces reuse one real connection per URL.
         logger.debug(f"Connecting new MCP client: {key}")
-        new_client = self._build_client(client_config, key)
+        is_http = self._is_http_transport(client_config.transport)
+        registry_key = None
 
-        try:
-            # Add timeout to prevent indefinite blocking
-            await asyncio.wait_for(new_client.connect(), timeout=timeout)
-        except BaseException:
-            await self._force_cleanup_client(new_client)
-            raise
+        if is_http:
+            from .shared_client import SharedHTTPClientRegistry
 
-        # 2. Swap and close old client inside lock
+            registry_key = self._http_share_key(client_config)
+            new_client = await SharedHTTPClientRegistry.get_instance().acquire_client(
+                registry_key,
+                lambda: self._build_client(client_config, key),
+                connect_timeout=timeout,
+            )
+        else:
+            new_client = self._build_client(client_config, key)
+            try:
+                # Add timeout to prevent indefinite blocking
+                await asyncio.wait_for(
+                    new_client.connect(), timeout=timeout,
+                )
+            except BaseException as e:
+                # Keep the client pending: its lifecycle task keeps
+                # retrying with backoff in the background.
+                logger.warning(
+                    f"MCP client '{key}' not connected ({e}); kept "
+                    f"pending with background retries.",
+                )
+
+        # 2. Swap and release old client inside lock
         async with self._lock:
             old_client = self._clients.get(key)
+            old_registry_key = self._shared_keys.pop(key, None)
             self._clients[key] = new_client
+            if is_http:
+                self._shared_keys[key] = registry_key
+            same_instance = old_client is new_client
 
-            if old_client is not None:
-                logger.debug(f"Closing old MCP client: {key}")
+        if same_instance:
+            # The shared client was already in place under this key
+            # (e.g. only non-connection fields changed): undo the
+            # extra reference taken by acquire() and keep it as is.
+            if is_http:
+                from .shared_client import SharedHTTPClientRegistry
+
+                await SharedHTTPClientRegistry.get_instance().release(
+                    registry_key,
+                    new_client,
+                )
+            return
+
+        if old_client is not None:
+            logger.debug(f"Closing old MCP client: {key}")
+            if old_registry_key is not None:
+                from .shared_client import SharedHTTPClientRegistry
+
+                closed = await SharedHTTPClientRegistry.get_instance().release(
+                    old_registry_key,
+                    old_client,
+                )
+                if closed:
+                    logger.info(
+                        f"Shared MCP connection released: "
+                        f"'{old_client.name}'",
+                    )
+            else:
                 try:
                     await old_client.close()
                 except Exception as e:
                     logger.warning(
                         f"Error closing old MCP client '{key}': {e}",
                     )
-            else:
-                logger.debug(f"Added new MCP client: {key}")
+        else:
+            logger.debug(f"Added new MCP client: {key}")
 
     async def remove_client(self, key: str) -> None:
         """Remove and close a client.
@@ -157,10 +257,7 @@ class MCPClientManager:
 
         if old_client is not None:
             logger.debug(f"Removing MCP client: {key}")
-            try:
-                await old_client.close()
-            except Exception as e:
-                logger.warning(f"Error closing MCP client '{key}': {e}")
+            await self._release_client(key, old_client)
 
     async def close_all(self) -> None:
         """Close all MCP clients.
@@ -174,10 +271,7 @@ class MCPClientManager:
         logger.debug("Closing all MCP clients")
         for key, client in clients_snapshot:
             if client is not None:
-                try:
-                    await client.close()
-                except Exception as e:
-                    logger.warning(f"Error closing MCP client '{key}': {e}")
+                await self._release_client(key, client)
 
     async def _add_client(
         self,
@@ -187,20 +281,54 @@ class MCPClientManager:
     ) -> None:
         """Add a new client (used during initial setup).
 
+        On connection failure the client is kept "pending" — its
+        lifecycle task keeps retrying with backoff in the background,
+        so it self-heals when the server becomes reachable.
+
         Args:
             key: Client identifier
             client_config: Client configuration
             timeout: Connection timeout in seconds (default 5s)
         """
-        client = self._build_client(client_config, key)
+        async with self._lock:
+            if key in self._clients:
+                return
 
+        if self._is_http_transport(client_config.transport):
+            from .shared_client import SharedHTTPClientRegistry
+
+            registry_key = self._http_share_key(client_config)
+            client = await SharedHTTPClientRegistry.get_instance().acquire_client(
+                registry_key,
+                lambda: self._build_client(client_config, key),
+                connect_timeout=timeout,
+            )
+            async with self._lock:
+                if key in self._clients:
+                    # Added concurrently by another coroutine
+                    await SharedHTTPClientRegistry.get_instance().release(
+                        registry_key,
+                        client,
+                    )
+                    return
+                self._shared_keys[key] = registry_key
+                self._clients[key] = client
+            return
+
+        client = self._build_client(client_config, key)
         try:
             await asyncio.wait_for(client.connect(), timeout=timeout)
-        except BaseException:
-            await self._force_cleanup_client(client)
-            raise
+        except BaseException as e:
+            logger.warning(
+                f"MCP client '{key}' not connected at startup ({e}); "
+                f"kept pending with background retries.",
+            )
 
         async with self._lock:
+            if key in self._clients:
+                # Added concurrently by another coroutine
+                await client.close()
+                return
             self._clients[key] = client
 
     @staticmethod

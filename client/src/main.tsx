@@ -4,6 +4,7 @@ import "./i18n";
 import { installHostExternals } from "./plugins/hostExternals";
 import { registerHostModulesEager } from "./plugins/dynamicModuleRegistry";
 import { initLanguages } from "./utils/preloadLanguages";
+import { initEnterprise } from "@enterprise/enterprise-entry";
 
 // Expose host dependencies (React, antd, etc.) on window
 // so that plugin UI modules can use them without bundling their own copies.
@@ -16,6 +17,9 @@ registerHostModulesEager();
 // Preload syntax highlighter languages
 // This fixes dynamic import failures in @ant-design/x CodeHighlighter
 initLanguages();
+
+// 注入企业版扩展（社区版为空，企业版注册路由等）
+initEnterprise?.();
 
 if (typeof window !== "undefined") {
   const originalError = console.error;

@@ -61,11 +61,6 @@ const AdminScenesPage = lazyImportWithRetry("../../pages/Admin/Scenes");
 const AdminTagsPage = lazyImportWithRetry("../../pages/Admin/Tags");
 const MultiLayerEvolutionPage = lazyImportWithRetry("../../pages/MultiLayerEvolution/index");
 const WorkbenchPage = lazyImportWithRetry("../../pages/Workbench/index");
-// 知识库功能 - 企业版扩展
-const KnowledgeBasePage = lazyImportWithRetry("../../pages/KnowledgeBase/index");
-const KnowledgeBaseCreatePage = lazyImportWithRetry("../../pages/KnowledgeBase/Create");
-const KnowledgeDocumentsPage = lazyImportWithRetry("../../pages/KnowledgeBase/Documents");
-const KnowledgeTestPage = lazyImportWithRetry("../../pages/KnowledgeBase/Test");
 
 // P2 Enterprise Features
 const MonitoringPage = lazyImportWithRetry("../../pages/Monitoring/index");
@@ -120,11 +115,6 @@ const pathToKey: Record<string, string> = {
   "/evolution": "evolution",
   // 工作场景：默认高亮 nature 维度；Sidebar 会根据实际子菜单再做精确匹配
   "/workbench": "nature",
-  // Knowledge Base routes
-  "/knowledge/bases": "knowledge-menu",
-  "/knowledge/bases/create": "knowledge-menu",
-  "/knowledge/bases/:id/documents": "knowledge-menu",
-  "/knowledge/bases/:id/test": "knowledge-menu",
   // P2 Enterprise Features
   "/monitoring": "monitoring",
   "/sso": "sso",
@@ -222,7 +212,7 @@ export default function MainLayout() {
                   />
                 }
               >
-                <Routes>
+                <Routes key={pluginRoutes.length}>
                   {/* 根路径和 home 路径都重定向到聊天页面（首页已隐藏） */}
                   <Route path="/" element={<Navigate to="/chat" replace />} />
                   <Route path="/home" element={<Navigate to="/chat" replace />} />
@@ -269,11 +259,7 @@ export default function MainLayout() {
                   <Route path="/workbench" element={<WorkbenchPage />} />
                   <Route path="/workbench/:category" element={<WorkbenchPage />} />
                   
-                  {/* Knowledge Base routes */}
-                  <Route path="/knowledge/bases" element={<KnowledgeBasePage />} />
-                  <Route path="/knowledge/bases/create" element={<KnowledgeBaseCreatePage />} />
-                  <Route path="/knowledge/bases/:id/documents" element={<KnowledgeDocumentsPage />} />
-                  <Route path="/knowledge/bases/:id/test" element={<KnowledgeTestPage />} />
+                  {/* Knowledge Base routes - 企业版扩展，社区版占位已移除 */}
                   
                   <Route path="/cross-agent" element={<Navigate to="/evolution" replace />} />
 

@@ -3,7 +3,7 @@ import {
   IAgentScopeRuntimeWebUIOptions,
   type IAgentScopeRuntimeWebUIRef,
 } from "@agentscope-ai/chat";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Modal, Result, Tooltip, Drawer } from "antd";
 import { useAppMessage } from "../../hooks/useAppMessage";
 import {
@@ -95,8 +95,18 @@ interface CommandSuggestion {
 }
 
 // ---------------------------------------------------------------------------
-// Enhanced tool render config — 注册 EnhancedToolCallCard 到所有已知工具
+// Helper: format multiline text with <br/> for line breaks
 // ---------------------------------------------------------------------------
+function formatMultilineText(text: string): React.ReactNode {
+  if (!text) return text;
+  const lines = text.split('\n');
+  return lines.map((line, index) => (
+    <React.Fragment key={index}>
+      {line}
+      {index < lines.length - 1 && <br />}
+    </React.Fragment>
+  ));
+}
 const _ENHANCED_TOOL_NAMES = [
   'execute_shell_command',
   'read_file', 'write_file', 'edit_file',
@@ -153,7 +163,7 @@ function payloadCompletesResponse(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
 
   const record = payload as Record<string, unknown>;
-  
+
   // 1) 标准 response 完成标志
   if (record.object === "response") {
     const status = record.status as string;
@@ -161,15 +171,17 @@ function payloadCompletesResponse(payload: unknown): boolean {
       return true;
     }
   }
-  
-  // 2) 兜底：message completed 也视为流结束
-  if (record.object === "message") {
-    const status = record.status as string;
-    if (status === "completed" || status === "failed" || status === "canceled") {
-      return true;
-    }
-  }
-  
+
+  // 2) ~~兜底：message completed 也视为流结束~~
+  // 注释掉：对齐 QwenPaw 做法，只检查 response 完成
+  // 原 CoApis 做法会导致 SDK 内部 loading 状态不同步
+  // if (record.object === "message") {
+  //   const status = record.status as string;
+  //   if (status === "completed" || status === "failed" || status === "canceled") {
+  //     return true;
+  //   }
+  // }
+
   // 3) 兼容：某些实现用 event: done 或 data: [DONE]
   if (record.object === "event" && (record as any).event === "done") {
     return true;
@@ -177,7 +189,7 @@ function payloadCompletesResponse(payload: unknown): boolean {
   if (record.object === "content" && (record as any).text === "[DONE]") {
     return true;
   }
-  
+
   return false;
 }
 
@@ -1478,7 +1490,7 @@ export default function ChatPage() {
         ...i18nConfig.welcome,
         nick: sceneName || "CoApis",
         avatar: "/bee_icon.png",
-        greeting: sceneWelcomeMessage || i18nConfig.welcome.greeting,
+        greeting: formatMultilineText(sceneWelcomeMessage) || i18nConfig.welcome.greeting,
         // 嵌入式模式（场景代入）：不显示推荐prompts，只显示场景欢迎消息
         prompts: isEmbeddedMode ? [] : (dynamicRecommendations.length > 0
           ? dynamicRecommendations.map((rec) => ({
@@ -1546,7 +1558,9 @@ export default function ChatPage() {
           // Filter out SSE events from other chats
           // Backend adds chat_id to metadata for session isolation
           const payloadChatId = (payload.metadata as Record<string, unknown>)?.chat_id as string | undefined;
-          const currentChatId = requestSessionIdRef.current;
+          // ⭐ 使用 chatIdRef.current（URL 中的后端 chat UUID），而非 requestSessionIdRef.current（SDK 内部 session ID）
+          // 修复：response 事件被错误过滤导致按钮卡在 loading 状态
+          const currentChatId = chatIdRef.current;
           
           if (payloadChatId && currentChatId && payloadChatId !== currentChatId) {
             console.log("[SSE] Ignoring payload from other chat:", payloadChatId, "current:", currentChatId);
@@ -1618,29 +1632,11 @@ export default function ChatPage() {
             sessionApi.invalidateSessionList();
             setTimeout(() => sessionApi.getSessionList(), 500);
 
-            // Reset loading state on completion
-            // Multi-layer fallback: bridge ref → window global → delayed retry
-            const resetLoading = () => {
-              const bridge = runtimeLoadingBridgeRef.current;
-              if (bridge?.setLoading) {
-                bridge.setLoading(false);
-                console.log("[rp] setLoading(false) via bridge ✓");
-                return true;
-              }
-              // Fallback: RuntimeLoadingBridge exposes setLoading on window
-              const fn = (window as any).__chatSetLoading as ((v: boolean) => void) | undefined;
-              if (fn) {
-                fn(false);
-                console.log("[rp] setLoading(false) via window fallback ✓");
-                return true;
-              }
-              return false;
-            };
-            if (!resetLoading()) {
-              console.warn("[rp] setLoading unavailable at completion, scheduling retry");
-              setTimeout(() => { resetLoading(); }, 100);
-              setTimeout(() => { resetLoading(); }, 500);
-            }
+            // ~~Reset loading state on completion~~
+            // 注释掉：对齐 QwenPaw 做法，不再手动调 setLoading
+            // SDK 内部会根据 response completed 自动更新 loading 状态
+            // const resetLoading = () => { ... };
+            // if (!resetLoading()) { ... }
 
             // ⭐ 深拷贝 output，解除 React state 的冻结
             // AgentScope 库会尝试修改消息对象的 cards 属性

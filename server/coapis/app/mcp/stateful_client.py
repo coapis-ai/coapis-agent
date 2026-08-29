@@ -48,6 +48,21 @@ from agentscope.mcp import StatefulClientBase
 
 logger = logging.getLogger(__name__)
 
+# Connection retry policy (shared by stdio/http clients).
+# Before the cap: exponential backoff (2,4,8,16,30s). After the cap: a
+# fixed low-frequency interval keeps the client alive so it self-heals
+# when the server comes back, without hammering a downed server.
+_MAX_RETRIES = 5
+_BACKOFF_CAP = 30.0
+_IDLE_RETRY_INTERVAL = 60.0
+
+
+def _next_retry_delay(retry_count: int) -> float:
+    """Backoff delay (seconds) for the given 1-based retry count."""
+    if retry_count <= _MAX_RETRIES:
+        return min(2.0 ** retry_count, _BACKOFF_CAP)
+    return _IDLE_RETRY_INTERVAL
+
 
 class StdIOStatefulClient(StatefulClientBase):
     """StdIO MCP client with proper cross-task lifecycle management.
@@ -131,6 +146,9 @@ class StdIOStatefulClient(StatefulClientBase):
         # User context token for MCP gateway authentication
         self._user_context_token: str | None = None
 
+        # Connection retry bookkeeping (see _run_lifecycle)
+        self._retry_count: int = 0
+
     async def _run_lifecycle(self) -> None:
         """Run MCP client lifecycle in a dedicated task.
 
@@ -159,6 +177,12 @@ class StdIOStatefulClient(StatefulClientBase):
                     self.is_connected = True
                     self._ready_event.set()
                     logger.info(f"MCP client connected: {self.name}")
+                    if self._retry_count:
+                        logger.info(
+                            f"MCP client '{self.name}' connected after "
+                            f"{self._retry_count} failed attempt(s).",
+                        )
+                        self._retry_count = 0
 
                     # Wait for reload or stop signal
                     while (
@@ -184,15 +208,41 @@ class StdIOStatefulClient(StatefulClientBase):
                 # Context manager exits cleanly in THIS task
 
             except Exception as e:
-                logger.error(
-                    f"Error in MCP client lifecycle for {self.name}: {e}",
-                    exc_info=True,
-                )
+                self._retry_count += 1
+                if self._retry_count == 1:
+                    logger.error(
+                        f"Error in MCP client lifecycle for {self.name}: {e}",
+                        exc_info=True,
+                    )
                 self.session = None
                 self.is_connected = False
                 self._cached_tools = None
                 self._ready_event.clear()
-                await asyncio.sleep(1)
+                delay = _next_retry_delay(self._retry_count)
+                if self._retry_count == _MAX_RETRIES + 1:
+                    logger.warning(
+                        f"MCP client '{self.name}' exceeded max retries "
+                        f"({_MAX_RETRIES}); retrying every {delay:.0f}s "
+                        f"until connected or removed.",
+                    )
+                elif self._retry_count <= _MAX_RETRIES:
+                    logger.warning(
+                        f"MCP client '{self.name}' connect failed "
+                        f"({self._retry_count}/{_MAX_RETRIES}), "
+                        f"retrying in {delay:.0f}s: {e}",
+                    )
+                else:
+                    logger.debug(
+                        f"MCP client '{self.name}' idle retry "
+                        f"(#{self._retry_count}) failed: {e}",
+                    )
+                # Sleep, but wake up immediately on stop/reload
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=delay,
+                    )
+                except asyncio.TimeoutError:
+                    pass  # delay elapsed -> loop retries
 
         logger.info(f"MCP client lifecycle task exited: {self.name}")
 
@@ -220,13 +270,14 @@ class StdIOStatefulClient(StatefulClientBase):
         try:
             await asyncio.wait_for(self._ready_event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            logger.error(
-                f"Timeout waiting for MCP client '{self.name}' to connect",
+            # Keep the lifecycle task alive: it retries with backoff in
+            # the background (see _run_lifecycle). The caller can hold
+            # this client as "pending" — it will self-heal when the
+            # server becomes reachable.
+            logger.warning(
+                f"Timeout waiting for MCP client '{self.name}' to connect; "
+                f"keeping it pending with background retries.",
             )
-            # Clean up failed task
-            self._stop_event.set()
-            if self._lifecycle_task:
-                await self._lifecycle_task
             raise
 
     async def close(self, ignore_errors: bool = True) -> None:
@@ -238,7 +289,10 @@ class StdIOStatefulClient(StatefulClientBase):
         Raises:
             RuntimeError: If not connected (unless ignore_errors=True)
         """
-        if not self.is_connected:
+        # Even when not connected, the lifecycle task may still be
+        # running (background retries after a failed connect) — always
+        # stop it in that case.
+        if not self.is_connected and self._lifecycle_task is None:
             if not ignore_errors:
                 raise RuntimeError(
                     f"MCP client '{self.name}' is not connected. "
@@ -250,8 +304,15 @@ class StdIOStatefulClient(StatefulClientBase):
             # Signal stop and wait for lifecycle task to finish
             self._stop_event.set()
             if self._lifecycle_task:
-                await self._lifecycle_task
+                await asyncio.wait_for(self._lifecycle_task, timeout=10)
                 self._lifecycle_task = None
+        except asyncio.TimeoutError:
+            # stop_event was set; the task will exit shortly.
+            self._lifecycle_task = None
+            logger.warning(
+                f"Timed out waiting for MCP client '{self.name}' "
+                f"lifecycle to stop",
+            )
         except Exception as e:
             if not ignore_errors:
                 raise
@@ -459,6 +520,9 @@ class HttpStatefulClient(StatefulClientBase):
         # User context token for MCP gateway authentication
         self._user_context_token: str | None = None
 
+        # Connection retry bookkeeping (see _run_lifecycle)
+        self._retry_count: int = 0
+
     def set_user_context_token(self, token: str | None) -> None:
         """Set the user context token for this client.
         
@@ -532,6 +596,12 @@ class HttpStatefulClient(StatefulClientBase):
                     self.is_connected = True
                     self._ready_event.set()
                     logger.info(f"MCP client connected: {self.name}")
+                    if self._retry_count:
+                        logger.info(
+                            f"MCP client '{self.name}' connected after "
+                            f"{self._retry_count} failed attempt(s).",
+                        )
+                        self._retry_count = 0
 
                     # Wait for reload or stop signal
                     while (
@@ -555,15 +625,41 @@ class HttpStatefulClient(StatefulClientBase):
                 # Context manager exits cleanly in THIS task
 
             except Exception as e:
-                logger.error(
-                    f"Error in MCP client lifecycle for {self.name}: {e}",
-                    exc_info=True,
-                )
+                self._retry_count += 1
+                if self._retry_count == 1:
+                    logger.error(
+                        f"Error in MCP client lifecycle for {self.name}: {e}",
+                        exc_info=True,
+                    )
                 self.session = None
                 self.is_connected = False
                 self._cached_tools = None
                 self._ready_event.clear()
-                await asyncio.sleep(1)
+                delay = _next_retry_delay(self._retry_count)
+                if self._retry_count == _MAX_RETRIES + 1:
+                    logger.warning(
+                        f"MCP client '{self.name}' exceeded max retries "
+                        f"({_MAX_RETRIES}); retrying every {delay:.0f}s "
+                        f"until connected or removed.",
+                    )
+                elif self._retry_count <= _MAX_RETRIES:
+                    logger.warning(
+                        f"MCP client '{self.name}' connect failed "
+                        f"({self._retry_count}/{_MAX_RETRIES}), "
+                        f"retrying in {delay:.0f}s: {e}",
+                    )
+                else:
+                    logger.debug(
+                        f"MCP client '{self.name}' idle retry "
+                        f"(#{self._retry_count}) failed: {e}",
+                    )
+                # Sleep, but wake up immediately on stop/reload
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=delay,
+                    )
+                except asyncio.TimeoutError:
+                    pass  # delay elapsed -> loop retries
 
         logger.info(f"MCP client lifecycle task exited: {self.name}")
 
@@ -589,12 +685,14 @@ class HttpStatefulClient(StatefulClientBase):
         try:
             await asyncio.wait_for(self._ready_event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            logger.error(
-                f"Timeout waiting for MCP client '{self.name}' to connect",
+            # Keep the lifecycle task alive: it retries with backoff in
+            # the background (see _run_lifecycle). The caller can hold
+            # this client as "pending" — it will self-heal when the
+            # server becomes reachable.
+            logger.warning(
+                f"Timeout waiting for MCP client '{self.name}' to connect; "
+                f"keeping it pending with background retries.",
             )
-            self._stop_event.set()
-            if self._lifecycle_task:
-                await self._lifecycle_task
             raise
 
     async def close(self, ignore_errors: bool = True) -> None:
@@ -606,7 +704,10 @@ class HttpStatefulClient(StatefulClientBase):
         Raises:
             RuntimeError: If not connected (unless ignore_errors=True)
         """
-        if not self.is_connected:
+        # Even when not connected, the lifecycle task may still be
+        # running (background retries after a failed connect) — always
+        # stop it in that case.
+        if not self.is_connected and self._lifecycle_task is None:
             if not ignore_errors:
                 raise RuntimeError(
                     f"MCP client '{self.name}' is not connected. "
@@ -617,8 +718,15 @@ class HttpStatefulClient(StatefulClientBase):
         try:
             self._stop_event.set()
             if self._lifecycle_task:
-                await self._lifecycle_task
+                await asyncio.wait_for(self._lifecycle_task, timeout=10)
                 self._lifecycle_task = None
+        except asyncio.TimeoutError:
+            # stop_event was set; the task will exit shortly.
+            self._lifecycle_task = None
+            logger.warning(
+                f"Timed out waiting for MCP client '{self.name}' "
+                f"lifecycle to stop",
+            )
         except Exception as e:
             if not ignore_errors:
                 raise

@@ -193,6 +193,7 @@ class Workspace:
         self._manager = None
         self._runner = None  # Lazily created AgentRunner
         self._config_watcher = None  # AgentConfigWatcher (started in start())
+        self._mcp_config_watcher = None  # MCPConfigWatcher (started in start())
 
     def _link_user_files(self):
         """Create symlink from workspace/files -> workspaces/{username}/files/.
@@ -468,6 +469,87 @@ class Workspace:
                         )
         except Exception as e:
             logger.warning(f"MCP tool registration to ToolRegistry failed: {e}")
+
+    async def _start_mcp_config_watcher(self):
+        """Start MCPConfigWatcher to hot-reload MCP clients on config change.
+
+        The loader mirrors _init_mcp_manager's merge (global/admin pool +
+        user overlay) so the watcher's diff matches what was initialized.
+        config_path=None → pure hash polling (2s), which also detects
+        changes to the global (admin) config, not only this user's file.
+        """
+        if not self._mcp_manager:
+            return
+        try:
+            from ..app.mcp.watcher import MCPConfigWatcher
+            from ..config.config import MCPConfig, load_agent_config
+            from ..config.utils import load_config
+
+            def mcp_config_loader():
+                merged_clients = {}
+                try:
+                    config = load_config()
+                    admin_agent_id = config.agents.active_agent or "user:admin"
+                    if admin_agent_id != self.agent_id:
+                        admin_config = load_agent_config(admin_agent_id)
+                        if admin_config.mcp and admin_config.mcp.clients:
+                            merged_clients.update(
+                                dict(admin_config.mcp.clients),
+                            )
+                except Exception:
+                    pass
+                agent_config = load_agent_config(
+                    self.agent_id, workspace_dir=self.workspace_dir,
+                )
+                if agent_config.mcp and agent_config.mcp.clients:
+                    merged_clients.update(dict(agent_config.mcp.clients))
+                return MCPConfig(clients=merged_clients)
+
+            async def on_change():
+                # Re-register MCP tools after reload; drop stale mcp__ tools
+                # whose client is gone.
+                try:
+                    clients = await self._mcp_manager.get_clients()
+                    if clients:
+                        await self.tools.register_mcp_tools(clients)
+                    current = set()
+                    for client in clients:
+                        try:
+                            for t in await client.list_tools():
+                                tname = getattr(t, "name", None) or t.get("name")
+                                if tname:
+                                    current.add(f"mcp__{tname}")
+                        except Exception:
+                            return  # client not ready; skip stale cleanup
+                    stale = [
+                        t.name
+                        for t in self.tools.list_tools()
+                        if t.name.startswith("mcp__") and t.name not in current
+                    ]
+                    for name in stale:
+                        self.tools.unregister(name)
+                    if stale:
+                        logger.info(
+                            f"MCP: unregistered {len(stale)} stale tools "
+                            f"for {self.agent_id}: {stale}"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"MCP on_change tool re-registration failed "
+                        f"for {self.agent_id}: {e}"
+                    )
+
+            self._mcp_config_watcher = MCPConfigWatcher(
+                mcp_manager=self._mcp_manager,
+                config_loader=mcp_config_loader,
+                config_path=None,
+                on_change=on_change,
+            )
+            await self._mcp_config_watcher.start()
+            logger.info(f"MCPConfigWatcher started for {self.agent_id}")
+        except Exception as e:
+            logger.warning(f"MCPConfigWatcher start failed (non-fatal): {e}")
+            self._mcp_config_watcher = None
 
     async def start(self):
         """Initialize all workspace components."""
@@ -916,6 +998,7 @@ class Workspace:
 
         # ── MCP Client Manager: 热加载 MCP 工具 ──────────────────────
         await self._init_mcp_manager()
+        await self._start_mcp_config_watcher()
 
         # ── TriggerTracker: 确保技能触发追踪单例已初始化 ──
         try:
@@ -1369,6 +1452,14 @@ class Workspace:
                 await self._config_watcher.stop()
             except Exception as e:
                 logger.warning(f"AgentConfigWatcher stop error: {e}")
+
+        # Stop MCP config watcher (if running)
+        if self._mcp_config_watcher:
+            try:
+                await self._mcp_config_watcher.stop()
+            except Exception as e:
+                logger.warning(f"MCPConfigWatcher stop error: {e}")
+            self._mcp_config_watcher = None
 
         # Stop channel manager first (closes consumer loops)
         if self.channel_manager:
