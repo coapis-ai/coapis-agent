@@ -1,0 +1,25 @@
+{
+  "name": "@coapis/c2a-react-sandbox",
+  "version": "1.0.0-alpha",
+  "description": "Sandbox examples for Chat-to-Action (C2A) Interactive Message Protocol - React Renderer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@coapis/c2a-core-types": "workspace:*",
+    "@coapis/c2a-renderer-react": "workspace:*",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0"
+  }
+}

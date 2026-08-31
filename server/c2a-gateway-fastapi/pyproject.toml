@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "c2a-gateway-fastapi"
+version = "1.0.0-alpha"
+description = "CoApis Chat-to-Action (C2A) Gateway - FastAPI Example Service for Enterprise Channel Integration"
+readme = "README.md"
+authors = [
+    { name = "CoApis Architecture Team", email = "tech@coapis.ai" }
+]
+license = { text = "Apache-2.0" }
+keywords = ["c2a", "chat-to-action", "llm", "agent", "gateway", "fastapi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "c2a-protocol>=1.0.0",
+    "c2a-adapters>=1.0.0",
+]

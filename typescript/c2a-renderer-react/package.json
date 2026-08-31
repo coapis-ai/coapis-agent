@@ -1,0 +1,30 @@
+{
+  "name": "@coapis/c2a-renderer-react",
+  "version": "1.0.0-alpha",
+  "description": "React components for Chat-to-Action (C2A) Interactive Message Protocol",
+  "main": "dist/index.cjs.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": ["c2a", "chat-to-action", "llm", "agent", "protocol", "react", "renderer"],
+  "authors": [
+    { "name": "CoApis Architecture Team", "email": "tech@coapis.ai" }
+  ],
+  "license": "Apache-2.0",
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "rollup": "^4.0.0",
+    "typescript": "^5.3.0"
+  }
+}

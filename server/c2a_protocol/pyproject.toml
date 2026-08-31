@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "c2a-protocol"
+version = "1.0.0"
+description = "CoApis Chat-to-Action (C2A) Interactive Message Protocol - Core Python SDK"
+readme = "README.md"
+authors = [
+    { name = "CoApis Architecture Team", email = "tech@coapis.ai" }
+]
+license = { text = "Apache-2.0" }
+keywords = ["c2a", "chat-to-action", "llm", "agent", "protocol"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/coapis-ai/coapis-c2a"
+Documentation = "https://docs.coapis.ai/c2a-protocol"

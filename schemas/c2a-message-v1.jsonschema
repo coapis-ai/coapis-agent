@@ -1,0 +1,204 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://coapis.ai/schemas/c2a-message-v1.json",
+  "title": "C2A Interactive Message Protocol Standard v1.0",
+  "description": "JSON Schema for Chat-to-Action (C2A) Interactive Message Protocol. Single canonical version c2a-v1.0.",
+  "type": "object",
+  "definitions": {
+    "rowAction": {
+      "type": "object",
+      "description": "A row-level action. style=link makes table rows clickable; url_template uses single-brace {field} placeholders filled from row_values per row.",
+      "properties": {
+        "action_id": { "type": "string" },
+        "label": { "type": "string" },
+        "style": { "type": "string", "enum": ["link", "button"] },
+        "business_intent": { "type": "string" },
+        "url_template": { "type": ["string", "null"] },
+        "link_column": {
+          "type": ["string", "null"],
+          "description": "Header name of the column rendered as an inline hyperlink (e.g. \"title\"). When set, only that column's cell is clickable instead of the whole row. Falls back to whole-row click when absent or the cell value is empty."
+        }
+      },
+      "required": ["action_id", "label", "style", "business_intent"]
+    },
+    "dataTableContent": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "headers": { "type": "array", "items": { "type": "string" } },
+            "rows": { "type": "array", "items": { "type": "array", "items": {} } }
+          },
+          "required": ["headers", "rows"]
+        },
+        "id_field": {
+          "type": ["string", "null"],
+          "description": "Name of the (hidden) id column used to build row links."
+        },
+        "row_values": {
+          "type": "array",
+          "description": "Per-row {id_field: value} maps so the renderer can fill url_template placeholders even though the id column is hidden.",
+          "items": { "type": "object" }
+        },
+        "row_actions": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/rowAction" }
+        }
+      },
+      "required": ["data"]
+    },
+    "dataListContent": {
+      "type": "object",
+      "description": "Content for a data_list block — an ordered list of tappable items.",
+      "properties": {
+        "title": { "type": ["string", "null"] },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string" },
+              "title": { "type": "string" },
+              "subtitle": { "type": ["string", "null"] },
+              "icon": { "type": ["string", "null"] },
+              "url_template": { "type": ["string", "null"] },
+              "business_intent": { "type": ["string", "null"] }
+            },
+            "required": ["key", "title"]
+          }
+        }
+      },
+      "required": ["items"]
+    }
+  },
+  "properties": {
+    "protocol_version": {
+      "type": "string",
+      "enum": ["c2a-v1.0"],
+      "description": "Protocol version identifier"
+    },
+    "message_id": {
+      "type": "string",
+      "description": "Unique identifier for the C2A message"
+    },
+    "context_ref": {
+      "type": "object",
+      "properties": {
+        "session_id": { "type": "string" },
+        "task_id": { "type": ["string", "null"] },
+        "scene_id": { "type": ["string", "null"] }
+      },
+      "required": ["session_id"]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "generated_by": { "type": "string" },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "ttl_seconds": { "type": ["integer", "null"], "minimum": 0 },
+        "source_system": { "type": ["string", "null"] },
+        "attachments": { "type": ["array", "null"] },
+        "permissions_required": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["generated_by"]
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "block_id": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["text_markdown", "data_table", "data_list", "form_definition", "custom_component"]
+          },
+          "content": {
+            "type": "object",
+            "description": "text_markdown: {markdown}; data_table: $ref dataTableContent; data_list: $ref dataListContent; form_definition: {fields, submit_label}; custom_component: arbitrary."
+          }
+        },
+        "required": ["type", "content"]
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action_id": { "type": "string" },
+          "label": { "type": "string" },
+          "icon": { "type": ["string", "null"] },
+          "style": {
+            "type": "string",
+            "enum": ["primary", "secondary", "danger", "success", "warning", "text"]
+          },
+          "disabled": { "type": "boolean", "default": false },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "api_call",
+              "function_invoke",
+              "web_redirect",
+              "workflow_trigger",
+              "form_submit",
+              "custom_extension"
+            ]
+          },
+          "payload": { "type": "object" },
+          "security": {
+            "type": "object",
+            "properties": {
+              "requires_auth": { "type": "boolean", "default": false },
+              "required_permissions": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "confirmation_prompt": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "required": ["action_id", "label", "intent", "payload"]
+      }
+    },
+    "state": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["idle", "generating", "rendered", "interactive", "executing", "completed", "failed"]
+        },
+        "error_code": { "type": ["string", "null"] },
+        "error_message": { "type": ["string", "null"] }
+      },
+      "required": ["status"]
+    },
+    "suggestions": {
+      "type": "array",
+      "description": "Quick-reply suggestions rendered under the card (e.g. export list, view more).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "suggestion_id": { "type": "string" },
+          "label": { "type": "string" },
+          "business_intent": { "type": "string" },
+          "context_data": { "type": "object" }
+        },
+        "required": ["suggestion_id", "label"]
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Domain-specific or custom framework extensions"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "message_id",
+    "context_ref",
+    "state"
+  ]
+}
