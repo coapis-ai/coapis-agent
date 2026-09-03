@@ -32,11 +32,20 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(__dirname, "./src"),
         // 企业版扩展入口（社区版为空实现，企业版覆盖 src/enterprise/）
         "@enterprise": path.resolve(__dirname, "./src/enterprise"),
+        // C2A 渲染器（coapis-c2a 独立项目，本地路径依赖，直接吃 TSX 源码）
+        "@coapis-c2a/renderer": path.resolve(
+          __dirname,
+          "../../coapis-c2a/typescript/c2a-renderer-react/src",
+        ),
       },
     },
     server: {
       host: "0.0.0.0",
       port: 5173,
+      fs: {
+        // 允许访问 coapis-c2a 独立项目的源码（C2A 渲染器）
+        allow: [path.resolve(__dirname, "../../")],
+      },
       proxy: {
         "/api": {
           target: env.VITE_DEV_PROXY_TARGET || "http://localhost:8000",

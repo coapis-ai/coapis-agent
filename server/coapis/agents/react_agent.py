@@ -87,17 +87,28 @@ def _wrap_tool_for_fault_tolerance(func, tool_name: str):
     2. Catch exceptions → return error ToolResponse instead of crashing
     """
     import inspect as _inspect
+    import json as _json
     from agentscope.tool import ToolResponse as _TR
     from agentscope.message import TextBlock as _TB
 
     def _dict_to_tool_response(d: dict) -> _TR:
-        """Convert a dict to a ToolResponse."""
+        """Convert a dict to a ToolResponse.
+
+        Non-trivial dicts are serialised with json.dumps (double-quoted,
+        Unicode-safe) so downstream consumers (the LLM and the frontend's
+        JSON.parse) can read the result. str(d) would emit a Python repr
+        (single quotes + None) that JSON.parse cannot parse, which silently
+        breaks JSON-returning tools such as c2a_render_card.
+        """
         if "error" in d:
             text = f"[Tool Error] {d['error']}"
         elif "content" in d and isinstance(d["content"], str):
             text = d["content"]
         else:
-            text = str(d)
+            try:
+                text = _json.dumps(d, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                text = str(d)
         return _TR(content=[_TB(type="text", text=text)])
 
     def _error_tool_response(tool_name: str, exc: Exception) -> _TR:
@@ -117,6 +128,12 @@ def _wrap_tool_for_fault_tolerance(func, tool_name: str):
                 return _error_tool_response(tool_name, e)
         _async_wrapper.__name__ = getattr(func, '__name__', tool_name)
         _async_wrapper.__doc__ = getattr(func, '__doc__', '')
+        # Copy original signature so agentscope can derive the tool's
+        # parameter schema (wrapper takes *args/**kwargs otherwise).
+        try:
+            _async_wrapper.__signature__ = _inspect.signature(func)
+        except (TypeError, ValueError):
+            pass
         # Preserve original_func for agentscope introspection
         _async_wrapper.original_func = getattr(func, 'original_func', func)
         return _async_wrapper
@@ -132,6 +149,10 @@ def _wrap_tool_for_fault_tolerance(func, tool_name: str):
                 return _error_tool_response(tool_name, e)
         _sync_wrapper.__name__ = getattr(func, '__name__', tool_name)
         _sync_wrapper.__doc__ = getattr(func, '__doc__', '')
+        try:
+            _sync_wrapper.__signature__ = _inspect.signature(func)
+        except (TypeError, ValueError):
+            pass
         _sync_wrapper.original_func = getattr(func, 'original_func', func)
         return _sync_wrapper
 

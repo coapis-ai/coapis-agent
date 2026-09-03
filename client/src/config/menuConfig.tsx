@@ -53,6 +53,13 @@ export const FALLBACK_MENU_ITEMS: MenuItem[] = [
     path: '/workspace/myspace',
   },
   {
+    key: 'knowledge',
+    label: '知识库',
+    icon: <BookOutlined />,
+    path: '/ent/knowledge-bases',
+    permission: 'knowledge:read',
+  },
+  {
     key: 'settings',
     label: '设置',
     icon: <SettingOutlined />,

@@ -41,6 +41,7 @@ import {
 import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
+import C2AToolCard from "./components/C2AToolCard";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
@@ -125,6 +126,8 @@ const _enhancedToolRenderConfig: Record<string, React.FC<any>> = {};
 for (const name of _ENHANCED_TOOL_NAMES) {
   _enhancedToolRenderConfig[name] = EnhancedToolCallCard;
 }
+// C2A 卡片：c2a_render_card 工具返回的 c2a_message 由 @coapis-c2a/renderer 渲染
+_enhancedToolRenderConfig["c2a_render_card"] = C2AToolCard;
 
 function messageRequestsHistoryClear(message: unknown): boolean {
   if (!message || typeof message !== "object") return false;

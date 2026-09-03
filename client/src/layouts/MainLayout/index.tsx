@@ -127,6 +127,7 @@ export default function MainLayout() {
   const location = useLocation();
   const currentPath = location.pathname;
   const { pluginRoutes } = usePlugins();
+  console.log("[MainLayout] pluginRoutes:", pluginRoutes.length, pluginRoutes.map(r => r.path));
   const isMobile = useIsMobile();
   const { setAgents, setSelectedAgent } = useAgentStore();
   

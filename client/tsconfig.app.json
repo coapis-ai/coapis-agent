@@ -24,7 +24,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@enterprise/*": ["src/enterprise/*"]
+      "@enterprise/*": ["src/enterprise/*"],
+      "@coapis-c2a/renderer/*": ["../../coapis-c2a/typescript/c2a-renderer-react/src/*"]
     }
   },
   "include": ["src"],

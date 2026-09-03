@@ -57,6 +57,7 @@ export function PluginProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Re-sync state whenever any plugin registers new capabilities
     const unsub = pluginSystem.subscribe(() => {
+      console.log("[PluginContext] subscribe callback triggered, routes:", pluginSystem.getRoutes().length);
       setToolRenderConfig(pluginSystem.getToolRenderConfig());
       setPluginRoutes(pluginSystem.getRoutes());
     });

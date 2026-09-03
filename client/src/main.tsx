@@ -18,8 +18,10 @@ registerHostModulesEager();
 // This fixes dynamic import failures in @ant-design/x CodeHighlighter
 initLanguages();
 
-// 注入企业版扩展（社区版为空，企业版注册路由等）
-initEnterprise?.();
+// Initialize enterprise features (no-op in community edition)
+// Use if check instead of optional chaining to prevent tree-shaking in build
+if (typeof initEnterprise === "function") initEnterprise();
+
 
 if (typeof window !== "undefined") {
   const originalError = console.error;

@@ -28,7 +28,6 @@ import { ApprovalProvider } from "./contexts/ApprovalContext";
 import { ChatWindowProvider } from "./contexts/ChatWindowContext";
 import { Suspense } from "react";
 import { lazyImportWithRetry } from "./utils/lazyWithRetry";
-
 const LoginPage = lazyImportWithRetry("./pages/Login/index");
 const EmbeddedChatPage = lazyImportWithRetry("./pages/Chat/EmbeddedChatPage");
 import { authApi } from "./api/modules/auth";
@@ -124,14 +123,17 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     };
   }, []); // Empty deps - only run once on mount
 
-  if (status === "loading") return null;
-  if (status === "auth-required")
+  if (status === "loading") { console.log("[AuthGuard] loading"); return null; }
+  if (status === "auth-required") { 
+    console.log("[AuthGuard] auth-required, redirecting to login");
     return (
       <Navigate
         to={`/login?redirect=${encodeURIComponent(window.location.pathname)}`}
         replace
       />
     );
+  }
+  console.log("[AuthGuard] status ok, rendering children");
   return <>{children}</>;
 }
 
@@ -182,6 +184,7 @@ function AppInner() {
     };
   }, [i18n]);
 
+  // 注入企业版扩展（社区版为空，企业版注册路由等）
   // Wait for plugins to load before rendering routes that might be patched
   if (pluginsLoading) {
     return null;

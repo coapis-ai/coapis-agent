@@ -177,6 +177,9 @@ export function installHostExternals(): void {
       );
     };
   }
+  
+  // Expose pluginSystem for debugging
+  (window as any).__pluginSystem = pluginSystem;
 
   if (!window.CoApis.registerToolRender) {
     window.CoApis.registerToolRender = (pluginId, renderers) => {

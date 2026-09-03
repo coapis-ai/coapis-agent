@@ -13,6 +13,10 @@ services:
   # ── 后端 API 服务 ──
   server:
     image: coapis-agent:latest
+    build:
+      context: ../..
+      dockerfile: server/deploy/Dockerfile
+      target: full
     container_name: coapis-server-dev
     ports:
       - "4308:8000"

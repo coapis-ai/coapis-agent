@@ -71,8 +71,8 @@
 
 ### 4.2 Tool Calling / Function Calling 设计
 - 在 `server/coapis/agents/tools/` 或 MCP Gateway 中，定义外部系统功能的 Tools（如 `query_external_data`, `get_approval_status`, `submit_approval_flow`）。
-- LLM 在执行完业务逻辑后，主动调用这些工具获取数据，并将结果与操作指令组装成 Card JSON。
-- 对于涉及状态修改的操作（如提交审批），Tool 返回的卡片应包含“确认/取消”按钮，LLM 在生成卡片时应提示用户“点击确认后将在 OA 系统中发起流程”。
+- LLM 调用工具获取数据，并将结果组装成 Card JSON（含表格、辅助摘要 summary、导航按钮 buttons）。
+- **边界原则：AI 只做展示 + 导航，不做业务执行。** 对于涉及状态修改的操作（如审批），卡片应包含导航按钮（如“去审批”），点击后打开外部系统页面，用户在那里完成操作。AI 不直接发起审批流。
 
 ### 4.3 SSO Deep Link 生成机制
 - 利用现有的 `external_login.py` 中的 SSO Token 签名机制，为“查看详情”等外部跳转生成带有有效身份凭证的安全 URL。

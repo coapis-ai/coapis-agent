@@ -120,3 +120,6 @@ server/restart_backend.py
 
 # --- Marketing documents (local only, not for git) ---
 tech_docs/go/
+
+# --- C2A local path dependency (vendor at build time, not for git) ---
+server/_vendor_c2a/

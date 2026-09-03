@@ -580,18 +580,18 @@ class TagService:
         
         # Validate parent_id if being updated
         if request.parent_id is not None:
-            if db_tag.type == str(TagType.CATEGORY):
+            if db_tag.type == TagType.CATEGORY.value:
                 if request.parent_id:  # Not empty
                     parent = self.get_tag(request.parent_id)
                     if not parent:
                         raise ValueError(f"Parent tag not found: {request.parent_id}")
                     if parent.type != TagType.DIMENSION:
                         raise ValueError(f"Parent must be a dimension tag, got: {parent.type}")
-            elif db_tag.type in (str(TagType.DIMENSION), str(TagType.MENU)):
+            elif db_tag.type in (TagType.DIMENSION.value, TagType.MENU.value):
                 raise ValueError(f"{db_tag.type} tag cannot have a parent_id")
         
         # Validate that menu tags still have metadata.path after update
-        if db_tag.type == str(TagType.MENU) and request.metadata is not None:
+        if db_tag.type == TagType.MENU.value and request.metadata is not None:
             if not request.metadata.get("path"):
                 raise ValueError("Menu tag must have metadata.path for navigation")
         
@@ -711,7 +711,7 @@ class TagService:
             raise ValueError(f"Tag not found: {tag_id}")
         
         # Check if tag has children (for dimension tags)
-        if str(db_tag.type) == str(TagType.DIMENSION):
+        if db_tag.type == TagType.DIMENSION.value:
             children = [t for t in self._enterprise_repo.list_tags() if getattr(t, 'parent_id', None) == tag_id]
             if children:
                 raise ValueError(
@@ -777,7 +777,7 @@ class TagService:
         db_tags = self._enterprise_repo.list_tags()
         
         # Get dimension tags
-        dimensions = [t for t in db_tags if str(t.type) == str(TagType.DIMENSION) and getattr(t, 'enabled', True)]
+        dimensions = [t for t in db_tags if str(t.type) == TagType.DIMENSION.value and getattr(t, 'enabled', True)]
         dimensions.sort(key=lambda t: (-getattr(t, 'sort_order', 0), t.name))
         
         # Build tree
@@ -786,7 +786,7 @@ class TagService:
             # Get category tags under this dimension
             categories = [
                 t for t in db_tags 
-                if str(t.type) == str(TagType.CATEGORY) and getattr(t, 'parent_id', None) == dim.id and getattr(t, 'enabled', True)
+                if str(t.type) == TagType.CATEGORY.value and getattr(t, 'parent_id', None) == dim.id and getattr(t, 'enabled', True)
             ]
             categories.sort(key=lambda t: (-getattr(t, 'sort_order', 0), t.name))
             
@@ -876,7 +876,7 @@ class TagService:
         # Get dimension tags with show_in_menu=True
         dimensions = [
             t for t in db_tags 
-            if str(t.type) == str(TagType.DIMENSION) and getattr(t, 'show_in_menu', False) and getattr(t, 'enabled', True)
+            if str(t.type) == TagType.DIMENSION.value and getattr(t, 'show_in_menu', False) and getattr(t, 'enabled', True)
         ]
         dimensions.sort(key=lambda t: (-getattr(t, 'sort_order', 0), t.name))
         
@@ -886,7 +886,7 @@ class TagService:
             # Get category tags under this dimension
             categories = [
                 t for t in db_tags 
-                if (str(t.type) == str(TagType.CATEGORY) and 
+                if (str(t.type) == TagType.CATEGORY.value and 
                     getattr(t, 'parent_id', None) == dim.id and 
                     getattr(t, 'show_in_menu', False) and 
                     getattr(t, 'enabled', True))

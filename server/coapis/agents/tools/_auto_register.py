@@ -28,6 +28,18 @@ from . import daily_memory  # Daily memory recording tool
 # ── Runtime / dependency ──
 from . import install_dependency  # Shared Runtime Pool package installer
 
+# ── C2A (Chat-to-Action) — one-click injection from the coapis-c2a package ──
+# Registers the `c2a_render_card` tool (data tables + row links). The module
+# is guarded so the backend still starts when c2a-tools is not installed.
+try:
+    from c2a_tools.integrations import coapis as c2a_integration  # noqa: F401
+except Exception as _c2a_err:  # pragma: no cover - optional dependency
+    import logging as _c2a_logging
+
+    _c2a_logging.getLogger(__name__).warning(
+        "c2a integration unavailable (c2a-tools not installed?): %s", _c2a_err
+    )
+
 # ── Code tools ──
 from . import git_ops
 from . import cron_scheduler
