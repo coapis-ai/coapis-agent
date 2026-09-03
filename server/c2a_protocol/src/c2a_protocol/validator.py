@@ -7,6 +7,18 @@ This module provides validation utilities for the C2A protocol.
 from typing import List, Optional
 from .models import C2AMessage, PROTOCOL_VERSION, BLOCK_TYPES, ACTION_INTENTS
 
+# Canonical version plus tolerated aliases. LLMs frequently emit shorthand
+# ("1.0", "v1.0", "c2a-1.0", ...) instead of the canonical "c2a-v1.0"; accept
+# these so hand-built payloads don't fail validation on a cosmetic mismatch.
+_ACCEPTED_VERSIONS = {
+    PROTOCOL_VERSION,
+    "1.0",
+    "v1.0",
+    "c2a-1.0",
+    "c2a_1.0",
+    "c2a_v1.0",
+}
+
 
 class C2AValidationError(Exception):
     """Exception raised when C2A protocol validation fails."""
@@ -36,9 +48,12 @@ def validate_c2a_message(
     Raises:
         C2AValidationError: If validation fails.
     """
-    # 1. Protocol version (single canonical version)
-    if c2a_msg.protocol_version != PROTOCOL_VERSION:
-        raise C2AValidationError(f"Unsupported protocol version: {c2a_msg.protocol_version}")
+    # 1. Protocol version (canonical + tolerated aliases)
+    if c2a_msg.protocol_version not in _ACCEPTED_VERSIONS:
+        raise C2AValidationError(
+            f"Unsupported protocol version: {c2a_msg.protocol_version} "
+            f"(expected {PROTOCOL_VERSION})"
+        )
 
     # 2. Block types
     for block in c2a_msg.blocks:

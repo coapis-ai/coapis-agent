@@ -34,6 +34,7 @@ from c2a_protocol import (
     PROTOCOL_VERSION,
     Block,
     BlockContent,
+    Button,
     C2AMessage,
     ContextRef,
     Metadata,
@@ -43,6 +44,36 @@ from c2a_protocol import (
 
 # Candidate id field names, in priority order.
 ID_FIELD_CANDIDATES = ("id", "approval_id", "order_id", "task_id", "record_id", "_id")
+
+# P1-B: URL field candidates for row links.
+# When MCP data provides a per-row detail URL, the converter/parser uses it
+# for clickable row links instead of generating a fake path.
+_URL_FIELD_CANDIDATES = (
+    "detail_url", "view_url", "page_url", "url", "link",
+    "detail_link", "view_link", "href", "detail_href",
+)
+
+
+def find_url_field(item: Dict[str, Any]) -> Optional[str]:
+    """Find a URL-like field in a data item that can be used for row links.
+
+    Returns the field name if found, or ``None``.
+
+    Strategy:
+      1. Exact match against known candidate names (deterministic).
+      2. Heuristic: any field whose name contains "url" / "link" / "href"
+         and whose value is a string starting with http/https or /.
+    """
+    for field in _URL_FIELD_CANDIDATES:
+        val = item.get(field)
+        if val and isinstance(val, str) and (val.startswith("http") or val.startswith("/")):
+            return field
+    for key, value in item.items():
+        k = str(key).lower()
+        if ("url" in k or "link" in k or "href" in k):
+            if isinstance(value, str) and (value.startswith("http") or value.startswith("/")):
+                return str(key)
+    return None
 
 
 # ============================================================================
@@ -151,14 +182,17 @@ class MCPC2AParser:
         id_field = MCPC2AParser._find_id_field(first_item)
 
         if len(list_items) > 1:
-            # Multi-record list: row links (NOT view_detail — that's single-record)
-            if id_field:
+            # Multi-record list: row links (NOT view_detail — that's single-record).
+            # P1-B: only add row_link when the data actually has a URL field;
+            # a fake /{list_key}/{id} path is worse than no link at all.
+            url_field = find_url_field(first_item)
+            if id_field and url_field:
                 inferred["row_link"] = {
                     "type": ActionTemplateTypes.ROW_LINK,
                     "label": "查看详情",
-                    # Single-brace placeholder; renderer fills from row_values.
-                    "url_template": (base_url.rstrip("/") if base_url else "") + f"/{list_key}/{{{id_field}}}",
+                    "url_template": f"{{{url_field}}}",
                     "business_intent": "view_detail",
+                    "link_column": str(url_field),
                 }
             inferred["export_list"] = {
                 "type": ActionTemplateTypes.EXPORT_LIST,
@@ -173,13 +207,16 @@ class MCPC2AParser:
                 "business_intent": "open_full_list",
                 "context_data": {},
             }
-        elif len(list_items) == 1 and id_field:
-            inferred["view_detail"] = {
-                "type": ActionTemplateTypes.VIEW_DETAIL,
-                "label": "查看详情",
-                "url_template": (base_url.rstrip("/") if base_url else "") + f"/{list_key}/{{{id_field}}}",
-                "business_intent": "view_detail",
-            }
+        elif len(list_items) == 1:
+            # P1-B: single record — only add view_detail with a real URL.
+            url_field = find_url_field(first_item)
+            if id_field and url_field:
+                inferred["view_detail"] = {
+                    "type": ActionTemplateTypes.VIEW_DETAIL,
+                    "label": "查看详情",
+                    "url_template": f"{{{url_field}}}",
+                    "business_intent": "view_detail",
+                }
         return inferred
 
     # ------------------------------------------------------------------
@@ -200,6 +237,8 @@ class MCPC2AParser:
             "resource_type": None,
             "external_system": None,
             "action_templates": {},
+            "summary": None,
+            "buttons": [],
         }
 
         # Extract business data from content.text (JSON)
@@ -214,6 +253,16 @@ class MCPC2AParser:
         metadata = mcp_result.get("metadata", {}) or {}
         parsed["resource_type"] = metadata.get("resource_type")
         parsed["external_system"] = metadata.get("external_system")
+        parsed["summary"] = metadata.get("summary")
+        # Buttons: pure navigation (label + url + scope). Only keep dict entries
+        # that have a non-empty url_template (a button without a URL is not
+        # renderable — the AI does not execute business logic).
+        buttons_raw = metadata.get("buttons", [])
+        if isinstance(buttons_raw, list):
+            parsed["buttons"] = [
+                b for b in buttons_raw
+                if isinstance(b, dict) and b.get("url_template")
+            ]
         base_url = metadata.get("base_url", "")
         action_templates = metadata.get("action_templates", {})
 
@@ -254,6 +303,21 @@ class MCPC2AParser:
         business_data = parsed.get("business_data")
         action_templates = parsed.get("action_templates", {}) or {}
 
+        # Build buttons from metadata (pure navigation: label + url + scope).
+        buttons_list: Optional[List[Button]] = None
+        raw_buttons = parsed.get("buttons", [])
+        if raw_buttons:
+            buttons_list = [
+                Button(
+                    id=b.get("id", f"btn_{i}"),
+                    label=b.get("label", "操作"),
+                    scope=b.get("scope", "card"),
+                    url_template=b.get("url_template", ""),
+                    style=b.get("style", "secondary"),
+                )
+                for i, b in enumerate(raw_buttons)
+            ]
+
         msg = C2AMessage(
             protocol_version=PROTOCOL_VERSION,
             message_id=message_id,
@@ -264,6 +328,8 @@ class MCPC2AParser:
             metadata=Metadata(
                 generated_by="mcp-tool-parser",
                 source_system=parsed.get("external_system") or "mcp-system",
+                summary=parsed.get("summary"),
+                buttons=buttons_list,
             ),
             state=State(status="rendered"),
         )

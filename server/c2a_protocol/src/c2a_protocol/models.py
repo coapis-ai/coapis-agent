@@ -45,6 +45,30 @@ class ContextRef:
 
 
 @dataclass
+class Button:
+    """A pure *navigation* button — opens an external URL, never executes
+    business logic in the AI.
+
+    Boundary principle: the AI only *helps decide* (shows the card, the summary,
+    and the buttons); the external system *performs* the action (approve / reject /
+    export / view). So every button is just ``label + url + scope`` — there is no
+    ``api_call`` / ``function_invoke`` behind it.
+
+    - ``scope="card"``: rendered once under the card (e.g. 去审批 / 查看详情 / 导出).
+    - ``scope="row"``:  rendered per table row; ``url_template`` may use ``{field}``
+      placeholders resolved against the row data.
+
+    A button is renderable only when ``url_template`` is non-empty; a button with
+    no URL (e.g. a legacy ``api_endpoint``-only export) is dropped, not executed.
+    """
+    id: str
+    label: str
+    scope: str = "card"  # "card" | "row"
+    url_template: str = ""  # required to render; {field} for row scope
+    style: str = "secondary"  # primary | secondary | danger | success | warning | text
+
+
+@dataclass
 class Metadata:
     generated_by: str
     generated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
@@ -52,6 +76,11 @@ class Metadata:
     source_system: Optional[str] = None
     attachments: Optional[List[Dict[str, Any]]] = None
     permissions_required: Optional[List[str]] = None
+    # ── C2A boundary additions ──────────────────────────────────────────────
+    # AI 辅助决策：关键结论 / 风险提示 / 下一步建议（纯展示文本，不驱动渲染分支）。
+    summary: Optional[str] = None
+    # 纯导航按钮（label + url + scope）。AI 不执行业务，只把用户带到外部系统。
+    buttons: Optional[List["Button"]] = None
 
 
 @dataclass

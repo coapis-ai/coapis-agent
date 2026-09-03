@@ -14,10 +14,22 @@ export interface ContextRef {
   task_id?: string;
 }
 
+export interface C2AButton {
+  id: string;
+  label: string;
+  scope: 'card' | 'row';
+  url_template: string;
+  style?: 'primary' | 'secondary' | 'danger' | 'success' | 'warning' | 'text';
+}
+
 export interface Metadata {
   generated_by: string;
   generated_at: string;
   ttl_seconds?: number;
+  /** AI 辅助决策文本。 */
+  summary?: string | null;
+  /** 纯导航按钮（label + url + scope）。 */
+  buttons?: C2AButton[];
 }
 
 export interface BlockContent {

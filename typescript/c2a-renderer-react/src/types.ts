@@ -29,6 +29,24 @@ export interface Attachment {
   type: string;
 }
 
+/**
+ * Pure navigation button — opens an external URL, never executes business
+ * logic in the AI. The AI only *helps decide* (shows the card, the summary,
+ * and the buttons); the external system *performs* the action.
+ *
+ * - scope="card": rendered once below the card (e.g. 去审批 / 查看详情 / 导出).
+ * - scope="row":  rendered per table row; url_template may use {field}
+ *   placeholders resolved against the row data.
+ */
+export interface C2AButton {
+  id: string;
+  label: string;
+  scope: 'card' | 'row';
+  /** Required to render; {field} for row scope. */
+  url_template: string;
+  style?: 'primary' | 'secondary' | 'danger' | 'success' | 'warning' | 'text';
+}
+
 export interface Metadata {
   generated_by: string;
   generated_at?: string;
@@ -37,6 +55,10 @@ export interface Metadata {
   doc_version?: string | number;
   permissions_required?: string[];
   attachments?: Attachment[];
+  /** AI 辅助决策：关键结论 / 风险提示 / 下一步建议（纯展示文本）。 */
+  summary?: string | null;
+  /** 纯导航按钮（label + url + scope）。AI 不执行业务，只把用户带到外部系统。 */
+  buttons?: C2AButton[];
 }
 
 export interface BlockContent {

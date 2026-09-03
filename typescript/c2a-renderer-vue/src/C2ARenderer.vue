@@ -102,23 +102,19 @@ const renderMarkdown = (markdown: string | undefined): string => {
   return html;
 };
 
-// Handle action click
+// Handle action click — navigation only (AI does not execute business logic)
 const handleActionClick = (action: Action) => {
   if (action.disabled) return;
-  
-  // Emit action event for parent component to handle
   emit('action-click', action);
-  
-  // Execute based on intent
-  switch (action.intent) {
-    case 'api_call':
-      console.log('API Call:', action.payload.api_endpoint);
-      break;
-    case 'workflow_trigger':
-      console.log('Workflow Trigger:', action.payload.api_endpoint);
-      break;
-    default:
-      console.log('Action executed:', action.action_id);
+
+  const url: string | undefined = action.payload?.url || action.payload?.url_template;
+  if (url && typeof url === 'string') {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } else {
+    console.log(
+      `Action ${action.action_id} (intent: ${action.intent}) — skipped. ` +
+      'AI is navigation-only; business execution belongs to the external system.'
+    );
   }
 };
 

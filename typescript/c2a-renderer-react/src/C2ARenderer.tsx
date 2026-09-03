@@ -16,7 +16,8 @@ import {
   Attachment,
   RowActionTemplate,
   Suggestion,
-  DataTableBlockContent
+  DataTableBlockContent,
+  C2AButton
 } from './types';
 
 // ============================================================================
@@ -122,13 +123,10 @@ export function processRowActionResult(rowAction: RowActionTemplate, rowData: Re
       }
       
       targetUrl = replaceUrlTemplate(rowAction.url_template, contextData);
-    } else if (rowAction.api_endpoint_mapping) {
-      // For API endpoints, construct the full URL based on current origin
-      const apiEndpoint = rowAction.api_endpoint_mapping;
-      const baseUrl = window.location.origin + '/api';
-      targetUrl = `${baseUrl}${apiEndpoint}`;
     } else {
-      console.warn('Row action has no url_template or api_endpoint_mapping');
+      // Boundary: AI does not execute business logic. Without a URL template
+      // there is nowhere to navigate — the external system owns that action.
+      console.warn('Row action has no url_template — skipped (AI is navigation-only)');
       return;
     }
 
@@ -154,7 +152,7 @@ export function processRowActionResult(rowAction: RowActionTemplate, rowData: Re
  */
 export function processSuggestionClick(
   suggestion: Suggestion,
-  onSuggestionClick?: (suggestion: Suggestion) => void,
+  _onSuggestionClick?: (suggestion: Suggestion) => void,
 ): void {
   try {
     const ctx = suggestion.context_data || {};
@@ -170,11 +168,11 @@ export function processSuggestionClick(
       return;
     }
 
-    // 2) API-based (e.g. export -> api_endpoint) or any custom intent
-    if (onSuggestionClick) {
-      onSuggestionClick(suggestion);
-    } else {
-      console.log(`Suggestion intent (no handler): ${suggestion.business_intent}`, ctx);
+    // 2) No URL → skip. AI is navigation-only; business execution belongs to
+    // the external system. (Legacy api_endpoint suggestions are silently
+    // ignored rather than executed.)
+    if (!urlTemplate) {
+      console.log(`Suggestion has no URL (intent: ${suggestion.business_intent}) — skipped`);
     }
   } catch (error) {
     console.error('Error processing suggestion click:', error);
@@ -309,58 +307,39 @@ interface C2ARendererProps {
 
 export const C2ARenderer: React.FC<C2ARendererProps> = ({
   message,
-  onActionClick,
+  onActionClick: _onActionClick,
   onSuggestionClick,
-  executor
+  executor: _executor,
 }) => {
   const [currentState, setCurrentState] = useState<C2AStateStatus>(message.state.status);
-  const [isExecuting, setIsExecuting] = useState(false);
+  // Navigation-only mode: no async execution, always false.
+  const isExecuting = false;
 
   // Update state when message changes
   useEffect(() => {
     setCurrentState(message.state.status);
   }, [message.state.status]);
 
-  // Handle action execution
-  const handleActionClick = async (action: Action) => {
+  // Handle action click — navigation only (AI does not execute business logic).
+  // Legacy actions with api_call / function_invoke intents are NOT executed;
+  // they are shown for context but skipped on click. Only URL-based actions
+  // (web_redirect or payload.url) open an external page.
+  const handleActionClick = (action: Action) => {
     if (action.disabled) return;
 
-    // Check authentication requirement
-    if (action.security?.requires_auth && !isAuthenticated()) {
-      console.warn(`Action ${action.action_id} requires authentication`);
-      return;
-    }
-
-    // Show confirmation prompt if required
-    if (action.security?.confirmation_prompt) {
-      const confirmed = window.confirm(action.security.confirmation_prompt);
-      if (!confirmed) return;
-    }
-
-    setIsExecuting(true);
-    
-    try {
-      if (executor && onActionClick) {
-        await executor.executeAction(action.action_id, action, message.context_ref);
-        onActionClick(action.action_id, action);
-      } else if (onActionClick) {
-        onActionClick(action.action_id, action);
-      }
-
-      // Update state to completed
+    const url: string | undefined = action.payload?.url || action.payload?.url_template;
+    if (url && typeof url === 'string') {
+      handleExternalRedirect(url, { openInNewTab: true });
       setCurrentState('completed');
-    } catch (error) {
-      console.error(`Action execution failed: ${action.action_id}`, error);
-      setCurrentState('failed');
-    } finally {
-      setIsExecuting(false);
+    } else if (action.intent === 'web_redirect') {
+      console.warn(`Action ${action.action_id} is web_redirect but has no URL in payload`);
+    } else {
+      // Non-navigation actions (api_call, function_invoke, etc.) are NOT executed.
+      console.log(
+        `Action ${action.action_id} (intent: ${action.intent}) — skipped. ` +
+        'AI is navigation-only; business execution belongs to the external system.'
+      );
     }
-  };
-
-  // Helper to check authentication (mock implementation)
-  const isAuthenticated = (): boolean => {
-    // In a real implementation, this would check the user's session token/JWT
-    return true;
   };
 
   // Render based on state
@@ -405,7 +384,37 @@ export const C2ARenderer: React.FC<C2ARendererProps> = ({
         ))}
       </div>
 
-      {/* Actions Rendering */}
+      {/* AI 辅助决策 (summary): 关键结论 / 风险提示 / 下一步建议 */}
+      {message.metadata?.summary && (
+        <div className="c2a-summary" data-summary={true}>
+          <div className="c2a-summary-label">📋 摘要</div>
+          <div className="c2a-summary-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {message.metadata.summary}
+          </div>
+        </div>
+      )}
+
+      {/* Card-scope buttons (pure navigation: label + url) */}
+      {message.metadata?.buttons && message.metadata.buttons.length > 0 && (
+        <div className="c2a-buttons" data-buttons={true}>
+          {message.metadata.buttons
+            .filter((b: C2AButton) => b.scope === 'card')
+            .map((btn: C2AButton) => (
+              <a
+                key={btn.id}
+                className={`c2a-button c2a-button-${btn.style || 'secondary'}`}
+                href={btn.url_template}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-button-id={btn.id}
+              >
+                {btn.label}
+              </a>
+            ))}
+        </div>
+      )}
+
+      {/* Actions Rendering (legacy — only URL-based actions are functional) */}
       {message.actions.length > 0 && (
         <div className="c2a-actions">
           {message.actions.map((action) => (
@@ -419,17 +428,21 @@ export const C2ARenderer: React.FC<C2ARendererProps> = ({
         </div>
       )}
 
-      {/* Suggestions Rendering (LLM Guided Interactions) */}
-      {message.suggestions && message.suggestions.length > 0 && (
+      {/* Suggestions Rendering (navigation-only: URL-based suggestions) */}
+      {message.suggestions &&
+        message.suggestions.filter(
+          (s) => s.context_data?.url_template
+        ).length > 0 && (
         <div className="c2a-suggestions">
           <div className="c2a-suggestions-title">建议操作：</div>
           <div className="c2a-suggestion-list">
-            {message.suggestions.map((suggestion: Suggestion) => (
+            {message.suggestions
+              .filter((s) => s.context_data?.url_template)
+              .map((suggestion: Suggestion) => (
               <button
                 key={suggestion.suggestion_id}
                 className="c2a-suggestion-btn"
                 onClick={() => {
-                  // URL-based suggestions open directly; API/custom intents go to the callback.
                   processSuggestionClick(suggestion, onSuggestionClick);
                 }}
                 data-business-intent={suggestion.business_intent}
