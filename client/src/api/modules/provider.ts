@@ -7,6 +7,7 @@ import type {
   ModelSlotRequest,
   CreateCustomProviderRequest,
   AddModelRequest,
+  UpdateModelRequest,
   ModelConfigRequest,
   LocalActionResponse,
   LocalModelConfig,
@@ -111,6 +112,21 @@ export const providerApi = {
         modelId,
       )}`,
       { method: "DELETE" },
+    ),
+
+  updateModel: (
+    providerId: string,
+    modelId: string,
+    body: UpdateModelRequest,
+  ) =>
+    request<ProviderInfo>(
+      `/models/${encodeURIComponent(providerId)}/models/${encodeURIComponent(
+        modelId,
+      )}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
     ),
 
   configureModel: (

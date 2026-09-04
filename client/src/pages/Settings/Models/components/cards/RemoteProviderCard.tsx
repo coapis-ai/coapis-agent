@@ -125,34 +125,35 @@ export const RemoteProviderCard = React.memo(function RemoteProviderCard({
         {providerTag}
       </div>
 
-      {/* Info Section */}
-      <div className={styles.cardInfo}>
-        <div className={styles.infoRow}>
-          <span className={styles.infoLabel}>Base URL:</span>
-          {provider.base_url ? (
-            <span className={styles.infoValue} title={provider.base_url}>
-              {provider.base_url}
-            </span>
-          ) : (
-            <span className={styles.infoEmpty}>{t("models.notSet")}</span>
-          )}
-        </div>
-        <div className={styles.infoRow}>
-          <span className={styles.infoLabel}>API Key:</span>
-          {provider.api_key ? (
-            <span className={styles.infoValue}>{provider.api_key}</span>
-          ) : (
-            <span className={styles.infoEmpty}>{t("models.notSet")}</span>
-          )}
-        </div>
-        <div className={styles.infoRow}>
-          <span className={styles.infoLabel}>Model:</span>
-          <span className={styles.infoValue}>
-            {totalCount > 0
-              ? t("models.modelsCount", { count: totalCount })
-              : t("models.noModels")}
-          </span>
-        </div>
+      {/* Compact summary: model count + type breakdown */}
+      <div className={styles.cardSummary}>
+        <span className={styles.cardSummaryCount}>
+          {totalCount > 0
+            ? t("models.modelsCount", { count: totalCount })
+            : t("models.noModels")}
+        </span>
+        <span className={styles.cardSummaryTypes}>
+          {(() => {
+            const byType: Record<string, number> = {};
+            provider.models.forEach((m) => {
+              const type = m.model_type || "chat";
+              byType[type] = (byType[type] ?? 0) + 1;
+            });
+            const typeIcons: Record<string, string> = {
+              chat: "💬",
+              embedding: "🔢",
+              rerank: "🔄",
+              audio: "🎵",
+              vision: "👁",
+            };
+            return Object.entries(byType)
+              .map(
+                ([type, count]) =>
+                  `${typeIcons[type] ?? "•"}${count}`,
+              )
+              .join("  ");
+          })()}
+        </span>
       </div>
 
       <div className={styles.cardActions}>

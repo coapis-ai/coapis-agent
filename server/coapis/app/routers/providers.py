@@ -32,7 +32,7 @@ from fastapi import (
     Query,
     Request,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from agentscope_runtime.engine.schemas.exception import (
     AppBaseException,
@@ -159,6 +159,56 @@ class AddModelRequest(BaseModel):
         default=None,
         description="Source of capability metadata",
     )
+    model_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "Model type: chat, embedding, rerank, audio, or vision. "
+            "If omitted, inferred from the model ID/name."
+        ),
+    )
+
+    @field_validator("model_type")
+    @classmethod
+    def _validate_model_type(cls, v):
+        from coapis.providers.model_type import is_valid_model_type
+
+        if v is not None and not is_valid_model_type(v):
+            raise ValueError(
+                "model_type must be one of: chat, embedding, rerank, "
+                f"audio, vision (got {v!r})",
+            )
+        return v
+
+
+class UpdateModelRequest(BaseModel):
+    """Request body for updating mutable model metadata."""
+
+    model_type: Optional[str] = Field(
+        None,
+        description=(
+            "Model type: chat, embedding, rerank, audio, or vision."
+        ),
+    )
+    name: Optional[str] = Field(
+        None,
+        description="Model display name",
+    )
+    is_free: Optional[bool] = Field(
+        None,
+        description="Whether the model is free",
+    )
+
+    @field_validator("model_type")
+    @classmethod
+    def _validate_model_type(cls, v):
+        from coapis.providers.model_type import is_valid_model_type
+
+        if v is not None and not is_valid_model_type(v):
+            raise ValueError(
+                "model_type must be one of: chat, embedding, rerank, "
+                f"audio, vision (got {v!r})",
+            )
+        return v
 
 
 class ModelConfigRequest(BaseModel):
@@ -543,6 +593,14 @@ async def add_model_endpoint(
     body: AddModelRequest = Body(...),
 ) -> ProviderInfo:
     try:
+        from coapis.providers.model_type import infer_model_type
+
+        # Infer the model type when the client does not specify one
+        model_type = (
+            body.model_type
+            if body.model_type is not None
+            else infer_model_type(body.id, body.name or body.id)
+        )
         provider = await manager.add_model_to_provider(
             provider_id=provider_id,
             model_info=ModelInfo(
@@ -553,6 +611,7 @@ async def add_model_endpoint(
                 supports_video=body.supports_video,
                 probe_source=body.probe_source,
                 is_free=body.is_free,
+                model_type=model_type,
             ),
         )  # Validate provider exists and add model
     except (ValueError, AppBaseException) as exc:
@@ -621,6 +680,35 @@ async def remove_model_endpoint(
         )  # Validate provider and model exist and delete
     except (ValueError, AppBaseException) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return provider
+
+
+@router.put(
+    "/{provider_id}/models/{model_id:path}",
+    response_model=ProviderInfo,
+    summary="Update model metadata (type / name / is_free)",
+)
+@require_permission("models:write")
+async def update_model_endpoint(
+    request: Request,
+    manager: ProviderManager = Depends(get_provider_manager),
+    provider_id: str = Path(...),
+    model_id: str = Path(...),
+    body: UpdateModelRequest = Body(...),
+) -> ProviderInfo:
+    """Update mutable model metadata (model_type / name / is_free)."""
+    try:
+        provider = await manager.update_model_metadata(
+            provider_id=provider_id,
+            model_id=model_id,
+            metadata={
+                "model_type": body.model_type,
+                "name": body.name,
+                "is_free": body.is_free,
+            },
+        )
+    except (ValueError, AppBaseException) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return provider
 
 

@@ -944,23 +944,41 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         try:
             models = await provider.fetch_models()
             if save:
-                # Merge fetched models with existing, keeping user-added ones
-                existing_added = {
-                    m.id: m for m in provider.models if m.source == "added"
-                }
+                # Merge fetched models with existing.
+                # For models we've seen before, preserve user-set metadata
+                # (model_type / is_free / capability flags) so a re-discovery
+                # never clobbers user edits. For brand-new models, infer
+                # the model type from ID/name.
+                from .model_type import infer_model_type
+
+                existing_by_id = {m.id: m for m in provider.models}
                 new_models = []
+                seen_ids = set()
                 for m in models:
-                    m.source = "added"
+                    old = existing_by_id.get(m.id)
+                    if old is not None:
+                        m.model_type = old.model_type
+                        m.is_free = old.is_free
+                        m.supports_multimodal = old.supports_multimodal
+                        m.supports_image = old.supports_image
+                        m.supports_video = old.supports_video
+                        m.probe_source = (
+                            old.probe_source
+                            if old.probe_source is not None
+                            else m.probe_source
+                        )
+                        m.embedding_dimension = old.embedding_dimension
+                        m.max_sequence_length = old.max_sequence_length
+                        m.source = old.source
+                    else:
+                        m.model_type = infer_model_type(m.id, m.name)
+                        m.source = "added"
                     new_models.append(m)
-                # Keep existing builtin models that weren't overwritten
+                    seen_ids.add(m.id)
+                # Keep previously-known models that weren't re-discovered
+                # (user-added models and leftover builtin models)
                 for m in provider.models:
-                    if m.source == "builtin" and m.id not in {
-                        nm.id for nm in new_models
-                    }:
-                        new_models.append(m)
-                # Re-add user-added models
-                for mid, m in existing_added.items():
-                    if mid not in {nm.id for nm in new_models}:
+                    if m.id not in seen_ids:
                         new_models.append(m)
                 provider.models = new_models
                 # Save provider config to appropriate location
@@ -1020,6 +1038,8 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         # Remove a custom provider by its ID. This will update the
         # providers.json file and remove the provider from the UI.
         if provider_id in self.custom_providers:
+            # Prevent dangling default-model references before removal
+            self._clear_stale_default_models(provider_id)
             del self.custom_providers[provider_id]
             provider_path = self.custom_path / f"{provider_id}.json"
             if provider_path.exists():
@@ -1029,16 +1049,26 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
 
     def hide_builtin_provider(self, provider_id: str) -> bool:
         """Hide a builtin provider from the list.
-        
+
         This is used when user wants to "delete" a builtin provider.
         The provider is not actually deleted from the code, just hidden from the UI.
         """
         if provider_id in self.builtin_providers:
+            # Prevent dangling default-model references before hiding
+            self._clear_stale_default_models(provider_id)
             self.hidden_providers.add(provider_id)
             self._save_hidden_providers()
             logger.info(f"Hidden builtin provider '{provider_id}'")
             return True
         return False
+
+    async def deactivate_model(self, provider_id: str) -> None:
+        """Deactivate the provider by clearing its active-model status.
+
+        No-op when the provider is not the currently active one.
+        """
+        provider_id = self._normalize_provider_id(provider_id)
+        self.clear_active_model(provider_id)
 
     def _load_hidden_providers(self) -> None:
         """Load hidden providers list from disk."""
@@ -1147,6 +1177,39 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
             )
         return await provider.get_info()
 
+    async def update_model_metadata(
+        self,
+        provider_id: str,
+        model_id: str,
+        metadata: Dict,
+    ) -> ProviderInfo:
+        """Update mutable model metadata (model_type / name / is_free)
+        and persist to disk."""
+        provider_id = self._normalize_provider_id(provider_id)
+        provider = self.get_provider(provider_id)
+        if not provider:
+            raise ProviderError(
+                message=f"Provider '{provider_id}' not found.",
+            )
+        if not provider.update_model_metadata(model_id, metadata):
+            raise ModelNotFoundException(
+                model_name=f"{provider_id}/{model_id}",
+                details={"provider_id": provider_id, "model_id": model_id},
+            )
+
+        # Save provider config to appropriate location
+        is_plugin = provider_id in self.plugin_providers
+        if is_plugin:
+            provider_info = ProviderInfo(**provider.model_dump())
+            self.plugin_providers[provider_id]["info"] = provider_info
+            self._save_plugin_provider(provider)
+        else:
+            self._save_provider(
+                provider,
+                is_builtin=provider_id in self.builtin_providers,
+            )
+        return await provider.get_info()
+
     async def update_model_config(
         self,
         provider_id: str,
@@ -1179,6 +1242,47 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
             )
         return await provider.get_info()
 
+    def _clear_stale_default_models(
+        self,
+        provider_id: str,
+        model_ids: set[str] | None = None,
+    ) -> None:
+        """Clear default-model slots that point at deleted/hidden models.
+
+        Args:
+            provider_id: The provider whose models became unavailable.
+            model_ids: When given, only slots pointing at these exact
+                model IDs are cleared. When None, ALL slots pointing at
+                the provider are cleared (provider-level removal).
+        """
+        cleared_any = False
+        for model_type in ("chat", "embedding", "rerank", "audio", "vision"):
+            slot = self.default_models.get_by_type(model_type)
+            if slot is None or slot.provider_id != provider_id:
+                continue
+            if model_ids is not None and slot.model_id not in model_ids:
+                continue
+            setattr(self.default_models, model_type, None)
+            cleared_any = True
+            logger.warning(
+                "Cleared stale default %s model %s/%s (model no longer "
+                "available)",
+                model_type,
+                provider_id,
+                slot.model_id,
+            )
+        if cleared_any:
+            self._save_default_models()
+            # chat default is synced to active_model — keep them in sync
+            if self.active_model is not None and (
+                model_ids is None
+                or (
+                    self.active_model.provider_id == provider_id
+                    and self.active_model.model in model_ids
+                )
+            ):
+                self.clear_active_model(provider_id)
+
     async def delete_model_from_provider(
         self,
         provider_id: str,
@@ -1191,6 +1295,12 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 message=f"Provider '{provider_id}' not found.",
             )
         await provider.delete_model(model_id=model_id)
+
+        # Prevent dangling default-model references
+        self._clear_stale_default_models(
+            provider_id,
+            model_ids={model_id},
+        )
 
         # Save provider config to appropriate location
         is_plugin = provider_id in self.plugin_providers

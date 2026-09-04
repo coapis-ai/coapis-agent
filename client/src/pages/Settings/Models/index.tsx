@@ -1,295 +1,250 @@
-import { useCallback, useMemo, useState, useEffect } from "react";
-import { Button, Input, message } from "antd";
-import { PlusOutlined, SearchOutlined, SyncOutlined } from "@ant-design/icons";
+import React, { useCallback, useEffect, useState } from "react";
+import { Empty, Button } from "@agentscope-ai/design";
+import { PageHeader } from "@/components/PageHeader";
+import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { Input } from "antd";
+import { useTranslation } from "react-i18next";
+import { useAppMessage } from "@/hooks/useAppMessage";
+import api from "@/api";
 import { useProviders } from "./useProviders";
 import {
-  LoadingState,
+  DefaultModelBar,
+  ConfiguredModelsSection,
   ProviderCard,
   CustomProviderModal,
 } from "./components";
-import { DefaultModelSelector } from "./components/DefaultModelSelector";
-import { ModelTypeTabs } from "./components/ModelTypeTabs";
-import { PageHeader } from "@/components/PageHeader";
-import { useTranslation } from "react-i18next";
-import type { ProviderInfo } from "../../../api/types/provider";
-import api from "@/api";
 import styles from "./index.module.less";
 
-/* ------------------------------------------------------------------ */
-/* Main Page                                                           */
-/* ------------------------------------------------------------------ */
+type ModelType = "chat" | "embedding" | "rerank" | "audio" | "vision";
 
-function ModelsPage() {
+const ModelsPage: React.FC = () => {
   const { t } = useTranslation();
+  const { message } = useAppMessage();
   const { providers, activeModels, loading, error, fetchAll } = useProviders();
-  const [addProviderOpen, setAddProviderOpen] = useState(false);
+
+  const [defaultModels, setDefaultModels] = useState<
+    Record<string, { providerId: string; modelId: string }>
+  >({});
+
+  const [refreshDefaultModelKey, setRefreshDefaultModelKey] = useState(0);
+  const [showAddProviderModal, setShowAddProviderModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  
-  // Model type filter
-  const [modelTypeFilter, setModelTypeFilter] = useState<string | undefined>(undefined);
-  
-  // Default models configuration
-  const [defaultModels, setDefaultModels] = useState<Record<string, { providerId: string; modelId: string } | null>>({});
 
-  // Refresh key: bump when providers change so DefaultModelSelector reloads its model list
-  const [modelRefreshKey, setModelRefreshKey] = useState(0);
+  // Load default models on mount
   useEffect(() => {
-    if (providers.length > 0) {
-      setModelRefreshKey((k) => k + 1);
-    }
-  }, [providers]);
-
-  // Load default models
-  useEffect(() => {
-    api.get("/models/default-models").then((data: any) => {
-      if (!data || typeof data !== 'object') {
-        console.error('Invalid default models response:', data);
-        return;
-      }
-      const models: Record<string, any> = {};
-      Object.entries(data).forEach(([type, value]: [string, any]) => {
-        if (value) {
-          models[type] = {
-            providerId: value.provider_id,
-            modelId: value.model_id,
-          };
-        }
-      });
-      setDefaultModels(models);
-    }).catch((err) => {
-      console.error('Failed to load default models:', err);
-    });
+    loadDefaultModels();
   }, []);
 
-  const handleDefaultModelChange = async (
-    type: string,
-    value: { providerId: string; modelId: string } | null
-  ) => {
-    if (!value) return;
+  const loadDefaultModels = async () => {
+    try {
+      const data = await api.get("/models/default-models");
+      if (data && typeof data === "object") {
+        // API returns snake_case (provider_id / model_id); components expect
+        // camelCase, so normalize here instead of casting blindly.
+        const normalized: Record<string, {
+          providerId: string;
+          modelId: string;
+        }> = {};
+        for (const [type, raw] of Object.entries(data as Record<string, any>)) {
+          if (raw && typeof raw === "object" && (raw.provider_id || raw.providerId)) {
+            normalized[type] = {
+              providerId: raw.providerId ?? raw.provider_id,
+              modelId: raw.modelId ?? raw.model_id,
+            };
+          }
+        }
+        setDefaultModels(normalized);
+      }
+    } catch (error) {
+      console.error("Failed to load default models:", error);
+    }
+  };
 
+  const setDefaultModel = async (
+    modelType: ModelType,
+    value: { providerId: string; modelId: string },
+  ) => {
     try {
       await api.put("/models/default-models", {
         provider_id: value.providerId,
         model_id: value.modelId,
-        model_type: type,
+        model_type: modelType,
       });
-      
-      setDefaultModels((prev) => ({
-        ...prev,
-        [type]: value,
-      }));
-      
+      setDefaultModels((prev) => ({ ...prev, [modelType]: value }));
       message.success(t("models.defaultModelSaved"));
-    } catch (err: any) {
-      message.error(err.response?.data?.detail || t("common.saveFailed"));
+    } catch (error) {
+      console.error("Failed to set default model:", error);
+      message.error(t("models.failedToSave"));
     }
   };
 
-  const refreshProvidersSilently = useCallback(() => {
-    void fetchAll(false);
+  const handleDefaultModelChange = (
+    type: ModelType,
+    value: { providerId: string; modelId: string } | null,
+  ) => {
+    if (!value) return;
+    setDefaultModel(type, value);
+  };
+
+  const handleSaved = useCallback(async () => {
+    await fetchAll(false);
+    setRefreshDefaultModelKey((k) => k + 1);
   }, [fetchAll]);
 
-  const { sortedProviders } = useMemo(() => {
-    // Sort providers: available first, then configured, then unconfigured.
-    // Within each group, sort by name alphabetically.
-    let sorted = [...providers].sort((a, b) => {
-      let isConfiguredA = false;
-      let isConfiguredB = false;
-      
-      if (a.is_custom && a.base_url) {
-        isConfiguredA = true;
-      } else if (a.require_api_key === false) {
-        isConfiguredA = true;
-      } else if (a.require_api_key && a.api_key) {
-        isConfiguredA = true;
-      }
-      
-      if (b.is_custom && b.base_url) {
-        isConfiguredB = true;
-      } else if (b.require_api_key === false) {
-        isConfiguredB = true;
-      } else if (b.require_api_key && b.api_key) {
-        isConfiguredB = true;
-      }
+  const handleAddProviderSuccess = useCallback(async () => {
+    setShowAddProviderModal(false);
+    await fetchAll(false);
+    setRefreshDefaultModelKey((k) => k + 1);
+  }, [fetchAll]);
 
-      const hasModelsA = a.models.length > 0;
-      const hasModelsB = b.models.length > 0;
-      const isAvailableA = isConfiguredA && hasModelsA;
-      const isAvailableB = isConfiguredB && hasModelsB;
+  const filteredProviders = providers.filter((p) => {
+    if (!searchQuery) return true;
+    return p.name
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
+  });
 
-      // Priority: available (0) > configured (1) > unconfigured (2)
-      const priorityA = isAvailableA ? 0 : isConfiguredA ? 1 : 2;
-      const priorityB = isAvailableB ? 0 : isConfiguredB ? 1 : 2;
-      
-      // First sort by priority
-      if (priorityA !== priorityB) {
-        return priorityA - priorityB;
-      }
-      
-      // Within same priority, sort by name alphabetically
-      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-    });
+  const isConfigured = (p: (typeof providers)[number]) => {
+    if (p.is_custom && p.base_url) return true;
+    if (p.require_api_key === false) return true;
+    if (p.require_api_key && p.api_key) return true;
+    return false;
+  };
 
-    // Filter by model type
-    if (modelTypeFilter) {
-      sorted = sorted.filter((p) =>
-        p.models.some((m: any) => (m.model_type || "chat") === modelTypeFilter)
-      );
-      
-      // Filter models within providers
-      sorted = sorted.map((p) => ({
-        ...p,
-        models: p.models.filter(
-          (m: any) => (m.model_type || "chat") === modelTypeFilter
-        ),
-      })) as ProviderInfo[];
-    }
-
-    // Fuzzy search filter: match provider name (case-insensitive)
-    const query = searchQuery.trim().toLowerCase();
-    if (query) {
-      sorted = sorted.filter((p) =>
-        p.name.toLowerCase().includes(query)
-      );
-    }
-
-    return { sortedProviders: sorted };
-  }, [providers, searchQuery, modelTypeFilter]);
-
-  const renderProviderCards = (list: ProviderInfo[]) =>
-    list.map((provider) => (
-      <ProviderCard
-        key={provider.id}
-        provider={provider}
-        activeModels={activeModels}
-        onSaved={refreshProvidersSilently}
-      />
-    ));
+  const availableProviders = filteredProviders.filter(
+    (p) => isConfigured(p) && p.models.length > 0,
+  );
+  const unreadyProviders = filteredProviders.filter(
+    (p) => !(isConfigured(p) && p.models.length > 0),
+  );
 
   return (
-    <div className={styles.settingsPage}>
+    <div className={styles.modelsPage}>
+      <PageHeader
+        parent={t("nav.settings")}
+        current={t("models.llmTitle")}
+      />
+
       {loading ? (
-        <LoadingState message={t("models.loading")} />
+        <div className={styles.loading}>
+          <span className={styles.loadingText}>{t("models.loading")}</span>
+        </div>
       ) : error ? (
-        <LoadingState message={error} error onRetry={fetchAll} />
+        <div className={styles.error}>
+          <p>{t("models.loadError")}: {error}</p>
+          <Button onClick={() => fetchAll()}>{t("models.retry")}</Button>
+        </div>
       ) : (
         <>
-          <PageHeader
-            parent={t("nav.settings")}
-            current={t("models.llmTitle")}
+          {/* Zone 1: default model bar (independent, above everything) */}
+          <DefaultModelBar
+            defaultModels={defaultModels}
+            onChange={handleDefaultModelChange}
+            refreshKey={refreshDefaultModelKey}
           />
-          {/* ---- Scrollable Content ---- */}
-          <div className={styles.content}>
-            {/* ---- Default Models Section ---- */}
-            <div className={styles.defaultModelsSection}>
-              <PageHeader current={t("models.defaultModelsTitle")} />
-              <div className={styles.defaultModelsGrid}>
-                <DefaultModelSelector
-                  modelType="chat"
-                  label={t("models.chatModels")}
-                  icon="💬"
-                  value={defaultModels.chat}
-                  onChange={(value) => handleDefaultModelChange("chat", value)}
-                  refreshKey={modelRefreshKey}
+
+          {/* Zone 2: configured models — type filter + table, tightly coupled */}
+          <ConfiguredModelsSection
+            providers={providers}
+            defaultModels={defaultModels}
+            onSetDefault={handleDefaultModelChange}
+          />
+
+          {/* Zone 3: provider management — compact cards, grouped by readiness */}
+          <section>
+            <div className={styles.providersHeaderRow}>
+              <div>
+                <h2 className={styles.sectionTitle}>
+                  {t("models.providersTitle")}
+                </h2>
+                <p className={styles.sectionDesc}>
+                  {t("models.providersDescription")}
+                </p>
+              </div>
+              <div className={styles.providersHeaderActions}>
+                <Input
+                  size="small"
+                  prefix={<SearchOutlined />}
+                  placeholder={t("models.searchPlaceholder")}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  allowClear
+                  style={{ width: 200 }}
                 />
-                <DefaultModelSelector
-                  modelType="embedding"
-                  label={t("models.embeddingModels")}
-                  icon="🔢"
-                  value={defaultModels.embedding}
-                  onChange={(value) => handleDefaultModelChange("embedding", value)}
-                  refreshKey={modelRefreshKey}
-                />
-                <DefaultModelSelector
-                  modelType="rerank"
-                  label={t("models.rerankModels")}
-                  icon="🔄"
-                  value={defaultModels.rerank}
-                  onChange={(value) => handleDefaultModelChange("rerank", value)}
-                  refreshKey={modelRefreshKey}
-                />
-                <DefaultModelSelector
-                  modelType="audio"
-                  label={t("models.audioModels")}
-                  icon="🎵"
-                  value={defaultModels.audio}
-                  onChange={(value) => handleDefaultModelChange("audio", value)}
-                  refreshKey={modelRefreshKey}
-                />
-                <DefaultModelSelector
-                  modelType="vision"
-                  label={t("models.visionModels")}
-                  icon="👁"
-                  value={defaultModels.vision}
-                  onChange={(value) => handleDefaultModelChange("vision", value)}
-                  refreshKey={modelRefreshKey}
-                />
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => setShowAddProviderModal(true)}
+                >
+                  {t("models.addProvider")}
+                </Button>
               </div>
             </div>
-            
-            {/* ---- Providers Section ---- */}
-            <div className={styles.providersBlock}>
-              <div className={styles.sectionHeaderRow}>
-                <div className={styles.headerLeft}>
-                  <PageHeader
-                    current={t("models.providersTitle")}
-                    className={styles.providersPageHeader}
-                  />
-                  {/* ---- Model Type Tabs ---- */}
-                  <ModelTypeTabs
-                    activeType={modelTypeFilter}
-                    onChange={setModelTypeFilter}
-                    providers={providers}
-                  />
-                </div>
-                <div className={styles.headerRight}>
-                  {/* ---- Search ---- */}
-                  <div className={styles.searchRow}>
-                    <Input
-                      placeholder={t("models.searchPlaceholder")}
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className={styles.searchInput}
-                      prefix={<SearchOutlined />}
-                      allowClear
-                    />
-                    <Button
-                      icon={<SyncOutlined />}
-                      onClick={() => fetchAll()}
-                      className={styles.searchBtn}
-                      title={t("common.refresh")}
-                    />
-                  </div>
-                  <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={() => setAddProviderOpen(true)}
-                    className={styles.addProviderBtn}
-                  >
-                    {t("models.addProvider")}
-                  </Button>
-                </div>
-              </div>
 
-              {sortedProviders.length > 0 && (
-                <div className={styles.providerGroup}>
-                  <div className={styles.providerCards}>
-                    {renderProviderCards(sortedProviders)}
+            {filteredProviders.length === 0 ? (
+              <Empty description={t("models.noProviders")} />
+            ) : (
+              <>
+                {availableProviders.length > 0 && (
+                  <div className={styles.providerGroup}>
+                    <div className={styles.providerGroupHeader}>
+                      <span className={styles.providerGroupDotReady} />
+                      <span className={styles.providerGroupTitle}>
+                        {t("models.availableProviders")}
+                      </span>
+                      <span className={styles.providerGroupCount}>
+                        {availableProviders.length}
+                      </span>
+                    </div>
+                    <div className={styles.providerCards}>
+                      {availableProviders.map((provider) => (
+                        <ProviderCard
+                          key={provider.id}
+                          provider={provider}
+                          activeModels={activeModels}
+                          onSaved={handleSaved}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-
-            <CustomProviderModal
-              open={addProviderOpen}
-              onClose={() => setAddProviderOpen(false)}
-              onSaved={fetchAll}
-            />
-          </div>
+                )}
+                {unreadyProviders.length > 0 && (
+                  <div className={styles.providerGroup}>
+                    <div className={styles.providerGroupHeader}>
+                      <span className={styles.providerGroupDot} />
+                      <span className={styles.providerGroupTitle}>
+                        {t("models.unreadyProviders")}
+                      </span>
+                      <span className={styles.providerGroupCount}>
+                        {unreadyProviders.length}
+                      </span>
+                    </div>
+                    <div className={styles.providerCards}>
+                      {unreadyProviders.map((provider) => (
+                        <ProviderCard
+                          key={provider.id}
+                          provider={provider}
+                          activeModels={activeModels}
+                          onSaved={handleSaved}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
         </>
       )}
+
+      <CustomProviderModal
+        open={showAddProviderModal}
+        onClose={() => setShowAddProviderModal(false)}
+        onSaved={handleAddProviderSuccess}
+      />
     </div>
   );
-}
+};
 
 export default ModelsPage;

@@ -7,6 +7,8 @@ export interface ModelInfo {
   probe_source?: string | null;
   is_free?: boolean;
   generate_kwargs: Record<string, unknown>;
+  /** Model type: chat, embedding, rerank, audio, or vision. */
+  model_type?: string;
 }
 
 export interface ProviderInfo {
@@ -81,6 +83,14 @@ export interface AddModelRequest {
   supports_image?: boolean | null;
   supports_video?: boolean | null;
   probe_source?: string | null;
+  /** Model type. If omitted, inferred from id/name by the backend. */
+  model_type?: string;
+}
+
+export interface UpdateModelRequest {
+  model_type?: string;
+  name?: string;
+  is_free?: boolean;
 }
 
 export interface ModelConfigRequest {

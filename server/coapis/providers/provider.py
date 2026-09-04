@@ -338,6 +338,37 @@ class Provider(ProviderInfo, ABC):
                 break
         return dict(self.generate_kwargs)
 
+    def update_model_metadata(
+        self,
+        model_id: str,
+        metadata: Dict,
+    ) -> bool:
+        """Update mutable model metadata (model_type / name / is_free).
+
+        Only keys present in *metadata* with non-None values are applied.
+        Returns True if the model exists, False otherwise.
+        """
+        from .model_type import is_valid_model_type
+
+        for model in self.models:
+            if model.id == model_id:
+                if (
+                    "model_type" in metadata
+                    and metadata["model_type"] is not None
+                    and is_valid_model_type(str(metadata["model_type"]))
+                ):
+                    model.model_type = metadata["model_type"]
+                if (
+                    "name" in metadata
+                    and metadata["name"] is not None
+                    and str(metadata["name"]).strip()
+                ):
+                    model.name = str(metadata["name"]).strip()
+                if "is_free" in metadata and metadata["is_free"] is not None:
+                    model.is_free = bool(metadata["is_free"])
+                return True
+        return False
+
     def update_model_config(
         self,
         model_id: str,

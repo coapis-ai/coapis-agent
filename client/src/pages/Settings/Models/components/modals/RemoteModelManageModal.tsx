@@ -6,6 +6,7 @@ import {
   Modal,
   Tag,
   Tooltip,
+  Select,
 } from "@agentscope-ai/design";
 import { AutoComplete } from "antd";
 import {
@@ -24,6 +25,7 @@ import {
   DatabaseOutlined,
   UserOutlined,
   GiftOutlined,
+  StarFilled,
 } from "@ant-design/icons";
 import type {
   ProviderInfo,
@@ -42,7 +44,43 @@ import {
   getTestConnectionFailureDetail,
 } from "./testConnectionMessage";
 import { OpenRouterFilterSection } from "./OpenRouterFilterSection";
+import { ModelTypeTabs } from "../ModelTypeTabs";
 import styles from "../../index.module.less";
+
+const typeOrder: Array<"chat" | "embedding" | "rerank" | "audio" | "vision"> = [
+  "chat",
+  "embedding",
+  "rerank",
+  "audio",
+  "vision",
+];
+
+/**
+ * Frontend mirror of the backend inference rules
+ * (server/coapis/providers/model_type.py). Used only for the "auto-infer"
+ * preview hint in the add-model form.
+ */
+function inferModelType(modelId: string, modelName = ""): string {
+  const haystack = `${modelId} ${modelName}`.trim().toLowerCase();
+  if (!haystack) return "chat";
+  if (haystack.includes("rerank")) return "rerank";
+  if (["embed", "bge", "e5-"].some((k) => haystack.includes(k)))
+    return "embedding";
+  if (
+      ["whisper", "asr", "tts", "speech", "speak"].some((k) =>
+        haystack.includes(k),
+      )
+    )
+    return "audio";
+  if (
+    ["vision", "omni", "llava", "clip", "-vl", "_vl", "vl-"].some((k) =>
+      haystack.includes(k),
+    ) ||
+    haystack.endsWith("vl")
+  )
+    return "vision";
+  return "chat";
+}
 
 function ModelConfigEditor({
   providerId,
@@ -122,16 +160,41 @@ function ModelConfigEditor({
     }
   };
 
+  const typeLabelKey: Record<string, string> = {
+    chat: "models.chatModels",
+    embedding: "models.embeddingModels",
+    rerank: "models.rerankModels",
+    audio: "models.audioModels",
+    vision: "models.visionModels",
+  };
+
   return (
     <div style={{ padding: "8px 0 4px" }}>
       <div
         style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
           fontSize: 12,
           color: isDark ? "rgba(255,255,255,0.45)" : "#888",
           marginBottom: 4,
         }}
       >
         {t("models.modelGenerateConfigHint")}
+        <Tag
+          style={{
+            fontSize: 11,
+            margin: 0,
+            lineHeight: "18px",
+            backgroundColor: isDark ? "rgba(24,144,255,0.15)" : "#e6f7ff",
+            color: isDark ? "#69b1ff" : "#1890ff",
+            borderColor: isDark ? "rgba(24,144,255,0.3)" : "#91d5ff",
+          }}
+        >
+          {t(
+            typeLabelKey[model.model_type || "chat"] ?? "models.chatModels",
+          )}
+        </Tag>
       </div>
       <JsonConfigEditor
         value={text}
@@ -200,6 +263,11 @@ const tagColors = (isDark: boolean) => ({
     backgroundColor: isDark ? "rgba(24,144,255,0.15)" : "#e6f7ff",
     color: "#1890ff",
     borderColor: isDark ? "rgba(24,144,255,0.3)" : "#91d5ff",
+  },
+  default: {
+    backgroundColor: isDark ? "rgba(250,173,20,0.15)" : "#fffbe6",
+    color: "#faad14",
+    borderColor: isDark ? "rgba(250,173,20,0.3)" : "#ffe58f",
   },
 });
 
@@ -279,7 +347,14 @@ export function RemoteModelManageModal({
     null,
   );
   const [modelSearchQuery, setModelSearchQuery] = useState("");
+  const [modelTypeFilter, setModelTypeFilter] = useState("");
+  const [typeUpdatingId, setTypeUpdatingId] = useState<string | null>(null);
+  const [defaultModels, setDefaultModels] = useState<
+    Record<string, { provider_id: string; model_id: string }>
+  >({});
   const [form] = Form.useForm();
+  const watchedModelId = Form.useWatch("id", form);
+  const watchedModelType = Form.useWatch("model_type", form);
   // OpenRouter filter state
   const isOpenRouter = provider.id === "openrouter";
   const [showFilters, setShowFilters] = useState(false);
@@ -296,8 +371,64 @@ export function RemoteModelManageModal({
 
   const [loadingDiscoveredModels, setLoadingDiscoveredModels] = useState(false);
 
-  const doAddModel = async (id: string, name: string) => {
-    await api.addModel(provider.id, { id, name });
+  const modelTypeOptions = useMemo(
+    () => [
+      { value: "chat", label: t("models.chatModels") },
+      { value: "embedding", label: t("models.embeddingModels") },
+      { value: "rerank", label: t("models.rerankModels") },
+      { value: "audio", label: t("models.audioModels") },
+      { value: "vision", label: t("models.visionModels") },
+    ],
+    [t],
+  );
+
+  const typeLabel = (type: string) =>
+    modelTypeOptions.find((o) => o.value === type)?.label ?? type;
+
+  // Load default models so rows can show a "default" marker.
+  useEffect(() => {
+    if (!open) return;
+    api
+      .get("/models/default-models")
+      .then((data: unknown) => {
+        if (data && typeof data === "object") {
+          setDefaultModels(
+            data as Record<string, { provider_id: string; model_id: string }>,
+          );
+        }
+      })
+      .catch(() => setDefaultModels({}));
+  }, [open]);
+
+  const isDefaultModel = (m: ModelInfo) => {
+    const type = m.model_type || "chat";
+    const slot = defaultModels[type];
+    return (
+      !!slot && slot.provider_id === provider.id && slot.model_id === m.id
+    );
+  };
+
+  const handleModelTypeChange = async (m: ModelInfo, val: string) => {
+    setTypeUpdatingId(m.id);
+    try {
+      await api.updateModel(provider.id, m.id, { model_type: val });
+      message.success(t("models.typeUpdated", { type: typeLabel(val) }));
+      onSaved();
+    } catch (error) {
+      const errMsg =
+        error instanceof Error ? error.message : t("models.updateModelFailed");
+      message.error(errMsg);
+    } finally {
+      setTypeUpdatingId(null);
+    }
+  };
+
+  const doAddModel = async (id: string, name: string, modelType?: string) => {
+    await api.addModel(provider.id, {
+      id,
+      name,
+      ...(modelType ? { model_type: modelType } : {}),
+    });
     message.success(t("models.modelAdded", { name }));
     form.resetFields();
     setAdding(false);
@@ -319,6 +450,10 @@ export function RemoteModelManageModal({
       }
 
       // Step 1: Test the model connection first
+      const modelType =
+        values.model_type && values.model_type !== "auto"
+          ? values.model_type
+          : undefined;
       setSaving(true);
       const testResult = await api.testModelConnection(provider.id, {
         model_id: id,
@@ -340,7 +475,7 @@ export function RemoteModelManageModal({
           onOk: async () => {
             setSaving(true);
             try {
-              await doAddModel(id, name);
+              await doAddModel(id, name, modelType);
             } catch (error) {
               const errMsg =
                 error instanceof Error
@@ -356,7 +491,7 @@ export function RemoteModelManageModal({
       }
 
       // Step 2: If test passed, add the model
-      await doAddModel(id, name);
+      await doAddModel(id, name, modelType);
     } catch (error) {
       if (error && typeof error === "object" && "errorFields" in error) return;
       const errMsg =
@@ -594,13 +729,28 @@ export function RemoteModelManageModal({
   }, [adding, form, isOpenRouter]);
 
   const filteredModels = useMemo(() => {
-    const all_models = [...(provider.models ?? [])];
+    let list = [...(provider.models ?? [])];
+    if (modelTypeFilter) {
+      list = list.filter((m) => (m.model_type || "chat") === modelTypeFilter);
+    }
     const q = modelSearchQuery.trim().toLowerCase();
-    if (!q) return all_models;
-    return all_models.filter(
-      (m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
-    );
-  }, [provider.models, modelSearchQuery]);
+    if (q) {
+      list = list.filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
+      );
+    }
+    return list.sort((a, b) => {
+      const ta = typeOrder.indexOf(
+        (a.model_type || "chat") as (typeof typeOrder)[number],
+      );
+      const tb = typeOrder.indexOf(
+        (b.model_type || "chat") as (typeof typeOrder)[number],
+      );
+      if (ta !== tb) return ta - tb;
+      return a.name.localeCompare(b.name);
+    });
+  }, [provider.models, modelSearchQuery, modelTypeFilter]);
 
   const colors = tagColors(isDark);
 
@@ -613,6 +763,15 @@ export function RemoteModelManageModal({
       width={800}
       destroyOnHidden
     >
+      {/* Type filter tabs (always shown, counts per model) */}
+      <div style={{ marginBottom: 8 }}>
+        <ModelTypeTabs
+          activeType={modelTypeFilter || undefined}
+          onChange={(v) => setModelTypeFilter(v ?? "")}
+          providers={[provider]}
+        />
+      </div>
+
       <Input
         placeholder={t("models.searchModelPlaceholder", "搜索模型...")}
         value={modelSearchQuery}
@@ -632,11 +791,35 @@ export function RemoteModelManageModal({
             return (
               <div key={m.id}>
                 <div className={styles.modelListItem}>
-                  <div className={styles.modelListItemInfo}>
+                  {/* Row 1: name + ID */}
+                  <div className={styles.modelRowMain}>
                     <span className={styles.modelListItemName}>{m.name}</span>
+                    {isDefaultModel(m) && (
+                      <Tag
+                        style={{
+                          fontSize: 11,
+                          marginRight: 4,
+                          ...colors.default,
+                        }}
+                      >
+                        <StarFilled
+                          style={{ fontSize: 10, marginRight: 3 }}
+                        />
+                        {t("models.defaultModelTag")}
+                      </Tag>
+                    )}
                     <span className={styles.modelListItemId}>{m.id}</span>
                   </div>
-                  <div className={styles.modelListItemActions}>
+                  {/* Row 2: type (save on change) + capability/free/default tags */}
+                  <div className={styles.modelRowMeta}>
+                    <Select
+                      size="small"
+                      style={{ width: 132 }}
+                      value={m.model_type || "chat"}
+                      loading={typeUpdatingId === m.id}
+                      onChange={(val: string) => handleModelTypeChange(m, val)}
+                      options={modelTypeOptions}
+                    />
                     <CapabilityTags model={m} isDark={isDark} />
                     {m.is_free && (
                       <Tag
@@ -816,6 +999,40 @@ export function RemoteModelManageModal({
               >
                 <Input placeholder={t("models.modelNamePlaceholder")} />
               </Form.Item>
+              <Form.Item
+                name="model_type"
+                label={t("models.modelTypeLabel")}
+                initialValue="auto"
+                style={{ marginBottom: 12 }}
+              >
+                <Select
+                  options={[
+                    { value: "auto", label: t("models.autoInferType") },
+                    ...modelTypeOptions,
+                  ]}
+                />
+              </Form.Item>
+              {watchedModelType === "auto" &&
+                watchedModelId &&
+                String(watchedModelId).trim() !== "" && (
+                  <div
+                    style={{
+                      marginTop: -6,
+                      marginBottom: 12,
+                      fontSize: 12,
+                      color: isDark ? "rgba(255,255,255,0.45)" : "#888",
+                    }}
+                  >
+                    {t("models.inferredTypeHint", {
+                      type: typeLabel(
+                        inferModelType(
+                          String(watchedModelId),
+                          String(form.getFieldValue("name") || ""),
+                        ),
+                      ),
+                    })}
+                  </div>
+                )}
               <div
                 style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
               >
