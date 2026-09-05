@@ -9,7 +9,7 @@ import tempfile
 import shutil
 import time
 from fastapi import APIRouter, Request, HTTPException
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 # Mapping file paths
 SYSTEMS_CONFIG_FILE = "data/external_systems_config.json"
@@ -78,6 +78,47 @@ async def get_external_systems_config():
     }
 
 
+def _check_base_url_overlap(
+    new_base_urls: List[str],
+    existing_systems: List[Dict[str, Any]],
+    current_provider_id: str,
+) -> Optional[str]:
+    """Check if new base_urls overlap with *other* systems' base_urls.
+
+    Overlap = two base URLs are identical, or one is a path-prefix of the
+    other (e.g. ``https://oa.corp.com`` vs ``https://oa.corp.com/finance``).
+    Such configurations are ambiguous — the intent is unclear even though
+    longest-prefix-match would pick one — so we block them at save time.
+
+    Returns an error message string if overlap is found, None if OK.
+    """
+    for other_sys in existing_systems:
+        if other_sys.get("provider_id") == current_provider_id:
+            continue  # skip self when updating
+        for other_base in (other_sys.get("base_urls") or []):
+            other_base = (other_base or "").rstrip("/")
+            if not other_base:
+                continue
+            other_name = other_sys.get("name", other_sys.get("provider_id", "?"))
+            for new_base in new_base_urls:
+                new_base = (new_base or "").rstrip("/")
+                if not new_base:
+                    continue
+                if new_base == other_base:
+                    return (
+                        f"base_url 冲突: '{new_base}' 与系统 "
+                        f"[{other_name}] 的 '{other_base}' 完全相同，"
+                        f"无法区分归属"
+                    )
+                if new_base.startswith(other_base + "/") or other_base.startswith(new_base + "/"):
+                    return (
+                        f"base_url 冲突: '{new_base}' 与系统 "
+                        f"[{other_name}] 的 '{other_base}' 前缀重叠，"
+                        f"请改用不同的域名或路径"
+                    )
+    return None
+
+
 @router_admin.post("/external-systems/config")
 async def save_external_systems_config(request: Request):
     """Add or update an external system configuration"""
@@ -94,6 +135,18 @@ async def save_external_systems_config(request: Request):
     shared_secret = data.get("shared_secret", "") if not shared_secret_use_global else ""
     callback_url = data.get("callback_url", "/api/auth/external/login")
     status = data.get("status", 1)
+    # Outbound identity assertion: which URLs belong to this external system
+    # (prefix list, e.g. ["https://oa.example.com"]). Only matched outbound
+    # requests carry the signed identity (see app/external_identity.py).
+    base_urls = data.get("base_urls", [])
+    if not isinstance(base_urls, list):
+        base_urls = [base_urls] if isinstance(base_urls, str) else []
+    base_urls = [str(u).rstrip("/") for u in base_urls if u]
+    # Identity assertion validity in seconds (default 60 min, adjustable)
+    try:
+        identity_token_ttl = int(data.get("identity_token_ttl") or 3600)
+    except (TypeError, ValueError):
+        identity_token_ttl = 3600
 
     if not provider_id or not name:
         raise HTTPException(status_code=400, detail="provider_id and name are required")
@@ -116,8 +169,21 @@ async def save_external_systems_config(request: Request):
         "shared_secret_use_global": shared_secret_use_global,
         "shared_secret": shared_secret,
         "callback_url": callback_url,
+        "base_urls": base_urls,
+        "identity_token_ttl": identity_token_ttl,
         "status": status
     }
+
+    if found_index >= 0:
+        # 更新：只校验**新增**的 base_urls（已有的重叠是历史遗留，不阻塞更新）
+        old_base_urls = systems[found_index].get("base_urls") or []
+        new_only = [u for u in base_urls if u not in old_base_urls]
+        overlap_err = _check_base_url_overlap(new_only, systems, provider_id)
+    else:
+        # 创建：校验全部 base_urls
+        overlap_err = _check_base_url_overlap(base_urls, systems, provider_id)
+    if overlap_err:
+        raise HTTPException(status_code=409, detail=overlap_err)
 
     if found_index >= 0:
         systems[found_index] = new_system_config

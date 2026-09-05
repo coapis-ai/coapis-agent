@@ -57,6 +57,58 @@ def find_binding_by_external(mappings_data: Dict[str, Any], provider: str, exter
     return None
 
 
+@router.get("/external/systems")
+async def list_external_systems():
+    """List configured external systems (public — used by external login pages).
+
+    Only active systems with at least one base_url are returned, exposing
+    just provider_id / name (no secrets).
+    """
+    from ..external_identity import _load_systems
+
+    systems = [
+        {
+            "provider_id": s.get("provider_id"),
+            "name": s.get("name"),
+        }
+        for s in _load_systems()
+        if s.get("base_urls")
+    ]
+    return {"success": True, "data": systems}
+
+
+@router.get("/external/signed-url")
+async def get_signed_url(request: Request, target_url: str = ""):
+    """Sign an outbound URL for browser navigation (C2A link jumps).
+
+    The browser cannot set custom headers, so the identity assertion is
+    carried as URL params: ?caid=<username>&cas=<timestamp>.<signature>.
+    The external system verifies with the same shared secret + TTL.
+
+    - Non-external URL (no configured base_url match) -> returned as-is.
+    - External URL + unbound user -> 403 BINDING_REQUIRED (clear message).
+    """
+    from ..external_identity import IdentityError, sign_url, set_identity_username
+
+    username = getattr(request.state, "username", None)
+    if not username or username == "anonymous":
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if not target_url:
+        raise HTTPException(status_code=400, detail="target_url is required")
+
+    # 普通 HTTP 请求不经过 agent/MCP 入口，身份 ContextVar 未被设置；
+    # 用已鉴权的 request.state.username 桥接一次（asyncio 任务级隔离，仅本次请求生效）。
+    set_identity_username(username)
+
+    try:
+        signed = sign_url(target_url, source="c2a_link")
+    except IdentityError as e:
+        raise HTTPException(status_code=403, detail=e.message)
+
+    return {"success": True, "data": {"url": signed, "username": username}}
+
+
 @router.post("/external/login")
 async def external_login(request: Request):
     """External system SSO callback / login verification endpoint"""

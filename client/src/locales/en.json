@@ -1,4 +1,7 @@
 {
+  "externalNav": {
+    "bindingRequired": "You have not linked an account for this external system. Access is blocked until you complete the binding."
+  },
   "common": {
     "save": "Save",
     "reset": "Reset",

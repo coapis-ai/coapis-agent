@@ -10,10 +10,16 @@
  */
 import { useMemo } from 'react';
 import { Typography } from 'antd';
-import C2ARenderer from '@coapis-c2a/renderer/C2ARenderer';
+import C2ARenderer, { setUrlNavigate } from '@coapis-c2a/renderer/C2ARenderer';
 import type { C2AMessage } from '@coapis-c2a/renderer/types';
+import { openExternalUrl } from '@/utils/externalNav';
 
 const { Text, Paragraph } = Typography;
+
+// 外部系统导航拦截：C2A 卡片里的行链接 / 按钮 / 快捷建议点击外部 URL 时，
+// 先向后端换取带身份断言的签名 URL 再打开（浏览器无法带自定义请求头）。
+// 非外部 URL 或后端不可用时，externalNav 会兜底直接打开。
+setUrlNavigate(openExternalUrl);
 
 // ---------------------------------------------------------------------------
 // Types（与 EnhancedToolCallCard 的 ToolData 保持一致）

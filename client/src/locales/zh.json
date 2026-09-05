@@ -1,4 +1,7 @@
 {
+  "externalNav": {
+    "bindingRequired": "您尚未绑定该外部系统账号，暂无法访问，请先完成账号绑定。"
+  },
   "common": {
     "save": "保存",
     "reset": "重置",

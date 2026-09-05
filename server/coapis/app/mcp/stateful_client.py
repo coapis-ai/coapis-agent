@@ -46,6 +46,12 @@ from mcp.client.streamable_http import streamable_http_client
 
 from agentscope.mcp import StatefulClientBase
 
+from ..external_identity import (
+    _httpx_identity_hook,
+    create_identity_httpx_client_factory,
+    identity_headers,
+)
+
 logger = logging.getLogger(__name__)
 
 # Connection retry policy (shared by stdio/http clients).
@@ -142,9 +148,6 @@ class StdIOStatefulClient(StatefulClientBase):
         self._cached_tools = None
 
         self.timeout = kwargs.get("timeout")
-        
-        # User context token for MCP gateway authentication
-        self._user_context_token: str | None = None
 
         # Connection retry bookkeeping (see _run_lifecycle)
         self._retry_count: int = 0
@@ -517,19 +520,8 @@ class HttpStatefulClient(StatefulClientBase):
         # Tool cache
         self._cached_tools = None
         
-        # User context token for MCP gateway authentication
-        self._user_context_token: str | None = None
-
         # Connection retry bookkeeping (see _run_lifecycle)
         self._retry_count: int = 0
-
-    def set_user_context_token(self, token: str | None) -> None:
-        """Set the user context token for this client.
-        
-        This token is used when making HTTP requests to external MCP servers
-        through the gateway for multi-tenant authentication and authorization.
-        """
-        self._user_context_token = token
 
     async def _run_lifecycle(self) -> None:
         """Run MCP client lifecycle in a dedicated task."""
@@ -554,6 +546,8 @@ class HttpStatefulClient(StatefulClientBase):
                         )
 
                         # Configure httpx client with MCP-recommended timeouts
+                        # + outbound identity assertion hook (per-request,
+                        # only touches URLs of configured external systems)
                         http_client = httpx.AsyncClient(
                             headers=self.headers or {},
                             timeout=httpx.Timeout(
@@ -562,6 +556,7 @@ class HttpStatefulClient(StatefulClientBase):
                                 write=timeout_seconds,
                                 pool=timeout_seconds,
                             ),
+                            event_hooks={"request": [_httpx_identity_hook]},
                             **self.client_kwargs,
                         )
 
@@ -581,6 +576,9 @@ class HttpStatefulClient(StatefulClientBase):
                                 headers=self.headers,
                                 timeout=self.timeout,
                                 sse_read_timeout=self.sse_read_timeout,
+                                # custom factory: httpx client carries the
+                                # outbound identity assertion hook
+                                httpx_client_factory=create_identity_httpx_client_factory(),
                                 **self.client_kwargs,
                             ),
                         )
@@ -810,6 +808,17 @@ class HttpStatefulClient(StatefulClientBase):
             RuntimeError: If not connected
         """
         self._validate_connection()
+
+        # Outbound identity pre-check: if this client talks to a
+        # configured external system, the current user must be bound.
+        # Fail fast with a clear message before hitting the network.
+        # (Actual header injection happens in the httpx request hook.)
+        try:
+            identity_headers(self.url, source="mcp")
+        except Exception as e:  # IdentityError etc.
+            raise RuntimeError(
+                f"External system identity verification failed: {e}"
+            ) from e
 
         return await self.session.call_tool(name, arguments or {})
 

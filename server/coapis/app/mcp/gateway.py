@@ -88,14 +88,12 @@ class MCPGateway:
         self, 
         gateway_name: str, 
         arguments: dict[str, Any],
-        user_context_token: str | None = None,
     ) -> dict[str, Any]:
         """Call an MCP tool by gateway name.
 
         Args:
             gateway_name: "mcp:{client_key}::{tool_name}"
             arguments: tool arguments dict
-            user_context_token: Internal context JWT token for external MCP server authentication
 
         Returns:
             {"result": str, "is_error": bool}
@@ -134,13 +132,6 @@ class MCPGateway:
         if not getattr(target, "enabled", True):
             return {"result": f"MCP client '{client_key}' is disabled", "is_error": True}
 
-        # Set user context token on the target client if available
-        if user_context_token and hasattr(target, 'set_user_context_token'):
-            try:
-                target.set_user_context_token(user_context_token)
-            except Exception:
-                pass  # Non-fatal if setting token fails
-                
         try:
             result = await target.call_tool(tool_name, arguments)
         except Exception as exc:

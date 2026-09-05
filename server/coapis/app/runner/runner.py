@@ -899,6 +899,13 @@ class AgentRunner(Runner):
             user_id = request.user_id or get_current_user_id() or ""
             channel = getattr(request, "channel", None) or get_current_channel() or DEFAULT_CHANNEL
 
+            # Outbound identity assertion (see app/external_identity.py):
+            # every external MCP call made inside this task tree carries
+            # this user's signed identity. Covers web / wecom / cron / console.
+            if user_id:
+                from ..external_identity import set_identity_username
+                set_identity_username(user_id)
+
             logger.info(
                 "Handle agent query:\n%s",
                 json.dumps(
