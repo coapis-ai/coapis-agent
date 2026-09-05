@@ -65,9 +65,33 @@ export function replaceUrlTemplate(urlTemplate: string, context: UrlReplacementC
   }
 }
 
+// ---------------------------------------------------------------------------
+// Host-provided navigation interceptor (optional).
+//
+// When the host app (e.g. the CoApis console) registers a navigator via
+// setUrlNavigate(), external (http/https) navigation is delegated to it —
+// typically so the backend can attach a signed identity assertion before the
+// browser opens the URL. If no navigator is registered, we fall back to plain
+// window.open / window.location (fully backward compatible).
+// ---------------------------------------------------------------------------
+export type UrlNavigator = (
+  targetUrl: string,
+  options?: { openInNewTab?: boolean; fallbackAction?: () => void },
+) => void | Promise<void>;
+
+let _urlNavigator: UrlNavigator | null = null;
+
+/**
+ * Register a host-provided navigator for external URLs.
+ * Pass null to clear (revert to plain browser navigation).
+ */
+export function setUrlNavigate(navigator: UrlNavigator | null): void {
+  _urlNavigator = navigator;
+}
+
 /**
  * Handle external redirect with fault tolerance and fallback mechanisms.
- * 
+ *
  * @param targetUrl - The target URL to redirect to
  * @param options - Redirect options including fallback behavior
  */
@@ -82,6 +106,14 @@ export function handleExternalRedirect(targetUrl: string, options?: {
     if (!targetUrl || (!isHttp && !isRelative)) {
       console.warn(`Invalid redirect URL: ${targetUrl}`);
       options?.fallbackAction?.();
+      return;
+    }
+
+    // Delegate external (http/https) navigation to the host-provided navigator
+    // (e.g. to obtain a signed, identity-carrying URL). Internal relative paths
+    // always navigate directly.
+    if (_urlNavigator && isHttp) {
+      void _urlNavigator(targetUrl, options);
       return;
     }
 
