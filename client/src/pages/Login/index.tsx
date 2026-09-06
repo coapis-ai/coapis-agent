@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Form, Input, Modal } from "antd";
+import { Button, Form, Input } from "antd";
 import { useAppMessage } from "../../hooks/useAppMessage";
 import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import { authApi, ExternalSystemInfo } from "../../api/modules/auth";
@@ -43,55 +43,24 @@ export default function LoginPage() {
   }, [navigate]);
 
   const [credSys, setCredSys] = useState<ExternalSystemInfo | null>(null);
-  const [credLoading, setCredLoading] = useState(false);
 
-  const handleExternalLogin = async (sys: ExternalSystemInfo) => {
+  const handleExternalLogin = (sys: ExternalSystemInfo) => {
     if (sys.login_type === "credential") {
-      setCredSys(sys);
+      // 复用主输入框：点中选中该系统（再点一次取消，回到 CoApis 登录），不弹窗
+      setCredSys(credSys?.provider_id === sys.provider_id ? null : sys);
       return;
     }
-    try {
-      const { login_url } = await authApi.getExternalLoginState(sys.provider_id);
-      // 整页跳转到外部系统登录页（用户在对方页面输账号密码，登录后 302 回 /login/callback）
-      window.location.href = login_url;
-    } catch (err) {
-      message.error(
-        err instanceof Error ? err.message : t("login.externalLoginFailed"),
-      );
-    }
-  };
-
-  const handleCredentialLogin = async (values: { username: string; password: string }) => {
-    if (!credSys) return;
-    setCredLoading(true);
-    try {
-      const raw = searchParams.get("redirect") || "/chat";
-      const redirect = raw.startsWith("/") && !raw.startsWith("//") ? raw : "/chat";
-      const res = await authApi.credentialLogin(credSys.provider_id, values.username, values.password, redirect);
-      if (res.token) {
-        AuthStorage.login(res.token, res.username, {
-          remember: false,
-          display_name: res.display_name || res.username,
-          default_agent_id: res.default_agent_id,
-        });
-        window.currentUserId = res.username;
-        window.currentChannel = "";
-        if (res.default_agent_id) {
-          setSelectedAgent(res.default_agent_id);
-        }
-        if (res.first_login) {
-          localStorage.setItem("coapis_first_login", "true");
-        }
-        message.success(res.auto_created
-          ? (t("login.callbackAutoCreated") || `已自动创建账号 ${res.display_name || res.username}`)
-          : (t("login.callbackSuccess") || "登录成功"));
-        navigate(redirect, { replace: true });
-      }
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : "Login failed");
-    } finally {
-      setCredLoading(false);
-    }
+    // SSO 跳转：整页去外部系统登录页（用户在对方页面输账号密码，登录后 302 回 /login/callback）
+    authApi
+      .getExternalLoginState(sys.provider_id)
+      .then(({ login_url }) => {
+        window.location.href = login_url;
+      })
+      .catch((err: unknown) => {
+        message.error(
+          err instanceof Error ? err.message : t("login.externalLoginFailed"),
+        );
+      });
   };
 
   const { setSelectedAgent } = useAgentStore();
@@ -104,6 +73,36 @@ export default function LoginPage() {
 
       // 记住我: expires_in=0 表示永久 token（100年），不勾选则用默认7天
       const expires_in = values.remember_me ? 0 : undefined;
+
+      // 选中了外部系统（凭证直登）：复用本输入框，走 credential-login
+      if (credSys) {
+        const res = await authApi.credentialLogin(
+          credSys.provider_id,
+          values.username,
+          values.password,
+          redirect,
+        );
+        if (res.token) {
+          AuthStorage.login(res.token, res.username, {
+            remember: false,
+            display_name: res.display_name || res.username,
+            default_agent_id: res.default_agent_id,
+          });
+          window.currentUserId = res.username;
+          window.currentChannel = "";
+          if (res.default_agent_id) {
+            setSelectedAgent(res.default_agent_id);
+          }
+          if (res.first_login) {
+            localStorage.setItem("coapis_first_login", "true");
+          }
+          message.success(res.auto_created
+            ? (t("login.callbackAutoCreated") || `已自动创建账号 ${res.display_name || res.username}`)
+            : (t("login.callbackSuccess") || "登录成功"));
+          navigate(redirect, { replace: true });
+        }
+        return;
+      }
 
       if (isRegister) {
         const res = await authApi.register(values.username, values.password);
@@ -230,7 +229,7 @@ export default function LoginPage() {
                   }}
                 />
               }
-              placeholder={t("login.usernamePlaceholder")}
+              placeholder={credSys ? "外部系统用户名" : t("login.usernamePlaceholder")}
               autoFocus
             />
           </Form.Item>
@@ -247,16 +246,18 @@ export default function LoginPage() {
                   }}
                 />
               }
-              placeholder={t("login.passwordPlaceholder")}
+              placeholder={credSys ? "外部系统密码" : t("login.passwordPlaceholder")}
             />
           </Form.Item>
 
-          <Form.Item name="remember_me" valuePropName="checked" style={{ marginBottom: 8 }}>
-            <label style={{ fontSize: 13, cursor: "pointer" }}>
-              <input type="checkbox" style={{ marginRight: 6 }} />
-              {t("login.rememberMe") || "记住我"}
-            </label>
-          </Form.Item>
+          {!credSys && (
+            <Form.Item name="remember_me" valuePropName="checked" style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" style={{ marginRight: 6 }} />
+                {t("login.rememberMe") || "记住我"}
+              </label>
+            </Form.Item>
+          )}
 
           <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
             <Button
@@ -266,7 +267,11 @@ export default function LoginPage() {
               block
               style={{ height: 44, borderRadius: 8, fontWeight: 500 }}
             >
-              {isRegister ? t("login.register") : t("login.submit")}
+              {credSys
+                ? `登录（${credSys.name}）`
+                : isRegister
+                  ? t("login.register")
+                  : t("login.submit")}
             </Button>
           </Form.Item>
         </Form>
@@ -320,58 +325,37 @@ export default function LoginPage() {
                   style={{
                     padding: "6px 18px",
                     borderRadius: 8,
-                    background: isDark ? "rgba(255,255,255,0.08)" : "#fafafa",
+                    background:
+                      credSys?.provider_id === sys.provider_id
+                        ? "#FF7F16"
+                        : isDark
+                          ? "rgba(255,255,255,0.08)"
+                          : "#fafafa",
+                    color:
+                      credSys?.provider_id === sys.provider_id
+                        ? "#fff"
+                        : undefined,
                   }}
                 >
                   {sys.icon ? `${sys.icon} ` : ""}
                   {sys.name}
                 </Button>
               ))}
+              {credSys && (
+                <p
+                  style={{
+                    margin: "10px 0 0",
+                    fontSize: 12,
+                    color: isDark ? "rgba(255,255,255,0.45)" : "#999",
+                    textAlign: "center",
+                  }}
+                >
+                  在上方输入{credSys.name}的账号密码即可登录，再次点击可切换回 CoApis 登录
+                </p>
+              )}
             </div>
           </div>
         )}
-
-        {/* 凭证直登弹窗 */}
-        <Modal
-          title={credSys ? `${credSys.icon ? credSys.icon + " " : ""}${credSys.name}` : ""}
-          open={!!credSys}
-          onCancel={() => setCredSys(null)}
-          footer={null}
-          destroyOnClose
-        >
-          <Form
-            layout="vertical"
-            onFinish={handleCredentialLogin}
-            autoComplete="off"
-            size="large"
-          >
-            <Form.Item
-              name="username"
-              label="用户名"
-              rules={[{ required: true, message: "请输入用户名" }]}
-            >
-              <Input prefix={<UserOutlined />} placeholder="外部系统用户名" autoFocus />
-            </Form.Item>
-            <Form.Item
-              name="password"
-              label="密码"
-              rules={[{ required: true, message: "请输入密码" }]}
-            >
-              <Input.Password prefix={<LockOutlined />} placeholder="外部系统密码" />
-            </Form.Item>
-            <Form.Item style={{ marginBottom: 0 }}>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={credLoading}
-                block
-                style={{ height: 44, borderRadius: 8 }}
-              >
-                登 录
-              </Button>
-            </Form.Item>
-          </Form>
-        </Modal>
       </div>
     </div>
   );
