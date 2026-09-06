@@ -2443,7 +2443,18 @@
     "logoutSuccess": "Logged out successfully",
     "sessionExpired": "Session expired, please login again",
     "unauthorized": "Unauthorized, please login",
-    "rememberMe": "Remember me"
+    "rememberMe": "Remember me",
+    "otherLoginMethods": "Other login methods",
+    "externalLoginFailed": "Failed to start external login",
+    "callbackLoading": "Completing login…",
+    "callbackLoadingHint": "Verifying external system identity, please wait",
+    "callbackMissingParams": "Missing callback parameters, please go back and log in again",
+    "callbackFailed": "External login failed",
+    "callbackFailedTitle": "Login not completed",
+    "callbackBackToLogin": "Back to login",
+    "callbackSuccess": "Login successful",
+    "callbackNoToken": "Abnormal login response, please try again",
+    "callbackAutoCreated": "Account auto-created for you: {{name}}"
   },
   "account": {
     "title": "Account",

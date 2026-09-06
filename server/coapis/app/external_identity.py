@@ -74,8 +74,11 @@ def get_identity_username() -> Optional[str]:
 # 配置与数据
 # ──────────────────────────────────────────────────────────────────────
 
-SYSTEMS_CONFIG_FILE = "data/external_systems_config.json"
-MAPPINGS_FILE = "data/external_identity_mappings.json"
+from ..constant import SYSTEM_DIR
+
+# 与 users.json/auth.json 同一运行时数据目录（避免相对路径受 CWD 影响）
+SYSTEMS_CONFIG_FILE = str(SYSTEM_DIR / "external_systems_config.json")
+MAPPINGS_FILE = str(SYSTEM_DIR / "external_identity_mappings.json")
 
 # 与 external_auth.py 入站验签同一个 secret：外部系统验签零新依赖
 EXTERNAL_SSO_SECRET = (
@@ -195,6 +198,20 @@ def find_external_system(url: str) -> Optional[Dict[str, Any]]:
                     best_len = len(base)
                     best_system = system
     return best_system
+
+
+def get_system_by_id(provider_id: str) -> Optional[Dict[str, Any]]:
+    """Look up a system by provider_id (any status).
+
+    入站登录校验用：需要区分"未配置"(None) 和 "已禁用"(status=0)。
+    """
+    if not provider_id:
+        return None
+    data = _systems_cache.get(SYSTEMS_CONFIG_FILE, {"systems": []})
+    for s in data.get("systems", []):
+        if s.get("provider_id") == provider_id:
+            return s
+    return None
 
 
 def find_binding(username: str, provider_id: str) -> Optional[Dict[str, Any]]:

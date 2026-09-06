@@ -128,7 +128,8 @@ FROM runtime-base AS min
 
 # 浏览器自动化 Python API（Chromium 在独立容器运行）
 RUN pip install --no-cache-dir playwright browser-use \
-    && echo "✅ min image: playwright + browser-use installed"
+    && pip install --no-cache-dir "mcp==1.29.0" \
+    && echo "✅ min image: playwright + browser-use + mcp pinned"
 
 ENV COAPIS_IMAGE_VARIANT=min
 
@@ -154,6 +155,10 @@ RUN pip install --no-cache-dir \
     "twilio>=9.10.2" \
     "matrix-nio>=0.24.0" \
     && echo "✅ channel SDKs installed"
+
+# browser-use 会拉 mcp 2.x（与 agentscope 不兼容），锁回 1.29.0
+RUN pip install --no-cache-dir "mcp==1.29.0" \
+    && echo "✅ mcp pinned to 1.29.0"
 
 ENV COAPIS_IMAGE_VARIANT=full
 

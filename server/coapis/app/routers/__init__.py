@@ -107,6 +107,8 @@ from .menus import router as menus_router
 from .webdav import router as webdav_router
 # External systems admin management (identity bindings & external system configs)
 from .external_systems_admin import router_admin as external_systems_admin_router
+# External SSO inbound login (Model A: SSO redirect + auto user creation)
+from .external_auth import router as external_auth_router
 
 router = APIRouter()
 
@@ -205,6 +207,8 @@ router.include_router(webdav_router)  # WebDAV API for workspace file access
 
 # External systems admin management (identity bindings & external system configs)
 router.include_router(external_systems_admin_router)
+# External SSO inbound login (Model A)
+router.include_router(external_auth_router)
 
 # ═══════════════════════════════════════════════════════════
 # Enterprise stubs (always loaded for upgrade prompts)

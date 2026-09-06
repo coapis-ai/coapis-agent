@@ -12,8 +12,11 @@ from fastapi import APIRouter, Request, HTTPException
 from typing import Dict, Any, List, Optional
 
 # Mapping file paths
-SYSTEMS_CONFIG_FILE = "data/external_systems_config.json"
-MAPPINGS_FILE = "data/external_identity_mappings.json"
+from ...constant import SYSTEM_DIR
+
+# 与 users.json/auth.json 同一运行时数据目录（避免相对路径受 CWD 影响）
+SYSTEMS_CONFIG_FILE = str(SYSTEM_DIR / "external_systems_config.json")
+MAPPINGS_FILE = str(SYSTEM_DIR / "external_identity_mappings.json")
 
 router_admin = APIRouter(prefix="/admin", tags=["external_systems_admin"])
 
@@ -129,12 +132,32 @@ async def save_external_systems_config(request: Request):
 
     provider_id = data.get("provider_id")
     name = data.get("name")
-    auth_type = data.get("auth_type", "hmac_callback")
     client_id = data.get("client_id", "")
     shared_secret_use_global = data.get("shared_secret_use_global", True)
     shared_secret = data.get("shared_secret", "") if not shared_secret_use_global else ""
-    callback_url = data.get("callback_url", "/api/auth/external/login")
     status = data.get("status", 1)
+    # 登录方式（新 schema）：sso_redirect(A) | credential(B) | none
+    login_type = data.get("login_type") or ""
+    # 模型A：SSO 跳转配置块
+    sso_cfg = data.get("sso")
+    if not isinstance(sso_cfg, dict):
+        sso_cfg = {}
+    # 模型B：凭证直登配置块（二期实现，schema 先就位）
+    credential_cfg = data.get("credential")
+    if not isinstance(credential_cfg, dict):
+        credential_cfg = {}
+    # 用户映射：自动建用户配置块
+    user_mapping_cfg = data.get("user_mapping")
+    if not isinstance(user_mapping_cfg, dict):
+        user_mapping_cfg = {}
+    # 登录页展示项
+    icon = data.get("icon", "")
+    description = data.get("description", "")
+    show_on_login = data.get("show_on_login", True)
+    try:
+        display_order = int(data.get("display_order") or 100)
+    except (TypeError, ValueError):
+        display_order = 100
     # Outbound identity assertion: which URLs belong to this external system
     # (prefix list, e.g. ["https://oa.example.com"]). Only matched outbound
     # requests carry the signed identity (see app/external_identity.py).
@@ -164,14 +187,22 @@ async def save_external_systems_config(request: Request):
     new_system_config = {
         "provider_id": provider_id,
         "name": name,
-        "auth_type": auth_type,
+        # 登录方式与展示（新 schema）
+        "login_type": login_type,
+        "sso": sso_cfg,
+        "credential": credential_cfg,
+        "user_mapping": user_mapping_cfg,
+        "icon": icon,
+        "description": description,
+        "show_on_login": show_on_login,
+        "display_order": display_order,
+        # 出站身份断言（现有字段，原样保留）
         "client_id": client_id,
         "shared_secret_use_global": shared_secret_use_global,
         "shared_secret": shared_secret,
-        "callback_url": callback_url,
         "base_urls": base_urls,
         "identity_token_ttl": identity_token_ttl,
-        "status": status
+        "status": status,
     }
 
     if found_index >= 0:
@@ -249,6 +280,7 @@ async def bind_external_identity_admin(request: Request):
     user_id = data.get("user_id")
     provider = data.get("provider")
     external_id = data.get("external_id")
+    external_name = str(data.get("external_name") or "").strip() or None
 
     if not user_id or not provider or not external_id:
         raise HTTPException(status_code=400, detail="Missing required parameters: user_id, provider, external_id")
@@ -272,6 +304,8 @@ async def bind_external_identity_admin(request: Request):
         "user_id": user_id,
         "provider": provider,
         "external_id": external_id,
+        "external_name": external_name,
+        "source": "manual",
         "status": 1,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     }
@@ -293,6 +327,7 @@ async def unbind_external_identity_admin(request: Request):
     user_id = data.get("user_id")
     provider = data.get("provider")
     external_id = data.get("external_id")
+    external_name = str(data.get("external_name") or "").strip() or None
 
     if not user_id or not provider or not external_id:
         raise HTTPException(status_code=400, detail="Missing required parameters: user_id, provider, external_id")
@@ -371,6 +406,8 @@ async def import_batch_identity_mappings(request: Request):
                 "user_id": user_id,
                 "provider": provider,
                 "external_id": external_id,
+                "external_name": str(item.get("external_name") or "").strip() or None,
+                "source": "manual",
                 "status": 1,
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             }

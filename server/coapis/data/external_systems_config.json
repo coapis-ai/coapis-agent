@@ -1,0 +1,85 @@
+{
+  "systems": [
+    {
+      "provider_id": "sczrsz_oa",
+      "name": "自然三资集团OA",
+      "icon": "🏢",
+      "description": "自然三资集团 OA 系统（凭证直登）",
+      "status": 1,
+      "show_on_login": true,
+      "display_order": 1,
+      "login_type": "credential",
+      "sso": {
+        "login_url": "https://oa.sczrsz.com/sso/login?client_id={client_id}&state={state}&redirect={redirect}",
+        "login_method": "get",
+        "post_form_url": "",
+        "post_fields": {},
+        "callback": {
+          "params": {
+            "external_id": "external_id",
+            "external_name": "name",
+            "timestamp": "timestamp",
+            "signature": "signature",
+            "state": "state",
+            "redirect": "redirect"
+          },
+          "sign_algorithm": "hmac_sha256",
+          "sign_string": "provider={provider}&external_id={external_id}&timestamp={timestamp}",
+          "timestamp_ttl": 300
+        }
+      },
+      "credential": {
+        "api": {
+          "method": "POST",
+          "url": "https://oa.sczrsz.com/admin-api/system/auth/login",
+          "content_type": "application/json",
+          "headers": {"tenant-id": "1"},
+          "body": {
+            "username": "{username}",
+            "password": "{password}"
+          }
+        },
+        "response": {
+          "success_field": "code",
+          "success_value": 0,
+          "error_field": "msg",
+          "openid_field": "data.userId",
+          "name_field": "data.nickName"
+        },
+        "external_token": {
+          "mode": "none",
+          "access_field": "data.token",
+          "expires_in_field": "data.expires_in",
+          "refresh_token_field": "data.refresh_token",
+          "refresh": {
+            "url": "",
+            "body": {}
+          }
+        },
+        "timeout": 10,
+        "profile": {
+          "url": "https://oa.sczrsz.com/admin-api/system/user/profile/get",
+          "method": "GET",
+          "headers": {"tenant-id": "1"},
+          "token_field": "data.accessToken",
+          "name_field": "data.nickname"
+        }
+      },
+      "user_mapping": {
+        "auto_create": true,
+        "username_prefix": "oa",
+        "seq_start": 1,
+        "seq_padding": 4,
+        "display_name_source": "external_name",
+        "default_role": "user"
+      },
+      "base_urls": [
+        "https://oa.sczrsz.com"
+      ],
+      "shared_secret_use_global": true,
+      "shared_secret": "",
+      "identity_token_ttl": 3600,
+      "client_id": ""
+    }
+  ]
+}

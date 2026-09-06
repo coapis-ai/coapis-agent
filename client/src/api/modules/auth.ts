@@ -13,6 +13,25 @@ export interface AuthStatusResponse {
   has_users: boolean;
 }
 
+export interface ExternalSystemInfo {
+  provider_id: string;
+  name: string;
+  icon?: string;
+  login_type: string;
+  display_order?: number;
+}
+
+export interface ExternalLoginStateResponse {
+  state: string;
+  login_url: string;
+}
+
+export interface ExternalLoginResponse extends LoginResponse {
+  display_name?: string;
+  auto_created?: boolean;
+  redirect?: string;
+}
+
 export const authApi = {
   login: async (username: string, password: string, expires_in?: number): Promise<LoginResponse> => {
     const body: any = { username, password };
@@ -48,6 +67,64 @@ export const authApi = {
   getStatus: async (): Promise<AuthStatusResponse> => {
     const res = await fetch(getApiUrl("/auth/status"));
     if (!res.ok) throw new Error("Failed to check auth status");
+    return res.json();
+  },
+
+  getExternalSystems: async (): Promise<ExternalSystemInfo[]> => {
+    const res = await fetch(getApiUrl("/auth/external/systems"));
+    if (!res.ok) throw new Error("Failed to get external systems");
+    const data = await res.json();
+    return data.data || [];
+  },
+
+  getExternalLoginState: async (provider: string): Promise<ExternalLoginStateResponse> => {
+    const res = await fetch(
+      getApiUrl(`/auth/external/login-state?provider=${encodeURIComponent(provider)}`),
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Failed to get login state");
+    }
+    const data = await res.json();
+    return data.data;
+  },
+
+  credentialLogin: async (
+    provider: string,
+    username: string,
+    password: string,
+    redirect?: string,
+  ): Promise<ExternalLoginResponse> => {
+    const res = await fetch(getApiUrl("/auth/external/credential-login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, username, password, redirect }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Credential login failed");
+    }
+    return res.json();
+  },
+
+  externalLogin: async (payload: {
+    provider?: string; // 缺省时后端从 state 还原
+    external_id: string | number;
+    external_name?: string;
+    timestamp: number;
+    signature: string;
+    state: string;
+    redirect?: string;
+  }): Promise<ExternalLoginResponse> => {
+    const res = await fetch(getApiUrl("/auth/external/login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "External login failed");
+    }
     return res.json();
   },
 

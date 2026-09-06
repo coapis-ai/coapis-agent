@@ -1621,7 +1621,18 @@
     "logout": "ログアウト",
     "logoutSuccess": "正常にログアウトしました",
     "sessionExpired": "セッションが期限切れです。再度ログインしてください",
-    "unauthorized": "未認証です。ログインしてください"
+    "unauthorized": "未認証です。ログインしてください",
+    "otherLoginMethods": "その他のログイン方法",
+    "externalLoginFailed": "外部システムログインを開始できませんでした",
+    "callbackLoading": "ログインを完了しています…",
+    "callbackLoadingHint": "外部システムのIDを検証中です。お待ちください",
+    "callbackMissingParams": "コールバックパラメータが不足しています。ログインページに戻ってやり直してください",
+    "callbackFailed": "外部システムログインに失敗しました",
+    "callbackFailedTitle": "ログインが完了しませんでした",
+    "callbackBackToLogin": "ログインページに戻る",
+    "callbackSuccess": "ログインに成功しました",
+    "callbackNoToken": "ログイン応答が異常です。再試行してください",
+    "callbackAutoCreated": "アカウントを自動作成しました：{{name}}"
   },
   "account": {
     "title": "アカウント管理",

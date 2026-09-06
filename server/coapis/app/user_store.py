@@ -289,6 +289,17 @@ def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
     }
 
 
+def touch_last_login(username: str) -> None:
+    """Update last_login for non-password logins (e.g. external SSO).
+
+    No-op if the user does not exist.
+    """
+    data = _load_users()
+    if username in data.get("users", {}):
+        data["users"][username]["last_login"] = time.time()
+        _save_users(data)
+
+
 def has_registered_users() -> bool:
     """Check if any users are registered."""
     data = _load_users()

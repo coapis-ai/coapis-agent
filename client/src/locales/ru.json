@@ -1636,7 +1636,18 @@
     "logout": "Выйти",
     "logoutSuccess": "Вы успешно вышли",
     "sessionExpired": "Сессия истекла, пожалуйста, войдите снова",
-    "unauthorized": "Не авторизован, пожалуйста, войдите"
+    "unauthorized": "Не авторизован, пожалуйста, войдите",
+    "otherLoginMethods": "Другие способы входа",
+    "externalLoginFailed": "Не удалось начать вход во внешнюю систему",
+    "callbackLoading": "Завершение входа…",
+    "callbackLoadingHint": "Проверка ID внешней системы, подождите",
+    "callbackMissingParams": "Не хватает параметров callback, вернитесь и войдите снова",
+    "callbackFailed": "Вход во внешнюю систему не удался",
+    "callbackFailedTitle": "Вход не завершён",
+    "callbackBackToLogin": "Вернуться ко входу",
+    "callbackSuccess": "Вход выполнен",
+    "callbackNoToken": "Некорректный ответ, попробуйте снова",
+    "callbackAutoCreated": "Аккаунт создан автоматически: {{name}}"
   },
   "account": {
     "title": "Управление аккаунтом",

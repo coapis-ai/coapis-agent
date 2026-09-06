@@ -29,6 +29,7 @@ import { ChatWindowProvider } from "./contexts/ChatWindowContext";
 import { Suspense } from "react";
 import { lazyImportWithRetry } from "./utils/lazyWithRetry";
 const LoginPage = lazyImportWithRetry("./pages/Login/index");
+const LoginCallbackPage = lazyImportWithRetry("./pages/LoginCallback/index");
 const EmbeddedChatPage = lazyImportWithRetry("./pages/Chat/EmbeddedChatPage");
 import { authApi } from "./api/modules/auth";
 import { languageApi } from "./api/modules/language";
@@ -225,6 +226,15 @@ function AppInner() {
                 element={
                   <Suspense fallback={null}>
                     <LoginPage />
+                  </Suspense>
+                }
+              />
+              {/* 外部系统 SSO 回调落地页（公开，未登录可访问） */}
+              <Route
+                path="/login/callback"
+                element={
+                  <Suspense fallback={null}>
+                    <LoginCallbackPage />
                   </Suspense>
                 }
               />

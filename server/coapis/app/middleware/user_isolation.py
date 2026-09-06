@@ -74,6 +74,11 @@ PUBLIC_PATHS = [
     # SSO 单点登录（外部系统接入）
     "/api/external/login",
     "/external/login",
+    # 外部系统 SSO（登录前匿名访问：登录页按钮列表 / state 签发 / 回调验签）
+    "/api/auth/external/systems",
+    "/api/auth/external/login",
+    "/api/auth/external/login-state",
+    "/api/auth/external/credential-login",
     # SSE streaming endpoints
     "/api/console/chat",
     "/console/chat",

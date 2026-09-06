@@ -2349,7 +2349,18 @@
     "logout": "退出登录",
     "logoutSuccess": "已成功退出",
     "sessionExpired": "会话已过期，请重新登录",
-    "unauthorized": "未授权，请登录"
+    "unauthorized": "未授权，请登录",
+    "otherLoginMethods": "其他登录方式",
+    "externalLoginFailed": "发起外部系统登录失败",
+    "callbackLoading": "正在完成登录…",
+    "callbackLoadingHint": "正在校验外部系统身份，请稍候",
+    "callbackMissingParams": "回调参数缺失，请返回登录页重新登录",
+    "callbackFailed": "外部系统登录失败",
+    "callbackFailedTitle": "登录未完成",
+    "callbackBackToLogin": "返回登录页",
+    "callbackSuccess": "登录成功",
+    "callbackNoToken": "登录响应异常，请返回重试",
+    "callbackAutoCreated": "已为你自动创建账号：{{name}}"
   },
   "account": {
     "title": "账户管理",

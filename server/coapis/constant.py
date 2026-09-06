@@ -494,6 +494,11 @@ PUBLIC_PATHS: frozenset = frozenset({
     # SSO 单点登录（外部系统接入）
     "/api/external/login",
     "/external/login",
+    # 外部系统 SSO（登录前匿名访问：按钮列表 / state 签发 / 回调验签 / 凭证直登）
+    "/api/auth/external/systems",
+    "/api/auth/external/login",
+    "/api/auth/external/login-state",
+    "/api/auth/external/credential-login",
     # Health and docs
     "/api/health",
     "/health",
