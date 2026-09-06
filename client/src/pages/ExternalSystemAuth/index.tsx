@@ -56,6 +56,8 @@ interface CredentialConfig {
 
 interface UserMappingConfig {
   auto_create?: boolean;
+  match_existing?: boolean;
+  match_by?: string;
   username_prefix?: string;
   seq_start?: number;
   seq_padding?: number;
@@ -87,7 +89,7 @@ interface IdentityBinding {
   provider: string;
   external_id: string;
   external_name?: string | null;
-  source?: string; // auto | manual
+  source?: string; // auto | auto_matched | manual
   status: number;
   created_at?: string;
   last_login_at?: string;
@@ -163,6 +165,8 @@ function ExternalSystemAuthPage() {
         },
         user_mapping: {
           auto_create: true,
+          match_existing: true,
+          match_by: 'username',
           seq_start: 1,
           seq_padding: 4,
           display_name_source: 'external_name',
@@ -187,6 +191,8 @@ function ExternalSystemAuthPage() {
         },
         user_mapping: {
           auto_create: true,
+          match_existing: true,
+          match_by: 'username',
           seq_start: 1,
           seq_padding: 4,
           display_name_source: 'external_name',
@@ -424,11 +430,15 @@ function ExternalSystemAuthPage() {
       title: '来源',
       dataIndex: 'source',
       key: 'source',
-      render: (v?: string) => (
-        <Tag color={v === 'auto' ? 'blue' : 'default'}>
-          {v === 'auto' ? '自动创建' : v === 'manual' ? '手动绑定' : '-'}
-        </Tag>
-      ),
+      render: (v?: string) => {
+        const map: Record<string, { label: string; color: string }> = {
+          auto: { label: '自动创建', color: 'blue' },
+          auto_matched: { label: '自动匹配', color: 'green' },
+          manual: { label: '手动绑定', color: 'default' },
+        };
+        const item = v ? map[v] : undefined;
+        return item ? <Tag color={item.color}>{item.label}</Tag> : <Tag>-</Tag>;
+      },
     },
     {
       title: '最近登录',
@@ -666,6 +676,20 @@ function ExternalSystemAuthPage() {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <Form.Item name={['user_mapping', 'auto_create']} label="自动创建用户" valuePropName="checked">
               <Switch />
+            </Form.Item>
+            <Form.Item
+              name={['user_mapping', 'match_existing']}
+              label="匹配已有用户"
+              valuePropName="checked"
+              tooltip="自动建用户前，先按匹配键大小写不敏感查找本地已有用户；匹配到则补全绑定关系（不新建用户）"
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item name={['user_mapping', 'match_by']} label="匹配键" style={{ width: 220 }}>
+              <Select>
+                <Option value="username">用户名（外部登录名 → 本地用户名）</Option>
+                <Option value="external_name">姓名（外部姓名 → 本地显示名）</Option>
+              </Select>
             </Form.Item>
             <Form.Item name={['user_mapping', 'username_prefix']} label="用户名前缀" style={{ width: 150 }}>
               <Input placeholder="如 oa（生成 oa_0001）" />

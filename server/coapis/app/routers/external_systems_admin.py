@@ -21,8 +21,22 @@ MAPPINGS_FILE = str(SYSTEM_DIR / "external_identity_mappings.json")
 router_admin = APIRouter(prefix="/admin", tags=["external_systems_admin"])
 
 
+def _get_ext_store():
+    """Return the enterprise external identity store, or None (community JSON)."""
+    try:
+        from ...foundation.repository_factory import RepositoryFactory
+        if RepositoryFactory.is_initialized():
+            return RepositoryFactory.get_external_identity_store()
+    except (RuntimeError, ImportError, Exception):
+        pass
+    return None
+
+
 def load_systems_config() -> Dict[str, Any]:
     """Safely read local external systems config JSON file"""
+    store = _get_ext_store()
+    if store:
+        return {"systems": store.load_systems()}
     if not os.path.exists(SYSTEMS_CONFIG_FILE):
         return {"systems": []}
     with open(SYSTEMS_CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -34,6 +48,10 @@ def load_systems_config() -> Dict[str, Any]:
 
 def save_systems_config_atomic(config_data: Dict[str, Any]):
     """Atomically write back external systems config JSON file to prevent concurrent overwrite"""
+    store = _get_ext_store()
+    if store:
+        store.save_systems(config_data.get("systems", []))
+        return
     dir_name = os.path.dirname(SYSTEMS_CONFIG_FILE) or "."
     fd, temp_path = tempfile.mkstemp(dir=dir_name)
     try:
@@ -48,6 +66,9 @@ def save_systems_config_atomic(config_data: Dict[str, Any]):
 
 def load_bindings() -> Dict[str, Any]:
     """Safely read local identity mappings JSON file"""
+    store = _get_ext_store()
+    if store:
+        return {"bindings": store.load_bindings()}
     if not os.path.exists(MAPPINGS_FILE):
         return {"bindings": []}
     with open(MAPPINGS_FILE, 'r', encoding='utf-8') as f:
@@ -59,6 +80,10 @@ def load_bindings() -> Dict[str, Any]:
 
 def save_bindings_atomic(mappings_data: Dict[str, Any]):
     """Atomically write back identity mappings JSON file to prevent concurrent overwrite"""
+    store = _get_ext_store()
+    if store:
+        store.save_bindings(mappings_data.get("bindings", []))
+        return
     dir_name = os.path.dirname(MAPPINGS_FILE) or "."
     fd, temp_path = tempfile.mkstemp(dir=dir_name)
     try:
@@ -311,7 +336,10 @@ async def bind_external_identity_admin(request: Request):
     }
     
     mappings_data.setdefault("bindings", []).append(new_binding)
-    save_bindings_atomic(mappings_data)
+    try:
+        save_bindings_atomic(mappings_data)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     return {"success": True, "message": "Admin binding successful"}
 

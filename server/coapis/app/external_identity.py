@@ -150,13 +150,30 @@ _systems_cache = _ConfigCache()
 _bindings_cache = _ConfigCache()
 
 
+def _get_ext_store():
+    """Return the enterprise external identity store, or None (community JSON)."""
+    try:
+        from ..foundation.repository_factory import RepositoryFactory
+        if RepositoryFactory.is_initialized():
+            return RepositoryFactory.get_external_identity_store()
+    except (RuntimeError, ImportError, Exception):
+        pass
+    return None
+
+
 def _load_systems() -> List[Dict[str, Any]]:
+    store = _get_ext_store()
+    if store:
+        return [s for s in store.load_systems() if s.get("status", 1) == 1]
     data = _systems_cache.get(SYSTEMS_CONFIG_FILE, {"systems": []})
     systems = data.get("systems", [])
     return [s for s in systems if s.get("status", 1) == 1]
 
 
 def _load_bindings() -> List[Dict[str, Any]]:
+    store = _get_ext_store()
+    if store:
+        return store.load_bindings()
     data = _bindings_cache.get(MAPPINGS_FILE, {"bindings": []})
     return data.get("bindings", [])
 
@@ -207,6 +224,9 @@ def get_system_by_id(provider_id: str) -> Optional[Dict[str, Any]]:
     """
     if not provider_id:
         return None
+    store = _get_ext_store()
+    if store:
+        return store.get_system_by_id(provider_id)
     data = _systems_cache.get(SYSTEMS_CONFIG_FILE, {"systems": []})
     for s in data.get("systems", []):
         if s.get("provider_id") == provider_id:

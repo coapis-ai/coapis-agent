@@ -241,6 +241,24 @@ class RepositoryFactory:
         
         return cls._scene_repo
 
+    # ── 外部系统身份绑定（enterprise） ──
+    _ext_store = None
+
+    @classmethod
+    def inject_external_identity_store(cls, store):
+        """Inject external identity store instance (enterprise)."""
+        cls._ext_store = store
+        logger.info("✅ External identity store injected into RepositoryFactory")
+
+    @classmethod
+    def get_external_identity_store(cls):
+        """Get external identity store instance.
+
+        Returns:
+            ExternalIdentityStore instance (None if not injected)
+        """
+        return cls._ext_store
+
     @classmethod
     def get_edition(cls) -> Optional[str]:
         """Get current edition.

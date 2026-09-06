@@ -151,6 +151,9 @@ router.include_router(voice_router)
 router.include_router(approval_router)
 router.include_router(user_scenes_router)
 router.include_router(user_router)
+# ⭐ 必须在 admin_router 之前注册：/admin/users/identity-bindings 是静态路径，
+# 若 admin_router 的 /admin/users/{user_id}（UUID 参数）先注册，会遮蔽静态路由导致 422
+router.include_router(external_systems_admin_router)
 router.include_router(admin_router)
 router.include_router(users_router)
 router.include_router(points_router)
@@ -205,8 +208,6 @@ router.include_router(files_router)
 router.include_router(file_preview_router)  # /files/preview/{path} — chat media serving
 router.include_router(webdav_router)  # WebDAV API for workspace file access
 
-# External systems admin management (identity bindings & external system configs)
-router.include_router(external_systems_admin_router)
 # External SSO inbound login (Model A)
 router.include_router(external_auth_router)
 

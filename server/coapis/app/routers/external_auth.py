@@ -27,7 +27,7 @@ import shutil
 import threading
 import logging
 from fastapi import APIRouter, Request, HTTPException
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +73,22 @@ def _atomic_write_json(path: str, data: Dict[str, Any]) -> None:
         raise
 
 
+def _get_ext_store():
+    """Return the enterprise external identity store, or None (community JSON)."""
+    try:
+        from ...foundation.repository_factory import RepositoryFactory
+        if RepositoryFactory.is_initialized():
+            return RepositoryFactory.get_external_identity_store()
+    except (RuntimeError, ImportError, Exception):
+        pass
+    return None
+
+
 def load_bindings() -> Dict[str, Any]:
     """Safely read local JSON mapping file"""
+    store = _get_ext_store()
+    if store:
+        return {"bindings": store.load_bindings()}
     if not os.path.exists(MAPPINGS_FILE):
         return {"bindings": []}
     with open(MAPPINGS_FILE, 'r', encoding='utf-8') as f:
@@ -86,6 +100,10 @@ def load_bindings() -> Dict[str, Any]:
 
 def save_bindings_atomic(mappings_data: Dict[str, Any]):
     """Atomically write back JSON file to prevent concurrent overwrite"""
+    store = _get_ext_store()
+    if store:
+        store.save_bindings(mappings_data.get("bindings", []))
+        return
     _atomic_write_json(MAPPINGS_FILE, mappings_data)
 
 
@@ -122,6 +140,108 @@ def find_binding_by_external(mappings_data: Dict[str, Any], provider: str, exter
                 and b.get("status") == 1):
             return b
     return None
+
+
+# ---------------------------------------------------------------------------
+# 补全绑定关系：登录时先匹配已有本地用户（未绑定 → 不新建，而是补绑定）
+# ---------------------------------------------------------------------------
+
+def _find_local_user_by(key_type: str, candidates: List[str]) -> Optional[str]:
+    """大小写不敏感：在本地用户中查找匹配任一 *candidates* 的用户。
+
+    key_type: "username"（匹配本地用户名）或 "display"（匹配本地显示名）。
+    返回匹配到的本地 username；无匹配返回 None。
+    """
+    from ..user_store import list_users
+
+    norm = {str(c).strip().lower() for c in candidates if c and str(c).strip()}
+    if not norm:
+        return None
+    for u in list_users():
+        key = u.get("display_name") if key_type == "display" else u.get("username")
+        if key and str(key).strip().lower() in norm:
+            return str(u["username"])
+    return None
+
+
+def _try_match_existing_local_user(
+    um: Dict[str, Any],
+    login_username: str,
+    external_name: str,
+) -> Optional[str]:
+    """自动建用户前，尝试匹配已有本地用户（大小写不敏感）。
+
+    um: 系统的 user_mapping 配置。
+    login_username: 外部系统登录名（凭证直登 = 用户输入；SSO = 回调可能携带的 username）。
+    external_name: 外部系统返回的姓名。
+
+    匹配键 match_by（默认 "username"）：
+        - "username":     本地用户名 ← 外部登录名（兜底 external_name）
+        - "external_name": 本地显示名 ← 外部姓名（兜底 login_username）
+    match_existing 默认 True（未配置 = 开）。
+    """
+    if um.get("match_existing", True) is False:
+        return None
+    match_by = um.get("match_by") or "username"
+    if match_by == "external_name":
+        candidates = [c for c in (external_name, login_username) if c]
+        return _find_local_user_by("display", candidates)
+    candidates = [c for c in (login_username, external_name) if c]
+    return _find_local_user_by("username", candidates)
+
+
+def _bind_matched_existing_user(
+    username: str,
+    provider: str,
+    external_id: str,
+    external_name: str,
+    mappings: Dict[str, Any],
+    request: Any,
+) -> bool:
+    """匹配到已有本地用户：写绑定（source=auto_matched）+ 补工作区（best-effort）。
+
+    不重复建用户、不改密码；仅补全外部系统用户授权中的绑定数据。
+    返回 True 表示绑定成功。
+    """
+    from ..user_store import get_user as _get_user, update_user as _update_user
+
+    existing_user = _get_user(username)
+    if existing_user is None:
+        return False
+
+    now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    mappings.setdefault("bindings", []).append({
+        "user_id": username,
+        "provider": provider,
+        "external_id": external_id,
+        "external_name": external_name or None,
+        "source": "auto_matched",
+        "status": 1,
+        "created_at": now_str,
+        "last_login_at": now_str,
+        "login_count": 1,
+    })
+    save_bindings_atomic(mappings)
+
+    # display_name 还是默认值（=username）时，用外部姓名更新
+    if external_name and existing_user.get("display_name") in (None, "", username):
+        try:
+            _update_user(username, display_name=external_name)
+            logger.info("Auto-matched: updated display_name for %s to '%s'", username, external_name)
+        except Exception as e:
+            logger.warning("Auto-matched: failed to update display_name: %s", e)
+
+    # best-effort：补初始化工作区（防预建用户从未跑过初始化）
+    try:
+        from ..user_provisioning import init_user_workspace
+        init_user_workspace(
+            username,
+            display_name=external_name or existing_user.get("display_name"),
+            request=request,
+        )
+    except Exception as e:
+        logger.warning("Auto-matched: workspace init skipped for %s: %s", username, e)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -375,86 +495,102 @@ async def external_login(request: Request):
         touch_last_login(username)
     else:
         um = system.get("user_mapping") or {}
-        if not um.get("auto_create"):
+
+        # ── 补全绑定关系：自动建用户前，先尝试匹配已有本地用户（默认开） ──
+        matched = _try_match_existing_local_user(
+            um, str(data.get("username") or "").strip(), external_name)
+
+        if matched is not None and _bind_matched_existing_user(
+                matched, provider, external_id, external_name, mappings, request):
+            username = matched
+            existing_user = get_user(matched)
+            first_login = existing_user.get("last_login") is None
+            touch_last_login(matched)
+            logger.info(
+                "SSO: auto-matched external identity to existing user %s (provider=%s, external_id=%s)",
+                matched, provider, external_id,
+            )
+        elif not um.get("auto_create"):
             raise HTTPException(
                 status_code=403,
                 detail="未绑定该外部系统账号，且系统未开启自动创建用户。请联系管理员绑定。",
             )
-        prefix = um.get("username_prefix") or provider
-        try:
-            padding = int(um.get("seq_padding") or 4)
-        except (TypeError, ValueError):
-            padding = 4
-        try:
-            seq_start = int(um.get("seq_start") or 1)
-        except (TypeError, ValueError):
-            seq_start = 1
-
-        username = _generate_username(prefix, padding, seq_start)
-
-        # 显示名来源
-        source = um.get("display_name_source", "external_name")
-        if source == "external_name":
-            display_name = external_name or username
-        elif source == "external_id":
-            display_name = str(external_id)
         else:
-            display_name = username
+            prefix = um.get("username_prefix") or provider
+            try:
+                padding = int(um.get("seq_padding") or 4)
+            except (TypeError, ValueError):
+                padding = 4
+            try:
+                seq_start = int(um.get("seq_start") or 1)
+            except (TypeError, ValueError):
+                seq_start = 1
 
-        default_role = um.get("default_role") or "user"
-        random_password = secrets.token_urlsafe(16)
+            username = _generate_username(prefix, padding, seq_start)
 
-        if not create_user(username, random_password,
-                           display_name=display_name, role=default_role):
-            raise HTTPException(status_code=500, detail="Failed to create user")
+            # 显示名来源
+            source = um.get("display_name_source", "external_name")
+            if source == "external_name":
+                display_name = external_name or username
+            elif source == "external_id":
+                display_name = str(external_id)
+            else:
+                display_name = username
 
-        # SQLite user_system 同步（与 register 一致，best-effort；密码由 service 侧散列）
-        try:
-            from ...user_system.database import get_db
-            from ...user_system.service import create_user as create_user_sql
-            from ...user_system.models import UserCreate
-            get_db()  # 初始化 DB（lazy 建表）
-            create_user_sql(UserCreate(
-                username=username,
-                password=random_password,
-                display_name=display_name,
-                role=default_role,
-            ))
-        except Exception as e:
-            logger.warning("Failed to sync auto-created user %s to SQLite: %s", username, e)
+            default_role = um.get("default_role") or "user"
+            random_password = secrets.token_urlsafe(16)
 
-        # 初始化用户工作区（agent/skills/workflows）— best-effort
-        default_agent_id = f"user:{username}"
-        try:
-            from ..user_provisioning import init_user_workspace
-            agent_id = init_user_workspace(username, display_name=display_name, request=request)
-            if agent_id:
-                default_agent_id = agent_id
-        except Exception as e:
-            logger.error("Failed to init workspace for auto-created user %s: %s", username, e)
+            if not create_user(username, random_password,
+                               display_name=display_name, role=default_role):
+                raise HTTPException(status_code=500, detail="Failed to create user")
 
-        # 写绑定
-        now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        mappings.setdefault("bindings", []).append({
-            "user_id": username,
-            "provider": provider,
-            "external_id": external_id,
-            "external_name": external_name or None,
-            "source": "auto",
-            "status": 1,
-            "created_at": now_str,
-            "last_login_at": now_str,
-            "login_count": 1,
-        })
-        save_bindings_atomic(mappings)
+            # SQLite user_system 同步（与 register 一致，best-effort；密码由 service 侧散列）
+            try:
+                from ...user_system.database import get_db
+                from ...user_system.service import create_user as create_user_sql
+                from ...user_system.models import UserCreate
+                get_db()  # 初始化 DB（lazy 建表）
+                create_user_sql(UserCreate(
+                    username=username,
+                    password=random_password,
+                    display_name=display_name,
+                    role=default_role,
+                ))
+            except Exception as e:
+                logger.warning("Failed to sync auto-created user %s to SQLite: %s", username, e)
 
-        touch_last_login(username)
-        auto_created = True
-        first_login = True
-        logger.info(
-            "Auto-created external user %s (provider=%s, external_id=%s, display_name=%s, role=%s)",
-            username, provider, external_id, display_name, default_role,
-        )
+            # 初始化用户工作区（agent/skills/workflows）— best-effort
+            default_agent_id = f"user:{username}"
+            try:
+                from ..user_provisioning import init_user_workspace
+                agent_id = init_user_workspace(username, display_name=display_name, request=request)
+                if agent_id:
+                    default_agent_id = agent_id
+            except Exception as e:
+                logger.error("Failed to init workspace for auto-created user %s: %s", username, e)
+
+            # 写绑定
+            now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            mappings.setdefault("bindings", []).append({
+                "user_id": username,
+                "provider": provider,
+                "external_id": external_id,
+                "external_name": external_name or None,
+                "source": "auto",
+                "status": 1,
+                "created_at": now_str,
+                "last_login_at": now_str,
+                "login_count": 1,
+            })
+            save_bindings_atomic(mappings)
+
+            touch_last_login(username)
+            auto_created = True
+            first_login = True
+            logger.info(
+                "Auto-created external user %s (provider=%s, external_id=%s, display_name=%s, role=%s)",
+                username, provider, external_id, display_name, default_role,
+            )
 
     # 6. 发真 token（与账号密码登录完全兼容）
     user_info = get_user(username)
@@ -649,81 +785,97 @@ async def credential_login(request: Request):
                 logger.warning("Credential login: failed to update display_name: %s", e)
     else:
         um = system.get("user_mapping") or {}
-        if not um.get("auto_create"):
+
+        # ── 补全绑定关系：自动建用户前，先尝试匹配已有本地用户（默认开） ──
+        # username 在此 = 外部系统登录名，是匹配的首选键
+        matched = _try_match_existing_local_user(um, username, external_name)
+
+        if matched is not None and _bind_matched_existing_user(
+                matched, provider, external_id, external_name, mappings, request):
+            local_username = matched
+            existing_user = get_user(matched)
+            first_login = existing_user.get("last_login") is None
+            touch_last_login(matched)
+            logger.info(
+                "Credential: auto-matched external identity to existing user %s (provider=%s, external_id=%s)",
+                matched, provider, external_id,
+            )
+        elif not um.get("auto_create"):
             raise HTTPException(
                 status_code=403,
                 detail="未绑定该外部系统账号，且系统未开启自动创建用户。请联系管理员绑定。",
             )
-        prefix = um.get("username_prefix") or provider
-        try:
-            padding = int(um.get("seq_padding") or 4)
-        except (TypeError, ValueError):
-            padding = 4
-        try:
-            seq_start = int(um.get("seq_start") or 1)
-        except (TypeError, ValueError):
-            seq_start = 1
-
-        local_username = _generate_username(prefix, padding, seq_start)
-
-        source = um.get("display_name_source", "external_name")
-        if source == "external_name":
-            display_name = external_name or local_username
-        elif source == "external_id":
-            display_name = external_id
         else:
-            display_name = local_username
+            prefix = um.get("username_prefix") or provider
+            try:
+                padding = int(um.get("seq_padding") or 4)
+            except (TypeError, ValueError):
+                padding = 4
+            try:
+                seq_start = int(um.get("seq_start") or 1)
+            except (TypeError, ValueError):
+                seq_start = 1
 
-        default_role = um.get("default_role") or "user"
-        random_password = secrets.token_urlsafe(16)
+            local_username = _generate_username(prefix, padding, seq_start)
 
-        if not create_user(local_username, random_password,
-                           display_name=display_name, role=default_role):
-            raise HTTPException(status_code=500, detail="Failed to create user")
+            source = um.get("display_name_source", "external_name")
+            if source == "external_name":
+                display_name = external_name or local_username
+            elif source == "external_id":
+                display_name = external_id
+            else:
+                display_name = local_username
 
-        # SQLite user_system 同步
-        try:
-            from ...user_system.database import get_db
-            from ...user_system.service import create_user as create_user_sql
-            from ...user_system.models import UserCreate
-            get_db()
-            create_user_sql(UserCreate(
-                username=local_username,
-                password=random_password,
-                display_name=display_name,
-                role=default_role,
-            ))
-        except Exception as e:
-            logger.warning("Failed to sync auto-created user %s to SQLite: %s", local_username, e)
+            default_role = um.get("default_role") or "user"
+            random_password = secrets.token_urlsafe(16)
 
-        # 初始化用户工作区
-        try:
-            from ..user_provisioning import init_user_workspace
-            init_user_workspace(local_username, display_name=display_name, request=request)
-        except Exception as e:
-            logger.error("Failed to init workspace for auto-created user %s: %s", local_username, e)
+            if not create_user(local_username, random_password,
+                               display_name=display_name, role=default_role):
+                raise HTTPException(status_code=500, detail="Failed to create user")
 
-        now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        mappings.setdefault("bindings", []).append({
-            "user_id": local_username,
-            "provider": provider,
-            "external_id": external_id,
-            "external_name": external_name or None,
-            "source": "auto",
-            "status": 1,
-            "created_at": now_str,
-            "last_login_at": now_str,
-            "login_count": 1,
-        })
-        save_bindings_atomic(mappings)
+            # SQLite user_system 同步
+            try:
+                from ...user_system.database import get_db
+                from ...user_system.service import create_user as create_user_sql
+                from ...user_system.models import UserCreate
+                get_db()
+                create_user_sql(UserCreate(
+                    username=local_username,
+                    password=random_password,
+                    display_name=display_name,
+                    role=default_role,
+                ))
+            except Exception as e:
+                logger.warning("Failed to sync auto-created user %s to SQLite: %s", local_username, e)
 
-        touch_last_login(local_username)
-        auto_created = True
-        first_login = True
-        logger.info(
-            "Credential login: auto-created user %s (provider=%s, external_id=%s)",
-            local_username, provider, external_id,
-        )
+            # 初始化用户工作区
+            try:
+                from ..user_provisioning import init_user_workspace
+                init_user_workspace(local_username, display_name=display_name, request=request)
+            except Exception as e:
+                logger.error("Failed to init workspace for auto-created user %s: %s", local_username, e)
+
+            now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            mappings.setdefault("bindings", []).append({
+                "user_id": local_username,
+                "provider": provider,
+                "external_id": external_id,
+                "external_name": external_name or None,
+                "source": "auto",
+                "status": 1,
+                "created_at": now_str,
+                "last_login_at": now_str,
+                "login_count": 1,
+            })
+            save_bindings_atomic(mappings)
+
+            touch_last_login(local_username)
+            auto_created = True
+            first_login = True
+            logger.info(
+                "Credential login: auto-created user %s (provider=%s, external_id=%s)",
+                local_username, provider, external_id,
+            )
 
     # 发真 token
     user_info = get_user(local_username)
