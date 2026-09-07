@@ -45,16 +45,56 @@ interface C2AToolCardProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** 解析工具输出：可能是 JSON 字符串，也可能已是对象。 */
+/**
+ * 从 agentscope 内容块数组中提取真正的 C2A 结果对象。
+ *
+ * 工具返回的 dict 在 SSE/历史消息里被 runtime 包装成内容块数组：
+ *   '[{"type": "text", "text": "<C2A 结果的 JSON 字符串>"}]'
+ * text 字段是二次 JSON 字符串，需再 parse 一次。
+ */
+function unwrapContentBlocks(blocks: unknown[]): Record<string, any> | null {
+  for (const b of blocks) {
+    if (
+      b &&
+      typeof b === 'object' &&
+      (b as any).type === 'text' &&
+      typeof (b as any).text === 'string'
+    ) {
+      try {
+        const inner = JSON.parse((b as any).text);
+        if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+          return inner as Record<string, any>;
+        }
+      } catch {
+        // text 块不是 JSON，继续找下一个
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 解析工具输出，兼容四种形态：
+ *   1. 已是 C2A 结果对象（dict）
+ *   2. C2A 结果对象的 JSON 字符串
+ *   3. 内容块数组（历史消息重载时 output 已是数组）
+ *   4. 内容块数组的 JSON 字符串（实时 SSE 流的实际形态）
+ */
 function parseToolOutput(raw: unknown): Record<string, any> | null {
   if (!raw) return null;
-  if (typeof raw === 'object') return raw as Record<string, any>;
-  if (typeof raw !== 'string') return null;
-  try {
-    return JSON.parse(raw) as Record<string, any>;
-  } catch {
-    return null;
+  let value: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
+  if (!value || typeof value !== 'object') return null;
+  if (Array.isArray(value)) {
+    return unwrapContentBlocks(value);
+  }
+  return value as Record<string, any>;
 }
 
 /** 归一化 C2A 消息：补齐 C2ARenderer 需要的必填字段。 */
@@ -76,7 +116,10 @@ function normalizeMessage(msg: any): C2AMessage {
 // ---------------------------------------------------------------------------
 
 export default function C2AToolCard({ data }: C2AToolCardProps) {
-  const output = data?.content?.[0]?.data?.output;
+  // output 可能在 content[0]（plugin_call_output）或 content[1]（与默认
+  // ToolCall 组件一致的形态），两处都试。
+  const output =
+    data?.content?.[0]?.data?.output ?? data?.content?.[1]?.data?.output;
 
   const parsed = useMemo(() => parseToolOutput(output), [output]);
   const c2aMessage = useMemo(
