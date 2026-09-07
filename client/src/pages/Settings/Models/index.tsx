@@ -26,7 +26,6 @@ const ModelsPage: React.FC = () => {
     Record<string, { providerId: string; modelId: string }>
   >({});
 
-  const [refreshDefaultModelKey, setRefreshDefaultModelKey] = useState(0);
   const [showAddProviderModal, setShowAddProviderModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -88,13 +87,11 @@ const ModelsPage: React.FC = () => {
 
   const handleSaved = useCallback(async () => {
     await fetchAll(false);
-    setRefreshDefaultModelKey((k) => k + 1);
   }, [fetchAll]);
 
   const handleAddProviderSuccess = useCallback(async () => {
     setShowAddProviderModal(false);
     await fetchAll(false);
-    setRefreshDefaultModelKey((k) => k + 1);
   }, [fetchAll]);
 
   const filteredProviders = providers.filter((p) => {
@@ -136,11 +133,10 @@ const ModelsPage: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* Zone 1: default model bar (independent, above everything) */}
+          {/* Zone 1: default model bar (read-only, above everything) */}
           <DefaultModelBar
             defaultModels={defaultModels}
-            onChange={handleDefaultModelChange}
-            refreshKey={refreshDefaultModelKey}
+            providers={providers}
           />
 
           {/* Zone 2: configured models — type filter + table, tightly coupled */}

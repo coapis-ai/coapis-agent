@@ -1305,7 +1305,7 @@
     "defaultModelSaved": "默认模型已保存",
     "allTypes": "全部",
     "configuredModelsTitle": "已配置模型",
-    "configuredModelsDesc": "所有提供商下已配置的模型，可按类型筛选、搜索，并设为对应类型的默认模型。",
+    "configuredModelsDesc": "仅显示可用（已配置）提供商下的模型，可按类型筛选、搜索，并设为对应类型的默认模型。",
     "defaultBarTitle": "默认模型",
     "invalidDefault": "已失效",
     "invalidDefaultHint": "当前默认模型不存在，请重新选择",

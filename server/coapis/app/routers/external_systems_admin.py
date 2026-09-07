@@ -3,8 +3,10 @@
 
 Provides API endpoints for admin to manage external system configurations and identity bindings.
 """
+import base64
 import json
 import os
+import re
 import tempfile
 import shutil
 import time
@@ -94,6 +96,21 @@ def save_bindings_atomic(mappings_data: Dict[str, Any]):
         if os.path.exists(temp_path):
             os.remove(temp_path)
         raise
+
+
+# Data-URI pattern: data:<mime>;base64,<payload>
+_DATA_URI_RE = re.compile(r"^data:(image/\w+);base64,[A-Za-z0-9+/=]+$")
+
+
+def _validate_icon(icon: str) -> None:
+    """Validate that icon is either empty or a valid image data-URI."""
+    if not icon:
+        return
+    if not _DATA_URI_RE.match(icon):
+        raise HTTPException(
+            status_code=400,
+            detail="icon must be a valid base64 data-URI (e.g. data:image/png;base64,...)",
+        )
 
 
 @router_admin.get("/external-systems/config")
@@ -198,6 +215,8 @@ async def save_external_systems_config(request: Request):
 
     if not provider_id or not name:
         raise HTTPException(status_code=400, detail="provider_id and name are required")
+
+    _validate_icon(icon)
 
     config_data = load_systems_config()
     systems = config_data.get("systems", [])
@@ -456,3 +475,63 @@ async def import_batch_identity_mappings(request: Request):
             "errors": errors if len(errors) > 0 else None
         }
     }
+
+
+# ---------------------------------------------------------------------------
+# 凭证登录 — 测试连接
+# ---------------------------------------------------------------------------
+
+@router_admin.post("/external-systems/credential-test", summary="Test external credential login")
+async def test_external_credential(request: Request):
+    """测试外部系统凭证登录配置。
+
+    请求体：``{provider, username, password}``
+    调用外部系统登录 API，返回连接状态 + 解析结果。
+    不需要建用户、不需要发 token — 纯连通性测试。
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    provider = data.get("provider")
+    username = str(data.get("username") or "").strip()
+    password = str(data.get("password") or "").strip()
+
+    if not provider or not username or not password:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required parameters: provider, username, password",
+        )
+
+    from ..external_identity import get_system_by_id
+    from ..routers.external_auth import _call_external_login_api
+
+    system = get_system_by_id(provider)
+    if system is None:
+        raise HTTPException(status_code=404, detail="External system not configured")
+    if system.get("login_type") != "credential":
+        raise HTTPException(
+            status_code=400,
+            detail="System does not use credential-based login",
+        )
+
+    result = await _call_external_login_api(system, username, password)
+
+    if result["ok"]:
+        # 返回脱敏结果（不返回完整响应，避免泄露敏感字段）
+        return {
+            "connected": True,
+            "external_id": result["external_id"],
+            "external_name": result["external_name"] or "(not returned by API)",
+            "message": f"Connected successfully. External user: {result['external_name'] or result['external_id']}",
+            "raw_response_keys": list(result["resp_data"].keys()) if result.get("resp_data") and isinstance(result["resp_data"], dict) else [],
+        }
+    else:
+        return {
+            "connected": False,
+            "external_id": None,
+            "external_name": None,
+            "message": result["error"] or "Unknown error",
+            "raw_response_keys": list(result["resp_data"].keys()) if result.get("resp_data") and isinstance(result["resp_data"], dict) else [],
+        }

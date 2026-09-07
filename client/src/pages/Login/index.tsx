@@ -8,6 +8,7 @@ import { authApi, ExternalSystemInfo } from "../../api/modules/auth";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTheme } from "../../contexts/ThemeContext";
 import { AuthStorage } from "../../utils/authStorage";
+import ExternalSystemIcon from "../../utils/externalSystemIcon";
 
 export default function LoginPage() {
   const { t } = useTranslation();
@@ -337,7 +338,7 @@ export default function LoginPage() {
                         : undefined,
                   }}
                 >
-                  {sys.icon ? `${sys.icon} ` : ""}
+                  <ExternalSystemIcon icon={sys.icon} size={20} style={{ marginRight: 4, verticalAlign: 'middle' }} />
                   {sys.name}
                 </Button>
               ))}

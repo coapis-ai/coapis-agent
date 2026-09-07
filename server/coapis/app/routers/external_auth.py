@@ -646,6 +646,104 @@ def _resolve_nested_field(data: Any, path: str) -> Any:
     return current
 
 
+async def _call_external_login_api(
+    system: Dict[str, Any],
+    username: str,
+    password: str,
+) -> Dict[str, Any]:
+    """调用外部系统登录 API 并解析响应（含 profile 补姓名）。
+
+    Returns:
+        {
+            ok: bool,
+            resp_data: dict (原始响应),
+            external_id: str | None,
+            external_name: str,
+            error: str | None,
+        }
+    """
+    import aiohttp
+
+    cred = system.get("credential") or {}
+    api_cfg = cred.get("api") or {}
+    login_url = api_cfg.get("url", "")
+    if not login_url:
+        return {"ok": False, "resp_data": None, "external_id": None,
+                "external_name": "", "error": "External system has no login API URL configured"}
+
+    method = (api_cfg.get("method") or "POST").upper()
+    content_type = api_cfg.get("content_type") or "application/json"
+    headers = dict(api_cfg.get("headers") or {})
+    headers["Content-Type"] = content_type
+
+    # 渲染 body 模板（{username} {password}）
+    body_tpl = api_cfg.get("body") or {}
+    body = {k: _render_template(str(v), {"username": username, "password": password})
+            for k, v in body_tpl.items()}
+
+    # 调外部系统登录 API
+    timeout = aiohttp.ClientTimeout(total=int(cred.get("timeout") or 15))
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.request(method, login_url, headers=headers, json=body) as resp:
+                resp_data = await resp.json()
+    except aiohttp.ClientError as e:
+        logger.error("Credential login: external API request failed: %s", e)
+        return {"ok": False, "resp_data": None, "external_id": None,
+                "external_name": "", "error": f"External system unreachable: {e}"}
+    except Exception as e:
+        logger.error("Credential login: external API error: %s", e)
+        return {"ok": False, "resp_data": None, "external_id": None,
+                "external_name": "", "error": f"External system request failed: {e}"}
+
+    # 解析响应
+    resp_cfg = cred.get("response") or {}
+    success_field = resp_cfg.get("success_field", "code")
+    success_value = resp_cfg.get("success_value", 0)
+    error_field = resp_cfg.get("error_field", "msg")
+    openid_field = resp_cfg.get("openid_field", "")
+    name_field = resp_cfg.get("name_field", "")
+
+    actual_code = _resolve_nested_field(resp_data, success_field)
+    if actual_code != success_value:
+        err_msg = _resolve_nested_field(resp_data, error_field) or str(resp_data)
+        return {"ok": False, "resp_data": resp_data, "external_id": None,
+                "external_name": "", "error": f"External system login failed: {err_msg}"}
+
+    external_id = _resolve_nested_field(resp_data, openid_field)
+    if external_id is None:
+        return {"ok": False, "resp_data": resp_data, "external_id": None,
+                "external_name": "", "error": "External system did not return an identifier (openid_field misconfigured?)"}
+    external_id = str(external_id)
+
+    external_name = str(_resolve_nested_field(resp_data, name_field) or "").strip()
+
+    # 如果登录响应没返回姓名，且配置了 profile 接口，用 access token 调 profile 拿姓名
+    if not external_name:
+        profile_cfg = cred.get("profile") or {}
+        profile_url = profile_cfg.get("url", "")
+        if profile_url:
+            try:
+                token_field = profile_cfg.get("token_field", "data.accessToken")
+                ext_token = _resolve_nested_field(resp_data, token_field)
+                if ext_token:
+                    p_method = (profile_cfg.get("method") or "GET").upper()
+                    p_headers = dict(profile_cfg.get("headers") or {})
+                    p_headers["Authorization"] = f"Bearer {ext_token}"
+                    p_timeout = aiohttp.ClientTimeout(total=10)
+                    async with aiohttp.ClientSession(timeout=p_timeout) as p_session:
+                        async with p_session.request(p_method, profile_url, headers=p_headers) as p_resp:
+                            p_data = await p_resp.json()
+                    p_name_field = profile_cfg.get("name_field", "")
+                    external_name = str(_resolve_nested_field(p_data, p_name_field) or "").strip()
+                    logger.info("Credential login: fetched profile name '%s' for external_id=%s", external_name, external_id)
+            except Exception as e:
+                logger.warning("Credential login: profile fetch failed (non-fatal): %s", e)
+
+    return {"ok": True, "resp_data": resp_data, "external_id": external_id,
+            "external_name": external_name, "error": None}
+
+
 @router.post("/external/credential-login")
 async def credential_login(request: Request):
     """凭证直登（模型B）：CoApis 代用户调用外部系统登录 API。
@@ -684,77 +782,15 @@ async def credential_login(request: Request):
             detail="System does not use credential-based login",
         )
 
-    cred = system.get("credential") or {}
-    api_cfg = cred.get("api") or {}
-    login_url = api_cfg.get("url", "")
-    if not login_url:
-        raise HTTPException(status_code=500, detail="External system has no login API URL configured")
+    # 调用外部系统登录 API 并解析
+    api_result = await _call_external_login_api(system, username, password)
+    if not api_result["ok"]:
+        status = 502 if "unreachable" in api_result["error"] else 401
+        raise HTTPException(status_code=status, detail=api_result["error"])
 
-    method = (api_cfg.get("method") or "POST").upper()
-    content_type = api_cfg.get("content_type") or "application/json"
-    headers = dict(api_cfg.get("headers") or {})
-    headers["Content-Type"] = content_type
-
-    # 渲染 body 模板（{username} {password}）
-    body_tpl = api_cfg.get("body") or {}
-    body = {k: _render_template(str(v), {"username": username, "password": password})
-            for k, v in body_tpl.items()}
-
-    # 调外部系统登录 API
-    import aiohttp
-    timeout = aiohttp.ClientTimeout(total=int(cred.get("timeout") or 15))
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.request(method, login_url, headers=headers, json=body) as resp:
-                resp_data = await resp.json()
-    except aiohttp.ClientError as e:
-        logger.error("Credential login: external API request failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"External system unreachable: {e}")
-    except Exception as e:
-        logger.error("Credential login: external API error: %s", e)
-        raise HTTPException(status_code=502, detail=f"External system request failed: {e}")
-
-    # 解析响应
-    resp_cfg = cred.get("response") or {}
-    success_field = resp_cfg.get("success_field", "code")
-    success_value = resp_cfg.get("success_value", 0)
-    error_field = resp_cfg.get("error_field", "msg")
-    openid_field = resp_cfg.get("openid_field", "")
-    name_field = resp_cfg.get("name_field", "")
-
-    actual_code = _resolve_nested_field(resp_data, success_field)
-    if actual_code != success_value:
-        err_msg = _resolve_nested_field(resp_data, error_field) or str(resp_data)
-        raise HTTPException(status_code=401, detail=f"External system login failed: {err_msg}")
-
-    external_id = _resolve_nested_field(resp_data, openid_field)
-    if external_id is None:
-        raise HTTPException(status_code=500, detail="External system did not return an identifier")
-    external_id = str(external_id)
-
-    external_name = str(_resolve_nested_field(resp_data, name_field) or "").strip()
-
-    # 如果登录响应没返回姓名，且配置了 profile 接口，用 access token 调 profile 拿姓名
-    if not external_name:
-        profile_cfg = cred.get("profile") or {}
-        profile_url = profile_cfg.get("url", "")
-        if profile_url:
-            try:
-                token_field = profile_cfg.get("token_field", "data.accessToken")
-                ext_token = _resolve_nested_field(resp_data, token_field)
-                if ext_token:
-                    p_method = (profile_cfg.get("method") or "GET").upper()
-                    p_headers = dict(profile_cfg.get("headers") or {})
-                    p_headers["Authorization"] = f"Bearer {ext_token}"
-                    p_timeout = aiohttp.ClientTimeout(total=10)
-                    async with aiohttp.ClientSession(timeout=p_timeout) as p_session:
-                        async with p_session.request(p_method, profile_url, headers=p_headers) as p_resp:
-                            p_data = await p_resp.json()
-                    p_name_field = profile_cfg.get("name_field", "")
-                    external_name = str(_resolve_nested_field(p_data, p_name_field) or "").strip()
-                    logger.info("Credential login: fetched profile name '%s' for external_id=%s", external_name, external_id)
-            except Exception as e:
-                logger.warning("Credential login: profile fetch failed (non-fatal): %s", e)
+    external_id = api_result["external_id"]
+    external_name = api_result["external_name"]
+    resp_data = api_result["resp_data"]
 
     # 查绑定 / 自动建用户（逻辑与 SSO 登录一致）
     mappings = load_bindings()
@@ -907,6 +943,65 @@ async def credential_login(request: Request):
         "default_agent_id": f"user:{local_username}",
         "auto_created": auto_created,
         "redirect": _validate_redirect(data.get("redirect") or "/chat"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 端点：外部系统登录 API 测试（管理端）
+# ---------------------------------------------------------------------------
+
+@router.post("/external/credential-test")
+async def credential_test(request: Request):
+    """测试外部系统登录 API 连通性。
+
+    用配置的凭证实际调一次登录 API（不建用户、不发 token），
+    返回原始响应供管理员确认 field 映射是否正确。
+
+    需要 admin 权限。
+    """
+    from ..auth import require_admin
+    require_admin(request)
+
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    provider = data.get("provider")
+    username = str(data.get("username") or "").strip()
+    password = str(data.get("password") or "").strip()
+
+    if not provider or not username or not password:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required parameters: provider, username, password",
+        )
+
+    from ..external_identity import get_system_by_id
+
+    system = get_system_by_id(provider)
+    if system is None:
+        raise HTTPException(status_code=404, detail="External system not configured")
+    if system.get("login_type") != "credential":
+        raise HTTPException(
+            status_code=400,
+            detail="System does not use credential-based login",
+        )
+
+    api_result = await _call_external_login_api(system, username, password)
+
+    if not api_result["ok"]:
+        return {
+            "success": False,
+            "error": api_result["error"],
+            "raw_response": api_result["resp_data"],
+        }
+
+    return {
+        "success": True,
+        "external_id": api_result["external_id"],
+        "external_name": api_result["external_name"],
+        "raw_response": api_result["resp_data"],
     }
 
 

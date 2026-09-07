@@ -14,6 +14,7 @@ import {
   message,
   Tabs,
   Upload,
+  Collapse,
 } from 'antd';
 import {
   PlusOutlined,
@@ -21,9 +22,12 @@ import {
   DeleteOutlined,
   ReloadOutlined,
   ImportOutlined,
+  UploadOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { PageHeader } from '@/components/PageHeader';
 import api from '@/api';
+import ExternalSystemIcon from '@/utils/externalSystemIcon';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Option } = Select;
@@ -103,6 +107,26 @@ const LOGIN_TYPE_LABELS: Record<string, string> = {
   none: '不登录',
 };
 
+const CREDENTIAL_EXAMPLE_RESPONSE = [
+  '{',
+  '  "code": 0,',
+  '  "msg": "ok",',
+  '  "data": {',
+  '    "userId": "ext_12345",',
+  '    "name": "张三",',
+  '    "accessToken": "eyJhbGciOi..."',
+  '  }',
+  '}',
+].join('\n');
+
+const CREDENTIAL_EXAMPLE_CONFIG = [
+  'success_field = "code"',
+  'success_value = 0',
+  'openid_field  = "data.userId"',
+  'name_field    = "data.name"',
+  'token_field   = "data.accessToken"',
+].join('\n');
+
 function ExternalSystemAuthPage() {
   const [loading, setLoading] = useState(false);
 
@@ -163,6 +187,13 @@ function ExternalSystemAuthPage() {
           callback: { sign_algorithm: 'hmac_sha256', timestamp_ttl: 300 },
           ...(system.sso || {}),
         },
+        credential: {
+          api: { method: 'POST', content_type: 'application/json', url: '', body: '' },
+          response: { success_field: 'code', success_value: 0, error_field: 'msg', openid_field: '', name_field: '' },
+          profile: { token_field: 'data.accessToken', name_field: '' },
+          timeout: 15,
+          ...(system.credential || {}),
+        },
         user_mapping: {
           auto_create: true,
           match_existing: true,
@@ -188,6 +219,12 @@ function ExternalSystemAuthPage() {
         sso: {
           login_method: 'get',
           callback: { sign_algorithm: 'hmac_sha256', timestamp_ttl: 300 },
+        },
+        credential: {
+          api: { method: 'POST', content_type: 'application/json', url: '', body: '' },
+          response: { success_field: 'code', success_value: 0, error_field: 'msg', openid_field: '', name_field: '' },
+          profile: { token_field: 'data.accessToken', name_field: '' },
+          timeout: 15,
         },
         user_mapping: {
           auto_create: true,
@@ -327,7 +364,7 @@ function ExternalSystemAuthPage() {
       key: 'name',
       render: (name: string, record: ExternalSystemConfig) => (
         <Space>
-          {record.icon && <span>{record.icon}</span>}
+          <ExternalSystemIcon icon={record.icon} name={name} size={28} />
           <span>
             {name}
             <div style={{ fontSize: 12, color: '#999' }}>{record.provider_id}</div>
@@ -583,10 +620,54 @@ function ExternalSystemAuthPage() {
             <Form.Item name="name" label="系统名称" rules={[{ required: true }]} style={{ flex: 1 }}>
               <Input placeholder="例如: 企业微信" />
             </Form.Item>
-            <Form.Item name="icon" label="图标（emoji）" style={{ width: 140 }}>
-              <Input placeholder="如 🏢" />
+            <Form.Item name="icon" label="图标" style={{ width: 180 }}
+              tooltip="支持上传图片（自动压缩为 96px base64）或输入 emoji"
+            >
+              <Upload
+                listType="picture"
+                accept="image/*"
+                maxCount={1}
+                beforeUpload={(file) => {
+                  // 前端压缩为 96px base64
+                  const reader = new FileReader();
+                  reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                      const canvas = document.createElement('canvas');
+                      const size = 96;
+                      canvas.width = size;
+                      canvas.height = size;
+                      const ctx = canvas.getContext('2d')!;
+                      // 居中裁切
+                      const minDim = Math.min(img.width, img.height);
+                      const sx = (img.width - minDim) / 2;
+                      const sy = (img.height - minDim) / 2;
+                      ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+                      const dataUrl = canvas.toDataURL('image/png');
+                      systemForm.setFieldValue('icon', dataUrl);
+                    };
+                    img.src = e.target?.result as string;
+                  };
+                  reader.readAsDataURL(file);
+                  return false; // Prevent auto-upload
+                }}
+              >
+                <Button icon={<UploadOutlined />}>上传图标</Button>
+              </Upload>
             </Form.Item>
           </div>
+          {/* 图标预览 */}
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.icon !== cur.icon}>
+            {({ getFieldValue }) => {
+              const icon = getFieldValue('icon');
+              return icon ? (
+                <div style={{ marginBottom: 12 }}>
+                  <span style={{ fontSize: 12, color: '#888', marginRight: 8 }}>预览：</span>
+                  <ExternalSystemIcon icon={icon} size={36} />
+                </div>
+              ) : null;
+            }}
+          </Form.Item>
           <Form.Item name="description" label="描述">
             <Input placeholder="可选，备注说明" />
           </Form.Item>
@@ -656,15 +737,167 @@ function ExternalSystemAuthPage() {
             }
           </Form.Item>
 
-          {/* 模型B：凭证直登（二期，schema 已就位，界面只给提示） */}
+          {/* 模型B：凭证直登 — 完整配置 */}
           <Form.Item noStyle shouldUpdate={(prev, cur) => prev.login_type !== cur.login_type}>
             {({ getFieldValue }) =>
               getFieldValue('login_type') === 'credential' ? (
-                <Form.Item>
-                  <div style={{ padding: '8px 12px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, fontSize: 13 }}>
-                    凭证直登（模型B）为二期功能，接口规范已定义，后端实现随后提供。
-                  </div>
-                </Form.Item>
+                <>
+                  <Collapse
+                    defaultActiveKey={['api', 'response']}
+                    style={{ marginBottom: 12 }}
+                    items={[
+                      {
+                        key: 'api',
+                        label: '登录 API 配置',
+                        children: (
+                          <>
+                            <Form.Item
+                              name={['credential', 'api', 'url']}
+                              label="登录接口 URL"
+                              rules={[{ required: true, message: '请输入登录接口 URL' }]}
+                            >
+                              <Input placeholder="https://oa.example.com/api/login" />
+                            </Form.Item>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              <Form.Item name={['credential', 'api', 'method']} label="方法" initialValue="POST">
+                                <Select>
+                                  <Option value="POST">POST</Option>
+                                  <Option value="GET">GET</Option>
+                                </Select>
+                              </Form.Item>
+                              <Form.Item name={['credential', 'api', 'content_type']} label="Content-Type" initialValue="application/json">
+                                <Select>
+                                  <Option value="application/json">application/json</Option>
+                                  <Option value="application/x-www-form-urlencoded">form-urlencoded</Option>
+                                </Select>
+                              </Form.Item>
+                            </div>
+                            <Form.Item
+                              name={['credential', 'api', 'body']}
+                              label="请求 Body 模板"
+                              tooltip="JSON 格式，支持 {username} {password} 占位符"
+                              rules={[{ required: true, message: '请输入请求 Body' }]}
+                            >
+                              <Input.TextArea
+                                rows={3}
+                                placeholder={'{"username": "{username}", "password": "{password}"}'}
+                              />
+                            </Form.Item>
+                            <Form.Item
+                              name={['credential', 'api', 'headers']}
+                              label="自定义 Headers"
+                              tooltip={'JSON 格式，如 {"X-App-Id": "12345"}'}
+                            >
+                              <Input.TextArea rows={2} placeholder='{"X-App-Id": "12345"}' />
+                            </Form.Item>
+                          </>
+                        ),
+                      },
+                      {
+                        key: 'response',
+                        label: '响应解析配置',
+                        children: (
+                          <>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              <Form.Item name={['credential', 'response', 'success_field']} label="成功字段" initialValue="code">
+                                <Input placeholder="如 code" />
+                              </Form.Item>
+                              <Form.Item name={['credential', 'response', 'success_value']} label="成功值" initialValue={0}>
+                                <Input placeholder="如 0" />
+                              </Form.Item>
+                              <Form.Item name={['credential', 'response', 'error_field']} label="错误信息字段" initialValue="msg">
+                                <Input placeholder="如 msg" />
+                              </Form.Item>
+                            </div>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              <Form.Item
+                                name={['credential', 'response', 'openid_field']}
+                                label="用户ID字段（openid）"
+                                tooltip="支持点号路径，如 data.userId"
+                                rules={[{ required: true, message: '必填' }]}
+                              >
+                                <Input placeholder="如 data.userId" />
+                              </Form.Item>
+                              <Form.Item name={['credential', 'response', 'name_field']} label="姓名字段（可选）" tooltip="支持点号路径，如 data.name">
+                                <Input placeholder="如 data.name" />
+                              </Form.Item>
+                            </div>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              <Form.Item name={['credential', 'profile', 'url']} label="Profile 接口（可选）" tooltip="登录响应无姓名时，用 access token 调此接口获取">
+                                <Input placeholder="https://oa.example.com/api/profile" />
+                              </Form.Item>
+                              <Form.Item name={['credential', 'profile', 'token_field']} label="Token 字段" initialValue="data.accessToken" tooltip="从登录响应中提取 token 的点号路径">
+                                <Input placeholder="data.accessToken" />
+                              </Form.Item>
+                              <Form.Item name={['credential', 'profile', 'name_field']} label="Profile 姓名字段">
+                                <Input placeholder="如 name" />
+                              </Form.Item>
+                            </div>
+                          </>
+                        ),
+                      },
+                      {
+                        key: 'example',
+                        label: '数据示例（参考）',
+                        children: (
+                          <div style={{ fontSize: 12, background: '#f6f8fa', padding: 12, borderRadius: 6, overflow: 'auto' }}>
+                            <p style={{ marginBottom: 8, fontWeight: 600 }}>响应示例：</p>
+                            <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap' }}>{CREDENTIAL_EXAMPLE_RESPONSE}</pre>
+                            <p style={{ margin: '8px 0 8px', fontWeight: 600 }}>配置对应：</p>
+                            <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap' }}>{CREDENTIAL_EXAMPLE_CONFIG}</pre>
+                          </div>
+                        ),
+                      },
+                    ]}
+                  />
+                  {/* 测试连接 */}
+                  <Form.Item noStyle shouldUpdate>
+                    {() => {
+                      const provider = systemForm.getFieldValue('provider_id');
+                      return (
+                        <Button
+                          type="dashed"
+                          icon={<ThunderboltOutlined />}
+                          onClick={async () => {
+                            // 让用户输入测试账号
+                            Modal.confirm({
+                              title: '测试连接 — 输入测试账号',
+                              content: (
+                                <div>
+                                  <p>使用配置的 API 测试连通性（不会建用户）</p>
+                                  <Input id="test-username" placeholder="测试用户名" />
+                                  <br />
+                                  <Input.Password id="test-password" placeholder="测试密码" style={{ marginTop: 8 }} />
+                                </div>
+                              ),
+                              onOk: async () => {
+                                const u = (document.getElementById('test-username') as HTMLInputElement)?.value || '';
+                                const p = (document.getElementById('test-password') as HTMLInputElement)?.value || '';
+                                if (!u || !p) { message.warning('请输入测试账号'); return; }
+                                try {
+                                  const res: any = await api.post('/auth/external/credential-test', {
+                                    provider, username: u, password: p,
+                                  });
+                                  if (res.success) {
+                                    message.success(`连接成功！external_id=${res.external_id || '(未配置)'}, name=${res.external_name || '(无)'}`);
+                                  } else {
+                                    message.error(res.error || '测试失败');
+                                  }
+                                } catch (e: any) {
+                                  message.error(e?.response?.data?.detail || '测试失败');
+                                }
+                              },
+                            });
+                          }}
+                          disabled={!provider}
+                          style={{ marginBottom: 12 }}
+                        >
+                          测试连接
+                        </Button>
+                      );
+                    }}
+                  </Form.Item>
+                </>
               ) : null
             }
           </Form.Item>
@@ -694,12 +927,25 @@ function ExternalSystemAuthPage() {
             <Form.Item name={['user_mapping', 'username_prefix']} label="用户名前缀" style={{ width: 150 }}>
               <Input placeholder="如 oa（生成 oa_0001）" />
             </Form.Item>
-            <Form.Item name={['user_mapping', 'seq_padding']} label="序号位数" style={{ width: 100 }}>
-              <InputNumber min={1} max={8} />
-            </Form.Item>
-            <Form.Item name={['user_mapping', 'seq_start']} label="起始序号" style={{ width: 100 }}>
-              <InputNumber min={1} />
-            </Form.Item>
+            <Collapse
+              ghost
+              size="small"
+              style={{ width: 240 }}
+              items={[{
+                key: 'seq',
+                label: <span style={{ fontSize: 12, color: '#888' }}>序号配置（高级）</span>,
+                children: (
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <Form.Item name={['user_mapping', 'seq_padding']} label="位数" style={{ marginBottom: 0 }}>
+                      <InputNumber min={1} max={8} style={{ width: 70 }} />
+                    </Form.Item>
+                    <Form.Item name={['user_mapping', 'seq_start']} label="起始" style={{ marginBottom: 0 }}>
+                      <InputNumber min={1} style={{ width: 70 }} />
+                    </Form.Item>
+                  </div>
+                ),
+              }]}
+            />
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
             <Form.Item name={['user_mapping', 'display_name_source']} label="显示名来源" style={{ flex: 1 }}>

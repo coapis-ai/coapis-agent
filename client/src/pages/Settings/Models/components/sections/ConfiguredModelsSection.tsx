@@ -38,10 +38,12 @@ interface ConfiguredModelsSectionProps {
 }
 
 /**
- * "Configured models" zone: a flat table of every model across all
- * providers, with the type filter tabs + search box tightly coupled in
- * one row above it. Read-only for model CRUD (that lives in the provider
- * "manage models" modal); the only action here is "set as default".
+ * "Configured models" zone: a flat table of every model from *available*
+ * providers only (configured with credentials + at least one model), so the
+ * list shows genuinely usable models. Type filter tabs + search box sit in
+ * one row above it, with counts matching the visible rows. Read-only for
+ * model CRUD (that lives in the provider "manage models" modal); the only
+ * action here is "set as default".
  */
 export const ConfiguredModelsSection = React.memo(function ConfiguredModelsSection({
   providers,
@@ -53,16 +55,32 @@ export const ConfiguredModelsSection = React.memo(function ConfiguredModelsSecti
   const [activeType, setActiveType] = useState<string | undefined>(undefined);
   const [query, setQuery] = useState("");
 
+  // Only models from available providers (configured + has models) are
+  // "usable". Models from unconfigured providers (e.g. built-in OpenAI/
+  // Anthropic catalogs without an API key) are noise here — they can't be
+  // selected, set as default, or used.
+  const configuredProviders = useMemo(
+    () =>
+      providers.filter((p) => {
+        const isConfigured =
+          (p.is_custom && !!p.base_url) ||
+          p.require_api_key === false ||
+          (p.require_api_key && !!p.api_key);
+        return isConfigured && (p.models?.length ?? 0) > 0;
+      }),
+    [providers],
+  );
+
   const allRows: Row[] = useMemo(
     () =>
-      providers.flatMap((p) =>
+      configuredProviders.flatMap((p) =>
         (p.models ?? []).map((m) => ({
           key: `${p.id}:${m.id}`,
           provider: p,
           model: m,
         })),
       ),
-    [providers],
+    [configuredProviders],
   );
 
   const rows = useMemo(() => {
@@ -222,7 +240,7 @@ export const ConfiguredModelsSection = React.memo(function ConfiguredModelsSecti
         <ModelTypeTabs
           activeType={activeType}
           onChange={setActiveType}
-          providers={providers}
+          providers={configuredProviders}
         />
         <Input
           size="small"

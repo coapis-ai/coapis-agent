@@ -58,9 +58,14 @@ class OllamaProvider(OpenAIProvider):
         self.base_url = self._normalize_base_url(self.base_url)
 
     def _client(self, timeout: float = 5) -> AsyncOpenAI:
+        # When api_key is empty and require_api_key=False, use "EMPTY" to avoid
+        # the OpenAI SDK rejecting empty credentials (openai>=3.x raises
+        # "Missing credentials" on an empty api_key). Local inference servers
+        # (Ollama / vLLM) ignore the key value, so a non-empty placeholder is safe.
+        api_key = self.api_key if self.api_key or self.require_api_key else "EMPTY"
         return AsyncOpenAI(
             base_url=self._openai_compatible_base_url(),
-            api_key=self.api_key,
+            api_key=api_key,
             timeout=timeout,
         )
 

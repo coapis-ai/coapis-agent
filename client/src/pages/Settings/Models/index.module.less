@@ -1632,6 +1632,77 @@
   color: #333;
 }
 
+/* ---- Default Model Bar (horizontal chips) ---- */
+
+.defaultModelBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.defaultModelChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  flex: 1 1 200px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.defaultModelChipInvalid {
+  border-color: #faad14;
+  background: #fffbe6;
+}
+
+.defaultModelChipIcon {
+  display: inline-flex;
+  align-items: center;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.defaultModelChipLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  flex-shrink: 0;
+}
+
+.defaultModelChipValue {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+
+  &[data-state="unset"] {
+    color: #999;
+  }
+
+  &[data-state="invalid"] {
+    color: #faad14;
+  }
+}
+
+/* ---- Configured Models Filter Row ---- */
+
+.configuredFilterRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0 8px;
+}
+
 /* ---- Model Type Tabs ---- */
 
 .modelTypeTabs {
@@ -1675,7 +1746,8 @@
   font-size: 13px;
 }
 
-.tabCount {
+.tabCount,
+.modelTypeTabCount {
   font-size: 12px;
   color: #999;
 }
@@ -1684,6 +1756,40 @@
   .defaultModelsSection {
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .defaultModelChip {
+    background: #2a2a2a;
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .defaultModelChipInvalid {
+    border-color: #faad14;
+    background: rgba(250, 173, 20, 0.08);
+  }
+
+  .defaultModelChipIcon {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .defaultModelChipLabel {
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .defaultModelChipValue {
+    color: rgba(255, 255, 255, 0.75);
+
+    &[data-state="unset"] {
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    &[data-state="invalid"] {
+      color: #faad14;
+    }
+  }
+
+  .modelTypeTabCount {
+    color: rgba(255, 255, 255, 0.35);
   }
 
   .default-model-selector-label {

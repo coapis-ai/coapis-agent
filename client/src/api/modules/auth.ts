@@ -107,6 +107,29 @@ export const authApi = {
     return res.json();
   },
 
+  credentialTest: async (
+    provider: string,
+    username: string,
+    password: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    external_id?: string;
+    external_name?: string;
+    raw_response?: Record<string, any>;
+  }> => {
+    const res = await fetch(getApiUrl("/auth/external/credential-test"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, username, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Test failed");
+    }
+    return res.json();
+  },
+
   externalLogin: async (payload: {
     provider?: string; // 缺省时后端从 state 还原
     external_id: string | number;

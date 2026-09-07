@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Select, Spin } from "antd";
+import React, { useMemo } from "react";
+import { Tooltip } from "antd";
 import {
   MessageOutlined,
   DatabaseOutlined,
@@ -8,18 +8,10 @@ import {
   EyeOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import api from "@/api";
+import type { ProviderInfo } from "@/api/types";
 import styles from "../../index.module.less";
 
 type ModelType = "chat" | "embedding" | "rerank" | "audio" | "vision";
-
-interface ModelByType {
-  provider_id: string;
-  provider_name: string;
-  model_id: string;
-  model_name: string;
-  model_type: string;
-}
 
 const TYPE_META: Array<{ type: ModelType; labelKey: string; icon: JSX.Element }> =
   [
@@ -34,146 +26,78 @@ const TYPE_META: Array<{ type: ModelType; labelKey: string; icon: JSX.Element }>
     { type: "vision", labelKey: "models.visionModels", icon: <EyeOutlined /> },
   ];
 
-interface DefaultModelChipProps {
-  modelType: ModelType;
-  icon: JSX.Element;
-  label: string;
-  value?: { providerId: string; modelId: string } | null;
-  onChange: (
-    modelType: ModelType,
-    value: { providerId: string; modelId: string } | null,
-  ) => void;
-  refreshKey: number;
-}
-
-function DefaultModelChip({
-  modelType,
-  icon,
-  label,
-  value,
-  onChange,
-  refreshKey,
-}: DefaultModelChipProps) {
-  const { t } = useTranslation();
-  const [models, setModels] = useState<ModelByType[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    api
-      .get(`/models/by-type/${modelType}`)
-      .then((data: unknown) => {
-        setModels(Array.isArray(data) ? (data as ModelByType[]) : []);
-      })
-      .catch((err) => {
-        console.error(`Failed to load ${modelType} models:`, err);
-        setModels([]);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [modelType, refreshKey]);
-
-  const options = useMemo(() => {
-    const grouped: Record<
-      string,
-      Array<{ value: string; label: string; name: string }>
-    > = {};
-    models.forEach((m) => {
-      if (!grouped[m.provider_name]) grouped[m.provider_name] = [];
-      grouped[m.provider_name].push({
-        value: `${m.provider_id}:${m.model_id}`,
-        label: `${m.model_name} · ${m.provider_name}`,
-        name: m.model_name,
-      });
-    });
-    return Object.entries(grouped).map(([providerName, opts]) => ({
-      label: providerName,
-      options: opts,
-    }));
-  }, [models]);
-
-  const valueStr = value ? `${value.providerId}:${value.modelId}` : undefined;
-  const valueValid =
-    !!valueStr && options.some((g) => g.options.some((o) => o.value === valueStr));
-  const invalid = !!valueStr && !valueValid;
-
-  const handleSelect = (combined: string | undefined) => {
-    if (!combined) {
-      // Clearing is ignored: the default slot keeps its last value.
-      return;
-    }
-    const [providerId, modelId] = combined.split(":");
-    onChange(modelType, { providerId, modelId });
-  };
-
-  return (
-    <div
-      className={`${styles.defaultModelChip} ${
-        invalid ? styles.defaultModelChipInvalid : ""
-      }`}
-    >
-      <span className={styles.defaultModelChipIcon}>{icon}</span>
-      <span className={styles.defaultModelChipLabel}>{label}</span>
-      <Spin spinning={loading} size="small">
-        <Select
-          size="small"
-          className={styles.defaultModelChipSelect}
-          value={invalid ? undefined : valueStr}
-          onChange={handleSelect}
-          options={options}
-          placeholder={
-            invalid
-              ? t("models.invalidDefault")
-              : valueStr
-              ? ""
-              : t("models.notSet")
-          }
-          showSearch
-          optionFilterProp="label"
-          notFoundContent={t("models.noModels")}
-        />
-      </Spin>
-    </div>
-  );
-}
-
 interface DefaultModelBarProps {
   defaultModels: Record<string, { providerId: string; modelId: string }>;
-  onChange: (
-    modelType: ModelType,
-    value: { providerId: string; modelId: string } | null,
-  ) => void;
-  refreshKey: number;
+  providers: ProviderInfo[];
 }
 
 /**
- * Compact bar with one chip per model type. Each chip is a dropdown that
- * directly switches the default model of that type (saved immediately on
- * change). Shows three states: set / not set / invalid (pointing to a
- * deleted model).
+ * Read-only bar showing the current default model per type.
+ * Changing the default is done via the "set as default" button in the
+ * ConfiguredModelsSection table below.
  */
 export const DefaultModelBar = React.memo(function DefaultModelBar({
   defaultModels,
-  onChange,
-  refreshKey,
+  providers,
 }: DefaultModelBarProps) {
   const { t } = useTranslation();
+
+  // Build a flat lookup from the already-loaded providers (no extra API calls).
+  const modelLookup = useMemo(() => {
+    const map: Record<string, { modelName: string; providerName: string }> = {};
+    for (const p of providers) {
+      for (const m of p.models ?? []) {
+        map[`${p.id}:${m.id}`] = {
+          modelName: m.name,
+          providerName: p.name,
+        };
+      }
+    }
+    return map;
+  }, [providers]);
+
   return (
     <section>
       <h2 className={styles.sectionTitle}>{t("models.defaultBarTitle")}</h2>
       <div className={styles.defaultModelBar}>
-        {TYPE_META.map((meta) => (
-          <DefaultModelChip
-            key={meta.type}
-            modelType={meta.type}
-            icon={meta.icon}
-            label={t(meta.labelKey)}
-            value={defaultModels[meta.type] ?? null}
-            onChange={onChange}
-            refreshKey={refreshKey}
-          />
-        ))}
+        {TYPE_META.map((meta) => {
+          const value = defaultModels[meta.type];
+          const key = value ? `${value.providerId}:${value.modelId}` : null;
+          const found = key ? modelLookup[key] : undefined;
+          const invalid = !!key && !found;
+
+          const displayName = found
+            ? `${found.modelName} · ${found.providerName}`
+            : invalid
+              ? t("models.invalidDefault")
+              : t("models.notSet");
+
+          const chipClass = [
+            styles.defaultModelChip,
+            invalid ? styles.defaultModelChipInvalid : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+
+          return (
+            <div key={meta.type} className={chipClass}>
+              <span className={styles.defaultModelChipIcon}>
+                {meta.icon}
+              </span>
+              <span className={styles.defaultModelChipLabel}>
+                {t(meta.labelKey)}
+              </span>
+              <Tooltip title={displayName} placement="top">
+                <span
+                  className={styles.defaultModelChipValue}
+                  data-state={found ? "set" : invalid ? "invalid" : "unset"}
+                >
+                  {displayName}
+                </span>
+              </Tooltip>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
