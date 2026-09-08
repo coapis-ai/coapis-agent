@@ -122,6 +122,7 @@ def get_user(username: str) -> Optional[Dict[str, Any]]:
         "created_at": info.get("created_at"),
         "last_login": info.get("last_login"),
         "onboarding_completed": info.get("onboarding_completed", False),
+        "password_set_by_user": info.get("password_set_by_user", True),
     }
 
 
@@ -147,8 +148,14 @@ def create_user(
     password: str,
     display_name: str = None,
     role: str = "user",
+    password_set_by_user: bool = True,
 ) -> bool:
-    """Create a new user. Returns False if user already exists."""
+    """Create a new user. Returns False if user already exists.
+
+    password_set_by_user: 密码是否由用户本人设置过。
+    - 正常注册 / 管理员建用户：True（用户知道密码）
+    - 外部系统自动创建（随机密码）：False（用户从未设置过，可走"首次设置"）
+    """
     data = _load_users()
     if username in data.get("users", {}):
         return False
@@ -163,6 +170,7 @@ def create_user(
         "is_active": True,
         "created_at": time.time(),
         "last_login": None,
+        "password_set_by_user": password_set_by_user,
     }
     _save_users(data)
     logger.info(f"Created user: {username}")
@@ -170,6 +178,31 @@ def create_user(
     # Create user's isolated data directories
     _create_user_dirs(username)
 
+    return True
+
+
+def set_initial_password(username: str, new_password: str) -> bool:
+    """首次设置密码（不校验旧密码）。
+
+    仅允许 password_set_by_user=False 的用户（外部系统自动创建、从未自己
+    设置过密码）。成功后置 password_set_by_user=True，此后必须走
+    update_user（需校验旧密码）。密码至少 8 位。
+    """
+    if not new_password or len(new_password) < 8:
+        return False
+    data = _load_users()
+    user_data = data.get("users", {}).get(username)
+    if user_data is None:
+        return False
+    if user_data.get("password_set_by_user", True):
+        logger.warning(f"set_initial_password rejected for {username}: already set")
+        return False
+    pw_hash, salt = _hash_password(new_password)
+    user_data["password_hash"] = pw_hash
+    user_data["salt"] = salt
+    user_data["password_set_by_user"] = True
+    _save_users(data)
+    logger.info(f"User {username} set initial password (no old-password check)")
     return True
 
 
@@ -228,6 +261,7 @@ def update_user(
         pw_hash, salt = _hash_password(new_password)
         user_data["password_hash"] = pw_hash
         user_data["salt"] = salt
+        user_data["password_set_by_user"] = True  # 改密成功 = 用户已知晓密码
 
     # Update individual fields (only if explicitly provided)
     if display_name is not None:

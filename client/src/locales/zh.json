@@ -2351,6 +2351,7 @@
     "sessionExpired": "会话已过期，请重新登录",
     "unauthorized": "未授权，请登录",
     "otherLoginMethods": "其他登录方式",
+    "loginMethods": "登录方式",
     "externalLoginFailed": "发起外部系统登录失败",
     "callbackLoading": "正在完成登录…",
     "callbackLoadingHint": "正在校验外部系统身份，请稍候",

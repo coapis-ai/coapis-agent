@@ -34,7 +34,6 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Request, Body
 from pydantic import BaseModel, ConfigDict
-from uuid import UUID
 
 from ....user_system.database import UserSystemDB
 from ....user_system.models import UserResponse
@@ -172,6 +171,7 @@ def _sync_user_store_password(username: str, password: str):
             pw_hash, salt = _hash_password(password)
             data["users"][username]["password_hash"] = pw_hash
             data["users"][username]["salt"] = salt
+            data["users"][username]["password_set_by_user"] = True
             _save_users(data)
             logger.info(f"Synced password change for {username} to JSON user_store")
     except Exception as e:
@@ -189,6 +189,42 @@ def _remove_user_store_user(username: str):
             logger.info(f"Removed {username} from JSON user_store")
     except Exception as e:
         logger.error(f"Failed to remove {username} from JSON user_store: {e}")
+
+
+def _is_pg_repo(repo) -> bool:
+    """仅企业版 PostgresUserRepository 才算独立主数据源。
+
+    社区版 RepositoryFactory 返回 JsonUserRepository（同一个 users.json），
+    与 UserSystemDB 同源，不应再走 id 主键写入。
+    """
+    return repo is not None and type(repo).__name__ == "PostgresUserRepository"
+
+
+async def _resolve_user(user_id: str) -> Dict[str, Any]:
+    """按 username（或整数 id）解析用户。
+
+    - 社区版：UserSystemDB 即 users.json（JSON 文件模式），username 是稳定键。
+    - 企业版：额外从 PG 取（authoritative）。
+    返回 {"username", "row"(UserSystemDB 行), "pg"(PG 行或 None)}；都查不到抛 404。
+    """
+    db = UserSystemDB()
+    row = db.get_user_by_username(user_id)
+    if row is None and user_id.isdigit():
+        row = db.get_user_by_id(int(user_id))
+
+    pg = None
+    repo = _get_user_repo()
+    if _is_pg_repo(repo):
+        try:
+            pg = await repo.get_user_by_username(user_id)
+        except Exception:
+            pg = None
+
+    if row is None and pg is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    username = (row or {}).get("username") or (pg or {}).get("username") or user_id
+    return {"username": username, "row": row, "pg": pg}
 
 
 async def _create_user_fallback(payload: "AdminUserCreate") -> Dict[str, Any]:
@@ -375,43 +411,18 @@ async def create_user_admin(
 @require_permission("admin:admin")
 async def get_user_by_id(
     request: Request,
-    user_id: UUID,
+    user_id: str,
 ) -> Dict[str, Any]:
-    """获取用户详情."""
-    # ⭐ 企业版：优先走 PostgreSQL
-    user_repo = _get_user_repo()
-    if user_repo:
-        try:
-            # user_id is already a UUID object from FastAPI type hint
-            user = await user_repo.get_user_by_id(user_id)
-            if user:
-                safe_user = _adapt_pg_user(user)
-                safe_user.pop("password_hash", None)
-                safe_user.pop("salt", None)
-                return safe_user
-            raise HTTPException(status_code=404, detail="用户不存在")
-        except ValueError:
-            # user_id 不是有效 UUID，可能是社区版的 int ID
-            logger.debug(f"user_id '{user_id}' is not a valid UUID, trying UserSystemDB")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"PG get_user failed, falling back to UserSystemDB: {e}")
-
-    # 社区版 fallback：UserSystemDB
-    db = UserSystemDB()
-    try:
-        int_id = int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user = db.get_user_by_id(int_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    safe_user = dict(user)
+    """获取用户详情（user_id 支持 username / 整数 / UUID）."""
+    r = await _resolve_user(user_id)
+    username = r["username"]
+    if r["pg"]:
+        safe_user = _adapt_pg_user(r["pg"])
+    else:
+        safe_user = dict(r["row"] or {})
     safe_user.pop("password_hash", None)
     safe_user.pop("salt", None)
+    safe_user["username"] = username
     return safe_user
 
 
@@ -419,118 +430,70 @@ async def get_user_by_id(
 @require_permission("admin:admin")
 async def update_user(
     request: Request,
-    user_id: UUID,
+    user_id: str,
     payload: AdminUserUpdate = Body(...),
 ) -> Dict[str, Any]:
-    """更新用户信息（管理员操作）.
-    
-    企业版：更新 PostgreSQL users 表 + 同步 JSON user_store（认证系统依赖）
-    社区版：更新 SQLite user_system + 同步 JSON user_store
+    """更新用户信息（管理员操作，user_id 支持 username / 整数 / UUID）.
+
+    以 username 为稳定键，同步：
+    - JSON user_store（认证源头：password / role）
+    - SQLite（社区版主数据源：role / display_name / token_quota_monthly / is_active）
+    - PostgreSQL（企业版主数据源：role / display_name / status / password）
     """
     admin_username = getattr(request.state, "username", "anonymous")
+    r = await _resolve_user(user_id)
+    username = r["username"]
 
-    # ⭐ 企业版：优先走 PostgreSQL
-    user_repo = _get_user_repo()
-    if user_repo:
-        try:
-            # user_id is already a UUID object from FastAPI type hint
-            user = await user_repo.get_user_by_id(user_id)
-            if not user:
-                raise HTTPException(status_code=404, detail="用户不存在")
-
-            username = user["username"]
-            update_data: Dict[str, Any] = {}
-
-            if payload.role is not None:
-                update_data["role"] = payload.role
-            if payload.display_name is not None:
-                update_data["display_name"] = payload.display_name
-            if payload.is_active is not None:
-                update_data["status"] = "active" if payload.is_active else "inactive"
-            
-            # Handle password update for PostgreSQL
-            if payload.password is not None:
-                from ...user_store import _hash_password
-                pw_hash, salt = _hash_password(payload.password)
-                update_data["password_hash"] = pw_hash
-                update_data["salt"] = salt
-
-            if update_data:
-                await user_repo.update_user(user_id, update_data)
-                logger.info(f"Admin updated user {username} via PG Repository")
-
-            # 同步到 JSON user_store（认证系统依赖）
-            if payload.role is not None:
-                _sync_user_store_role(username, payload.role)
-            if payload.password is not None:
-                _sync_user_store_password(username, payload.password)
-
-            # Save permission_overrides if provided
-            if payload.permission_overrides is not None:
-                try:
-                    from ...permissions.manager import PermissionManager
-                    pm = PermissionManager.get_instance()
-                    if payload.permission_overrides:
-                        pm.update_user_overrides(username, payload.permission_overrides)
-                    else:
-                        pm.delete_user_overrides(username)
-                except Exception as e:
-                    logger.warning(f"Failed to save permission_overrides for {username}: {e}")
-
-            return {"success": True, "user_id": user_id, "username": username}
-
-        except ValueError:
-            logger.debug(f"user_id '{user_id}' is not a valid UUID, trying UserSystemDB")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"PG update_user failed, falling back to UserSystemDB: {e}")
-
-    # 社区版 fallback：UserSystemDB
-    db = UserSystemDB()
-
-    try:
-        int_id = int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user = db.get_user_by_id(int_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    username = user["username"]
-    update_data = {}
-
+    # 1) JSON user_store（认证源头，最优先）
+    if payload.password is not None:
+        _sync_user_store_password(username, payload.password)
     if payload.role is not None:
-        update_data["role"] = payload.role
-    if payload.display_name is not None:
-        update_data["display_name"] = payload.display_name
-    if payload.token_quota_monthly is not None:
-        update_data["token_quota_monthly"] = payload.token_quota_monthly
-    if payload.is_active is not None:
-        update_data["is_active"] = int(payload.is_active)
+        _sync_user_store_role(username, payload.role)
 
-    if update_data:
-        db.update_user_by_id(int_id, update_data)
-        
-        # 同步到 JSON user_store（认证系统依赖）
+    # 2) 社区版主数据源：UserSystemDB（users.json）按 username 更新
+    if r["row"] is not None:
+        db = UserSystemDB()
+        update_data: Dict[str, Any] = {}
         if payload.role is not None:
-            _sync_user_store_role(username, payload.role)
-        if payload.password is not None:
-            _sync_user_store_password(username, payload.password)
-        
-        # Audit log
-        admin_user_id = _ensure_admin_in_db(db, admin_username)
-        db.insert_audit_log(
-            user_id=admin_user_id,
-            username=admin_username,
-            action="admin_update_user",
-            resource_type="user",
-            resource_id=str(user_id),
-            details={"updates": {k: v for k, v in payload.model_dump().items() if v is not None}},
-        )
+            update_data["role"] = payload.role
+        if payload.display_name is not None:
+            update_data["display_name"] = payload.display_name
+        if payload.token_quota_monthly is not None:
+            update_data["token_quota_monthly"] = payload.token_quota_monthly
+        if payload.is_active is not None:
+            update_data["is_active"] = int(payload.is_active)
+        if update_data:
+            db.update_user(username, update_data)
+            db.insert_audit_log(
+                user_id=_ensure_admin_in_db(db, admin_username),
+                username=admin_username,
+                action="admin_update_user",
+                resource_type="user",
+                resource_id=username,
+                details={"updates": {k: v for k, v in payload.model_dump().items() if v is not None}},
+            )
 
-    # Save permission_overrides if provided
+    # 3) PostgreSQL（企业版主数据源）
+    if r["pg"]:
+        pg_id = r["pg"]["id"]
+        repo = _get_user_repo()
+        update_data = {}
+        if payload.role is not None:
+            update_data["role"] = payload.role
+        if payload.display_name is not None:
+            update_data["display_name"] = payload.display_name
+        if payload.is_active is not None:
+            update_data["status"] = "active" if payload.is_active else "inactive"
+        if payload.password is not None:
+            from ...user_store import _hash_password
+            pw_hash, salt = _hash_password(payload.password)
+            update_data["password_hash"] = pw_hash
+            update_data["salt"] = salt
+        if update_data:
+            await repo.update_user(pg_id, update_data)
+            logger.info(f"Admin updated user {username} via PG Repository")
+
+    # 4) permission_overrides
     if payload.permission_overrides is not None:
         try:
             from ...permissions.manager import PermissionManager
@@ -542,205 +505,105 @@ async def update_user(
         except Exception as e:
             logger.warning(f"Failed to save permission_overrides for {username}: {e}")
 
-    return {"success": True, "user_id": user_id, "username": username}
+    return {"success": True, "user_id": username, "username": username}
 
 
 @router.delete("/admin/users/{user_id}")
 @require_permission("admin:admin")
 async def delete_user(
     request: Request,
-    user_id: UUID,
+    user_id: str,
     body: UserDeleteRequest = Body(default=UserDeleteRequest()),
 ) -> Dict[str, Any]:
-    """删除用户（支持软删除和硬删除）.
-    
-    企业版：
-    - 软删除（默认）：PG 软删除（deleted_at + status=inactive）+ 清理 JSON user_store
-    - 硬删除（backup=True）：备份工作区 → PG 硬删除 → 清理 JSON user_store → 删除工作区
-    社区版：同原逻辑
+    """删除用户（user_id 支持 username / 整数 / UUID，支持软删除和硬删除）.
+
+    - 软删除（默认）：SQLite/PG 标记 inactive + 清理 JSON user_store
+    - 硬删除（backup=True）：备份工作区 → 各 store 删除 → 清理 JSON user_store → 删除工作区
     """
     admin_username = getattr(request.state, "username", "anonymous")
+    r = await _resolve_user(user_id)
+    username = r["username"]
 
-    # ⭐ 企业版：优先走 PostgreSQL
-    user_repo = _get_user_repo()
-    if user_repo:
-        try:
-            uid = uuid.UUID(user_id)
-            user = await user_repo.get_user_by_id(uid)
-            if not user:
-                raise HTTPException(status_code=404, detail="用户不存在")
-
-            username = user["username"]
-
-            if body.backup:
-                # 硬删除 - 先备份
-                from ....constant import WORKING_DIR
-                backup_dir = WORKING_DIR / "backups" / "users"
-                backup_dir.mkdir(parents=True, exist_ok=True)
-
-                timestamp = int(time.time())
-                backup_path = backup_dir / f"{username}_{timestamp}"
-
-                workspace_dir = WORKING_DIR / "workspaces" / username
-                if workspace_dir.exists():
-                    shutil.copytree(workspace_dir, backup_path / "workspace")
-                    logger.info(f"Backed up workspace for {username} to {backup_path}")
-
-                # PG 硬删除（设 deleted_at）
-                await user_repo.delete_user(uid)
-
-                # 从 JSON user_store 删除
-                _remove_user_store_user(username)
-
-                if workspace_dir.exists():
-                    shutil.rmtree(workspace_dir)
-                    logger.info(f"Deleted workspace for {username}")
-
-                return {"success": True, "user_id": user_id, "username": username, "backup_path": str(backup_path)}
-            else:
-                # 软删除 - PG 软删除
-                await user_repo.delete_user(uid)
-
-                # 从 JSON user_store 删除（软删除也清理认证信息）
-                _remove_user_store_user(username)
-
-                logger.info(f"Admin soft-deleted user {username} (PG + user_store)")
-                return {"success": True, "user_id": user_id, "username": username}
-
-        except ValueError:
-            logger.debug(f"user_id '{user_id}' is not a valid UUID, trying UserSystemDB")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"PG delete_user failed, falling back to UserSystemDB: {e}")
-
-    # 社区版 fallback：UserSystemDB
-    db = UserSystemDB()
-
-    try:
-        int_id = int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user = db.get_user_by_id(int_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    username = user["username"]
-
+    # 硬删除：先备份工作区
+    backup_path = None
     if body.backup:
-        # 硬删除 - 先备份
         from ....constant import WORKING_DIR
         backup_dir = WORKING_DIR / "backups" / "users"
         backup_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = int(time.time())
-        backup_path = backup_dir / f"{username}_{timestamp}"
-
+        backup_path = backup_dir / f"{username}_{int(time.time())}"
         workspace_dir = WORKING_DIR / "workspaces" / username
         if workspace_dir.exists():
             shutil.copytree(workspace_dir, backup_path / "workspace")
             logger.info(f"Backed up workspace for {username} to {backup_path}")
 
-        chats_dir = WORKING_DIR / "workspaces" / username / "chat"
-        if chats_dir.exists():
-            shutil.copytree(chats_dir, backup_path / "chat", dirs_exist_ok=True)
+    # 社区版 UserSystemDB（users.json）按 username
+    if r["row"] is not None:
+        db = UserSystemDB()
+        if body.backup:
+            db.delete_user(username)
+        else:
+            db.update_user(username, {"is_active": 0})
+        db.insert_audit_log(
+            user_id=_ensure_admin_in_db(db, admin_username),
+            username=admin_username,
+            action="admin_hard_delete_user" if body.backup else "admin_soft_delete_user",
+            resource_type="user",
+            resource_id=username,
+            details={"username": username, **({"backup_path": str(backup_path)} if backup_path else {})},
+        )
 
-        # 从数据库删除
-        db.delete_user_by_id(int_id)
+    # PostgreSQL（企业版）
+    if r["pg"]:
+        await _get_user_repo().delete_user(r["pg"]["id"])
+        logger.info(f"Admin deleted user {username} (PG)")
 
-        # 从 JSON user_store 删除
-        _remove_user_store_user(username)
+    # JSON user_store（认证源头，软删/硬删都清理）
+    _remove_user_store_user(username)
 
+    # 硬删除：移除工作区
+    if body.backup:
+        workspace_dir = WORKING_DIR / "workspaces" / username
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir)
             logger.info(f"Deleted workspace for {username}")
 
-        admin_user_id = _ensure_admin_in_db(db, admin_username)
-        db.insert_audit_log(
-            user_id=admin_user_id,
-            username=admin_username,
-            action="admin_hard_delete_user",
-            resource_type="user",
-            resource_id=str(user_id),
-            details={"username": username, "backup_path": str(backup_path)},
-        )
-
-        return {"success": True, "user_id": user_id, "username": username, "backup_path": str(backup_path)}
-    else:
-        # 软删除 - 标记为非活跃
-        db.update_user_by_id(int_id, {"is_active": 0})
-
-        # 从 JSON user_store 删除
-        _remove_user_store_user(username)
-
-        admin_user_id = _ensure_admin_in_db(db, admin_username)
-        db.insert_audit_log(
-            user_id=admin_user_id,
-            username=admin_username,
-            action="admin_soft_delete_user",
-            resource_type="user",
-            resource_id=str(user_id),
-        )
-
-        return {"success": True, "user_id": user_id, "username": username}
+    result: Dict[str, Any] = {"success": True, "user_id": username, "username": username}
+    if backup_path:
+        result["backup_path"] = str(backup_path)
+    return result
 
 
 @router.post("/admin/users/{user_id}/reset-tokens")
 @require_permission("admin:admin")
 async def reset_user_tokens(
     request: Request,
-    user_id: UUID,
+    user_id: str,
 ) -> Dict[str, Any]:
-    """重置用户 Token 用量."""
+    """重置用户 Token 用量（user_id 支持 username / 整数 / UUID）."""
     admin_username = getattr(request.state, "username", "anonymous")
+    r = await _resolve_user(user_id)
+    username = r["username"]
 
-    # ⭐ 企业版：优先走 PostgreSQL
-    user_repo = _get_user_repo()
-    if user_repo:
-        try:
-            uid = uuid.UUID(user_id)
-            user = await user_repo.get_user_by_id(uid)
-            if not user:
-                raise HTTPException(status_code=404, detail="用户不存在")
+    # 社区版 UserSystemDB（users.json）按 username
+    if r["row"] is not None:
+        db = UserSystemDB()
+        db.update_user(username, {"token_used_monthly": 0})
+        admin_user = db.get_user_by_username(admin_username)
+        if admin_user:
+            db.insert_audit_log(
+                user_id=admin_user["id"],
+                username=admin_username,
+                action="admin_reset_tokens",
+                resource_type="user",
+                resource_id=username,
+            )
 
-            # 更新 quota（清零 token 使用量）
-            quota = user.get("quota", {})
-            quota["token_used_monthly"] = 0
-            await user_repo.update_user(uid, {"quota": quota})
+    # PostgreSQL（企业版）
+    if r["pg"]:
+        repo = _get_user_repo()
+        quota = r["pg"].get("quota", {})
+        quota["token_used_monthly"] = 0
+        await repo.update_user(r["pg"]["id"], {"quota": quota})
+        logger.info(f"Admin reset tokens for {username}")
 
-            logger.info(f"Admin reset tokens for {user['username']}")
-            return {"success": True, "user_id": user_id, "username": user["username"]}
-
-        except ValueError:
-            logger.debug(f"user_id '{user_id}' is not a valid UUID, trying UserSystemDB")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"PG reset_tokens failed, falling back to UserSystemDB: {e}")
-
-    # 社区版 fallback：UserSystemDB
-    db = UserSystemDB()
-
-    try:
-        int_id = int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    user = db.get_user_by_id(int_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    db.update_user_by_id(int_id, {"token_used_monthly": 0})
-
-    admin_user = db.get_user_by_username(admin_username)
-    if admin_user:
-        db.insert_audit_log(
-            user_id=admin_user["id"],
-            username=admin_username,
-            action="admin_reset_tokens",
-            resource_type="user",
-            resource_id=str(user_id),
-        )
-
-    return {"success": True, "user_id": user_id}
+    return {"success": True, "user_id": username, "username": username}

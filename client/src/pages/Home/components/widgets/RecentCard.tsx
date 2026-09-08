@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { ClockCircleOutlined } from '@ant-design/icons';
 import styles from '../../styles.module.less';
 import { WidgetProps, Scene } from '../../types';
+import { getApiToken } from '../../../../api/config';
 
 interface RecentCardProps extends WidgetProps {
   onRefresh?: () => void;
@@ -26,7 +27,7 @@ const RecentCard: React.FC<RecentCardProps> = () => {
     setLoading(true);
     try {
       // 获取token
-      const token = localStorage.getItem('coapis_auth_token');
+      const token = getApiToken();
       
       if (!token) {
         // 未登录，显示空状态

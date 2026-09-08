@@ -91,6 +91,21 @@ export default function UserProfilePage() {
     }
   };
 
+  // 首次设置密码：外部系统自动创建、从未自己设置过密码的用户（免旧密码）
+  const handleSetInitialPassword = async () => {
+    try {
+      const values = await passwordForm.validateFields();
+      await authApi.setInitialPassword(values.newPassword);
+      message.success(t('usersystem.passwordChanged'));
+      passwordForm.resetFields();
+      // 刷新 /user/me：password_set_by_user 变 true，表单切回"修改密码"
+      const fresh = await getCurrentUser().catch(() => null);
+      if (fresh) setUserDetails(fresh as any);
+    } catch (e: any) {
+      message.error(e?.message || t('usersystem.passwordChangeFailed'));
+    }
+  };
+
   if (loading) {
     return (
       <div className={styles.profileContainer}>
@@ -220,22 +235,36 @@ export default function UserProfilePage() {
 
           {/* Password Change */}
           <Card
-            title={t('userprofile.changePassword')}
+            title={
+              userDetails?.password_set_by_user === false
+                ? t('userprofile.setPassword', { defaultValue: '设置新密码' })
+                : t('userprofile.changePassword')
+            }
             bordered={false}
             className={styles.settingsCard}
           >
-            <Form form={passwordForm} layout="vertical" onFinish={handleChangePassword}>
-              <Form.Item
-                name="currentPassword"
-                label={t('account.currentPassword')}
-                rules={[{ required: true, message: t('account.currentPasswordRequired') }]}
-              >
-                <Input.Password />
-              </Form.Item>
+            <Form
+              form={passwordForm}
+              layout="vertical"
+              onFinish={
+                userDetails?.password_set_by_user === false
+                  ? handleSetInitialPassword
+                  : handleChangePassword
+              }
+            >
+              {userDetails?.password_set_by_user !== false && (
+                <Form.Item
+                  name="currentPassword"
+                  label={t('account.currentPassword')}
+                  rules={[{ required: true, message: t('account.currentPasswordRequired') }]}
+                >
+                  <Input.Password />
+                </Form.Item>
+              )}
               <Form.Item
                 name="newPassword"
                 label={t('account.newPassword')}
-                rules={[{ required: true, min: 6, message: t('usersystem.passwordMinLength') }]}
+                rules={[{ required: true, min: 8, message: t('usersystem.passwordMinLength') }]}
               >
                 <Input.Password placeholder={t('account.newPasswordPlaceholder')} />
               </Form.Item>
@@ -256,7 +285,9 @@ export default function UserProfilePage() {
                 <Input.Password placeholder={t('account.confirmPasswordPlaceholder')} />
               </Form.Item>
               <Button type="primary" htmlType="submit" block>
-                {t('userprofile.updatePassword')}
+                {userDetails?.password_set_by_user === false
+                  ? t('userprofile.setPassword', { defaultValue: '设置新密码' })
+                  : t('userprofile.updatePassword')}
               </Button>
             </Form>
           </Card>

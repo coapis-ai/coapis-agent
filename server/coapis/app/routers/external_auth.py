@@ -541,7 +541,7 @@ async def external_login(request: Request):
             random_password = secrets.token_urlsafe(16)
 
             if not create_user(username, random_password,
-                               display_name=display_name, role=default_role):
+                               display_name=display_name, role=default_role, password_set_by_user=False):
                 raise HTTPException(status_code=500, detail="Failed to create user")
 
             # SQLite user_system 同步（与 register 一致，best-effort；密码由 service 侧散列）
@@ -866,7 +866,7 @@ async def credential_login(request: Request):
             random_password = secrets.token_urlsafe(16)
 
             if not create_user(local_username, random_password,
-                               display_name=display_name, role=default_role):
+                               display_name=display_name, role=default_role, password_set_by_user=False):
                 raise HTTPException(status_code=500, detail="Failed to create user")
 
             # SQLite user_system 同步

@@ -1638,6 +1638,7 @@
     "sessionExpired": "Сессия истекла, пожалуйста, войдите снова",
     "unauthorized": "Не авторизован, пожалуйста, войдите",
     "otherLoginMethods": "Другие способы входа",
+    "loginMethods": "Способы входа",
     "externalLoginFailed": "Не удалось начать вход во внешнюю систему",
     "callbackLoading": "Завершение входа…",
     "callbackLoadingHint": "Проверка ID внешней системы, подождите",

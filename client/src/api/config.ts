@@ -140,7 +140,7 @@ export function getCurrentUsername(): string {
 
   // 4. 从 localStorage 中的 token 解析（向后兼容）
   try {
-    const token = localStorage.getItem("coapis_auth_token");
+    const token = getApiToken();
     if (token) {
       return parseUsernameFromToken(token) || "";
     }

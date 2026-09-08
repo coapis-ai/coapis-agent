@@ -1623,6 +1623,7 @@
     "sessionExpired": "セッションが期限切れです。再度ログインしてください",
     "unauthorized": "未認証です。ログインしてください",
     "otherLoginMethods": "その他のログイン方法",
+    "loginMethods": "ログイン方法",
     "externalLoginFailed": "外部システムログインを開始できませんでした",
     "callbackLoading": "ログインを完了しています…",
     "callbackLoadingHint": "外部システムのIDを検証中です。お待ちください",

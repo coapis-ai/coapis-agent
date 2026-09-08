@@ -1805,6 +1805,19 @@ class AgentRunner(Runner):
                         user_text_override=query,
                         agent_messages=_new_msgs,
                     ))
+                    # 企业版扩展点：回合结束归档消息到 PG（文件为主，PG 旁路归档）。
+                    # 文件写盘成功后的路径上触发；用 shield 隔离，归档慢或失败都
+                    # 不影响回合收尾。社区版未装企业版时 is_enterprise_installed()
+                    # 为 False，直接跳过，行为完全不变。
+                    if _new_msgs:
+                        try:
+                            from ...enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
+                            if is_enterprise_installed():
+                                _plugin = get_enterprise_plugin()
+                                if _plugin is not None and hasattr(_plugin, "archive_turn"):
+                                    await asyncio.shield(_plugin.archive_turn(chat, _new_msgs))
+                        except Exception as _ae:
+                            logger.warning(f"archive_turn failed (non-fatal): {_ae}")
                 except asyncio.CancelledError:
                     logger.warning(
                         "Chat persistence was cancelled (user stopped), "

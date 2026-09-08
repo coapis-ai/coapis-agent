@@ -11,6 +11,7 @@ import api, {
 } from "../../../api";
 import { useAgentStore } from "../../../stores/agentStore";
 import { toDisplayUrl } from "../utils";
+import { getApiToken } from "../../../api/config";
 
 // ---------------------------------------------------------------------------
 // Retry helper
@@ -627,7 +628,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     // Get current username from JWT token if window.currentUserId not set
     if (!window.currentUserId) {
       try {
-        const token = localStorage.getItem("coapis_auth_token");
+        const token = getApiToken();
         if (token) {
           const payload = JSON.parse(atob(token.split(".")[1] || ""));
           window.currentUserId = payload?.sub || payload?.username || DEFAULT_USER_ID;
@@ -737,7 +738,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         let userId = window.currentUserId;
         if (!userId) {
           try {
-            const token = localStorage.getItem("coapis_auth_token");
+            const token = getApiToken();
             if (token) {
               const payload = JSON.parse(atob(token.split(".")[1] || ""));
               userId = payload?.sub || payload?.username || "";

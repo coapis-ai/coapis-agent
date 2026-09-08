@@ -87,6 +87,11 @@ class UpdateProfileRequest(BaseModel):
     new_password: Optional[str] = None
 
 
+class SetInitialPasswordRequest(BaseModel):
+    """首次设置密码（外部系统自动创建用户，无需旧密码）。"""
+    new_password: str
+
+
 class UserInfoResponse(BaseModel):
     username: str
     display_name: str
@@ -272,11 +277,21 @@ async def get_my_profile(request: Request):
     logger.info(f"get_my_profile: user_info={user_info}")
     # Return the user info already resolved by middleware (SQLite-first)
     # instead of re-reading from JSON which may be out of sync
+    username = user_info.get("username", "")
+    # password_set_by_user 存于 JSON user_store（认证主存储）。middleware 的
+    # user_info 是 SQLite-first，不一定含该字段，故显式从 JSON 读取（默认 True，
+    # 向后兼容：老用户视为已设置，走"修改密码"需旧密码）。
+    try:
+        from ..user_store import get_user as _get_json_user
+        json_user = _get_json_user(username) if username else None
+    except Exception:
+        json_user = None
     return {
-        "username": user_info.get("username", ""),
-        "display_name": user_info.get("display_name", user_info.get("username", "")),
+        "username": username,
+        "display_name": user_info.get("display_name", username),
         "role": user_info.get("role", "user"),
         "email": user_info.get("email", ""),
+        "password_set_by_user": (json_user or {}).get("password_set_by_user", True),
     }
 
 
@@ -295,6 +310,35 @@ async def update_profile(request: Request, payload: UpdateProfileRequest):
         raise HTTPException(status_code=400, detail="更新失败，请检查当前密码")
 
     return {"message": "资料已更新"}
+
+
+@router.post("/set-initial-password")
+async def set_initial_password(request: Request, payload: SetInitialPasswordRequest):
+    """首次设置密码：外部系统自动创建、从未自己设置过密码的用户。
+
+    不校验旧密码；成功后置为"已设置"，此后改密走 /update-profile（需旧密码）。
+    """
+    from ..user_store import get_user as _get_json_user
+    from ..user_store import set_initial_password as _do_set_pw
+    user_info = get_current_user(request)
+    username = user_info.get("username", "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    json_user = _get_json_user(username)
+    if json_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if json_user.get("password_set_by_user", True):
+        raise HTTPException(
+            status_code=400,
+            detail="Password already set; use 'modify password' instead.",
+        )
+    if not payload.new_password or len(payload.new_password) < 8:
+        raise HTTPException(
+            status_code=400, detail="Password must be at least 8 characters"
+        )
+    if not _do_set_pw(username, payload.new_password):
+        raise HTTPException(status_code=500, detail="Failed to set initial password")
+    return {"success": True, "username": username}
 
 
 @router.delete("/users/{username}")

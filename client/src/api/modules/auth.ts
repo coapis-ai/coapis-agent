@@ -1,4 +1,4 @@
-import { getApiUrl } from "../config";
+import { getApiUrl, getApiToken } from "../config";
 
 export interface LoginResponse {
   token: string;
@@ -67,6 +67,25 @@ export const authApi = {
   getStatus: async (): Promise<AuthStatusResponse> => {
     const res = await fetch(getApiUrl("/auth/status"));
     if (!res.ok) throw new Error("Failed to check auth status");
+    return res.json();
+  },
+
+  setInitialPassword: async (
+    newPassword: string,
+  ): Promise<{ success: boolean; username: string }> => {
+    const token = getApiToken();
+    const res = await fetch(getApiUrl("/auth/set-initial-password"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Failed to set initial password");
+    }
     return res.json();
   },
 
@@ -156,7 +175,7 @@ export const authApi = {
     newUsername?: string,
     newPassword?: string,
   ): Promise<LoginResponse> => {
-    const token = localStorage.getItem("coapis_auth_token") || "";
+    const token = getApiToken();
     const res = await fetch(getApiUrl("/auth/update-profile"), {
       method: "POST",
       headers: {
@@ -182,7 +201,7 @@ export const authApi = {
     agent_role?: string;
     user_name?: string;
   }): Promise<{ ok: boolean }> => {
-    const token = localStorage.getItem("coapis_auth_token") || "";
+    const token = getApiToken();
     const res = await fetch(getApiUrl("/auth/onboarding/complete"), {
       method: "POST",
       headers: {
@@ -199,7 +218,7 @@ export const authApi = {
   },
 
   getOnboardingStatus: async (): Promise<{ onboarding_completed: boolean }> => {
-    const token = localStorage.getItem("coapis_auth_token") || "";
+    const token = getApiToken();
     const res = await fetch(getApiUrl("/auth/onboarding/status"), {
       headers: {
         Authorization: `Bearer ${token}`,

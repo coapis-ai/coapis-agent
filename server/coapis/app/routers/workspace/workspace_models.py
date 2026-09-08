@@ -199,7 +199,9 @@ async def test_model_connection(
         
         # 尝试获取模型列表
         models = await client.models.list()
-        model_ids = [m.id for m in models[:20]]  # 限制返回数量
+        # openai>=1.x: list() 返回 AsyncPage 分页对象（可迭代但不可下标切片），
+        # 需取 .data 得到真正的 Model 列表
+        model_ids = [m.id for m in models.data[:20]]  # 限制返回数量
         
         await client.close()
         

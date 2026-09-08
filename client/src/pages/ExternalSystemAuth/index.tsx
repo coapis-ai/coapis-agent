@@ -93,12 +93,20 @@ interface IdentityBinding {
   provider: string;
   external_id: string;
   external_name?: string | null;
+  department?: string | null;
+  position?: string | null;
   source?: string; // auto | auto_matched | manual
   status: number;
   created_at?: string;
   last_login_at?: string;
   login_count?: number;
   updated_at?: string;
+}
+
+interface UserInfo {
+  username: string;
+  display_name: string;
+  role?: string;
 }
 
 const LOGIN_TYPE_LABELS: Record<string, string> = {
@@ -144,6 +152,7 @@ function ExternalSystemAuthPage() {
   const [bindingModalOpen, setBindingModalOpen] = useState(false);
   const [editingBinding, setEditingBinding] = useState<IdentityBinding | null>(null);
   const [bindingForm] = Form.useForm();
+  const [userList, setUserList] = useState<UserInfo[]>([]);
 
   // Load systems config
   const loadSystemsConfig = async () => {
@@ -168,13 +177,32 @@ function ExternalSystemAuthPage() {
     }
   };
 
+  // Load user list for binding selector
+  const loadUserList = async () => {
+    try {
+      const res: any = await api.get('/auth/users');
+      setUserList(Array.isArray(res) ? res : res.data || []);
+    } catch (e: any) {
+      // silently fail — user selector will just be empty
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'systems') {
       loadSystemsConfig();
     } else {
       loadBindings();
     }
+    // 确保 provider 下拉数据始终可用（绑定 modal 需要）
+    if (systemsConfig.length === 0) {
+      loadSystemsConfig();
+    }
   }, [activeTab]);
+
+  // Load user list once on mount (needed for binding modal)
+  useEffect(() => {
+    loadUserList();
+  }, []);
 
   // Handle add/edit system config
   const handleSystemModalOpen = (system?: ExternalSystemConfig) => {
@@ -446,6 +474,24 @@ function ExternalSystemAuthPage() {
       title: '内部用户',
       dataIndex: 'user_id',
       key: 'user_id',
+      render: (v: string) => {
+        const u = userList.find((item) => item.username === v);
+        return u ? <>{u.display_name} <span style={{ color: '#999', fontSize: 12 }}>({v})</span></> : v;
+      },
+    },
+    {
+      title: '外部系统',
+      dataIndex: 'provider',
+      key: 'provider',
+      render: (v: string) => {
+        const s = systemsConfig.find((item) => item.provider_id === v);
+        return s ? (s.name || v) : v;
+      },
+    },
+    {
+      title: '外部ID',
+      dataIndex: 'external_id',
+      key: 'external_id',
     },
     {
       title: '显示名',
@@ -454,14 +500,16 @@ function ExternalSystemAuthPage() {
       render: (v?: string | null) => v || <span style={{ color: '#bbb' }}>-</span>,
     },
     {
-      title: '系统 Provider',
-      dataIndex: 'provider',
-      key: 'provider',
+      title: '部门',
+      dataIndex: 'department',
+      key: 'department',
+      render: (v?: string | null) => v || <span style={{ color: '#bbb' }}>-</span>,
     },
     {
-      title: '外部ID',
-      dataIndex: 'external_id',
-      key: 'external_id',
+      title: '职位',
+      dataIndex: 'position',
+      key: 'position',
+      render: (v?: string | null) => v || <span style={{ color: '#bbb' }}>-</span>,
     },
     {
       title: '来源',
@@ -488,11 +536,13 @@ function ExternalSystemAuthPage() {
       dataIndex: 'login_count',
       key: 'login_count',
       render: (v?: number) => v ?? 0,
+      width: 80,
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
+      width: 80,
       render: (status: number) => (
         <Tag color={status === 1 ? 'success' : 'default'}>
           {status === 1 ? '已绑定' : '未绑定'}
@@ -502,6 +552,7 @@ function ExternalSystemAuthPage() {
     {
       title: '操作',
       key: 'actions',
+      width: 120,
       render: (_: any, record: IdentityBinding) => (
         <Space>
           <Button
@@ -999,20 +1050,54 @@ function ExternalSystemAuthPage() {
         open={bindingModalOpen}
         onCancel={() => setBindingModalOpen(false)}
         onOk={handleSaveBinding}
-        width={500}
+        width={520}
       >
         <Form form={bindingForm} layout="vertical">
-          <Form.Item name="user_id" label="内部用户ID" rules={[{ required: true }]}>
-            <Input placeholder="CoApis内部用户名或ID" />
+          <Form.Item name="user_id" label="内部用户" rules={[{ required: true, message: '请选择内部用户' }]}>
+            <Select
+              showSearch
+              placeholder="搜索并选择 CoApis 内部用户"
+              optionFilterProp="label"
+              filterOption={(input, option) =>
+                (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ||
+                (option?.value as string)?.toLowerCase().includes(input.toLowerCase())
+              }
+              notFoundContent={userList.length === 0 ? '暂无用户数据' : '无匹配用户'}
+            >
+              {userList.map((u) => (
+                <Option key={u.username} value={u.username} label={`${u.display_name} (${u.username})`}>
+                  {u.display_name} ({u.username})
+                </Option>
+              ))}
+            </Select>
           </Form.Item>
-          <Form.Item name="provider" label="系统编号 / Provider" rules={[{ required: true }]}>
-            <Input placeholder="例如: wecom, dingtalk, feishu" disabled={!!editingBinding} />
+          <Form.Item name="provider" label="关联外部系统" rules={[{ required: true, message: '请选择外部系统' }]}>
+            <Select
+              placeholder="选择已配置的外部系统"
+              disabled={!!editingBinding}
+              optionFilterProp="label"
+              filterOption={(input, option) =>
+                (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
+              }
+            >
+              {systemsConfig.map((s) => (
+                <Option key={s.provider_id} value={s.provider_id} label={s.name || s.provider_id}>
+                  {s.name || s.provider_id}
+                </Option>
+              ))}
+            </Select>
           </Form.Item>
-          <Form.Item name="external_id" label="外部系统OpenID / External ID" rules={[{ required: true }]}>
+          <Form.Item name="external_id" label="外部系统用户ID / OpenID" rules={[{ required: true, message: '请输入外部用户ID' }]}>
             <Input placeholder="外部系统的用户标识或OpenID" disabled={!!editingBinding} />
           </Form.Item>
           <Form.Item name="external_name" label="显示名（外部系统姓名）">
             <Input placeholder="可选，如: 张三" />
+          </Form.Item>
+          <Form.Item name="department" label="部门">
+            <Input placeholder="可选，如: 技术部" />
+          </Form.Item>
+          <Form.Item name="position" label="职位">
+            <Input placeholder="可选，如: 工程师" />
           </Form.Item>
         </Form>
       </Modal>

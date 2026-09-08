@@ -42,6 +42,7 @@ class UserInfoResponse(BaseModel):
     role: str = "user"
     token_remaining: int = 0
     is_active: bool = True
+    password_set_by_user: bool = True
 
 
 @router.get("/user/me")
@@ -105,6 +106,7 @@ async def get_current_user(request: Request) -> UserInfoResponse:
                         points=0,
                         token_remaining=100000,  # 默认配额
                         is_active=True,
+                        password_set_by_user=json_user.get("password_set_by_user", True),
                     )
         except Exception as e:
             logger.warning(f"Failed to query JSON user_store for {username}: {e}")
@@ -126,6 +128,14 @@ async def get_current_user(request: Request) -> UserInfoResponse:
     # 计算 Token 剩余
     token_remaining = max(0, user.token_quota_monthly - user.token_used_monthly)
 
+    # password_set_by_user 存于 JSON user_store（认证主存储），SQLite 不存该字段
+    try:
+        from ...user_store import get_user as json_get_user
+        juser = json_get_user(username)
+        pw_set = (juser or {}).get("password_set_by_user", True)
+    except Exception:
+        pw_set = True
+
     return UserInfoResponse(
         id=user.id,
         username=user.username,
@@ -134,4 +144,5 @@ async def get_current_user(request: Request) -> UserInfoResponse:
         role=user.role,
         token_remaining=token_remaining,
         is_active=user.is_active,
+        password_set_by_user=pw_set,
     )

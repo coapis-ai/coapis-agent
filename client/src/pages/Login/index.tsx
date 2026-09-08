@@ -277,86 +277,115 @@ export default function LoginPage() {
           </Form.Item>
         </Form>
 
-        {externalSystems.length > 0 && (
-          <div style={{ marginTop: 24 }}>
+        <div style={{ marginTop: 24 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              margin: "0 0 16px",
+            }}
+          >
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                margin: "0 0 16px",
+                flex: 1,
+                height: 1,
+                background: isDark ? "rgba(255,255,255,0.15)" : "#e8e8e8",
+              }}
+            />
+            <span
+              style={{
+                fontSize: 12,
+                color: isDark ? "rgba(255,255,255,0.45)" : "#999",
+                whiteSpace: "nowrap",
               }}
             >
-              <div
-                style={{
-                  flex: 1,
-                  height: 1,
-                  background: isDark ? "rgba(255,255,255,0.15)" : "#e8e8e8",
-                }}
+              {t("login.loginMethods", "登录方式")}
+            </span>
+            <div
+              style={{
+                flex: 1,
+                height: 1,
+                background: isDark ? "rgba(255,255,255,0.15)" : "#e8e8e8",
+              }}
+            />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              flexWrap: "wrap",
+              gap: 12,
+            }}
+          >
+            {/* 蜜蜂（CoApis 自身登录）入口：固定首位，credSys===null 时高亮 */}
+            <Button
+              key="coapis"
+              onClick={() => setCredSys(null)}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 8,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+                background:
+                  credSys === null
+                    ? "#FF7F16"
+                    : isDark
+                      ? "rgba(255,255,255,0.08)"
+                      : "#fafafa",
+                color: credSys === null ? "#fff" : undefined,
+              }}
+            >
+              <img
+                src="/bee_icon.png"
+                alt="CoApis"
+                style={{ width: 28, height: 28 }}
               />
-              <span
+              <span style={{ fontSize: 13, lineHeight: 1.2 }}>CoApis</span>
+            </Button>
+            {externalSystems.map((sys) => (
+              <Button
+                key={sys.provider_id}
+                onClick={() => handleExternalLogin(sys)}
                 style={{
-                  fontSize: 12,
-                  color: isDark ? "rgba(255,255,255,0.45)" : "#999",
-                  whiteSpace: "nowrap",
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 4,
+                  background:
+                    credSys?.provider_id === sys.provider_id
+                      ? "#FF7F16"
+                      : isDark
+                        ? "rgba(255,255,255,0.08)"
+                        : "#fafafa",
+                  color:
+                    credSys?.provider_id === sys.provider_id
+                      ? "#fff"
+                      : undefined,
                 }}
               >
-                {t("login.otherLoginMethods")}
-              </span>
-              <div
+                <ExternalSystemIcon icon={sys.icon} size={28} />
+                <span style={{ fontSize: 13, lineHeight: 1.2 }}>{sys.name}</span>
+              </Button>
+            ))}
+            {credSys && (
+              <p
                 style={{
-                  flex: 1,
-                  height: 1,
-                  background: isDark ? "rgba(255,255,255,0.15)" : "#e8e8e8",
+                  margin: "10px 0 0",
+                  fontSize: 12,
+                  color: isDark ? "rgba(255,255,255,0.45)" : "#999",
+                  textAlign: "center",
                 }}
-              />
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                flexWrap: "wrap",
-                gap: 12,
-              }}
-            >
-              {externalSystems.map((sys) => (
-                <Button
-                  key={sys.provider_id}
-                  onClick={() => handleExternalLogin(sys)}
-                  style={{
-                    padding: "6px 18px",
-                    borderRadius: 8,
-                    background:
-                      credSys?.provider_id === sys.provider_id
-                        ? "#FF7F16"
-                        : isDark
-                          ? "rgba(255,255,255,0.08)"
-                          : "#fafafa",
-                    color:
-                      credSys?.provider_id === sys.provider_id
-                        ? "#fff"
-                        : undefined,
-                  }}
-                >
-                  <ExternalSystemIcon icon={sys.icon} size={20} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-                  {sys.name}
-                </Button>
-              ))}
-              {credSys && (
-                <p
-                  style={{
-                    margin: "10px 0 0",
-                    fontSize: 12,
-                    color: isDark ? "rgba(255,255,255,0.45)" : "#999",
-                    textAlign: "center",
-                  }}
-                >
-                  在上方输入{credSys.name}的账号密码即可登录，再次点击可切换回 CoApis 登录
-                </p>
-              )}
-            </div>
+              >
+                在上方输入{credSys.name}的账号密码即可登录，点击 CoApis 可切换回主登录
+              </p>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

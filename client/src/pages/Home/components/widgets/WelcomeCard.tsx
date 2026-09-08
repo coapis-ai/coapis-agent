@@ -7,6 +7,7 @@ import { EditOutlined, CheckOutlined } from '@ant-design/icons';
 import { message } from 'antd';
 import styles from '../../styles.module.less';
 import { WidgetProps } from '../../types';
+import { getApiToken } from '../../../../api/config';
 
 interface WelcomeCardProps extends WidgetProps {}
 
@@ -41,7 +42,7 @@ const WelcomeCard: React.FC<WelcomeCardProps> = ({ onRefresh }) => {
     setLoading(true);
     try {
       // 获取token
-      const token = localStorage.getItem('coapis_auth_token');
+      const token = getApiToken();
       
       if (!token) {
         // 未登录，使用默认标签
@@ -76,7 +77,7 @@ const WelcomeCard: React.FC<WelcomeCardProps> = ({ onRefresh }) => {
   const handleSaveTags = async () => {
     setSaving(true);
     try {
-      const token = localStorage.getItem('coapis_auth_token');
+      const token = getApiToken();
       
       if (!token) {
         message.warning('请先登录');

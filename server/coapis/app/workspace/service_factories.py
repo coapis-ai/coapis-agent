@@ -105,6 +105,34 @@ async def create_mcp_service(ws: "Workspace", mcp):
     # pylint: enable=protected-access
 
 
+def _maybe_wrap_chat_repository(chat_repo):
+    """企业版扩展点：若企业版已安装且提供了 wrap_chat_repository，则包装仓储。
+
+    社区版不 import 企业版代码，仅依赖 enterprise_plugin 模块（与
+    tag/scene 注入同一模式）。未安装企业版或包装失败时，原样返回
+    文件主仓储，社区版行为完全不变。
+    """
+    try:
+        from ...enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
+    except ImportError:
+        return chat_repo
+
+    if not is_enterprise_installed():
+        return chat_repo
+
+    plugin = get_enterprise_plugin()
+    if plugin is None or not hasattr(plugin, "wrap_chat_repository"):
+        return chat_repo
+
+    try:
+        wrapped = plugin.wrap_chat_repository(chat_repo)
+        logger.info("Chat repository wrapped with enterprise archiving (file-primary + PG)")
+        return wrapped
+    except Exception:
+        logger.warning("wrap_chat_repository failed, using file-only repository", exc_info=True)
+        return chat_repo
+
+
 async def create_chat_service(ws: "Workspace", service):
     """Create and attach chat manager, or reuse existing one.
 
@@ -126,6 +154,9 @@ async def create_chat_service(ws: "Workspace", service):
         chats_dir.mkdir(parents=True, exist_ok=True)
         chats_path = str(chats_dir / "chats.json")
         chat_repo = JsonChatRepository(chats_path)
+        # 企业版扩展点：归档仓储包装（文件为主 + PG 旁路归档）。
+        # 社区版行为完全不变；企业版通过 plugin.wrap_chat_repository 包装。
+        chat_repo = _maybe_wrap_chat_repository(chat_repo)
         cm = ChatManager(repo=chat_repo)
         ws._service_manager.services["chat_manager"] = cm
         logger.info(f"ChatManager created: {chats_path}")

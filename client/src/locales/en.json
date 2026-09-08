@@ -2445,6 +2445,7 @@
     "unauthorized": "Unauthorized, please login",
     "rememberMe": "Remember me",
     "otherLoginMethods": "Other login methods",
+    "loginMethods": "Login methods",
     "externalLoginFailed": "Failed to start external login",
     "callbackLoading": "Completing login…",
     "callbackLoadingHint": "Verifying external system identity, please wait",

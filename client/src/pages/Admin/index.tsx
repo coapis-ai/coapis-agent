@@ -313,6 +313,7 @@ export function UsersTab() {
       display_name: u.display_name || '',
       role: u.role || 'user',
       is_active: u.is_active ?? true,
+      password: '',
     });
     setEditRoleVal(u.role || 'user');
     // Load existing overrides from API, merge with role defaults for full display
@@ -335,6 +336,8 @@ export function UsersTab() {
   const handleSaveEdit = async () => {
     try {
       const values = await editForm.validateFields();
+      // 重置密码：留空则不传（后端 is not None 才更新；空串会被当作新密码导致密码被置空）
+      if (!values.password) delete values.password;
       const overrides = computeOverrides(editRoleVal, editOverrides);
       // When overrides is null (no diff from role defaults), send {} to clear
       // any previously stored overrides — otherwise they'd persist forever.
@@ -355,7 +358,7 @@ export function UsersTab() {
       content: t('admin.confirmDisableDesc', { username: u.username }),
       onOk: async () => {
         try {
-          await disableUser(u.id);
+          await disableUser(u.username);
           message.success(t('admin.userDisabled'));
           loadUsers();
         } catch (e: any) {
@@ -371,7 +374,7 @@ export function UsersTab() {
       content: t('admin.confirmEnableDesc', { username: u.username }),
       onOk: async () => {
         try {
-          await updateUser(u.id, { is_active: true });
+          await updateUser(u.username, { is_active: true });
           message.success(t('admin.userEnabled'));
           loadUsers();
         } catch (e: any) {
@@ -401,7 +404,7 @@ export function UsersTab() {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await deleteUser(u.id, { backup: true });
+          await deleteUser(u.username, { backup: true });
           message.success(t('admin.userDeleted'));
           loadUsers();
         } catch (e: any) {
@@ -610,6 +613,13 @@ export function UsersTab() {
             </Form.Item>
             <Form.Item name="is_active" valuePropName="checked" label={t('usersystem.status')}>
               <Switch />
+            </Form.Item>
+            <Form.Item
+              name="password"
+              label={t('admin.resetPassword', { defaultValue: '重置密码' })}
+              extra={t('admin.resetPasswordExtra', { defaultValue: '留空则不修改；填写则为该用户重置密码' })}
+            >
+              <Input.Password placeholder={t('admin.resetPasswordPlaceholder', { defaultValue: '输入新密码' })} />
             </Form.Item>
           </Form>
         </div>

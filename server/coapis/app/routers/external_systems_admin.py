@@ -325,9 +325,22 @@ async def bind_external_identity_admin(request: Request):
     provider = data.get("provider")
     external_id = data.get("external_id")
     external_name = str(data.get("external_name") or "").strip() or None
+    department = str(data.get("department") or "").strip() or None
+    position = str(data.get("position") or "").strip() or None
 
     if not user_id or not provider or not external_id:
         raise HTTPException(status_code=400, detail="Missing required parameters: user_id, provider, external_id")
+
+    # Validate user exists
+    try:
+        from ...user_store import get_user
+        user_info = get_user(user_id)
+        if user_info is None:
+            raise HTTPException(status_code=400, detail=f"User '{user_id}' not found. Please select a valid user.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # user_store not available, skip validation
 
     mappings_data = load_bindings()
     
@@ -336,9 +349,21 @@ async def bind_external_identity_admin(request: Request):
         if b.get("provider") == provider and b.get("external_id") == external_id:
             if b.get("user_id") != user_id:
                 raise HTTPException(status_code=400, detail="External ID already bound to another account.")
-            # If bound to the same user, just update status or return success
+            # If bound to the same user, update extended fields and return success
+            changed = False
+            if external_name and b.get("external_name") != external_name:
+                b["external_name"] = external_name
+                changed = True
+            if department is not None and b.get("department") != department:
+                b["department"] = department
+                changed = True
+            if position is not None and b.get("position") != position:
+                b["position"] = position
+                changed = True
             if b.get("status") != 1:
                 b["status"] = 1
+                changed = True
+            if changed:
                 b["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 save_bindings_atomic(mappings_data)
             return {"success": True, "message": "Binding already exists and is active."}
@@ -349,6 +374,8 @@ async def bind_external_identity_admin(request: Request):
         "provider": provider,
         "external_id": external_id,
         "external_name": external_name,
+        "department": department,
+        "position": position,
         "source": "manual",
         "status": 1,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -442,9 +469,17 @@ async def import_batch_identity_mappings(request: Request):
                 failed_count += 1
                 errors.append(f"Row {idx + 1}: External ID '{external_id}' for provider '{provider}' is already bound to user '{existing_match['user_id']}'.")
             else:
-                # Already bound to the same user, update status if needed
+                # Already bound to the same user, update extended fields if provided
+                changed = False
                 if existing_match.get("status") != 1:
                     existing_match["status"] = 1
+                    changed = True
+                for field in ("external_name", "department", "position"):
+                    val = str(item.get(field) or "").strip() or None
+                    if val is not None and existing_match.get(field) != val:
+                        existing_match[field] = val
+                        changed = True
+                if changed:
                     existing_match["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 success_count += 1
         else:
@@ -454,6 +489,8 @@ async def import_batch_identity_mappings(request: Request):
                 "provider": provider,
                 "external_id": external_id,
                 "external_name": str(item.get("external_name") or "").strip() or None,
+                "department": str(item.get("department") or "").strip() or None,
+                "position": str(item.get("position") or "").strip() or None,
                 "source": "manual",
                 "status": 1,
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

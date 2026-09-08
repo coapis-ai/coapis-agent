@@ -7,6 +7,7 @@ import { StarFilled } from '@ant-design/icons';
 import { message } from 'antd';
 import styles from '../../styles.module.less';
 import { WidgetProps, Scene } from '../../types';
+import { getApiToken } from '../../../../api/config';
 
 interface FavoritesCardProps extends WidgetProps {}
 
@@ -25,7 +26,7 @@ const FavoritesCard: React.FC<FavoritesCardProps> = ({ onRefresh }) => {
     setLoading(true);
     try {
       // 获取token
-      const token = localStorage.getItem('coapis_auth_token');
+      const token = getApiToken();
       
       if (!token) {
         // 未登录，显示空状态
@@ -69,7 +70,7 @@ const FavoritesCard: React.FC<FavoritesCardProps> = ({ onRefresh }) => {
     e.stopPropagation();
     
     try {
-      const token = localStorage.getItem('coapis_auth_token');
+      const token = getApiToken();
       if (!token) {
         message.warning('请先登录');
         return;
