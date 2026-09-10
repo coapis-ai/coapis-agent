@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Card,
   Table,
@@ -146,6 +146,9 @@ function ExternalSystemAuthPage() {
   const [systemModalOpen, setSystemModalOpen] = useState(false);
   const [editingSystem, setEditingSystem] = useState<ExternalSystemConfig | null>(null);
   const [systemForm] = Form.useForm();
+  // 图标上传用：隐藏 <input type="file">（不绑 antd Form 字段，避免
+  // Upload 组件把字符串值当作文件数组处理导致的 startsWith 崩溃）。
+  const iconInputRef = useRef<HTMLInputElement>(null);
 
   // Identity bindings state
   const [bindings, setBindings] = useState<IdentityBinding[]>([]);
@@ -203,6 +206,43 @@ function ExternalSystemAuthPage() {
   useEffect(() => {
     loadUserList();
   }, []);
+
+  // 读取并压缩上传的图标为 96px PNG base64，写入表单（表单值始终是字符串）。
+  const handleIconFile = (file?: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const size = 96;
+          const canvas = document.createElement('canvas');
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            systemForm.setFieldValue('icon', dataUrl);
+            return;
+          }
+          const minDim = Math.min(img.width, img.height);
+          const sx = (img.width - minDim) / 2;
+          const sy = (img.height - minDim) / 2;
+          ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+          systemForm.setFieldValue('icon', canvas.toDataURL('image/png'));
+        } catch {
+          // 压缩失败时兜底直接用原图 dataURL，交给后端校验
+          systemForm.setFieldValue('icon', dataUrl);
+        }
+      };
+      img.onerror = () => {
+        // 非有效图片，直接用原 dataURL 交给后端校验
+        systemForm.setFieldValue('icon', dataUrl);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Handle add/edit system config
   const handleSystemModalOpen = (system?: ExternalSystemConfig) => {
@@ -671,40 +711,28 @@ function ExternalSystemAuthPage() {
             <Form.Item name="name" label="系统名称" rules={[{ required: true }]} style={{ flex: 1 }}>
               <Input placeholder="例如: 企业微信" />
             </Form.Item>
-            <Form.Item name="icon" label="图标" style={{ width: 180 }}
+            <Form.Item label="图标" style={{ width: 180 }}
               tooltip="支持上传图片（自动压缩为 96px base64）或输入 emoji"
             >
-              <Upload
-                listType="picture"
+              <Button icon={<UploadOutlined />} onClick={() => iconInputRef.current?.click()}>
+                上传图标
+              </Button>
+              {/* 隐藏 file input：不绑 antd Form 字段，避免字符串值被当文件数组处理
+                  导致的 startsWith is not a function 崩溃（icon 表单值始终是字符串）。 */}
+              <input
+                ref={iconInputRef}
+                type="file"
                 accept="image/*"
-                maxCount={1}
-                beforeUpload={(file) => {
-                  // 前端压缩为 96px base64
-                  const reader = new FileReader();
-                  reader.onload = (e) => {
-                    const img = new Image();
-                    img.onload = () => {
-                      const canvas = document.createElement('canvas');
-                      const size = 96;
-                      canvas.width = size;
-                      canvas.height = size;
-                      const ctx = canvas.getContext('2d')!;
-                      // 居中裁切
-                      const minDim = Math.min(img.width, img.height);
-                      const sx = (img.width - minDim) / 2;
-                      const sy = (img.height - minDim) / 2;
-                      ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
-                      const dataUrl = canvas.toDataURL('image/png');
-                      systemForm.setFieldValue('icon', dataUrl);
-                    };
-                    img.src = e.target?.result as string;
-                  };
-                  reader.readAsDataURL(file);
-                  return false; // Prevent auto-upload
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  handleIconFile(e.target.files?.[0]);
+                  e.target.value = '';
                 }}
-              >
-                <Button icon={<UploadOutlined />}>上传图标</Button>
-              </Upload>
+              />
+            </Form.Item>
+            {/* 注册 icon 表单字段（隐藏）：保证保存时 values.icon 存在且为字符串 */}
+            <Form.Item name="icon" noStyle>
+              <input type="text" style={{ display: 'none' }} />
             </Form.Item>
           </div>
           {/* 图标预览 */}
@@ -737,7 +765,7 @@ function ExternalSystemAuthPage() {
             <Form.Item name={['login_type']} label="登录方式" style={{ flex: 1 }} rules={[{ required: true }]}>
               <Select>
                 <Option value="sso_redirect">SSO 跳转（模型A）</Option>
-                <Option value="credential">凭证直登（模型B，二期）</Option>
+                <Option value="credential">凭证直登（模型B）</Option>
                 <Option value="none">不登录（仅出站身份断言）</Option>
               </Select>
             </Form.Item>
@@ -888,6 +916,108 @@ function ExternalSystemAuthPage() {
                         ),
                       },
                       {
+                        key: 'token',
+                        label: '外部 Token 透传（可选）',
+                        children: (
+                          <>
+                            <p style={{ margin: 0, fontSize: 12, color: '#888' }}>
+                              外部系统不支持 CoApis 签名断言时，开启「透传」：登录时把外部系统签发的
+                              token 存进用户绑定，出站（MCP/HTTP）自动以 <code>Authorization: Bearer</code> 注入，外部系统零改造。
+                            </p>
+                            <Form.Item
+                              name={['credential', 'external_token', 'mode']}
+                              label="Token 模式"
+                              initialValue="none"
+                            >
+                              <Select>
+                                <Option value="none">不处理（默认）</Option>
+                                <Option value="pass_through">透传外部 token（pass_through）</Option>
+                              </Select>
+                            </Form.Item>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              <Form.Item
+                                name={['credential', 'external_token', 'access_field']}
+                                label="Access Token 字段"
+                                initialValue="data.accessToken"
+                                tooltip="从登录响应提取 access token 的点号路径"
+                              >
+                                <Input placeholder="data.accessToken" />
+                              </Form.Item>
+                              <Form.Item
+                                name={['credential', 'external_token', 'refresh_token_field']}
+                                label="Refresh Token 字段"
+                                initialValue="data.refreshToken"
+                              >
+                                <Input placeholder="data.refreshToken" />
+                              </Form.Item>
+                              <Form.Item
+                                name={['credential', 'external_token', 'expires_in_field']}
+                                label="过期时间字段"
+                                initialValue="data.expiresTime"
+                                tooltip="毫秒/秒 epoch、相对秒数或 ISO 字符串均可"
+                              >
+                                <Input placeholder="data.expiresTime" />
+                              </Form.Item>
+                            </div>
+                            <Form.Item
+                              name={['credential', 'external_token', 'refresh', 'url']}
+                              label="刷新端点 URL"
+                              tooltip="外部系统刷新 token 的接口；留空则不自动刷新（token 过期需重登）"
+                            >
+                              <Input placeholder="https://oa.example.com/api/refresh-token" />
+                            </Form.Item>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              <Form.Item
+                                name={['credential', 'external_token', 'refresh', 'method']}
+                                label="刷新方法"
+                                initialValue="POST"
+                              >
+                                <Select>
+                                  <Option value="POST">POST</Option>
+                                  <Option value="GET">GET</Option>
+                                </Select>
+                              </Form.Item>
+                              <Form.Item
+                                name={['credential', 'external_token', 'refresh', 'placement']}
+                                label="refresh_token 位置"
+                                initialValue="query"
+                                tooltip="query=拼在 URL 查询参数；body=放在请求体"
+                              >
+                                <Select>
+                                  <Option value="query">URL 查询参数 (query)</Option>
+                                  <Option value="body">请求体 (body)</Option>
+                                </Select>
+                              </Form.Item>
+                              <Form.Item
+                                name={['credential', 'external_token', 'refresh', 'token_param']}
+                                label="refresh_token 参数名"
+                                initialValue="refreshToken"
+                              >
+                                <Input placeholder="refreshToken" />
+                              </Form.Item>
+                            </div>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              <Form.Item
+                                name={['credential', 'external_token', 'refresh_ratio']}
+                                label="提前刷新比例"
+                                initialValue={0.05}
+                                tooltip="距过期时间小于「token 寿命 × 此比例」时提前刷新（默认 0.05 = 5%）"
+                              >
+                                <InputNumber min={0} max={0.5} step={0.01} style={{ width: 140 }} />
+                              </Form.Item>
+                              <Form.Item
+                                name={['credential', 'external_token', 'refresh_margin_sec']}
+                                label="提前刷新下限（秒）"
+                                initialValue={60}
+                                tooltip="绝对下限：距过期小于此秒数必刷新；实际阈值取 max(寿命×比例, 此值)"
+                              >
+                                <InputNumber min={0} max={3600} step={10} style={{ width: 140 }} />
+                              </Form.Item>
+                            </div>
+                          </>
+                        ),
+                      },
+                      {
                         key: 'example',
                         label: '数据示例（参考）',
                         children: (
@@ -926,8 +1056,11 @@ function ExternalSystemAuthPage() {
                                 const p = (document.getElementById('test-password') as HTMLInputElement)?.value || '';
                                 if (!u || !p) { message.warning('请输入测试账号'); return; }
                                 try {
+                                  // 把表单里正在编辑的 credential 一并传给后端，
+                                  // 未保存也能测试真实连通性（覆盖未保存场景）
+                                  const credValues = systemForm.getFieldValue('credential') || {};
                                   const res: any = await api.post('/auth/external/credential-test', {
-                                    provider, username: u, password: p,
+                                    provider, username: u, password: p, credential: credValues,
                                   });
                                   if (res.success) {
                                     message.success(`连接成功！external_id=${res.external_id || '(未配置)'}, name=${res.external_name || '(无)'}`);
@@ -935,7 +1068,11 @@ function ExternalSystemAuthPage() {
                                     message.error(res.error || '测试失败');
                                   }
                                 } catch (e: any) {
-                                  message.error(e?.response?.data?.detail || '测试失败');
+                                  // request 层把 FastAPI detail 与原始响应拼成 "detail - {body}"，
+                                  // 提取干净的 detail，避免用户看到 JSON 噪音
+                                  const raw: string = e?.message || e?.response?.data?.detail || '';
+                                  const m = raw.match(/"detail"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+                                  message.error(m ? JSON.parse(`"${m[1]}"`) : (raw || '测试失败'));
                                 }
                               },
                             });

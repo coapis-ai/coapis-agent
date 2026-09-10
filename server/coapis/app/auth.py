@@ -153,8 +153,17 @@ def _get_jwt_secret() -> str:
     return secret
 
 
-def create_token(username: str, expiry_seconds: Optional[int] = None) -> str:
-    """Create HMAC-signed token: base64(payload).signature"""
+def create_token(
+    username: str,
+    expiry_seconds: Optional[int] = None,
+    ext_provider: Optional[str] = None,
+) -> str:
+    """Create HMAC-signed token: base64(payload).signature
+
+    ext_provider: 记录用户通过哪个外部系统登录（provider_id），供前端在
+    页面头部展示"所登录的外部系统"名称/LOGO。普通账号密码登录不传，
+    旧 token 无该字段，向后兼容。
+    """
     if expiry_seconds is None:
         expiry_seconds = TOKEN_EXPIRY_SECONDS
     elif expiry_seconds <= 0:
@@ -170,9 +179,31 @@ def create_token(username: str, expiry_seconds: Optional[int] = None) -> str:
         "iat": int(time.time()),
         "jti": token_id,
     })
+    if ext_provider:
+        payload = json.dumps({
+            "sub": username,
+            "exp": int(time.time()) + expiry_seconds,
+            "iat": int(time.time()),
+            "jti": token_id,
+            "ext_provider": str(ext_provider),
+        })
     payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode()
     sig = hmac.new(secret.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
     return f"{payload_b64}.{sig}"
+
+
+def get_token_ext_provider(token: str) -> Optional[str]:
+    """Extract the ext_provider claim from a token payload.
+
+    仅解析 payload（base64 JSON），不做签名校验（调用方应已验证 token，
+    如经过 auth middleware 的鉴权路径）。旧 token 无该字段 → None。
+    """
+    try:
+        payload_b64 = token.split(".", 1)[0]
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return payload.get("ext_provider") or None
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError, IndexError):
+        return None
 
 
 def verify_token(token: str) -> Optional[str]:

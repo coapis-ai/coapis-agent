@@ -14,7 +14,7 @@ import C2ARenderer, { setUrlNavigate } from '@coapis-c2a/renderer/C2ARenderer';
 import type { C2AMessage } from '@coapis-c2a/renderer/types';
 import { openExternalUrl } from '@/utils/externalNav';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 // 外部系统导航拦截：C2A 卡片里的行链接 / 按钮 / 快捷建议点击外部 URL 时，
 // 先向后端换取带身份断言的签名 URL 再打开（浏览器无法带自定义请求头）。
@@ -139,56 +139,21 @@ export default function C2AToolCard({ data }: C2AToolCardProps) {
     );
   }
 
-  // 2) 跳过（工具输出里没有可渲染的数据列表）→ 提示 + 原始输出
+  // 2) 跳过（工具输出里没有可渲染的数据列表）→ 简洁提示。
+  // 不展示原始输出/技术报错——数据已由 LLM 的文字回复呈现给用户。
   if (parsed && parsed.status === 'skipped') {
     return (
       <div className="c2a-tool-card">
-        <Text type="secondary">
-          ℹ️ {Array.isArray(parsed.errors) && parsed.errors[0]
-            ? parsed.errors[0]
-            : '无可渲染的 C2A 卡片数据'}
-        </Text>
-        {output ? (
-          <Paragraph
-            style={{
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontSize: 12,
-              color: '#999',
-              marginTop: 8,
-            }}
-            ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}
-          >
-            {typeof output === 'string' ? output : JSON.stringify(output)}
-          </Paragraph>
-        ) : null}
+        <Text type="secondary">ℹ️ 暂无可展示的表格数据</Text>
       </div>
     );
   }
 
-  // 3) 失败或无法解析 → 显示错误 / 原始输出
-  const errorText =
-    parsed && Array.isArray(parsed.errors) && parsed.errors.length > 0
-      ? parsed.errors.join('; ')
-      : null;
-
+  // 3) 失败或无法解析 → 同样只给一句简洁提示，绝不向最终用户展示
+  // 原始 JSON / 错误码 / 技术细节（数据在 LLM 的文字回复里）。
   return (
     <div className="c2a-tool-card">
-      {errorText ? <Text type="danger">⚠️ {errorText}</Text> : null}
-      {output ? (
-        <Paragraph
-          style={{
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            fontSize: 12,
-            color: '#999',
-            marginTop: errorText ? 8 : 0,
-          }}
-          ellipsis={{ rows: 6, expandable: true, symbol: '展开' }}
-        >
-          {typeof output === 'string' ? output : JSON.stringify(output)}
-        </Paragraph>
-      ) : null}
+      <Text type="secondary">⚠️ 卡片渲染失败，数据以文字形式展示</Text>
     </div>
   );
 }

@@ -96,6 +96,18 @@ export const authApi = {
     return data.data || [];
   },
 
+  // 当前登录会话所使用的外部系统（头部徽标：名称 + LOGO）；
+  // 普通登录 / 系统已删除时返回 null
+  getCurrentExternalSystem: async (): Promise<ExternalSystemInfo | null> => {
+    const token = getApiToken();
+    const res = await fetch(getApiUrl("/auth/external/current-system"), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.data || null;
+  },
+
   getExternalLoginState: async (provider: string): Promise<ExternalLoginStateResponse> => {
     const res = await fetch(
       getApiUrl(`/auth/external/login-state?provider=${encodeURIComponent(provider)}`),

@@ -1818,6 +1818,33 @@ class AgentRunner(Runner):
                                     await asyncio.shield(_plugin.archive_turn(chat, _new_msgs))
                         except Exception as _ae:
                             logger.warning(f"archive_turn failed (non-fatal): {_ae}")
+                    # 企业版扩展点：记忆文件归档到 PG（P1，变更检测，幂等）。
+                    # 独立于 _new_msgs：每轮结束都尝试，内容未变则跳过（sha256 比对）。
+                    if user_id:
+                        try:
+                            from ...enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
+                            if is_enterprise_installed():
+                                _mp = get_enterprise_plugin()
+                                if _mp is not None and hasattr(_mp, "archive_memory"):
+                                    _ws_dir = str(self.workspace_dir) if self.workspace_dir else None
+                                    _user_ws = None
+                                    try:
+                                        from ...constant import WORKSPACES_DIR
+                                        _uname = getattr(self._workspace, "username", None)
+                                        if _uname and _ws_dir:
+                                            _cand = str(WORKSPACES_DIR / _uname)
+                                            if _cand != _ws_dir:
+                                                _user_ws = _cand
+                                    except Exception:
+                                        _user_ws = None
+                                    await asyncio.shield(_mp.archive_memory(
+                                        working_dir=_ws_dir,
+                                        user_workspace=_user_ws,
+                                        agent_id=getattr(self, "agent_id", None),
+                                        user_id=user_id,
+                                    ))
+                        except Exception as _me:
+                            logger.warning(f"archive_memory failed (non-fatal): {_me}")
                 except asyncio.CancelledError:
                     logger.warning(
                         "Chat persistence was cancelled (user stopped), "

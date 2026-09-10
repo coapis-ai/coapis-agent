@@ -2361,7 +2361,11 @@
     "callbackBackToLogin": "返回登录页",
     "callbackSuccess": "登录成功",
     "callbackNoToken": "登录响应异常，请返回重试",
-    "callbackAutoCreated": "已为你自动创建账号：{{name}}"
+    "callbackAutoCreated": "已为你自动创建账号：{{name}}",
+    "ssoPopupClosing": "登录成功，本窗口即将关闭",
+    "ssoPopupBlocked": "浏览器拦截了登录弹窗，请允许弹窗后重试",
+    "ssoLoginCancelled": "已取消登录",
+    "ssoLoginTimeout": "登录未完成（该系统可能不支持自动回调，可改用账号密码直登）"
   },
   "account": {
     "title": "账户管理",

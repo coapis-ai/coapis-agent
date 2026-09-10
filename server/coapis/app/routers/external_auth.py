@@ -328,6 +328,48 @@ async def list_external_systems():
 
 
 # ---------------------------------------------------------------------------
+# 端点：当前登录会话的外部系统（页面头部徽标用）
+# ---------------------------------------------------------------------------
+
+@router.get("/external/current-system")
+async def get_current_external_system(request: Request):
+    """返回当前登录会话所使用的外部系统（名称 + LOGO）。
+
+    登录 token 携带 ext_provider 声明（外部系统登录时写入）。本端点解析
+    token 中的 provider 并查系统配置，返回头部展示所需的 name/icon。
+
+    - 未登录 / 普通账号密码登录（无 ext_provider）/ 系统已被删除 → data=null
+    - 已登录外部系统 → data={provider_id, name, icon, login_type}
+
+    注意：不限制 show_on_login（登录页隐藏的系统，其用户会话仍需展示来源）。
+    """
+    from ..auth import get_token_ext_provider
+    from ..external_identity import get_system_by_id
+
+    # 从 Authorization 头解析 token（middleware 已保证公共路径也尝试解析；
+    # 这里直接取原始 token 读 ext_provider 声明）
+    auth_header = request.headers.get("authorization", "")
+    token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+    if not token:
+        return {"success": True, "data": None}
+
+    provider = get_token_ext_provider(token)
+    if not provider:
+        return {"success": True, "data": None}
+
+    system = get_system_by_id(provider)
+    if system is None:
+        return {"success": True, "data": None}
+
+    return {"success": True, "data": {
+        "provider_id": provider,
+        "name": system.get("name") or provider,
+        "icon": system.get("icon", ""),
+        "login_type": system.get("login_type", ""),
+    }}
+
+
+# ---------------------------------------------------------------------------
 # 端点：模型A — 签发一次性 state + 外部系统登录 URL
 # ---------------------------------------------------------------------------
 
@@ -592,12 +634,12 @@ async def external_login(request: Request):
                 username, provider, external_id, display_name, default_role,
             )
 
-    # 6. 发真 token（与账号密码登录完全兼容）
+    # 6. 发真 token（与账号密码登录完全兼容；ext_provider 记录登录来源外部系统）
     user_info = get_user(username)
     if user_info is None:
         raise HTTPException(status_code=404, detail="Local user no longer exists")
 
-    token = create_token(username)
+    token = create_token(username, ext_provider=provider)
 
     # 审计
     try:
@@ -646,6 +688,22 @@ def _resolve_nested_field(data: Any, path: str) -> Any:
     return current
 
 
+def _values_equal(actual: Any, expected: Any) -> bool:
+    """智能比较 success_value：兼容数字/字符串（0 == "0"，200 == "200"）。"""
+    if actual is None or expected is None:
+        return False
+    if actual == expected:
+        return True
+    a = str(actual).strip()
+    b = str(expected).strip()
+    if a == b:
+        return True
+    try:
+        return float(a) == float(b)
+    except (ValueError, TypeError):
+        return False
+
+
 async def _call_external_login_api(
     system: Dict[str, Any],
     username: str,
@@ -666,35 +724,85 @@ async def _call_external_login_api(
 
     cred = system.get("credential") or {}
     api_cfg = cred.get("api") or {}
-    login_url = api_cfg.get("url", "")
+    login_url = (api_cfg.get("url") or "").strip()
     if not login_url:
         return {"ok": False, "resp_data": None, "external_id": None,
-                "external_name": "", "error": "External system has no login API URL configured"}
+                "external_name": "", "error": "外部系统未配置登录 API URL"}
 
     method = (api_cfg.get("method") or "POST").upper()
-    content_type = api_cfg.get("content_type") or "application/json"
-    headers = dict(api_cfg.get("headers") or {})
+    content_type = (api_cfg.get("content_type") or "application/json").strip()
+    is_form = content_type.startswith("application/x-www-form-urlencoded")
+
+    # headers：可能是 dict，也可能是前端存的 JSON 字符串
+    raw_headers = api_cfg.get("headers") or {}
+    if isinstance(raw_headers, str):
+        try:
+            raw_headers = json.loads(raw_headers) if raw_headers.strip() else {}
+        except json.JSONDecodeError as e:
+            return {"ok": False, "resp_data": None, "external_id": None,
+                    "external_name": "", "error": f"Headers 配置不是合法 JSON：{e}"}
+    if not isinstance(raw_headers, dict):
+        return {"ok": False, "resp_data": None, "external_id": None,
+                "external_name": "", "error": "Headers 配置必须是 JSON 对象"}
+    headers = {str(k): str(v) for k, v in raw_headers.items()}
     headers["Content-Type"] = content_type
 
-    # 渲染 body 模板（{username} {password}）
-    body_tpl = api_cfg.get("body") or {}
-    body = {k: _render_template(str(v), {"username": username, "password": password})
-            for k, v in body_tpl.items()}
+    # body：可能是 dict，也可能是前端 TextArea 存的 JSON 字符串
+    body_raw = api_cfg.get("body")
+    body_dict: Dict[str, str] | None = None
+    body_str: str | None = None
+    tpl = {"username": username, "password": password}
+    if isinstance(body_raw, dict):
+        body_dict = {str(k): _render_template(str(v), tpl) for k, v in body_raw.items()}
+    elif isinstance(body_raw, str) and body_raw.strip():
+        try:
+            parsed = json.loads(body_raw)
+            if isinstance(parsed, dict):
+                body_dict = {str(k): _render_template(str(v), tpl) for k, v in parsed.items()}
+            else:
+                body_str = _render_template(body_raw, tpl)
+        except json.JSONDecodeError:
+            body_str = _render_template(body_raw, tpl)
 
     # 调外部系统登录 API
     timeout = aiohttp.ClientTimeout(total=int(cred.get("timeout") or 15))
+    resp_status: int | None = None
+    resp_text = ""
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.request(method, login_url, headers=headers, json=body) as resp:
-                resp_data = await resp.json()
+            req_kwargs: Dict[str, Any] = {}
+            if is_form:
+                if body_dict is not None:
+                    req_kwargs["data"] = body_dict
+                elif body_str is not None:
+                    req_kwargs["data"] = body_str
+            else:
+                if body_dict is not None:
+                    req_kwargs["json"] = body_dict
+                elif body_str is not None:
+                    req_kwargs["data"] = body_str
+                else:
+                    req_kwargs["json"] = {}
+            async with session.request(method, login_url, headers=headers, **req_kwargs) as resp:
+                resp_status = resp.status
+                resp_text = await resp.text()
     except aiohttp.ClientError as e:
         logger.error("Credential login: external API request failed: %s", e)
         return {"ok": False, "resp_data": None, "external_id": None,
-                "external_name": "", "error": f"External system unreachable: {e}"}
+                "external_name": "", "error": f"外部系统不可达：{e}"}
     except Exception as e:
         logger.error("Credential login: external API error: %s", e)
         return {"ok": False, "resp_data": None, "external_id": None,
-                "external_name": "", "error": f"External system request failed: {e}"}
+                "external_name": "", "error": f"调用外部系统失败：{e}"}
+
+    # 解析响应：非 JSON 给明确提示
+    try:
+        resp_data = json.loads(resp_text) if resp_text.strip() else {}
+    except json.JSONDecodeError:
+        preview = (resp_text or "")[:200]
+        return {"ok": False, "resp_data": None, "external_id": None,
+                "external_name": "",
+                "error": f"外部系统响应不是 JSON（HTTP {resp_status}）：{preview}"}
 
     # 解析响应
     resp_cfg = cred.get("response") or {}
@@ -705,7 +813,7 @@ async def _call_external_login_api(
     name_field = resp_cfg.get("name_field", "")
 
     actual_code = _resolve_nested_field(resp_data, success_field)
-    if actual_code != success_value:
+    if not _values_equal(actual_code, success_value):
         err_msg = _resolve_nested_field(resp_data, error_field) or str(resp_data)
         return {"ok": False, "resp_data": resp_data, "external_id": None,
                 "external_name": "", "error": f"External system login failed: {err_msg}"}
@@ -913,12 +1021,21 @@ async def credential_login(request: Request):
                 local_username, provider, external_id,
             )
 
-    # 发真 token
+    # 透传模式：把外部系统签发的 token 存进绑定记录（供出站透传）
+    try:
+        from ..external_token import extract_login_tokens, store_login_tokens
+        ext_tokens = extract_login_tokens(system, resp_data)
+        if ext_tokens:
+            store_login_tokens(provider, external_id, ext_tokens)
+    except Exception as e:
+        logger.warning("Credential login: 存外部 token 失败（不影响登录）: %s", e)
+
+    # 发真 token（ext_provider 记录登录来源外部系统）
     user_info = get_user(local_username)
     if user_info is None:
         raise HTTPException(status_code=404, detail="Local user no longer exists")
 
-    token = create_token(local_username)
+    token = create_token(local_username, ext_provider=provider)
 
     # 审计
     try:
@@ -970,23 +1087,39 @@ async def credential_test(request: Request):
     provider = data.get("provider")
     username = str(data.get("username") or "").strip()
     password = str(data.get("password") or "").strip()
+    # 支持未保存的表单数据：前端把弹窗里正在编辑的 credential 直接传过来，
+    # 不必先保存就能测试真实连通性。未提供时回退到查询已保存配置。
+    inline_cred = data.get("credential")
 
-    if not provider or not username or not password:
+    if not username or not password:
         raise HTTPException(
             status_code=400,
-            detail="Missing required parameters: provider, username, password",
+            detail="Missing required parameters: username, password",
         )
 
-    from ..external_identity import get_system_by_id
+    if isinstance(inline_cred, dict) and inline_cred:
+        # 直接用表单里的配置测试（覆盖未保存场景）
+        system = {"provider_id": provider, "login_type": "credential",
+                  "credential": inline_cred}
+    else:
+        if not provider:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required parameter: provider",
+            )
+        from ..external_identity import get_system_by_id
 
-    system = get_system_by_id(provider)
-    if system is None:
-        raise HTTPException(status_code=404, detail="External system not configured")
-    if system.get("login_type") != "credential":
-        raise HTTPException(
-            status_code=400,
-            detail="System does not use credential-based login",
-        )
+        system = get_system_by_id(provider)
+        if system is None:
+            raise HTTPException(
+                status_code=404,
+                detail="External system not configured（请先保存配置，或确认 provider_id 正确）",
+            )
+        if system.get("login_type") != "credential":
+            raise HTTPException(
+                status_code=400,
+                detail="System does not use credential-based login",
+            )
 
     api_result = await _call_external_login_api(system, username, password)
 
@@ -1130,7 +1263,7 @@ async def auto_login_by_identifier(request: Request):
     if get_user(user_id) is None:
         raise HTTPException(status_code=404, detail="Local user no longer exists")
 
-    token = create_token(user_id)
+    token = create_token(user_id, ext_provider=provider)
 
     return {
         "success": True,

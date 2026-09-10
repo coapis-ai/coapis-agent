@@ -340,6 +340,25 @@
   cursor: default;
 }
 
+// 版本信息右侧：外部系统登录来源徽标（LOGO + 名称）
+.extSysBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  cursor: default;
+}
+
+.extSysName {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a171673;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .collapseBtn {
   margin: auto;
   color: #ff7f16;
@@ -643,6 +662,10 @@
 
   .versionBadge {
     color: #ff7f16;
+  }
+
+  .extSysName {
+    color: rgba(255, 255, 255, 0.65);
   }
 
   .collapseBtn {

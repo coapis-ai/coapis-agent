@@ -1633,7 +1633,11 @@
     "callbackBackToLogin": "ログインページに戻る",
     "callbackSuccess": "ログインに成功しました",
     "callbackNoToken": "ログイン応答が異常です。再試行してください",
-    "callbackAutoCreated": "アカウントを自動作成しました：{{name}}"
+    "callbackAutoCreated": "アカウントを自動作成しました：{{name}}",
+    "ssoPopupClosing": "ログインに成功しました。このウィンドウは間もなく閉じます",
+    "ssoPopupBlocked": "ログインポップアップがブロックされました。ポップアップを許可してからやり直してください",
+    "ssoLoginCancelled": "ログインをキャンセルしました",
+    "ssoLoginTimeout": "ログインが完了しませんでした（このシステムは自動コールバックに対応していない可能性があります。ID/パスワードログインをご利用ください）"
   },
   "account": {
     "title": "アカウント管理",

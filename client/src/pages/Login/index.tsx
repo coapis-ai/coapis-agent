@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Form, Input } from "antd";
+import { Button, Form, Input, Dropdown } from "antd";
 import { useAppMessage } from "../../hooks/useAppMessage";
-import { LockOutlined, UserOutlined } from "@ant-design/icons";
+import { LockOutlined, UserOutlined, MoreOutlined } from "@ant-design/icons";
 import { authApi, ExternalSystemInfo } from "../../api/modules/auth";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTheme } from "../../contexts/ThemeContext";
 import { AuthStorage } from "../../utils/authStorage";
+import { openSsoPopup } from "../../utils/ssoPopup";
 import ExternalSystemIcon from "../../utils/externalSystemIcon";
 
 export default function LoginPage() {
@@ -44,25 +45,80 @@ export default function LoginPage() {
   }, [navigate]);
 
   const [credSys, setCredSys] = useState<ExternalSystemInfo | null>(null);
+  const [ssoBusy, setSsoBusy] = useState(false);
 
-  const handleExternalLogin = (sys: ExternalSystemInfo) => {
+  const handleExternalLogin = async (sys: ExternalSystemInfo) => {
+    if (ssoBusy) return; // 弹窗流程进行中，禁止重复点开
     if (sys.login_type === "credential") {
       // 复用主输入框：点中选中该系统（再点一次取消，回到 CoApis 登录），不弹窗
       setCredSys(credSys?.provider_id === sys.provider_id ? null : sys);
       return;
     }
-    // SSO 跳转：整页去外部系统登录页（用户在对方页面输账号密码，登录后 302 回 /login/callback）
-    authApi
-      .getExternalLoginState(sys.provider_id)
-      .then(({ login_url }) => {
-        window.location.href = login_url;
-      })
-      .catch((err: unknown) => {
-        message.error(
-          err instanceof Error ? err.message : t("login.externalLoginFailed"),
+    // SSO 弹窗：window.open 打开外部系统登录页（真浏览器弹窗，不受 X-Frame-Options
+    // 限制）。外部系统登录后 302 回 /login/callback（在弹窗内），落地页把结果
+    // reportSsoResult 回本窗口，这里接收后完成登录、关弹窗、跳主界面。
+    setSsoBusy(true);
+    try {
+      const { login_url } = await authApi.getExternalLoginState(sys.provider_id);
+      const result = await openSsoPopup(login_url);
+      if (result.ok) {
+        const res = result.payload;
+        AuthStorage.login(res.token, res.username, {
+          remember: true, // 外部系统登录默认保持会话
+          display_name: res.display_name || res.username,
+          default_agent_id: res.default_agent_id,
+        });
+        window.currentUserId = res.username;
+        window.currentChannel = "";
+        if (res.default_agent_id) {
+          setSelectedAgent(res.default_agent_id);
+        }
+        if (res.first_login) {
+          localStorage.setItem("coapis_first_login", "true");
+        }
+        message.success(
+          res.auto_created
+            ? t("login.callbackAutoCreated", { name: res.display_name || res.username })
+            : t("login.callbackSuccess"),
         );
-      });
+        navigate(res.redirect || "/chat", { replace: true });
+      } else {
+        // 按失败原因给差异化提示（不再吞掉真实原因）
+        if (result.code === "blocked") {
+          message.warning(
+            t("login.ssoPopupBlocked") || "浏览器拦截了登录弹窗，请允许弹窗后重试",
+          );
+        } else if (result.code === "cancelled") {
+          message.info(t("login.ssoLoginCancelled") || "已取消登录");
+        } else if (result.code === "timeout") {
+          message.warning(
+            t("login.ssoLoginTimeout") ||
+              "登录未完成（该系统可能不支持自动回调，可改用账号密码直登）",
+          );
+        } else {
+          message.error(result.error || t("login.callbackFailed"));
+        }
+      }
+    } catch (err: unknown) {
+      message.error(
+        err instanceof Error ? err.message : t("login.externalLoginFailed"),
+      );
+    } finally {
+      setSsoBusy(false);
+    }
   };
+
+  // 登录方式按钮布局：CoApis 固定首位 + 最多 2 个外部系统 + "更多"下拉收纳其余
+  const visibleSystems = externalSystems.slice(0, 2);
+  const overflowSystems = externalSystems.slice(2);
+  const moreItems = overflowSystems.map((sys) => ({
+    key: sys.provider_id,
+    icon: <ExternalSystemIcon icon={sys.icon} size={20} />,
+    label: sys.name,
+    onClick: () => handleExternalLogin(sys),
+  }));
+  const moreHighlighted =
+    !!credSys && overflowSystems.some((s) => s.provider_id === credSys.provider_id);
 
   const { setSelectedAgent } = useAgentStore();
   const onFinish = async (values: { username: string; password: string; remember_me?: boolean }) => {
@@ -181,7 +237,7 @@ export default function LoginPage() {
     >
       <div
         style={{
-          width: 400,
+          width: 540,
           padding: 32,
           borderRadius: 12,
           background: isDark ? "#1f1f1f" : "#fff",
@@ -314,8 +370,8 @@ export default function LoginPage() {
             style={{
               display: "flex",
               justifyContent: "center",
-              flexWrap: "wrap",
-              gap: 12,
+              flexWrap: "nowrap",
+              gap: 8,
             }}
           >
             {/* 蜜蜂（CoApis 自身登录）入口：固定首位，credSys===null 时高亮 */}
@@ -323,12 +379,15 @@ export default function LoginPage() {
               key="coapis"
               onClick={() => setCredSys(null)}
               style={{
-                padding: "10px 18px",
+                flex: 1,
+                minWidth: 0,
+                padding: "10px 8px",
                 borderRadius: 8,
                 display: "flex",
-                flexDirection: "column",
+                flexDirection: "row",
                 alignItems: "center",
-                gap: 4,
+                justifyContent: "center",
+                gap: 6,
                 background:
                   credSys === null
                     ? "#FF7F16"
@@ -341,21 +400,35 @@ export default function LoginPage() {
               <img
                 src="/bee_icon.png"
                 alt="CoApis"
-                style={{ width: 28, height: 28 }}
+                style={{ width: 20, height: 20, flexShrink: 0 }}
               />
-              <span style={{ fontSize: 13, lineHeight: 1.2 }}>CoApis</span>
+              <span
+                style={{
+                  fontSize: 12,
+                  lineHeight: 1.2,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                CoApis
+              </span>
             </Button>
-            {externalSystems.map((sys) => (
+            {visibleSystems.map((sys) => (
               <Button
                 key={sys.provider_id}
                 onClick={() => handleExternalLogin(sys)}
+                disabled={ssoBusy}
                 style={{
-                  padding: "10px 18px",
+                  flex: 1,
+                  minWidth: 0,
+                  padding: "10px 8px",
                   borderRadius: 8,
                   display: "flex",
-                  flexDirection: "column",
+                  flexDirection: "row",
                   alignItems: "center",
-                  gap: 4,
+                  justifyContent: "center",
+                  gap: 6,
                   background:
                     credSys?.provider_id === sys.provider_id
                       ? "#FF7F16"
@@ -368,10 +441,61 @@ export default function LoginPage() {
                       : undefined,
                 }}
               >
-                <ExternalSystemIcon icon={sys.icon} size={28} />
-                <span style={{ fontSize: 13, lineHeight: 1.2 }}>{sys.name}</span>
+                <ExternalSystemIcon icon={sys.icon} size={20} />
+                <span
+                  style={{
+                    fontSize: 12,
+                    lineHeight: 1.2,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {sys.name}
+                </span>
               </Button>
             ))}
+            {overflowSystems.length > 0 && (
+              <Dropdown
+                menu={{ items: moreItems }}
+                placement="bottom"
+                trigger={["click"]}
+              >
+                <Button
+                  disabled={ssoBusy}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: "10px 8px",
+                    borderRadius: 8,
+                    display: "flex",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    background: moreHighlighted
+                      ? "#FF7F16"
+                      : isDark
+                        ? "rgba(255,255,255,0.08)"
+                        : "#fafafa",
+                    color: moreHighlighted ? "#fff" : undefined,
+                  }}
+                >
+                  <MoreOutlined style={{ fontSize: 16 }} />
+                  <span
+                    style={{
+                      fontSize: 12,
+                      lineHeight: 1.2,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {t("login.more", "更多")}
+                  </span>
+                </Button>
+              </Dropdown>
+            )}
             {credSys && (
               <p
                 style={{

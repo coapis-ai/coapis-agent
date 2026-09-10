@@ -49,7 +49,8 @@ from agentscope.mcp import StatefulClientBase
 from ..external_identity import (
     _httpx_identity_hook,
     create_identity_httpx_client_factory,
-    identity_headers,
+    outbound_headers,
+    IdentityError,
 )
 
 logger = logging.getLogger(__name__)
@@ -809,13 +810,27 @@ class HttpStatefulClient(StatefulClientBase):
         """
         self._validate_connection()
 
-        # Outbound identity pre-check: if this client talks to a
-        # configured external system, the current user must be bound.
+        # Outbound identity pre-check (async, mode-aware). Using
+        # ``outbound_headers`` means: for pass_through systems it also
+        # validates the user actually holds a token (refreshing if
+        # needed); for signature systems it checks the binding. no_user
+        # (no user context) passes through to match the httpx hook.
         # Fail fast with a clear message before hitting the network.
-        # (Actual header injection happens in the httpx request hook.)
+        # (Actual header injection still happens in the httpx request hook.)
         try:
-            identity_headers(self.url, source="mcp")
-        except Exception as e:  # IdentityError etc.
+            await outbound_headers(self.url, source="mcp")
+        except IdentityError as e:
+            if e.code == "no_user":
+                # 无用户上下文 → 放行（与 httpx hook 一致）
+                logger.debug(
+                    "call_tool pre-check: no user context, pass through url=%s",
+                    self.url,
+                )
+            else:
+                raise RuntimeError(
+                    f"External system identity verification failed: {e.message}"
+                ) from e
+        except Exception as e:
             raise RuntimeError(
                 f"External system identity verification failed: {e}"
             ) from e

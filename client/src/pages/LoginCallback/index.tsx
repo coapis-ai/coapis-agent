@@ -6,6 +6,7 @@ import { authApi } from "../../api/modules/auth";
 import { useAgentStore } from "../../stores/agentStore";
 import { useTheme } from "../../contexts/ThemeContext";
 import { AuthStorage } from "../../utils/authStorage";
+import { reportSsoResult } from "../../utils/ssoPopup";
 
 /**
  * 外部系统 SSO 回调落地页（模型A）。
@@ -25,13 +26,18 @@ export default function LoginCallbackPage() {
   const { message } = useAppMessage();
   const { setSelectedAgent } = useAgentStore();
 
-  const [status, setStatus] = useState<"loading" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const ranRef = useRef(false);
 
   useEffect(() => {
     if (ranRef.current) return; // StrictMode 双保险
     ranRef.current = true;
+
+    // 落地页是否运行在 SSO 弹窗内（由登录页 window.open 打开）。
+    // 弹窗模式：本窗口只负责"验签 + 拿结果"，不自己登录/跳转，
+    // 而是把结果 reportSsoResult 回主窗口（会话的"主人"）。
+    const inPopup = typeof window.opener !== "undefined" && !!window.opener;
 
     const externalId = searchParams.get("external_id");
     const signature = searchParams.get("signature");
@@ -44,9 +50,16 @@ export default function LoginCallbackPage() {
         ? rawRedirect
         : "/chat";
 
+    // 弹窗模式下把真实错误送回主窗口，避免"错误提示吞了真实原因"
+    const reportFail = (error: string) => {
+      if (inPopup) reportSsoResult({ ok: false, code: "failed", error });
+    };
+
     if (!externalId || !signature || !state || !timestampRaw) {
+      const msg = t("login.callbackMissingParams");
+      reportFail(msg);
       setStatus("error");
-      setErrorMsg(t("login.callbackMissingParams"));
+      setErrorMsg(msg);
       return;
     }
 
@@ -62,6 +75,20 @@ export default function LoginCallbackPage() {
           redirect,
         });
         if (res.token) {
+          if (inPopup) {
+            // 弹窗模式：结果交回主窗口，本窗口展示成功提示后自动关闭
+            reportSsoResult({ ok: true, payload: res });
+            setStatus("success");
+            window.setTimeout(() => {
+              try {
+                window.close();
+              } catch {
+                /* 某些浏览器禁止脚本关闭窗口，忽略 */
+              }
+            }, 1500);
+            return;
+          }
+          // 全页模式（向后兼容）：直接登录并跳转
           AuthStorage.login(res.token, res.username, {
             remember: true, // 外部系统登录默认保持会话（与"记住我"一致）
             display_name: res.display_name || res.username,
@@ -82,12 +109,16 @@ export default function LoginCallbackPage() {
           }
           navigate(res.redirect || redirect, { replace: true });
         } else {
+          const msg = t("login.callbackNoToken");
+          reportFail(msg);
           setStatus("error");
-          setErrorMsg(t("login.callbackNoToken"));
+          setErrorMsg(msg);
         }
       } catch (err) {
+        const msg = err instanceof Error ? err.message : t("login.callbackFailed");
+        reportFail(msg);
         setStatus("error");
-        setErrorMsg(err instanceof Error ? err.message : t("login.callbackFailed"));
+        setErrorMsg(msg);
       }
     };
 
@@ -142,6 +173,15 @@ export default function LoginCallbackPage() {
             <p style={{ margin: 0, fontSize: 13, color: subColor }}>
               {t("login.callbackLoadingHint")}
             </p>
+          </>
+        )}
+
+        {status === "success" && (
+          <>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 600 }}>
+              {t("login.ssoPopupClosing") || "登录成功，本窗口即将关闭"}
+            </h3>
           </>
         )}
 

@@ -2455,7 +2455,11 @@
     "callbackBackToLogin": "Back to login",
     "callbackSuccess": "Login successful",
     "callbackNoToken": "Abnormal login response, please try again",
-    "callbackAutoCreated": "Account auto-created for you: {{name}}"
+    "callbackAutoCreated": "Account auto-created for you: {{name}}",
+    "ssoPopupClosing": "Login successful, this window will close shortly",
+    "ssoPopupBlocked": "The login popup was blocked. Please allow popups and try again.",
+    "ssoLoginCancelled": "Login cancelled",
+    "ssoLoginTimeout": "Login not completed (this system may not support auto-callback; you can use credential login instead)"
   },
   "account": {
     "title": "Account",

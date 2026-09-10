@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Modal } from "@agentscope-ai/design";
 import styles from "./index.module.less";
 import api from "../api";
+import { authApi, ExternalSystemInfo } from "../api/modules/auth";
 import {
   getReleaseNotesUrl,
   UPDATE_MD,
@@ -22,6 +23,10 @@ import HelpButton from "../components/HeaderButtons/HelpButton";
 import LanguageButton from "../components/HeaderButtons/LanguageButton";
 import SettingsButton from "../components/HeaderButtons/SettingsButton";
 import ProfileButton from "../components/HeaderButtons/ProfileButton";
+
+// External system badge (login source)
+import { AuthStorage } from "../utils/authStorage";
+import ExternalSystemIcon from "../utils/externalSystemIcon";
 
 const { Header: AntHeader } = Layout;
 
@@ -63,6 +68,16 @@ export default function Header() {
     api
       .getVersion()
       .then((res) => setVersion(res?.version ?? ""))
+      .catch(() => {});
+  }, []);
+
+  // 当前登录会话的外部系统（SSO/凭证直登来源）→ 头部徽标（版本信息右侧）
+  const [extSys, setExtSys] = useState<ExternalSystemInfo | null>(null);
+  useEffect(() => {
+    if (!AuthStorage.isLoggedIn()) return;
+    authApi
+      .getCurrentExternalSystem()
+      .then((sys) => sys && setExtSys(sys))
       .catch(() => {});
   }, []);
 
@@ -159,6 +174,22 @@ export default function Header() {
             )}
 
             <div className={styles.logoDivider} />
+
+            {/* 版本信息右侧：当前登录来源的外部系统徽标（名称 + LOGO） */}
+            {extSys && (
+              <span
+                className={styles.extSysBadge}
+                title={`通过 ${extSys.name} 登录`}
+              >
+                <ExternalSystemIcon
+                  icon={extSys.icon}
+                  name={extSys.name}
+                  size={20}
+                  style={{ borderRadius: 5 }}
+                />
+                <span className={styles.extSysName}>{extSys.name}</span>
+              </span>
+            )}
 
             {/* 工作台/控制台切换按钮已移除 - 功能已整合到菜单 */}
           </div>

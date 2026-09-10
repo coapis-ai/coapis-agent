@@ -499,6 +499,8 @@ PUBLIC_PATHS: frozenset = frozenset({
     "/api/auth/external/login",
     "/api/auth/external/login-state",
     "/api/auth/external/credential-login",
+    # 当前会话外部系统（头部徽标；端点内部自校验 token，未登录返回 null）
+    "/api/auth/external/current-system",
     # Health and docs
     "/api/health",
     "/health",

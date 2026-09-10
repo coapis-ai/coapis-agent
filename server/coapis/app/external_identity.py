@@ -91,6 +91,15 @@ EXTERNAL_SSO_SECRET = (
 # 外部系统验签中间件用同样的 TTL 校验 timestamp。
 DEFAULT_TOKEN_TTL = 3600
 
+# 出站认证模式（系统级 auth_mode）二态：
+# - optional（默认）：有身份就注入，无身份 → 裸放行（容错，让业务系统自行判定）
+# - none          ：不注入任何身份头，裸放行（纯公开）
+#
+# 设计取舍：不做"无身份硬阻断"——是否放行由外部业务系统自行决定（它才是
+# 业务规则的权威）。CoApis 的职责是"有身份就尽力注入"，注入不了就降级放行。
+AUTH_MODES = ("optional", "none")
+DEFAULT_AUTH_MODE = "optional"
+
 HEAD_IDENTITY = "X-CoApis-Identity"
 HEAD_OPENID = "X-CoApis-OpenId"
 HEAD_TIMESTAMP = "X-CoApis-Timestamp"
@@ -263,6 +272,18 @@ def get_token_ttl(system: Optional[Dict[str, Any]]) -> int:
     return DEFAULT_TOKEN_TTL
 
 
+def resolve_auth_mode(system: Optional[Dict[str, Any]]) -> str:
+    """系统的出站认证模式（optional/none），默认 optional。
+
+    非法值或旧值 ``required`` 回退 optional（降级放行）；旧配置无 ``auth_mode``
+    字段 → optional，零破坏、无需迁移。
+    """
+    if not system:
+        return DEFAULT_AUTH_MODE
+    mode = str(system.get("auth_mode") or DEFAULT_AUTH_MODE).lower()
+    return mode if mode in AUTH_MODES else DEFAULT_AUTH_MODE
+
+
 # ──────────────────────────────────────────────────────────────────────
 # 签名（与入站登录同一算法：HMAC-SHA256 hex）
 # ──────────────────────────────────────────────────────────────────────
@@ -359,6 +380,45 @@ def identity_headers(url: str, source: str = "mcp") -> Dict[str, str]:
     }
 
 
+async def outbound_headers(url: str, source: str = "mcp") -> Dict[str, str]:
+    """统一的出站身份头（异步）。两层分流：
+
+    1. 系统级 ``auth_mode``（optional/none）决定是否注入与容错：
+       - ``none``     → 不注入、不阻断（返回 {}）；
+       - ``optional``（默认）→ 有身份就注入，注入失败（IdentityError）→ 降级裸放行（返回 {}）。
+    2. 注入方式按系统 ``credential.external_token.mode`` 分流：
+       - ``pass_through`` → 透传外部 token（必要时异步刷新），
+         返回 ``Authorization: Bearer <token>``（外部系统零改造）；
+       - 其他（``signature`` / 未配置）→ 签名断言（原同步逻辑）。
+
+    非外部系统 URL 返回 {}。
+    """
+    system = find_external_system(url)
+    if system is None:
+        return {}
+
+    auth_mode = resolve_auth_mode(system)
+    if auth_mode == "none":
+        return {}
+
+    async def _inject() -> Dict[str, str]:
+        et = (system.get("credential") or {}).get("external_token") or {}
+        if et.get("mode") == "pass_through":
+            from .external_token import passthrough_headers
+            return await passthrough_headers(url, system, source)
+        return identity_headers(url, source)
+
+    # optional（唯一非 non-none 模式）：有身份就注入，注入失败（无用户/未绑定/无密钥/
+    # token 失效）→ 降级裸放行（是否放行由外部业务系统自行判定，CoApis 不硬拦）。
+    # passthrough 无 token 时返回 None，统一归一为 {}。
+    try:
+        headers = await _inject()
+        return headers or {}
+    except IdentityError:
+        # 容错降级：无身份/未绑定/token 失效 → 裸放行（由外部系统自行决定）
+        return {}
+
+
 def sign_url(target_url: str, source: str = "c2a_link") -> str:
     """浏览器载体（C2A 链接跳转）。
 
@@ -382,14 +442,21 @@ def sign_url(target_url: str, source: str = "c2a_link") -> str:
 async def _httpx_identity_hook(request) -> None:
     """httpx request event hook: inject identity headers per request.
 
-    非外部系统 URL → 无操作。未绑定/无身份 → 抛错阻断（安全默认），
-    错误信息会一路传到工具调用结果，agent 可原样转告用户。
+    非外部系统 URL → 无操作。
+
+    降级放行策略（不做硬阻断）：
+    - ``outbound_headers`` 在 optional 模式下已内部降级——任何身份注入失败
+      （无用户 / 未绑定 / 无密钥 / token 失效）都返回 ``{}``，请求裸发，由
+      外部业务系统自行判定是否放行。CoApis 只负责"有身份就尽力注入"。
+    - 正常路径下不会抛异常；此处 except 仅作防御性兜底，任何注入异常一律
+      降级放行，绝不让内部流量（如 MCP 连接握手）因身份问题崩溃。
+
+    透传模式（external_token.mode=pass_through）会走异步刷新逻辑，故此处用
+    ``outbound_headers``（按 mode 分流）。
     """
     try:
-        headers = identity_headers(str(request.url), source="mcp")
-    except IdentityError as e:
-        raise RuntimeError(f"外部系统身份验证失败: {e.message}") from e
-    except Exception as e:  # 注入失败不应让内部流量崩溃
+        headers = await outbound_headers(str(request.url), source="mcp")
+    except Exception as e:  # 注入失败一律降级放行，不阻断业务请求
         logger.debug("identity injection skipped: %s", e)
         return
     for key, value in headers.items():

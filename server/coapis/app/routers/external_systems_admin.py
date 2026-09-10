@@ -99,27 +99,74 @@ def save_bindings_atomic(mappings_data: Dict[str, Any]):
 
 
 # Data-URI pattern: data:<mime>;base64,<payload>
-_DATA_URI_RE = re.compile(r"^data:(image/\w+);base64,[A-Za-z0-9+/=]+$")
+_DATA_URI_RE = re.compile(r"^data:(image/[\w.+-]+);base64,([A-Za-z0-9+/=]+)$")
+# Legacy icons may be a plain image URL (http/https).
+_URL_ICON_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+# Legacy icons may also be a short emoji / glyph string (no spaces, short length).
+_MAX_LEGACY_ICON_LEN = 64
 
 
 def _validate_icon(icon: str) -> None:
-    """Validate that icon is either empty or a valid image data-URI."""
+    """Validate that icon is empty or one of the accepted icon formats.
+
+    Accepted (kept intentionally permissive for backward compatibility):
+      1. base64 data-URI  ``data:image/<mime>;base64,<payload>`` (strict,
+         the payload must actually decode as base64)
+      2. image URL        ``http(s)://...`` (legacy data stores full URLs)
+      3. short legacy string (emoji / glyph, ≤ 64 chars, no whitespace)
+
+    Anything else (garbage, over-long blobs) is rejected with 400.
+    """
     if not icon:
         return
-    if not _DATA_URI_RE.match(icon):
-        raise HTTPException(
-            status_code=400,
-            detail="icon must be a valid base64 data-URI (e.g. data:image/png;base64,...)",
-        )
+    icon = icon.strip()
+    if not icon:
+        return
+
+    # Anything that looks like a data-URI must be a *valid* one (rejects
+    # truncated / malformed base64 that would otherwise be misread as emoji).
+    if icon.startswith("data:"):
+        m = _DATA_URI_RE.match(icon)
+        if not m:
+            raise HTTPException(
+                status_code=400,
+                detail="icon must be a valid base64 data-URI (data:image/...;base64,...)",
+            )
+        try:
+            base64.b64decode(m.group(2), validate=True)
+        except (base64.binascii.Error, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="icon base64 payload is not valid (expected data:image/...;base64,...)",
+            )
+        return
+
+    if _URL_ICON_RE.match(icon):
+        return
+
+    if len(icon) <= _MAX_LEGACY_ICON_LEN and not re.search(r"\s", icon):
+        # Legacy emoji / glyph — keep as-is.
+        return
+
+    raise HTTPException(
+        status_code=400,
+        detail="icon must be a base64 data-URI, an image URL, or a short emoji",
+    )
 
 
 @router_admin.get("/external-systems/config")
 async def get_external_systems_config():
     """Get list of configured external systems"""
     config_data = load_systems_config()
+    systems = config_data.get("systems", [])
+    # 存量兼容：required 已废弃（降级放行），读时归一化为 optional，
+    # 避免前端下拉（仅 optional/none）显示异常；用户保存后落盘即为 optional。
+    for sys in systems:
+        if sys.get("auth_mode") == "required":
+            sys["auth_mode"] = "optional"
     return {
         "success": True,
-        "data": config_data.get("systems", [])
+        "data": systems
     }
 
 
@@ -207,6 +254,11 @@ async def save_external_systems_config(request: Request):
     if not isinstance(base_urls, list):
         base_urls = [base_urls] if isinstance(base_urls, str) else []
     base_urls = [str(u).rstrip("/") for u in base_urls if u]
+    # 出站认证模式：optional(默认/有身份注入无身份裸放行) | none(不注入)
+    # 兼容旧值 required → optional（降级放行）
+    auth_mode = str(data.get("auth_mode") or "optional").lower()
+    if auth_mode not in ("optional", "none"):
+        auth_mode = "optional"
     # Identity assertion validity in seconds (default 60 min, adjustable)
     try:
         identity_token_ttl = int(data.get("identity_token_ttl") or 3600)
@@ -245,6 +297,7 @@ async def save_external_systems_config(request: Request):
         "shared_secret_use_global": shared_secret_use_global,
         "shared_secret": shared_secret,
         "base_urls": base_urls,
+        "auth_mode": auth_mode,
         "identity_token_ttl": identity_token_ttl,
         "status": status,
     }
