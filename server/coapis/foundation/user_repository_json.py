@@ -51,7 +51,6 @@ class JsonUserRepository(UserRepository):
                 username=user_data.get("username"),
                 password=user_data.get("password"),
                 display_name=user_data.get("display_name"),
-                email=user_data.get("email"),
                 role=user_data.get("role", "user"),
             )
 

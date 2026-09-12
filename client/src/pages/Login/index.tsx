@@ -40,18 +40,41 @@ export default function LoginPage() {
     // 登录页下方"其他登录方式"：动态拉取已配置的外部系统（无配置则不显示）
     authApi
       .getExternalSystems()
-      .then((list) => setExternalSystems(list || []))
+      .then((list) => {
+        const systems = list || [];
+        setExternalSystems(systems);
+        // 恢复上次登录方式：coapis=默认不动；credential=自动选中；SSO=仅高亮按钮
+        const lastMethod = localStorage.getItem("coapis_last_login_method");
+        if (lastMethod && lastMethod !== "coapis") {
+          const sys = systems.find((s) => s.provider_id === lastMethod);
+          if (sys) {
+            if (sys.login_type === "credential") {
+              setCredSys(sys);
+            } else {
+              setHighlightedSsoId(sys.provider_id);
+            }
+          }
+        }
+      })
       .catch(() => {});
   }, [navigate]);
 
   const [credSys, setCredSys] = useState<ExternalSystemInfo | null>(null);
   const [ssoBusy, setSsoBusy] = useState(false);
+  const [highlightedSsoId, setHighlightedSsoId] = useState<string | null>(null);
+
+  // 无条件记住用户名 + 登录方式（密码走浏览器加密，不存我们这）
+  const rememberLogin = (username: string, method: string) => {
+    if (username) localStorage.setItem("coapis_last_username", username);
+    localStorage.setItem("coapis_last_login_method", method);
+  };
 
   const handleExternalLogin = async (sys: ExternalSystemInfo) => {
     if (ssoBusy) return; // 弹窗流程进行中，禁止重复点开
     if (sys.login_type === "credential") {
       // 复用主输入框：点中选中该系统（再点一次取消，回到 CoApis 登录），不弹窗
       setCredSys(credSys?.provider_id === sys.provider_id ? null : sys);
+      setHighlightedSsoId(null);
       return;
     }
     // SSO 弹窗：window.open 打开外部系统登录页（真浏览器弹窗，不受 X-Frame-Options
@@ -76,6 +99,7 @@ export default function LoginPage() {
         if (res.first_login) {
           localStorage.setItem("coapis_first_login", "true");
         }
+        rememberLogin(res.username, sys.provider_id);
         message.success(
           res.auto_created
             ? t("login.callbackAutoCreated", { name: res.display_name || res.username })
@@ -117,8 +141,9 @@ export default function LoginPage() {
     label: sys.name,
     onClick: () => handleExternalLogin(sys),
   }));
-  const moreHighlighted =
-    !!credSys && overflowSystems.some((s) => s.provider_id === credSys.provider_id);
+  const moreHighlighted = overflowSystems.some(
+    (s) => s.provider_id === credSys?.provider_id || s.provider_id === highlightedSsoId,
+  );
 
   const { setSelectedAgent } = useAgentStore();
   const onFinish = async (values: { username: string; password: string; remember_me?: boolean }) => {
@@ -153,6 +178,7 @@ export default function LoginPage() {
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");
           }
+          rememberLogin(res.username, credSys.provider_id);
           message.success(res.auto_created
             ? (t("login.callbackAutoCreated") || `已自动创建账号 ${res.display_name || res.username}`)
             : (t("login.callbackSuccess") || "登录成功"));
@@ -179,6 +205,7 @@ export default function LoginPage() {
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");
           }
+          rememberLogin(values.username, "coapis");
           message.success(t("login.registerSuccess"));
           navigate(redirect, { replace: true });
         } else {
@@ -203,6 +230,7 @@ export default function LoginPage() {
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");
           }
+          rememberLogin(values.username, "coapis");
           message.success(t("login.success"));
           navigate(redirect, { replace: true });
         } else {
@@ -271,7 +299,7 @@ export default function LoginPage() {
         <Form
           layout="vertical"
           onFinish={onFinish}
-          autoComplete="off"
+          initialValues={{ username: localStorage.getItem("coapis_last_username") || "" }}
           size="large"
         >
           <Form.Item
@@ -287,6 +315,7 @@ export default function LoginPage() {
                 />
               }
               placeholder={credSys ? "外部系统用户名" : t("login.usernamePlaceholder")}
+              autoComplete="username"
               autoFocus
             />
           </Form.Item>
@@ -304,6 +333,7 @@ export default function LoginPage() {
                 />
               }
               placeholder={credSys ? "外部系统密码" : t("login.passwordPlaceholder")}
+              autoComplete="current-password"
             />
           </Form.Item>
 
@@ -377,7 +407,7 @@ export default function LoginPage() {
             {/* 蜜蜂（CoApis 自身登录）入口：固定首位，credSys===null 时高亮 */}
             <Button
               key="coapis"
-              onClick={() => setCredSys(null)}
+              onClick={() => { setCredSys(null); setHighlightedSsoId(null); }}
               style={{
                 flex: 1,
                 minWidth: 0,
@@ -389,12 +419,15 @@ export default function LoginPage() {
                 justifyContent: "center",
                 gap: 6,
                 background:
-                  credSys === null
+                  (credSys === null && highlightedSsoId === null)
                     ? "#FF7F16"
                     : isDark
                       ? "rgba(255,255,255,0.08)"
                       : "#fafafa",
-                color: credSys === null ? "#fff" : undefined,
+                color:
+                  (credSys === null && highlightedSsoId === null)
+                    ? "#fff"
+                    : undefined,
               }}
             >
               <img
@@ -430,13 +463,15 @@ export default function LoginPage() {
                   justifyContent: "center",
                   gap: 6,
                   background:
-                    credSys?.provider_id === sys.provider_id
+                    (credSys?.provider_id === sys.provider_id ||
+                      highlightedSsoId === sys.provider_id)
                       ? "#FF7F16"
                       : isDark
                         ? "rgba(255,255,255,0.08)"
                         : "#fafafa",
                   color:
-                    credSys?.provider_id === sys.provider_id
+                    (credSys?.provider_id === sys.provider_id ||
+                      highlightedSsoId === sys.provider_id)
                       ? "#fff"
                       : undefined,
                 }}

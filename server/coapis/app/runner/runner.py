@@ -1294,9 +1294,11 @@ class AgentRunner(Runner):
             )
             await agent.register_mcp_clients()
             mcp_tool_count = len([t for t in (agent.toolkit.tools or {}) if t.startswith("mcp_")]) if hasattr(agent, "toolkit") and agent.toolkit else 0
+            _all_names = sorted((agent.toolkit.tools or {}).keys()) if hasattr(agent, "toolkit") and agent.toolkit else []
             logger.warning(
-                f"[MCP_DEBUG] register_mcp_clients done: mcp_clients={len(mcp_clients)}, toolkit_mcp_tools={mcp_tool_count}, total_tools={len(agent.toolkit.tools) if hasattr(agent, 'toolkit') and agent.toolkit else 0}"
+                f"[MCP_DEBUG] register_mcp_clients done: mcp_clients={len(mcp_clients)}, toolkit_mcp_tools={mcp_tool_count}, total_tools={len(_all_names)}"
             )
+            logger.warning(f"[MCP_DEBUG] ALL_TOOL_NAMES: {_all_names}")
             agent.set_console_output_enabled(enabled=False)
             
             # ── Scene Skills Injection: 场景技能优选注入到 toolkit ──
@@ -1531,6 +1533,27 @@ class AgentRunner(Runner):
                         yield msg, last
             else:
                 # DEBUG: log messages passed to agent
+                _dbg_schema_names = []
+                try:
+                    _dbg_schemas = agent.toolkit.get_json_schemas() if hasattr(agent, "toolkit") and agent.toolkit else []
+                    for _s in _dbg_schemas:
+                        _fn = (_s or {}).get("function", {}) if isinstance(_s, dict) else {}
+                        _dbg_schema_names.append(str(_fn.get("name", "?")))
+                except Exception as e:  # noqa: BLE001
+                    _dbg_schema_names = [f"ERR:{e}"]
+                logger.warning(
+                    f"[MCP_DEBUG] schemas_at_call_time: n={len(_dbg_schema_names)}, "
+                    f"mock={'fetch_mock_approvals' in _dbg_schema_names}, oa_pending={'fetch_pending_approvals' in _dbg_schema_names}"
+                )
+                if not ("fetch_mock_approvals" in _dbg_schema_names):
+                    logger.warning(f"[MCP_DEBUG] schemas_at_call_time NAMES: {_dbg_schema_names}")
+                else:
+                    for _s2 in (_dbg_schemas or []):
+                        try:
+                            if isinstance(_s2, dict) and (_s2.get("function", {}) or {}).get("name") == "fetch_mock_approvals":
+                                logger.warning(f"[MCP_DEBUG] MOCK_SCHEMA_ENTRY: {json.dumps(_s2, ensure_ascii=False)[:600]}")
+                        except Exception as _e3:  # noqa: BLE001
+                            pass
                 logger.info(
                     "[DEBUG] runner.query_handler calling agent(msgs): "
                     "msgs_count=%s, last_msg_role=%s, last_msg_content=%s",

@@ -22,6 +22,7 @@ Tools are async-callable with structured metadata and security controls.
 
 import asyncio
 import inspect
+import json
 import logging
 import functools
 import os
@@ -161,12 +162,44 @@ class ToolRegistry:
         logger.debug(f"Registered tool: {name}")
         return tool
 
+    @staticmethod
+    def _extract_mcp_tool_metadata(mcp_tool) -> Optional[Dict[str, Any]]:
+        """Extract C2A card metadata from an MCP tool definition.
+
+        Servers declare card metadata (``action_templates`` with
+        ``url_template`` + ``params_mapping``) in non-uniform places — OA
+        puts it inside ``inputSchema["metadata"]``, others use a top-level
+        ``metadata`` field. Check the common carriers in priority order and
+        return the first non-empty dict (or ``None``).
+        """
+        carriers: List[Dict[str, Any]] = []
+
+        input_schema = getattr(mcp_tool, "inputSchema", None)
+        if isinstance(input_schema, dict):
+            carriers.append(input_schema)
+        model_extra = getattr(mcp_tool, "model_extra", None)
+        if isinstance(model_extra, dict):
+            carriers.append(model_extra)
+        if isinstance(mcp_tool, dict):  # raw-dict tool (defensive)
+            carriers.append(mcp_tool)
+
+        for carrier in carriers:
+            meta = carrier.get("metadata")
+            if isinstance(meta, dict) and meta:
+                return meta
+        return None
+
     async def register_mcp_tools(self, mcp_clients: list) -> int:
         """Register MCP tools with mcp__ prefix to avoid conflicts with built-in tools.
 
         Each MCP tool is wrapped as a ToolInfo with an async closure that
         delegates to client.call_tool(). The mcp__ prefix convention is
         consistent with Cursor / Claude Desktop tool naming.
+
+        Tool-definition metadata (C2A action_templates, ...) is captured at
+        registration time and threaded through the wrapper response — it is
+        NOT part of the tool-call response, so without this the C2A
+        converter could never build row links from it.
 
         Args:
             mcp_clients: List of MCP client instances (with list_tools/call_tool)
@@ -180,9 +213,10 @@ class ToolRegistry:
                 mcp_tools = await client.list_tools()
                 for mcp_tool in mcp_tools:
                     prefixed = f"mcp__{mcp_tool.name}"
+                    tool_metadata = self._extract_mcp_tool_metadata(mcp_tool)
 
-                    # Factory: capture client + tool name in closure
-                    def _make_wrapper(_client, _tool_name):
+                    # Factory: capture client + tool name (+ metadata) in closure
+                    def _make_wrapper(_client, _tool_name, _meta):
                         async def _mcp_call(**kwargs):
                             result = await _client.call_tool(_tool_name, kwargs)
                             # Normalize CallToolResult → dict for ToolRegistry
@@ -192,17 +226,28 @@ class ToolRegistry:
                                     texts.append(
                                         getattr(blk, "text", None) or str(blk)
                                     )
-                                return {
+                                out: Dict[str, Any] = {
                                     "result": "\n".join(texts),
                                     "is_error": getattr(result, "isError", False),
                                 }
+                                if _meta:
+                                    out["metadata"] = _meta
+                                return out
                             return str(result)
                         return _mcp_call
 
                     await self.register(
                         name=prefixed,
-                        func=_make_wrapper(client, mcp_tool.name),
-                        description=mcp_tool.description or f"MCP tool: {mcp_tool.name}",
+                        func=_make_wrapper(client, mcp_tool.name, tool_metadata),
+                        description=(
+                            (mcp_tool.description or f"MCP tool: {mcp_tool.name}")
+                            + (
+                                "\n[Metadata]: "
+                                + json.dumps(tool_metadata, ensure_ascii=False)
+                                if tool_metadata
+                                else ""
+                            )
+                        ),
                         parameters=getattr(mcp_tool, "inputSchema", None) or {},
                         tags=["mcp", client.name],
                     )

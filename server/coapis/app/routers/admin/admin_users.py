@@ -333,15 +333,10 @@ async def create_user_admin(
         from ....foundation.repository_factory import RepositoryFactory
         user_repo = RepositoryFactory.get_user_repository()
         
-        # Hash password for PostgreSQL storage
-        from ...user_store import _hash_password
-        pw_hash, salt = _hash_password(payload.password)
-        
-        # 准备用户数据
+        # 准备用户数据（明文 password，底层 store 负责 hash）
         user_data = {
             "username": payload.username,
-            "password_hash": pw_hash,
-            "salt": salt,
+            "password": payload.password,
             "email": payload.email,
             "display_name": payload.display_name,
             "role": payload.role,

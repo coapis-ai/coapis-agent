@@ -911,6 +911,10 @@ class Workspace:
                         except Exception:
                             pass
                         for pname, param in sig.parameters.items():
+                            # Skip **kwargs (VAR_KEYWORD): it must never become a
+                            # required "kwargs" string param in the LLM schema.
+                            if param.kind is _inspect.Parameter.VAR_KEYWORD:
+                                continue
                             ptype = hints.get(pname, str)
                             type_str = (
                                 "integer" if ptype in (int,)
