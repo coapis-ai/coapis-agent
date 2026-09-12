@@ -30,6 +30,22 @@ from c2a_tools.converter import convert_tool_output_to_c2a
 
 logger = logging.getLogger(__name__)
 
+
+# Hints returned to the LLM on failed/skip. They tell the LLM exactly how to
+# recover (show the data as Markdown text in its reply) and — crucially — that
+# it must NEVER leak raw tool output (JSON / error codes / Python reprs) to
+# end users.
+_USER_HINT_FAILED = (
+    "卡片渲染失败。请把数据整理成 Markdown 表格直接写进你的文字回复，"
+    "并简短说明卡片未能渲染、已改为文字展示；"
+    "绝对不要向用户展示本工具返回的任何原始内容（JSON、错误码、Python 结构）。"
+)
+_USER_HINT_SKIPPED = (
+    "工具输出中没有可渲染成卡片的表格数据。请把数据直接写进你的文字回复；"
+    "不要提及卡片渲染或本工具的返回。"
+)
+
+
 # ---------------------------------------------------------------------------
 # Import the CoApis tool registry defensively.
 # ---------------------------------------------------------------------------
@@ -208,11 +224,17 @@ def render_card_payload(
         except (json.JSONDecodeError, TypeError):
             return {"status": "failed",
                     "errors": ["c2a_payload is a string but not valid JSON — "
-                               "pass a dict or a valid JSON string"]}
-        if not isinstance(c2a_payload, dict):
-            return {"status": "failed",
-                    "errors": [f"c2a_payload must be a JSON object (dict), "
-                               f"got {type(c2a_payload).__name__}"]}
+                               "pass a dict or a valid JSON string"],
+                    "user_hint": _USER_HINT_FAILED}
+
+    # P0: a non-None payload must be a dict (string is parsed above; a raw
+    # int/float/list would otherwise crash on .get() below — that crash is
+    # exactly what leaked a raw traceback to end users).
+    if c2a_payload is not None and not isinstance(c2a_payload, dict):
+        return {"status": "failed",
+                "errors": [f"c2a_payload must be a JSON object (dict), "
+                           f"got {type(c2a_payload).__name__}"],
+                "user_hint": _USER_HINT_FAILED}
 
     # Mode 1: explicit payload
     if c2a_payload:
@@ -257,7 +279,8 @@ def render_card_payload(
             # empty card pretending to succeed).
             if not blocks:
                 return {"status": "failed",
-                        "errors": ["no valid blocks found in c2a_payload"]}
+                        "errors": ["no valid blocks found in c2a_payload"],
+                        "user_hint": _USER_HINT_FAILED}
 
             actions = []
             for i, a in enumerate(c2a_payload.get("actions", [])):
@@ -330,18 +353,33 @@ def render_card_payload(
             # block has no recoverable rows — we must NOT report success for
             # an empty table (that is the "27 rows shown, user sees nothing" bug).
             logger.warning("c2a_render_card payload invalid/empty: %s", e)
-            return {"status": "failed", "errors": [str(e)]}
+            return {"status": "failed", "errors": [str(e)],
+                    "user_hint": _USER_HINT_FAILED}
 
     # Mode 2: raw tool output → implicit conversion
+    if tool_output is not None and isinstance(tool_output, str):
+        # P0-class tolerance: the LLM sometimes forwards the raw tool
+        # response as a JSON *string* instead of a dict.
+        try:
+            tool_output = json.loads(tool_output)
+        except (json.JSONDecodeError, TypeError):
+            return {"status": "failed",
+                    "errors": ["tool_output is a string but not valid JSON — "
+                               "pass the tool's dict output or a valid JSON string"],
+                    "user_hint": _USER_HINT_FAILED}
+
     if tool_output:
         converted = convert_tool_output_to_c2a(tool_name, tool_output, session_id)
         if converted is None:
             return {"status": "skipped",
-                    "errors": ["tool_output contains no data list to render as a C2A card"]}
+                    "errors": ["tool_output contains no data list to render as a C2A card"],
+                    "user_hint": _USER_HINT_SKIPPED}
         return {"status": "success", "c2a_message": converted.to_dict(),
                 "c2a_json": converted.to_json(indent=2), "errors": []}
 
-    return {"status": "failed", "errors": ["provide c2a_payload or (tool_output + tool_name)"]}
+    return {"status": "failed",
+            "errors": ["provide c2a_payload or (tool_output + tool_name)"],
+            "user_hint": _USER_HINT_FAILED}
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +392,10 @@ def render_card_payload(
         "当需要以交互式 UI（而非纯文本）呈现列表/表格/表单/操作时，优先用本工具。\n"
         "★ 有工具/MCP 原始数据时，务必只传 tool_output(+tool_name)，切勿自己拼 payload——"
         "工具会自动转成合法 data_table（含表头、行、行链接），最不易出错。\n"
+        "★★ tool_output 必须原样传入该工具返回的完整 dict（MCP 工具返回形如 "
+        "{\"result\": \"<JSON>\", \"is_error\": false, \"metadata\": {...}}——整段照传，"
+        "包括 result 字符串和 metadata，不要只摘 result 里的业务数据、不要自己解析或改写；"
+        "行级链接正是靠 metadata 里的 action_templates 生成的）。\n"
         "手动拼 c2a_payload 时的严格格式：\n"
         "• 合法 block type：text_markdown | data_table | data_list | form_definition | custom_component。\n"
         "• text_markdown：content 必须是对象 {\"markdown\": \"...\"}，不要传裸字符串。\n"
@@ -369,7 +411,10 @@ def render_card_payload(
         "• metadata.buttons：纯导航按钮列表，每项 {id, label, scope, url_template, style}。"
         "scope=\"card\" 渲染在卡片底部，scope=\"row\" 按行渲染（url_template 支持 {列名} 占位符）。"
         "AI 不执行业务操作——按钮只跳转外部系统页面，用户在那里完成审批/导出等操作。\n"
-        "• metadata.source_system：数据来源系统标识（如 oa_system、erp）。"
+        "• metadata.source_system：数据来源系统标识（如 oa_system、erp）。\n"
+        "★ 失败处理（强制）：若返回 status=\"failed\" 或 \"skipped\"，禁止向用户展示本工具返回的"
+        "任何原始内容（JSON、错误码、Python 结构、字段名）。正确做法：把数据整理成 Markdown 表格"
+        "直接写进你的文字回复，并简短说明卡片未能渲染、已改为文字展示。"
     ),
     category="plugin",
     tags=["c2a", "card", "render", "validation"],
@@ -385,6 +430,7 @@ async def c2a_render_card(
     tool_output: Optional[Dict[str, Any]] = None,
     tool_name: str = "tool",
     session_id: str = "default_session",
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """解析并验证 C2A payload（或自动转换工具输出）为可渲染的 C2A 消息。
 
@@ -413,6 +459,17 @@ async def c2a_render_card(
         "c2a_json": "...", "errors": [...]}``
         ——空表格 / 格式非法返回 ``failed``（含具体原因），不会再假成功。
     """
+    # Tolerate hallucinated / unknown kwargs (e.g. an LLM emitting a
+    # non-existent ``card_id``). Log once so the hallucination is visible in
+    # logs, but do NOT crash: the previous bare TypeError escaped the function
+    # (raised before the body ran) and leaked a raw Python error to the user,
+    # which aborts the whole card render. Ignore them and proceed.
+    if kwargs:
+        logger.warning(
+            "c2a_render_card: ignoring unexpected arguments: %s",
+            sorted(kwargs.keys()),
+        )
+
     return render_card_payload(
         c2a_payload=c2a_payload,
         tool_output=tool_output,

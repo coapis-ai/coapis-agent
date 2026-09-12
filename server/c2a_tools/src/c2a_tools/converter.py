@@ -19,7 +19,13 @@ from c2a_protocol.models import (
     ActionSecurity,
     State,
 )
-from .mcp_parser import MCPC2AParser, find_url_field
+from .mcp_parser import (
+    MCPC2AParser,
+    extract_row_link_template,
+    find_url_field,
+    unwrap_mcp_response,
+    url_template_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +65,22 @@ def _convert_inner(
     session_id: str,
 ) -> Optional[C2AMessage]:
     """(internal) conversion logic — may raise; the wrapper catches it."""
+    # Unwrap the two accepted shapes (see mcp_parser.unwrap_mcp_response):
+    #  * raw MCP wrapper response {"result": "<json>", "metadata": {...}, ...}
+    #    — the LLM is instructed to forward the MCP tool's whole response
+    #      dict verbatim; metadata is what powers row links.
+    #  * plain business dict (with optional top-level "metadata").
+    business, metadata = unwrap_mcp_response(tool_output)
+    work: Dict[str, Any]
+    if business is not None:
+        work = business
+    elif isinstance(tool_output, dict):
+        work = {k: v for k, v in tool_output.items() if k != "result"}
+    else:
+        return None
+
     # Locate a list-of-dicts recursively (depth ≤ 3), preferring known keys.
-    found = _find_data_list(tool_output)
+    found = _find_data_list(work)
     if found is None:
         return None
     list_key, list_items = found
@@ -80,13 +100,26 @@ def _convert_inner(
     rows = [[str(item.get(h, "")) for h in headers] for item in list_items]
 
     table_content: Dict[str, Any] = {"data": {"headers": headers, "rows": rows}}
+
+    # Row links. Two sources, in priority order:
+    #  1. metadata.action_templates with a {placeholder} url_template
+    #     (plan B — the MCP server declares the detail-URL contract).
+    #  2. P1-B fallback: a URL field in the row data itself.
+    template = extract_row_link_template(metadata)
+    if template:
+        _apply_template_row_links(
+            table_content, first_item, list_items, id_field, headers, template
+        )
+        return _build_message(tool_name, session_id, table_content)
+
+    # No metadata template — only emit row links when the data carries a
+    # real URL field. Without one, the old code generated a fake
+    # /{list_key}/{id} path that never resolved — better a plain table.
     if id_field:
         table_content["id_field"] = id_field
-        table_content["row_values"] = [{id_field: item.get(id_field, "")} for item in list_items]
-
-    # P1-B: Row links only when MCP data actually provides a URL field.
-    # Without a real URL, the old code generated a fake /{list_key}/{id}
-    # path that never resolved — better to show a plain table.
+        table_content["row_values"] = [
+            {id_field: item.get(id_field, "")} for item in list_items
+        ]
     url_field = find_url_field(first_item)
     if url_field:
         # Make sure the URL column is visible in the table.
@@ -108,6 +141,14 @@ def _convert_inner(
         table_content["row_actions"] = {"view_detail": row_action}
     # If no url_field: no row_actions — the table is just a plain table.
 
+    return _build_message(tool_name, session_id, table_content)
+
+
+def _build_message(
+    tool_name: str,
+    session_id: str,
+    table_content: Dict[str, Any],
+) -> C2AMessage:
     c2a_block = Block(type="data_table", content=BlockContent(data=table_content))
 
     # P1-B: No fake top-level "查看详情" button.  Row links (when present)
@@ -120,6 +161,59 @@ def _convert_inner(
         actions=[],
         state=State(status="rendered"),
     )
+
+
+def _apply_template_row_links(
+    table_content: Dict[str, Any],
+    first_item: Dict[str, Any],
+    list_items: List[Dict[str, Any]],
+    id_field: Optional[str],
+    headers: List[str],
+    template: Dict[str, Any],
+) -> None:
+    """Attach row_actions + row_values driven by a metadata action template.
+
+    ``template`` comes from :func:`extract_row_link_template`: a dict with
+    ``url_template`` (``{placeholder}`` tokens), optional ``params_mapping``
+    (placeholder name → row field name) and the original ``_key``.
+
+    The renderer fills url_template from visible cells + ``row_values``
+    (per-row field map), so every field a placeholder maps to is added to
+    ``row_values`` — including hidden ones like the id column.
+    """
+    url_template = str(template.get("url_template", ""))
+    link_fields = url_template_fields(
+        url_template, template.get("params_mapping"), first_item
+    )
+
+    rv_fields: List[str] = []
+    if id_field and id_field not in link_fields:
+        rv_fields.append(id_field)
+    rv_fields.extend(link_fields)
+    if id_field:
+        table_content["id_field"] = id_field
+    if rv_fields:
+        table_content["row_values"] = [
+            {f: item.get(f, "") for f in rv_fields} for item in list_items
+        ]
+
+    # Multi-row lists get clickable rows; a single record gets a button
+    # under the table (consistent with the mcp_parser contract).
+    style = "link" if len(list_items) > 1 else "button"
+    row_action: Dict[str, Any] = {
+        "action_id": f"btn_{template.get('_key', 'link')}_view",
+        "label": template.get("label") or "查看详情",
+        "style": style,
+        "business_intent": template.get("business_intent") or "view_detail",
+        "url_template": url_template,
+    }
+    if style == "link":
+        link_column = (
+            template.get("link_column") or MCPC2AParser._infer_link_column(headers)
+        )
+        if link_column:
+            row_action["link_column"] = link_column
+    table_content["row_actions"] = {template.get("_key", "row_link"): row_action}
 
 
 def _is_dict_list(value: Any) -> bool:

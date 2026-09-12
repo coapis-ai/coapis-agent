@@ -28,6 +28,7 @@ Row-link contract (fixes the "row link never opens" bug family):
 """
 
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from c2a_protocol import (
@@ -74,6 +75,127 @@ def find_url_field(item: Dict[str, Any]) -> Optional[str]:
             if isinstance(value, str) and (value.startswith("http") or value.startswith("/")):
                 return str(key)
     return None
+
+
+# Single-brace placeholder in a URL template, e.g. ``{processInstanceId}``.
+_URL_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def url_template_fields(
+    url_template: Any,
+    params_mapping: Any,
+    first_item: Dict[str, Any],
+) -> List[str]:
+    """Row-field names needed to fill every placeholder in ``url_template``.
+
+    ``params_mapping`` maps *placeholder name* → *row field name* (OA servers
+    declare it as ``{"processInstanceId": "processInstanceId", "id": "id"}``).
+    Placeholders absent from the mapping fall back to identity (placeholder
+    name == field name). Only fields that actually exist in ``first_item``
+    are returned (unknown fields would leave dead ``{x}`` tokens in the URL).
+    """
+    if not url_template or not isinstance(url_template, str):
+        return []
+    mapping = params_mapping if isinstance(params_mapping, dict) else {}
+    fields: List[str] = []
+    for placeholder in _URL_PLACEHOLDER_RE.findall(url_template):
+        field_name = str(mapping.get(placeholder, placeholder))
+        if field_name and field_name in first_item and field_name not in fields:
+            fields.append(field_name)
+    return fields
+
+
+def extract_row_link_template(metadata: Any) -> Optional[Dict[str, Any]]:
+    """Pick the ``action_templates`` entry that declares a per-row URL.
+
+    Servers are not consistent about the key: OA uses ``row_link`` for some
+    tools and ``view_detail`` for others (both carry a ``url_template`` with
+    row placeholders). Priority: explicit ``row_link`` → ``view_detail`` →
+    any template whose ``url_template`` contains ``{placeholder}`` tokens.
+
+    Returns the template dict with its original key injected as ``_key``,
+    or ``None`` when no usable template exists.
+    """
+    if not isinstance(metadata, dict):
+        return None
+    templates = metadata.get("action_templates")
+    if not isinstance(templates, dict):
+        return None
+    for key in (ActionTemplateTypes.ROW_LINK, ActionTemplateTypes.VIEW_DETAIL):
+        template = templates.get(key)
+        if isinstance(template, dict) and template.get("url_template"):
+            return {"_key": key, **template}
+    for key, template in templates.items():
+        if isinstance(template, dict) and _URL_PLACEHOLDER_RE.search(
+            str(template.get("url_template", ""))
+        ):
+            return {"_key": key, **template}
+    return None
+
+
+def unwrap_mcp_response(mcp_result: Any) -> tuple:
+    """Normalise the two MCP response shapes into ``(business, metadata)``.
+
+    Shape A — raw tool-call response (what CoApis's MCP wrapper returns)::
+
+        {"result": "<json string>" | {...}, "is_error": false,
+         "metadata": {...}}
+
+    Shape B — canonical MCP result::
+
+        {"content": [{"type": "text", "text": "<json>"}], "metadata": {...}}
+
+    Returns ``(business_dict_or_None, metadata_dict_or_empty)``.  ``metadata``
+    is taken from the top level of either shape; ``business`` is the parsed
+    JSON payload (from ``result`` in shape A, from ``content[0].text`` in
+    shape B).
+    """
+    metadata: Dict[str, Any] = {}
+    business: Optional[Dict[str, Any]] = None
+    if not isinstance(mcp_result, dict):
+        return None, metadata
+
+    meta = mcp_result.get("metadata")
+    if isinstance(meta, dict):
+        metadata = meta
+    elif isinstance(meta, str):
+        try:
+            parsed = json.loads(meta)
+            if isinstance(parsed, dict):
+                metadata = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if "result" in mcp_result:
+        result = mcp_result["result"]
+        if isinstance(result, dict):
+            business = result
+        elif isinstance(result, str):
+            try:
+                parsed = json.loads(result)
+                if isinstance(parsed, dict):
+                    business = parsed
+                elif isinstance(parsed, list):
+                    # Top-level JSON array payload (e.g. OA mock returns a bare row list).
+                    # Wrap so _find_data_list can locate it under the known "data" key.
+                    business = {"data": parsed}
+            except (json.JSONDecodeError, TypeError):
+                pass
+    for item in mcp_result.get("content", []) or []:
+        if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+            try:
+                parsed = json.loads(item["text"])
+                if isinstance(parsed, dict):
+                    business = parsed
+                elif isinstance(parsed, list):
+                    # Top-level JSON array payload (same as shape A). Wrap for _find_data_list.
+                    business = {"data": parsed}
+                else:
+                    continue
+                break
+            except (json.JSONDecodeError, TypeError):
+                continue
+    return business, metadata
 
 
 # ============================================================================
@@ -241,13 +363,13 @@ class MCPC2AParser:
             "buttons": [],
         }
 
-        # Extract business data from content.text (JSON)
-        for item in mcp_result.get("content", []):
-            if item.get("type") == "text" and "text" in item:
-                try:
-                    parsed["business_data"] = json.loads(item["text"])
-                except (json.JSONDecodeError, TypeError):
-                    pass  # non-JSON text — ignore
+        # Extract business data. Two shapes are accepted:
+        #  * canonical MCP result: content[0].text (JSON)
+        #  * CoApis wrapper response: {"result": "<json>" | {...}, ...}
+        #    (the LLM often forwards the whole wrapper dict as tool_output)
+        business, _ = unwrap_mcp_response(mcp_result)
+        if business is not None:
+            parsed["business_data"] = business
 
         # Extract metadata (may be absent entirely).
         metadata = mcp_result.get("metadata", {}) or {}
@@ -375,12 +497,35 @@ class MCPC2AParser:
 
         table_content: Dict[str, Any] = {"data": {"headers": headers, "rows": rows}}
 
-        # Row-link plumbing: id column is hidden from the table, so the
+        # Row-link plumbing: the id column is hidden from the table, so the
         # renderer needs row_values to fill url_template placeholders.
+        # Beyond the id field, a template's {placeholders} (mapped via
+        # params_mapping) may reference other hidden fields (e.g.
+        # processInstanceId) — include them too so every row builds a full URL.
+        link_fields: List[str] = []
+        for template in action_templates.values():
+            if not isinstance(template, dict):
+                continue
+            ttype = template.get("type", "")
+            if ttype in (
+                ActionTemplateTypes.ROW_LINK,
+                ActionTemplateTypes.VIEW_DETAIL,
+            ) and template.get("url_template"):
+                link_fields = url_template_fields(
+                    template.get("url_template"),
+                    template.get("params_mapping"),
+                    first_item,
+                )
+                break
+        rv_fields: List[str] = []
+        if id_field and id_field not in link_fields:
+            rv_fields.append(id_field)
+        rv_fields.extend(link_fields)
         if id_field:
             table_content["id_field"] = id_field
+        if rv_fields:
             table_content["row_values"] = [
-                {id_field: item.get(id_field, "")} for item in list_items
+                {f: item.get(f, "") for f in rv_fields} for item in list_items
             ]
 
         # Row actions (row_link = clickable rows, view_detail = button under table)
