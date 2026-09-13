@@ -551,6 +551,18 @@ def _load_and_validate_config(
         return Config()
 
 
+def get_global_mcp_pool_agent_id() -> str:
+    """Agent ID that sources the global (shared) MCP pool.
+
+    Pinned to the admin workspace and deliberately decoupled from
+    ``agents.active_agent``: in enterprise deployments ``active_agent`` may
+    point at a bare workspace (e.g. ``global_default``), whose config nobody
+    maintains — reading the pool from it would silently drop admin's
+    globally-shared MCP clients for every non-admin user.
+    """
+    return "user:admin"
+
+
 def load_config(config_path: Optional[Path] = None) -> Config:
     """Load config from file with mtime-based caching.
 

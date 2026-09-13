@@ -273,6 +273,19 @@ async def save_external_systems_config(request: Request):
     config_data = load_systems_config()
     systems = config_data.get("systems", [])
 
+    # 前缀唯一性：同一前缀只能归属一个外部系统（用户名=“前缀+登录名”，跨系统重复会导致命名冲突/错绑）
+    _um_prefix = str(user_mapping_cfg.get("username_prefix") or "").strip()
+    if _um_prefix:
+        for other in systems:
+            if other.get("provider_id") == provider_id:
+                continue  # 更新时跳过自身（允许保持不变，只拦跨系统冲突）
+            _op = str((other.get("user_mapping") or {}).get("username_prefix") or "").strip()
+            if _op and _op.lower() == _um_prefix.lower():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"用户名前缀 '{_um_prefix}' 已被系统 [{other.get('name')}] 使用，请更换（同一前缀只能归属一个外部系统）",
+                )
+
     # Check if provider_id exists, update if so, else append
     found_index = -1
     for i, sys in enumerate(systems):

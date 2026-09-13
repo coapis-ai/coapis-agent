@@ -182,12 +182,15 @@ def _get_user_id(request: Request) -> str:
 
 
 def _get_admin_agent_id() -> str:
-    """Get admin's agent ID for global MCP pool."""
-    from ...config.utils import load_config
+    """Get admin's agent ID for global MCP pool.
 
-    config = load_config()
-    # Admin's active agent is the global pool source
-    return config.agents.active_agent or "user:admin"
+    The global pool is always sourced from the admin workspace,
+    independent of ``agents.active_agent`` (see
+    ``get_global_mcp_pool_agent_id``).
+    """
+    from ...config.utils import get_global_mcp_pool_agent_id
+
+    return get_global_mcp_pool_agent_id()
 
 
 def _load_global_mcp() -> Dict[str, MCPClientConfig]:

@@ -401,7 +401,7 @@ class Workspace:
         try:
             from ..app.mcp.manager import MCPClientManager
             from ..config.config import MCPConfig, load_agent_config
-            from ..config.utils import load_config
+            from ..config.utils import get_global_mcp_pool_agent_id
 
             self._mcp_manager = MCPClientManager()
 
@@ -410,8 +410,7 @@ class Workspace:
 
             # 1. Load global pool (admin's MCP)
             try:
-                config = load_config()
-                admin_agent_id = config.agents.active_agent or "user:admin"
+                admin_agent_id = get_global_mcp_pool_agent_id()
                 if admin_agent_id != self.agent_id:
                     admin_config = load_agent_config(admin_agent_id)
                     if admin_config.mcp and admin_config.mcp.clients:
@@ -483,13 +482,12 @@ class Workspace:
         try:
             from ..app.mcp.watcher import MCPConfigWatcher
             from ..config.config import MCPConfig, load_agent_config
-            from ..config.utils import load_config
+            from ..config.utils import get_global_mcp_pool_agent_id
 
             def mcp_config_loader():
                 merged_clients = {}
                 try:
-                    config = load_config()
-                    admin_agent_id = config.agents.active_agent or "user:admin"
+                    admin_agent_id = get_global_mcp_pool_agent_id()
                     if admin_agent_id != self.agent_id:
                         admin_config = load_agent_config(admin_agent_id)
                         if admin_config.mcp and admin_config.mcp.clients:

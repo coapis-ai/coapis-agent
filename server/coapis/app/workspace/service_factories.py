@@ -46,7 +46,7 @@ async def create_mcp_service(ws: "Workspace", mcp):
     """
     # pylint: disable=protected-access
     from ...config.config import MCPConfig, load_agent_config
-    from ...config.utils import load_config
+    from ...config.utils import get_global_mcp_pool_agent_id
 
     logger.warning(f"[MCP_FACTORY] create_mcp_service called for {ws.agent_id}")
 
@@ -55,8 +55,7 @@ async def create_mcp_service(ws: "Workspace", mcp):
 
     # 1. Load global pool (admin's MCP)
     try:
-        config = load_config()
-        admin_agent_id = config.agents.active_agent or "user:admin"
+        admin_agent_id = get_global_mcp_pool_agent_id()
         if admin_agent_id != ws.agent_id:
             admin_config = load_agent_config(admin_agent_id)
             if admin_config.mcp and admin_config.mcp.clients:

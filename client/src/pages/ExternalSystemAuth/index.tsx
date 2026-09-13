@@ -1112,8 +1112,13 @@ function ExternalSystemAuthPage() {
                 <Option value="external_name">姓名（外部姓名 → 本地显示名）</Option>
               </Select>
             </Form.Item>
-            <Form.Item name={['user_mapping', 'username_prefix']} label="用户名前缀" style={{ width: 150 }}>
-              <Input placeholder="如 oa（生成 oa_0001）" />
+            <Form.Item
+              name={['user_mapping', 'username_prefix']}
+              label="用户名前缀"
+              tooltip='AI 用户名为“前缀+外部ID”（如 oa_154），同一人永远固定；重名已有用户时自动加序号。同一前缀只能归属一个外部系统'
+              style={{ width: 150 }}
+            >
+              <Input placeholder="如 oa（生成 oa_liuliangxu）" />
             </Form.Item>
             <Collapse
               ghost

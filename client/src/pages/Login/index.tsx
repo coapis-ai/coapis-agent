@@ -178,7 +178,7 @@ export default function LoginPage() {
           if (res.first_login) {
             localStorage.setItem("coapis_first_login", "true");
           }
-          rememberLogin(res.username, credSys.provider_id);
+          rememberLogin(values.username, credSys.provider_id);
           message.success(res.auto_created
             ? (t("login.callbackAutoCreated") || `已自动创建账号 ${res.display_name || res.username}`)
             : (t("login.callbackSuccess") || "登录成功"));
@@ -530,18 +530,6 @@ export default function LoginPage() {
                   </span>
                 </Button>
               </Dropdown>
-            )}
-            {credSys && (
-              <p
-                style={{
-                  margin: "10px 0 0",
-                  fontSize: 12,
-                  color: isDark ? "rgba(255,255,255,0.45)" : "#999",
-                  textAlign: "center",
-                }}
-              >
-                在上方输入{credSys.name}的账号密码即可登录，点击 CoApis 可切换回主登录
-              </p>
             )}
           </div>
         </div>

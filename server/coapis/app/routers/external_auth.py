@@ -168,15 +168,17 @@ def _try_match_existing_local_user(
     um: Dict[str, Any],
     login_username: str,
     external_name: str,
+    external_id: str,
 ) -> Optional[str]:
     """自动建用户前，尝试匹配已有本地用户（大小写不敏感）。
 
     um: 系统的 user_mapping 配置。
     login_username: 外部系统登录名（凭证直登 = 用户输入；SSO = 回调可能携带的 username）。
     external_name: 外部系统返回的姓名。
+    external_id: 外部系统用户ID。
 
     匹配键 match_by（默认 "username"）：
-        - "username":     本地用户名 ← 外部登录名（兜底 external_name）
+        - "username":     本地用户名 ← 外部登录名（兜底 external_name、前缀_外部ID）
         - "external_name": 本地显示名 ← 外部姓名（兜底 login_username）
     match_existing 默认 True（未配置 = 开）。
     """
@@ -187,6 +189,11 @@ def _try_match_existing_local_user(
         candidates = [c for c in (external_name, login_username) if c]
         return _find_local_user_by("display", candidates)
     candidates = [c for c in (login_username, external_name) if c]
+    # 规则：本地用户名 == 前缀_外部ID（吸收老通道"前缀+id"命名的存量账号）
+    prefix = (str(um.get("username_prefix") or "")).strip()
+    ext = _sanitize_external_id(external_id)
+    if prefix and ext:
+        candidates.append(f"{prefix}_{ext}")
     return _find_local_user_by("username", candidates)
 
 
@@ -280,13 +287,42 @@ def _validate_redirect(redirect: str) -> str:
     return "/chat"
 
 
-def _generate_username(prefix: str, padding: int, seq_start: int) -> str:
-    """Generate the next auto username: ``<prefix>_<seq>``（零填充）。
+def _sanitize_external_id(external_id):
+    """从外部 ID 提取可用作用户名片段的标识。
+
+    保留字母/数字/下划线/CJK/连字符，其余替换为 `_`。
+    不可用（清洗后为空）时返回 None → 调用方回退旧序号规则。
+
+    统一规则（v2）：SSO 回调与凭证直登两条建号路径都用"前缀 + 外部ID"命名，
+    保证同一外部系统同一人在任何入口进来都是同一个 AI 账号（binding 命中复用）。
+    """
+    import re
+    v = str(external_id or "").strip()
+    if not v:
+        return None
+    out = re.sub(r"[^\w-]", "_", v).strip("_")[:64].rstrip("_")
+    return out or None
+
+
+def _generate_username(prefix: str, padding: int, seq_start: int, external_id=None) -> str:
+    """Generate the next auto username.
+
+    优先（v2）：``{prefix}_{外部ID}`` —— 同一系统同一个人恒得同名；碰撞时尾部追加 _01/_02…直到唯一。
+    回退（无可用外部ID）：旧规则 ``<prefix>_<seq>``（零填充）。
 
     序号 = 现有用户名中匹配 ``<prefix>_<数字>`` 的最大序号 + 1 —— 单一事实源，
     永不漂移，无需计数器字段。碰撞时继续递增直到唯一。
     """
     from ..user_store import get_user
+
+    ext = _sanitize_external_id(external_id)
+    if prefix and ext:
+        base = f"{prefix}_{ext}"
+        candidate, n = base, 0
+        while get_user(candidate) is not None:
+            n += 1
+            candidate = f"{base}_{n:02d}"
+        return candidate
 
     seq = max(seq_start, 1)
     candidate = f"{prefix}_{seq:0{max(padding, 1)}d}"
@@ -539,8 +575,9 @@ async def external_login(request: Request):
         um = system.get("user_mapping") or {}
 
         # ── 补全绑定关系：自动建用户前，先尝试匹配已有本地用户（默认开） ──
-        matched = _try_match_existing_local_user(
-            um, str(data.get("username") or "").strip(), external_name)
+        # v2 命名规则：统一"前缀 + 外部ID"（两条建号路径同源，同人恒同账号）
+        ext_login = _sanitize_external_id(external_id)
+        matched = _try_match_existing_local_user(um, str(data.get("username") or "").strip(), external_name, external_id)
 
         if matched is not None and _bind_matched_existing_user(
                 matched, provider, external_id, external_name, mappings, request):
@@ -558,7 +595,7 @@ async def external_login(request: Request):
                 detail="未绑定该外部系统账号，且系统未开启自动创建用户。请联系管理员绑定。",
             )
         else:
-            prefix = um.get("username_prefix") or provider
+            prefix = (str(um.get("username_prefix") or "")).strip() or provider
             try:
                 padding = int(um.get("seq_padding") or 4)
             except (TypeError, ValueError):
@@ -568,7 +605,7 @@ async def external_login(request: Request):
             except (TypeError, ValueError):
                 seq_start = 1
 
-            username = _generate_username(prefix, padding, seq_start)
+            username = _generate_username(prefix, padding, seq_start, ext_login)
 
             # 显示名来源
             source = um.get("display_name_source", "external_name")
@@ -931,8 +968,9 @@ async def credential_login(request: Request):
         um = system.get("user_mapping") or {}
 
         # ── 补全绑定关系：自动建用户前，先尝试匹配已有本地用户（默认开） ──
-        # username 在此 = 外部系统登录名，是匹配的首选键
-        matched = _try_match_existing_local_user(um, username, external_name)
+        # v2 命名规则：统一"前缀 + 外部ID"（此时代码路径 `username` 仍是原始外部登录名，仅作匹配用）
+        ext_login = _sanitize_external_id(external_id)
+        matched = _try_match_existing_local_user(um, username, external_name, external_id)
 
         if matched is not None and _bind_matched_existing_user(
                 matched, provider, external_id, external_name, mappings, request):
@@ -950,7 +988,7 @@ async def credential_login(request: Request):
                 detail="未绑定该外部系统账号，且系统未开启自动创建用户。请联系管理员绑定。",
             )
         else:
-            prefix = um.get("username_prefix") or provider
+            prefix = (str(um.get("username_prefix") or "")).strip() or provider
             try:
                 padding = int(um.get("seq_padding") or 4)
             except (TypeError, ValueError):
@@ -960,7 +998,7 @@ async def credential_login(request: Request):
             except (TypeError, ValueError):
                 seq_start = 1
 
-            local_username = _generate_username(prefix, padding, seq_start)
+            local_username = _generate_username(prefix, padding, seq_start, ext_login)
 
             source = um.get("display_name_source", "external_name")
             if source == "external_name":
