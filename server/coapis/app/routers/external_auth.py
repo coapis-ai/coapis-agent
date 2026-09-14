@@ -251,6 +251,62 @@ def _bind_matched_existing_user(
     return True
 
 
+def _provision_local_user(
+    username: str,
+    display_name: str,
+    role: str,
+    request: Any,
+) -> bool:
+    """死绑定自愈：本地用户丢失时自动重建（幂等）。
+
+    场景：绑定存在（binding.user_id → 本地用户名），但本地用户记录已不存在
+    （如历史命名迁移/清理时删了用户但没更新绑定）。此时不应让用户永远
+    登不进来，而是按原用户名重建账号，保证下次登录可用。
+
+    复用自动建用户的同一套逻辑：user_store.create_user + SQLite 同步
+    （best-effort）+ 工作区初始化（best-effort）。已存在则直接返回 True。
+
+    返回 True 表示操作后用户可用。
+    """
+    from ..user_store import get_user, create_user
+
+    if get_user(username) is not None:
+        return True
+
+    dn = display_name or username
+    random_password = secrets.token_urlsafe(16)
+    if not create_user(username, random_password,
+                       display_name=dn, role=role, password_set_by_user=False):
+        logger.error("Re-provision failed: create_user returned False for %s", username)
+        return False
+
+    # SQLite user_system 同步（与自动建用户一致，best-effort）
+    try:
+        from ...user_system.database import get_db
+        from ...user_system.service import create_user as create_user_sql
+        from ...user_system.models import UserCreate
+        get_db()  # 初始化 DB（lazy 建表）
+        create_user_sql(UserCreate(
+            username=username,
+            password=random_password,
+            display_name=dn,
+            role=role,
+        ))
+    except Exception as e:
+        logger.warning("Re-provision: failed to sync %s to SQLite: %s", username, e)
+
+    # 初始化用户工作区（agent/skills）— best-effort
+    try:
+        from ..user_provisioning import init_user_workspace
+        init_user_workspace(username, display_name=dn, request=request)
+    except Exception as e:
+        logger.warning("Re-provision: workspace init skipped for %s: %s", username, e)
+
+    logger.info("Re-provisioned local user %s (dead binding self-heal, display_name=%s, role=%s)",
+                username, dn, role)
+    return get_user(username) is not None
+
+
 # ---------------------------------------------------------------------------
 # 签名 / state 工具
 # ---------------------------------------------------------------------------
@@ -561,7 +617,13 @@ async def external_login(request: Request):
         username = binding["user_id"]
         existing_user = get_user(username)
         if existing_user is None:
-            raise HTTPException(status_code=404, detail="Local user no longer exists")
+            # 死绑定自愈：绑定在但本地用户丢了 → 按原用户名重建（幂等）
+            if not _provision_local_user(username, external_name, "user", request):
+                raise HTTPException(
+                    status_code=500,
+                    detail="本地用户已丢失且自动恢复失败，请联系管理员检查用户数据",
+                )
+            existing_user = get_user(username)
         # 首次登录判定必须在 touch_last_login 之前（与主登录一致）
         first_login = existing_user.get("last_login") is None
         # 记录本次登录（审计字段）
@@ -948,7 +1010,13 @@ async def credential_login(request: Request):
         local_username = binding["user_id"]
         existing_user = get_user(local_username)
         if existing_user is None:
-            raise HTTPException(status_code=404, detail="Local user no longer exists")
+            # 死绑定自愈：绑定在但本地用户丢了 → 按原用户名重建（幂等）
+            if not _provision_local_user(local_username, external_name, "user", request):
+                raise HTTPException(
+                    status_code=500,
+                    detail="本地用户已丢失且自动恢复失败，请联系管理员检查用户数据",
+                )
+            existing_user = get_user(local_username)
         first_login = existing_user.get("last_login") is None
         binding["last_login_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         binding["login_count"] = int(binding.get("login_count") or 0) + 1
