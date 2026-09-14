@@ -9,7 +9,7 @@ name: coapis-mycom
 services:
   # ── 后端 API 服务 ──
   server:
-    image: coapis-agent:1.0.1
+    image: coapis-agent:1.0.2
     build:
       context: ../..
       dockerfile: server/deploy/Dockerfile
