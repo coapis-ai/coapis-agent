@@ -2,6 +2,7 @@
 """Repository factory for dependency injection."""
 
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +17,7 @@ class RepositoryFactory:
     
     This factory provides dependency injection for repositories,
     allowing different implementations based on edition:
-        - Community: JsonKnowledgeBaseRepository, JsonUserRepository
+        - Community: JsonKnowledgeBaseRepository, SqliteUserRepository
         - Enterprise: PostgresKnowledgeBaseRepository, PostgresUserRepository (loaded dynamically)
     
     Usage:
@@ -39,12 +40,24 @@ class RepositoryFactory:
     """
     
     _kb_repo: Optional[KnowledgeBaseRepository] = None
-    _user_repo = None  # User repository (injected by enterprise)
+    _user_repo = None  # User repository (SQLite community / Postgres enterprise)
+    _lock: threading.Lock = threading.Lock()
     _tag_repo = None   # Tag repository (injected by enterprise)
     _scene_repo = None # Scene repository (injected by enterprise)
     _edition: Optional[str] = None
     _initialized: bool = False
-    
+
+    @classmethod
+    def reset_user_repo(cls) -> None:
+        """Close and reset the user repository (for testing / re-init)."""
+        with cls._lock:
+            if cls._user_repo is not None:
+                try:
+                    cls._user_repo.close()
+                except Exception:
+                    pass
+                cls._user_repo = None
+
     @classmethod
     def initialize(
         cls,
@@ -72,13 +85,18 @@ class RepositoryFactory:
             cls._kb_repo = JsonKnowledgeBaseRepository(data_dir)
             logger.info(f"Initialized Community edition repositories (data_dir={data_dir})")
             
-            # 社区版：使用JSON User Repository
-            try:
-                from .user_repository_json import JsonUserRepository
-                cls._user_repo = JsonUserRepository()
-                logger.info("Initialized Community User repository (JSON)")
-            except Exception as e:
-                logger.warning(f"Failed to initialize JsonUserRepository: {e}")
+            # 社区版：SQLite only（初始化失败直接报错，不回退）
+            from .user_repository_sqlite import SqliteUserRepository
+            from ..constant import SYSTEM_DIR
+            from .migrations import ensure_migrated
+            from .db_settings import resolve_db_path
+            # D-7/D-8/D-9：COAPIS_DATABASE_URL（可选；默认 <WORKING_DIR>/system/coapis.db，
+            # 相对路径相对 WORKING_DIR 解析，必须落在挂载卷内）
+            db_path = resolve_db_path()
+            # 首启迁移：users.json → coapis.db（幂等，已迁移则跳过）
+            ensure_migrated(system_dir=SYSTEM_DIR, db_path=db_path)
+            cls._user_repo = SqliteUserRepository(db_path)
+            logger.info("Initialized Community User repository (SQLite at %s)", db_path)
         
         elif edition == "enterprise":
             # 企业版：注入Repository（由企业版plugin提供）
@@ -126,13 +144,11 @@ class RepositoryFactory:
                     except Exception as e:
                         logger.warning(f"Failed to initialize PostgresUserRepository: {e}")
             else:
-                # 没有 session 也没有 user_repository，使用 JSON fallback
-                logger.info("Enterprise User repository not injected, using JSON")
-                try:
-                    from .user_repository_json import JsonUserRepository
-                    cls._user_repo = JsonUserRepository()
-                except Exception as e:
-                    logger.warning(f"Failed to initialize JsonUserRepository: {e}")
+                # 企业版必须注入 user_repository 或 session，无回退
+                raise ValueError(
+                    "Enterprise edition requires user_repository or session to be provided. "
+                    "Pass either user_repository=postgres_user_repo or session=db_session."
+                )
         
         else:
             raise ValueError(f"Invalid edition: {edition}. Must be 'community' or 'enterprise'")

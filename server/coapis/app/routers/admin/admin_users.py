@@ -194,7 +194,7 @@ def _remove_user_store_user(username: str):
 def _is_pg_repo(repo) -> bool:
     """仅企业版 PostgresUserRepository 才算独立主数据源。
 
-    社区版 RepositoryFactory 返回 JsonUserRepository（同一个 users.json），
+    社区版 RepositoryFactory 返回 SqliteUserRepository（coapis.db），
     与 UserSystemDB 同源，不应再走 id 主键写入。
     """
     return repo is not None and type(repo).__name__ == "PostgresUserRepository"
@@ -203,7 +203,7 @@ def _is_pg_repo(repo) -> bool:
 async def _resolve_user(user_id: str) -> Dict[str, Any]:
     """按 username（或整数 id）解析用户。
 
-    - 社区版：UserSystemDB 即 users.json（JSON 文件模式），username 是稳定键。
+    - 社区版：UserSystemDB 即 SQLite（coapis.db），username 是稳定键。
     - 企业版：额外从 PG 取（authoritative）。
     返回 {"username", "row"(UserSystemDB 行), "pg"(PG 行或 None)}；都查不到抛 404。
     """

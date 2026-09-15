@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Body, Request
 from pydantic import BaseModel, Field
@@ -60,7 +60,7 @@ class ScenePreferencesResponse(BaseModel):
 
 # ── Helper functions ────────────────────────────────────────────────────
 
-def _get_user_id(request: Request) -> int:
+def _get_user_id(request: Request) -> Any:
     """从请求中获取用户ID."""
     user = get_current_user(request)
     if not user or not hasattr(user, 'id'):
@@ -68,7 +68,7 @@ def _get_user_id(request: Request) -> int:
     return user.id
 
 
-def _get_preference(db: UserSystemDB, user_id: int, key: str, default: any = None) -> any:
+def _get_preference(db: UserSystemDB, user_id: Any, key: str, default: any = None) -> any:
     """获取用户偏好值."""
     try:
         value = db.get_user_preference(user_id, key)
@@ -80,7 +80,7 @@ def _get_preference(db: UserSystemDB, user_id: int, key: str, default: any = Non
         return default
 
 
-def _set_preference(db: UserSystemDB, user_id: int, key: str, value: any) -> bool:
+def _set_preference(db: UserSystemDB, user_id: Any, key: str, value: any) -> bool:
     """设置用户偏好值."""
     try:
         value_str = json.dumps(value, ensure_ascii=False)

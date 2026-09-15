@@ -34,8 +34,11 @@ async def scan_cleanup(request: Request) -> Dict[str, Any]:
     KEEP_FILES = {
         "config.json", "users.json", "auth.json", "permissions.json",
         "providers.json", "evolution_config.json", "token_usage.json",
-        "user_system.db", "user_system.db-shm", "user_system.db-wal"
+        "user_system.db", "user_system.db-shm", "user_system.db-wal",
+        "coapis.db", "coapis.db-shm", "coapis.db-wal",
     }
+    # 迁移备份文件（users.json → coapis.db 后重命名留底）
+    KEEP_FILE_PREFIXES = ("users.json.migrated-",)
 
     stale_dirs = []
     unknown_files = []
@@ -51,7 +54,9 @@ async def scan_cleanup(request: Request) -> Dict[str, Any]:
                     "size_kb": size // 1024,
                 })
         elif item.is_file():
-            if item.name not in KEEP_FILES:
+            if item.name not in KEEP_FILES and not any(
+                item.name.startswith(prefix) for prefix in KEEP_FILE_PREFIXES
+            ):
                 unknown_files.append({
                     "name": item.name,
                     "path": str(item),

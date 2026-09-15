@@ -193,7 +193,7 @@ def get_user_by_username(username: str) -> Optional[UserResponse]:
 get_user = get_user_by_username
 
 
-def get_user_by_id(user_id: int) -> Optional[UserResponse]:
+def get_user_by_id(user_id: Any) -> Optional[UserResponse]:
     """Get user by ID."""
     db = get_db()
     row = db.get_user_by_id(user_id)

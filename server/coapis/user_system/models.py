@@ -22,9 +22,19 @@ Quota management is kept but level-based logic is removed.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
+import uuid as uuid_mod
+from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _coerce_id(v: Any) -> Optional[str]:
+    """Coerce int (legacy) or str to UUID hex string. Returns None for None."""
+    if v is None:
+        return None
+    if isinstance(v, int):
+        return str(uuid_mod.UUID(int=v))
+    return str(v)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +64,7 @@ class UserUpdate(BaseModel):
 
 class UserResponse(BaseModel):
     """User response (no sensitive data)."""
-    id: int
+    id: str
     username: str
     email: Optional[str] = None
     display_name: Optional[str] = None
@@ -87,7 +97,7 @@ class UserListResponse(BaseModel):
 class TokenUsageRecord(BaseModel):
     """A single token usage record."""
     id: int
-    user_id: int
+    user_id: str
     username: str
     agent_id: Optional[str] = None
     model: str
@@ -187,7 +197,7 @@ class APIKeyList(BaseModel):
 class AuditLog(BaseModel):
     """审计日志记录."""
     id: int
-    user_id: int
+    user_id: str
     username: str
     action: str          # create_agent, update_model, login, etc.
     resource_type: str   # agent, model, skill, backup
@@ -200,7 +210,7 @@ class AuditLog(BaseModel):
 
 class AuditLogCreate(BaseModel):
     """创建审计日志."""
-    user_id: int
+    user_id: str
     username: str
     action: str
     resource_type: str
@@ -208,6 +218,11 @@ class AuditLogCreate(BaseModel):
     details: Dict[str, Any] = {}
     ip_address: str = ""
     user_agent: str = ""
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def _coerce_uid(cls, v):
+        return _coerce_id(v) or v
 
 
 class AuditLogList(BaseModel):
@@ -220,7 +235,7 @@ class AuditLogList(BaseModel):
 
 class AuditLogFilter(BaseModel):
     """审计日志筛选条件."""
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     username: Optional[str] = None
     action: Optional[str] = None
     resource_type: Optional[str] = None
@@ -228,3 +243,8 @@ class AuditLogFilter(BaseModel):
     end_time: Optional[float] = None
     page: int = 1
     page_size: int = 50
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def _coerce_uid(cls, v):
+        return _coerce_id(v)
