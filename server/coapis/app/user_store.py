@@ -14,20 +14,19 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""User store - JSON-based user persistence (no database).
+"""User store - SQLite-backed user persistence (single source of truth).
 
-Stores:
-- User credentials (username, password hash, salt)
-- User profiles (display_name, avatar_url)
-- User roles (admin, user)
-- User metadata (created_at, last_login)
+用户主表收口到 coapis.db（SQLite）。本模块是 user repository 的薄门面，
+公共函数签名保持不变，~30 处调用方无需改动。
 
-File: ~/.coapis/users/users.json
+- 读/写：全部走 RepositoryFactory.get_user_repository()（SQLite）。
+- 密码哈希：保留 bcrypt（与历史 users.json 兼容；verify 同时认 bcrypt / 历史 SHA-256）。
+- 旧 users.json 不再被业务逻辑读写：启动时由 foundation/migrations.py 一次性
+  导入 SQLite，之后保留为冷备。
 """
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import secrets
@@ -37,8 +36,7 @@ from typing import Any, Dict, List, Optional
 
 import bcrypt
 
-from ..constant import SYSTEM_DIR, USERS_FILE
-from ..utils.file_lock import safe_read_json, safe_write_json
+from ..constant import SYSTEM_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -52,20 +50,45 @@ def _ensure_users_dir() -> None:
         pass
 
 
+def _repo():
+    """Return the (SQLite) user repository from the repository factory.
+
+    SQLite (coapis.db) is the single source of truth for the user domain.
+    The legacy users.json is imported once at startup (foundation/migrations.py)
+    and then kept as a cold backup — business logic no longer reads/writes it.
+
+    Lazy-init: if the factory hasn't been initialized yet (e.g. code runs
+    before the FastAPI lifespan), initialize it here so that user_store
+    functions work at any point during the process lifetime.
+    """
+    from ..foundation.repository_factory import RepositoryFactory
+    if not RepositoryFactory.is_initialized():
+        import os
+        from ..constant import DATA_DIR
+        edition = os.getenv("COAPIS_EDITION", "community")
+        if edition == "community":
+            RepositoryFactory.initialize(edition=edition, data_dir=DATA_DIR)
+    return RepositoryFactory.get_user_repository()
+
+
 def _load_users() -> Dict[str, Any]:
-    """Load users from file with shared lock. Returns empty dict if missing."""
-    _ensure_users_dir()
-    data = safe_read_json(USERS_FILE, default={"users": {}})
-    if not isinstance(data, dict) or "users" not in data:
-        data = {"users": {}}
-    return data
+    """All users as ``{username: row}``（SQLite-backed，只读视图）。
+
+    仅保留给少数仍用 load-modify-save 旧范式的调用点；新代码应直接用
+    下面的定向 helper。返回完整行（含 password 字段）。
+    """
+    rows = _repo().list_users()
+    return {"users": {r["username"]: r for r in rows}}
 
 
 def _save_users(data: Dict[str, Any]) -> None:
-    """Save users to file with exclusive lock and atomic write."""
-    _ensure_users_dir()
-    if not safe_write_json(USERS_FILE, data):
-        logger.error("Failed to save users")
+    """把 ``{username: row}`` 幂等 upsert 回 SQLite。"""
+    repo = _repo()
+    for username, user in data.get("users", {}).items():
+        if repo.user_exists(username):
+            repo.update_user(username, user)
+        else:
+            repo.create_user(user)
 
 
 # ---------------------------------------------------------------------------
@@ -94,53 +117,37 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
 # User CRUD operations
 # ---------------------------------------------------------------------------
 
+def _normalize_row(
+    row: Optional[Dict[str, Any]], include_password: bool = False
+) -> Optional[Dict[str, Any]]:
+    """Normalize a SQLite user row for legacy callers.
+
+    - adds a ``last_login`` alias (旧字段名) pointing to ``last_login_at``；
+    - drops password_hash/salt unless ``include_password``.
+    """
+    if row is None:
+        return None
+    out = dict(row)
+    out["last_login"] = out.get("last_login_at")
+    if not include_password:
+        out.pop("password_hash", None)
+        out.pop("salt", None)
+    return out
+
+
 def list_users() -> List[Dict[str, Any]]:
-    """List all users (without password hashes)."""
-    data = _load_users()
-    result = []
-    for username, info in data.get("users", {}).items():
-        result.append({
-            "username": username,
-            "display_name": info.get("display_name", username),
-            "role": info.get("role", "user"),
-            "created_at": info.get("created_at"),
-            "last_login": info.get("last_login"),
-        })
-    return result
+    """List all users (without password hashes) (SQLite)."""
+    return [_normalize_row(r) for r in _repo().list_users()]
 
 
 def get_user(username: str) -> Optional[Dict[str, Any]]:
-    """Get user by username (without password hash)."""
-    data = _load_users()
-    info = data.get("users", {}).get(username)
-    if info is None:
-        return None
-    return {
-        "username": username,
-        "display_name": info.get("display_name", username),
-        "role": info.get("role", "user"),
-        "created_at": info.get("created_at"),
-        "last_login": info.get("last_login"),
-        "onboarding_completed": info.get("onboarding_completed", False),
-        "password_set_by_user": info.get("password_set_by_user", True),
-    }
+    """Get user by username (without password hash) (SQLite)."""
+    return _normalize_row(_repo().get_user_by_username(username))
 
 
 def get_user_with_creds(username: str) -> Optional[Dict[str, Any]]:
-    """Get user with credentials (for auth verification)."""
-    data = _load_users()
-    info = data.get("users", {}).get(username)
-    if info is None:
-        return None
-    return {
-        "username": username,
-        "display_name": info.get("display_name", username),
-        "role": info.get("role", "user"),
-        "password_hash": info.get("password_hash"),
-        "salt": info.get("salt"),
-        "created_at": info.get("created_at"),
-        "last_login": info.get("last_login"),
-    }
+    """Get user with credentials (for auth verification) (SQLite)."""
+    return _normalize_row(_repo().get_user_by_username(username), include_password=True)
 
 
 def create_user(
@@ -156,24 +163,24 @@ def create_user(
     - 正常注册 / 管理员建用户：True（用户知道密码）
     - 外部系统自动创建（随机密码）：False（用户从未设置过，可走"首次设置"）
     """
-    data = _load_users()
-    if username in data.get("users", {}):
+    repo = _repo()
+    if repo.user_exists(username):
         return False
 
     pw_hash, salt = _hash_password(password)
-    data["users"][username] = {
-        "username": username,  # 保存用户名
+    repo.create_user({
+        "username": username,
         "display_name": display_name or username,
         "password_hash": pw_hash,
         "salt": salt,
         "role": role,
-        "is_active": True,
+        "is_active": 1,
         "created_at": time.time(),
-        "last_login": None,
-        "password_set_by_user": password_set_by_user,
-    }
-    _save_users(data)
-    logger.info(f"Created user: {username}")
+        "last_login_at": None,
+        "password_set_by_user": 1 if password_set_by_user else 0,
+        "onboarding_completed": 1,
+    })
+    logger.info("Created user: %s", username)
 
     # Create user's isolated data directories
     _create_user_dirs(username)
@@ -190,19 +197,20 @@ def set_initial_password(username: str, new_password: str) -> bool:
     """
     if not new_password or len(new_password) < 8:
         return False
-    data = _load_users()
-    user_data = data.get("users", {}).get(username)
+    repo = _repo()
+    user_data = repo.get_user_by_username(username)
     if user_data is None:
         return False
-    if user_data.get("password_set_by_user", True):
-        logger.warning(f"set_initial_password rejected for {username}: already set")
+    if user_data.get("password_set_by_user", 1):
+        logger.warning("set_initial_password rejected for %s: already set", username)
         return False
     pw_hash, salt = _hash_password(new_password)
-    user_data["password_hash"] = pw_hash
-    user_data["salt"] = salt
-    user_data["password_set_by_user"] = True
-    _save_users(data)
-    logger.info(f"User {username} set initial password (no old-password check)")
+    repo.update_user(username, {
+        "password_hash": pw_hash,
+        "salt": salt,
+        "password_set_by_user": 1,
+    })
+    logger.info("User %s set initial password (no old-password check)", username)
     return True
 
 
@@ -239,64 +247,65 @@ def update_user(
     # Fields that should never be overwritten via kwargs
     PROTECTED_FIELDS = {"username", "password_hash", "salt", "created_at"}
 
-    data = _load_users()
-    if username not in data.get("users", {}):
-        logger.warning(f"Cannot update user {username}: user does not exist")
+    repo = _repo()
+    if not repo.user_exists(username):
+        logger.warning("Cannot update user %s: user does not exist", username)
         return False
 
-    user_data = data["users"][username]
+    user_data = repo.get_user_by_username(username)
+    updates: Dict[str, Any] = {}
 
     # Verify current password if changing password
     if new_password is not None:
         if current_password is None:
-            logger.warning(f"Cannot update password for {username}: current_password required")
+            logger.warning("Cannot update password for %s: current_password required", username)
             return False
         if not verify_password(
             current_password,
             user_data.get("password_hash", ""),
             user_data.get("salt", ""),
         ):
-            logger.warning(f"Password update failed for {username}: incorrect current password")
+            logger.warning("Password update failed for %s: incorrect current password", username)
             return False
         pw_hash, salt = _hash_password(new_password)
-        user_data["password_hash"] = pw_hash
-        user_data["salt"] = salt
-        user_data["password_set_by_user"] = True  # 改密成功 = 用户已知晓密码
+        updates["password_hash"] = pw_hash
+        updates["salt"] = salt
+        updates["password_set_by_user"] = 1  # 改密成功 = 用户已知晓密码
 
     # Update individual fields (only if explicitly provided)
     if display_name is not None:
-        user_data["display_name"] = display_name
+        updates["display_name"] = display_name
 
     if is_active is not None:
-        user_data["is_active"] = is_active
+        updates["is_active"] = 1 if is_active else 0
 
     if role is not None:
-        user_data["role"] = role
+        updates["role"] = role
 
     # Update additional fields (but protect critical fields)
     for key, value in kwargs.items():
         if key in PROTECTED_FIELDS:
-            logger.warning(
-                f"Skipping protected field '{key}' for user {username}"
-            )
+            logger.warning("Skipping protected field '%s' for user %s", key, username)
             continue
-        user_data[key] = value
+        updates[key] = value
 
-    _save_users(data)
-    logger.info(f"Updated user: {username}")
+    if not updates:
+        return True
+    repo.update_user(username, updates)
+    logger.info("Updated user: %s", username)
     return True
 
 
 def delete_user(username: str) -> bool:
-    """Delete a user. Returns False if user doesn't exist."""
-    data = _load_users()
-    if username not in data.get("users", {}):
+    """Delete a user. Returns False if user doesn't exist (SQLite)."""
+    try:
+        if _repo().delete_user(username):
+            logger.info("Deleted user: %s", username)
+            return True
         return False
-
-    del data["users"][username]
-    _save_users(data)
-    logger.info(f"Deleted user: {username}")
-    return True
+    except Exception as e:
+        logger.error("Failed to delete user %s: %s", username, e)
+        return False
 
 
 def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
@@ -312,9 +321,7 @@ def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
         return None
 
     # Update last login
-    data = _load_users()
-    data["users"][username]["last_login"] = time.time()
-    _save_users(data)
+    _repo().update_user(username, {"last_login_at": time.time()})
 
     return {
         "username": username,
@@ -328,16 +335,13 @@ def touch_last_login(username: str) -> None:
 
     No-op if the user does not exist.
     """
-    data = _load_users()
-    if username in data.get("users", {}):
-        data["users"][username]["last_login"] = time.time()
-        _save_users(data)
+    if _repo().user_exists(username):
+        _repo().update_user(username, {"last_login_at": time.time()})
 
 
 def has_registered_users() -> bool:
-    """Check if any users are registered."""
-    data = _load_users()
-    return len(data.get("users", {})) > 0
+    """Check if any users are registered (SQLite)."""
+    return _repo().count_users() > 0
 
 
 # ---------------------------------------------------------------------------

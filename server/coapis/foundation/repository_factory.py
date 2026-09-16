@@ -96,6 +96,11 @@ class RepositoryFactory:
             # 首启迁移：users.json → coapis.db（幂等，已迁移则跳过）
             ensure_migrated(system_dir=SYSTEM_DIR, db_path=db_path)
             cls._user_repo = SqliteUserRepository(db_path)
+            # F3: external identity bindings (SSO) → same coapis.db. The app
+            # layer's get_external_identity_store() now returns this instead
+            # of falling back to external_identity_mappings.json.
+            from .external_identity_store_sqlite import SqliteExternalIdentityStore
+            RepositoryFactory.inject_external_identity_store(SqliteExternalIdentityStore(db_path))
             logger.info("Initialized Community User repository (SQLite at %s)", db_path)
         
         elif edition == "enterprise":
@@ -292,3 +297,14 @@ class RepositoryFactory:
             True if initialized, False otherwise
         """
         return cls._initialized
+
+    @classmethod
+    def reset(cls):
+        """Reset factory state (used by tests)."""
+        cls._kb_repo = None
+        cls._user_repo = None
+        cls._scene_repo = None
+        cls._ext_store = None
+        cls._tag_repo = None
+        cls._edition = None
+        cls._initialized = False

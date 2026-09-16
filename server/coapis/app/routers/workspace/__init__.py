@@ -25,7 +25,9 @@ from fastapi import APIRouter
 from .workspace_agents import router as workspace_agents_router
 from .workspace_models import router as workspace_models_router
 from .workspace_skills import router as workspace_skills_router
-from .workspace_security import router as workspace_security_router
+# workspace_security: 6 个端点全部损坏（调用不存在的 db.execute()、引用不存在列），
+# 前端零调用（密码走 /auth/update-profile）。下线，保留文件供未来重构。
+# from .workspace_security import router as workspace_security_router
 from .workspace_backups import router as workspace_backups_router
 from .workspace_audit import router as workspace_audit_router
 
@@ -38,7 +40,8 @@ router = APIRouter()
 router.include_router(workspace_agents_router)
 router.include_router(workspace_models_router)
 router.include_router(workspace_skills_router)
-router.include_router(workspace_security_router)
+# router.include_router(workspace_security_router)  # F4: 死路由下线
+
 router.include_router(workspace_backups_router)
 router.include_router(workspace_audit_router)
 router.include_router(workspace_config_router)

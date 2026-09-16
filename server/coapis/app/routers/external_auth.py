@@ -280,20 +280,7 @@ def _provision_local_user(
         logger.error("Re-provision failed: create_user returned False for %s", username)
         return False
 
-    # SQLite user_system 同步（与自动建用户一致，best-effort）
-    try:
-        from ...user_system.database import get_db
-        from ...user_system.service import create_user as create_user_sql
-        from ...user_system.models import UserCreate
-        get_db()  # 初始化 DB（lazy 建表）
-        create_user_sql(UserCreate(
-            username=username,
-            password=random_password,
-            display_name=dn,
-            role=role,
-        ))
-    except Exception as e:
-        logger.warning("Re-provision: failed to sync %s to SQLite: %s", username, e)
+    # user_store.create_user 现在直接写 SQLite（coapis.db），无需再同步到 user_system。
 
     # 初始化用户工作区（agent/skills）— best-effort
     try:
@@ -685,20 +672,7 @@ async def external_login(request: Request):
                                display_name=display_name, role=default_role, password_set_by_user=False):
                 raise HTTPException(status_code=500, detail="Failed to create user")
 
-            # SQLite user_system 同步（与 register 一致，best-effort；密码由 service 侧散列）
-            try:
-                from ...user_system.database import get_db
-                from ...user_system.service import create_user as create_user_sql
-                from ...user_system.models import UserCreate
-                get_db()  # 初始化 DB（lazy 建表）
-                create_user_sql(UserCreate(
-                    username=username,
-                    password=random_password,
-                    display_name=display_name,
-                    role=default_role,
-                ))
-            except Exception as e:
-                logger.warning("Failed to sync auto-created user %s to SQLite: %s", username, e)
+            # user_store.create_user 现在直接写 SQLite（coapis.db），无需再同步到 user_system。
 
             # 初始化用户工作区（agent/skills/workflows）— best-effort
             default_agent_id = f"user:{username}"
@@ -1083,20 +1057,7 @@ async def credential_login(request: Request):
                                display_name=display_name, role=default_role, password_set_by_user=False):
                 raise HTTPException(status_code=500, detail="Failed to create user")
 
-            # SQLite user_system 同步
-            try:
-                from ...user_system.database import get_db
-                from ...user_system.service import create_user as create_user_sql
-                from ...user_system.models import UserCreate
-                get_db()
-                create_user_sql(UserCreate(
-                    username=local_username,
-                    password=random_password,
-                    display_name=display_name,
-                    role=default_role,
-                ))
-            except Exception as e:
-                logger.warning("Failed to sync auto-created user %s to SQLite: %s", local_username, e)
+            # user_store.create_user 现在直接写 SQLite（coapis.db），无需再同步到 user_system。
 
             # 初始化用户工作区
             try:

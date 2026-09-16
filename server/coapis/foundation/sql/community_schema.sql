@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS users (
     created_at REAL,
     updated_at REAL,
     last_login_at REAL,
-    muga_key TEXT
+    muga_key TEXT,
+    password_set_by_user INTEGER DEFAULT 0,
+    onboarding_completed INTEGER DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -109,16 +111,26 @@ CREATE TABLE IF NOT EXISTS token_usage (
 CREATE INDEX IF NOT EXISTS idx_token_usage_user ON token_usage(user_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage(created_at);
 
+-- ---------------- 迁移状态（完成标记，F6） ----------------
+CREATE TABLE IF NOT EXISTS migration_state (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at REAL
+);
+
 -- ---------------- 外部系统绑定（SSO） ----------------
+-- DDL kept in sync with SqliteExternalIdentityStore._ensure_table:
+-- user_id is the local *username* (community convention, see
+-- external_auth.py which reads binding["user_id"] as a username).
 CREATE TABLE IF NOT EXISTS external_bindings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     external_system TEXT NOT NULL,
     external_user_id TEXT NOT NULL,
-    display_name TEXT,
-    email TEXT,
-    extra_data TEXT,
-    created_at REAL,
+    display_name TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    extra_data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
     UNIQUE(external_system, external_user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_bindings_user ON external_bindings(user_id);

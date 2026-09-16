@@ -29,12 +29,18 @@ import uuid as uuid_mod
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from .external_identity_store_sqlite import _COLUMN_KEYS
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    """Current local time as ISO-8601 string (default for created_at)."""
+    return datetime.now().isoformat(timespec="seconds")
+
 
 def _deterministic_uuid(old_id: Any) -> str:
     """Convert a legacy int ID to a deterministic UUID hex string.
@@ -69,7 +75,7 @@ def _load_json_list(path: Path) -> List[Dict[str, Any]]:
     if isinstance(data, dict):
         for key in ("users", "audit_logs", "user_preferences", "api_keys",
                     "point_transactions", "token_usage", "external_bindings",
-                    "user_settings"):
+                    "user_settings", "bindings"):
             if key in data:
                 value = data[key]
                 if isinstance(value, list):
@@ -99,27 +105,34 @@ def ensure_migrated(
     system_dir = system_dir or SYSTEM_DIR
     db_path = db_path or (system_dir / "coapis.db")
 
-    # Check if migration is needed
+    # F6: migration is INCREMENTAL. The only skip condition is "users.json no
+    # longer exists" (it is renamed by a prior migration). We deliberately do
+    # NOT skip on "SQLite already has users" — that all-or-nothing gate was the
+    # bug that stranded N-1 users in JSON while SQLite kept 1 (split-brain).
+    # INSERT OR REPLACE + deterministic UUIDs make re-imports idempotent & safe.
+    users_file = system_dir / "users.json"
+    if not users_file.exists():
+        logger.info(
+            "Migration skipped: users.json not found at %s (already migrated)",
+            users_file,
+        )
+        return False
+
+    # Report current state for logging only (NOT a skip gate).
+    existing_count = 0
     if db_path.exists():
-        # DB exists — check if it has users
         try:
             import sqlite3
             conn = sqlite3.connect(str(db_path))
-            count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            existing_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
             conn.close()
-            if count > 0:
-                logger.info("Migration skipped: coapis.db already has %d users", count)
-                return False
         except Exception:
-            pass  # Fall through to migration
+            pass
 
-    # Check if source JSON exists
-    users_file = system_dir / "users.json"
-    if not users_file.exists():
-        logger.info("Migration skipped: users.json not found at %s", users_file)
-        return False
-
-    logger.info("Starting migration: %s → %s", users_file, db_path)
+    logger.info(
+        "Starting migration: %s → %s (SQLite already has %d users; importing any missing)",
+        users_file, db_path, existing_count,
+    )
 
     try:
         _do_migrate(system_dir, db_path)
@@ -128,6 +141,24 @@ def ensure_migrated(
     except Exception as e:
         logger.error("Migration failed: %s", e, exc_info=True)
         raise
+
+
+def _guarded_table_migrate(conn, system_dir: Path, table: str, migrate_fn) -> int:
+    """F6: run one per-table migration at most once.
+
+    Append-only tables (audit_logs / api_keys / point_transactions /
+    token_usage) are imported with bare INSERT.  If a previous run crashed
+    mid-migration (users.json not yet backed up), a re-run would duplicate
+    every row.  The per-table marker ensures each table is imported exactly
+    once; a partial table import on crash can leave a few duplicates, but
+    the whole table is never re-duplicated.
+    """
+    if get_migration_flag(conn, f"migrated_{table}") == "done":
+        logger.info("Table %s already migrated (marker set), skipping", table)
+        return 0
+    count = migrate_fn(conn, system_dir)
+    set_migration_flag(conn, f"migrated_{table}", "done")
+    return count
 
 
 def _do_migrate(system_dir: Path, db_path: Path) -> None:
@@ -151,13 +182,20 @@ def _do_migrate(system_dir: Path, db_path: Path) -> None:
                     "users.json yielded 0 users; imported %d users from legacy %s",
                     legacy_migrated, system_dir / "user_system.db",
                 )
-        _migrate_audit_logs(conn, system_dir)
+        # F6: append-only tables (bare INSERT) are guarded by per-table
+        # idempotency markers so a crash-recovery re-run never re-duplicates
+        # a whole table.  UPSERT tables (users/preferences/settings/
+        # external_bindings) are naturally re-runnable and stay unguarded.
+        _guarded_table_migrate(conn, system_dir, "audit_logs", _migrate_audit_logs)
         _migrate_preferences(conn, system_dir)
         _migrate_settings(conn, system_dir)
-        _migrate_api_keys(conn, system_dir)
-        _migrate_point_transactions(conn, system_dir)
-        _migrate_token_usage(conn, system_dir)
+        _guarded_table_migrate(conn, system_dir, "api_keys", _migrate_api_keys)
+        _guarded_table_migrate(conn, system_dir, "point_transactions", _migrate_point_transactions)
+        _guarded_table_migrate(conn, system_dir, "token_usage", _migrate_token_usage)
         _migrate_external_bindings(conn, system_dir)
+        # F6: completion marker — records that the JSON→SQLite migration ran,
+        # so the "already migrated?" check never relies on the users>0 heuristic.
+        set_migration_flag(conn, "json_migration", "done")
         conn.commit()
     finally:
         conn.close()
@@ -173,14 +211,66 @@ def _create_schema(conn) -> None:
     代码里不再内联 DDL）：
     - ``community_schema.sql`` 数据库结构（唯一事实来源）
     - ``community_seed.sql``   必须的基础数据（为空则跳过）
+
+    注意：CREATE TABLE IF NOT EXISTS 不会改动已存在的表，所以先调用
+    ``_ensure_users_columns`` 给旧库补齐新增列（password_set_by_user /
+    onboarding_completed），再应用 schema，保证全新库与升级库最终同构。
     """
     from .sql import load_community_schema, load_community_seed
 
+    _ensure_users_columns(conn)
     conn.executescript(load_community_schema())
     seed = load_community_seed().strip()
     if seed:
         conn.executescript(seed)
     conn.commit()
+
+
+def _ensure_users_columns(conn) -> None:
+    """给已存在的 ``users`` 表补齐新增列（幂等，升级路径）。
+
+    CREATE TABLE IF NOT EXISTS 从不动已存在的表，旧库缺 password_set_by_user /
+    onboarding_completed 两列会导致 create_user/update_user 静默丢字段。这里
+    读 PRAGMA 判断缺哪列就补哪列。
+    """
+    import sqlite3
+    try:
+        cur = conn.execute("PRAGMA table_info(users)")
+        existing = {row[1] for row in cur.fetchall()}
+    except sqlite3.Error:
+        return  # users 表还没建，CREATE TABLE 会按新 schema 建
+    for name, ddl in (
+        ("password_set_by_user", "INTEGER DEFAULT 0"),
+        ("onboarding_completed", "INTEGER DEFAULT 1"),
+    ):
+        if name not in existing:
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
+                logger.info("[migrations] added missing column users.%s", name)
+            except sqlite3.Error as e:
+                logger.warning("[migrations] failed to add users.%s: %s", name, e)
+    conn.commit()
+
+
+def set_migration_flag(conn, key: str, value: str) -> None:
+    """写入迁移完成标记（F6）。"""
+    conn.execute(
+        "INSERT OR REPLACE INTO migration_state (key, value, updated_at) VALUES (?, ?, ?)",
+        (key, value, time.time()),
+    )
+    conn.commit()
+
+
+def get_migration_flag(conn, key: str):
+    """读取迁移完成标记（F6）。不存在返回 None。"""
+    import sqlite3
+    try:
+        row = conn.execute(
+            "SELECT value FROM migration_state WHERE key = ?", (key,)
+        ).fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        return None
 
 
 def _migrate_users(conn, system_dir: Path) -> int:
@@ -206,6 +296,10 @@ def _migrate_users(conn, system_dir: Path) -> int:
             "updated_at": user.get("updated_at"),
             "last_login_at": user.get("last_login_at") or user.get("last_login"),
             "muga_key": user.get("muga_key"),
+            # F1 收口：这两个字段旧 users.json 里有，SQLite 表原本没有，迁移时带过来，
+            # 否则改成 SQLite 单一事实源后「首次设密码 / 引导」状态会丢。
+            "password_set_by_user": 1 if user.get("password_set_by_user", False) else 0,
+            "onboarding_completed": 1 if user.get("onboarding_completed", True) else 0,
         }
         # Remove None values for optional fields
         for key in list(user_data.keys()):
@@ -427,32 +521,66 @@ def _migrate_token_usage(conn, system_dir: Path) -> int:
 
 
 def _migrate_external_bindings(conn, system_dir: Path) -> int:
-    """Migrate external_bindings.json → external_bindings table."""
-    bindings = _load_json_list(system_dir / "external_bindings.json")
-    count = 0
-    for b in bindings:
-        user_id = _deterministic_uuid(b.get("user_id"))
-        extra = b.get("extra_data")
-        if isinstance(extra, dict):
-            extra = json.dumps(extra, ensure_ascii=False)
+    """Migrate external identity bindings → external_bindings table.
+
+    The community edition keeps bindings in ``external_identity_mappings.json``
+    (shape ``{"bindings": [{user_id, provider, external_id, external_name,
+    email, source, status, last_login_at, login_count, created_at}]}``).  We map
+    each binding to the same columns the ``SqliteExternalIdentityStore`` uses
+    and keep the original dict in ``extra_data`` so the round-trip is lossless.
+    A legacy ``external_bindings.json`` (a bare list) is also honoured.
+    """
+    def _insert(b: Dict[str, Any]) -> bool:
+        # NOTE: community binding.user_id is the local *username* — the app
+        # layer (external_auth.py) uses it directly as a username, so it must
+        # be preserved verbatim (no UUID conversion).
+        user_id = str(b.get("user_id") or "")
+        provider = str(b.get("provider") or b.get("external_system") or "")
+        ext_id = str(b.get("external_id") or b.get("external_user_id") or "")
+        if not (user_id and provider and ext_id):
+            return False
+        original = {k: v for k, v in b.items() if k not in _COLUMN_KEYS}
         conn.execute(
             """INSERT OR REPLACE INTO external_bindings
-               (user_id, external_system, external_user_id, display_name, email, extra_data, created_at)
+               (user_id, external_system, external_user_id, display_name,
+                email, extra_data, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 user_id,
-                b.get("external_system", ""),
-                b.get("external_user_id", ""),
-                b.get("display_name"),
+                provider,
+                ext_id,
+                b.get("external_name") or b.get("display_name"),
                 b.get("email"),
-                extra,
-                b.get("created_at"),
+                json.dumps(original, ensure_ascii=False),
+                b.get("created_at") or _now_iso(),
             ),
         )
-        count += 1
+        return True
+
+    count = 0
+    # Community shape: external_identity_mappings.json -> {"bindings": [...]}
+    data = _load_json_dict(system_dir / "external_identity_mappings.json")
+    for b in data.get("bindings", []):
+        if _insert(b):
+            count += 1
+    # Legacy shape: external_bindings.json (a bare list).
+    for b in _load_json_list(system_dir / "external_bindings.json"):
+        if _insert(b):
+            count += 1
     logger.info("Migrated %d external bindings", count)
     return count
 
+def _load_json_dict(path: Path) -> Dict[str, Any]:
+    """Load a JSON object from path; return {} if missing/invalid."""
+    if not path.exists():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Could not load JSON dict from %s", path)
+        return {}
 
 def _backup_json_files(system_dir: Path) -> None:
     """Rename JSON data files to .migrated-<timestamp> backups."""

@@ -42,6 +42,7 @@ _USER_COLUMNS = frozenset({
     "id", "username", "password_hash", "salt", "display_name", "email",
     "avatar_url", "token_quota_monthly", "token_used_monthly", "role",
     "is_active", "created_at", "updated_at", "last_login_at", "muga_key",
+    "password_set_by_user", "onboarding_completed",
 })
 
 

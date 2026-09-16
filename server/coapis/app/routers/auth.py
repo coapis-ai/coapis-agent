@@ -173,7 +173,7 @@ async def register(req: RegisterRequest, request: Request):
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
 
     username = req.username.strip()
-    # Check if user already exists (JSON store)
+    # Check if user already exists（SQLite 单一事实源）
     if get_user(username):
         raise HTTPException(status_code=409, detail="用户已存在")
 
@@ -181,28 +181,9 @@ async def register(req: RegisterRequest, request: Request):
     role = "admin" if not has_registered_users() else "user"
 
     from ..user_store import create_user
+    # user_store 现在直接写 SQLite（coapis.db），无需再同步到 user_system。
     if not create_user(username, req.password, role=role):
         raise HTTPException(status_code=409, detail="注册失败")
-
-    # Also create in SQLite user_system for /user/me endpoint
-    try:
-        from ...user_system.database import get_db
-        get_db()  # Initialize DB (creates tables lazily)
-        from ...user_system.service import create_user as create_user_sql
-        from ...user_system.models import UserCreate
-        user_create = UserCreate(
-            username=username,
-            password=req.password,
-            email=getattr(req, 'email', None),
-            display_name=username,
-            role=role
-        )
-        create_user_sql(user_create)
-        logger.info(f"User {username} created in both JSON store and SQLite (role={role})")
-    except Exception as e:
-        logger.error(f"Failed to create user {username} in SQLite: {e}")
-        # Don't fail registration if SQLite creation fails
-        # But log the error for debugging
 
     # Initialize user workspace (agent, skills, workflows, etc.) — pass request for runtime registration
     default_agent_id = f"user:{username}"
