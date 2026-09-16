@@ -73,7 +73,7 @@ from . import code_exec
 # from . import auto_heal       — rare, internal diagnostics
 # from . import resource_guard  — rare, internal diagnostics
 # from . import changelog_gen   — rare, on-demand only
-# from . import task_delegation — rare, use delegate_external_agent
+# from . import task_delegation — CODE DELETED 2026-09 (use delegate_external_agent)
 #
 # # v0.7.21 merged (low-freq)
 # from . import code_quality    — rare, on-demand only
@@ -86,7 +86,7 @@ from . import code_exec
 # from . import llm_helper      — rare, on-demand only
 # from . import data_ops        — rare, on-demand only
 # from . import security_ops    — merged into security_scan
-# from . import collab_ops      — rare, on-demand only
+# from . import collab_ops      — CODE DELETED 2026-09 (incl. notify_ops / shared_state)
 # from . import security_scan   — rare, on-demand only
 
 # ── Previously merged tools (code deleted, consolidated) ──
@@ -98,7 +98,7 @@ from . import code_exec
 # db_ops, cache_ops, queue_ops → data_store
 # secret_scan, dependency_audit → security_scan
 # audit_log, crypto_ops → security_ops
-# notify_ops, shared_state → collab_ops
+# notify_ops, shared_state, collab_ops, task_delegation → deleted 2026-09 (zero callers)
 # test_runner, code_runner → code_exec
 # llm_ops, prompt_builder → llm_helper
 # data_processor, batch_ops → data_ops
