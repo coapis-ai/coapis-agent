@@ -35,7 +35,7 @@ router = APIRouter(tags=["user/me"])
 
 class UserInfoResponse(BaseModel):
     """当前用户信息（含角色、配额）."""
-    id: int
+    id: str
     username: str
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
@@ -97,7 +97,7 @@ async def get_current_user(request: Request) -> UserInfoResponse:
                 if not user and json_user:
                     # 从 JSON 数据构造 UserInfoResponse
                     return UserInfoResponse(
-                        id=0,
+                        id="0",
                         username=username,
                         display_name=json_user.get("display_name", username),
                         avatar_url=json_user.get("avatar_url"),
