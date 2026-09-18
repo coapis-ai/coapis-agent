@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
-    from ...enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
+    from ..enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
 except ImportError:
     is_enterprise_installed = lambda: False
     get_enterprise_plugin = lambda: None
@@ -92,16 +92,27 @@ class SceneAgentService:
         self.scenes_file = self.data_dir / "scenes.json"
         self.agents_dir = self.data_dir / "agents"
         self._enterprise_repo = None
-        
+        self._community_repo = None
+
         # Check if enterprise repository is available
         if is_enterprise_installed():
             try:
-                from ...foundation.repository_factory import RepositoryFactory
+                from ..foundation.repository_factory import RepositoryFactory
                 if RepositoryFactory.is_initialized():
                     self._enterprise_repo = RepositoryFactory.get_scene_repository()
                     logger.info("SceneAgentService using Enterprise PostgreSQL scene repository")
             except Exception as e:
                 logger.warning(f"Failed to get enterprise scene repository: {e}, falling back to JSON")
+        else:
+            # Community edition M1: SQLite scene repository
+            try:
+                from ..foundation.repository_factory import RepositoryFactory
+                if (RepositoryFactory.is_initialized()
+                        and RepositoryFactory.get_edition() == "community"):
+                    self._community_repo = RepositoryFactory.get_scene_repository()
+                    logger.info("SceneAgentService using community SQLite scene repository")
+            except Exception as e:
+                logger.warning(f"Failed to get community scene repository: {e}, falling back to JSON")
         
         # Ensure directories exist (for agent storage)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -304,7 +315,7 @@ class SceneAgentService:
         if existing:
             raise ValueError(f"Scene ID already exists: {scene_create.id}")
         
-        from ...enterprise.database.models import scene as scene_model
+        from ..enterprise.database.models import scene as scene_model
         
         now_dt = datetime.now(timezone.utc)
         db_scene = scene_model.Scene(
@@ -459,23 +470,22 @@ class SceneAgentService:
         """
         if self._enterprise_repo:
             return self._delete_scene_in_repository(scene_id)
-        
-        scenes_file = self._load_scenes_file()
 
-    def _delete_scene_in_repository(self, scene_id: str) -> bool:
-        """Delete a scene in PostgreSQL repository (soft delete).
-        
-        Args:
-            scene_id: Scene ID
-            
-        Returns:
-            True if deleted, False if not found
-        """
-        success = self._enterprise_repo.delete_scene(scene_id)
-        logger.info(f"Deleted scene in repository: {scene_id}")
-        return success
-        
-        
+        # 社区 M1：SQLite 硬删除必须走仓储定向 DELETE。
+        # 若走 load-all→pop→save-all，当删掉的是最后一个场景时列表为空，
+        # save_many 的空列表 no-op 保护会跳过 reconcile，行永远删不掉。
+        if self._community_repo is not None and hard_delete:
+            if self._community_repo.get_scene(scene_id) is None:
+                return False
+            self._community_repo.delete_scene(scene_id)
+            agent_dir = self.agents_dir / f"scene-{scene_id}"
+            if agent_dir.exists():
+                import shutil
+                shutil.rmtree(agent_dir)
+            logger.info(f"Hard deleted scene (SQLite): {scene_id}")
+            return True
+
+        scenes_file = self._load_scenes_file()
         for i, scene in enumerate(scenes_file.scenes):
             if scene.id == scene_id:
                 if hard_delete:
@@ -502,7 +512,20 @@ class SceneAgentService:
                 return True
         
         return False
-    
+
+    def _delete_scene_in_repository(self, scene_id: str) -> bool:
+        """Delete a scene in enterprise repository (soft delete).
+        
+        Args:
+            scene_id: Scene ID
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        success = self._enterprise_repo.delete_scene(scene_id)
+        logger.info(f"Deleted scene in repository: {scene_id}")
+        return success
+
     # -------------------------------------------------------------------------
     # Scene Agent Management
     # -------------------------------------------------------------------------
@@ -712,11 +735,19 @@ class SceneAgentService:
     # -------------------------------------------------------------------------
     
     def _load_scenes_file(self) -> ScenesFile:
-        """Load scenes.json file.
+        """Load scenes (community M1: SQLite, otherwise scenes.json).
         
         Returns:
             ScenesFile object
         """
+        if self._community_repo is not None:
+            try:
+                scenes = [SceneConfig(**d) for d in self._community_repo.get_all()]
+            except Exception as e:
+                logger.error(f"Failed to load scenes from SQLite: {e}")
+                return ScenesFile(version=1, scenes=[])
+            return ScenesFile(version=1, scenes=scenes)
+
         if not self.scenes_file.exists():
             return ScenesFile(version=1, scenes=[])
         
@@ -726,11 +757,17 @@ class SceneAgentService:
         return ScenesFile(**data)
     
     def _save_scenes_file(self, scenes_file: ScenesFile) -> None:
-        """Save scenes.json file.
+        """Save scenes (community M1: SQLite reconcile upsert, otherwise scenes.json).
         
         Args:
             scenes_file: ScenesFile object to save
         """
+        if self._community_repo is not None:
+            self._community_repo.save_many(
+                [s.model_dump(mode="json") for s in scenes_file.scenes]
+            )
+            return
+
         with open(self.scenes_file, "w", encoding="utf-8") as f:
             json.dump(scenes_file.model_dump(), f, indent=2, ensure_ascii=False)
     
@@ -738,97 +775,6 @@ class SceneAgentService:
     # Utility Methods
     # -------------------------------------------------------------------------
     
-    def get_scene_categories(self) -> List[str]:
-        """Get all unique scene categories.
-        
-        Returns:
-            List of category names
-        """
-        scenes_file = self._load_scenes_file()
-        categories = set()
-        for scene in scenes_file.scenes:
-            if scene.category:
-                categories.add(scene.category)
-        return sorted(list(categories))
-    
-    def get_categories_with_dimensions(self) -> Dict[str, Any]:
-        """Get categories with dimension grouping.
-        
-        Reads from tags.json and returns structured data:
-        {
-            "dimensions": {
-                "nature": {
-                    "name": "通用分类",
-                    "categories": [...]
-                },
-                "domain": {
-                    "name": "按领域分类",
-                    "categories": [...]
-                }
-            }
-        }
-        
-        Returns:
-            Dict with dimension-grouped categories
-        """
-        # Load tags from tag service
-        from ..app.services.tag_service import TagService
-        from ..models.tag import TagType
-        tag_service = TagService(data_dir=self.data_dir)
-        
-        # Get all tags
-        all_tags = tag_service.list_tags(enabled=True)
-        
-        # Group categories by parent_id (dimension)
-        dimensions = {}
-        
-        # Find all dimension tags (type="dimension")
-        dimension_tags = [t for t in all_tags.tags if t.type == "dimension"]
-        
-        for dim_tag in dimension_tags:
-            # Find all category tags with this parent_id
-            categories = [
-                {
-                    "id": t.id,
-                    "name": t.name,
-                    "icon": t.icon or "",
-                    "description": t.description or "",
-                    "sort_order": t.sort_order or 0,
-                    "scene_count": self._count_scenes_by_tag(t.id)
-                }
-                for t in all_tags.tags
-                if t.type == "category" and t.parent_id == dim_tag.id
-            ]
-            
-            # Sort by sort_order
-            categories.sort(key=lambda x: x["sort_order"])
-            
-            dimensions[dim_tag.id] = {
-                "name": dim_tag.name,
-                "description": dim_tag.description or "",
-                "categories": categories
-            }
-        
-        return {"dimensions": dimensions}
-    
-    def _count_scenes_by_tag(self, tag_id: str) -> int:
-        """Count scenes by primary_tag_id or tag_ids.
-        
-        Args:
-            tag_id: Tag ID to count
-            
-        Returns:
-            Number of active scenes with this tag
-        """
-        scenes_file = self._load_scenes_file()
-        count = 0
-        for scene in scenes_file.scenes:
-            if scene.status == "active":
-                if scene.primary_tag_id == tag_id:
-                    count += 1
-                elif scene.tag_ids and tag_id in scene.tag_ids:
-                    count += 1
-        return count
     
     def get_scene_tags(self) -> List[str]:
         """Get all unique scene tags.
@@ -951,6 +897,12 @@ class SceneAgentService:
         Args:
             scene_id: Scene ID
         """
+        if self._community_repo is not None:
+            if self._community_repo.get_scene(scene_id) is None:
+                raise SceneNotFoundError(f"Scene not found: {scene_id}")
+            self._community_repo.increment_usage(scene_id)
+            return
+
         scenes_file = self._load_scenes_file()
         
         # Find scene

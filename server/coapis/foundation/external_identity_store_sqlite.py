@@ -42,6 +42,47 @@ _COLUMN_KEYS = (
     "external_name", "display_name", "email", "created_at",
 )
 
+# ── 域A：external_systems 表字段 ─────────────────────────────
+_SYSTEMS_COLUMNS = (
+    "provider_id", "name", "icon", "description", "login_type", "sso",
+    "status", "show_on_login", "display_order", "user_mapping", "client_id",
+    "credential", "auth_mode", "base_urls", "identity_token_ttl", "extra_data",
+    "created_at", "updated_at",
+)
+# 顶层直接映射到列的字段；其余（如 shared_secret_use_global / shared_secret）进 extra_data
+_SYSTEMS_DIRECT = {
+    "provider_id", "name", "icon", "description", "login_type", "sso",
+    "status", "show_on_login", "display_order", "user_mapping", "client_id",
+    "credential", "auth_mode", "base_urls", "identity_token_ttl",
+    "created_at", "updated_at",
+}
+
+
+def _sys_dumps(value: Any, kind: str) -> str:
+    if value is None:
+        value = [] if kind == "list" else {}
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return json.dumps([] if kind == "list" else {}, ensure_ascii=False)
+
+
+def _sys_loads(text: Optional[str], kind: str) -> Any:
+    if text is None or text == "":
+        return [] if kind == "list" else {}
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        return [] if kind == "list" else {}
+
+
+def _sys_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value if isinstance(value, str) else str(value)
+
 
 class SqliteExternalIdentityStore:
     """SQLite-backed external identity store (community edition).
@@ -80,21 +121,102 @@ class SqliteExternalIdentityStore:
                 UNIQUE(external_system, external_user_id)
             )"""
         )
+        # 域A：系统配置表（与 community_schema.sql 一致；store 自包含，独立于 factory 建表）
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS external_systems (
+                provider_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                icon TEXT,
+                description TEXT,
+                login_type TEXT NOT NULL,
+                sso TEXT NOT NULL DEFAULT '{}',
+                status INTEGER NOT NULL DEFAULT 1,
+                show_on_login INTEGER NOT NULL DEFAULT 1,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                user_mapping TEXT NOT NULL DEFAULT '{}',
+                client_id TEXT,
+                credential TEXT NOT NULL DEFAULT '{}',
+                auth_mode TEXT NOT NULL DEFAULT 'password',
+                base_urls TEXT NOT NULL DEFAULT '[]',
+                identity_token_ttl INTEGER,
+                extra_data TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT,
+                updated_at TEXT
+            )"""
+        )
         self._conn.commit()
 
-    # ── systems (JSON config domain, read-only) ─────────────────────
+    # ── systems (域A：external_systems 表) ─────────────────────────
+
+    def _systems_upsert_sql(self) -> str:
+        col_sql = ", ".join(_SYSTEMS_COLUMNS)
+        ph_sql = ", ".join(f":{c}" for c in _SYSTEMS_COLUMNS)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in _SYSTEMS_COLUMNS if c != "provider_id")
+        return (
+            f"INSERT INTO external_systems ({col_sql}) VALUES ({ph_sql}) "
+            f"ON CONFLICT(provider_id) DO UPDATE SET {updates}"
+        )
+
+    def _systems_seed_sql(self) -> str:
+        col_sql = ", ".join(_SYSTEMS_COLUMNS)
+        ph_sql = ", ".join(f":{c}" for c in _SYSTEMS_COLUMNS)
+        return f"INSERT OR IGNORE INTO external_systems ({col_sql}) VALUES ({ph_sql})"
+
+    @staticmethod
+    def _system_dict_to_row(system: Dict[str, Any]) -> Dict[str, Any]:
+        """系统 dict → 行。非 _SYSTEMS_DIRECT 的顶层字段进 extra_data（保真）。"""
+        extra = {k: v for k, v in system.items() if k not in _SYSTEMS_DIRECT}
+        return {
+            "provider_id": system.get("provider_id"),
+            "name": system.get("name", ""),
+            "icon": _sys_text(system.get("icon")),
+            "description": _sys_text(system.get("description")),
+            "login_type": system.get("login_type") or "password",
+            "sso": _sys_dumps(system.get("sso"), "dict"),
+            "status": int(system.get("status", 1)),
+            "show_on_login": int(bool(system.get("show_on_login", True))),
+            "display_order": int(system.get("display_order") or 0),
+            "user_mapping": _sys_dumps(system.get("user_mapping"), "dict"),
+            "client_id": _sys_text(system.get("client_id")),
+            "credential": _sys_dumps(system.get("credential"), "dict"),
+            "auth_mode": system.get("auth_mode") or "password",
+            "base_urls": _sys_dumps(system.get("base_urls"), "list"),
+            "identity_token_ttl": (
+                int(system["identity_token_ttl"])
+                if system.get("identity_token_ttl") is not None else None
+            ),
+            "extra_data": _sys_dumps(extra, "dict"),
+            "created_at": _sys_text(system.get("created_at")),
+            "updated_at": _sys_text(system.get("updated_at")),
+        }
+
+    @staticmethod
+    def _system_row_to_dict(row) -> Dict[str, Any]:
+        """行 → 系统 dict。extra_data 字段合并回顶层（与 JSON 结构一致）。"""
+        d = dict(row)
+        d["sso"] = _sys_loads(d.get("sso"), "dict")
+        d["user_mapping"] = _sys_loads(d.get("user_mapping"), "dict")
+        d["credential"] = _sys_loads(d.get("credential"), "dict")
+        d["base_urls"] = _sys_loads(d.get("base_urls"), "list")
+        d["show_on_login"] = bool(int(d.get("show_on_login", 1)))
+        d["status"] = int(d.get("status", 1))
+        d["display_order"] = int(d.get("display_order") or 0)
+        extra = _sys_loads(d.get("extra_data"), "dict")
+        d.pop("extra_data", None)
+        d.update(extra)
+        return d
 
     def load_systems(self) -> List[Dict[str, Any]]:
-        """Return all external system configs (from JSON config file)."""
-        cfg_file = SYSTEM_DIR / _SYSTEMS_CONFIG_FILE
-        if not cfg_file.exists():
-            return []
+        """域A：从 external_systems 表读系统配置（extra_data 合并回顶层）。"""
         try:
-            data = json.loads(cfg_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            with self._lock, self._conn:
+                rows = self._conn.execute(
+                    "SELECT * FROM external_systems ORDER BY display_order"
+                ).fetchall()
+            return [self._system_row_to_dict(r) for r in rows]
+        except sqlite3.Error as exc:
+            logger.warning("load systems from DB failed: %s", exc)
             return []
-        systems = data.get("systems", []) if isinstance(data, dict) else data
-        return [s for s in systems if isinstance(s, dict)]
 
     def get_system_by_id(self, provider_id: str) -> Optional[Dict[str, Any]]:
         for s in self.load_systems():
@@ -103,31 +225,49 @@ class SqliteExternalIdentityStore:
         return None
 
     def save_systems(self, systems: List[Dict[str, Any]]) -> None:
-        """Persist the external systems config.
+        """域A：reconcile upsert 到 external_systems 表。
 
-        External systems are *admin configuration* (SSO endpoints, credentials,
-        outbound identity), not per-user data — they intentionally stay in
-        ``external_systems_config.json`` (same domain as ``settings.json``),
-        mirroring how the community edition keeps other config files.
+        服务层 load-all -> modify -> save-all 模式：空列表 = 清空；否则删除
+        不在列表内的 provider_id，再 upsert 列表内全部（删除系统才真正生效）。
+        密钥字段（shared_secret_use_global / shared_secret）进 extra_data，
+        与 community_schema 的 D1 约定一致（密钥实际来自 env，此处仅存引用标记）。
+        JSON 文件 external_systems_config.json 保留为只读备份，不再写入。
         """
-        config_data = {"systems": systems or []}
-        path = SYSTEM_DIR / _SYSTEMS_CONFIG_FILE
         try:
-            SYSTEM_DIR.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        tmp_path = path.with_suffix(".json.tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, path)
-        except Exception:
-            try:
-                if tmp_path.exists():
-                    tmp_path.unlink()
-            except Exception:
-                pass
+            with self._lock, self._conn:
+                ids = [s.get("provider_id") for s in (systems or []) if s.get("provider_id")]
+                if not ids:
+                    self._conn.execute("DELETE FROM external_systems")
+                else:
+                    ph = ",".join("?" * len(ids))
+                    self._conn.execute(
+                        f"DELETE FROM external_systems WHERE provider_id NOT IN ({ph})", ids
+                    )
+                    for s in systems:
+                        if s.get("provider_id"):
+                            self._conn.execute(
+                                self._systems_upsert_sql(), self._system_dict_to_row(s)
+                            )
+                self._conn.commit()
+        except sqlite3.Error as exc:
+            logger.warning("save systems to DB failed: %s", exc)
             raise
+        logger.info("external identity store: saved %d systems to SQLite",
+                    len(systems or []))
+
+    def seed_systems(self, systems: List[Dict[str, Any]]) -> int:
+        """迁移用：INSERT OR IGNORE 播种 external_systems（幂等，不覆盖已有行）。"""
+        count = 0
+        with self._lock, self._conn:
+            for s in systems or []:
+                if not isinstance(s, dict) or not s.get("provider_id"):
+                    continue
+                self._conn.execute(
+                    self._systems_seed_sql(), self._system_dict_to_row(s)
+                )
+                count += 1
+            self._conn.commit()
+        return count
 
 
     # ── bindings (SQLite user domain) ───────────────────────────────

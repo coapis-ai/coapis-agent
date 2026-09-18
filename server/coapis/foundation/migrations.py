@@ -112,6 +112,16 @@ def ensure_migrated(
     # INSERT OR REPLACE + deterministic UUIDs make re-imports idempotent & safe.
     users_file = system_dir / "users.json"
     if not users_file.exists():
+        # Already migrated (users.json renamed to .migrated-<ts>). Older
+        # first-boot migrations wrote users WITHOUT a meaningful role, so
+        # admin accounts could land as plain "user" and silently lose the
+        # whole admin-panel UI. Recover lost roles from the .migrated-*
+        # backups (promotion-only, idempotent, best-effort — never blocks
+        # startup).
+        try:
+            _backfill_roles_from_backups(system_dir, db_path)
+        except Exception as e:  # noqa: BLE001 — backfill must never block startup
+            logger.warning("Role backfill from backups failed: %s", e)
         logger.info(
             "Migration skipped: users.json not found at %s (already migrated)",
             users_file,
@@ -316,6 +326,78 @@ def _migrate_users(conn, system_dir: Path) -> int:
 
     logger.info("Migrated %d users", count)
     return count
+
+
+_ROLE_LEVEL: Dict[str, int] = {"user": 0, "advanced": 1, "admin": 2}
+
+
+def _role_level(role: Any) -> int:
+    """Rank a role for promotion-only backfill; unknown roles rank lowest."""
+    return _ROLE_LEVEL.get(str(role or "").strip().lower(), 0)
+
+
+def _backfill_roles_from_backups(system_dir: Path, db_path: Path) -> int:
+    """Recover user roles lost by older first-boot migrations.
+
+    Early migration versions (before F1's role mapping existed) wrote users
+    into SQLite without a meaningful ``role`` — admin accounts landed as
+    plain ``user`` and lost the entire admin-panel UI.  The original
+    ``users.json`` is preserved as ``users.json.migrated-<timestamp>`` after
+    migration, so this pass scans those backups and re-applies the original
+    role to the live row — but **promotion-only**: a live user is only
+    upgraded when the backup's role level is strictly higher (e.g. a live
+    ``user`` upgraded to backup ``admin``).  It never downgrades, never
+    touches matching roles, and is idempotent (re-running changes nothing).
+
+    Best-effort: any failure is swallowed by the caller; returns the number
+    of users promoted.
+    """
+    import glob
+    import sqlite3
+
+    backups = sorted(glob.glob(str(system_dir / "users.json.migrated-*")))
+    if not backups or not db_path.exists():
+        return 0
+
+    # Collect the strongest role per username across all backups.
+    backup_roles: Dict[str, str] = {}
+    for bpath in backups:
+        for u in _load_json_list(Path(bpath)):
+            username = u.get("username")
+            role = u.get("role")
+            if not username or not role or _role_level(role) <= 0:
+                continue
+            existing = backup_roles.get(username)
+            if existing is None or _role_level(role) > _role_level(existing):
+                backup_roles[username] = role
+    if not backup_roles:
+        return 0
+
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    promoted = 0
+    try:
+        for username, role in backup_roles.items():
+            row = conn.execute(
+                "SELECT role FROM users WHERE username = ?", (username,)
+            ).fetchone()
+            if row is None:
+                continue  # user no longer exists — nothing to backfill
+            live_role = row["role"]
+            if _role_level(role) > _role_level(live_role):
+                conn.execute(
+                    "UPDATE users SET role = ?, updated_at = ? WHERE username = ?",
+                    (role, time.time(), username),
+                )
+                promoted += 1
+                logger.info(
+                    "[backfill] restored role: %s %s -> %s (from users.json backup)",
+                    username, live_role, role,
+                )
+        conn.commit()
+    finally:
+        conn.close()
+    return promoted
 
 
 def _migrate_legacy_users_db(conn, system_dir: Path) -> int:
@@ -601,3 +683,101 @@ def _backup_json_files(system_dir: Path) -> None:
             backup = system_dir / f"{fname}.migrated-{ts}"
             shutil.move(str(fpath), str(backup))
             logger.info("Backed up %s → %s", fname, backup.name)
+
+
+# ---------------------------------------------------------------------------
+# M1 四域落库迁移（域A外部系统 / 域C标签 / 域B场景 / 域D用户场景）
+# ---------------------------------------------------------------------------
+
+def ensure_domain_migrated(data_dir: Path, system_dir: Path, db_path: Path) -> bool:
+    """M1：把 tags.json / scenes.json / user_scenes.json / external_systems_config.json
+    播种到对应的 SQLite 表。
+
+    数据源路径（与服务层 fallback 路径保持一致）：
+      - tags.json / scenes.json / user_scenes.json → data_dir（WORKING_DIR）
+      - external_systems_config.json → system_dir（SYSTEM_DIR）
+
+    与 ``ensure_migrated`` 独立：存量实例的 users.json 已被删除，
+    ``ensure_migrated`` 不会再运行，因此本函数有独立的幂等标志
+    （migration_flags.domain_migration）。
+
+    幂等性：
+      - 标志已置 → 直接跳过；
+      - 即使强制重跑，seed 全部走 INSERT OR IGNORE，不覆盖已有行。
+
+    JSON 文件保留为只读备份，不删除、不重命名（D2/D5 决策）。
+    """
+    import sqlite3
+
+    from .scene_repository_sqlite import SqliteSceneRepository
+    from .tag_repository_sqlite import SqliteTagRepository
+    from .user_scene_repository_sqlite import SqliteUserSceneSettingsRepo
+    from .external_identity_store_sqlite import SqliteExternalIdentityStore
+
+    system_dir = Path(system_dir)
+    db_path = Path(db_path)
+
+    conn = None
+    tag_repo = scene_repo = us_repo = ext_store = None
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+
+        if get_migration_flag(conn, "domain_migration") == "done":
+            return False
+
+        # 确保 4 张新表存在（schema 全量 IF NOT EXISTS，幂等）
+        _create_schema(conn)
+        conn.commit()
+
+        system_dir.mkdir(parents=True, exist_ok=True)
+        tag_repo = SqliteTagRepository(db_path)
+        scene_repo = SqliteSceneRepository(db_path)
+        us_repo = SqliteUserSceneSettingsRepo(db_path)
+        ext_store = SqliteExternalIdentityStore(db_path)
+
+        # 域C：tags.json {"version", "tags": [...]}
+        tags = _load_json_dict(data_dir / "tags.json").get("tags") or []
+        if not isinstance(tags, list):
+            tags = []
+
+        # 域B：scenes.json {"version", "scenes": [...]}
+        scenes = _load_json_dict(data_dir / "scenes.json").get("scenes") or []
+        if not isinstance(scenes, list):
+            scenes = []
+
+        # 域D：user_scenes.json {"version", "user_scenes": [...]}
+        user_scenes = _load_json_dict(data_dir / "user_scenes.json").get("user_scenes") or []
+        if not isinstance(user_scenes, list):
+            user_scenes = []
+
+        # 域A：external_systems_config.json {"systems": [...]}
+        systems = _load_json_dict(system_dir / "external_systems_config.json").get("systems") or []
+        if not isinstance(systems, list):
+            systems = []
+
+        n_tags = tag_repo.seed_many(tags)
+        n_scenes = scene_repo.seed_many(scenes)
+        n_us = us_repo.seed_many(user_scenes)
+        n_sys = ext_store.seed_systems(systems)
+
+        set_migration_flag(conn, "domain_migration", "done")
+        conn.commit()
+
+        logger.info(
+            "M1 domain migration done: tags=%d scenes=%d user_scenes=%d external_systems=%d",
+            n_tags, n_scenes, n_us, n_sys,
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — 迁移失败不应阻断启动，仅告警
+        logger.error("M1 domain migration failed: %s", exc, exc_info=True)
+        return False
+    finally:
+        for repo in (tag_repo, scene_repo, us_repo, ext_store):
+            if repo is not None:
+                try:
+                    repo.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        if conn is not None:
+            conn.close()

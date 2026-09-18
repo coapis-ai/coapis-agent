@@ -134,3 +134,78 @@ CREATE TABLE IF NOT EXISTS external_bindings (
     UNIQUE(external_system, external_user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_bindings_user ON external_bindings(user_id);
+
+-- ---------------- 外部系统登录配置（M1 域A，D1：密钥不落库） ----------------
+CREATE TABLE IF NOT EXISTS external_systems (
+    provider_id          TEXT PRIMARY KEY,
+    name                 TEXT NOT NULL,
+    icon                 TEXT NOT NULL DEFAULT '',
+    description          TEXT NOT NULL DEFAULT '',
+    login_type           TEXT NOT NULL DEFAULT 'password',
+    sso                  TEXT NOT NULL DEFAULT '{}',
+    status               INTEGER NOT NULL DEFAULT 1,
+    show_on_login        INTEGER NOT NULL DEFAULT 1,
+    display_order        INTEGER NOT NULL DEFAULT 0,
+    user_mapping         TEXT NOT NULL DEFAULT '{}',
+    client_id            TEXT NOT NULL DEFAULT '',
+    credential           TEXT NOT NULL DEFAULT '{}',
+    auth_mode            TEXT NOT NULL DEFAULT '',
+    base_urls            TEXT NOT NULL DEFAULT '[]',
+    identity_token_ttl   INTEGER,
+    extra_data           TEXT NOT NULL DEFAULT '{}',
+    created_at           TEXT NOT NULL DEFAULT '',
+    updated_at           TEXT NOT NULL DEFAULT ''
+);
+
+-- ---------------- 标签（M1 域C，字段与社区版 TagConfig 对齐） ----------------
+CREATE TABLE IF NOT EXISTS tags (
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    icon           TEXT NOT NULL DEFAULT '',
+    type           TEXT NOT NULL DEFAULT 'custom',
+    parent_id      TEXT,
+    description    TEXT NOT NULL DEFAULT '',
+    keywords       TEXT NOT NULL DEFAULT '[]',
+    related_skills TEXT NOT NULL DEFAULT '[]',
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    show_in_menu   INTEGER NOT NULL DEFAULT 0,
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    category       TEXT NOT NULL DEFAULT '',
+    metadata       TEXT NOT NULL DEFAULT '{}',
+    created_at     TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_tags_type ON tags(type);
+
+-- ---------------- 场景（M1 域D，字段与社区版 SceneConfig 一一对应） ----------------
+CREATE TABLE IF NOT EXISTS scenes (
+    scene_id          TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    description       TEXT NOT NULL DEFAULT '',
+    short_description TEXT NOT NULL DEFAULT '',
+    icon              TEXT NOT NULL DEFAULT '📝',
+    category          TEXT,
+    status            TEXT NOT NULL DEFAULT 'active',
+    system_prompt     TEXT NOT NULL DEFAULT '',
+    welcome_message   TEXT NOT NULL DEFAULT '',
+    skills            TEXT NOT NULL DEFAULT '[]',
+    tags              TEXT NOT NULL DEFAULT '[]',
+    tag_ids           TEXT NOT NULL DEFAULT '[]',
+    primary_tag_id    TEXT,
+    usage_count       INTEGER NOT NULL DEFAULT 0,
+    created_by        TEXT,
+    created_at        TEXT NOT NULL DEFAULT '',
+    updated_at        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_scenes_status ON scenes(status);
+CREATE INDEX IF NOT EXISTS idx_scenes_primary_tag ON scenes(primary_tag_id);
+
+-- ---------------- 用户场景定制（M1 域D / D3：user_scenes.json → 库） ----------------
+CREATE TABLE IF NOT EXISTS user_scene_settings (
+    user_id        TEXT PRIMARY KEY,
+    enabled_scenes TEXT NOT NULL DEFAULT '[]',
+    custom_scenes  TEXT NOT NULL DEFAULT '[]',
+    preferences    TEXT NOT NULL DEFAULT '{}',
+    created_at     TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL DEFAULT ''
+);

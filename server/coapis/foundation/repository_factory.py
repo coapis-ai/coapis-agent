@@ -42,8 +42,9 @@ class RepositoryFactory:
     _kb_repo: Optional[KnowledgeBaseRepository] = None
     _user_repo = None  # User repository (SQLite community / Postgres enterprise)
     _lock: threading.Lock = threading.Lock()
-    _tag_repo = None   # Tag repository (injected by enterprise)
-    _scene_repo = None # Scene repository (injected by enterprise)
+    _tag_repo = None   # Tag repository (community: SQLite / enterprise: injected)
+    _scene_repo = None # Scene repository (community: SQLite / enterprise: injected)
+    _user_scene_repo = None  # User scene settings repo (community: SQLite / enterprise: injected)
     _edition: Optional[str] = None
     _initialized: bool = False
 
@@ -87,7 +88,7 @@ class RepositoryFactory:
             
             # 社区版：SQLite only（初始化失败直接报错，不回退）
             from .user_repository_sqlite import SqliteUserRepository
-            from ..constant import SYSTEM_DIR
+            from ..constant import SYSTEM_DIR, WORKING_DIR
             from .migrations import ensure_migrated
             from .db_settings import resolve_db_path
             # D-7/D-8/D-9：COAPIS_DATABASE_URL（可选；默认 <WORKING_DIR>/system/coapis.db，
@@ -101,7 +102,18 @@ class RepositoryFactory:
             # of falling back to external_identity_mappings.json.
             from .external_identity_store_sqlite import SqliteExternalIdentityStore
             RepositoryFactory.inject_external_identity_store(SqliteExternalIdentityStore(db_path))
+            # M1 四域落库：先跑域迁移（4 张新表建表 + JSON 播种，幂等），
+            # 再注入 tag/scene/user_scene 三个 SQLite 仓储。
+            from .migrations import ensure_domain_migrated
+            ensure_domain_migrated(data_dir=WORKING_DIR, system_dir=SYSTEM_DIR, db_path=db_path)
+            from .tag_repository_sqlite import SqliteTagRepository
+            from .scene_repository_sqlite import SqliteSceneRepository
+            from .user_scene_repository_sqlite import SqliteUserSceneSettingsRepo
+            RepositoryFactory.inject_tag_repository(SqliteTagRepository(db_path))
+            RepositoryFactory.inject_scene_repository(SqliteSceneRepository(db_path))
+            cls._user_scene_repo = SqliteUserSceneSettingsRepo(db_path)
             logger.info("Initialized Community User repository (SQLite at %s)", db_path)
+            logger.info("M1: tag/scene/user_scene repositories injected (SQLite)")
         
         elif edition == "enterprise":
             # 企业版：注入Repository（由企业版plugin提供）
@@ -262,6 +274,36 @@ class RepositoryFactory:
         
         return cls._scene_repo
 
+    @classmethod
+    def inject_user_scene_repository(cls, repo):
+        """Inject user scene settings repository instance."""
+        cls._user_scene_repo = repo
+        logger.info("✅ User scene repository injected into RepositoryFactory")
+
+    @classmethod
+    def get_user_scene_repository(cls):
+        """Get user scene settings repository instance.
+
+        Returns:
+            UserSceneSettings repository (community: SQLite / enterprise: injected)
+
+        Raises:
+            RuntimeError: If factory not initialized or repo not available
+        """
+        if not cls._initialized:
+            raise RuntimeError(
+                "RepositoryFactory not initialized. "
+                "Call RepositoryFactory.initialize() first."
+            )
+
+        if cls._user_scene_repo is None:
+            raise RuntimeError(
+                "User scene repository not available. "
+                "Ensure RepositoryFactory was configured with user_scene_repository."
+            )
+
+        return cls._user_scene_repo
+
     # ── 外部系统身份绑定（enterprise） ──
     _ext_store = None
 
@@ -301,10 +343,15 @@ class RepositoryFactory:
     @classmethod
     def reset(cls):
         """Reset factory state (used by tests)."""
+        for attr in ("_user_repo", "_scene_repo", "_tag_repo",
+                     "_user_scene_repo", "_ext_store"):
+            repo = getattr(cls, attr, None)
+            if repo is not None and hasattr(repo, "close"):
+                try:
+                    repo.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            setattr(cls, attr, None)
         cls._kb_repo = None
-        cls._user_repo = None
-        cls._scene_repo = None
-        cls._ext_store = None
-        cls._tag_repo = None
         cls._edition = None
         cls._initialized = False

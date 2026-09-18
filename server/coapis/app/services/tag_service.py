@@ -61,7 +61,8 @@ class TagService:
         self.data_dir = data_dir
         self.tags_file = data_dir / "tags.json"
         self._enterprise_repo = None
-        
+        self._community_repo = None
+
         # Check if enterprise repository is available
         if is_enterprise_installed():
             try:
@@ -71,6 +72,16 @@ class TagService:
                     logger.info("TagService using Enterprise PostgreSQL tag repository")
             except Exception as e:
                 logger.warning(f"Failed to get enterprise tag repository: {e}, falling back to JSON")
+        else:
+            # Community edition M1: SQLite tag repository
+            try:
+                from ...foundation.repository_factory import RepositoryFactory
+                if (RepositoryFactory.is_initialized()
+                        and RepositoryFactory.get_edition() == "community"):
+                    self._community_repo = RepositoryFactory.get_tag_repository()
+                    logger.info("TagService using community SQLite tag repository")
+            except Exception as e:
+                logger.warning(f"Failed to get community tag repository: {e}, falling back to JSON")
     
     def _load_tags(self) -> List[TagConfig]:
         """Load tags from file or enterprise repository.
@@ -80,6 +91,8 @@ class TagService:
         """
         if self._enterprise_repo:
             return self._load_tags_from_repository()
+        if self._community_repo:
+            return self._load_tags_from_db()
         
         if not self.tags_file.exists():
             logger.warning(f"Tags file not found: {self.tags_file}")
@@ -130,6 +143,34 @@ class TagService:
         except Exception as e:
             logger.error(f"Failed to load tags from repository: {e}")
             return []
+
+    def _load_tags_from_db(self) -> List[TagConfig]:
+        """Load tags from community SQLite repository (M1 域C).
+
+        The SQLite repo returns plain dicts; TagConfig (pydantic) accepts
+        them directly — created_at/updated_at ISO strings parse into
+        datetime, and the ``type`` string resolves to TagType.
+        """
+        try:
+            rows = self._community_repo.get_all()
+            return [TagConfig(**row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to load tags from SQLite: {e}")
+            return []
+
+    def _save_tags_to_db(self, tags: List[TagConfig]) -> None:
+        """Save tags to community SQLite repository (M1 域C).
+
+        Reconcile upsert (same load-all -> modify -> save-all pattern as
+        the JSON path). tags.json is kept as a read-only backup.
+        """
+        try:
+            self._community_repo.save_many(
+                [t.model_dump(mode="json") for t in tags]
+            )
+        except Exception as e:
+            logger.error(f"Failed to save tags to SQLite: {e}")
+            raise
     
     def _save_tags(self, tags: List[TagConfig]) -> None:
         """Save tags to file or enterprise repository.
@@ -140,7 +181,10 @@ class TagService:
         if self._enterprise_repo:
             self._save_tags_to_repository(tags)
             return
-        
+        if self._community_repo:
+            self._save_tags_to_db(tags)
+            return
+
         # Create data directory if not exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
         

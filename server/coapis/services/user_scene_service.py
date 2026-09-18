@@ -6,7 +6,7 @@
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class UserSceneService:
@@ -16,7 +16,20 @@ class UserSceneService:
         self.data_dir = Path(data_dir)
         self.user_scenes_file = self.data_dir / "user_scenes.json"
         self.scenes_file = self.data_dir / "scenes.json"
-    
+        # M1 域D：社区版 SQLite 仓储
+        self._us_repo = None
+        self._scene_repo = None
+        try:
+            from ..foundation.repository_factory import RepositoryFactory
+            if (RepositoryFactory.is_initialized()
+                    and RepositoryFactory.get_edition() == "community"):
+                self._us_repo = RepositoryFactory.get_user_scene_repository()
+                self._scene_repo = RepositoryFactory.get_scene_repository()
+        except Exception:
+            # 工厂未初始化（如单测）或非社区版 → 回退 JSON 路径
+            self._us_repo = None
+            self._scene_repo = None
+
     def _load_user_scenes(self) -> Dict[str, Any]:
         """加载用户场景数据"""
         if not self.user_scenes_file.exists():
@@ -35,6 +48,20 @@ class UserSceneService:
     
     def get_user_scenes(self, user_id: str) -> Dict[str, Any]:
         """获取用户的场景配置"""
+        if self._us_repo is not None:
+            row = self._us_repo.get(user_id)
+            if row:
+                return {
+                    'enabled_scenes': row.get('enabled_scenes', []),
+                    'custom_scenes': row.get('custom_scenes', []),
+                    'preferences': row.get('preferences', {})
+                }
+            # 默认返回空配置
+            return {
+                'enabled_scenes': [],
+                'custom_scenes': [],
+                'preferences': {}
+            }
         data = self._load_user_scenes()
         
         for user_scene in data.get('user_scenes', []):
@@ -54,8 +81,19 @@ class UserSceneService:
     
     def set_user_scenes(self, user_id: str, scenes_data: Dict[str, Any]) -> bool:
         """设置用户的场景配置"""
+        if self._us_repo is not None:
+            now = datetime.now(timezone.utc).isoformat()
+            self._us_repo.save({
+                'user_id': user_id,
+                'enabled_scenes': scenes_data.get('enabled_scenes', []),
+                'custom_scenes': scenes_data.get('custom_scenes', []),
+                'preferences': scenes_data.get('preferences', {}),
+                'created_at': now,
+                'updated_at': now,
+            })
+            return True
         data = self._load_user_scenes()
-        
+
         # 查找现有记录
         found = False
         for user_scene in data.get('user_scenes', []):
@@ -83,6 +121,8 @@ class UserSceneService:
     
     def get_all_scenes(self) -> List[Dict[str, Any]]:
         """获取所有系统场景"""
+        if self._scene_repo is not None:
+            return self._scene_repo.get_all()
         if not self.scenes_file.exists():
             return []
         
