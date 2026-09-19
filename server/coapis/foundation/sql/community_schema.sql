@@ -112,6 +112,38 @@ CREATE INDEX IF NOT EXISTS idx_token_usage_user ON token_usage(user_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage(created_at);
 
 -- ---------------- 迁移状态（完成标记，F6） ----------------
+CREATE TABLE IF NOT EXISTS token_usage_daily (
+    date            TEXT NOT NULL,
+    provider_id     TEXT NOT NULL,
+    model_name      TEXT NOT NULL,
+    prompt_tokens   INTEGER DEFAULT 0,
+    completion_tokens INTEGER DEFAULT 0,
+    call_count      INTEGER DEFAULT 0,
+    last_updated    TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (date, provider_id, model_name)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_bases (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL DEFAULT '',
+    description  TEXT NOT NULL DEFAULT '',
+    scope        TEXT NOT NULL DEFAULT 'user',
+    status       TEXT NOT NULL DEFAULT 'active',
+    created_at   TEXT NOT NULL DEFAULT '',
+    updated_at   TEXT NOT NULL DEFAULT '',
+    metadata     TEXT NOT NULL DEFAULT '{}',
+    department_id TEXT,
+    visibility   TEXT,
+    tenant_id    TEXT,
+    created_by   TEXT,
+    updated_by   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS permissions_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '{}'
+);
+
 CREATE TABLE IF NOT EXISTS migration_state (
     key TEXT PRIMARY KEY,
     value TEXT,

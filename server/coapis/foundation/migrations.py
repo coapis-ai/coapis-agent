@@ -25,11 +25,12 @@ import json
 import logging
 import shutil
 import time
+import hashlib
 import uuid as uuid_mod
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from .external_identity_store_sqlite import _COLUMN_KEYS
+from .external_identity_impl import _COLUMN_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +312,13 @@ def _migrate_users(conn, system_dir: Path) -> int:
             "password_set_by_user": 1 if user.get("password_set_by_user", False) else 0,
             "onboarding_completed": 1 if user.get("onboarding_completed", True) else 0,
         }
+        # 明文密码 → 哈希（与 create_user 一致：迁移后不保留明文）。
+        if user.get("password") and not user.get("password_hash"):
+            salt = uuid_mod.uuid4().hex
+            user_data["password_hash"] = hashlib.sha256(
+                f"{user['password']}:{salt}".encode("utf-8")
+            ).hexdigest()
+            user_data["salt"] = salt
         # Remove None values for optional fields
         for key in list(user_data.keys()):
             if key not in ("id", "username", "password_hash", "salt", "role", "is_active") and user_data[key] is None:
@@ -577,7 +585,7 @@ def _migrate_point_transactions(conn, system_dir: Path) -> int:
 
 def _migrate_token_usage(conn, system_dir: Path) -> int:
     """Migrate token_usage.json → token_usage table."""
-    records = _load_json_list(system_dir / "token_usage.json")
+    records = _load_json_list(system_dir / "token_usage_details.json")
     count = 0
     for r in records:
         user_id = _deterministic_uuid(r.get("user_id"))
@@ -600,6 +608,215 @@ def _migrate_token_usage(conn, system_dir: Path) -> int:
         count += 1
     logger.info("Migrated %d token usage records", count)
     return count
+
+
+# ---------------------------------------------------------------------------
+# B 档：运行时域 JSON → DB 迁移（token_usage 日聚合/明细、知识库、权限配置）
+# 全部按「表空且文件有数据才迁」自守幂等，无额外 flag。
+# ---------------------------------------------------------------------------
+
+def _migrate_token_usage_daily(conn, system_dir: Path) -> int:
+    """token_usage.json（日聚合 {date: {provider:model: {...}}}）→ token_usage_daily 表。"""
+    path = system_dir / "token_usage.json"
+    if not path.exists():
+        return 0
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    existing = conn.execute(text("SELECT COUNT(*) FROM token_usage_daily")).fetchone()
+    if existing and int(existing[0]) > 0:
+        return 0  # 表非空 → 已迁移过
+    count = 0
+    for day, entries in data.items():
+        if not isinstance(entries, dict):
+            continue
+        for entry in entries.values():
+            if not isinstance(entry, dict):
+                continue
+            conn.execute(
+                text(
+                    "INSERT INTO token_usage_daily "
+                    "(date, provider_id, model_name, prompt_tokens, "
+                    " completion_tokens, call_count, last_updated) "
+                    "VALUES (:day, :pid, :mid, :pt, :ct, :cc, :ts) "
+                    "ON CONFLICT(date, provider_id, model_name) DO UPDATE SET "
+                    "prompt_tokens = excluded.prompt_tokens, "
+                    "completion_tokens = excluded.completion_tokens, "
+                    "call_count = excluded.call_count, "
+                    "last_updated = excluded.last_updated"
+                ),
+                {
+                    "day": str(day),
+                    "pid": str(entry.get("provider_id", "") or ""),
+                    "mid": str(entry.get("model_name", "") or ""),
+                    "pt": int(entry.get("prompt_tokens", 0) or 0),
+                    "ct": int(entry.get("completion_tokens", 0) or 0),
+                    "cc": int(entry.get("call_count", 0) or 0),
+                    "ts": str(entry.get("last_updated", "") or ""),
+                },
+            )
+            count += 1
+    logger.info("Migrated %d token usage daily rows", count)
+    return count
+
+
+def _migrate_token_usage_details_retry(conn, system_dir: Path) -> int:
+    """B 档补跑：M0 误读 token_usage.json 致明细未入库；表空时补迁 details 文件。"""
+    existing = conn.execute(text("SELECT COUNT(*) FROM token_usage")).fetchone()
+    if existing and int(existing[0]) > 0:
+        return 0  # 表非空 → 已有明细
+    records = _load_json_list(system_dir / "token_usage_details.json")
+    if not records:
+        return 0
+    count = 0
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        created_at = r.get("created_at", "")
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at).timestamp()
+            except (ValueError, TypeError):
+                created_at = time.time()
+        elif not isinstance(created_at, (int, float)):
+            created_at = time.time()
+        conn.execute(
+            text(
+                """INSERT INTO token_usage
+                   (user_id, username, agent_id, model, input_tokens,
+                    output_tokens, total_tokens, cost_cents, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ),
+            (
+                r.get("user_id", ""),
+                r.get("username", ""),
+                r.get("agent_id"),
+                r.get("model", ""),
+                r.get("input_tokens", 0),
+                r.get("output_tokens", 0),
+                r.get("total_tokens", 0),
+                r.get("cost_cents", 0.0),
+                created_at,
+            ),
+        )
+        count += 1
+    logger.info("Migrated %d token usage detail rows (retry)", count)
+    return count
+
+
+def _migrate_knowledge_bases(conn, system_dir: Path) -> int:
+    """knowledge_bases.json（{"knowledge_bases": [...]}）→ knowledge_bases 表。"""
+    path = system_dir / "knowledge_bases.json"
+    if not path.exists():
+        return 0
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    kbs = data.get("knowledge_bases", []) if isinstance(data, dict) else []
+    if not kbs:
+        return 0
+    existing = conn.execute(text("SELECT COUNT(*) FROM knowledge_bases")).fetchone()
+    if existing and int(existing[0]) > 0:
+        return 0
+    count = 0
+    for kb in kbs:
+        if not isinstance(kb, dict) or not kb.get("id"):
+            continue
+        try:
+            metadata = json.dumps(kb.get("metadata", {}) or {}, ensure_ascii=False)
+        except (TypeError, ValueError):
+            metadata = "{}"
+
+        def _iso(v):
+            if isinstance(v, str):
+                return v
+            try:
+                return v.isoformat()
+            except AttributeError:
+                return datetime.now().isoformat()
+
+        conn.execute(
+            text(
+                "INSERT OR IGNORE INTO knowledge_bases "
+                "(id, name, description, scope, status, created_at, updated_at, "
+                " metadata, department_id, visibility, tenant_id, created_by, updated_by) "
+                "VALUES (:id, :name, :desc, :scope, :status, :ca, :ua, :meta, "
+                " :dept, :vis, :tid, :cb, :ub)"
+            ),
+            {
+                "id": str(kb["id"]),
+                "name": str(kb.get("name", "") or ""),
+                "desc": str(kb.get("description", "") or ""),
+                "scope": str(kb.get("scope", "user") or "user"),
+                "status": str(kb.get("status", "active") or "active"),
+                "ca": _iso(kb.get("created_at") or datetime.now()),
+                "ua": _iso(kb.get("updated_at") or kb.get("created_at") or datetime.now()),
+                "meta": metadata,
+                "dept": kb.get("department_id"),
+                "vis": kb.get("visibility"),
+                "tid": kb.get("tenant_id"),
+                "cb": kb.get("created_by"),
+                "ub": kb.get("updated_by"),
+            },
+        )
+        count += 1
+    logger.info("Migrated %d knowledge bases", count)
+    return count
+
+
+def _migrate_permissions(conn, system_dir: Path) -> int:
+    """permissions.json（整个配置 dict）→ permissions_config 表（key='all' 单行）。"""
+    path = system_dir / "permissions.json"
+    if not path.exists():
+        return 0
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    existing = conn.execute(text("SELECT COUNT(*) FROM permissions_config")).fetchone()
+    if existing and int(existing[0]) > 0:
+        return 0
+    conn.execute(
+        text("INSERT OR IGNORE INTO permissions_config (key, value) VALUES ('all', :v)"),
+        {"v": json.dumps(data, ensure_ascii=False)},
+    )
+    logger.info("Migrated permissions config")
+    return 1
+
+
+def ensure_runtime_domain_migrated(conn, system_dir: Path) -> None:
+    """B 档：运行时域 JSON → DB 迁移（幂等，表空且文件有数据才迁）。
+
+    与 ensure_domain_migrated 独立：domain_migration flag 已在存量实例打平，
+    新域用自己的表空判断做自守，不受旧 flag 影响。
+    """
+    system_dir = Path(system_dir)
+    # 确保 B 档表存在（幂等）：存量实例的 DB 早于 B 档建表，knowledge_bases /
+    # permissions_config / token_usage_daily 可能缺失（ORM 导入顺序 / 首次建表
+    # 时机都不保证覆盖到）。community_schema.sql 全 CREATE TABLE IF NOT EXISTS，
+    # 重复应用安全，是建表的事实源。
+    _create_schema(conn)
+    totals = {}
+    for name, fn in (
+        ("token_usage_daily", _migrate_token_usage_daily),
+        ("token_usage_details", _migrate_token_usage_details_retry),
+        ("knowledge_bases", _migrate_knowledge_bases),
+        ("permissions", _migrate_permissions),
+    ):
+        try:
+            totals[name] = fn(conn, system_dir)
+        except Exception as e:
+            logger.warning(f"runtime domain migration failed: {name}: {e}")
+            totals[name] = 0
+    if any(totals.values()):
+        conn.commit()
+        logger.info(f"Runtime domain migration complete: {totals}")
 
 
 def _migrate_external_bindings(conn, system_dir: Path) -> int:
@@ -712,7 +929,9 @@ def ensure_domain_migrated(data_dir: Path, system_dir: Path, db_path: Path) -> b
     from .scene_repository_sqlite import SqliteSceneRepository
     from .tag_repository_sqlite import SqliteTagRepository
     from .user_scene_repository_sqlite import SqliteUserSceneSettingsRepo
-    from .external_identity_store_sqlite import SqliteExternalIdentityStore
+    # Phase 1: 外部身份仓储 SQLAlchemy 化（走全局 engine；生产工厂路径下与
+    # db_path 同一文件；测试需先 init_engine 到目标库）。
+    from .external_identity_impl import SqlaExternalIdentityStore
 
     system_dir = Path(system_dir)
     db_path = Path(db_path)
@@ -734,7 +953,7 @@ def ensure_domain_migrated(data_dir: Path, system_dir: Path, db_path: Path) -> b
         tag_repo = SqliteTagRepository(db_path)
         scene_repo = SqliteSceneRepository(db_path)
         us_repo = SqliteUserSceneSettingsRepo(db_path)
-        ext_store = SqliteExternalIdentityStore(db_path)
+        ext_store = SqlaExternalIdentityStore()
 
         # 域C：tags.json {"version", "tags": [...]}
         tags = _load_json_dict(data_dir / "tags.json").get("tags") or []

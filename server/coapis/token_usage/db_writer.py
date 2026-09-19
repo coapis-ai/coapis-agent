@@ -1,113 +1,162 @@
-# -*- coding: utf-8 -*-
-# Copyright 2026 蜜蜂 & CoApis Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+Token usage DB writer - 明细记录持久化。
 
-"""JSON file writer for token usage — per-user, per-agent tracking.
+DB 优先（token_usage 表），DB 不可用时回退 JSON 文件（token_usage_details.json，
+测试/降级模式）。
 
-Writes to token_usage_details.json for detailed analytics.
-No database dependency - pure JSON file storage.
+Provides:
+- save_token_usage()       - 每次 LLM 调用的明细入库（model_wrapper 调用）
+- record_token_usage()     - 兼容旧签名
+- get_user_token_usage()   - 按用户查询
+- get_agent_token_usage()  - 按 agent 查询
+- get_usage_history()      - 单用户/agent 历史
+- get_token_usage()        - 汇总统计
+- load_token_usage()       - 全量记录
 """
 
 import json
 import logging
-import os
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+
+from ..constant import SYSTEM_DIR
 
 logger = logging.getLogger(__name__)
 
-# File path (can be overridden via env var)
-_USAGE_FILE: Optional[Path] = None
+SYSTEM_DIR = Path(SYSTEM_DIR)
 
 
-def _get_usage_file() -> Path:
-    """Get the token_usage_details.json path."""
-    global _USAGE_FILE
-    if _USAGE_FILE is not None:
-        return _USAGE_FILE
-    
-    # Check env var first
-    env_path = os.environ.get("COAPIS_TOKEN_USAGE_DETAILS_FILE")
-    if env_path:
-        _USAGE_FILE = Path(env_path)
-        return _USAGE_FILE
-    
-    # Default path: same directory as token_usage.json
-    from ..constant import SYSTEM_DIR
-    _USAGE_FILE = SYSTEM_DIR / "token_usage_details.json"
-    return _USAGE_FILE
+def _details_file() -> Path:
+    return SYSTEM_DIR / "token_usage_details.json"
 
 
-def _load_data() -> dict:
-    """Load token usage data from JSON file."""
-    usage_file = _get_usage_file()
-    
-    if not usage_file.exists():
-        return {"records": []}
-    
+def _engine():
+    """获取全局 DB engine（未初始化返回 None）。"""
     try:
-        with open(usage_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if "records" not in data:
-                data["records"] = []
-            return data
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to load token usage data: %s", e)
-        return {"records": []}
+        from ..foundation.db import get_engine
+        return get_engine()
+    except Exception:
+        return None
 
 
-def _save_data(data: dict) -> None:
-    """Save token usage data to JSON file atomically."""
-    usage_file = _get_usage_file()
-    
-    try:
-        # Ensure directory exists
-        usage_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Atomic write: write to temp file, then rename
-        tmp_file = usage_file.with_suffix(".tmp")
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        # Rename (atomic on most systems)
-        os.replace(tmp_file, usage_file)
-    except OSError as e:
-        logger.warning("Failed to save token usage data: %s", e)
+# ---------------------------------------------------------------------------
+# 写入
+# ---------------------------------------------------------------------------
 
-
-def save_token_usage(
-    user_id: Optional[int],
-    username: Optional[str],
-    agent_id: Optional[str],
+def _db_insert(
+    user_id: int | str | None,
+    username: str | None,
+    agent_id: str | None,
     model: str,
     input_tokens: int,
     output_tokens: int,
-    total_tokens: int,
+    total_tokens: int | None,
+    cost_cents: float,
+    created_at: float | None = None,
+) -> None:
+    from sqlalchemy import text
+    engine = _engine()
+    if engine is None:
+        return
+    ts = float(created_at) if created_at else time.time()
+    total = int(total_tokens) if total_tokens is not None else int(input_tokens or 0) + int(output_tokens or 0)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO token_usage "
+                "(user_id, username, agent_id, model, input_tokens, output_tokens, "
+                " total_tokens, cost_cents, created_at) "
+                "VALUES (:uid, :uname, :aid, :model, :in_t, :out_t, :total, :cost, :ts)"
+            ),
+            {
+                "uid": str(user_id) if user_id is not None else None,
+                "uname": username,
+                "aid": agent_id,
+                "model": model,
+                "in_t": int(input_tokens or 0),
+                "out_t": int(output_tokens or 0),
+                "total": total,
+                "cost": float(cost_cents or 0),
+                "ts": ts,
+            },
+        )
+
+
+def save_token_usage(
+    user_id: int | str | None,
+    agent_id: str | None = None,
+    model: str = "",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    total_tokens: int | None = None,
     cost_cents: float = 0.0,
-) -> bool:
-    """Save a token usage record to JSON file.
-    
-    Returns True on success, False on failure.
+    username: str | None = None,
+    created_at: float | None = None,
+) -> None:
+    """每次 LLM 调用后记录明细（model_wrapper._record_usage_to_db 调用）。
+
+    兼容两种调用形态：
+    - model_wrapper: save_token_usage(user_id=..., username=..., agent_id=..., model=...,
+      input_tokens=..., output_tokens=..., total_tokens=..., cost_cents=...)
+    - 旧签名: record_token_usage(user_id, agent_id, model, in, out, cost, created_at)
     """
-    # Provide default values
-    if user_id is None:
-        user_id = 0
-    if not username:
-        username = "anonymous"
-    
+    try:
+        engine = _engine()
+        if engine is not None:
+            _db_insert(
+                user_id, username, agent_id, model,
+                input_tokens, output_tokens, total_tokens, cost_cents, created_at,
+            )
+        else:
+            _file_append(
+                user_id, username, agent_id, model,
+                input_tokens, output_tokens, total_tokens, cost_cents, created_at,
+            )
+    except Exception as e:
+        logger.debug(f"Failed to save token usage: {e}")
+
+
+def record_token_usage(
+    user_id: int | str | None,
+    agent_id: str | None = None,
+    model: str = "",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cost_cents: float = 0.0,
+    created_at: float | None = None,
+    username: str | None = None,
+    total_tokens: int | None = None,
+) -> None:
+    """记录一条 token 用量明细（兼容旧签名）。"""
+    save_token_usage(
+        user_id,
+        agent_id=agent_id,
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        cost_cents=cost_cents,
+        username=username,
+        created_at=created_at,
+    )
+
+
+def _file_append(
+    user_id: int | str | None,
+    username: str | None,
+    agent_id: str | None,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    total_tokens: int | None,
+    cost_cents: float,
+    created_at: float | None,
+) -> None:
+    """文件兜底：追加到 token_usage_details.json（{"records": [...]} 格式）。"""
+    file = _details_file()
+    file.parent.mkdir(parents=True, exist_ok=True)
+    total = int(total_tokens) if total_tokens is not None else int(input_tokens or 0) + int(output_tokens or 0)
     record = {
         "user_id": user_id,
         "username": username,
@@ -115,266 +164,141 @@ def save_token_usage(
         "model": model,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
+        "total_tokens": total,
         "cost_cents": cost_cents,
-        "created_at": time.time(),
+        "created_at": datetime.fromtimestamp(
+            float(created_at) if created_at else time.time()
+        ).isoformat(),
     }
-    
+    records = []
+    if file.exists():
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            records = data.get("records", []) if isinstance(data, dict) else data
+        except Exception:
+            records = []
+    records.append(record)
+    # 保留最近 10000 条
+    if len(records) > 10000:
+        records = records[-10000:]
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump({"records": records}, f, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# 查询
+# ---------------------------------------------------------------------------
+
+def _norm_record(row: dict) -> dict:
+    """统一记录字段（created_at 转 ISO 字符串，兼容前端/旧格式）。"""
+    rec = dict(row)
+    ts = rec.get("created_at")
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+        rec["created_at"] = datetime.fromtimestamp(float(ts)).isoformat()
+    for k in ("input_tokens", "output_tokens", "total_tokens"):
+        rec[k] = int(rec.get(k) or 0)
+    rec["cost_cents"] = float(rec.get("cost_cents") or 0)
+    return rec
+
+
+def _db_rows(where: str, params: dict) -> list[dict]:
+    from sqlalchemy import text
+    engine = _engine()
+    if engine is None:
+        return []
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT user_id, agent_id, model, input_tokens, output_tokens, "
+                "total_tokens, cost_cents, created_at FROM token_usage "
+                + (f"WHERE {where} " if where else "")
+                + "ORDER BY created_at DESC LIMIT 10000"
+            ),
+            params,
+        ).mappings().all()
+    return [_norm_record(dict(r)) for r in rows]
+
+
+def _file_rows() -> list[dict]:
+    file = _details_file()
+    if not file.exists():
+        return []
     try:
-        data = _load_data()
-        data["records"].append(record)
-        
-        # Keep only last 100000 records to prevent file from growing too large
-        if len(data["records"]) > 100000:
-            data["records"] = data["records"][-100000:]
-        
-        _save_data(data)
-        
-        logger.debug(
-            "Token usage saved: user=%s, agent=%s, model=%s, tokens=%d",
-            username, agent_id, model, total_tokens
-        )
-        return True
-        
-    except Exception as e:
-        logger.warning("Failed to save token usage: %s", e)
-        return False
-
-
-def _filter_records(
-    records: list,
-    username: Optional[str] = None,
-    agent_id: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-) -> list:
-    """Filter records by criteria."""
-    filtered = records
-    
-    if username:
-        filtered = [r for r in filtered if r.get("username") == username]
-    
-    if agent_id:
-        filtered = [r for r in filtered if r.get("agent_id") == agent_id]
-    
-    if start_date:
-        import datetime
-        start_ts = datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp()
-        filtered = [r for r in filtered if r.get("created_at", 0) >= start_ts]
-    
-    if end_date:
-        import datetime
-        end_ts = datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() + 86399
-        filtered = [r for r in filtered if r.get("created_at", 0) <= end_ts]
-    
-    return filtered
-
-
-def get_user_token_usage(
-    username: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-) -> dict:
-    """Get token usage summary for a user.
-    
-    Args:
-        username: Username to query
-        start_date: Start date (YYYY-MM-DD), inclusive
-        end_date: End date (YYYY-MM-DD), inclusive
-    
-    Returns:
-        Dictionary with total tokens, by_agent, by_model breakdowns
-    """
-    try:
-        data = _load_data()
-        records = data.get("records", [])
-        
-        # Filter by username and date range
-        filtered = _filter_records(records, username=username, start_date=start_date, end_date=end_date)
-        
-        # Aggregate
-        total_input = 0
-        total_output = 0
-        total_tokens = 0
-        by_agent = {}
-        by_model = {}
-        
-        for record in filtered:
-            total_input += record.get("input_tokens", 0)
-            total_output += record.get("output_tokens", 0)
-            total_tokens += record.get("total_tokens", 0)
-            
-            # By agent
-            aid = record.get("agent_id") or "unknown"
-            if aid not in by_agent:
-                by_agent[aid] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
-            by_agent[aid]["input_tokens"] += record.get("input_tokens", 0)
-            by_agent[aid]["output_tokens"] += record.get("output_tokens", 0)
-            by_agent[aid]["total_tokens"] += record.get("total_tokens", 0)
-            by_agent[aid]["calls"] += 1
-            
-            # By model
-            model = record.get("model") or "unknown"
-            if model not in by_model:
-                by_model[model] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
-            by_model[model]["input_tokens"] += record.get("input_tokens", 0)
-            by_model[model]["output_tokens"] += record.get("output_tokens", 0)
-            by_model[model]["total_tokens"] += record.get("total_tokens", 0)
-            by_model[model]["calls"] += 1
-        
-        return {
-            "username": username,
-            "total_input_tokens": total_input,
-            "total_output_tokens": total_output,
-            "total_tokens": total_tokens,
-            "total_calls": len(filtered),
-            "by_agent": by_agent,
-            "by_model": by_model,
-        }
-        
-    except Exception as e:
-        logger.warning("Failed to get token usage for user %s: %s", username, e)
-        return {"total_tokens": 0, "by_agent": {}, "by_model": {}}
-
-
-def get_agent_token_usage(
-    agent_id: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-) -> dict:
-    """Get token usage summary for an agent."""
-    try:
-        data = _load_data()
-        records = data.get("records", [])
-        
-        # Filter by agent_id and date range
-        filtered = _filter_records(records, agent_id=agent_id, start_date=start_date, end_date=end_date)
-        
-        # Aggregate
-        total_input = 0
-        total_output = 0
-        total_tokens = 0
-        by_user = {}
-        by_model = {}
-        
-        for record in filtered:
-            total_input += record.get("input_tokens", 0)
-            total_output += record.get("output_tokens", 0)
-            total_tokens += record.get("total_tokens", 0)
-            
-            # By user
-            uname = record.get("username") or "unknown"
-            if uname not in by_user:
-                by_user[uname] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
-            by_user[uname]["input_tokens"] += record.get("input_tokens", 0)
-            by_user[uname]["output_tokens"] += record.get("output_tokens", 0)
-            by_user[uname]["total_tokens"] += record.get("total_tokens", 0)
-            by_user[uname]["calls"] += 1
-            
-            # By model
-            model = record.get("model") or "unknown"
-            if model not in by_model:
-                by_model[model] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0}
-            by_model[model]["input_tokens"] += record.get("input_tokens", 0)
-            by_model[model]["output_tokens"] += record.get("output_tokens", 0)
-            by_model[model]["total_tokens"] += record.get("total_tokens", 0)
-            by_model[model]["calls"] += 1
-        
-        return {
-            "agent_id": agent_id,
-            "total_input_tokens": total_input,
-            "total_output_tokens": total_output,
-            "total_tokens": total_tokens,
-            "total_calls": len(filtered),
-            "by_user": by_user,
-            "by_model": by_model,
-        }
-        
-    except Exception as e:
-        logger.warning("Failed to get token usage for agent %s: %s", agent_id, e)
-        return {"total_tokens": 0, "by_user": {}, "by_model": {}}
-
-
-def get_user_token_history(
-    username: str,
-    page: int = 1,
-    page_size: int = 50,
-    model: Optional[str] = None,
-    agent_id: Optional[str] = None,
-) -> list:
-    """Get paginated token usage history for a user from JSON file.
-    
-    Args:
-        username: Username to query
-        page: Page number (1-based)
-        page_size: Number of records per page
-        model: Optional model filter
-        agent_id: Optional agent_id filter
-    
-    Returns:
-        List of token usage records (sorted by created_at DESC)
-    """
-    try:
-        data = _load_data()
-        records = data.get("records", [])
-        
-        # Filter by username
-        filtered = [r for r in records if r.get("username") == username]
-        
-        # Filter by model
-        if model:
-            filtered = [r for r in filtered if r.get("model") == model]
-        
-        # Filter by agent_id
-        if agent_id:
-            filtered = [r for r in filtered if r.get("agent_id") == agent_id]
-        
-        # Sort by created_at DESC
-        filtered.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-        
-        # Paginate
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        
-        return filtered[start_idx:end_idx]
-        
-    except Exception as e:
-        logger.warning("Failed to get token history for user %s: %s", username, e)
+        with open(file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
         return []
 
 
-def get_user_token_history_count(
-    username: str,
-    model: Optional[str] = None,
-    agent_id: Optional[str] = None,
-) -> int:
-    """Get total count of token usage records for a user.
-    
-    Args:
-        username: Username to query
-        model: Optional model filter
-        agent_id: Optional agent_id filter
-    
-    Returns:
-        Total count of records
-    """
-    try:
-        data = _load_data()
-        records = data.get("records", [])
-        
-        # Filter by username
-        filtered = [r for r in records if r.get("username") == username]
-        
-        # Filter by model
-        if model:
-            filtered = [r for r in filtered if r.get("model") == model]
-        
-        # Filter by agent_id
-        if agent_id:
-            filtered = [r for r in filtered if r.get("agent_id") == agent_id]
-        
-        return len(filtered)
-        
-    except Exception as e:
-        logger.warning("Failed to get token history count for user %s: %s", username, e)
-        return 0
+def get_user_token_usage(user_id: str, agent_id: str | None = None) -> list[dict]:
+    """按用户查询 token 用量记录。"""
+    where = "user_id = :uid"
+    params = {"uid": str(user_id)}
+    if agent_id is not None:
+        where += " AND agent_id = :aid"
+        params["aid"] = agent_id
+    rows = _db_rows(where, params)
+    if not rows and _engine() is None:
+        rows = [
+            r for r in _file_rows()
+            if str(r.get("user_id")) == str(user_id)
+            and (agent_id is None or r.get("agent_id") == agent_id)
+        ]
+    return rows
+
+
+def get_agent_token_usage(agent_id: str) -> list[dict]:
+    """按 agent 查询 token 用量记录。"""
+    rows = _db_rows("agent_id = :aid", {"aid": agent_id})
+    if not rows and _engine() is None:
+        rows = [
+            r for r in _file_rows()
+            if r.get("agent_id") == agent_id
+        ]
+    return rows
+
+
+def get_usage_history(user_id: str | None = None, agent_id: str | None = None) -> list[dict]:
+    """获取单用户/单 agent 的 token 用量历史。"""
+    if user_id is not None and agent_id is None:
+        return get_user_token_usage(user_id)
+    if agent_id is not None and user_id is None:
+        return get_agent_token_usage(agent_id)
+    if user_id is not None and agent_id is not None:
+        return get_user_token_usage(user_id, agent_id)
+    # 全量
+    rows = _db_rows("", {})
+    if not rows and _engine() is None:
+        rows = _file_rows()
+    return rows
+
+
+def get_token_usage(user_id: str | None = None, agent_id: str | None = None) -> dict:
+    """汇总 token 用量统计（按 model 分组）。"""
+    records = get_usage_history(user_id=user_id, agent_id=agent_id)
+    total_input = sum(r.get("input_tokens", 0) for r in records)
+    total_output = sum(r.get("output_tokens", 0) for r in records)
+    total_cost = sum(r.get("cost_cents", 0) for r in records)
+    by_model = {}
+    for r in records:
+        m = r.get("model", "unknown")
+        if m not in by_model:
+            by_model[m] = {"input_tokens": 0, "output_tokens": 0, "cost_cents": 0, "calls": 0}
+        by_model[m]["input_tokens"] += r.get("input_tokens", 0)
+        by_model[m]["output_tokens"] += r.get("output_tokens", 0)
+        by_model[m]["cost_cents"] += r.get("cost_cents", 0)
+        by_model[m]["calls"] += 1
+    return {
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "total_tokens": total_input + total_output,
+        "total_cost_cents": total_cost,
+        "record_count": len(records),
+        "by_model": by_model,
+    }
+
+
+def load_token_usage() -> list[dict]:
+    """加载全量 token 用量明细。"""
+    return get_usage_history()

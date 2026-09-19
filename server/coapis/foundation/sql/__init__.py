@@ -4,7 +4,7 @@
 - ``community_seed.sql``   — 必须的基础数据（幂等；当前为空占位）
 
 初始化时由 ``foundation/migrations.py::_create_schema`` 统一执行；
-``user_repository_sqlite.py::_create_tables`` 作为访问兜底执行同一份结构脚本。
+ORM 镜像 ``foundation/db/models`` 与 alembic 0001 以同一份脚本为准（13 张表，逐列对齐）。
 """
 
 from __future__ import annotations

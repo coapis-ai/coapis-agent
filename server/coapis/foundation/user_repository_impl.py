@@ -24,11 +24,10 @@ from typing import Any, Dict, List, Optional
 import hashlib
 
 from sqlalchemy import delete, func, insert, or_, select, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from .db.engine import get_session_factory, init_engine
-from .db.models.user import User, UserPreference, UserSetting
-from .db.models.usage import AuditLog, PointTransaction, TokenUsage
+from .db.models.user import AuditLog, User, UserPreference, UserSetting
+from .db.models.usage import PointTransaction, TokenUsage
 from .user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -61,23 +60,69 @@ class SqlaUserRepository(UserRepository):
         # ``db_url``: optional override (tests / multi-DB). ``None`` →
         # engine default (COAPIS_DATABASE_URL or <data_dir>/system/coapis.db).
         self._db_url = db_url
-        self._session_factory = None
+        self._sf_cache: Optional["sessionmaker[Session]"] = None
 
     # ------------------------------------------------------------------
     # Session plumbing
     # ------------------------------------------------------------------
 
+    @property
     def _sf(self):
-        if self._session_factory is None:
+        """The bound session factory (a ``sessionmaker``).
+
+        Callers use it as ``with self._sf() as session:`` — each call
+        creates a fresh ``Session``; the session is closed on block exit.
+        """
+        if self._sf_cache is None:
             if self._db_url:
                 init_engine(self._db_url)
-            self._session_factory = get_session_factory()
-        return self._session_factory
+            self._sf_cache = get_session_factory()
+        return self._sf_cache
+
+    def _session_factory(self) -> "sessionmaker[Session]":
+        """Return the bound ``sessionmaker`` (test/external contract).
+
+        Usable as ``repo._session_factory()()`` to open a fresh Session.
+        """
+        return self._sf
 
     @staticmethod
     def _row_dict(row: Any) -> Dict[str, Any]:
-        """Full-column dict for a ``users`` row (same shape as ``SELECT *``)."""
-        return dict(row._mapping)
+        """Full-column dict for a ``users`` row (same shape as ``SELECT *``).
+
+        SQLAlchemy 2.0 gotcha: ``Session.execute(select(Entity))`` returns
+        *ORM-enabled* rows whose ``_mapping`` is keyed by the **entity class**
+        (``{User: <User>}``), not by column name — a naive ``dict(row._mapping)``
+        yields ``{'User': ...}`` and every ``row["id"]`` lookup KeyErrors.
+        Plain ORM instances (``.scalars()`` results) have no ``_mapping`` at
+        all. So: instance → map via ``__mapper__.column_attrs``; Row → core
+        string keys pass through, ORM rows extract the entity first.
+        """
+        if row is None:
+            return None
+        if hasattr(row, "_sa_instance_state"):  # plain ORM instance
+            inst = row
+        elif hasattr(row, "_mapping"):
+            m = row._mapping
+            # ORM-enabled single-entity row: _mapping is keyed by the entity
+            # class name (a *string*, e.g. 'User'), value = the instance.
+            vals = list(m.values())
+            if len(vals) == 1 and hasattr(vals[0], "_sa_instance_state"):
+                inst = vals[0]
+            else:  # core Row with string column keys
+                d = dict(m)
+                d["password"] = None
+                return d
+        else:
+            d = dict(row)
+            d["password"] = None
+            return d
+        if inst is None:
+            return None
+        d = {c.key: getattr(inst, c.key) for c in inst.__mapper__.column_attrs}
+        # 明文密码永不入库；对外统一置 None，消费方不得依赖明文。
+        d["password"] = None
+        return d
 
     # ------------------------------------------------------------------
     # CRUD
@@ -92,7 +137,7 @@ class SqlaUserRepository(UserRepository):
         if "password" in user_data and "password_hash" not in user_data:
             salt = uuid_mod.uuid4().hex
             pw_hash = hashlib.sha256(
-                (salt + str(user_data.pop("password"))).encode("utf-8")
+                f"{user_data.pop('password')}:{salt}".encode("utf-8")
             ).hexdigest()
             user_data["password_hash"] = pw_hash
             user_data["salt"] = salt
@@ -237,18 +282,18 @@ class SqlaUserRepository(UserRepository):
                     select(func.count()).select_from(User).where(User.username == username)
                 ).scalar()
                 or 0
-            )
-            > 0
+            ) > 0
 
     def email_exists(self, email: str) -> bool:
         if not email:
             return False
         with self._sf() as session:
             return (
-                session.execute(select(func.count()).select_from(User).where(User.email == email)).scalar()
+                session.execute(
+                    select(func.count()).select_from(User).where(User.email == email)
+                ).scalar()
                 or 0
-            )
-            > 0
+            ) > 0
 
     def count_users(self) -> int:
         with self._sf() as session:
@@ -430,20 +475,22 @@ class SqlaUserRepository(UserRepository):
         if not user:
             return None
         with self._sf() as session:
-            row = session.execute(
+            # .scalars() → plain ORM instance (Row attribute access on
+            # ORM-enabled rows is keyed by entity class, not column name)
+            inst = session.execute(
                 select(UserPreference).where(UserPreference.user_id == user["id"])
-            ).first()
-            if not row:
+            ).scalars().first()
+            if not inst:
                 return None
             settings = {}
-            if row.settings:
+            if inst.settings:
                 try:
-                    settings = json.loads(row.settings)
+                    settings = json.loads(inst.settings)
                 except (json.JSONDecodeError, TypeError):
                     settings = {}
             result: Dict[str, Any] = dict(settings)
-            result["username"] = row.username
-            result["updated_at"] = row.updated_at
+            result["username"] = inst.username
+            result["updated_at"] = inst.updated_at
             return result
 
     def save_user_preferences(self, username: str, prefs_data: Dict[str, Any]) -> None:
@@ -456,9 +503,11 @@ class SqlaUserRepository(UserRepository):
             updated_at = time.time()
         settings_json = json.dumps(settings, ensure_ascii=False)
         with self._sf() as session:
+            # .scalars() → mutable ORM instance (a Row would be immutable
+            # and the attribute writes below would be lost)
             existing = session.execute(
                 select(UserPreference).where(UserPreference.user_id == user["id"])
-            ).first()
+            ).scalars().first()
             if existing:
                 existing.settings = settings_json
                 existing.updated_at = updated_at
@@ -478,30 +527,39 @@ class SqlaUserRepository(UserRepository):
         if not uid:
             return None
         with self._sf() as session:
-            row = session.execute(
+            inst = session.execute(
                 select(UserSetting).where(
                     UserSetting.user_id == uid, UserSetting.setting_key == key
                 )
-            ).first()
-            return row.setting_value if row else None
+            ).scalars().first()
+            return inst.setting_value if inst else None
 
     def set_user_preference(self, user_id: Any, key: str, value: str) -> bool:
         uid = _normalize_id(user_id)
         if not uid:
             return False
         now = time.time()
+        # D-13: dialect-neutral upsert (no sqlite ON CONFLICT) — identical
+        # behaviour on SQLite and PostgreSQL.
         with self._sf() as session:
-            stmt = sqlite_insert(UserSetting).values(
-                user_id=uid, setting_key=key, setting_value=value, updated_at=now
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[UserSetting.user_id, UserSetting.setting_key],
-                set_={
-                    "setting_value": stmt.excluded.setting_value,
-                    "updated_at": stmt.excluded.updated_at,
-                },
-            )
-            session.execute(stmt)
+            existing = session.execute(
+                select(UserSetting).where(
+                    UserSetting.user_id == uid,
+                    UserSetting.setting_key == key,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                existing.setting_value = value
+                existing.updated_at = now
+            else:
+                session.add(
+                    UserSetting(
+                        user_id=uid,
+                        setting_key=key,
+                        setting_value=value,
+                        updated_at=now,
+                    )
+                )
             session.commit()
         return True
 
@@ -510,9 +568,9 @@ class SqlaUserRepository(UserRepository):
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        if self._session_factory is not None:
-            try:
-                self._session_factory.dispose()
-            except Exception:
-                pass
-            self._session_factory = None
+        # No per-instance connections to close — every call opens its own
+        # session from the *global* engine. The engine is shared by all
+        # repositories in the process, so it must NOT be disposed here
+        # (that would break every other live repository). Clearing the
+        # cached reference is enough; the next call re-resolves it.
+        self._sf_cache = None

@@ -162,14 +162,19 @@ class TokenUsageBuffer:
                     break
 
     async def _flush_once(self, force: bool = False) -> None:
-        """Write ``_disk_cache`` to disk if dirty."""
+        """Write ``_disk_cache`` to DB (or file fallback) if dirty."""
         if not self._dirty and not force:
             return
         self._dirty = False
 
         snapshot = copy.deepcopy(self._disk_cache)
-        await asyncio.to_thread(save_data_sync, self._path, snapshot)
-        logger.debug("token_usage: flushed cache to disk")
+        engine = _get_engine()
+        if engine is not None:
+            await asyncio.to_thread(_save_to_db, engine, snapshot)
+            logger.debug("token_usage: flushed cache to DB")
+        else:
+            await asyncio.to_thread(save_data_sync, self._path, snapshot)
+            logger.debug("token_usage: flushed cache to disk")
 
     async def _flush_loop(self) -> None:
         """Periodically flush the cache to disk."""
@@ -186,12 +191,17 @@ class TokenUsageBuffer:
             pass
 
     async def _seed_cache(self) -> None:
-        """Load existing data from disk into ``_disk_cache`` (once)."""
+        """Load existing data from DB (or file fallback) into ``_disk_cache``."""
         if self._cache_loaded:
             return
-        self._disk_cache = await load_data(self._path)
+        engine = _get_engine()
+        if engine is not None:
+            self._disk_cache = await asyncio.to_thread(_load_from_db, engine)
+            logger.debug("token_usage: cache seeded from DB")
+        else:
+            self._disk_cache = await load_data(self._path)
+            logger.debug("token_usage: cache seeded from disk")
         self._cache_loaded = True
-        logger.debug("token_usage: cache seeded from disk")
 
 
 def _apply_event(cache: dict, ev: _UsageEvent) -> None:
@@ -223,3 +233,77 @@ def _apply_event(cache: dict, ev: _UsageEvent) -> None:
 
 
 __all__ = ["TokenUsageBuffer", "_UsageEvent"]
+
+
+# ---------------------------------------------------------------------------
+# DB 持久化（token_usage_daily 表）；DB 未初始化时走文件兜底
+# ---------------------------------------------------------------------------
+
+_DAILY_TABLE = "token_usage_daily"
+
+
+def _get_engine():
+    """获取全局 DB engine（未初始化返回 None → 走文件兜底）。"""
+    try:
+        from ..foundation.db import get_engine
+
+        return get_engine()
+    except Exception:
+        return None
+
+
+def _load_from_db(engine) -> dict:
+    """从 token_usage_daily 表加载日聚合数据（与 JSON 结构一致）。"""
+    from sqlalchemy import text
+
+    data: dict = {}
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                f"SELECT date, provider_id, model_name, prompt_tokens, "
+                f"completion_tokens, call_count FROM {_DAILY_TABLE}"
+            )
+        ).mappings().all()
+    for r in rows:
+        day = data.setdefault(r["date"], {})
+        key = f"{r['provider_id']}:{r['model_name']}"
+        day[key] = {
+            "provider_id": r["provider_id"],
+            "model_name": r["model_name"],
+            "prompt_tokens": int(r["prompt_tokens"] or 0),
+            "completion_tokens": int(r["completion_tokens"] or 0),
+            "call_count": int(r["call_count"] or 0),
+        }
+    return data
+
+
+def _save_to_db(engine, snapshot: dict) -> None:
+    """把日聚合快照 upsert 到 token_usage_daily 表（单事务）。"""
+    from sqlalchemy import text
+
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with engine.begin() as conn:
+        for day, entries in snapshot.items():
+            for entry in entries.values():
+                conn.execute(
+                    text(
+                        f"INSERT INTO {_DAILY_TABLE} "
+                        f"(date, provider_id, model_name, prompt_tokens, "
+                        f"completion_tokens, call_count, last_updated) "
+                        f"VALUES (:day, :pid, :mid, :pt, :ct, :cc, :ts) "
+                        f"ON CONFLICT(date, provider_id, model_name) DO UPDATE SET "
+                        f"prompt_tokens = excluded.prompt_tokens, "
+                        f"completion_tokens = excluded.completion_tokens, "
+                        f"call_count = excluded.call_count, "
+                        f"last_updated = excluded.last_updated"
+                    ),
+                    {
+                        "day": day,
+                        "pid": entry.get("provider_id", ""),
+                        "mid": entry.get("model_name", ""),
+                        "pt": int(entry.get("prompt_tokens", 0)),
+                        "ct": int(entry.get("completion_tokens", 0)),
+                        "cc": int(entry.get("call_count", 0)),
+                        "ts": now,
+                    },
+                )

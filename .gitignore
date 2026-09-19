@@ -123,3 +123,8 @@ tech_docs/go/
 
 # --- C2A local path dependency (vendor at build time, not for git) ---
 server/_vendor_c2a/
+
+# --- Scratch / dev-only artifacts (not part of the package) ---
+/data/
+scripts_dev_*.py
+server/scripts_dev_smoke.py

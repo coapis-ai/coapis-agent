@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from .repository import KnowledgeBaseRepository
-from .repository_json import JsonKnowledgeBaseRepository
+from .knowledge_base_impl import SqlaKnowledgeBaseRepository
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ class RepositoryFactory:
     
     This factory provides dependency injection for repositories,
     allowing different implementations based on edition:
-        - Community: JsonKnowledgeBaseRepository, SqliteUserRepository
+        - Community: JsonKnowledgeBaseRepository, SqlaUserRepository (SQLAlchemy)
         - Enterprise: PostgresKnowledgeBaseRepository, PostgresUserRepository (loaded dynamically)
     
     Usage:
@@ -83,36 +83,55 @@ class RepositoryFactory:
         
         if edition == "community":
             data_dir = kwargs.get("data_dir", Path.cwd() / "data")
-            cls._kb_repo = JsonKnowledgeBaseRepository(data_dir)
+            # 知识库仓储延迟到 DB engine 初始化后注入（见下方）
+            cls._kb_repo = None
             logger.info(f"Initialized Community edition repositories (data_dir={data_dir})")
             
             # 社区版：SQLite only（初始化失败直接报错，不回退）
-            from .user_repository_sqlite import SqliteUserRepository
+            # Phase 1: 用户域/外部身份仓储全面 SQLAlchemy 化（统一全局 engine）。
+            from .user_repository_impl import SqlaUserRepository
             from ..constant import SYSTEM_DIR, WORKING_DIR
             from .migrations import ensure_migrated
             from .db_settings import resolve_db_path
+            from .db.migrate import run_migrations
             # D-7/D-8/D-9：COAPIS_DATABASE_URL（可选；默认 <WORKING_DIR>/system/coapis.db，
             # 相对路径相对 WORKING_DIR 解析，必须落在挂载卷内）
             db_path = resolve_db_path()
             # 首启迁移：users.json → coapis.db（幂等，已迁移则跳过）
             ensure_migrated(system_dir=SYSTEM_DIR, db_path=db_path)
-            cls._user_repo = SqliteUserRepository(db_path)
             # F3: external identity bindings (SSO) → same coapis.db. The app
             # layer's get_external_identity_store() now returns this instead
             # of falling back to external_identity_mappings.json.
-            from .external_identity_store_sqlite import SqliteExternalIdentityStore
-            RepositoryFactory.inject_external_identity_store(SqliteExternalIdentityStore(db_path))
+            from .external_identity_impl import SqlaExternalIdentityStore
+            RepositoryFactory.inject_external_identity_store(SqlaExternalIdentityStore())
             # M1 四域落库：先跑域迁移（4 张新表建表 + JSON 播种，幂等），
             # 再注入 tag/scene/user_scene 三个 SQLite 仓储。
             from .migrations import ensure_domain_migrated
             ensure_domain_migrated(data_dir=WORKING_DIR, system_dir=SYSTEM_DIR, db_path=db_path)
+            # Alembic：补齐 ORM 声明的全部表 + 打 head 戳（幂等；旧库 schema
+            # 与模型一致，仅补缺表/索引并 stamp，零数据迁移）。
+            run_migrations()
+            # B 档：运行时域 JSON → DB（token_usage 日聚合/明细、知识库、权限）。
+            # 与文件内其余迁移一致：用裸 sqlite3 连接（? 占位符 + conn.commit()）。
+            from .migrations import ensure_runtime_domain_migrated
+            import sqlite3
+
+            _rt_conn = sqlite3.connect(str(db_path), timeout=30.0)
+            try:
+                ensure_runtime_domain_migrated(_rt_conn, SYSTEM_DIR)
+            finally:
+                _rt_conn.close()
+
+            # 知识库仓储：DB 引擎就绪后注入 Sqla 实现（替代 JSON）
+            cls._kb_repo = SqlaKnowledgeBaseRepository()
+            cls._user_repo = SqlaUserRepository()
             from .tag_repository_sqlite import SqliteTagRepository
             from .scene_repository_sqlite import SqliteSceneRepository
             from .user_scene_repository_sqlite import SqliteUserSceneSettingsRepo
             RepositoryFactory.inject_tag_repository(SqliteTagRepository(db_path))
             RepositoryFactory.inject_scene_repository(SqliteSceneRepository(db_path))
             cls._user_scene_repo = SqliteUserSceneSettingsRepo(db_path)
-            logger.info("Initialized Community User repository (SQLite at %s)", db_path)
+            logger.info("Initialized Community User repository (SQLAlchemy at %s)", db_path)
             logger.info("M1: tag/scene/user_scene repositories injected (SQLite)")
         
         elif edition == "enterprise":
@@ -131,14 +150,17 @@ class RepositoryFactory:
                     cls._kb_repo = PostgresKnowledgeBaseRepository(session)
                     logger.info("Enterprise KB repository initialized (PostgreSQL)")
                 except ImportError:
-                    logger.info("Enterprise KB repository not available, using JSON")
-                    data_dir = kwargs.get("data_dir", Path.cwd() / "data")
-                    cls._kb_repo = JsonKnowledgeBaseRepository(data_dir)
+                    raise RuntimeError(
+                        "Enterprise KB repository not available: no kb_repository "
+                        "or session provided. The community JSON fallback has been "
+                        "removed (B 档 JSON 清理) — provide kb_repository or a DB session."
+                    ) from None
             else:
-                # 默认使用JSON
-                data_dir = kwargs.get("data_dir", Path.cwd() / "data")
-                cls._kb_repo = JsonKnowledgeBaseRepository(data_dir)
-                logger.info("Using JSON KB repository (default)")
+                raise RuntimeError(
+                    "Enterprise KB repository not provided: pass kb_repository or "
+                    "session to RepositoryFactory.initialize(). The community JSON "
+                    "fallback has been removed (B 档 JSON 清理)."
+                )
             
             # 2. User Repository（企业版注入）
             user_repo = kwargs.get("user_repository")

@@ -85,7 +85,67 @@ class PermissionManager:
 
     # ── Config loading ────────────────────────────────────────────────
 
+    # -- B 档：DB 存储（permissions_config 表，key='all' 单行 JSON）----
+
+    @staticmethod
+    def _db_engine():
+        try:
+            from ...foundation.db import get_engine
+            return get_engine()
+        except Exception:
+            return None
+
+    @classmethod
+    def _db_load_config(cls) -> Optional[Dict[str, Any]]:
+        """从 DB 读取权限配置；无表/无行/DB 不可用返回 None。"""
+        from sqlalchemy import text
+
+        engine = cls._db_engine()
+        if engine is None:
+            return None
+        try:
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT value FROM permissions_config WHERE key = 'all'")
+                ).mappings().first()
+            if row is None:
+                return None
+            return json.loads(row["value"])
+        except Exception:
+            return None
+
+    @classmethod
+    def _db_save_config(cls, config: Dict[str, Any]) -> bool:
+        """把权限配置写入 DB；DB 不可用返回 False（由调用方走文件兜底）。"""
+        from sqlalchemy import text
+
+        engine = cls._db_engine()
+        if engine is None:
+            return False
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO permissions_config (key, value) "
+                        "VALUES ('all', :v) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                    ),
+                    {"v": json.dumps(config, ensure_ascii=False)},
+                )
+            return True
+        except Exception as e:
+            logger.warning(f"PermissionManager: DB save failed: {e}")
+            return False
+
     def _load_config(self) -> None:
+        # 1) DB 优先（B 档：权限配置存 permissions_config 表）
+        db_config = self._db_load_config()
+        if db_config is not None:
+            self._config = db_config
+            self._maybe_migrate_v1()
+            logger.info("PermissionManager: config loaded from DB")
+            return
+        # 2) 文件兜底（DB 空/不可用；测试或首次种子场景）
         if self._config_path is None:
             logger.error("PermissionManager: config_path not set")
             return
@@ -100,13 +160,16 @@ class PermissionManager:
                 self.save_config()
                 logger.info("PermissionManager: migrated v1 → v2.0 CRUD matrix")
             self._last_modified = stat.st_mtime
+            self._db_save_config(self._config)  # 文件 → DB 种子（B 档）
             logger.info(f"PermissionManager: config reloaded from {self._config_path}")
         except FileNotFoundError:
             logger.warning(f"PermissionManager: config file not found {self._config_path}, using default")
             self._config = self._get_default_config()
+            self._db_save_config(self._config)  # 首次启动：默认配置落库
         except json.JSONDecodeError as e:
             logger.error(f"PermissionManager: invalid JSON: {e}")
             self._config = self._get_default_config()
+            self._db_save_config(self._config)  # 坏文件：默认配置落库
 
     def _maybe_migrate_v1(self) -> bool:
         """Auto-migrate v1 string-list format to v2.0 CRUD matrix."""
@@ -299,15 +362,19 @@ class PermissionManager:
         return self._config.copy()
 
     def save_config(self) -> bool:
+        # B 档：DB 优先；DB 不可用时回退文件（测试/降级模式）
+        if self._db_save_config(self._config):
+            logger.info("PermissionManager: config saved to DB (permissions_config)")
+            return True
         if self._config_path is None:
-            logger.error("PermissionManager: cannot save, config_path not set")
+            logger.error("PermissionManager: cannot save, DB unavailable and config_path not set")
             return False
         try:
             self._config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._config_path, "w", encoding="utf-8") as f:
                 json.dump(self._config, f, indent=2, ensure_ascii=False)
             self._last_modified = self._config_path.stat().st_mtime
-            logger.info(f"PermissionManager: config saved to {self._config_path}")
+            logger.info(f"PermissionManager: config saved to {self._config_path} (DB fallback)")
             return True
         except OSError as e:
             logger.error(f"PermissionManager: failed to save: {e}")
