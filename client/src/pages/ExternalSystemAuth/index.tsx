@@ -61,7 +61,6 @@ interface CredentialConfig {
 interface UserMappingConfig {
   auto_create?: boolean;
   match_existing?: boolean;
-  match_by?: string;
   username_prefix?: string;
   seq_start?: number;
   seq_padding?: number;
@@ -265,7 +264,6 @@ function ExternalSystemAuthPage() {
         user_mapping: {
           auto_create: true,
           match_existing: true,
-          match_by: 'username',
           seq_start: 1,
           seq_padding: 4,
           display_name_source: 'external_name',
@@ -297,7 +295,6 @@ function ExternalSystemAuthPage() {
         user_mapping: {
           auto_create: true,
           match_existing: true,
-          match_by: 'username',
           seq_start: 1,
           seq_padding: 4,
           display_name_source: 'external_name',
@@ -1102,15 +1099,9 @@ function ExternalSystemAuthPage() {
               name={['user_mapping', 'match_existing']}
               label="匹配已有用户"
               valuePropName="checked"
-              tooltip="自动建用户前，先按匹配键大小写不敏感查找本地已有用户；匹配到则补全绑定关系（不新建用户）"
+              tooltip="自动建用户前，先按「前缀_外部ID」大小写不敏感查找本地已有用户（与自动建用户命名同源）；匹配到则补全绑定关系（不新建用户）"
             >
               <Switch />
-            </Form.Item>
-            <Form.Item name={['user_mapping', 'match_by']} label="匹配键" style={{ width: 220 }}>
-              <Select>
-                <Option value="username">用户名（外部登录名 → 本地用户名）</Option>
-                <Option value="external_name">姓名（外部姓名 → 本地显示名）</Option>
-              </Select>
             </Form.Item>
             <Form.Item
               name={['user_mapping', 'username_prefix']}

@@ -146,10 +146,9 @@ def find_binding_by_external(mappings_data: Dict[str, Any], provider: str, exter
 # 补全绑定关系：登录时先匹配已有本地用户（未绑定 → 不新建，而是补绑定）
 # ---------------------------------------------------------------------------
 
-def _find_local_user_by(key_type: str, candidates: List[str]) -> Optional[str]:
-    """大小写不敏感：在本地用户中查找匹配任一 *candidates* 的用户。
+def _find_local_user_by_username(candidates: List[str]) -> Optional[str]:
+    """大小写不敏感：在本地用户中查找用户名匹配任一 *candidates* 的用户。
 
-    key_type: "username"（匹配本地用户名）或 "display"（匹配本地显示名）。
     返回匹配到的本地 username；无匹配返回 None。
     """
     from ..user_store import list_users
@@ -158,7 +157,7 @@ def _find_local_user_by(key_type: str, candidates: List[str]) -> Optional[str]:
     if not norm:
         return None
     for u in list_users():
-        key = u.get("display_name") if key_type == "display" else u.get("username")
+        key = u.get("username")
         if key and str(key).strip().lower() in norm:
             return str(u["username"])
     return None
@@ -166,35 +165,31 @@ def _find_local_user_by(key_type: str, candidates: List[str]) -> Optional[str]:
 
 def _try_match_existing_local_user(
     um: Dict[str, Any],
-    login_username: str,
-    external_name: str,
     external_id: str,
+    provider: str,
 ) -> Optional[str]:
-    """自动建用户前，尝试匹配已有本地用户（大小写不敏感）。
+    """自动建用户前，按确定性身份查找已有本地用户（大小写不敏感）。
+
+    A1 治本规则：外部身份的本地账号映射只认 **前缀_外部ID** 这一个确定性键
+    （与自动建用户命名同源：同一系统同一人恒得同账号）。
+    不再使用输入登录名/姓名做匹配——输入是易变值，用登录名匹配会让
+    同一外部身份在不同输入下落到不同本地账号（分身账号）。
 
     um: 系统的 user_mapping 配置。
-    login_username: 外部系统登录名（凭证直登 = 用户输入；SSO = 回调可能携带的 username）。
-    external_name: 外部系统返回的姓名。
     external_id: 外部系统用户ID。
+    provider: 外部系统 ID（未配置前缀时与 auto_create 路径一样回退用它）。
 
-    匹配键 match_by（默认 "username"）：
-        - "username":     本地用户名 ← 外部登录名（兜底 external_name、前缀_外部ID）
-        - "external_name": 本地显示名 ← 外部姓名（兜底 login_username）
-    match_existing 默认 True（未配置 = 开）。
+    match_existing 默认 True（未配置 = 开）；False 时跳过匹配直接走自动建用户。
+    旧配置 match_by 已废弃（无论配什么都只按 前缀_外部ID 匹配）。
     """
     if um.get("match_existing", True) is False:
         return None
-    match_by = um.get("match_by") or "username"
-    if match_by == "external_name":
-        candidates = [c for c in (external_name, login_username) if c]
-        return _find_local_user_by("display", candidates)
-    candidates = [c for c in (login_username, external_name) if c]
-    # 规则：本地用户名 == 前缀_外部ID（吸收老通道"前缀+id"命名的存量账号）
-    prefix = (str(um.get("username_prefix") or "")).strip()
+    # 与 auto_create 路径完全同源：未配置前缀时回退 provider，两条路径恒一致
+    prefix = (str(um.get("username_prefix") or "")).strip() or provider
     ext = _sanitize_external_id(external_id)
-    if prefix and ext:
-        candidates.append(f"{prefix}_{ext}")
-    return _find_local_user_by("username", candidates)
+    if not prefix or not ext:
+        return None
+    return _find_local_user_by_username([f"{prefix}_{ext}"])
 
 
 def _bind_matched_existing_user(
@@ -623,10 +618,10 @@ async def external_login(request: Request):
     else:
         um = system.get("user_mapping") or {}
 
-        # ── 补全绑定关系：自动建用户前，先尝试匹配已有本地用户（默认开） ──
-        # v2 命名规则：统一"前缀 + 外部ID"（两条建号路径同源，同人恒同账号）
+        # ── 补全绑定关系：自动建用户前，按"前缀_外部ID"匹配已有本地用户（默认开） ──
+        # A1 治本：只认确定性身份键（前缀_外部ID），不用输入登录名/姓名匹配
         ext_login = _sanitize_external_id(external_id)
-        matched = _try_match_existing_local_user(um, str(data.get("username") or "").strip(), external_name, external_id)
+        matched = _try_match_existing_local_user(um, external_id, provider)
 
         if matched is not None and _bind_matched_existing_user(
                 matched, provider, external_id, external_name, mappings, request):
@@ -1009,10 +1004,10 @@ async def credential_login(request: Request):
     else:
         um = system.get("user_mapping") or {}
 
-        # ── 补全绑定关系：自动建用户前，先尝试匹配已有本地用户（默认开） ──
-        # v2 命名规则：统一"前缀 + 外部ID"（此时代码路径 `username` 仍是原始外部登录名，仅作匹配用）
+        # ── 补全绑定关系：自动建用户前，按"前缀_外部ID"匹配已有本地用户（默认开） ──
+        # A1 治本：只认确定性身份键（前缀_外部ID），不用输入登录名/姓名匹配
         ext_login = _sanitize_external_id(external_id)
-        matched = _try_match_existing_local_user(um, username, external_name, external_id)
+        matched = _try_match_existing_local_user(um, external_id, provider)
 
         if matched is not None and _bind_matched_existing_user(
                 matched, provider, external_id, external_name, mappings, request):
