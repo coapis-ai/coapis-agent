@@ -137,7 +137,7 @@ def find_binding_by_external(mappings_data: Dict[str, Any], provider: str, exter
     for b in mappings_data.get("bindings", []):
         if (b.get("provider") == provider
                 and str(b.get("external_id")) == str(external_id)
-                and b.get("status") == 1):
+                and str(b.get("status", 1)) == "1"):
             return b
     return None
 

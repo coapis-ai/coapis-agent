@@ -16,8 +16,8 @@ class MigrationState(BaseRow):
 
     # NOTE: the Python attribute is ``key_`` because ``key`` is a reserved
     # Declarative attribute; the DB column stays ``key``.
-    key_: Mapped[Optional[str]] = mapped_column(
-        "key", Text, primary_key=True, nullable=True
+    key_: Mapped[str] = mapped_column(
+        "key", Text, primary_key=True, nullable=False
     )
     value: Mapped[Optional[str]] = mapped_column(Text)
     updated_at: Mapped[Optional[float]] = mapped_column(REAL)

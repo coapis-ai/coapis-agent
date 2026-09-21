@@ -30,8 +30,8 @@ from ..base import BaseRow
 class User(BaseRow):
     __tablename__ = "users"
 
-    id: Mapped[Optional[str]] = mapped_column(
-        Text, primary_key=True, nullable=True
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, nullable=False
     )
     username: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
@@ -81,8 +81,8 @@ class UserSetting(BaseRow):
 class UserPreference(BaseRow):
     __tablename__ = "user_preferences"
 
-    id: Mapped[Optional[int]] = mapped_column(
-        Integer, primary_key=True, autoincrement=True, nullable=True
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
     )
     user_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     username: Mapped[Optional[str]] = mapped_column(Text)
@@ -93,8 +93,8 @@ class UserPreference(BaseRow):
 class ApiKey(BaseRow):
     __tablename__ = "api_keys"
 
-    id: Mapped[Optional[int]] = mapped_column(
-        Integer, primary_key=True, autoincrement=True, nullable=True
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
     )
     user_id: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -115,8 +115,8 @@ class ApiKey(BaseRow):
 class AuditLog(BaseRow):
     __tablename__ = "audit_logs"
 
-    id: Mapped[Optional[int]] = mapped_column(
-        Integer, primary_key=True, autoincrement=True, nullable=True
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
     )
     user_id: Mapped[Optional[str]] = mapped_column(Text)
     username: Mapped[Optional[str]] = mapped_column(Text)

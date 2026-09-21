@@ -18,8 +18,8 @@ from ..base import BaseRow
 class PointTransaction(BaseRow):
     __tablename__ = "point_transactions"
 
-    id: Mapped[Optional[int]] = mapped_column(
-        Integer, primary_key=True, autoincrement=True, nullable=True
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
     )
     user_id: Mapped[str] = mapped_column(Text, nullable=False)
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -35,8 +35,8 @@ class PointTransaction(BaseRow):
 class TokenUsage(BaseRow):
     __tablename__ = "token_usage"
 
-    id: Mapped[Optional[int]] = mapped_column(
-        Integer, primary_key=True, autoincrement=True, nullable=True
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
     )
     user_id: Mapped[str] = mapped_column(Text, nullable=False)
     username: Mapped[Optional[str]] = mapped_column(Text)

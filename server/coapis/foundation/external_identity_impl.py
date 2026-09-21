@@ -255,6 +255,18 @@ class SqlaExternalIdentityStore:
         out: List[Dict[str, Any]] = []
         for r in rows:
             d = _orm_mapping(r)
+            extra = _sys_loads(d.get("extra_data"), "object")
+            if not isinstance(extra, dict):
+                extra = {}
+            # 兼容旧数据：迁移/老版本写入的行 extra_data 可能为空，
+            # 缺 status 会导致 find_binding_by_external 永远查不到。
+            merged = {
+                "status": 1,
+                "source": "manual",
+                "last_login_at": None,
+                "login_count": 0,
+            }
+            merged.update(extra)
             out.append(
                 {
                     "user_id": d.get("user_id"),
@@ -263,7 +275,7 @@ class SqlaExternalIdentityStore:
                     "external_name": d.get("display_name"),
                     "email": d.get("email"),
                     "created_at": _sys_text(d.get("created_at")),
-                    **_sys_loads(d.get("extra_data"), "object"),
+                    **merged,
                 }
             )
         return out
@@ -299,6 +311,12 @@ class SqlaExternalIdentityStore:
                     "extra_data": _sys_dumps(extra, "object"),
                 }
             )
+        # 防呆：同一 (external_system, external_user_id) 只保留最后一条
+        # （最新写入优先），否则全量替换会撞 UNIQUE 约束直接 500。
+        deduped: Dict[tuple, Dict[str, Any]] = {}
+        for row in clean:
+            deduped[(row["external_system"], row["external_user_id"])] = row
+        clean = list(deduped.values())
         with get_session() as session:
             session.execute(delete(ExternalBinding))
             for row in clean:

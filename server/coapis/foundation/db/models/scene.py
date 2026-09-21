@@ -28,8 +28,8 @@ from ..base import BaseRow
 class Tag(BaseRow):
     __tablename__ = "tags"
 
-    id: Mapped[Optional[str]] = mapped_column(
-        Text, primary_key=True, nullable=True
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     icon: Mapped[str] = mapped_column(
@@ -78,8 +78,8 @@ class Tag(BaseRow):
 class Scene(BaseRow):
     __tablename__ = "scenes"
 
-    scene_id: Mapped[Optional[str]] = mapped_column(
-        Text, primary_key=True, nullable=True
+    scene_id: Mapped[str] = mapped_column(
+        Text, primary_key=True, nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(
@@ -131,8 +131,8 @@ class Scene(BaseRow):
 class UserSceneSettings(BaseRow):
     __tablename__ = "user_scene_settings"
 
-    user_id: Mapped[Optional[str]] = mapped_column(
-        Text, primary_key=True, nullable=True
+    user_id: Mapped[str] = mapped_column(
+        Text, primary_key=True, nullable=False
     )
     enabled_scenes: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]", server_default=text("'[]'")

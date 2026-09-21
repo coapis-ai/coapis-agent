@@ -31,8 +31,8 @@ from ..base import BaseRow
 class ExternalBinding(BaseRow):
     __tablename__ = "external_bindings"
 
-    id: Mapped[Optional[int]] = mapped_column(
-        Integer, primary_key=True, autoincrement=True, nullable=True
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
     )
     user_id: Mapped[str] = mapped_column(Text, nullable=False)
     external_system: Mapped[str] = mapped_column(Text, nullable=False)
@@ -57,8 +57,8 @@ class ExternalBinding(BaseRow):
 class ExternalSystem(BaseRow):
     __tablename__ = "external_systems"
 
-    provider_id: Mapped[Optional[str]] = mapped_column(
-        Text, primary_key=True, nullable=True
+    provider_id: Mapped[str] = mapped_column(
+        Text, primary_key=True, nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     icon: Mapped[str] = mapped_column(
