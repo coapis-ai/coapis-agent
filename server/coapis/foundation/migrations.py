@@ -71,11 +71,16 @@ def _load_json_list(path: Path) -> List[Dict[str, Any]]:
     """Load a JSON file that may be a list or dict-wrapped list."""
     if not path.exists():
         return []
+    # T3（bug① 治本）区分两种情况：文件不存在 → 无遗留数据，返回 []；
+    # 存在但读不出合法 JSON → 真实故障，显式失败。旧行为静默 `return []` = bug①。
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error("legacy JSON unreadable at %s: %r — 拒绝静默跳过，向上抛出", path, e)
+        raise RuntimeError(
+            f"遗留数据文件存在但无法解析（{path}）：{type(e).__name__}: {e}"
+        ) from e
     if isinstance(data, dict):
         for key in ("users", "audit_logs", "user_preferences", "api_keys",
                     "point_transactions", "token_usage", "external_bindings",
@@ -301,7 +306,13 @@ def _create_schema(conn) -> None:
     # 建表完成后再补列（见 docstring：SA 事务内对不存在的表 ALTER 会污染连接）
     _ensure_users_columns(conn)
 
-    conn.commit()
+    # T3（bug① 根因之一）：这里**不再内部 commit**。旧代码无条件 `conn.commit()`，
+    # 当调用方用 SA Connection + engine.begin() 包着跑时（repository_factory），
+    # 会提前终止外层事务 → 后续 SQL 全部 InvalidRequestError("Can't operate on
+    # closed transaction")——而该错误又被 ensure_runtime_domain_migrated 的逐域
+    # try/except warn+continue 吞掉，表现为"B档迁移静默迁了个寂寞"。
+    # 现在事务所有权归调用方：raw sqlite3 路径由各自显式 commit（DDL 本就自动提交）；
+    # SA 路径由 engine.begin() / ensure_runtime_domain_migrated 末尾统一收尾。
 
 
 def _ensure_users_columns(conn) -> None:
@@ -697,8 +708,12 @@ def _migrate_token_usage_daily(conn, system_dir: Path) -> int:
         return 0
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return 0
+    except (json.JSONDecodeError, OSError) as e:
+        # T3（bug①）：文件存在但解析失败是真实故障，禁止静默按"无数据"跳过。
+        logger.error("legacy token_usage.json unreadable at %s: %r", path, e)
+        raise RuntimeError(
+            f"遗留数据文件存在但无法解析（{path}）：{type(e).__name__}: {e}"
+        ) from e
     if not isinstance(data, dict):
         return 0
     existing = conn.execute(text("SELECT COUNT(*) FROM token_usage_daily")).fetchone()
@@ -789,8 +804,12 @@ def _migrate_permissions(conn, system_dir: Path) -> int:
         return 0
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return 0
+    except (json.JSONDecodeError, OSError) as e:
+        # T3（bug①）：文件存在但解析失败是真实故障，禁止静默按"无数据"跳过。
+        logger.error("legacy permissions.json unreadable at %s: %r", path, e)
+        raise RuntimeError(
+            f"遗留数据文件存在但无法解析（{path}）：{type(e).__name__}: {e}"
+        ) from e
     if not isinstance(data, dict):
         return 0
     existing = conn.execute(text("SELECT COUNT(*) FROM permissions_config")).fetchone()
@@ -816,17 +835,17 @@ def ensure_runtime_domain_migrated(conn, system_dir: Path) -> None:
     # 时机都不保证覆盖到）。T2：_create_schema 由 ORM metadata 驱动
     # （与 Alembic 同一事实来源），重复应用安全。
     _create_schema(conn)
+    # T3（bug① 治本）：不再逐域 try/except warn+continue。旧行为把 NameError /
+    # JSON 解析失败降级成一条 warning，服务照常启动、数据静默丢失——正是 bug①
+    # 长期未被发现的原因。现在任何一域迁移异常都直接向上抛出（调用方事务回滚），
+    # 以显式错误终止启动；修复文件后重启即可幂等续跑。
     totals = {}
     for name, fn in (
         ("token_usage_daily", _migrate_token_usage_daily),
         ("token_usage_details", _migrate_token_usage_details_retry),
         ("permissions", _migrate_permissions),
     ):
-        try:
-            totals[name] = fn(conn, system_dir)
-        except Exception as e:
-            logger.warning(f"runtime domain migration failed: {name}: {e}")
-            totals[name] = 0
+        totals[name] = fn(conn, system_dir)
     if any(totals.values()):
         conn.commit()
         logger.info(f"Runtime domain migration complete: {totals}")
