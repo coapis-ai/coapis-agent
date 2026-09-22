@@ -1,369 +1,265 @@
 # -*- coding: utf-8 -*-
-"""Repository factory for dependency injection."""
+"""Repository factory for dependency injection.
+
+纯注入点（社区版为唯一内置实现）：
+
+- ``community``：内置 SQLite 实现（SQLAlchemy 全局 engine），
+  初始化时自动完成 JSON → DB 迁移（幂等）。
+- ``enterprise``：由上层 edition 插件在启动时通过
+  ``inject_*_repository()`` 注入 PostgreSQL 实现；工厂自身
+  **不 import 任何上层 edition 包**（禁止 coapis.enterprise.* 反向依赖）。
+"""
 
 import logging
 import threading
 from pathlib import Path
 from typing import Optional
 
-from .repository import KnowledgeBaseRepository
-from .knowledge_base_impl import SqlaKnowledgeBaseRepository
-
 logger = logging.getLogger(__name__)
 
 
 class RepositoryFactory:
-    """Factory for creating repository instances.
-    
-    This factory provides dependency injection for repositories,
-    allowing different implementations based on edition:
-        - Community: JsonKnowledgeBaseRepository, SqlaUserRepository (SQLAlchemy)
-        - Enterprise: PostgresKnowledgeBaseRepository, PostgresUserRepository (loaded dynamically)
-    
+    """Factory for creating repository instances (edition-aware injection).
+
     Usage:
         # Community edition (default)
         RepositoryFactory.initialize(
             edition="community",
-            data_dir=Path("./data")
+            data_dir=Path("./data"),
         )
-        
-        # Enterprise edition
-        RepositoryFactory.initialize(
-            edition="enterprise",
-            session=db_session,
-            user_repository=postgres_user_repo  # 注入企业版Repository
-        )
-        
+
+        # Enterprise edition: repositories are injected by the edition plugin
+        RepositoryFactory.initialize(edition="enterprise")
+        RepositoryFactory.inject_user_repository(postgres_user_repo)
+
         # Get repository instance
-        kb_repo = RepositoryFactory.get_kb_repository()
         user_repo = RepositoryFactory.get_user_repository()
     """
-    
-    _kb_repo: Optional[KnowledgeBaseRepository] = None
+
     _user_repo = None  # User repository (SQLite community / Postgres enterprise)
     _lock: threading.Lock = threading.Lock()
     _tag_repo = None   # Tag repository (community: SQLite / enterprise: injected)
     _scene_repo = None # Scene repository (community: SQLite / enterprise: injected)
-    _user_scene_repo = None  # User scene settings repo (community: SQLite / enterprise: injected)
+    _user_scene_repo = None  # User scene settings repo (community / enterprise: injected)
+    _ext_store = None  # External identity store (community: SQLAlchemy / enterprise: injected)
     _edition: Optional[str] = None
     _initialized: bool = False
 
-    @classmethod
-    def reset_user_repo(cls) -> None:
-        """Close and reset the user repository (for testing / re-init)."""
-        with cls._lock:
-            if cls._user_repo is not None:
-                try:
-                    cls._user_repo.close()
-                except Exception:
-                    pass
-                cls._user_repo = None
+    # ── lifecycle ──
 
     @classmethod
-    def initialize(
-        cls,
-        edition: str = "community",
-        **kwargs,
-    ):
+    def initialize(cls, edition: str = "community", **kwargs) -> None:
         """Initialize repository based on edition.
-        
+
         Args:
             edition: "community" or "enterprise"
             **kwargs: Edition-specific configuration
-                - Community: data_dir (Path)
-                - Enterprise: session, user_repository (injected)
-        
+                - Community: data_dir (Path, reserved)
+
         Raises:
-            ValueError: If invalid edition or missing required config
+            ValueError: If invalid edition
         """
         if cls._initialized:
             logger.warning("RepositoryFactory already initialized, re-initializing...")
-        
+
         cls._edition = edition
-        
+
         if edition == "community":
-            data_dir = kwargs.get("data_dir", Path.cwd() / "data")
-            # 知识库仓储延迟到 DB engine 初始化后注入（见下方）
-            cls._kb_repo = None
-            logger.info(f"Initialized Community edition repositories (data_dir={data_dir})")
-            
-            # 社区版：SQLite only（初始化失败直接报错，不回退）
-            # Phase 1: 用户域/外部身份仓储全面 SQLAlchemy 化（统一全局 engine）。
-            from .user_repository_impl import SqlaUserRepository
-            from ..constant import SYSTEM_DIR, WORKING_DIR
-            from .migrations import ensure_migrated
-            from .db_settings import resolve_db_path
-            from .db.migrate import run_migrations
-            # D-7/D-8/D-9：COAPIS_DATABASE_URL（可选；默认 <WORKING_DIR>/system/coapis.db，
-            # 相对路径相对 WORKING_DIR 解析，必须落在挂载卷内）
-            db_path = resolve_db_path()
-            # 首启迁移：users.json → coapis.db（幂等，已迁移则跳过）
-            ensure_migrated(system_dir=SYSTEM_DIR, db_path=db_path)
-            # F3: external identity bindings (SSO) → same coapis.db. The app
-            # layer's get_external_identity_store() now returns this instead
-            # of falling back to external_identity_mappings.json.
-            from .external_identity_impl import SqlaExternalIdentityStore
-            RepositoryFactory.inject_external_identity_store(SqlaExternalIdentityStore())
-            # M1 四域落库：先跑域迁移（4 张新表建表 + JSON 播种，幂等），
-            # 再注入 tag/scene/user_scene 三个 SQLite 仓储。
-            from .migrations import ensure_domain_migrated
-            ensure_domain_migrated(data_dir=WORKING_DIR, system_dir=SYSTEM_DIR, db_path=db_path)
-            # Alembic：补齐 ORM 声明的全部表 + 打 head 戳（幂等；旧库 schema
-            # 与模型一致，仅补缺表/索引并 stamp，零数据迁移）。
-            run_migrations()
-            # B 档：运行时域 JSON → DB（token_usage 日聚合/明细、知识库、权限）。
-            # 与文件内其余迁移一致：用裸 sqlite3 连接（? 占位符 + conn.commit()）。
-            from .migrations import ensure_runtime_domain_migrated
-            import sqlite3
-
-            _rt_conn = sqlite3.connect(str(db_path), timeout=30.0)
-            try:
-                ensure_runtime_domain_migrated(_rt_conn, SYSTEM_DIR)
-            finally:
-                _rt_conn.close()
-
-            # 知识库仓储：DB 引擎就绪后注入 Sqla 实现（替代 JSON）
-            cls._kb_repo = SqlaKnowledgeBaseRepository()
-            cls._user_repo = SqlaUserRepository()
-            from .tag_repository_sqlite import SqliteTagRepository
-            from .scene_repository_sqlite import SqliteSceneRepository
-            from .user_scene_repository_sqlite import SqliteUserSceneSettingsRepo
-            RepositoryFactory.inject_tag_repository(SqliteTagRepository(db_path))
-            RepositoryFactory.inject_scene_repository(SqliteSceneRepository(db_path))
-            cls._user_scene_repo = SqliteUserSceneSettingsRepo(db_path)
-            logger.info("Initialized Community User repository (SQLAlchemy at %s)", db_path)
-            logger.info("M1: tag/scene/user_scene repositories injected (SQLite)")
-        
+            cls._initialize_community()
         elif edition == "enterprise":
-            # 企业版：注入Repository（由企业版plugin提供）
-            
-            # 1. KnowledgeBase Repository（可选）
-            session = kwargs.get("session")
-            kb_repo = kwargs.get("kb_repository")
-            
-            if kb_repo:
-                cls._kb_repo = kb_repo
-                logger.info("Enterprise KB repository injected")
-            elif session:
-                try:
-                    from coapis.enterprise.repository_postgres import PostgresKnowledgeBaseRepository
-                    cls._kb_repo = PostgresKnowledgeBaseRepository(session)
-                    logger.info("Enterprise KB repository initialized (PostgreSQL)")
-                except ImportError:
-                    raise RuntimeError(
-                        "Enterprise KB repository not available: no kb_repository "
-                        "or session provided. The community JSON fallback has been "
-                        "removed (B 档 JSON 清理) — provide kb_repository or a DB session."
-                    ) from None
-            else:
-                raise RuntimeError(
-                    "Enterprise KB repository not provided: pass kb_repository or "
-                    "session to RepositoryFactory.initialize(). The community JSON "
-                    "fallback has been removed (B 档 JSON 清理)."
-                )
-            
-            # 2. User Repository（企业版注入）
-            user_repo = kwargs.get("user_repository")
-            session = kwargs.get("session")
-            
-            if user_repo:
-                cls._user_repo = user_repo
-                logger.info("✅ Enterprise User repository injected")
-            elif session:
-                # 尝试从数据库创建 PostgresUserRepository
-                try:
-                    from coapis.enterprise.repository_postgres import PostgresUserRepository
-                    cls._user_repo = PostgresUserRepository(session)
-                    logger.info("Enterprise User repository initialized (PostgreSQL)")
-                except ImportError:
-                    try:
-                        from coapis.database.repositories.user_repository import PostgresUserRepository
-                        cls._user_repo = PostgresUserRepository(session)
-                        logger.info("Enterprise User repository initialized (PostgreSQL)")
-                    except Exception as e:
-                        logger.warning(f"Failed to initialize PostgresUserRepository: {e}")
-            else:
-                # 企业版必须注入 user_repository 或 session，无回退
-                raise ValueError(
-                    "Enterprise edition requires user_repository or session to be provided. "
-                    "Pass either user_repository=postgres_user_repo or session=db_session."
-                )
-        
+            cls._initialize_enterprise(kwargs)
         else:
             raise ValueError(f"Invalid edition: {edition}. Must be 'community' or 'enterprise'")
-        
+
         cls._initialized = True
-    
+
     @classmethod
-    def get_kb_repository(cls) -> KnowledgeBaseRepository:
-        """Get knowledge base repository instance.
-        
-        Returns:
-            KnowledgeBaseRepository implementation
-            
-        Raises:
-            RuntimeError: If factory not initialized
+    def _initialize_community(cls) -> None:
+        """Community edition: built-in SQLite repositories (SQLAlchemy engine).
+
+        初始化失败直接报错，不回退（D-8：社区版 = SQLite only）。
         """
+        from ..constant import SYSTEM_DIR, WORKING_DIR
+        from .db_settings import resolve_db_path
+        from .migrations import (
+            ensure_domain_migrated,
+            ensure_migrated,
+            ensure_runtime_domain_migrated,
+        )
+        from .user_repository_impl import SqlaUserRepository
+
+        # D-7/D-8/D-9：COAPIS_DATABASE_URL（可选；默认 <WORKING_DIR>/system/coapis.db，
+        # 相对路径相对 WORKING_DIR 解析，必须落在挂载卷内）
+        db_path = resolve_db_path()
+
+        # T2 单一事实来源（结构）= Alembic / ORM metadata：先建齐全部表 +
+        # stamp head，再跑下面的数据迁移。旧库缺的 B-tier 表由同一份
+        # Base.metadata 补齐；存量表整体跳过（幂等）。
+        from .db.migrate import run_migrations
+
+        try:
+            run_migrations()
+        except Exception as e:
+            logger.error(f"Migration failed (non-fatal): {e}")
+
+        # 首启迁移：users.json → coapis.db（幂等，已迁移则跳过）——纯 INSERT，表结构已由上面保证。
+        ensure_migrated(system_dir=SYSTEM_DIR, db_path=db_path)
+        # F3: external identity bindings (SSO) → same coapis.db.
+        from .external_identity_impl import SqlaExternalIdentityStore
+        cls._ext_store = SqlaExternalIdentityStore()
+        # M1 四域落库：域迁移（tags/scenes/user_scene_settings 建表 + JSON 播种，幂等）。
+        ensure_domain_migrated(data_dir=WORKING_DIR, system_dir=SYSTEM_DIR, db_path=db_path)
+        # B 档：运行时域 JSON → DB（token_usage 日聚合/明细、权限配置）。
+        # B 档迁移函数基于 SQLAlchemy text() + :name 命名参数，必须走全局
+        # engine（裸 sqlite3 连接无法解析 text() 对象，会静默迁移 0 行）。
+        from .db.engine import get_engine
+        with get_engine().begin() as engine_conn:
+            ensure_runtime_domain_migrated(engine_conn, SYSTEM_DIR)
+
+        cls._user_repo = SqlaUserRepository()
+        from .tag_repository_sqlite import SqliteTagRepository
+        from .scene_repository_sqlite import SqliteSceneRepository
+        from .user_scene_repository_sqlite import SqliteUserSceneSettingsRepo
+        cls._tag_repo = SqliteTagRepository(db_path)
+        cls._scene_repo = SqliteSceneRepository(db_path)
+        cls._user_scene_repo = SqliteUserSceneSettingsRepo(db_path)
+        logger.info("Initialized Community repositories (SQLAlchemy at %s)", db_path)
+
+    @classmethod
+    def _initialize_enterprise(cls, kwargs: dict) -> None:
+        """Enterprise edition: repositories must be injected by the edition plugin.
+
+        The factory never imports coapis.enterprise.* — the plugin calls
+        ``inject_user_repository()`` / ``inject_tag_repository()`` / ...
+        after ``initialize()`` returns.
+        """
+        user_repo = kwargs.get("user_repository")
+        if user_repo is not None:
+            cls._user_repo = user_repo
+            logger.info("Enterprise User repository injected at initialize()")
+        else:
+            logger.warning(
+                "Enterprise edition initialized without user_repository; "
+                "the edition plugin must call inject_user_repository() at startup."
+            )
+
+    # ── getters ──
+
+    @classmethod
+    def _require_initialized(cls) -> None:
+        """Guard: getters require initialize() to have run first."""
         if not cls._initialized:
             raise RuntimeError(
                 "RepositoryFactory not initialized. "
-                "Call RepositoryFactory.initialize() first."
+                "Call RepositoryFactory.initialize(edition=...) first."
             )
-        
-        return cls._kb_repo
-    
+
     @classmethod
     def get_user_repository(cls):
-        """Get user repository instance.
-        
-        Returns:
-            UserRepository implementation (JSON or PostgreSQL)
-            
-        Raises:
-            RuntimeError: If factory not initialized
-        """
-        if not cls._initialized:
-            raise RuntimeError(
-                "RepositoryFactory not initialized. "
-                "Call RepositoryFactory.initialize() first."
-            )
-        
+        """Get user repository instance (SQLAlchemy community / Postgres enterprise)."""
+        cls._require_initialized()
         if cls._user_repo is None:
             raise RuntimeError(
                 "User repository not available. "
-                "Ensure RepositoryFactory.initialize() was called with user_repository."
+                "Ensure RepositoryFactory.initialize() was called with a user repository."
             )
-        
         return cls._user_repo
-    
-    @classmethod
-    def inject_tag_repository(cls, tag_repo):
-        """Inject tag repository instance."""
-        cls._tag_repo = tag_repo
-        logger.info("✅ Tag repository injected into RepositoryFactory")
 
     @classmethod
     def get_tag_repository(cls):
-        """Get tag repository instance.
-        
-        Returns:
-            TagRepository implementation (PostgreSQL in enterprise)
-            
-        Raises:
-            RuntimeError: If factory not initialized or tag repo not available
-        """
-        if not cls._initialized:
-            raise RuntimeError(
-                "RepositoryFactory not initialized. "
-                "Call RepositoryFactory.initialize() first."
-            )
-        
+        """Get tag repository instance."""
+        cls._require_initialized()
         if cls._tag_repo is None:
             raise RuntimeError(
                 "Tag repository not available. "
                 "Ensure RepositoryFactory was configured with tag_repository."
             )
-        
         return cls._tag_repo
 
     @classmethod
-    def inject_scene_repository(cls, scene_repo):
-        """Inject scene repository instance."""
-        cls._scene_repo = scene_repo
-        logger.info("✅ Scene repository injected into RepositoryFactory")
-
-    @classmethod
     def get_scene_repository(cls):
-        """Get scene repository instance.
-        
-        Returns:
-            SceneRepository implementation (PostgreSQL in enterprise)
-            
-        Raises:
-            RuntimeError: If factory not initialized or scene repo not available
-        """
-        if not cls._initialized:
-            raise RuntimeError(
-                "RepositoryFactory not initialized. "
-                "Call RepositoryFactory.initialize() first."
-            )
-        
+        """Get scene repository instance."""
+        cls._require_initialized()
         if cls._scene_repo is None:
             raise RuntimeError(
                 "Scene repository not available. "
                 "Ensure RepositoryFactory was configured with scene_repository."
             )
-        
         return cls._scene_repo
 
     @classmethod
-    def inject_user_scene_repository(cls, repo):
-        """Inject user scene settings repository instance."""
-        cls._user_scene_repo = repo
-        logger.info("✅ User scene repository injected into RepositoryFactory")
-
-    @classmethod
     def get_user_scene_repository(cls):
-        """Get user scene settings repository instance.
-
-        Returns:
-            UserSceneSettings repository (community: SQLite / enterprise: injected)
-
-        Raises:
-            RuntimeError: If factory not initialized or repo not available
-        """
-        if not cls._initialized:
-            raise RuntimeError(
-                "RepositoryFactory not initialized. "
-                "Call RepositoryFactory.initialize() first."
-            )
-
+        """Get user scene settings repository instance."""
+        cls._require_initialized()
         if cls._user_scene_repo is None:
             raise RuntimeError(
                 "User scene repository not available. "
                 "Ensure RepositoryFactory was configured with user_scene_repository."
             )
-
         return cls._user_scene_repo
-
-    # ── 外部系统身份绑定（enterprise） ──
-    _ext_store = None
-
-    @classmethod
-    def inject_external_identity_store(cls, store):
-        """Inject external identity store instance (enterprise)."""
-        cls._ext_store = store
-        logger.info("✅ External identity store injected into RepositoryFactory")
 
     @classmethod
     def get_external_identity_store(cls):
-        """Get external identity store instance.
-
-        Returns:
-            ExternalIdentityStore instance (None if not injected)
-        """
+        """Get external identity store instance (None if not initialized)."""
         return cls._ext_store
 
     @classmethod
     def get_edition(cls) -> Optional[str]:
-        """Get current edition.
-        
-        Returns:
-            "community" or "enterprise" or None if not initialized
-        """
+        """Get current edition ("community" / "enterprise" / None)."""
         return cls._edition
-    
-    @classmethod
-    def is_initialized(cls) -> bool:
-        """Check if factory is initialized.
-        
-        Returns:
-            True if initialized, False otherwise
-        """
-        return cls._initialized
 
     @classmethod
-    def reset(cls):
+    def is_initialized(cls) -> bool:
+        """Check if factory is initialized."""
+        return cls._initialized
+
+    # ── injection (enterprise plugin API) ──
+
+    @classmethod
+    def inject_user_repository(cls, repo) -> None:
+        """Inject user repository instance (enterprise plugin)."""
+        cls._user_repo = repo
+        logger.info("User repository injected into RepositoryFactory")
+
+    @classmethod
+    def inject_tag_repository(cls, tag_repo) -> None:
+        """Inject tag repository instance (enterprise plugin)."""
+        cls._tag_repo = tag_repo
+        logger.info("Tag repository injected into RepositoryFactory")
+
+    @classmethod
+    def inject_scene_repository(cls, scene_repo) -> None:
+        """Inject scene repository instance (enterprise plugin)."""
+        cls._scene_repo = scene_repo
+        logger.info("Scene repository injected into RepositoryFactory")
+
+    @classmethod
+    def inject_user_scene_repository(cls, repo) -> None:
+        """Inject user scene settings repository instance (enterprise plugin)."""
+        cls._user_scene_repo = repo
+        logger.info("User scene repository injected into RepositoryFactory")
+
+    @classmethod
+    def inject_external_identity_store(cls, store) -> None:
+        """Inject external identity store instance (enterprise plugin)."""
+        cls._ext_store = store
+        logger.info("External identity store injected into RepositoryFactory")
+
+    # ── testing helpers ──
+
+    @classmethod
+    def reset_user_repo(cls) -> None:
+        """Close and reset the user repository (for testing / re-init)."""
+        with cls._lock:
+            if cls._user_repo is not None and hasattr(cls._user_repo, "close"):
+                try:
+                    cls._user_repo.close()
+                except Exception:
+                    pass
+            cls._user_repo = None
+
+    @classmethod
+    def reset(cls) -> None:
         """Reset factory state (used by tests)."""
         for attr in ("_user_repo", "_scene_repo", "_tag_repo",
                      "_user_scene_repo", "_ext_store"):
@@ -374,6 +270,5 @@ class RepositoryFactory:
                 except Exception:  # noqa: BLE001
                     pass
             setattr(cls, attr, None)
-        cls._kb_repo = None
         cls._edition = None
         cls._initialized = False

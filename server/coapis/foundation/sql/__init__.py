@@ -4,7 +4,9 @@
 - ``community_seed.sql``   — 必须的基础数据（幂等；当前为空占位）
 
 初始化时由 ``foundation/migrations.py::_create_schema`` 统一执行；
-ORM 镜像 ``foundation/db/models`` 与 alembic 0001 以同一份脚本为准（13 张表，逐列对齐）。
+ORM 镜像 ``foundation/db/models`` 与 alembic 迁移链覆盖全部社区版表
+（含 B-tier runtime：token_usage_daily / permissions_config，T2 起以
+Alembic 为结构单一事实来源）。
 """
 
 from __future__ import annotations

@@ -10,7 +10,7 @@ PRAGMA journal_mode = WAL;
 
 -- ---------------- 用户主表 ----------------
 CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     salt TEXT NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 
 -- ---------------- 用户偏好（整包 JSON） ----------------
 CREATE TABLE IF NOT EXISTS user_preferences (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     username TEXT,
     settings TEXT,
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 
 -- ---------------- API 密钥 ----------------
 CREATE TABLE IF NOT EXISTS api_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     name TEXT NOT NULL,
     key_prefix TEXT NOT NULL,
@@ -67,7 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 
 -- ---------------- 审计日志 ----------------
 CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     user_id TEXT,
     username TEXT,
     action TEXT NOT NULL,
@@ -84,7 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
 
 -- ---------------- 积分流水 ----------------
 CREATE TABLE IF NOT EXISTS point_transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     amount INTEGER NOT NULL,
     balance_after INTEGER NOT NULL,
@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_points_user ON point_transactions(user_id);
 
 -- ---------------- Token 用量 ----------------
 CREATE TABLE IF NOT EXISTS token_usage (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     username TEXT,
     agent_id TEXT,
@@ -123,29 +123,13 @@ CREATE TABLE IF NOT EXISTS token_usage_daily (
     PRIMARY KEY (date, provider_id, model_name)
 );
 
-CREATE TABLE IF NOT EXISTS knowledge_bases (
-    id           TEXT PRIMARY KEY,
-    name         TEXT NOT NULL DEFAULT '',
-    description  TEXT NOT NULL DEFAULT '',
-    scope        TEXT NOT NULL DEFAULT 'user',
-    status       TEXT NOT NULL DEFAULT 'active',
-    created_at   TEXT NOT NULL DEFAULT '',
-    updated_at   TEXT NOT NULL DEFAULT '',
-    metadata     TEXT NOT NULL DEFAULT '{}',
-    department_id TEXT,
-    visibility   TEXT,
-    tenant_id    TEXT,
-    created_by   TEXT,
-    updated_by   TEXT
-);
-
 CREATE TABLE IF NOT EXISTS permissions_config (
-    key   TEXT PRIMARY KEY,
+    key   TEXT NOT NULL PRIMARY KEY,
     value TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS migration_state (
-    key TEXT PRIMARY KEY,
+    key TEXT NOT NULL PRIMARY KEY,
     value TEXT,
     updated_at REAL
 );
@@ -155,7 +139,7 @@ CREATE TABLE IF NOT EXISTS migration_state (
 -- user_id is the local *username* (community convention, see
 -- external_auth.py which reads binding["user_id"] as a username).
 CREATE TABLE IF NOT EXISTS external_bindings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     external_system TEXT NOT NULL,
     external_user_id TEXT NOT NULL,
@@ -169,7 +153,7 @@ CREATE INDEX IF NOT EXISTS idx_bindings_user ON external_bindings(user_id);
 
 -- ---------------- 外部系统登录配置（M1 域A，D1：密钥不落库） ----------------
 CREATE TABLE IF NOT EXISTS external_systems (
-    provider_id          TEXT PRIMARY KEY,
+    provider_id          TEXT NOT NULL PRIMARY KEY,
     name                 TEXT NOT NULL,
     icon                 TEXT NOT NULL DEFAULT '',
     description          TEXT NOT NULL DEFAULT '',
@@ -191,7 +175,7 @@ CREATE TABLE IF NOT EXISTS external_systems (
 
 -- ---------------- 标签（M1 域C，字段与社区版 TagConfig 对齐） ----------------
 CREATE TABLE IF NOT EXISTS tags (
-    id             TEXT PRIMARY KEY,
+    id             TEXT NOT NULL PRIMARY KEY,
     name           TEXT NOT NULL,
     icon           TEXT NOT NULL DEFAULT '',
     type           TEXT NOT NULL DEFAULT 'custom',
@@ -211,7 +195,7 @@ CREATE INDEX IF NOT EXISTS idx_tags_type ON tags(type);
 
 -- ---------------- 场景（M1 域D，字段与社区版 SceneConfig 一一对应） ----------------
 CREATE TABLE IF NOT EXISTS scenes (
-    scene_id          TEXT PRIMARY KEY,
+    scene_id          TEXT NOT NULL PRIMARY KEY,
     name              TEXT NOT NULL,
     description       TEXT NOT NULL DEFAULT '',
     short_description TEXT NOT NULL DEFAULT '',
@@ -234,7 +218,7 @@ CREATE INDEX IF NOT EXISTS idx_scenes_primary_tag ON scenes(primary_tag_id);
 
 -- ---------------- 用户场景定制（M1 域D / D3：user_scenes.json → 库） ----------------
 CREATE TABLE IF NOT EXISTS user_scene_settings (
-    user_id        TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL PRIMARY KEY,
     enabled_scenes TEXT NOT NULL DEFAULT '[]',
     custom_scenes  TEXT NOT NULL DEFAULT '[]',
     preferences    TEXT NOT NULL DEFAULT '{}',

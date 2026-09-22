@@ -30,6 +30,9 @@ import uuid as uuid_mod
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from sqlalchemy import text
+
 from .external_identity_impl import _COLUMN_KEYS
 
 logger = logging.getLogger(__name__)
@@ -215,25 +218,89 @@ def _do_migrate(system_dir: Path, db_path: Path) -> None:
     _backup_json_files(system_dir)
 
 
-def _create_schema(conn) -> None:
-    """创建表结构与基础数据（幂等）。
+def _crows(conn, sql):
+    """双类型兼容查询执行（raw sqlite3.Connection / SQLAlchemy Connection）。
 
-    SQL 脚本位于 ``foundation/sql/``（决策 D-8：结构 + 基础数据全部脚本化，
-    代码里不再内联 DDL）：
-    - ``community_schema.sql`` 数据库结构（唯一事实来源）
-    - ``community_seed.sql``   必须的基础数据（为空则跳过）
-
-    注意：CREATE TABLE IF NOT EXISTS 不会改动已存在的表，所以先调用
-    ``_ensure_users_columns`` 给旧库补齐新增列（password_set_by_user /
-    onboarding_completed），再应用 schema，保证全新库与升级库最终同构。
+    ``conn`` 来自 ensure_migrated/ensure_domain 路径时是 raw sqlite3；B-tier runtime
+    路径传的是 SA Connection。SQLAlchemy ≥2.0 strict 模式拒绝裸字符串 SQL，仅当报
+    "not executable" 类错误才回退 TextClause —— 真实 DB 错误一律原样抛出。
     """
-    from .sql import load_community_schema, load_community_seed
+    try:
+        return conn.execute(sql).fetchall()  # type: ignore[arg-type]
+    except Exception as ex:  # noqa: BLE001 — raw sqlite3 对合法 SQL 字符串不会报此类错
+        if getattr(type(ex), "__name__", "") != "ObjectNotExecutableError":
+            raise
+        from sqlalchemy import text as _t
 
+        return conn.execute(_t(sql)).fetchall()  # type: ignore[union-attr]
+
+
+def _cexec(conn, sql) -> None:
+    """双类型兼容单语句执行（无结果集），语义同 :func:`_crows`。"""
+    try:
+        conn.execute(sql)  # type: ignore[arg-type]
+    except Exception as ex:  # noqa: BLE001 — 同上：仅 "not executable" 回退 text()
+        if getattr(type(ex), "__name__", "") != "ObjectNotExecutableError":
+            raise
+        from sqlalchemy import text as _t
+
+        conn.execute(_t(sql))  # type: ignore[union-attr]
+
+
+def _create_schema(conn) -> None:
+    """确保 ``conn`` 所在数据库具备完整表结构（幂等）。
+
+    T2 单一事实来源 = ORM metadata（:mod:`coapis.foundation.db.models`），
+    Alembic 迁移链也从同一份 metadata 生成。旧 raw-DDL 文件
+    （community_schema.sql / community_seed.sql）已无任何运行时引用，
+    待清理批次统一删除：
+
+    - 全新库 → 按外键顺序逐表创建（每表 checkfirst，重复应用安全）；
+    - 存量库 → 已有表整体跳过（等价 CREATE IF NOT EXISTS），建完后再由
+      ``_ensure_users_columns`` 补齐旧 users 表的两个新增列。
+
+    **先建表、后补列**：SA Connection 事务内对不存在的表执行 ALTER 会污染整个
+    连接的事务；全新库的 users 本就带新列（ORM metadata），只有 legacy raw-DDL
+    老表才需要 ALTER，此时表必然已存在。
+
+    seed 文件删除前已核实不含任何数据行（纯注释占位），无需移植：
+    admin 引导在运行时发生 —— app/routers/auth.py::register，首个注册用户
+    自动获得 admin 角色。
+    """
+    import coapis.foundation.db.models  # noqa: F401 -- register all models on Base.metadata
+
+    from sqlalchemy import create_engine, inspect as sa_inspect, text as _text
+
+    from .db.base import Base
+
+    def _row(sql):  # type-agnostic execute：raw sqlite3 / SA Connection（2.x strict）都支持
+        try:
+            return conn.execute(sql).fetchone()  # type: ignore[arg-type]
+        except Exception:
+            return conn.execute(_text(sql)).fetchone()
+
+    row = _row("PRAGMA database_list")
+    db_file = str(row[2]) if len(row) > 2 and row[2] else ""
+    if not Path(db_file).exists():
+        raise RuntimeError(
+            f"_create_schema: expected a file-backed SQLite DB, got {db_file!r}"
+        )
+
+    engine = create_engine(
+        f"sqlite:///{Path(db_file)}", connect_args={"check_same_thread": False}
+    )
+    try:
+        with engine.begin() as sa_conn:
+            existing = set(sa_inspect(sa_conn).get_table_names())
+            for table in Base.metadata.sorted_tables:  # FK-safe order
+                if table.name not in existing:
+                    table.create(bind=sa_conn)
+    finally:
+        engine.dispose()
+
+    # 建表完成后再补列（见 docstring：SA 事务内对不存在的表 ALTER 会污染连接）
     _ensure_users_columns(conn)
-    conn.executescript(load_community_schema())
-    seed = load_community_seed().strip()
-    if seed:
-        conn.executescript(seed)
+
     conn.commit()
 
 
@@ -242,25 +309,33 @@ def _ensure_users_columns(conn) -> None:
 
     CREATE TABLE IF NOT EXISTS 从不动已存在的表，旧库缺 password_set_by_user /
     onboarding_completed 两列会导致 create_user/update_user 静默丢字段。这里
-    读 PRAGMA 判断缺哪列就补哪列。
+    读 PRAGMA 判断缺哪列就补哪列；``conn`` 双类型兼容（raw sqlite3 / SA）。
     """
-    import sqlite3
     try:
-        cur = conn.execute("PRAGMA table_info(users)")
-        existing = {row[1] for row in cur.fetchall()}
-    except sqlite3.Error:
-        return  # users 表还没建，CREATE TABLE 会按新 schema 建
+        rows = _crows(conn, "PRAGMA table_info(users)")  # users 表不存在时返回空 → 稍后 CREATE 按新 schema 建
+    except Exception as ex:  # noqa: BLE001 — 检查阶段异常一律跳过，交由全新建表兜底（保持旧语义）
+        logger.debug("[migrations] _ensure_users_columns skipped: %s", ex)
+        return
+
+    if not rows:  # users 表尚不存在 → 无列可补，交由建表路径按新 schema 创建
+        return
+
+    existing = {row[1] for row in rows}
+    added_any = False
     for name, ddl in (
         ("password_set_by_user", "INTEGER DEFAULT 0"),
         ("onboarding_completed", "INTEGER DEFAULT 1"),
     ):
         if name not in existing:
             try:
-                conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
+                _cexec(conn, f"ALTER TABLE users ADD COLUMN {name} {ddl}")
                 logger.info("[migrations] added missing column users.%s", name)
-            except sqlite3.Error as e:
+                added_any = True
+            except Exception as e:  # noqa: BLE001 — 保持旧语义：失败告警不中断（如并发重复加列）
                 logger.warning("[migrations] failed to add users.%s: %s", name, e)
-    conn.commit()
+
+    if added_any and hasattr(conn, "commit"):
+        conn.commit()  # raw sqlite3 / SA Connection；Engine 无 commit，事务归其上下文管理
 
 
 def set_migration_flag(conn, key: str, value: str) -> None:
@@ -688,83 +763,22 @@ def _migrate_token_usage_details_retry(conn, system_dir: Path) -> int:
                 """INSERT INTO token_usage
                    (user_id, username, agent_id, model, input_tokens,
                     output_tokens, total_tokens, cost_cents, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ),
-            (
-                r.get("user_id", ""),
-                r.get("username", ""),
-                r.get("agent_id"),
-                r.get("model", ""),
-                r.get("input_tokens", 0),
-                r.get("output_tokens", 0),
-                r.get("total_tokens", 0),
-                r.get("cost_cents", 0.0),
-                created_at,
-            ),
-        )
-        count += 1
-    logger.info("Migrated %d token usage detail rows (retry)", count)
-    return count
-
-
-def _migrate_knowledge_bases(conn, system_dir: Path) -> int:
-    """knowledge_bases.json（{"knowledge_bases": [...]}）→ knowledge_bases 表。"""
-    path = system_dir / "knowledge_bases.json"
-    if not path.exists():
-        return 0
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return 0
-    kbs = data.get("knowledge_bases", []) if isinstance(data, dict) else []
-    if not kbs:
-        return 0
-    existing = conn.execute(text("SELECT COUNT(*) FROM knowledge_bases")).fetchone()
-    if existing and int(existing[0]) > 0:
-        return 0
-    count = 0
-    for kb in kbs:
-        if not isinstance(kb, dict) or not kb.get("id"):
-            continue
-        try:
-            metadata = json.dumps(kb.get("metadata", {}) or {}, ensure_ascii=False)
-        except (TypeError, ValueError):
-            metadata = "{}"
-
-        def _iso(v):
-            if isinstance(v, str):
-                return v
-            try:
-                return v.isoformat()
-            except AttributeError:
-                return datetime.now().isoformat()
-
-        conn.execute(
-            text(
-                "INSERT OR IGNORE INTO knowledge_bases "
-                "(id, name, description, scope, status, created_at, updated_at, "
-                " metadata, department_id, visibility, tenant_id, created_by, updated_by) "
-                "VALUES (:id, :name, :desc, :scope, :status, :ca, :ua, :meta, "
-                " :dept, :vis, :tid, :cb, :ub)"
+                   VALUES (:uid, :uname, :aid, :model, :it, :ot, :tt, :cost, :ts)""",
             ),
             {
-                "id": str(kb["id"]),
-                "name": str(kb.get("name", "") or ""),
-                "desc": str(kb.get("description", "") or ""),
-                "scope": str(kb.get("scope", "user") or "user"),
-                "status": str(kb.get("status", "active") or "active"),
-                "ca": _iso(kb.get("created_at") or datetime.now()),
-                "ua": _iso(kb.get("updated_at") or kb.get("created_at") or datetime.now()),
-                "meta": metadata,
-                "dept": kb.get("department_id"),
-                "vis": kb.get("visibility"),
-                "tid": kb.get("tenant_id"),
-                "cb": kb.get("created_by"),
-                "ub": kb.get("updated_by"),
+                "uid": r.get("user_id", ""),
+                "uname": r.get("username", ""),
+                "aid": r.get("agent_id"),
+                "model": r.get("model", ""),
+                "it": r.get("input_tokens", 0),
+                "ot": r.get("output_tokens", 0),
+                "tt": r.get("total_tokens", 0),
+                "cost": r.get("cost_cents", 0.0),
+                "ts": created_at,
             },
         )
         count += 1
-    logger.info("Migrated %d knowledge bases", count)
+    logger.info("Migrated %d token usage detail rows (retry)", count)
     return count
 
 
@@ -797,16 +811,15 @@ def ensure_runtime_domain_migrated(conn, system_dir: Path) -> None:
     新域用自己的表空判断做自守，不受旧 flag 影响。
     """
     system_dir = Path(system_dir)
-    # 确保 B 档表存在（幂等）：存量实例的 DB 早于 B 档建表，knowledge_bases /
+    # 确保 B 档表存在（幂等）：存量实例的 DB 早于 B 档建表，
     # permissions_config / token_usage_daily 可能缺失（ORM 导入顺序 / 首次建表
-    # 时机都不保证覆盖到）。community_schema.sql 全 CREATE TABLE IF NOT EXISTS，
-    # 重复应用安全，是建表的事实源。
+    # 时机都不保证覆盖到）。T2：_create_schema 由 ORM metadata 驱动
+    # （与 Alembic 同一事实来源），重复应用安全。
     _create_schema(conn)
     totals = {}
     for name, fn in (
         ("token_usage_daily", _migrate_token_usage_daily),
         ("token_usage_details", _migrate_token_usage_details_retry),
-        ("knowledge_bases", _migrate_knowledge_bases),
         ("permissions", _migrate_permissions),
     ):
         try:
@@ -916,7 +929,7 @@ def ensure_domain_migrated(data_dir: Path, system_dir: Path, db_path: Path) -> b
 
     与 ``ensure_migrated`` 独立：存量实例的 users.json 已被删除，
     ``ensure_migrated`` 不会再运行，因此本函数有独立的幂等标志
-    （migration_flags.domain_migration）。
+    （migration_state.domain_migration）。
 
     幂等性：
       - 标志已置 → 直接跳过；

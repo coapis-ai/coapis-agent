@@ -32,7 +32,29 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ..constant import WORKING_DIR, SYSTEM_DIR
+# 注意：必须动态读取 constant.WORKING_DIR / constant.SYSTEM_DIR（而非 from-import），
+# 否则模块首次导入时静态绑定，之后测试/运行时对 coapis.constant 的 monkeypatch
+# （如 tmpdir fixture）不会生效 → resolve_db_path() 用旧值校验、误报越界。
+from .. import constant as _constant  # noqa: F401 (re-exported for tests that patch via db_settings namespace if needed)
+
+# D-9 兼容层：WORKING_DIR/SYSTEM_DIR 支持两种 monkeypatch 风格——
+#   a) patch coapis.constant.WORKING_DIR（单一事实源，默认路径）；
+#   b) setattr(db_settings, "WORKING_DIR", ...)（旧测试写法）。
+# resolve_db_path() 调用时动态查本模块全局名：被显式设置过 → 用之；否则回退 constant。
+_UNSET = object()
+WORKING_DIR: Path | str = _UNSET  # type: ignore[assignment]
+SYSTEM_DIR: Path | str = _UNSET   # type: ignore[assignment]
+
+
+def _working_dir():
+    v = globals().get("WORKING_DIR")
+    return Path(v if (v is not None and v is not _UNSET) else _constant.WORKING_DIR)
+
+
+def _system_dir():
+    v = globals().get("SYSTEM_DIR")
+    return Path(v if (v is not None and v is not _UNSET) else _constant.SYSTEM_DIR)
+
 
 DEFAULT_DB_FILENAME = "coapis.db"
 
@@ -48,15 +70,15 @@ def resolve_db_path() -> Path:
     """
     raw = os.environ.get("COAPIS_DATABASE_URL", "").strip()
     if not raw:
-        return SYSTEM_DIR / DEFAULT_DB_FILENAME
+        return _system_dir() / DEFAULT_DB_FILENAME
 
     candidate = _parse(raw)
     # D-9：相对路径必须相对 WORKING_DIR 解析（而非 CWD），保证落点确定、
     # 一定在挂载卷内。绝对路径保持原样。
     if not candidate.is_absolute():
-        candidate = WORKING_DIR / candidate
+        candidate = _working_dir() / candidate
     resolved = candidate.resolve()
-    work = WORKING_DIR.resolve()
+    work = _working_dir().resolve()
     if resolved != work and work not in resolved.parents:
         raise DatabaseConfigError(
             f"COAPIS_DATABASE_URL points to {resolved}, which is outside the "

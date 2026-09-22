@@ -128,3 +128,6 @@ server/_vendor_c2a/
 /data/
 scripts_dev_*.py
 server/scripts_dev_smoke.py
+
+# --- Local archive for removed dead code (kept locally, never committed) ---
+.trash/

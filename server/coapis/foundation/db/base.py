@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Declarative base for the unified SQLAlchemy data layer.
 
-All 13 community tables are mapped here. Models mirror the existing
-``community_schema.sql`` **column-for-column** so that:
+All 15 community tables (incl. B-tier runtime) are mapped here. Models
+mirror ``community_schema.sql`` **column-for-column** so that:
 
 * existing dev/prod databases need **zero data migration** (types,
   defaults and names match exactly);
