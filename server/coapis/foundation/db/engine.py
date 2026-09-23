@@ -12,6 +12,10 @@ URL resolution (preserves the D-7 / D-8 / D-9 rules from ``db_settings``):
   relative paths resolved under the data dir), falling back to
   ``<DATA>/system/coapis.db``.
 
+Connection pooling for both dialects can be tuned with
+``COAPIS_DB_POOL_SIZE`` / ``COAPIS_DB_MAX_OVERFLOW`` (defaults: pool size
+5, max overflow 10); non-positive or invalid values fall back to the defaults.
+
 SQLite connection pragmas (WAL + busy_timeout + FK) are applied on every
 new DBAPI connection, so any pooled connection is safe for concurrent
 readers/writers. A ``QueuePool`` (SQLAlchemy default for file SQLite) is
@@ -22,6 +26,7 @@ DBAPI connection is not safe for concurrent use.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from collections.abc import Generator
@@ -44,6 +49,8 @@ _PG_SCHEMES = (
     "postgresql+psycopg",
     "postgresql+asyncpg",
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_database_url() -> str:
@@ -72,11 +79,31 @@ def build_database_url() -> str:
     return f"sqlite:///{resolve_db_path()}"
 
 
+def _env_pool_int(name: str, default: int) -> int:
+    """Read a positive-int pool setting from env (fallback to *default*)."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("invalid %s=%r; falling back to %d", name, raw, default)
+        return default
+    if value < 1:
+        logger.warning("%s must be >= 1 (got %d); using %d", name, value, default)
+        return default
+    return value
+
+
 def _create_engine(url: str) -> Engine:
     kwargs: dict = {"pool_pre_ping": True}
+    pool_size = _env_pool_int("COAPIS_DB_POOL_SIZE", 5)
+    max_overflow = _env_pool_int("COAPIS_DB_MAX_OVERFLOW", 10)
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
-        engine = create_engine(url, **kwargs)
+        engine = create_engine(
+            url, pool_size=pool_size, max_overflow=max_overflow, **kwargs
+        )
 
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, _record) -> None:  # noqa: ANN001
@@ -91,7 +118,9 @@ def _create_engine(url: str) -> Engine:
         return engine
 
     # PostgreSQL (enterprise).
-    return create_engine(url, pool_size=5, max_overflow=10, **kwargs)
+    return create_engine(
+        url, pool_size=pool_size, max_overflow=max_overflow, **kwargs
+    )
 
 
 def get_engine() -> Engine:

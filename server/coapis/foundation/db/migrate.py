@@ -35,13 +35,15 @@ def run_migrations() -> None:
 
 
 def current_revision() -> str | None:
-    """Return the current alembic revision (``None`` if un-stamped)."""
-    cfg = _alembic_config()
-    from alembic.runtime.migration import MigrationContext
-    from coapis.foundation.db.engine import build_database_url
-    from sqlalchemy import create_engine
+    """Return the current alembic revision (``None`` if un-stamped).
 
-    engine = create_engine(build_database_url())
-    with engine.connect() as conn:
+    Reuses the global engine/connection pool instead of opening a throwaway
+    connection.
+    """
+    from alembic.runtime.migration import MigrationContext
+
+    from .engine import get_engine
+
+    with get_engine().connect() as conn:
         ctx = MigrationContext.configure(conn)
         return ctx.get_current_revision()
