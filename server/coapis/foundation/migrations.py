@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
+from ..constant import WORKING_DIR
 from .external_identity_impl import _COLUMN_KEYS
 
 logger = logging.getLogger(__name__)
@@ -706,9 +707,23 @@ def _migrate_token_usage(conn, system_dir: Path) -> int:
 # ---------------------------------------------------------------------------
 
 def _migrate_token_usage_daily(conn, system_dir: Path) -> int:
-    """token_usage.json（日聚合 {date: {provider:model: {...}}}）→ token_usage_daily 表。"""
-    path = system_dir / "token_usage.json"
-    if not path.exists():
+    """token_usage.json（日聚合 {date: {provider:model: {...}}}）→ token_usage_daily 表。
+
+    路径修正：运行时写入位置是 WORKING_DIR/token_usage.json（token_usage/manager.py），
+    不是 system/token_usage.json（后者是 init 时的空文件）。两处都查，优先有数据的。
+    """
+    candidates = [WORKING_DIR / "token_usage.json", system_dir / "token_usage.json"]
+    path = None
+    for p in candidates:
+        if p.exists():
+            try:
+                _d = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(_d, dict) and _d:
+                    path = p
+                    break
+            except (json.JSONDecodeError, OSError):
+                continue
+    if path is None:
         return 0
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
