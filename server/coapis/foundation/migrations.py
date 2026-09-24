@@ -85,7 +85,7 @@ def _load_json_list(path: Path) -> List[Dict[str, Any]]:
     if isinstance(data, dict):
         for key in ("users", "audit_logs", "user_preferences", "api_keys",
                     "point_transactions", "token_usage", "external_bindings",
-                    "user_settings", "bindings"):
+                    "user_settings", "bindings", "records"):
             if key in data:
                 value = data[key]
                 if isinstance(value, list):
