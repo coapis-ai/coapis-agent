@@ -379,9 +379,11 @@ def _migrate_users(conn, system_dir: Path) -> int:
         new_id = _deterministic_uuid(old_id)
         user_data = {
             "id": new_id,
-            "username": user.get("username", ""),
-            "password_hash": user.get("password_hash", ""),
-            "salt": user.get("salt", ""),
+            # NOT NULL 列防穿透：旧 users.json / legacy DB 里可能显式存 null（如早期 SSO 账号 salt=null），
+            # .get(key,"") 的默认值只在 key 缺失时生效，null 会原样穿进 INSERT → IntegrityError。
+            "username": user.get("username") or "",
+            "password_hash": user.get("password_hash") if isinstance(user.get("password_hash"), str) else "",
+            "salt": user.get("salt") if isinstance(user.get("salt"), str) else "",
             "display_name": user.get("display_name"),
             "email": user.get("email"),
             "avatar_url": user.get("avatar_url"),
@@ -523,9 +525,11 @@ def _migrate_legacy_users_db(conn, system_dir: Path) -> int:
         new_id = _deterministic_uuid(old_id)
         user_data = {
             "id": new_id,
-            "username": user.get("username", ""),
-            "password_hash": user.get("password_hash", ""),
-            "salt": user.get("salt", ""),
+            # NOT NULL 列防穿透：旧 users.json / legacy DB 里可能显式存 null（如早期 SSO 账号 salt=null），
+            # .get(key,"") 的默认值只在 key 缺失时生效，null 会原样穿进 INSERT → IntegrityError。
+            "username": user.get("username") or "",
+            "password_hash": user.get("password_hash") if isinstance(user.get("password_hash"), str) else "",
+            "salt": user.get("salt") if isinstance(user.get("salt"), str) else "",
             "display_name": user.get("display_name"),
             "email": user.get("email"),
             "avatar_url": user.get("avatar_url"),
@@ -880,8 +884,9 @@ def _migrate_external_bindings(conn, system_dir: Path) -> int:
                 user_id,
                 provider,
                 ext_id,
-                b.get("external_name") or b.get("display_name"),
-                b.get("email"),
+                # NOT NULL 防穿透：生产绑定数据 email 全为 null，显式 null 进 INSERT 会炸
+                b.get("external_name") or b.get("display_name") or "",
+                b.get("email") or "",
                 json.dumps(original, ensure_ascii=False),
                 b.get("created_at") or _now_iso(),
             ),

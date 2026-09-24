@@ -203,6 +203,8 @@ class SqlaExternalIdentityStore:
                 out[key] = str(system.get("provider_id") or "")
             elif key in _SYSTEMS_DIRECT and key in system:
                 out[key] = system[key]
+            elif key == "name":
+                out[key] = ""  # NOT NULL 且无 server_default，缺省补空串
             else:
                 out[key] = None
         out["sso"] = _sys_dumps(system.get("sso"), "object")
