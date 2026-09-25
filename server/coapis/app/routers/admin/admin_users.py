@@ -280,7 +280,7 @@ async def list_all_users(
     user_repo = _get_user_repo()
     if user_repo:
         try:
-            users, total = await user_repo.list_users_page(page=page, page_size=page_size, search=search)
+            users, total = user_repo.list_users_page(page=page, page_size=page_size, search=search)
             safe_users = []
             for u in users:
                 safe_user = _adapt_pg_user(u)
@@ -342,9 +342,19 @@ async def create_user_admin(
             "role": payload.role,
         }
         
-        # 创建用户
-        user = await user_repo.create_user(user_data)
-        logger.info(f"Admin created user {user.get('username')} via Repository")
+        # 创建用户（ABC 契约：返回用户 id 字符串；兼容个别实现返回 dict 的情况）
+        created = user_repo.create_user(user_data)
+        if isinstance(created, dict):
+            user = created
+        elif isinstance(created, str) and created:
+            user = {
+                "id": created,
+                "username": payload.username,
+                "display_name": payload.display_name,
+            }
+        else:
+            raise ValueError("Repository create_user 返回异常")
+        logger.info(f"Admin created user {user['username']} via Repository")
         
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

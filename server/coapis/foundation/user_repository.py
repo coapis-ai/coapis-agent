@@ -8,6 +8,15 @@ allowing different implementations:
 
 P1: 23 abstract methods covering the full UserSystemDB public surface.
 D-6: users.id is TEXT (UUID hex string), with deterministic int→uuid mapping for migration.
+
+Contract notes (binding for ALL implementations, community & enterprise):
+- Every method is SYNCHRONOUS (``def``, never ``async def``); callers must
+  NOT ``await`` them.
+- ``create_user`` returns a plain ``str`` (the new user id).
+- ``list_users_page`` returns a plain ``(list[dict], int)`` tuple.
+- Timestamp fields (``created_at`` / ``updated_at`` / ``last_login_at``) in
+  returned dicts are Unix timestamps (float seconds), matching the
+  ``UserResponse`` contract.
 """
 
 from abc import ABC, abstractmethod

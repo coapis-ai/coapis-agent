@@ -46,9 +46,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
-    """Hash password with salt. Returns (hash_hex, salt_hex)."""
+    """Hash password.
+
+    New passwords use bcrypt (salt embedded in the hash, no separate salt
+    column required); the legacy SHA-256 path is kept only for verifying
+    old records. Mirrors ``app/user_store.py::_hash_password`` — the two
+    implementations must stay in sync.
+    """
     if salt is None:
-        salt = secrets.token_hex(16)
+        import bcrypt
+        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+        return hashed.decode("utf-8"), "$2b$"
+    # Legacy SHA-256 path (compat with pre-existing records)
     h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
     return h, salt
 

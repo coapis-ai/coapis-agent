@@ -335,11 +335,15 @@ def register_user(username: str, password: str,
         config = get_config()
         if config.enabled:
             db = UserSystemDB()
-            # Hash password for SQLite
-            import secrets, hashlib
-            salt = secrets.token_hex(16)
-            pw_hash, _ = _hash_password(password, salt)
-            db.create_user(username, pw_hash, salt, role="user")
+            # Hash password for SQLite (bcrypt, salt embedded in hash)
+            pw_hash, salt_val = _hash_password(password)
+            db.insert_user({
+                "username": username,
+                "password_hash": pw_hash,
+                "salt": salt_val,
+                "role": "user",
+                "is_active": True,
+            })
             logger.info(f"Synced user '{username}' to SQLite user_system")
     except Exception as e:
         logger.warning(f"Failed to sync user '{username}' to SQLite: {e}")

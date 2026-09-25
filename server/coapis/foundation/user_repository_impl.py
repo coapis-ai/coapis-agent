@@ -38,6 +38,23 @@ def _gen_user_id() -> str:
     return str(uuid_mod.uuid4())
 
 
+def _hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
+    """Hash password.
+
+    New passwords use bcrypt (salt embedded in the hash, no separate salt
+    column required); the legacy SHA-256 path is kept for verifying
+    pre-existing records. Mirrors ``user_system/service.py::_hash_password``
+    — the two implementations must stay in sync.
+    """
+    if salt is None:
+        import bcrypt
+
+        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+        return hashed.decode("utf-8"), "$2b$"
+    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return h, salt
+
+
 def _normalize_id(user_id: Any) -> str:
     """Convert int (legacy) or str to UUID hex string."""
     if user_id is None:
@@ -133,14 +150,14 @@ class SqlaUserRepository(UserRepository):
         user_id = _normalize_id(user_id)
         now = time.time()
 
-        # Handle plaintext password → hash
+        # Handle plaintext password → hash. Uniformly bcrypt (salt embedded
+        # in the hash) via the module-local _hash_password, matching
+        # app/user_store.py and the enterprise PG repository. Legacy
+        # SHA-256 rows remain verifiable by the dual-mode verify_password.
         if "password" in user_data and "password_hash" not in user_data:
-            salt = uuid_mod.uuid4().hex
-            pw_hash = hashlib.sha256(
-                f"{user_data.pop('password')}:{salt}".encode("utf-8")
-            ).hexdigest()
+            pw_hash, salt_marker = _hash_password(user_data.pop("password"))
             user_data["password_hash"] = pw_hash
-            user_data["salt"] = salt
+            user_data["salt"] = salt_marker
         # Remove plaintext password if present alongside hash
         user_data.pop("password", None)
         user_data.setdefault("created_at", now)
