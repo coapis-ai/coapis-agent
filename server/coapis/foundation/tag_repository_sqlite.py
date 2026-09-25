@@ -50,6 +50,7 @@ def _loads_list(text: Optional[str]) -> list:
         return []
     if not isinstance(parsed, list):  # defensive (legacy data drift)
         return [parsed]
+    return parsed
 
 
 def _loads_obj(raw: Optional[str]) -> dict:
@@ -62,6 +63,7 @@ def _loads_obj(raw: Optional[str]) -> dict:
         return {}
     if not isinstance(parsed, dict):  # defensive (legacy data drift)
         return {"value": parsed}
+    return parsed
 
 
 def _dumps(value: Any, is_list: bool) -> str:
@@ -142,6 +144,12 @@ class SqliteTagRepository:
             d["enabled"] = int(raw_en) if raw_en is not None else 1
         except (TypeError, ValueError):
             d["enabled"] = 1
+
+        # 时间列：空串/None → None（TagConfig 字段 Optional[datetime] 不接受 ""）。
+        for col in ("created_at", "updated_at"):
+            raw = d.get(col)
+            if isinstance(raw, str) and not raw.strip():
+                d[col] = None
 
         return d
 

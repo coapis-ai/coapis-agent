@@ -46,6 +46,20 @@ class ExternalBinding(BaseRow):
     extra_data: Mapped[str] = mapped_column(
         Text, nullable=False, default="{}", server_default=text("'{}'")
     )
+    # ── 外部系统 token（B 方案：从 extra_data 提升为一等公民列）────────
+    # 登录成功后落库，token 刷新时更新；出站透传优先读这里的列。
+    external_access_token: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    external_refresh_token: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    token_expires_at: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    token_updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (

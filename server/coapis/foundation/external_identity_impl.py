@@ -40,6 +40,16 @@ logger = logging.getLogger(__name__)
 _COLUMN_KEYS = (
     "user_id", "provider", "external_id",
     "external_name", "display_name", "email", "created_at",
+    # B 方案：外部系统 token 四个字段是一等公民列，不进 extra_data
+    "token", "refresh_token", "expires_at", "token_updated_at",
+)
+
+# (DB 列名, dict 键) — token 字段的列↔dict 双向映射
+_TOKEN_FIELD_MAP = (
+    ("external_access_token", "token"),
+    ("external_refresh_token", "refresh_token"),
+    ("token_expires_at", "expires_at"),
+    ("token_updated_at", "token_updated_at"),
 )
 
 # ── 域A：external_systems 表字段 ─────────────────────────────
@@ -267,8 +277,18 @@ class SqlaExternalIdentityStore:
                 "source": "manual",
                 "last_login_at": None,
                 "login_count": 0,
+                "token": "",
+                "refresh_token": "",
+                "expires_at": "",
+                "token_updated_at": "",
             }
             merged.update(extra)
+            # B 方案：列值是权威；extra_data 里的残留值仅作旧数据兜底
+            # （迁移 0002 会把它们搬进列并从 extra_data 清除）。
+            for col, key in _TOKEN_FIELD_MAP:
+                col_val = _sys_text(d.get(col))
+                if col_val:
+                    merged[key] = col_val
             out.append(
                 {
                     "user_id": d.get("user_id"),
@@ -310,6 +330,10 @@ class SqlaExternalIdentityStore:
                     "display_name": row["external_name"],
                     "email": row["email"],
                     "created_at": row["created_at"],
+                    "external_access_token": _sys_text(b.get("token")),
+                    "external_refresh_token": _sys_text(b.get("refresh_token")),
+                    "token_expires_at": _sys_text(b.get("expires_at")),
+                    "token_updated_at": _sys_text(b.get("token_updated_at")),
                     "extra_data": _sys_dumps(extra, "object"),
                 }
             )

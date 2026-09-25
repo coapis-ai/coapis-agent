@@ -146,6 +146,10 @@ CREATE TABLE IF NOT EXISTS external_bindings (
     display_name TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
     extra_data TEXT NOT NULL DEFAULT '{}',
+    external_access_token TEXT NOT NULL DEFAULT '',
+    external_refresh_token TEXT NOT NULL DEFAULT '',
+    token_expires_at TEXT NOT NULL DEFAULT '',
+    token_updated_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     UNIQUE(external_system, external_user_id)
 );
