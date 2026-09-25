@@ -773,47 +773,13 @@ def _migrate_token_usage_daily(conn, system_dir: Path) -> int:
 
 
 def _migrate_token_usage_details_retry(conn, system_dir: Path) -> int:
-    """B 档补跑：M0 误读 token_usage.json 致明细未入库；表空时补迁 details 文件。"""
-    existing = conn.execute(text("SELECT COUNT(*) FROM token_usage")).fetchone()
-    if existing and int(existing[0]) > 0:
-        return 0  # 表非空 → 已有明细
-    records = _load_json_list(system_dir / "token_usage_details.json")
-    if not records:
-        return 0
-    count = 0
-    for r in records:
-        if not isinstance(r, dict):
-            continue
-        created_at = r.get("created_at", "")
-        if isinstance(created_at, str):
-            try:
-                created_at = datetime.fromisoformat(created_at).timestamp()
-            except (ValueError, TypeError):
-                created_at = time.time()
-        elif not isinstance(created_at, (int, float)):
-            created_at = time.time()
-        conn.execute(
-            text(
-                """INSERT INTO token_usage
-                   (user_id, username, agent_id, model, input_tokens,
-                    output_tokens, total_tokens, cost_cents, created_at)
-                   VALUES (:uid, :uname, :aid, :model, :it, :ot, :tt, :cost, :ts)""",
-            ),
-            {
-                "uid": r.get("user_id", ""),
-                "uname": r.get("username", ""),
-                "aid": r.get("agent_id"),
-                "model": r.get("model", ""),
-                "it": r.get("input_tokens", 0),
-                "ot": r.get("output_tokens", 0),
-                "tt": r.get("total_tokens", 0),
-                "cost": r.get("cost_cents", 0.0),
-                "ts": created_at,
-            },
-        )
-        count += 1
-    logger.info("Migrated %d token usage detail rows (retry)", count)
-    return count
+    """B 档补跑：M0 误读 token_usage.json 致明细未入库；表空时补迁 details 文件。
+
+    2026-09-25 用户拍板：遗留 token_usage_details.json 不做数据迁移（历史记录
+    user_id 多为 null/0、admin/anonymous，无业务价值），文件本体移入 .trash；
+    新数据经 token_usage/db_writer.py 直写 DB（DB 优先），本迁移永久停用。
+    """
+    return 0
 
 
 def _migrate_permissions(conn, system_dir: Path) -> int:
