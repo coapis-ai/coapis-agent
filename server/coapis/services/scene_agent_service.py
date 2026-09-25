@@ -122,6 +122,18 @@ class SceneAgentService:
     # Scene Configuration Management
     # -------------------------------------------------------------------------
     
+    @staticmethod
+    def _parse_dt(value):
+        """Parse timestamp arriving as str (SQLite) or datetime (enterprise PG)."""
+        if value is None:
+            return datetime.now(timezone.utc)
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return datetime.now(timezone.utc)
+
     def list_scenes(
         self,
         status: Optional[str] = None,
@@ -184,8 +196,8 @@ class SceneAgentService:
                     welcome_message=getattr(db_scene, 'welcome_message', None) or '',
                     status=db_scene.status if hasattr(db_scene, 'status') else "active",
                     category=getattr(db_scene, 'category', None),
-                    created_at=datetime.fromisoformat(getattr(db_scene, 'created_at', datetime.now().isoformat())) if getattr(db_scene, 'created_at', None) else datetime.now(timezone.utc),
-                    updated_at=datetime.fromisoformat(getattr(db_scene, 'updated_at', datetime.now().isoformat())) if getattr(db_scene, 'updated_at', None) else datetime.now(timezone.utc),
+                    created_at=self._parse_dt(getattr(db_scene, 'created_at', None)).isoformat(),
+                    updated_at=self._parse_dt(getattr(db_scene, 'updated_at', None)).isoformat(),
                     created_by=getattr(db_scene, 'created_by', None),
                     usage_count=getattr(db_scene, 'usage_count', 0),
                 )
@@ -226,8 +238,8 @@ class SceneAgentService:
                 welcome_message=getattr(db_scene, 'welcome_message', None) or '',
                 status=db_scene.status if hasattr(db_scene, 'status') else "active",
                 category=getattr(db_scene, 'category', None),
-                created_at=datetime.fromisoformat(getattr(db_scene, 'created_at', datetime.now().isoformat())) if getattr(db_scene, 'created_at', None) else datetime.now(timezone.utc),
-                updated_at=datetime.fromisoformat(getattr(db_scene, 'updated_at', datetime.now().isoformat())) if getattr(db_scene, 'updated_at', None) else datetime.now(timezone.utc),
+                created_at=self._parse_dt(getattr(db_scene, 'created_at', None)).isoformat(),
+                updated_at=self._parse_dt(getattr(db_scene, 'updated_at', None)).isoformat(),
                 created_by=getattr(db_scene, 'created_by', None),
                 usage_count=getattr(db_scene, 'usage_count', 0),
             )
