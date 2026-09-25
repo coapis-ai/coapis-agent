@@ -44,7 +44,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..constant import (
-    SYSTEM_DIR, AUTH_FILE,
+    SYSTEM_DIR, AUTH_FILE, JWT_SECRET,
     TOKEN_EXPIRY_SECONDS, TOKEN_EXPIRY_MAX,
     PUBLIC_PATHS, PUBLIC_PREFIXES,
 )
@@ -143,7 +143,13 @@ def is_auth_enabled() -> bool:
 # ---------------------------------------------------------------------------
 
 def _get_jwt_secret() -> str:
-    """Return the signing secret, creating one if absent."""
+    """Return the signing secret, creating one if absent.
+
+    Priority: ``COAPIS_JWT_SECRET`` env var > value stored in auth.json
+    > freshly generated (persisted to auth.json).
+    """
+    if JWT_SECRET:
+        return JWT_SECRET
     data = _load_auth_data()
     secret = data.get("jwt_secret", "")
     if not secret:

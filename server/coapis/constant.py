@@ -469,6 +469,9 @@ USERS_DIR = SYSTEM_DIR
 AUTH_DIR = SYSTEM_DIR
 USERS_FILE = SYSTEM_DIR / "users.json"
 AUTH_FILE = SYSTEM_DIR / "auth.json"
+# JWT signing secret: prefer env var (12-factor, recommended for production);
+# falls back to the value stored in auth.json when unset.
+JWT_SECRET = EnvVarLoader.get_str("COAPIS_JWT_SECRET", "").strip()
 
 # Auth
 TOKEN_EXPIRY_SECONDS = 7 * 24 * 3600  # 7 days default

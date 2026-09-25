@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 
 import click
@@ -74,3 +75,9 @@ def reset_password_cmd() -> None:
         "✓ Password reset successfully. "
         "All existing sessions have been invalidated.",
     )
+    if os.environ.get("COAPIS_JWT_SECRET", "").strip():
+        click.echo(
+            "⚠ COAPIS_JWT_SECRET is set: the env var takes precedence over "
+            "auth.json, so existing sessions are NOT invalidated. Rotate the "
+            "env var and restart to invalidate them.",
+        )
