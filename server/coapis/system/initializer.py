@@ -353,11 +353,8 @@ class SystemInitializer:
         if not token_file.exists():
             self._save_json(token_file, {"version": 1, "daily": {}, "total": 0})
             result["actions"].append("created:token_usage.json")
-
-        details_file = self.system_dir / "token_usage_details.json"
-        if not details_file.exists():
-            self._save_json(details_file, {"records": []})
-            result["actions"].append("created:token_usage_details.json")
+        # NOTE: token_usage_details.json 已退役（数据全量入库 token_usage 表），
+        # 不再预建该文件。
 
     # ═══════════════════════════════════════════════════════════════
     # 6. 审计日志
