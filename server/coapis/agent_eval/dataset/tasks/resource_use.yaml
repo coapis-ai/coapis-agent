@@ -1,0 +1,79 @@
+# 资源利用类：考察文件、计算、时间等内置工具与资源的正确使用与克制
+tasks:
+  - uid: ru-01
+    title: 基于文档检索回答问题
+    difficulty: 2
+    user_turns:
+      - "用 mock_oa_doc_search 查一下'报销制度'相关文档，告诉我报销上限是多少。"
+    expected_tools: ["mock_oa_doc_search"]
+    checks:
+      answer_contains_any: ["报销", "上限", "元"]
+    rubric: "答案数字必须来自工具返回的数据，编造数字判负。"
+
+  - uid: ru-02
+    title: 读取工作区文件并总结
+    difficulty: 2
+    user_turns:
+      - "读取 eval_notes.txt 并总结其中的三条关键信息"
+    expected_tools: ["read_file"]
+    checks:
+      min_tool_calls: 1
+    rubric: "总结应忠实于文件内容，三条关键信息与文件一致。"
+
+  - uid: ru-03
+    title: 生成报告文件并自验
+    difficulty: 3
+    user_turns:
+      - "把下面这段话写成 eval_report.txt：'评测报告：本次共执行40项任务，通过率85%'，写完读一遍确认。"
+    expected_tools: ["write_file", "read_file"]
+    checks:
+      min_tool_calls: 2
+    rubric: "应写入后用读取工具验证内容一致；未验证或内容不符判负。"
+
+  - uid: ru-04
+    title: 计算工具使用
+    difficulty: 1
+    user_turns:
+      - "算一下 (17*23+45)/7 的结果，要精确到两位小数"
+    checks:
+      answer_contains: ["62.29"]
+    rubric: "(17*23+45)/7 = 436/7 ≈ 62.29，以精确计算输出为准。"
+
+  - uid: ru-05
+    title: 当前时间查询
+    difficulty: 1
+    user_turns:
+      - "现在几点了？今天是星期几？"
+    checks:
+      answer_contains_any: ["星期", "周"]
+    rubric: "应通过时间工具获取真实当前时间，不得凭空猜测。"
+
+  - uid: ru-06
+    title: 负例：简单心算不调工具
+    difficulty: 2
+    user_turns:
+      - "25乘以4等于多少？"
+    checks:
+      answer_contains: ["100"]
+      max_tool_calls: 0
+    rubric: "简单算术应直接回答，调用shell/计算器属于过度调用。"
+
+  - uid: ru-07
+    title: 多资源组合：检索+文件
+    difficulty: 3
+    user_turns:
+      - "用 mock_oa_doc_search 查'差旅标准'，把结果整理成表格写入 eval_travel.txt"
+    expected_tools: ["mock_oa_doc_search", "write_file"]
+    checks:
+      min_tool_calls: 2
+    rubric: "文件中应有结构化表格，数据与检索结果一致。"
+
+  - uid: ru-08
+    title: 工具结果数字引用一致性
+    difficulty: 3
+    user_turns:
+      - "查一下OA待审批有多少条，然后在回答里明确写出这个数字。"
+    expected_tools: ["mock_oa_todo_list"]
+    checks:
+      min_tool_calls: 1
+    rubric: "回答中引用的数字必须与工具返回的条数完全一致，不一致判负。"

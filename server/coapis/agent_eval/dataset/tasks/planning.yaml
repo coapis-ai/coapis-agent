@@ -1,0 +1,82 @@
+# 规划分解类：考察多步任务的拆解、顺序、纠偏与恢复能力
+tasks:
+  - uid: pl-01
+    title: 三步法写工作总结
+    difficulty: 3
+    user_turns:
+      - "帮我写一份Q3工作总结，分三步：先出提纲，再写初稿，最后润色。先给我提纲。"
+      - "提纲可以，按这个写初稿。"
+      - "初稿不错，请润色后给我最终版。"
+    checks:
+      min_llm_calls: 3
+      answer_contains_any: ["总结", "工作"]
+    rubric: "最终版应是经过润色的完整工作总结，结构清晰，优于初稿，且不丢失初稿要点。"
+
+  - uid: pl-02
+    title: 复杂调研：三源材料综合
+    difficulty: 3
+    user_turns:
+      - "我要了解竞品A的情况：先用mock_oa_doc_search查内部文档，再查OA待办里相关事项，最后综合成一段分析。"
+    expected_tools: ["mock_oa_doc_search", "mock_oa_todo_list"]
+    checks:
+      min_tool_calls: 2
+      answer_contains_any: ["竞品", "分析"]
+    rubric: "回答应体现三个来源的信息融合，而不是只复述某一个来源。"
+
+  - uid: pl-03
+    title: 十项数据清洗分步执行
+    difficulty: 3
+    user_turns:
+      - "这份名单里有10个重复项和5个空值（见附件说明），请逐项处理并给出处理后结果。"
+    checks:
+      min_tool_calls: 1
+    rubric: "应展示明确的步骤化处理过程（识别重复→去重→处理空值→核对总数），最终数字自洽。"
+
+  - uid: pl-04
+    title: 中途改需求
+    difficulty: 3
+    user_turns:
+      - "帮我起草一份会议纪要，主题是预算评审。"
+      - "等一下，主题改成供应商选型评审，重点突出三家对比。"
+    checks:
+      answer_contains_any: ["供应商", "选型"]
+    rubric: "最终纪要应以修改后的主题（供应商选型评审）为准，体现三家对比，不得停留在旧主题。"
+
+  - uid: pl-05
+    title: 阶段确认后再推进
+    difficulty: 2
+    user_turns:
+      - "做一个三步计划：调研、撰写、校对。每完成一步先跟我确认再继续。现在做第一步。"
+      - "确认，继续第二步。"
+    checks:
+      min_llm_calls: 2
+    rubric: "第一步完成后应先呈现结果并请求确认，而不是擅自跳到后续步骤。"
+
+  - uid: pl-06
+    title: 工具失败后恢复
+    difficulty: 3
+    user_turns:
+      - "查一下OA待审批事项，如果查不到就用文档库搜'审批'相关内容替代。"
+    checks:
+      min_tool_calls: 1
+    rubric: "面对首次工具失败（mock会随机失败一次），应明确切换备用路径并给出有效结果，而不是直接报错放弃。"
+
+  - uid: pl-07
+    title: 千字摘要生成
+    difficulty: 3
+    user_turns:
+      - "请用 mock_oa_doc_search 查出'年度报告'相关文档，基于其内容写一篇不少于300字的摘要。"
+    expected_tools: ["mock_oa_doc_search"]
+    checks:
+      min_answer_length: 300
+    rubric: "摘要应覆盖文档要点、层次分明、无明显编造，长度达标。"
+
+  - uid: pl-08
+    title: 依赖顺序：先读后写
+    difficulty: 2
+    user_turns:
+      - "先读取 eval_src.txt 的内容，然后把它的摘要写入 eval_out.txt。"
+    expected_tools: ["read_file", "write_file"]
+    checks:
+      min_tool_calls: 2
+    rubric: "必须先读后写；写出内容应与源文件内容一致（摘要关系成立），顺序颠倒判负。"

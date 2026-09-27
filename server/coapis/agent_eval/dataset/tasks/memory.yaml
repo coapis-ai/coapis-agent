@@ -1,0 +1,86 @@
+# 记忆引用类：考察短期（会话内）与长期（跨会话）记忆的保持与运用
+# 多轮任务：user_turns 依次发送，判定针对最后一轮回答
+tasks:
+  - uid: me-01
+    title: 引用上一轮给出的公司名
+    difficulty: 1
+    user_turns:
+      - "我们公司叫星辰科技，主要做智能制造。"
+      - "刚才说的我们公司是做什么的？"
+    checks:
+      answer_contains: ["星辰科技", "智能制造"]
+
+  - uid: me-02
+    title: 偏好一致性保持
+    difficulty: 2
+    user_turns:
+      - "以后回答我都用正式书面语，不要用口语和网络用语。"
+      - "帮我写一句请假理由。"
+    rubric: "第二轮的回答应保持正式书面语风格，不出现口语化表达。"
+
+  - uid: me-03
+    title: 实体属性记忆
+    difficulty: 2
+    user_turns:
+      - "我们的项目代号是凤凰，上线日期定在下个月15号。"
+      - "凤凰项目的上线日期是哪天？"
+    checks:
+      answer_contains: ["15"]
+
+  - uid: me-04
+    title: 跨会话记忆
+    difficulty: 3
+    user_turns:
+      - "记住：我们团队周五下午三点站会。"
+    cross_session: true
+    followup_turns:
+      - "我们团队的站会是每周几几点？"
+    checks:
+      answer_contains_any: ["周五", "星期五"]
+    rubric: "在新会话中仍能准确回忆站会时间，答不出或答错判负。"
+
+  - uid: me-05
+    title: 事实更正后采用新值
+    difficulty: 2
+    user_turns:
+      - "我们办公室在8楼。"
+      - "抱歉说错了，其实在12楼。"
+      - "我们办公室在几楼？"
+    checks:
+      answer_contains: ["12"]
+      answer_not_contains: ["8楼"]
+
+  - uid: me-06
+    title: 第10轮引用第1轮细节
+    difficulty: 3
+    user_turns:
+      - "我姓陈，负责采购部，工号C001。"
+      - "第一个问题：1+1等于几？"
+      - "第二个问题：2+2等于几？"
+      - "第三个问题：3+3等于几？"
+      - "第四个问题：4+4等于几？"
+      - "第五个问题：5+5等于几？"
+      - "第六个问题：6+6等于几？"
+      - "第七个问题：7+7等于几？"
+      - "第八个问题：8+8等于几？"
+      - "我是谁，负责哪个部门，工号多少？"
+    checks:
+      answer_contains: ["陈", "采购", "C001"]
+
+  - uid: me-07
+    title: 负例：不编造未提供的信息
+    difficulty: 2
+    user_turns:
+      - "我的猫叫什么名字？"
+    rubric: "对话中从未提到猫的名字，正确行为是承认不知道并请用户补充；编造名字判负。"
+
+  - uid: me-08
+    title: 对话要点归纳
+    difficulty: 3
+    user_turns:
+      - "我今天做了三件事：开了预算会、审了两份合同、拜访了客户王总。"
+      - "预算会上定了Q4预算上浮10%。"
+      - "帮我总结我们今天谈到的要点。"
+    checks:
+      answer_contains_any: ["预算", "合同", "王总"]
+    rubric: "要点归纳应覆盖三件事及预算会上限定的10%细节，无遗漏无添加。"

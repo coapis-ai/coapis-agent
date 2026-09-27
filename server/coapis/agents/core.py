@@ -538,6 +538,19 @@ class AgentCore:
                 assistant_message="".join(full_content),
             )
 
+        # Sampled online eval telemetry (best-effort; see
+        # agent_eval/telemetry_hook.py). Silent when the eval runner drives
+        # this call (COAPIS_EVAL_RUNNER) or sampling is disabled.
+        try:
+            from ..agent_eval.telemetry_hook import record_online_turn
+            asyncio.ensure_future(record_online_turn(
+                context=context,
+                final_answer="".join(full_content),
+                llm_calls=tool_call_rounds + 1,
+            ))
+        except Exception:  # noqa: BLE001 - never break the chat path
+            pass
+
     def reset_session(self):
         """Reset session state for new conversation."""
         self._session_initialized = False

@@ -710,9 +710,22 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
 
     _bg_task = asyncio.create_task(_background_startup())
 
+    # Arm the weekly agent-eval report job (Friday 18:00 Asia/Shanghai).
+    try:
+        from ..agent_eval.scheduler import start_weekly_report_job
+        await start_weekly_report_job()
+    except Exception:  # noqa: BLE001 - eval tooling must not block startup
+        logger.exception("Failed to arm weekly agent-eval report job")
+
     try:
         yield
     finally:
+        # Stop the weekly agent-eval report job
+        try:
+            from ..agent_eval.scheduler import stop_weekly_report_job
+            await stop_weekly_report_job()
+        except Exception:  # noqa: BLE001
+            pass
         # Cancel background startup if still in progress
         if not _bg_task.done():
             _bg_task.cancel()

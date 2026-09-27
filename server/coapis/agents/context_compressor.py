@@ -126,6 +126,9 @@ class ContextCompressor:
         # Cache: store last compressed result to avoid re-compression
         self._last_message_count = 0
         self._last_compressed = None
+        # Conversation-scoped guard: the compression cache must never leak a
+        # previous chat's history into a new chat (see compress()).
+        self._last_fingerprint = None
         # Compaction history tracking
         self._compaction_history: List[Dict] = []
         self._total_messages_compacted = 0
@@ -161,7 +164,19 @@ class ContextCompressor:
 
         # --- Quick check: if message count didn't grow much, return cached ---
         # But also check token budget — a single long response can blow past budget
-        if self._last_compressed is not None and msg_count - self._last_message_count < 3:
+        # Guard: the cache is only reusable for the SAME conversation. A new
+        # chat starts with fewer messages than the previous one (monotonic
+        # check) and a different opening message (fingerprint). Without these
+        # guards a new chat inherits the previous chat's compressed history
+        # (observed in eval batches: task N+1's prompt contained task N's
+        # full transcript).
+        fp = self._fingerprint(messages)
+        if (
+            self._last_compressed is not None
+            and fp == self._last_fingerprint
+            and msg_count >= self._last_message_count
+            and msg_count - self._last_message_count < 3
+        ):
             # Check if new messages alone exceeded token budget
             new_msgs = messages[self._last_message_count:]
             new_tokens = self._estimate_tokens(new_msgs)
@@ -249,15 +264,39 @@ class ContextCompressor:
         logger.info(f"Compressed to {len(result)} messages")
         return result
 
+    @staticmethod
+    def _fingerprint(messages: List[Dict]) -> tuple:
+        """Cheap identity of a conversation's opening (stable per chat).
+
+        Uses the first NON-SYSTEM message: the system prompt is identical
+        across chats and would not distinguish them.
+        """
+        for m in messages:
+            if isinstance(m, dict) and m.get("role") != "system":
+                content = m.get("content", "")
+                if isinstance(content, list):
+                    content = "".join(str(part) for part in content)
+                return (str(m.get("role")), str(content)[:200])
+        m0 = messages[0] if messages else {}
+        content = m0.get("content", "") if isinstance(m0, dict) else ""
+        if isinstance(content, list):
+            content = "".join(str(part) for part in content)
+        return ("system", str(content)[:200])
+
     def _cache_result(self, original: List[Dict], compressed: List[Dict]):
         """Cache the compressed result to avoid re-compression."""
         self._last_message_count = len(original)
         self._last_compressed = compressed
+        self._last_fingerprint = self._fingerprint(original)
 
     def clear_cache(self):
         """Clear compression cache (call when session resets)."""
         self._last_message_count = 0
         self._last_compressed = None
+        # Conversation-scoped guard: the compression cache must never leak a
+        # previous chat's history into a new chat (see compress()).
+        self._last_fingerprint = None
+        self._last_fingerprint = None
 
     def _estimate_tokens(self, messages: List[Dict]) -> int:
         """More accurate token estimation using character-level heuristics.

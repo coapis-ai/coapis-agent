@@ -1,0 +1,70 @@
+# 技能触发类：考察技能的准确触发、选择、续接与克制
+# 依赖 dev 环境 skill_pool 中已有的技能（简历制作/公文起草等），
+# 具体技能名在运行时由 runner 探测填充，此处用占位符 {resume}/{official_doc}
+tasks:
+  - uid: sk-01
+    title: 自然语言触发简历技能
+    difficulty: 2
+    user_turns:
+      - "帮我写一份简历，我叫张三，五年Java开发经验"
+    checks:
+      answer_contains_any: ["简历", "工作经历", "技能"]
+    rubric: "应触发简历制作类技能并产出结构化简历内容，而非泛泛而谈。"
+
+  - uid: sk-02
+    title: 公文起草触发
+    difficulty: 2
+    user_turns:
+      - "帮我起草一份关于申请会议室的请示公文"
+    checks:
+      answer_contains_any: ["请示", "会议室"]
+    rubric: "应触发公文起草技能，符合公文格式（标题、主送、正文、落款要素）。"
+
+  - uid: sk-03
+    title: 负例：闲聊不触发技能
+    difficulty: 2
+    user_turns:
+      - "晚上吃火锅怎么样？推荐个蘸料配方"
+    rubric: "普通问答不应触发简历/公文等业务技能，正常友好作答即可；强行套用技能模板判负。"
+
+  - uid: sk-04
+    title: 相似意图二选一
+    difficulty: 3
+    user_turns:
+      - "下周要给新员工做一次入职培训，帮我准备培训大纲"
+    rubric: "应识别为培训/教学类任务（若有对应技能则触发，若无则高质量自制大纲），不得误触简历或公文技能。"
+
+  - uid: sk-05
+    title: 技能流程内追问
+    difficulty: 3
+    user_turns:
+      - "帮我起草一份会议纪要，主题是Q3复盘。"
+      - "再加一条决议：下月启动供应商比价。"
+    checks:
+      answer_contains_any: ["供应商", "比价"]
+    rubric: "第二轮应在已有纪要基础上增量修改，保留原有内容，而不是从头重写丢失信息。"
+
+  - uid: sk-06
+    title: 负例：无适用技能时正常应答
+    difficulty: 2
+    user_turns:
+      - "解释一下什么是分布式锁，举一个Redis的例子"
+    rubric: "知识型问答应直接高质量解答，不强行匹配业务技能。"
+
+  - uid: sk-07
+    title: 显式指定技能
+    difficulty: 2
+    user_turns:
+      - "用公文技能帮我写一份关于开展安全生产月的通知"
+    checks:
+      answer_contains_any: ["通知", "安全生产"]
+    rubric: "应遵从用户指定的技能路径，产出符合公文规范的通知。"
+
+  - uid: sk-08
+    title: 参数抽取完整性
+    difficulty: 3
+    user_turns:
+      - "帮我订一份会议室：下周三下午两点到四点，参加人是我、李四和王五，主题是季度经营分析"
+    checks:
+      answer_contains_any: ["周三", "李四", "王五", "季度经营分析"]
+    rubric: "应完整提取时间（下周三14:00-16:00）、人员（3人）、主题三组参数，缺一即扣分。"

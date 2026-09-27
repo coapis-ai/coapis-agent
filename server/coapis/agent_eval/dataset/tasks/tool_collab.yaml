@@ -1,0 +1,82 @@
+# 工具协作类：考察 MCP/工具调用的准确性与组合能力
+# 依赖 mocks.py 注入的 mock_oa_* / mock_email_* 工具
+tasks:
+  - uid: tc-01
+    title: 查询OA待审批列表
+    difficulty: 1
+    user_turns:
+      - "帮我查一下OA里有哪些待审批事项"
+    expected_tools: ["mock_oa_todo_list"]
+    checks:
+      answer_contains_any: ["待审批", "审批"]
+      min_tool_calls: 1
+
+  - uid: tc-02
+    title: 查询本周日程
+    difficulty: 1
+    user_turns:
+      - "我这周有哪些会议安排？"
+    expected_tools: ["mock_oa_calendar_query"]
+    checks:
+      answer_contains_any: ["会议", "日程"]
+      min_tool_calls: 1
+
+  - uid: tc-03
+    title: 文档库检索季度报告
+    difficulty: 1
+    user_turns:
+      - "在文档库里搜一下关于季度报告的文档"
+    expected_tools: ["mock_oa_doc_search"]
+    checks:
+      answer_contains_any: ["季度报告", "文档"]
+      min_tool_calls: 1
+
+  - uid: tc-04
+    title: 发送通知邮件
+    difficulty: 2
+    user_turns:
+      - "给 zhangsan@corp.cn 发一封邮件，通知他明天上午10点开项目例会"
+    expected_tools: ["mock_email_send"]
+    checks:
+      answer_contains_any: ["已发送", "发送成功", "邮件"]
+      min_tool_calls: 1
+
+  - uid: tc-05
+    title: 汇总待审批并按部门统计
+    difficulty: 3
+    user_turns:
+      - "查一下OA待审批事项，按部门统计数量给我汇总"
+    expected_tools: ["mock_oa_todo_list"]
+    checks:
+      answer_contains_any: ["部门", "统计", "汇总"]
+      min_tool_calls: 1
+    rubric: "回答应基于工具返回的真实数据做部门维度分组统计，数字与工具输出一致。"
+
+  - uid: tc-06
+    title: 两工具串联：检索文档并发邮件
+    difficulty: 3
+    user_turns:
+      - "在文档库找到季度报告相关文档，把文档名称整理后发给 lisi@corp.cn"
+    expected_tools: ["mock_oa_doc_search", "mock_email_send"]
+    checks:
+      min_tool_calls: 2
+      answer_contains_any: ["已发送", "发送成功"]
+
+  - uid: tc-07
+    title: 负例：闲聊不应调用OA工具
+    difficulty: 2
+    user_turns:
+      - "今天心情不错，你觉得周末适合做什么活动？"
+    forbid_tools: ["mock_oa_todo_list", "mock_oa_calendar_query", "mock_oa_doc_search", "mock_email_send"]
+    checks:
+      max_tool_calls: 0
+
+  - uid: tc-08
+    title: 并行双查询：日程+待审批
+    difficulty: 3
+    user_turns:
+      - "同时帮我看下今天的会议和OA待审批事项，一起告诉我"
+    expected_tools: ["mock_oa_calendar_query", "mock_oa_todo_list"]
+    checks:
+      min_tool_calls: 2
+      answer_contains_any: ["会议", "待审批"]

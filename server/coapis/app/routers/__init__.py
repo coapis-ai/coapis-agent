@@ -80,6 +80,7 @@ from .cross_agent import cross_agent_router
 from .multi_layer_evolution import router as multi_layer_evolution_router
 from .security import router as security_router
 from .permissions import router as permissions_router
+from .admin_agent_eval import router as admin_agent_eval_router
 from .admin_providers import router as admin_providers_router
 from .input_guard import router as input_guard_router
 from .tool_guard import router as tool_guard_router
@@ -191,6 +192,7 @@ router.include_router(search_router)
 router.include_router(i18n_router)
 router.include_router(config_reload_router)
 router.include_router(theme_router)
+router.include_router(admin_agent_eval_router)
 router.include_router(admin_providers_router)
 router.include_router(user_model_prefs_router)
 router.include_router(monitoring_router)

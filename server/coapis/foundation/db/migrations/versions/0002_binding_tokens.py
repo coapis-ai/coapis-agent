@@ -73,6 +73,12 @@ def upgrade() -> None:
     # One-time backfill: move token values out of extra_data into the
     # new columns (only rows where the column is still empty, i.e.
     # legacy rows written before this migration).
+    # Guarded: some legacy databases (early dev environments) carry an
+    # external_bindings table that never had the extra_data column —
+    # in that case there is simply nothing to backfill.
+    if "extra_data" not in cols:
+        return
+
     rows = bind.execute(
         sa.text(
             "SELECT id, extra_data, "
