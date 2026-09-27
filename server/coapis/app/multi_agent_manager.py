@@ -90,6 +90,15 @@ class MultiAgentManager:
         chats_dir.mkdir(parents=True, exist_ok=True)
         chats_path = chats_dir / "chats.json"
         chat_repo = JsonChatRepository(chats_path)
+        # 企业版：经全局单例附加 PG 归档包装（与 service_factories 同一模式）
+        try:
+            from ..enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
+            if is_enterprise_installed():
+                _ep = get_enterprise_plugin()
+                if _ep is not None and hasattr(_ep, "wrap_chat_repository"):
+                    chat_repo = _ep.wrap_chat_repository(chat_repo)
+        except Exception:
+            pass
         cm = ChatManager(repo=chat_repo)
         self._user_chat_managers[username] = cm
         logger.info(f"Created user ChatManager: {chats_path}")

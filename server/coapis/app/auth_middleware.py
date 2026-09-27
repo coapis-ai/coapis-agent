@@ -134,8 +134,8 @@ def install_auth_middleware(app):
                 content={"detail": "Invalid or expired token"},
             )
 
-        # Resolve user info - PREFER SQLite (authoritative source for roles)
-        # SQLite-first strategy: roles are managed in user_system, not JSON
+        # Resolve user info - PREFER user_system (authoritative source for roles)
+        # user_system-first strategy: roles are managed in user_system, not JSON
         user_info = None
         try:
             from ..user_system.service import get_user_by_username as us_get_user
@@ -147,11 +147,11 @@ def install_auth_middleware(app):
                     "email": getattr(us_user, "email", ""),
                     "display_name": getattr(us_user, "display_name", us_user.username),
                 }
-                logger.info(f"Resolved user {username} from user_system SQLite (role={us_user.role})")
+                logger.info(f"Resolved user {username} from user_system (role={us_user.role})")
         except (ImportError, Exception) as e:
             logger.warning(f"user_system lookup failed: {e}")
 
-        # Fallback: try JSON user_store if SQLite didn't have the user
+        # Fallback: try JSON user_store if user_system didn't have the user
         if user_info is None:
             user_info = get_user(username)
             if user_info:

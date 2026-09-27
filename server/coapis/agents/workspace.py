@@ -986,6 +986,15 @@ class Workspace:
             repo_dir = ws.workspace_dir / "chat"
             repo_dir.mkdir(parents=True, exist_ok=True)
             chat_repo = JsonChatRepository(str(repo_dir / "chats.json"))
+            # 企业版：经全局单例附加 PG 归档包装（与 service_factories 同一模式）
+            try:
+                from ..enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
+                if is_enterprise_installed():
+                    _ep = get_enterprise_plugin()
+                    if _ep is not None and hasattr(_ep, "wrap_chat_repository"):
+                        chat_repo = _ep.wrap_chat_repository(chat_repo)
+            except Exception:
+                pass
             return ChatManager(repo=chat_repo)
 
         self._service_mgr.register(ServiceDescriptor(

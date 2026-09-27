@@ -4,31 +4,54 @@
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
+try:
+    from ..enterprise_plugin import is_enterprise_installed
+except ImportError:
+    is_enterprise_installed = lambda: False
+
+logger = logging.getLogger(__name__)
+
 
 class UserSceneService:
-    """用户场景服务"""
+    """用户场景服务
+
+    社区版：SQLite 仓储（工厂已初始化时）或 JSON 文件兜底。
+    企业版：PostgreSQL 仓储，经 RepositoryFactory 注入（与 TagService 同款模式）。
+    """
     
     def __init__(self, data_dir: str):
         self.data_dir = Path(data_dir)
         self.user_scenes_file = self.data_dir / "user_scenes.json"
         self.scenes_file = self.data_dir / "scenes.json"
-        # M1 域D：社区版 SQLite 仓储
         self._us_repo = None
         self._scene_repo = None
-        try:
-            from ..foundation.repository_factory import RepositoryFactory
-            if (RepositoryFactory.is_initialized()
-                    and RepositoryFactory.get_edition() == "community"):
-                self._us_repo = RepositoryFactory.get_user_scene_repository()
-                self._scene_repo = RepositoryFactory.get_scene_repository()
-        except Exception:
-            # 工厂未初始化（如单测）或非社区版 → 回退 JSON 路径
-            self._us_repo = None
-            self._scene_repo = None
+        if is_enterprise_installed():
+            # 企业版：PostgreSQL 仓储
+            try:
+                from ..foundation.repository_factory import RepositoryFactory
+                if RepositoryFactory.is_initialized():
+                    self._us_repo = RepositoryFactory.get_user_scene_repository()
+                    self._scene_repo = RepositoryFactory.get_scene_repository()
+                    logger.info("UserSceneService using enterprise PostgreSQL repositories")
+            except Exception as e:
+                logger.warning(f"Failed to get enterprise user-scene repositories: {e}, falling back to JSON")
+        else:
+            # M1 域D：社区版 SQLite 仓储
+            try:
+                from ..foundation.repository_factory import RepositoryFactory
+                if (RepositoryFactory.is_initialized()
+                        and RepositoryFactory.get_edition() == "community"):
+                    self._us_repo = RepositoryFactory.get_user_scene_repository()
+                    self._scene_repo = RepositoryFactory.get_scene_repository()
+            except Exception:
+                # 工厂未初始化（如单测） → 回退 JSON 路径
+                self._us_repo = None
+                self._scene_repo = None
 
     def _load_user_scenes(self) -> Dict[str, Any]:
         """加载用户场景数据"""

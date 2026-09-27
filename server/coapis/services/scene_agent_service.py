@@ -349,7 +349,25 @@ class SceneAgentService:
             usage_count=0,
         )
         
-        saved_scene = self._enterprise_repo.create_scene(db_scene)
+        # 平台仓储契约统一为 dict 入参（社区 SQLite save_scene / 企业 PG
+        # create_scene 均为 dict），这里显式构造载荷，保留 created_by。
+        scene_payload = {
+            "id": db_scene.id,
+            "name": db_scene.name,
+            "icon": db_scene.icon,
+            "description": db_scene.description,
+            "short_description": db_scene.short_description,
+            "primary_tag_id": db_scene.primary_tag_id,
+            "tag_ids": db_scene.tag_ids,
+            "skills": db_scene.skills,
+            "system_prompt": db_scene.system_prompt,
+            "welcome_message": db_scene.welcome_message,
+            "status": db_scene.status,
+            "created_at": db_scene.created_at,
+            "updated_at": db_scene.updated_at,
+            "created_by": created_by,
+        }
+        saved_scene = self._enterprise_repo.create_scene(scene_payload)
         
         # Convert to Pydantic SceneConfig
         scene_config = SceneConfig(
@@ -432,17 +450,23 @@ class SceneAgentService:
         db_scene = self._enterprise_repo.get_scene_by_id(scene_id)
         if not db_scene:
             return None
-        
-        # Update fields from scene_update
+
+        # 契约对齐：企业仓储 update_scene(scene_id, updates: dict) 接收字典载荷，
+        # 此前直接把 DTO 对象传入导致 TypeError。
         update_data = scene_update.model_dump(exclude_unset=True)
-        
-        for key, value in update_data.items():
-            if hasattr(db_scene, key) and key != 'created_at':
-                setattr(db_scene, key, value)
-        
-        db_scene.updated_at = datetime.now(timezone.utc)
-        
-        saved_scene = self._enterprise_repo.update_scene(db_scene)
+        payload = {
+            key: value
+            for key, value in update_data.items()
+            if key != 'created_at' and value is not None
+        }
+        payload['updated_at'] = datetime.now(timezone.utc)
+
+        saved = self._enterprise_repo.update_scene(scene_id, payload)
+        if not saved:
+            return None
+        saved_scene = self._enterprise_repo.get_scene_by_id(scene_id)
+        if not saved_scene:
+            return None
         
         # Convert to Pydantic SceneConfig
         scene_config = SceneConfig(
@@ -481,7 +505,7 @@ class SceneAgentService:
             True if deleted, False if not found
         """
         if self._enterprise_repo:
-            return self._delete_scene_in_repository(scene_id)
+            return self._delete_scene_in_repository(scene_id, hard_delete)
 
         # 社区 M1：SQLite 硬删除必须走仓储定向 DELETE。
         # 若走 load-all→pop→save-all，当删掉的是最后一个场景时列表为空，
@@ -525,17 +549,27 @@ class SceneAgentService:
         
         return False
 
-    def _delete_scene_in_repository(self, scene_id: str) -> bool:
-        """Delete a scene in enterprise repository (soft delete).
+    def _delete_scene_in_repository(self, scene_id: str, hard_delete: bool = False) -> bool:
+        """Delete a scene in enterprise repository.
+        
+        默认软删除（标记 status=deleted，保留行），与社区版 JSON 软删语义一致；
+        hard_delete=True 时才物理删除。
         
         Args:
             scene_id: Scene ID
-            
+            hard_delete: If True, permanently delete the row
+        
         Returns:
             True if deleted, False if not found
         """
-        success = self._enterprise_repo.delete_scene(scene_id)
-        logger.info(f"Deleted scene in repository: {scene_id}")
+        if hard_delete:
+            success = self._enterprise_repo.delete_scene(scene_id)
+        else:
+            success = self._enterprise_repo.update_scene(
+                scene_id,
+                {"status": "deleted", "updated_at": datetime.now(timezone.utc)},
+            )
+        logger.info(f"Deleted scene in repository: {scene_id} (hard={hard_delete})")
         return success
 
     # -------------------------------------------------------------------------

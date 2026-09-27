@@ -11,7 +11,7 @@ from ..auth import get_current_user
 from ...services.user_scene_service import UserSceneService
 from ...constant import WORKING_DIR
 
-router = APIRouter(prefix="/api/user-scenes", tags=["User Scenes"])
+router = APIRouter(prefix="/user-scenes", tags=["User Scenes"])
 
 
 class SetUserScenesRequest(BaseModel):
