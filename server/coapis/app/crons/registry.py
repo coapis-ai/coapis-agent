@@ -161,11 +161,15 @@ async def get_user_cron_manager(request: Request) -> CronManager:
         try:
             mam = getattr(request.app.state, "multi_agent_manager", None)
             if mam:
-                ws = await mam.get_agent("default", username=username)
+                # User workspaces are keyed "user:{username}" — passing
+                # "default" looks up a non-existent global agent and the
+                # ownership check rejects it, so the workspace's
+                # CronManager never got registered (silent cron failure).
+                ws = await mam.get_agent(f"user:{username}", username=username)
                 if ws and not ws._started:
                     await ws.start()
         except Exception as e:
-            logger.debug(f"Could not trigger workspace load for {username}: {e}")
+            logger.warning(f"Could not trigger workspace load for {username}: {e}")
 
     mgr = registry.get_or_create(username)
     if not registry._started.get(username):

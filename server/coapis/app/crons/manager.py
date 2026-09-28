@@ -539,9 +539,10 @@ class CronManager:
         """Run scheduled data cleanup — hot→warm→cold lifecycle for all users."""
         try:
             from ..cleanup import CleanupEngine
-            from ...constant import WORKSPACES_DIR
+            from ...constant import WORKSPACES_DIR, WORKING_DIR
 
             workspaces_root = WORKSPACES_DIR
+            data_root = WORKING_DIR
 
             total_archived = 0
             total_deleted = 0

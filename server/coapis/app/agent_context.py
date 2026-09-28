@@ -21,7 +21,7 @@ Provides utilities to get the correct agent instance for each request.
 """
 import json
 from contextvars import ContextVar
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from fastapi import Request
 from .multi_agent_manager import MultiAgentManager
 from ..config.utils import load_config
@@ -263,13 +263,28 @@ def get_active_agent_id() -> str:
         return "global_default"
 
 
-def set_current_agent_id(agent_id: str) -> None:
+def set_current_agent_id(agent_id: str) -> Any:
     """Set current agent ID in context.
 
     Args:
         agent_id: Agent ID to set
+
+    Returns:
+        A token usable with :func:`reset_current_agent_id` to undo the
+        override (e.g. cron executions must not leak the user's agent id
+        into the scheduler task's context).
     """
-    _current_agent_id.set(agent_id)
+    return _current_agent_id.set(agent_id)
+
+
+def reset_current_agent_id(token: Any) -> None:
+    """Restore the agent-id context to the value before an override.
+
+    Args:
+        token: The token returned by :func:`set_current_agent_id`.
+    """
+    if token is not None:
+        _current_agent_id.reset(token)
 
 
 def get_current_agent_id() -> str:

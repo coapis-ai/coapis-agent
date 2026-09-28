@@ -48,7 +48,17 @@ class CronExecutor:
         if job.request and hasattr(job.request, "input") and job.request.input:
             for msg in job.request.input:
                 if isinstance(msg, dict) and msg.get("content"):
-                    check_texts.append(("prompt", msg["content"]))
+                    content = msg["content"]
+                    # content 可能是内容块列表 [{type:text,text:...}]，
+                    # guard 契约是纯文本，先归一化
+                    if isinstance(content, list):
+                        content = " ".join(
+                            b.get("text", "")
+                            for b in content
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        )
+                    if isinstance(content, str) and content.strip():
+                        check_texts.append(("prompt", content))
         for label, text in check_texts:
             guard_result = _guard.check(text)
             if not guard_result.is_safe:
@@ -176,6 +186,43 @@ class CronExecutor:
             else:
                 logger.warning(f"cron execute: job_id={job.id} collected empty response")
 
+            # Deliver the agent's reply to the job's dispatch channel.
+            # Previously the reply only landed in the isolated cron session
+            # and the user never saw it (broken delivery link).
+            reply = collected_text.strip()
+            if reply:
+                if self._channel_manager is not None:
+                    try:
+                        await self._channel_manager.send_text(
+                            channel=job.dispatch.channel,
+                            user_id=target_user_id,
+                            session_id=target_session_id,
+                            text=reply,
+                            meta=dispatch_meta,
+                        )
+                        logger.info(
+                            "cron reply delivered: job_id=%s channel=%s len=%d",
+                            job.id, job.dispatch.channel, len(reply),
+                        )
+                    except Exception as deliver_err:
+                        logger.warning(
+                            "cron reply delivery FAILED: job_id=%s channel=%s err=%r",
+                            job.id, job.dispatch.channel, deliver_err,
+                        )
+                else:
+                    logger.warning(
+                        "cron reply produced but channel_manager missing — "
+                        "NOT delivered: job_id=%s channel=%s",
+                        job.id, job.dispatch.channel,
+                    )
+
+        # Route the dynamic runner to THIS user's workspace. Without this,
+        # get_current_agent_id() falls back to the config's active_agent
+        # (e.g. "global_default"), so cron executed in the wrong workspace.
+        # The token resets the context afterwards so the scheduler task's
+        # context is not polluted with this user's agent id.
+        from ..agent_context import set_current_agent_id, reset_current_agent_id
+        agent_token = set_current_agent_id(f"user:{target_user_id}")
         try:
             await asyncio.wait_for(
                 _run(),
@@ -194,3 +241,5 @@ class CronExecutor:
         except Exception as e:
             logger.error("cron execute: job_id=%s failed: %s", job.id, e)
             raise
+        finally:
+            reset_current_agent_id(agent_token)
