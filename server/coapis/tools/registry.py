@@ -33,6 +33,14 @@ from .schema_gen import auto_generate_schema, merge_with_manual_schema
 
 logger = logging.getLogger(__name__)
 
+# ── C2A (coapis-c2a 独立项目) — MCP 工具定义中的卡片元数据提取 ──
+# 逻辑位于 c2a_protocol 包；未安装时降级为「无元数据」，不影响工具注册。
+try:
+    from c2a_protocol import extract_tool_metadata as _extract_mcp_tool_metadata
+except Exception:  # pragma: no cover - optional dependency
+    def _extract_mcp_tool_metadata(_mcp_tool):  # type: ignore
+        return None
+
 # ─── SandboxedExecutor integration ───
 _sandboxed_executor = None
 
@@ -162,33 +170,6 @@ class ToolRegistry:
         logger.debug(f"Registered tool: {name}")
         return tool
 
-    @staticmethod
-    def _extract_mcp_tool_metadata(mcp_tool) -> Optional[Dict[str, Any]]:
-        """Extract C2A card metadata from an MCP tool definition.
-
-        Servers declare card metadata (``action_templates`` with
-        ``url_template`` + ``params_mapping``) in non-uniform places — OA
-        puts it inside ``inputSchema["metadata"]``, others use a top-level
-        ``metadata`` field. Check the common carriers in priority order and
-        return the first non-empty dict (or ``None``).
-        """
-        carriers: List[Dict[str, Any]] = []
-
-        input_schema = getattr(mcp_tool, "inputSchema", None)
-        if isinstance(input_schema, dict):
-            carriers.append(input_schema)
-        model_extra = getattr(mcp_tool, "model_extra", None)
-        if isinstance(model_extra, dict):
-            carriers.append(model_extra)
-        if isinstance(mcp_tool, dict):  # raw-dict tool (defensive)
-            carriers.append(mcp_tool)
-
-        for carrier in carriers:
-            meta = carrier.get("metadata")
-            if isinstance(meta, dict) and meta:
-                return meta
-        return None
-
     async def register_mcp_tools(self, mcp_clients: list) -> int:
         """Register MCP tools with mcp__ prefix to avoid conflicts with built-in tools.
 
@@ -213,7 +194,7 @@ class ToolRegistry:
                 mcp_tools = await client.list_tools()
                 for mcp_tool in mcp_tools:
                     prefixed = f"mcp__{mcp_tool.name}"
-                    tool_metadata = self._extract_mcp_tool_metadata(mcp_tool)
+                    tool_metadata = _extract_mcp_tool_metadata(mcp_tool)
 
                     # Factory: capture client + tool name (+ metadata) in closure
                     def _make_wrapper(_client, _tool_name, _meta):

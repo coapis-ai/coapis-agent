@@ -41,7 +41,8 @@ import {
 import ChatDisplaySettings from "./components/ChatDisplaySettings";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
-import C2AToolCard from "./components/C2AToolCard";
+import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
+import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
@@ -127,6 +128,8 @@ for (const name of _ENHANCED_TOOL_NAMES) {
   _enhancedToolRenderConfig[name] = EnhancedToolCallCard;
 }
 // C2A 卡片：c2a_render_card 工具返回的 c2a_message 由 @coapis-c2a/renderer 渲染
+// 外部 URL 拦截（宿主职责）：行链接/按钮点击外部地址时先换带身份断言的签名 URL 再打开
+setUrlNavigate(openExternalUrl);
 _enhancedToolRenderConfig["c2a_render_card"] = C2AToolCard;
 
 function messageRequestsHistoryClear(message: unknown): boolean {
