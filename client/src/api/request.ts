@@ -1,4 +1,4 @@
-import { getApiUrl, clearAuthToken } from "./config";
+import { getApiUrl, clearAuthToken, getApiToken } from "./config";
 import { buildAuthHeaders } from "./authHeaders";
 
 function getErrorMessageFromBody(
@@ -92,6 +92,11 @@ export async function request<T = unknown>(
   // Cache-Control headers.
   const cacheMode: RequestCache = method === "GET" ? "no-store" : "default";
 
+  // Snapshot auth state at send time: only a 401 on a request that DID carry
+  // a token means the credential was rejected. A 401 on a token-less request
+  // (e.g. a poll racing ahead of login) must not wipe a freshly set token.
+  const hadToken = Boolean(getApiToken());
+
   const response = await fetch(url, {
     ...options,
     headers,
@@ -113,7 +118,7 @@ export async function request<T = unknown>(
           isEmbedded = true;
         }
       }
-      if (!isEmbedded) {
+      if (!isEmbedded && hadToken) {
         clearAuthToken();
         if (window.location.pathname !== "/login") {
           window.location.href = "/login";

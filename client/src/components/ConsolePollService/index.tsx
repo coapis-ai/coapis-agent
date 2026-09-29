@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageCircle, X } from "lucide-react";
 import { consoleApi, type PushMessage } from "../../api/modules/console";
+import { getApiToken } from "../../api/config";
 import { useApprovalContext } from "../../contexts/ApprovalContext";
 import styles from "./index.module.less";
 
@@ -36,6 +37,10 @@ export default function ConsolePollService() {
 
   useEffect(() => {
     const tick = () => {
+      // Skip while unauthenticated: a token-less request yields 401, and the
+      // global 401 handler would wipe a freshly stored token and redirect to
+      // /login right after login (observed race on main-layout mount).
+      if (!getApiToken()) return;
       // Pass current session_id for session-level isolation
       const sessionId = window.currentSessionId || "";
       consoleApi
