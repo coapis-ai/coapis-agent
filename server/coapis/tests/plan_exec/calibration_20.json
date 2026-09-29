@@ -1,0 +1,126 @@
+{
+  "source": "server/coapis/agent_eval/dataset/tasks/*.yaml（40题基线集，commit 4d24377）",
+  "note": "D1 判级校准：20 条真实任务首轮文本 + 人工判级（m1-plan 判级标准）。验收线：classifier 一致率 >= 80%。",
+  "samples": [
+    {
+      "uid": "me-01",
+      "text": "我们公司叫星辰科技，主要做智能制造。",
+      "expected": "simple",
+      "note": "陈述事实+追问，单一意图"
+    },
+    {
+      "uid": "me-04",
+      "text": "记住：我们团队周五下午三点站会。",
+      "expected": "simple",
+      "note": "单一记忆指令"
+    },
+    {
+      "uid": "me-07",
+      "text": "我的猫叫什么名字？",
+      "expected": "simple",
+      "note": "单一问答"
+    },
+    {
+      "uid": "me-08",
+      "text": "我今天做了三件事：开了预算会、审了两份合同、拜访了客户王总。",
+      "expected": "simple",
+      "note": "首轮为陈述枚举，无动作请求"
+    },
+    {
+      "uid": "pl-01",
+      "text": "帮我写一份Q3工作总结，分三步：先出提纲，再写初稿，最后润色。先给我提纲。",
+      "expected": "complex",
+      "note": "显式三步：提纲→初稿→润色"
+    },
+    {
+      "uid": "pl-03",
+      "text": "这份名单里有10个重复项和5个空值（见附件说明），请逐项处理并给出处理后结果。",
+      "expected": "medium",
+      "note": "隐含逐项迭代处理（规则层已知弱点）"
+    },
+    {
+      "uid": "pl-06",
+      "text": "查一下OA待审批事项，如果查不到就用文档库搜'审批'相关内容替代。",
+      "expected": "medium",
+      "note": "条件分支：查不到则替代检索"
+    },
+    {
+      "uid": "pl-08",
+      "text": "先读取 eval_src.txt 的内容，然后把它的摘要写入 eval_out.txt。",
+      "expected": "complex",
+      "note": "两个子目标：读文件+写摘要文件"
+    },
+    {
+      "uid": "ru-01",
+      "text": "用 mock_oa_doc_search 查一下'报销制度'相关文档，告诉我报销上限是多少。",
+      "expected": "simple",
+      "note": "单次检索回答单一问题"
+    },
+    {
+      "uid": "ru-04",
+      "text": "算一下 (17*23+45)/7 的结果，要精确到两位小数",
+      "expected": "simple",
+      "note": "纯计算"
+    },
+    {
+      "uid": "ru-07",
+      "text": "用 mock_oa_doc_search 查'差旅标准'，把结果整理成表格写入 eval_travel.txt",
+      "expected": "complex",
+      "note": "三段流水：检索→制表→写文件"
+    },
+    {
+      "uid": "ru-08",
+      "text": "查一下OA待审批有多少条，然后在回答里明确写出这个数字。",
+      "expected": "simple",
+      "note": "单次查询+复述数字"
+    },
+    {
+      "uid": "sk-01",
+      "text": "帮我写一份简历，我叫张三，五年Java开发经验",
+      "expected": "simple",
+      "note": "单一生成任务"
+    },
+    {
+      "uid": "sk-03",
+      "text": "晚上吃火锅怎么样？推荐个蘸料配方",
+      "expected": "simple",
+      "note": "闲聊+单一建议"
+    },
+    {
+      "uid": "sk-06",
+      "text": "解释一下什么是分布式锁，举一个Redis的例子",
+      "expected": "medium",
+      "note": "两部分：解释+举例"
+    },
+    {
+      "uid": "sk-08",
+      "text": "帮我订一份会议室：下周三下午两点到四点，参加人是我、李四和王五，主题是季度经营分析",
+      "expected": "simple",
+      "note": "单一预订意图（参数多但目标单一）"
+    },
+    {
+      "uid": "tc-01",
+      "text": "帮我查一下OA里有哪些待审批事项",
+      "expected": "simple",
+      "note": "单次查询"
+    },
+    {
+      "uid": "tc-04",
+      "text": "给 zhangsan@corp.cn 发一封邮件，通知他明天上午10点开项目例会",
+      "expected": "simple",
+      "note": "单一发送动作"
+    },
+    {
+      "uid": "tc-05",
+      "text": "查一下OA待审批事项，按部门统计数量给我汇总",
+      "expected": "medium",
+      "note": "两步：查询+按部门聚合"
+    },
+    {
+      "uid": "tc-08",
+      "text": "同时帮我看下今天的会议和OA待审批事项，一起告诉我",
+      "expected": "medium",
+      "note": "两个并列子查询（规则层已知弱点）"
+    }
+  ]
+}
