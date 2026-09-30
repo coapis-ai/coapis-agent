@@ -31,7 +31,7 @@ import os
 import threading
 import time
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -439,8 +439,8 @@ def sign_url(target_url: str, source: str = "c2a_link") -> str:
 # httpx 层注入（MCP 出站统一拦截点）
 # ──────────────────────────────────────────────────────────────────────
 
-async def _httpx_identity_hook(request) -> None:
-    """httpx request event hook: inject identity headers per request.
+async def _httpx_identity_core(request) -> None:
+    """身份注入钩子核心逻辑（依据当前上下文身份解析，按 mode 分流）。
 
     非外部系统 URL → 无操作。
 
@@ -457,17 +457,66 @@ async def _httpx_identity_hook(request) -> None:
     try:
         headers = await outbound_headers(str(request.url), source="mcp")
     except Exception as e:  # 注入失败一律降级放行，不阻断业务请求
-        logger.debug("identity injection skipped: %s", e)
+        logger.warning("[IDENTITY_DEBUG] core inject FAILED url=%s err=%s",
+                       getattr(request, "url", ""), e)
         return
+    logger.warning("[IDENTITY_DEBUG] core inject url=%s headers=%s",
+                   getattr(request, "url", ""),
+                   {k: (v[:12] + "..." if isinstance(v, str) and len(v) > 16 else v)
+                    for k, v in headers.items()})
     for key, value in headers.items():
         request.headers[key] = value
 
 
-def create_identity_httpx_client_factory():
+async def _httpx_identity_hook(request) -> None:
+    """全局 httpx 请求钩子（兼容旧入口，等价于核心逻辑）。"""
+    await _httpx_identity_core(request)
+
+
+def make_bound_identity_hook(
+    get_identity: Callable[[], Optional[str]],
+) -> Callable[..., Any]:
+    """生成绑定到特定 MCP client 实例的 httpx 请求钩子。
+
+    streamable_http 的发送通道是连接期创建的常驻任务，不会继承触发
+    调用的业务任务的 ContextVar（身份丢失会导致 Bearer/签名头缺失）。
+    这里把调用时刻显式捕获的"调用方身份"传入，并在发送任务里临时置入
+    ContextVar，从而复用既有的 outbound_headers/passthrough/签名逻辑。
+    """
+
+    async def hook(request) -> None:
+        ident = get_identity()
+        logger.warning(
+            "[IDENTITY_DEBUG] bound_hook url=%s ident=%r ctxvar=%r",
+            getattr(request, "url", ""), ident,
+            _CURRENT_IDENTITY_USER.get(),
+        )
+        if not ident:
+            await _httpx_identity_core(request)
+            return
+        token = _CURRENT_IDENTITY_USER.set(ident)
+        try:
+            await _httpx_identity_core(request)
+        finally:
+            _CURRENT_IDENTITY_USER.reset(token)
+
+    return hook
+
+
+def create_identity_httpx_client_factory(
+    *extra_request_hooks,
+    identity_getter: Optional[Callable[[], Optional[str]]] = None,
+):
     """MCP SDK ``httpx_client_factory``：创建的 client 自动挂身份注入 hook。
 
     用于 sse_client（streamable_http 在 stateful_client 里直接构造
     AsyncClient，单独加 event_hooks）。
+
+    ``extra_request_hooks``：附加的请求钩子（如 MCP 访问日志钩子），
+    排在身份注入之后，保证身份头先就位。
+
+    ``identity_getter``：按 client 实例捕获调用方身份的取值函数（发送
+    通道常驻任务不继承业务 ContextVar 时用）；为 None 时用全局钩子。
     """
     def factory(
         headers: Optional[Dict[str, str]] = None,
@@ -487,7 +536,14 @@ def create_identity_httpx_client_factory():
             )
         if auth is not None:
             client_kwargs["auth"] = auth
-        client_kwargs["event_hooks"] = {"request": [_httpx_identity_hook]}
+        identity_hook = (
+            make_bound_identity_hook(identity_getter)
+            if identity_getter is not None
+            else _httpx_identity_hook
+        )
+        client_kwargs["event_hooks"] = {
+            "request": [identity_hook, *extra_request_hooks]
+        }
         return httpx.AsyncClient(**client_kwargs)
 
     return factory

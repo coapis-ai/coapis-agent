@@ -33,7 +33,9 @@
           "method": "POST",
           "url": "https://oa.sczrsz.com/admin-api/system/auth/login",
           "content_type": "application/json",
-          "headers": {"tenant-id": "1"},
+          "headers": {
+            "tenant-id": "1"
+          },
           "body": {
             "username": "{username}",
             "password": "{password}"
@@ -60,7 +62,9 @@
         "profile": {
           "url": "https://oa.sczrsz.com/admin-api/system/user/profile/get",
           "method": "GET",
-          "headers": {"tenant-id": "1"},
+          "headers": {
+            "tenant-id": "1"
+          },
           "token_field": "data.accessToken",
           "name_field": "data.nickname"
         }
@@ -74,7 +78,9 @@
         "default_role": "user"
       },
       "base_urls": [
-        "https://oa.sczrsz.com"
+        "https://oa.sczrsz.com",
+        "http://172.16.6.47:3101",
+        "https://sczrsz.naturalcapital.cn"
       ],
       "shared_secret_use_global": true,
       "shared_secret": "",

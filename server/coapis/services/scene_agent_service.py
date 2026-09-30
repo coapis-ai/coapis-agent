@@ -373,7 +373,7 @@ class SceneAgentService:
         scene_config = SceneConfig(
             id=saved_scene.id,
             name=getattr(saved_scene, 'name', ''),
-            icon=getattr(saved_scene, 'icon', None),
+            icon=getattr(saved_scene, 'icon', None) or "📝",
             description=getattr(saved_scene, 'description', '') or '',
             short_description=getattr(saved_scene, 'short_description', '') or '',
             primary_tag_id=getattr(saved_scene, 'primary_tag_id', None),
@@ -382,9 +382,12 @@ class SceneAgentService:
             system_prompt=getattr(saved_scene, 'system_prompt', '') or '',
             welcome_message=getattr(saved_scene, 'welcome_message', '') or '',
             status=saved_scene.status if hasattr(saved_scene, 'status') else "active",
-            category=getattr(saved_scene, 'category', None),
-            created_at=datetime.fromisoformat(getattr(saved_scene, 'created_at', datetime.now(timezone.utc).isoformat())) if getattr(saved_scene, 'created_at', None) else datetime.now(timezone.utc),
-            updated_at=datetime.fromisoformat(getattr(saved_scene, 'updated_at', datetime.now(timezone.utc).isoformat())) if getattr(saved_scene, 'updated_at', None) else datetime.now(timezone.utc),
+            category=getattr(saved_scene, 'category', None) or "",
+            # SceneConfig 的 created_at/updated_at 是 str（ISO 字符串），
+            # 仓储 DTO 已保证返回字符串，直接透传，不要再 fromisoformat
+            # 转成 datetime 对象（会导致 pydantic 校验 500，而库已提交）。
+            created_at=getattr(saved_scene, 'created_at', None) or datetime.now(timezone.utc).isoformat(),
+            updated_at=getattr(saved_scene, 'updated_at', None) or datetime.now(timezone.utc).isoformat(),
             created_by=getattr(saved_scene, 'created_by', None),
             usage_count=getattr(saved_scene, 'usage_count', 0),
         )
@@ -472,7 +475,7 @@ class SceneAgentService:
         scene_config = SceneConfig(
             id=saved_scene.id,
             name=getattr(saved_scene, 'name', ''),
-            icon=getattr(saved_scene, 'icon', None),
+            icon=getattr(saved_scene, 'icon', None) or "📝",
             description=getattr(saved_scene, 'description', '') or '',
             short_description=getattr(saved_scene, 'short_description', '') or '',
             primary_tag_id=getattr(saved_scene, 'primary_tag_id', None),
@@ -481,9 +484,10 @@ class SceneAgentService:
             system_prompt=getattr(saved_scene, 'system_prompt', '') or '',
             welcome_message=getattr(saved_scene, 'welcome_message', '') or '',
             status=saved_scene.status if hasattr(saved_scene, 'status') else "active",
-            category=getattr(saved_scene, 'category', None),
-            created_at=datetime.fromisoformat(getattr(saved_scene, 'created_at', datetime.now(timezone.utc).isoformat())) if getattr(saved_scene, 'created_at', None) else datetime.now(timezone.utc),
-            updated_at=datetime.fromisoformat(getattr(saved_scene, 'updated_at', datetime.now(timezone.utc).isoformat())) if getattr(saved_scene, 'updated_at', None) else datetime.now(timezone.utc),
+            category=getattr(saved_scene, 'category', None) or "",
+            # 同上：时间戳保持 ISO 字符串透传，不能塞 datetime 对象
+            created_at=getattr(saved_scene, 'created_at', None) or datetime.now(timezone.utc).isoformat(),
+            updated_at=getattr(saved_scene, 'updated_at', None) or datetime.now(timezone.utc).isoformat(),
             created_by=getattr(saved_scene, 'created_by', None),
             usage_count=getattr(saved_scene, 'usage_count', 0),
         )

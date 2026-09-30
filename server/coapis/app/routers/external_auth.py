@@ -27,7 +27,7 @@ import shutil
 import threading
 import logging
 from fastapi import APIRouter, Request, HTTPException
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +190,62 @@ def _try_match_existing_local_user(
     if not prefix or not ext:
         return None
     return _find_local_user_by_username([f"{prefix}_{ext}"])
+
+
+def _norm_display_name(name: Any) -> str:
+    """显示名归一化：NFKC + 去首尾空白 + 小写 + 压缩内部空白。"""
+    import unicodedata
+
+    if not name:
+        return ""
+    s = unicodedata.normalize("NFKC", str(name)).strip().lower()
+    return " ".join(s.split())
+
+
+def _try_match_by_display_name(
+    um: Dict[str, Any],
+    external_name: str,
+) -> Tuple[Optional[str], bool]:
+    """自动建用户前，按"显示名"收养已有本地账号（治分身账号之根）。
+
+    external_name 必须由已认证的外部系统签发（SSO 回调直送 / 模型B 登录 API
+    返回值），可信方可收养；用户表单输入的登录名永不参与匹配。
+
+    严格防歧义规则：
+    - 只考虑**尚未绑定任何外部系统**的本地账号（绝不抢占已绑定账号）；
+    - 恰好 1 个命中 → 返回 ``(username, False)``，收养之；
+    - 0 个命中 → 返回 ``(None, False)``，照常走自动建用户；
+    - ≥2 个命中 → 返回 ``(None, True)``，调用方必须拒绝（403），绝不猜测。
+
+    ``um.match_display_name`` 可关（默认 True）；``match_existing=False`` 时
+    整个"建号前匹配"（含显示名收养）一并关闭，保持旧语义。
+    """
+    if um.get("match_existing", True) is False:
+        return None, False
+    if um.get("match_display_name", True) is False:
+        return None, False
+    target = _norm_display_name(external_name)
+    if not target:
+        return None, False
+
+    from ..user_store import list_users
+
+    bound_users = {
+        str(b.get("user_id"))
+        for b in load_bindings().get("bindings", [])
+        if str(b.get("status", 1)) == "1"
+    }
+    hits = [
+        str(u["username"])
+        for u in list_users()
+        if _norm_display_name(u.get("display_name")) == target
+        and str(u.get("username")) not in bound_users
+    ]
+    if len(hits) == 1:
+        return hits[0], False
+    if len(hits) > 1:
+        return None, True
+    return None, False
 
 
 def _bind_matched_existing_user(
@@ -618,10 +674,23 @@ async def external_login(request: Request):
     else:
         um = system.get("user_mapping") or {}
 
-        # ── 补全绑定关系：自动建用户前，按"前缀_外部ID"匹配已有本地用户（默认开） ──
-        # A1 治本：只认确定性身份键（前缀_外部ID），不用输入登录名/姓名匹配
+        # ── 补全绑定关系：自动建用户前匹配已有本地用户（默认开） ──
+        # A1 治本：① 确定性身份键（前缀_外部ID）；② 显示名收养（恰1个且未绑定）
+        # 歧义（同名≥2）→ 403 拒绝，绝不猜测 —— 保证后续账号无重复无歧义
+        # 信任边界：external_name 由已通过认证的外部系统签发（可信），
+        # 用户表单输入的登录名永不参与匹配。
         ext_login = _sanitize_external_id(external_id)
         matched = _try_match_existing_local_user(um, external_id, provider)
+        if matched is None:
+            matched, ambiguous = _try_match_by_display_name(um, external_name)
+            if ambiguous:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"存在多个名为'{external_name}'的未绑定本地账号，"
+                        "无法安全自动绑定。请联系管理员手动绑定。"
+                    ),
+                )
 
         if matched is not None and _bind_matched_existing_user(
                 matched, provider, external_id, external_name, mappings, request):
@@ -1004,10 +1073,23 @@ async def credential_login(request: Request):
     else:
         um = system.get("user_mapping") or {}
 
-        # ── 补全绑定关系：自动建用户前，按"前缀_外部ID"匹配已有本地用户（默认开） ──
-        # A1 治本：只认确定性身份键（前缀_外部ID），不用输入登录名/姓名匹配
+        # ── 补全绑定关系：自动建用户前匹配已有本地用户（默认开） ──
+        # A1 治本：① 确定性身份键（前缀_外部ID）；② 显示名收养（恰1个且未绑定）
+        # 歧义（同名≥2）→ 403 拒绝，绝不猜测 —— 保证后续账号无重复无歧义
+        # 信任边界：external_name 来自外部系统登录 API 的返回值（已认证，可信）；
+        # 用户在表单里输入的 username/password 永不参与匹配（王静分身的教训）。
         ext_login = _sanitize_external_id(external_id)
         matched = _try_match_existing_local_user(um, external_id, provider)
+        if matched is None:
+            matched, ambiguous = _try_match_by_display_name(um, external_name)
+            if ambiguous:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"存在多个名为'{external_name}'的未绑定本地账号，"
+                        "无法安全自动绑定。请联系管理员手动绑定。"
+                    ),
+                )
 
         if matched is not None and _bind_matched_existing_user(
                 matched, provider, external_id, external_name, mappings, request):
