@@ -15,6 +15,7 @@ import { useAgentStore } from "../../stores/agentStore";
 import { isDefaultAgent } from "../../utils/agentDisplayName";
 import FloatingChatWindow from "../../components/FloatingChatWindow";
 import { useChatWindow } from "../../contexts/ChatWindowContext";
+import { recordNonChatPath } from "../../lib/lastNonChatPath";
 import styles from "../index.module.less";
 
 // Chat is eagerly loaded (used by floating chat window)
@@ -189,6 +190,11 @@ export default function MainLayout() {
   // causing the @agentscope-ai/chat library to abort the SSE connection.
   const isChatRoute =
     currentPath === "/" || currentPath.startsWith("/chat");
+
+  // M3/T3.1：记录最近访问的非聊天路由（全屏最小化时“回到原页面”用）
+  useEffect(() => {
+    recordNonChatPath(currentPath);
+  }, [currentPath]);
 
   return (
     <Layout className={styles.mainLayout}>

@@ -3,6 +3,7 @@ import { Dropdown, Button, Avatar, Tag, Space } from 'antd';
 import {
   UserOutlined,
   LogoutOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../../contexts/UserContext';
@@ -45,6 +46,12 @@ export default function ProfileButton() {
       icon: <UserOutlined />,
       label: t('header.profile.viewProfile'),
       onClick: () => navigate('/user/profile'),
+    },
+    {
+      key: 'sessions-center',
+      icon: <UnorderedListOutlined />,
+      label: t('nav.sessionsCenter'),
+      onClick: () => navigate('/sessions'),
     },
     { type: 'divider' as const },
     {

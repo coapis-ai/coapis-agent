@@ -26,6 +26,7 @@ import UserProvider from "./contexts/UserContext";
 import { PluginProvider, usePlugins } from "./plugins/PluginContext";
 import { ApprovalProvider } from "./contexts/ApprovalContext";
 import { ChatWindowProvider } from "./contexts/ChatWindowContext";
+import { ModelChoiceProvider } from "./lib/modelChoice";
 import { Suspense } from "react";
 import { lazyImportWithRetry } from "./utils/lazyWithRetry";
 const LoginPage = lazyImportWithRetry("./pages/Login/index");
@@ -260,7 +261,9 @@ function App() {
       <UserProvider>
         <PluginProvider>
           <ChatWindowProvider>
-            <AppInner />
+            <ModelChoiceProvider>
+              <AppInner />
+            </ModelChoiceProvider>
           </ChatWindowProvider>
         </PluginProvider>
       </UserProvider>

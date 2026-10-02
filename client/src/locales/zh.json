@@ -1,4 +1,16 @@
 {
+  "resourceMenu": {
+    "title": "添加资源",
+    "upload": "上传文件",
+    "mySpace": "从我的空间选取",
+    "knowledge": "关联知识",
+    "model": "切换模型",
+    "session": "切换会话",
+    "history": "历史会话",
+    "more": "更多选项",
+    "mcp": "MCP 服务",
+    "skill": "指定技能"
+  },
   "externalNav": {
     "bindingRequired": "您尚未绑定该外部系统账号，暂无法访问，请先完成账号绑定。"
   },
@@ -42,6 +54,7 @@
     "reload": "刷新页面"
   },
   "nav": {
+    "sessionsCenter": "会话中心",
     "home": "首页",
     "chat": "聊天",
     "workbench": "工作场景",
@@ -2730,5 +2743,18 @@
   },
   "permission": {
     "noAccess": "无权限执行此操作"
+  },
+  "resourcePicker": {
+    "tabTree": "文件树",
+    "tabLedger": "文件台账",
+    "filterAll": "全部",
+    "filterSession": "本会话生成",
+    "filterUpload": "我上传的",
+    "selectedCount": "已选 {{count}} 项",
+    "noRecords": "暂无记录",
+    "autoUnavailable": "自动路由（暂未开放）",
+    "clearModel": "清除模型",
+    "noModels": "暂无可用模型",
+    "current": "使用中"
   }
 }

@@ -1,4 +1,16 @@
 {
+  "resourceMenu": {
+    "title": "Add Resources",
+    "upload": "Upload File",
+    "mySpace": "Pick from My Space",
+    "knowledge": "Attach Knowledge",
+    "model": "Switch Model",
+    "session": "Switch Session",
+    "history": "Session History",
+    "more": "More Options",
+    "mcp": "MCP Services",
+    "skill": "Specify Skills"
+  },
   "externalNav": {
     "bindingRequired": "You have not linked an account for this external system. Access is blocked until you complete the binding."
   },
@@ -42,6 +54,7 @@
     "reload": "Reload"
   },
   "nav": {
+    "sessionsCenter": "Sessions Center",
     "home": "Home",
     "chat": "Chat",
     "workbench": "Office",
@@ -2680,5 +2693,18 @@
   },
   "permission": {
     "noAccess": "No permission to perform this action"
+  },
+  "resourcePicker": {
+    "tabTree": "File Tree",
+    "tabLedger": "File Ledger",
+    "filterAll": "All",
+    "filterSession": "Generated in this session",
+    "filterUpload": "My uploads",
+    "selectedCount": "{{count}} selected",
+    "noRecords": "No records",
+    "autoUnavailable": "Auto routing (coming soon)",
+    "clearModel": "Clear model",
+    "noModels": "No models available",
+    "current": "In use"
   }
 }

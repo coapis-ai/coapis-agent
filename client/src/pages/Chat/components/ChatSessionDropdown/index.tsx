@@ -112,6 +112,8 @@ interface ChatSessionDropdownProps {
   showSearch?: boolean;
   /** Callback when search keyword changes */
   onSearchChange?: (keyword: string) => void;
+  /** 选择模式：提供后点击会话不跳转，而是回调（M4 历史会话引用芯片） */
+  onSelect?: (session: { id: string; name: string }) => void;
 }
 
 /** Format an ISO 8601 timestamp to YYYY-MM-DD HH:mm:ss */
@@ -268,7 +270,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
       });
   }, [props.open, setSessions]);
 
-  /** Navigate to a session and close the dropdown */
+  /** Navigate to a session and close the dropdown (or select it in select mode) */
   const handleSessionClick = useCallback(
     (sessionId: string) => {
       // Resolve the real backend UUID — session.id may be a local timestamp
@@ -278,9 +280,13 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
       const targetId = backendId || sessionId;
       console.log(`[ChatSessionDropdown] handleSessionClick: sessionId=${sessionId}, backendId=${backendId}, targetId=${targetId}`);
       props.onClose();
-      navigate(`/chat/${targetId}`, { replace: true });
+      if (props.onSelect) {
+        props.onSelect({ id: targetId, name: session?.name || "New Chat" });
+      } else {
+        navigate(`/chat/${targetId}`, { replace: true });
+      }
     },
-    [props.onClose, localSessions, navigate],
+    [props.onClose, props.onSelect, localSessions, navigate],
   );
 
   /** Start editing a session name */

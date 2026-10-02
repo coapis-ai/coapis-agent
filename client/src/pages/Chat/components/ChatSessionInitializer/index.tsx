@@ -5,6 +5,7 @@ import {
   useChatAnywhereSessionsState,
 } from "@agentscope-ai/chat";
 import { useAgentStore } from "../../../../stores/agentStore";
+import { getChatGlobals } from "../../../../lib/chatGlobals";
 import sessionApi from "../../sessionApi";
 
 interface ChatSessionInitializerProps {
@@ -36,13 +37,13 @@ const ChatSessionInitializer: React.FC<ChatSessionInitializerProps> = ({
 }) => {
   const location = useLocation();
   
-  // ⭐ 嵌入式模式：从 window 对象获取 chatId
+  // ⭐ 嵌入式模式：从 lib/chatGlobals 命名空间获取 chatId（M3/T3.2）
   const isEmbeddedMode = useMemo(() => {
-    return (window as any).__CHAT_MODE__ === 'embedded';
+    return getChatGlobals().mode === 'embedded';
   }, []);
   
   const windowChatId = useMemo(() => {
-    return (window as any).__CHAT_SESSION_ID__;
+    return getChatGlobals().sessionId;
   }, []);
   
   const chatId = useMemo(() => {

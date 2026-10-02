@@ -305,6 +305,25 @@ async def upload_file(
             raise HTTPException(status_code=409, detail="文件已存在")
         raise HTTPException(status_code=500, detail=f"上传文件失败: {e}")
 
+    # File ledger hook (fire-and-forget, never breaks the upload)
+    try:
+        from ...config.session_context import (
+            get_current_agent_id,
+            get_current_session_id,
+        )
+        from ...foundation.file_ledger import record_file_event
+
+        led_abs = WORKSPACES_DIR / username / category / str(result.path).lstrip("/")
+        record_file_event(
+            username,
+            str(led_abs),
+            session_id=get_current_session_id(),
+            agent_id=get_current_agent_id(),
+            source="upload",
+        )
+    except Exception:
+        pass
+
     # Return format expected by frontend ChatUploadResponse: {url, file_name}
     return {
         "success": True,
@@ -313,6 +332,38 @@ async def upload_file(
         "file_name": result.name,
         "stored_name": result.path,
     }
+
+
+@router.get("/records")
+@require_permission("chat:read")
+async def list_file_records(
+    session_id: Optional[str] = Query(None, description="按会话过滤"),
+    source: Optional[str] = Query(None, description="按来源过滤: upload/write_file/edit_file/append_file/reconcile"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    request: Request = None,
+):
+    """文件台账列表（按文件去重，最新一次写入为准）"""
+    from ...foundation.file_ledger import get_file_ledger
+
+    username = get_current_user(request)["username"]
+    return get_file_ledger().list_records(
+        username,
+        session_id=session_id,
+        source=source,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/records/stats")
+@require_permission("chat:read")
+async def file_records_stats(request: Request = None):
+    """文件台账汇总统计（文件数/总大小/来源分布/扩展名分布）"""
+    from ...foundation.file_ledger import get_file_ledger
+
+    username = get_current_user(request)["username"]
+    return get_file_ledger().stats(username)
 
 
 @router.get("/download")

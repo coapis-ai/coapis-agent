@@ -16,6 +16,17 @@ export { useToolbarState } from './hooks/useToolbarState';
 export { useFileTree } from './hooks/useFileTree';
 export { useKnowledgeList } from './hooks/useKnowledgeList';
 
+// M4 资源融合：+ 资源菜单与选择面板
+export {
+  ResourcePlusMenu,
+  MySpacePickerModal,
+  KnowledgePickerModal,
+  HistorySessionsModal,
+  ModelPickerModal,
+  MultiSelectPickerModal,
+} from './resource';
+export type { PickItem } from './resource';
+
 export type {
   FileInfo,
   FileNode,

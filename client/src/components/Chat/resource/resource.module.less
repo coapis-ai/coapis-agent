@@ -1,0 +1,135 @@
+/* M4 资源融合：+ 资源菜单与选择面板共用样式 */
+
+.cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.invisibleUploadTarget {
+  display: block;
+  width: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  overflow: hidden;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.plusButton {
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.45));
+}
+
+.quickButton {
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.35));
+}
+
+.menuSectionLabel {
+  font-size: 11px;
+  color: var(--color-text-quaternary, rgba(0, 0, 0, 0.25));
+  padding: 4px 12px 2px;
+  letter-spacing: 0.4px;
+}
+
+.menuItemIcon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.modalBody {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.recordList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recordRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: var(--color-fill-quaternary, rgba(0, 0, 0, 0.04));
+  }
+}
+
+.recordName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.recordMeta {
+  font-size: 11px;
+  color: var(--color-text-quaternary, rgba(0, 0, 0, 0.25));
+  flex-shrink: 0;
+}
+
+.emptyTip {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--color-text-quaternary, rgba(0, 0, 0, 0.25));
+  font-size: 13px;
+}
+
+.pickRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: var(--color-fill-quaternary, rgba(0, 0, 0, 0.04));
+  }
+}
+
+.pickName {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pickDesc {
+  font-size: 12px;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.35));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footerBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.footerCount {
+  font-size: 12px;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.35));
+}

@@ -10,13 +10,16 @@ import {
   ExclamationCircleOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import { SparkCopyLine, SparkAttachmentLine } from "@agentscope-ai/icons";
+import { SparkCopyLine } from "@agentscope-ai/icons";
 import { usePlugins } from "../../plugins/PluginContext";
 import { useTranslation } from "react-i18next";
+import { useModelChoice } from "@/lib/modelChoice";
 import { useLocation, useNavigate } from "react-router-dom";
 import sessionApi from "./sessionApi";
 import defaultConfig, { getDefaultConfig } from "./OptionsPanel/defaultConfig";
 import { chatApi } from "../../api/modules/chat";
+import { skillApi } from "../../api/modules/skill";
+import api from "@/api";
 import { getApiUrl } from "../../api/config";
 import { buildAuthHeaders } from "../../api/authHeaders";
 import { providerApi } from "../../api/modules/provider";
@@ -25,9 +28,9 @@ import { useTheme } from "../../contexts/ThemeContext";
 import useIsMobile from "../../hooks/useIsMobile";
 import { useUser } from "../../contexts/UserContext";
 import { useAgentStore } from "../../stores/agentStore";
+import { getChatGlobals } from "../../lib/chatGlobals";
 import { useChatAnywhereInput, useChatAnywhereSessionsState } from "@agentscope-ai/chat";
 import styles from "./index.module.less";
-import { IconButton } from "@agentscope-ai/design";
 import ChatSessionInitializer from "./components/ChatSessionInitializer";
 import ChatSessionHeader from "./components/ChatSessionHeader";
 import ChatErrorBoundary from "./components/ChatErrorBoundary";
@@ -46,7 +49,19 @@ import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
-import { ChatToolbarSidebar, useToolbarState, ChatInputFooter, ModelCapabilityTag } from "../../components/Chat";
+import {
+  ChatToolbarSidebar,
+  useToolbarState,
+  ChatInputFooter,
+  ModelCapabilityTag,
+  ResourcePlusMenu,
+  MySpacePickerModal,
+  KnowledgePickerModal,
+  HistorySessionsModal,
+  ModelPickerModal,
+  MultiSelectPickerModal,
+  type PickItem,
+} from "../../components/Chat";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -601,19 +616,19 @@ export default function ChatPage() {
   const isMobile = useIsMobile();
   const { user } = useUser();
   
-  // 读取场景参数（嵌入式模式通过window注入）
+  // 读取场景参数（嵌入式模式通过 lib/chatGlobals 命名空间注入，M3/T3.2）
   const chatMode = useMemo(() => {
-    return (window as any).__CHAT_MODE__ || 'full';
+    return getChatGlobals().mode || 'full';
   }, []);
   
   const isEmbeddedMode = chatMode === 'embedded';
   
   const sceneSessionId = useMemo(() => {
-    return (window as any).__CHAT_SESSION_ID__;
+    return getChatGlobals().sessionId;
   }, []);
   
   const sceneId = useMemo(() => {
-    return (window as any).__CHAT_SCENE_ID__;
+    return getChatGlobals().sceneId;
   }, []);
   
   // 场景ID用于后续场景智能体相关逻辑
@@ -632,15 +647,15 @@ export default function ChatPage() {
   // 监听window参数变化（ChatWrapper使用useLayoutEffect设置参数）
   useEffect(() => {
     if (isEmbeddedMode) {
-      setSceneName((window as any).__CHAT_SCENE_NAME__ || '');
-      setSceneWelcomeMessage((window as any).__CHAT_WELCOME_MESSAGE__ || '');
-      // setSceneShowToolbar((window as any).__CHAT_SHOW_TOOLBAR__ !== false);
+      const g = getChatGlobals();
+      setSceneName(g.sceneName || '');
+      setSceneWelcomeMessage(g.welcomeMessage || '');
     }
   }, [isEmbeddedMode]);
   
   // 嵌入式模式的回调函数
   const embeddedOnClose = useMemo(() => {
-    return (window as any).__CHAT_ON_CLOSE__;
+    return getChatGlobals().onClose;
   }, [isEmbeddedMode]);
   
   const chatId = useMemo(() => {
@@ -658,6 +673,62 @@ export default function ChatPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const runtimeLoadingBridgeRef = useRef<RuntimeLoadingBridgeApi | null>(null);
   const { message } = useAppMessage();
+
+  // ─── M4 资源整合：+ 菜单与各选择面板 ─────────────────────────────
+  type PickerKind =
+    | "myspace"
+    | "knowledge"
+    | "model"
+    | "session"
+    | "history"
+    | "mcp"
+    | "skill";
+  const [pickerOpen, setPickerOpen] = useState<PickerKind | null>(null);
+  const [refMcps, setRefMcps] = useState<PickItem[]>([]);
+  const [refSkills, setRefSkills] = useState<PickItem[]>([]);
+  const [refSessions, setRefSessions] = useState<PickItem[]>([]);
+  const [mcpOptions, setMcpOptions] = useState<PickItem[]>([]);
+  const [skillOptions, setSkillOptions] = useState<PickItem[]>([]);
+  const { choice: modelChoice, clearChoice: clearModelChoice } =
+    useModelChoice();
+
+  const openPicker = useCallback(
+    (kind: PickerKind) => {
+      setPickerOpen(kind);
+      if (kind === "mcp" && mcpOptions.length === 0) {
+        api
+          .get("/mcp")
+          .then((data: any) => {
+            const list = Array.isArray(data) ? data : [];
+            setMcpOptions(
+              list
+                .filter((m: any) => m.enabled !== false)
+                .map((m: any) => ({
+                  id: m.key ?? m.id,
+                  name: m.name,
+                  desc: m.description || "",
+                })),
+            );
+          })
+          .catch(() => setMcpOptions([]));
+      }
+      if (kind === "skill" && skillOptions.length === 0) {
+        skillApi
+          .listSkills()
+          .then((list: any[]) => {
+            setSkillOptions(
+              (Array.isArray(list) ? list : []).map((s: any) => ({
+                id: s.name,
+                name: s.name,
+                desc: s.description || "",
+              })),
+            );
+          })
+          .catch(() => setSkillOptions([]));
+      }
+    },
+    [mcpOptions.length, skillOptions.length],
+  );
   const { approvals } = useApprovalContext();
   const [approvalRequests, setApprovalRequests] = useState<
     Map<string, ApprovalMessageData>
@@ -1519,10 +1590,19 @@ export default function ChatPage() {
               : "chat.attachments.tooltipNoMultimodal";
             return (
               <Tooltip title={t(tooltipKey, { limit: CHAT_ATTACHMENT_MAX_MB })}>
-                <IconButton
-                  disabled={props?.disabled}
-                  icon={<SparkAttachmentLine />}
-                  bordered={false}
+                <ResourcePlusMenu
+                  disabled={!!props?.disabled}
+                  onUploadClick={() => {
+                    // 故意不 stopPropagation：让点击冒泡到外层 antd Upload，
+                    // 打开原生文件选择（保留 Sender 原生上传流程）
+                  }}
+                  onMySpaceClick={() => openPicker("myspace")}
+                  onKnowledgeClick={() => openPicker("knowledge")}
+                  onModelClick={() => openPicker("model")}
+                  onSessionClick={() => openPicker("session")}
+                  onHistoryClick={() => openPicker("history")}
+                  onMcpClick={() => openPicker("mcp")}
+                  onSkillClick={() => openPicker("skill")}
                 />
               </Tooltip>
             );
@@ -1539,12 +1619,33 @@ export default function ChatPage() {
           <ChatInputFooter
             files={selectedFiles}
             knowledge={selectedKnowledge}
+            model={
+              modelChoice.name
+                ? {
+                    id: modelChoice.id ?? modelChoice.name,
+                    name: modelChoice.name,
+                  }
+                : null
+            }
+            mcps={refMcps}
+            skills={refSkills}
+            sessions={refSessions}
             onRemoveFile={(id) => {
               setSelectedFiles(prev => prev.filter(f => f.id !== id));
             }}
             onRemoveKnowledge={(id) => {
               setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
             }}
+            onRemoveModel={() => clearModelChoice()}
+            onRemoveMcp={(id) =>
+              setRefMcps(prev => prev.filter(x => x.id !== id))
+            }
+            onRemoveSkill={(id) =>
+              setRefSkills(prev => prev.filter(x => x.id !== id))
+            }
+            onRemoveSession={(id) =>
+              setRefSessions(prev => prev.filter(x => x.id !== id))
+            }
           />
         ),
         // 右下角操作区 - 显示模型能力
@@ -1755,6 +1856,12 @@ export default function ChatPage() {
     sessionApi,
     selectedFiles,
     selectedKnowledge,
+    // M5 联调修复：afterUI 芯片行引用的状态必须进依赖，
+    // 否则选中模型/MCP/技能/会话后芯片不实时刷新（要刷新页面才对）
+    modelChoice,
+    refMcps,
+    refSkills,
+    refSessions,
   ]);
 
   return (
@@ -2028,6 +2135,81 @@ export default function ChatPage() {
         />
       </Drawer>
     )}
+
+    {/* ─── M4 资源整合：各选择面板 ─────────────────────────────────── */}
+    <MySpacePickerModal
+      open={pickerOpen === "myspace"}
+      onClose={() => setPickerOpen(null)}
+      onConfirm={(files) => {
+        setSelectedFiles((prev) => {
+          const seen = new Set(prev.map((f) => f.path));
+          return [...prev, ...files.filter((f) => !seen.has(f.path))];
+        });
+        setPickerOpen(null);
+      }}
+      currentSessionId={chatId}
+    />
+    <KnowledgePickerModal
+      open={pickerOpen === "knowledge"}
+      onClose={() => setPickerOpen(null)}
+      onConfirm={(items) => {
+        setSelectedKnowledge((prev) => {
+          const seen = new Set(prev.map((k) => k.id));
+          return [...prev, ...items.filter((k) => !seen.has(k.id))];
+        });
+        setPickerOpen(null);
+      }}
+    />
+    <ModelPickerModal
+      open={pickerOpen === "model"}
+      onClose={() => setPickerOpen(null)}
+    />
+    <HistorySessionsModal
+      open={pickerOpen === "session" || pickerOpen === "history"}
+      mode={pickerOpen === "history" ? "reference" : "switch"}
+      onClose={() => setPickerOpen(null)}
+      onReference={(s) => {
+        setRefSessions((prev) =>
+          prev.some((x) => x.id === s.id)
+            ? prev
+            : [...prev, { id: s.id, name: s.name }],
+        );
+      }}
+    />
+    <MultiSelectPickerModal
+      open={pickerOpen === "mcp"}
+      title={t("resourceMenu.mcp")}
+      items={mcpOptions}
+      loading={false}
+      selectedIds={refMcps.map((i) => i.id)}
+      onOk={(ids: string[]) => {
+        setRefMcps(
+          ids.map((id: string) => {
+            const opt = mcpOptions.find((o) => o.id === id);
+            return { id, name: opt?.name ?? id, desc: opt?.desc };
+          }),
+        );
+        setPickerOpen(null);
+      }}
+      onClose={() => setPickerOpen(null)}
+    />
+    <MultiSelectPickerModal
+      open={pickerOpen === "skill"}
+      title={t("resourceMenu.skill")}
+      items={skillOptions}
+      loading={false}
+      selectedIds={refSkills.map((i) => i.id)}
+      onOk={(ids: string[]) => {
+        setRefSkills(
+          ids.map((id: string) => {
+            const opt = skillOptions.find((o) => o.id === id);
+            return { id, name: opt?.name ?? id, desc: opt?.desc };
+          }),
+        );
+        setPickerOpen(null);
+      }}
+      onClose={() => setPickerOpen(null)}
+    />
     </ChatDisplayConfigContext.Provider>
   );
 }

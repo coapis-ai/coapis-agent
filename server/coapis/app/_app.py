@@ -505,6 +505,19 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
 
             provider_manager.start_local_model_resume(local_model_manager)
 
+            # ---- File ledger: initial reconcile + daily sweep (M2) ----
+            try:
+                from ..foundation.file_ledger import (
+                    start_file_ledger_maintenance,
+                )
+
+                asyncio.create_task(start_file_ledger_maintenance())
+                logger.debug("File ledger maintenance started")
+            except Exception as exc:
+                logger.warning(
+                    "Failed to start file ledger maintenance: %s", exc,
+                )
+
             # ---- Plugin System ----
             logger.debug("Initializing plugin system...")
 

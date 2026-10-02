@@ -325,11 +325,13 @@ async def console_chat(
 
     # ── Inject session context (unified contextvars, CoApis pattern) ──
     from ...config.session_context import set_session_context
+    session_id = payload.get("session_id", "")
     set_session_context(
         user_id=username,
         username=username,
         user_role=user_role,
         agent_id=agent_id,
+        session_id=session_id,
         channel="console",
         workspace_dir=workspace.workspace_dir,
     )

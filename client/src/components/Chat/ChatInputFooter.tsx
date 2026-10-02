@@ -1,17 +1,49 @@
 // 聊天输入框底部引用条
-// 单行显示已选择的文件和知识库，超长省略
+// 单行显示已选择的资源芯片（文件/知识库/模型/MCP/技能/会话引用），超长省略
 
 import { Tag, Tooltip } from 'antd';
-import { FileOutlined, BookOutlined } from '@ant-design/icons';
+import {
+  FileOutlined,
+  BookOutlined,
+  RobotOutlined,
+  ApiOutlined,
+  ThunderboltOutlined,
+  HistoryOutlined,
+} from '@ant-design/icons';
 import type { FileInfo, KnowledgeInfo } from './types';
 import styles from './ChatInputFooter.module.less';
+
+export interface RefChip {
+  id: string;
+  name: string;
+}
 
 interface ChatInputFooterProps {
   files: FileInfo[];
   knowledge: KnowledgeInfo[];
   onRemoveFile: (id: string) => void;
   onRemoveKnowledge: (id: string) => void;
+  /** M4 新增芯片（均可选，向后兼容） */
+  model?: RefChip | null;
+  onRemoveModel?: () => void;
+  mcps?: RefChip[];
+  onRemoveMcp?: (id: string) => void;
+  skills?: RefChip[];
+  onRemoveSkill?: (id: string) => void;
+  sessions?: RefChip[];
+  onRemoveSession?: (id: string) => void;
 }
+
+type ChipKind = 'file' | 'knowledge' | 'model' | 'mcp' | 'skill' | 'session';
+
+const CHIP_ICON: Record<ChipKind, React.ReactNode> = {
+  file: <FileOutlined />,
+  knowledge: <BookOutlined />,
+  model: <RobotOutlined />,
+  mcp: <ApiOutlined />,
+  skill: <ThunderboltOutlined />,
+  session: <HistoryOutlined />,
+};
 
 /**
  * 聊天输入框底部引用条
@@ -23,8 +55,25 @@ export function ChatInputFooter({
   knowledge,
   onRemoveFile,
   onRemoveKnowledge,
+  model,
+  onRemoveModel,
+  mcps = [],
+  onRemoveMcp,
+  skills = [],
+  onRemoveSkill,
+  sessions = [],
+  onRemoveSession,
 }: ChatInputFooterProps) {
-  const totalCount = files.length + knowledge.length;
+  const items: Array<{ kind: ChipKind; id: string; name: string }> = [
+    ...(model ? [{ kind: 'model' as const, id: model.id, name: model.name }] : []),
+    ...files.map(f => ({ kind: 'file' as const, name: f.name, id: f.id })),
+    ...knowledge.map(k => ({ kind: 'knowledge' as const, name: k.name, id: k.id })),
+    ...mcps.map(m => ({ kind: 'mcp' as const, name: m.name, id: m.id })),
+    ...skills.map(s => ({ kind: 'skill' as const, name: s.name, id: s.id })),
+    ...sessions.map(s => ({ kind: 'session' as const, name: s.name, id: s.id })),
+  ];
+
+  const totalCount = items.length;
 
   // 没有引用时显示占位文字
   if (totalCount === 0) {
@@ -37,14 +86,19 @@ export function ChatInputFooter({
     );
   }
 
-  // 构建显示内容
-  const items: Array<{ type: 'file' | 'knowledge'; name: string; id: string }> = [
-    ...files.map(f => ({ type: 'file' as const, name: f.name, id: f.id })),
-    ...knowledge.map(k => ({ type: 'knowledge' as const, name: k.name, id: k.id })),
-  ];
+  const handleRemove = (kind: ChipKind, id: string) => {
+    switch (kind) {
+      case 'file': onRemoveFile(id); break;
+      case 'knowledge': onRemoveKnowledge(id); break;
+      case 'model': onRemoveModel?.(); break;
+      case 'mcp': onRemoveMcp?.(id); break;
+      case 'skill': onRemoveSkill?.(id); break;
+      case 'session': onRemoveSession?.(id); break;
+    }
+  };
 
   // 限制显示数量，避免换行
-  const maxDisplay = 3;
+  const maxDisplay = 4;
   const displayItems = items.slice(0, maxDisplay);
   const remainingCount = items.length - maxDisplay;
 
@@ -53,19 +107,15 @@ export function ChatInputFooter({
       <div className={styles.left}>
         {displayItems.map((item) => (
           <Tag
-            key={item.id}
+            key={`${item.kind}:${item.id}`}
             closable
             onClose={(e) => {
               e.preventDefault();
-              if (item.type === 'file') {
-                onRemoveFile(item.id);
-              } else {
-                onRemoveKnowledge(item.id);
-              }
+              handleRemove(item.kind, item.id);
             }}
             className={styles.refTag}
           >
-            {item.type === 'file' ? <FileOutlined /> : <BookOutlined />}
+            {CHIP_ICON[item.kind]}
             <span className={styles.refName}>{item.name}</span>
           </Tag>
         ))}

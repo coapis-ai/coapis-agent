@@ -1,4 +1,16 @@
 {
+  "resourceMenu": {
+    "title": "リソースを追加",
+    "upload": "ファイルをアップロード",
+    "mySpace": "マイスペースから選択",
+    "knowledge": "ナレッジを関連付け",
+    "model": "モデルを切り替え",
+    "session": "セッションを切り替え",
+    "history": "履歴セッション",
+    "more": "その他のオプション",
+    "mcp": "MCP サービス",
+    "skill": "スキルを指定"
+  },
   "common": {
     "save": "保存",
     "reset": "リセット",
@@ -37,6 +49,7 @@
     "reload": "再読み込み"
   },
   "nav": {
+    "sessionsCenter": "セッションセンター",
     "chat": "チャット",
     "control": "コントロール",
     "channels": "チャンネル",
@@ -1994,5 +2007,18 @@
       "all": "すべて",
       "refresh": "更新"
     }
+  },
+  "resourcePicker": {
+    "tabTree": "ファイルツリー",
+    "tabLedger": "ファイル台帳",
+    "filterAll": "すべて",
+    "filterSession": "このセッションで生成",
+    "filterUpload": "自分がアップロード",
+    "selectedCount": "{{count}} 件選択済み",
+    "noRecords": "記録がありません",
+    "autoUnavailable": "自動ルーティング（近日公開）",
+    "clearModel": "モデルをクリア",
+    "noModels": "選択可能なモデルはありません",
+    "current": "使用中"
   }
 }

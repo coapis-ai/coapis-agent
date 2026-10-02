@@ -17,6 +17,7 @@ import {
   LinkOutlined,
   TeamOutlined,
   MenuOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { menusApi } from '../api/modules/menus';
 
@@ -45,6 +46,12 @@ export const FALLBACK_MENU_ITEMS: MenuItem[] = [
     icon: <AppstoreOutlined />,
     path: '/workbench',
     // 二级菜单从 API 动态加载，不在此硬编码
+  },
+  {
+    key: 'sessions-center',
+    label: '会话中心',
+    icon: <UnorderedListOutlined />,
+    path: '/sessions',
   },
   {
     key: 'myspace',
@@ -86,6 +93,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   'LinkOutlined': <LinkOutlined />,
   'TeamOutlined': <TeamOutlined />,
   'MenuOutlined': <MenuOutlined />,
+  'UnorderedListOutlined': <UnorderedListOutlined />,
 };
 
 /**

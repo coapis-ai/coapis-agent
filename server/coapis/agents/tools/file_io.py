@@ -119,6 +119,32 @@ def _get_encoding_for_file(file_path: str) -> str:
     return "utf-8"
 
 
+def _ledger_record(abs_path: str, source: str) -> None:
+    """Fire-and-forget file-ledger hook (never raises).
+
+    Attributes the write to the current session context (username /
+    session_id / agent_id). Failures are swallowed — the ledger must
+    never break the message path.
+    """
+    try:
+        from ...config.context import get_current_username
+        from ...config.session_context import (
+            get_current_agent_id,
+            get_current_session_id,
+        )
+        from ...foundation.file_ledger import record_file_event
+
+        record_file_event(
+            get_current_username(),
+            abs_path,
+            session_id=get_current_session_id(),
+            agent_id=get_current_agent_id(),
+            source=source,
+        )
+    except Exception:
+        pass
+
+
 @register_tool(
     name="read_file",
     description="读取文件内容。必需参数：file_path（文件路径）。可选参数：start_line、end_line（行号范围）。",
@@ -335,6 +361,9 @@ async def write_file(
     try:
         with open(file_path, "w", encoding=encoding) as file:
             file.write(content)
+
+        _ledger_record(file_path, "write_file")
+
         return ToolResponse(
             content=[
                 TextBlock(
@@ -457,6 +486,7 @@ async def edit_file(
         write_text = write_response.content[0].get("text", "")
         if write_text.startswith("Error:"):
             return write_response
+        _ledger_record(resolved_path, "edit_file")
 
     return ToolResponse(
         content=[
@@ -506,6 +536,9 @@ async def append_file(
     try:
         with open(file_path, "a", encoding=encoding) as file:
             file.write(content)
+
+        _ledger_record(file_path, "append_file")
+
         return ToolResponse(
             content=[
                 TextBlock(

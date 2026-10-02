@@ -906,6 +906,25 @@ class AgentRunner(Runner):
                 from ..external_identity import set_identity_username
                 set_identity_username(user_id)
 
+            # M2 文件台账：把 username + 用户工作区目录写入会话上下文，
+            # 让工具钩子（文件台账、媒体 URL 解析、workspace 守卫）能正确
+            # 归因到用户；相对路径写入也会落到 workspaces/{user}/files/。
+            if user_id:
+                try:
+                    from ...config.session_context import (
+                        set_current_username,
+                        set_current_workspace_dir,
+                    )
+                    from ...constant import WORKSPACES_DIR
+
+                    set_current_username(user_id)
+                    set_current_workspace_dir(WORKSPACES_DIR / user_id)
+                except Exception:
+                    logger.debug(
+                        "Failed to set session context for user %s",
+                        user_id, exc_info=True,
+                    )
+
             logger.info(
                 "Handle agent query:\n%s",
                 json.dumps(
