@@ -73,6 +73,7 @@ export function ChatWrapper({
       welcomeMessage,
       compact: compactLayout,
       onClose,
+      onExpand,
       onTogglePin,
       isPinned,
       onDragStart: onDragStart
@@ -91,9 +92,9 @@ export function ChatWrapper({
     };
   }, []);
 
-  // 以下两个回调不再有全局通道（原 __CHAT_ON_EXPAND__ / __CHAT_ON_SESSION_CREATED__ /
+  // onSessionCreated / onError 不再有全局通道（原 __CHAT_ON_SESSION_CREATED__ /
   // __CHAT_ON_ERROR__ 无任何消费者，已在 T3.2 中裁撤）；保留 props 以便父级直接使用。
-  void onExpand;
+  // onExpand 自 v2.2.2 起恢复全局通道（浮窗"展开"按钮消费）。
   void onSessionCreated;
   void onError;
   void showToolbar;

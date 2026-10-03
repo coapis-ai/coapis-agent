@@ -1,9 +1,9 @@
 // 聊天全局参数 —— 单一命名空间（M3/T3.2：14 → 10，过渡期兼容旧变量）
 //
 // 背景：嵌入式（浮窗/场景）模式需要把参数传给 Chat 页面。历史上散落成 14 个
-// window.__CHAT_*__ 全局变量，其中 4 个无任何消费者（onExpand / onSessionCreated /
+// window.__CHAT_*__ 全局变量，其中 3 个无任何消费者（onSessionCreated /
 // onError / showToolbar），已裁撤。现收敛为单一命名空间对象 window.__COAPIS_CHAT__，
-// 共 10 个字段。
+// 共 11 个字段（onExpand 于 v2.2.2 恢复，供浮窗"展开"按钮使用）。
 //
 // 过渡期兼容：setter 同时写穿（write-through）旧版 __CHAT_*__ 键，第三方/旧代码
 // 仍可读取；消费方已全部迁移到 getChatGlobals()。
@@ -16,6 +16,7 @@ export interface ChatGlobals {
   welcomeMessage?: string;
   compact?: boolean;
   onClose?: () => void;
+  onExpand?: () => void;
   onTogglePin?: () => void;
   isPinned?: boolean;
   onDragStart?: (e: unknown) => void;
@@ -55,6 +56,7 @@ export function setChatGlobals(partial: Partial<ChatGlobals>): void {
     welcomeMessage: '__CHAT_WELCOME_MESSAGE__',
     compact: '__CHAT_COMPACT__',
     onClose: '__CHAT_ON_CLOSE__',
+    onExpand: '__CHAT_ON_EXPAND__',
     onTogglePin: '__CHAT_ON_TOGGLE_PIN__',
     isPinned: '__CHAT_IS_PINNED__',
     onDragStart: '__CHAT_ON_DRAG_START__',

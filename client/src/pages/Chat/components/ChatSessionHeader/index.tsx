@@ -19,6 +19,8 @@ interface ChatSessionHeaderProps {
   isEmbeddedMode: boolean;
   /** 关闭回调（嵌入模式） */
   onClose?: () => void;
+  /** 展开回调（嵌入模式：收起浮窗并跳转全屏聊天页） */
+  onExpand?: () => void;
   /** 场景名称（嵌入模式） */
   sceneName?: string;
 }
@@ -31,6 +33,7 @@ interface ChatSessionHeaderProps {
 const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
   isEmbeddedMode,
   onClose,
+  onExpand,
   sceneName,
 }) => {
   const { t } = useTranslation();
@@ -103,6 +106,7 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
               type="text"
               size="small"
               icon={<ExpandOutlined />}
+              onClick={onExpand}
               className={styles.embeddedControlBtn}
               title={t("chat.expand")}
             />

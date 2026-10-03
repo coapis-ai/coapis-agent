@@ -2719,5 +2719,11 @@
     "clearModel": "Clear model",
     "noModels": "No models available",
     "current": "In use"
+  },
+  "tasks": {
+    "title": "Tasks",
+    "placeholderTitle": "Task center coming soon",
+    "placeholderDesc": "Long-running task overview, progress tracking and artifact links arrive in the next release. Start tasks in chat for now and review them here later.",
+    "startChat": "Start a task in chat"
   }
 }

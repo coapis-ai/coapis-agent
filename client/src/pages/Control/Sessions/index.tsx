@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Form, Modal, Table, Button } from "@agentscope-ai/design";
+import { Card, Form, Modal, Table, Button, Empty } from "@agentscope-ai/design";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import { useTranslation } from "react-i18next";
 import {
@@ -187,21 +187,34 @@ function SessionsPage() {
       />
 
       <Card className={styles.tableCard} bodyStyle={{ padding: 0 }}>
-        <Table
-          columns={columns}
-          dataSource={filteredSessions}
-          loading={loading}
-          rowKey="id"
-          rowSelection={rowSelection}
-          rowClassName={(record) =>
-            selectedRowKeys.includes(record.id) ? styles.selectedRow : ""
-          }
-          scroll={{ x: 1500 }}
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: false,
-          }}
-        />
+        {!loading && filteredSessions.length === 0 ? (
+          <div style={{ padding: "64px 16px", textAlign: "center" }}>
+            <Empty description={t("sessions.emptyDesc")} />
+            <Button
+              type="primary"
+              style={{ marginTop: 16 }}
+              onClick={() => navigate("/chat")}
+            >
+              {t("sessions.startFirstChat")}
+            </Button>
+          </div>
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={filteredSessions}
+            loading={loading}
+            rowKey="id"
+            rowSelection={rowSelection}
+            rowClassName={(record) =>
+              selectedRowKeys.includes(record.id) ? styles.selectedRow : ""
+            }
+            scroll={{ x: 1500 }}
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: false,
+            }}
+          />
+        )}
       </Card>
 
       <SessionDrawer

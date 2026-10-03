@@ -656,6 +656,11 @@ export default function ChatPage() {
   const embeddedOnClose = useMemo(() => {
     return getChatGlobals().onClose;
   }, [isEmbeddedMode]);
+
+  // v2.2.2: 浮窗"展开"按钮回调（收起浮窗并跳转全屏聊天页）
+  const embeddedOnExpand = useMemo(() => {
+    return getChatGlobals().onExpand;
+  }, [isEmbeddedMode]);
   
   const chatId = useMemo(() => {
     // 嵌入式模式：使用场景会话ID
@@ -1854,6 +1859,7 @@ export default function ChatPage() {
           onShowDisplaySettings={() => setShowDisplaySettings(true)}
           isEmbeddedMode={isEmbeddedMode}
           onClose={embeddedOnClose}
+          onExpand={embeddedOnExpand}
           sceneName={sceneName}
         />
         
