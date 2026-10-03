@@ -26,6 +26,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Guard: on a fresh database, 0001 already created file_records from the
+    # current ORM models — a blind create_table would raise "table already
+    # exists". Legacy databases lack the table and get the full DDL.
+    bind = op.get_bind()
+    if "file_records" in sa.inspect(bind).get_table_names():
+        return
     op.create_table(
         "file_records",
         sa.Column(

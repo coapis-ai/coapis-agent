@@ -25,9 +25,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("agent_trajectories") as batch:
-        batch.add_column(sa.Column("duration_ms", sa.Integer(), nullable=True))
-        batch.add_column(sa.Column("created_at", sa.Float(), nullable=True))
+    # Guard: on a fresh database, 0001 creates tables from the *current* ORM
+    # models, which already carry these columns — blind add_column would
+    # raise "duplicate column name". Only add what is actually missing.
+    bind = op.get_bind()
+    existing = {c["name"] for c in sa.inspect(bind).get_columns("agent_trajectories")}
+    missing = [
+        sa.Column("duration_ms", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.Float(), nullable=True),
+    ]
+    missing = [c for c in missing if c.name not in existing]
+    if missing:
+        with op.batch_alter_table("agent_trajectories") as batch:
+            for col in missing:
+                batch.add_column(col)
 
 
 def downgrade() -> None:

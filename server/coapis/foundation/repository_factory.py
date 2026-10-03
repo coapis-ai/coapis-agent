@@ -143,6 +143,14 @@ class RepositoryFactory:
                 "the edition plugin must call inject_user_repository() at startup."
             )
 
+        # Enterprise edition: always bring the schema to head at startup.
+        # Production runs Postgres via COAPIS_DATABASE_URL; alembic upgrade
+        # head is idempotent, so fresh installs and rolling deployments both
+        # converge without manual psql steps.
+        from .db.migrate import run_migrations
+
+        run_migrations()
+
     # ── getters ──
 
     @classmethod
