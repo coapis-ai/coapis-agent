@@ -131,3 +131,7 @@ server/scripts_dev_smoke.py
 
 # --- Local archive for removed dead code (kept locally, never committed) ---
 .trash/
+
+# 临时诊断探针（收口后保留于磁盘，不进 git）
+/server/_diag_save.py
+/server/_probe_ledger_e2e.py

@@ -46,7 +46,7 @@ def upgrade() -> None:
                 "related_skills, sort_order, show_in_menu, enabled, category, "
                 "metadata, created_at, updated_at) "
                 "VALUES (:id, :name, :icon, 'menu', NULL, :desc, '[]', '[]', "
-                ":sort, 1, 1, '', :meta, :now, :now)"
+                ":sort, TRUE, TRUE, '', :meta, :now, :now)"
             ),
             {
                 "id": TASKS_TAG_ID,
