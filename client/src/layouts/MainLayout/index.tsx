@@ -70,9 +70,6 @@ const SSOPage = lazyImportWithRetry("../../pages/SSO/index");
 // External Systems Auth Management
 const ExternalSystemAuthPage = lazyImportWithRetry("../../pages/ExternalSystemAuth/index");
 
-// Messages - Intelligent Message System (placeholder)
-const MessagesPage = lazyImportWithRetry("../../pages/Messages/index");
-
 const { Content } = Layout;
 
 const pathToKey: Record<string, string> = {
@@ -120,7 +117,7 @@ const pathToKey: Record<string, string> = {
   "/monitoring": "monitoring",
   "/sso": "sso",
   // Messages - Intelligent Message System
-  "/messages": "menu-messages",
+
 };
 
 export default function MainLayout() {
@@ -274,8 +271,7 @@ export default function MainLayout() {
                   <Route path="/monitoring" element={<MonitoringPage />} />
                   <Route path="/sso" element={<SSOPage />} />
                   
-                  {/* Messages - Intelligent Message System */}
-                  <Route path="/messages" element={<MessagesPage />} />
+
 
                   {/* Plugin routes — dynamically injected at runtime */}
                   {pluginRoutes.map((route) => {

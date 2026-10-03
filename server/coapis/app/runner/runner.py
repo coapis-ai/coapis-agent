@@ -516,6 +516,56 @@ class AgentRunner(Runner):
                         "guidance system messages", _filtered,
                     )
 
+                # ── 中断垃圾消息过滤 ─────────────────────────────────────────
+                # 流被用户停止时，agentscope 内核会在 finally 里把进行中的
+                # assistant 消息（可能为空壳）add 进 memory，随后
+                # handle_interrupt() 又追加一条固定打断应答
+                # （metadata._is_interrupted=True）。两者对历史展示都没有价值，
+                # 在此一并过滤。
+                # 注意：保留配对的 tool_result 系统消息
+                # （"The tool call has been interrupted by the user."）——
+                # 它与前面的 tool_use 配对，保证下一轮上下文完整性。
+                def _block_substantive(block):
+                    if isinstance(block, dict):
+                        btype = block.get("type")
+                        btext = block.get("text")
+                    else:
+                        btype = getattr(block, "type", None)
+                        btext = getattr(block, "text", None)
+                    if btext is not None and str(btext).strip():
+                        return True
+                    # tool_use 等结构化块：块的存在本身就是实质内容
+                    return btype is not None
+
+                def _msg_substantive(m):
+                    c = getattr(m, "content", None)
+                    if isinstance(c, str):
+                        return bool(c.strip())
+                    if isinstance(c, (list, tuple)):
+                        return any(_block_substantive(b) for b in c)
+                    return False
+
+                _kept_msgs = []
+                _junk_count = 0
+                for m in _msgs_to_add:
+                    if getattr(m, "role", "") == "assistant":
+                        md = getattr(m, "metadata", None)
+                        is_interrupt_reply = (
+                            isinstance(md, dict)
+                            and md.get("_is_interrupted") is True
+                        )
+                        if is_interrupt_reply or not _msg_substantive(m):
+                            _junk_count += 1
+                            continue
+                    _kept_msgs.append(m)
+                if _junk_count:
+                    logger.info(
+                        "_persist_chat_messages: filtered %d interruption "
+                        "junk assistant messages (empty shell / interrupt reply)",
+                        _junk_count,
+                    )
+                _msgs_to_add = _kept_msgs
+
                 for msg in _msgs_to_add:
                     await isolated_mem.add(msg)
                 logger.info(

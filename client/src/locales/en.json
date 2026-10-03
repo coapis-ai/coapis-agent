@@ -1826,7 +1826,16 @@
       "roleSuperadmin": "Super Admin",
       "viewProfile": "Profile",
       "adminPanel": "Admin Panel",
-      "logout": "Logout"
+      "logout": "Logout",
+      "modelSelection": "Model",
+      "auto": "Auto",
+      "displaySettings": "Appearance",
+      "themeLight": "Light",
+      "themeDark": "Dark",
+      "themeSystem": "System"
+    },
+    "sessionsCenter": {
+      "title": "Sessions"
     }
   },
   "userprofile": {
@@ -2175,7 +2184,11 @@
         "light": "Light",
         "dark": "Dark"
       }
-    }
+    },
+    "header": {
+      "switchSession": "Switch session"
+    },
+    "newChat": "New Chat"
   },
   "security": {
     "parent": "Settings",

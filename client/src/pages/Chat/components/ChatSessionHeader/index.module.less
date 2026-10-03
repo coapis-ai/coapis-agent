@@ -78,6 +78,32 @@
   }
 }
 
+// 会话快切按钮（设计 §2.4）
+.divider {
+  width: 1px;
+  height: 16px;
+  background: #e0e0e0;
+  margin: 0 4px;
+
+  :global(.dark-mode) & {
+    background: #404040;
+  }
+}
+
+.statusTag {
+  margin-right: 0;
+  font-size: 12px;
+}
+
+.switchBtn {
+  margin-left: 8px;
+  color: rgba(0, 0, 0, 0.45);
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.45);
+  }
+}
+
 /* Mobile: compact header */
 @media (max-width: 768px) {
   .sessionHeader,

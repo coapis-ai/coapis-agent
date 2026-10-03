@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Modal, Button, Segmented, Radio, Spin, Empty } from "antd";
 import { useTranslation } from "react-i18next";
 import api from "@/api";
-import { FileTreeSelector } from "../ChatToolbarDrawer/FileTreeSelector";
+import { FileTreeSelector } from "./FileTreeSelector";
 import type { FileInfo } from "../types";
 import styles from "./resource.module.less";
 

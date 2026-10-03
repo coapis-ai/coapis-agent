@@ -4,7 +4,7 @@ import {
   type IAgentScopeRuntimeWebUIRef,
 } from "@agentscope-ai/chat";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, Result, Tooltip, Drawer } from "antd";
+import { Button, Modal, Result, Tooltip } from "antd";
 import { useAppMessage } from "../../hooks/useAppMessage";
 import {
   ExclamationCircleOutlined,
@@ -50,7 +50,6 @@ import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
 import {
-  ChatToolbarSidebar,
   useToolbarState,
   ChatInputFooter,
   ModelCapabilityTag,
@@ -745,37 +744,13 @@ export default function ChatPage() {
   } = useChatDisplayFromUser();
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
 
-  // 工具栏状态管理
+  // 资源选择状态（旧工具栏已按设计 §2.4 移除，入口迁至 + 菜单 / 头像下拉 / 顶栏）
   const {
-    visible: toolbarOpen,
-    closeToolbar,
-    toggleToolbar,
     selectedFiles,
     selectedKnowledge,
     setSelectedFiles,
     setSelectedKnowledge,
   } = useToolbarState();
-
-  // 工具栏功能回调
-  const handleSettingsClick = useCallback(() => {
-    setShowDisplaySettings(true);
-  }, []);
-
-  // 嵌入式模式：用户聚焦输入框时自动关闭工具栏
-  useEffect(() => {
-    if (!isEmbeddedMode) return;
-    
-    const handleFocus = (e: FocusEvent) => {
-      if (e.target instanceof HTMLTextAreaElement && toolbarOpen) {
-        closeToolbar();
-      }
-    };
-    
-    document.addEventListener('focusin', handleFocus, true);
-    return () => {
-      document.removeEventListener('focusin', handleFocus, true);
-    };
-  }, [isEmbeddedMode, toolbarOpen, closeToolbar]);
 
   // Sync authenticated username to window for AgentScope Runtime session API
   // IMPORTANT: Set immediately on mount to ensure window.currentUserId is available
@@ -1877,7 +1852,6 @@ export default function ChatPage() {
         {/* Chat session header: title + actions */}
         <ChatSessionHeader 
           onShowDisplaySettings={() => setShowDisplaySettings(true)}
-          onToolbarToggle={toggleToolbar}
           isEmbeddedMode={isEmbeddedMode}
           onClose={embeddedOnClose}
           sceneName={sceneName}
@@ -1885,28 +1859,10 @@ export default function ChatPage() {
         
         {/* 主内容区域：工具栏 + 聊天区 */}
         <div className={styles.chatContentArea}>
-          {/* PC端完整模式：工具栏在主内容区域内（固定Sidebar） */}
-          {!isEmbeddedMode && !isMobile && toolbarOpen && (
-            <div className={styles.toolbarSidebar}>
-              <ChatToolbarSidebar
-                selectedFiles={selectedFiles}
-                selectedKnowledge={selectedKnowledge}
-                onFileSelect={setSelectedFiles}
-                onKnowledgeSelect={setSelectedKnowledge}
-                onSettingsClick={handleSettingsClick}
-              />
-            </div>
-          )}
           
           {/* 聊天区域 */}
           <div
             className={styles.chatMessagesArea}
-            onClick={() => {
-              // 嵌入式模式：点击聊天区域时自动收缩工具栏
-              if (isEmbeddedMode && toolbarOpen) {
-                closeToolbar();
-              }
-            }}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onDrop={(e) => {
               e.preventDefault();
@@ -2077,64 +2033,6 @@ export default function ChatPage() {
       />
     </div>
 
-    {/* 嵌入式模式工具栏 - 纯浮层，不影响聊天区域位置 */}
-    {isEmbeddedMode && toolbarOpen && (
-      <div
-        style={{
-          position: 'absolute',
-          top: '40px',
-          left: 0,
-          width: '75%',
-          height: 'calc(100% - 48px)',
-          backgroundColor: '#fff',
-          boxShadow: '2px 0 8px rgba(0,0,0,0.15)',
-          zIndex: 100,
-          overflow: 'auto',
-          borderTop: '1px solid #f0f0f0',
-        }}
-      >
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '8px 12px',
-          borderBottom: '1px solid #f0f0f0',
-          backgroundColor: '#fafafa',
-        }}>
-          <span style={{ fontWeight: 500, fontSize: '14px' }}>工具栏</span>
-          <Button type="text" size="small" onClick={closeToolbar}>✕</Button>
-        </div>
-        <ChatToolbarSidebar
-          selectedFiles={selectedFiles}
-          selectedKnowledge={selectedKnowledge}
-          onFileSelect={setSelectedFiles}
-          onKnowledgeSelect={setSelectedKnowledge}
-          onSettingsClick={handleSettingsClick}
-          showPinButton={false}
-        />
-      </div>
-    )}
-
-    {/* 完整模式移动端工具栏 - 底部抽屉 */}
-    {!isEmbeddedMode && isMobile && toolbarOpen && (
-      <Drawer
-        title="工具栏"
-        placement="bottom"
-        height="80%"
-        open={toolbarOpen}
-        onClose={closeToolbar}
-        styles={{ body: { padding: 0 } }}
-      >
-        <ChatToolbarSidebar
-          selectedFiles={selectedFiles}
-          selectedKnowledge={selectedKnowledge}
-          onFileSelect={setSelectedFiles}
-          onKnowledgeSelect={setSelectedKnowledge}
-          onSettingsClick={handleSettingsClick}
-          showPinButton={false}
-        />
-      </Drawer>
-    )}
 
     {/* ─── M4 资源整合：各选择面板 ─────────────────────────────────── */}
     <MySpacePickerModal

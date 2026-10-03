@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal, Button } from "antd";
 import { useTranslation } from "react-i18next";
-import { KnowledgeSelector } from "../ChatToolbarDrawer/KnowledgeSelector";
+import { KnowledgeSelector } from "./KnowledgeSelector";
 import type { KnowledgeInfo } from "../types";
 
 interface KnowledgePickerModalProps {

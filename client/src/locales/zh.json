@@ -1692,7 +1692,16 @@
       "roleSuperadmin": "超级管理员",
       "viewProfile": "个人资料",
       "adminPanel": "管理后台",
-      "logout": "退出登录"
+      "logout": "退出登录",
+      "modelSelection": "模型选择",
+      "auto": "自动",
+      "displaySettings": "显示设置",
+      "themeLight": "浅色",
+      "themeDark": "深色",
+      "themeSystem": "跟随系统"
+    },
+    "sessionsCenter": {
+      "title": "会话中心"
     }
   },
   "userprofile": {
@@ -2082,7 +2091,11 @@
     "rename": "重命名",
     "pin": "置顶",
     "unpin": "取消置顶",
-    "delete": "删除"
+    "delete": "删除",
+    "header": {
+      "switchSession": "切换会话"
+    },
+    "newChat": "新聊天"
   },
   "security": {
     "parent": "设置",

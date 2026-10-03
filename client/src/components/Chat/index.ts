@@ -1,12 +1,8 @@
 // Chat 组件导出
 
-export { ChatToolbarDrawer } from './ChatToolbarDrawer';
-export { ChatToolbarSidebar } from './ChatToolbarDrawer/ChatToolbarSidebar';
-export { PinButton } from './ChatToolbarDrawer/PinButton';
-export { GlobalTools } from './ChatToolbarDrawer/GlobalTools';
-export { FileTreeSelector } from './ChatToolbarDrawer/FileTreeSelector';
-export { KnowledgeSelector } from './ChatToolbarDrawer/KnowledgeSelector';
-export { SelectedReferences } from './ChatToolbarDrawer/SelectedReferences';
+// 资源选择器（原工具栏组件，设计 §2.4 迁至 resource/）
+export { FileTreeSelector } from './resource/FileTreeSelector';
+export { KnowledgeSelector } from './resource/KnowledgeSelector';
 export { ReferenceHint } from './ReferenceHint';
 export { ModelCapabilityHint } from './ModelCapabilityHint';
 export { ModelCapabilityTag } from './ModelCapabilityTag';
