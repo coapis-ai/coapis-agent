@@ -158,8 +158,26 @@ async def get_push_messages(
     except Exception:
         logger.debug("Failed to fetch pending approvals", exc_info=True)
 
+    # Proactive push messages (e.g. cron task_type='text'): consume from
+    # the in-memory push store.  Exact session match first, then the
+    # generic console handle ``console:{username}`` so jobs targeted at
+    # the user (rather than a specific chat session) still arrive.
+    messages: List[Dict[str, Any]] = []
+    try:
+        from ..console_push_store import take as push_store_take
+
+        if session_id:
+            messages = await push_store_take(session_id)
+            if not messages:
+                username = getattr(request.state, "username", None)
+                if username:
+                    messages = await push_store_take(f"console:{username}")
+    except Exception:
+        logger.warning("Failed to fetch push messages", exc_info=True)
+        messages = []
+
     return {
-        "messages": [],
+        "messages": messages,
         "pending_approvals": pending_approvals,
     }
 
