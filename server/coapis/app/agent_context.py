@@ -49,6 +49,35 @@ _current_agent_id: ContextVar[Optional[str]] = ContextVar(
     default=None,
 )
 
+# ---------------------------------------------------------------------------
+# Current username (request-scoped)
+#
+# Bound at the workspace streaming entry point (and by the cron executor)
+# so that tools resolving per-user resources (e.g. cron_scheduler) can
+# address the CALLER's own data instead of guessing from a global pool.
+# ---------------------------------------------------------------------------
+
+_current_username: ContextVar[Optional[str]] = ContextVar(
+    "current_username",
+    default=None,
+)
+
+
+def set_current_username(username: str) -> object:
+    """Bind the current username to the context; returns a reset token."""
+    return _current_username.set(username)
+
+
+def reset_current_username(token: object) -> None:
+    """Reset the username binding (pass the token from set_current_username)."""
+    if token is not None:
+        _current_username.reset(token)
+
+
+def get_current_username() -> Optional[str]:
+    """Return the username bound to the current request context, or None."""
+    return _current_username.get()
+
 # Context variable to store current session id across async calls
 _current_session_id: ContextVar[Optional[str]] = ContextVar(
     "current_session_id",

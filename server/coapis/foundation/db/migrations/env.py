@@ -26,7 +26,11 @@ config = context.config
 config.set_main_option("sqlalchemy.url", build_database_url())
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # NOTE: disable_existing_loggers=False is critical — the default (True)
+    # wipes out every logger created before migrations run (the whole
+    # coapis.* tree), silently killing app logging for the rest of the
+    # process lifetime. See incident 2026-10-05 (frozen log pipeline).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

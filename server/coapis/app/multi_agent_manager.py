@@ -598,22 +598,13 @@ class MultiAgentManager:
         # Fast path: already loaded (no lock)
         if cache_key in self.agents:
             ws = self.agents[cache_key]
-            # Lazy-start: workspace registered by create_agent() but not yet started
-            if getattr(ws, "status", "running") != "running":
-                logger.info(f"Lazy-starting workspace: {cache_key}")
-                try:
-                    await ws.start()
-                    ws.set_manager(self)
-                except Exception as e:
-                    # Distinguish "missing provider" (expected) from real errors
-                    if "No provider configured" in str(e):
-                        logger.info(
-                            f"Workspace not started: {cache_key} - "
-                            "waiting for provider configuration"
-                        )
-                    else:
-                        logger.error(f"Lazy-start failed for {cache_key}: {e}")
-            return ws
+            if getattr(ws, "status", "running") == "running":
+                return ws
+            # Lazy-start: workspace registered but not yet started.
+            # Coordinate through the shared pending-starts protocol so
+            # concurrent callers share ONE start (prevents duplicate
+            # CronManager / triple execution).
+            return await self._ensure_workspace_started(ws, cache_key)
 
         should_start = False
         event = None
@@ -668,28 +659,75 @@ class MultiAgentManager:
         async with self._lock:
             self.agents[cache_key] = instance
 
-        try:
-            await instance.start()
-            instance.set_manager(self)
+        # Release our pending claim so the helper re-claims cleanly
+        # (avoids a self-wait deadlock), then start via the shared
+        # protocol — exactly one start even under concurrency.
+        async with self._lock:
+            self._pending_starts.pop(cache_key, None)
+        await self._ensure_workspace_started(instance, cache_key)
 
-            elapsed = time.perf_counter() - t0
-            scope = "user" if username else "global"
-            logger.debug(
-                f"{scope.capitalize()} workspace created: {cache_key} "
-                f"({elapsed:.3f}s)",
-            )
-            return instance
+        elapsed = time.perf_counter() - t0
+        scope = "user" if username else "global"
+        logger.debug(
+            f"{scope.capitalize()} workspace created: {cache_key} "
+            f"({elapsed:.3f}s)",
+        )
+        # Return the canonical instance (may differ if a concurrent
+        # create_agent replaced ours in the registry)
+        return self.agents.get(cache_key, instance)
+
+
+    async def _ensure_workspace_started(
+        self, ws: "Workspace", cache_key: str
+    ) -> "Workspace":
+        """Start an unstarted workspace, coordinating concurrent callers.
+
+        Exactly one caller performs the start (claims the pending-starts
+        slot); everyone else waits on the shared event. Covers BOTH the
+        fast path (cached-but-not-running) and the slow path, closing the
+        race where a workspace registered before its start completed could
+        be started twice by two callers (duplicate CronManager →
+        duplicate scheduling / triple execution).
+        """
+        event: Optional[asyncio.Event] = None
+        should_start = False
+        async with self._lock:
+            if getattr(ws, "status", "running") == "running":
+                return ws
+            if cache_key in self._pending_starts:
+                event = self._pending_starts[cache_key]
+                logger.debug(f"Waiting for existing start: {cache_key}")
+            else:
+                event = asyncio.Event()
+                self._pending_starts[cache_key] = event
+                should_start = True
+
+        if not should_start:
+            # Someone else is starting it — wait, then return canonical.
+            await event.wait()
+            return self.agents.get(cache_key, ws)
+
+        try:
+            logger.info(f"Starting workspace: {cache_key}")
+            await ws.start()
+            ws.set_manager(self)
         except Exception as e:
-            # Workspace registered but not started — still visible in dropdown
-            logger.error(f"Failed to start workspace {cache_key}: {e}")
-            return instance
+            # Distinguish "missing provider" (expected) from real errors
+            if "No provider configured" in str(e):
+                logger.info(
+                    f"Workspace not started: {cache_key} - "
+                    "waiting for provider configuration"
+                )
+            else:
+                logger.error(f"Failed to start workspace {cache_key}: {e}")
         finally:
             # Always clean up pending state and signal waiters
-            # This handles cancellation (CancelledError) and all other cases
+            # (handles cancellation and all other exit paths)
             async with self._lock:
                 self._pending_starts.pop(cache_key, None)
+            assert event is not None
             event.set()
-
+        return self.agents.get(cache_key, ws)
 
     @staticmethod
     def _infer_username_from_workspace_dir(workspace_dir: str) -> Optional[str]:

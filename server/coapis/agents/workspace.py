@@ -124,6 +124,7 @@ class Workspace:
         self.is_global = is_global
         self.role = role
         self.status = "stopped"
+        self._start_lock = asyncio.Lock()  # guards start() idempotency
         self.config: Optional[Dict[str, Any]] = None
         self._config: Dict[str, Any] = {}
         # Last streaming reasoning/response for persistence
@@ -550,7 +551,21 @@ class Workspace:
             self._mcp_config_watcher = None
 
     async def start(self):
-        """Initialize all workspace components."""
+        """Initialize all workspace components (idempotent).
+
+        Concurrent or repeated calls share a single in-flight start
+        (guarded by ``_start_lock``) so no component — especially the
+        CronManager — is ever instantiated twice (triple-execution fix).
+        """
+        if self.status == "running":
+            return
+        async with self._start_lock:
+            if self.status == "running":
+                return
+            await self._do_start()
+
+    async def _do_start(self):
+        """Actual startup sequence (call only via start())."""
         # Always ensure identity files exist (handles cached workspace reuse)
         self._ensure_identity_files()
 
@@ -1042,6 +1057,23 @@ class Workspace:
             @agentscope-ai/chat frontend expectations (CoApis native format).
             """
             async def _stream(request_obj):
+                # Bind the owning user into the request context so tools
+                # (e.g. cron_scheduler) resolve the CALLER's own resources
+                # instead of guessing from a global pool.
+                from ..app.agent_context import (
+                    set_current_username,
+                    reset_current_username,
+                )
+                _uname = self.username or getattr(request_obj, "user_id", "") or ""
+                _tok = set_current_username(_uname) if _uname else None
+                try:
+                    async for _ev in _stream_impl(request_obj):
+                        yield _ev
+                finally:
+                    if _tok is not None:
+                        reset_current_username(_tok)
+
+            async def _stream_impl(request_obj):
                 # Import Event classes
                 from agentscope_runtime.engine.schemas.agent_schemas import (
                     Event, Message, TextContent, RunStatus, MessageType
@@ -1399,39 +1431,51 @@ class Workspace:
         self.status = "running"
         logger.info(f"Workspace started: {self.agent_id}")
 
-        # Start CronManager (heartbeat + scheduled tasks) in background
+        # Start CronManager (heartbeat + scheduled tasks) in background.
+        # Registry-first: if a manager for this user already exists (e.g.
+        # from a previous workspace instance), reuse it instead of creating
+        # a second scheduler over the same jobs.json (triple-execution fix).
         try:
             from ..app.crons.manager import CronManager
             from ..app.crons.repo.json_repo import JsonJobRepository
+            from ..app.crons.registry import get_registry
             from ..config.timezone import normalize_tz
-            crons_dir = self.workspace_dir / "crons"
-            crons_dir.mkdir(parents=True, exist_ok=True)
-            jobs_file = crons_dir / "jobs.json"
-            if not jobs_file.exists():
-                jobs_file.write_text('{"version": 1, "jobs": []}')
-            cron_repo = JsonJobRepository(str(jobs_file))
-            cfg = load_config()
-            tz = normalize_tz(getattr(cfg, "user_timezone", None) or "UTC") or "UTC"
-            self._cron_manager = CronManager(
-                repo=cron_repo,
-                runner=self.runner,
-                channel_manager=self.channel_manager,
-                timezone=tz,
-                agent_id=self.agent_id,
-            )
-            await self._cron_manager.start()
-            logger.info(f"CronManager started for agent {self.agent_id}")
+            registry = get_registry()
+            owned = bool(self.username) and not self.is_global
+            existing = registry.get(self.username) if (registry and owned) else None
 
-            # 注册到全局 CronManagerRegistry
-            if self.username and not self.is_global:
-                try:
-                    from ..app.crons.registry import get_registry
-                    registry = get_registry()
-                    if registry:
-                        registry.register_manager(self.username, self._cron_manager)
-                        logger.info(f"Registered workspace CronManager for {self.username} into global registry")
-                except Exception as e:
-                    logger.warning(f"Failed to register CronManager in registry: {e}")
+            if existing is not None:
+                self._cron_manager = existing
+                if registry:
+                    await registry.start_manager(self.username)  # idempotent
+                logger.info(
+                    f"CronManager reused from registry for {self.username}"
+                )
+            else:
+                crons_dir = self.workspace_dir / "crons"
+                crons_dir.mkdir(parents=True, exist_ok=True)
+                jobs_file = crons_dir / "jobs.json"
+                if not jobs_file.exists():
+                    jobs_file.write_text('{"version": 1, "jobs": []}')
+                cron_repo = JsonJobRepository(str(jobs_file))
+                cfg = load_config()
+                tz = normalize_tz(getattr(cfg, "user_timezone", None) or "UTC") or "UTC"
+                self._cron_manager = CronManager(
+                    repo=cron_repo,
+                    runner=self.runner,
+                    channel_manager=self.channel_manager,
+                    timezone=tz,
+                    agent_id=self.agent_id,
+                    owner_user_id=self.username if owned else None,
+                )
+                await self._cron_manager.start()
+                logger.info(f"CronManager started for agent {self.agent_id}")
+
+                # 注册到全局 CronManagerRegistry（register_manager 会对被取代的
+                # 旧实例做优雅停止，见 registry.A3）
+                if registry and owned:
+                    registry.register_manager(self.username, self._cron_manager)
+                    logger.info(f"Registered workspace CronManager for {self.username} into global registry")
         except Exception as e:
             logger.warning(f"CronManager start failed (non-fatal): {e}")
             self._cron_manager = None
@@ -1479,10 +1523,22 @@ class Workspace:
             except Exception as e:
                 logger.warning(f"ChannelManager stop error: {e}")
 
-        # Stop cron manager
-        if getattr(self, "_cron_manager", None):
+        # Stop cron manager — but skip if this workspace merely *shares*
+        # the manager registered in the global registry (e.g. a newer
+        # workspace instance for the same user owns it now).
+        cm = getattr(self, "_cron_manager", None)
+        if cm:
             try:
-                await self._cron_manager.stop()
+                from ..app.crons.registry import get_registry
+                registry = get_registry()
+                shared = (
+                    registry is not None
+                    and self.username
+                    and not self.is_global
+                    and registry.get(self.username) is cm
+                )
+                if not shared:
+                    await cm.stop()
             except Exception as e:
                 logger.warning(f"CronManager stop error: {e}")
 

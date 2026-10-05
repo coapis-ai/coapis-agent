@@ -33,25 +33,30 @@ logger = logging.getLogger(__name__)
 
 
 def _get_cron_manager():
-    """Get the CronManager for the current user from the request context.
+    """Resolve the CALLER's OWN CronManager via the current_username context.
 
-    This is a helper that tries to get the CronManager from the
-    multi_agent_manager's cron_registry.
+    The username is bound at the workspace streaming entry point (and by
+    the cron executor), so a job created through this tool always lands in
+    the requesting user's own jobs.json.
+
+    Hard-fails when no username context is available — deliberately
+    refuses to fall back to "some other user's manager" (cross-user
+    pollution guard).
     """
     # Import here to avoid circular imports
+    from ...app.agent_context import get_current_username
     from ...app.crons.registry import get_registry
 
+    username = get_current_username()
     registry = get_registry()
+    if not username:
+        raise PermissionError(
+            "cron_scheduler: current user context is unavailable; "
+            "refusing to schedule a job for an unknown owner"
+        )
     if registry is None:
-        return None
-
-    # Get the first available manager (for the current user context)
-    # In practice, the workspace's CronManager should be registered
-    if registry._managers:
-        # Return the first available manager
-        for username, mgr in registry._managers.items():
-            return mgr
-    return None
+        raise RuntimeError("cron_scheduler: cron registry is not initialized")
+    return registry.get_or_create(username)
 
 
 @register_tool(

@@ -106,9 +106,10 @@ class CronExecutor:
                     meta=dispatch_meta,
                 )
             else:
-                logger.debug(
-                    "cron send_text (no channel_manager): job_id=%s",
-                    job.id,
+                logger.warning(
+                    "cron send_text dropped: channel_manager missing — "
+                    "text NOT delivered: job_id=%s channel=%s",
+                    job.id, job.dispatch.channel,
                 )
             return
 
@@ -221,8 +222,16 @@ class CronExecutor:
         # (e.g. "global_default"), so cron executed in the wrong workspace.
         # The token resets the context afterwards so the scheduler task's
         # context is not polluted with this user's agent id.
-        from ..agent_context import set_current_agent_id, reset_current_agent_id
+        from ..agent_context import (
+            set_current_agent_id,
+            reset_current_agent_id,
+            set_current_username,
+            reset_current_username,
+        )
         agent_token = set_current_agent_id(f"user:{target_user_id}")
+        # Bind the job OWNER as the current user so any tool executed
+        # during this run resolves the owner's own resources.
+        user_token = set_current_username(target_user_id)
         try:
             await asyncio.wait_for(
                 _run(),
@@ -243,3 +252,4 @@ class CronExecutor:
             raise
         finally:
             reset_current_agent_id(agent_token)
+            reset_current_username(user_token)

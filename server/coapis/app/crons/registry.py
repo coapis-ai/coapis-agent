@@ -23,9 +23,10 @@ Uses @app.middleware("http") pattern for SSE compatibility.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, Request, HTTPException
 from starlette.responses import Response
@@ -65,6 +66,8 @@ class CronManagerRegistry:
         self._agent_id = agent_id
         self._managers: Dict[str, CronManager] = {}
         self._started: Dict[str, bool] = {}
+        # Superseded managers awaiting graceful stop (drained best-effort).
+        self._retired: List[CronManager] = []
 
     def register_manager(self, username: str, manager: CronManager) -> None:
         """Register a workspace CronManager for a user.
@@ -72,10 +75,53 @@ class CronManagerRegistry:
         This overwrites any lazy-created CronManager, ensuring the API
         always uses the workspace's CronManager (which has the real runner,
         channel_manager, memory_manager, heartbeat, and dream).
+
+        A superseded manager is gracefully stopped (best-effort) so two
+        schedulers never run over the same jobs.json simultaneously.
         """
+        old = self._managers.get(username)
+        if old is not None and old is not manager:
+            self._retire(old)
         self._managers[username] = manager
         self._started[username] = True
         logger.info(f"Registered workspace CronManager for {username}")
+
+    def _retire(self, old: CronManager) -> None:
+        """Schedule a graceful stop for a superseded manager.
+
+        Async-safe: if an event loop is running the stop is scheduled as a
+        task; otherwise the manager stays in ``_retired`` and is drained by
+        ``start_all()`` / ``stop_all()``.
+        """
+        self._retired.append(old)
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(self._stop_retired(old))
+            task.add_done_callback(self._discard_retired_task)
+        except RuntimeError:
+            # No running loop — will be drained later.
+            logger.debug("Retired CronManager queued (no running loop)")
+
+    @staticmethod
+    def _discard_retired_task(task: "asyncio.Task") -> None:
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning(
+                f"Retired CronManager stop error: {task.exception()}"
+            )
+
+    async def _stop_retired(self, old: CronManager) -> None:
+        try:
+            await old.stop()
+            logger.info("Stopped superseded CronManager")
+        except Exception as e:
+            logger.warning(f"Superseded CronManager stop failed: {e}")
+        finally:
+            if old in self._retired:
+                self._retired.remove(old)
+
+    def get(self, username: str) -> Optional[CronManager]:
+        """Return the registered manager for a user, or None."""
+        return self._managers.get(username)
 
     def get_or_create(self, username: str) -> CronManager:
         """Get existing CronManager or create new one for user."""
@@ -115,7 +161,15 @@ class CronManagerRegistry:
             await self.start_manager(username)
 
     async def stop_all(self) -> None:
-        """Stop all registered CronManagers."""
+        """Stop all registered CronManagers (incl. retired backlog)."""
+        # Drain any superseded managers that were never stopped (e.g.
+        # retired while no event loop was running).
+        for old in list(self._retired):
+            try:
+                await old.stop()
+            except Exception as e:
+                logger.warning(f"Retired CronManager stop failed: {e}")
+        self._retired.clear()
         for username in list(self._managers.keys()):
             mgr = self._managers.get(username)
             if mgr:
