@@ -42,6 +42,7 @@ class RepositoryFactory:
     _scene_repo = None # Scene repository (community: SQLite / enterprise: injected)
     _user_scene_repo = None  # User scene settings repo (community / enterprise: injected)
     _ext_store = None  # External identity store (community: SQLAlchemy / enterprise: injected)
+    _memory_repo = None  # Memory repository (community: SQLAlchemy / enterprise: injected)
     _edition: Optional[str] = None
     _initialized: bool = False
 
@@ -117,6 +118,9 @@ class RepositoryFactory:
             ensure_runtime_domain_migrated(engine_conn, SYSTEM_DIR)
 
         cls._user_repo = SqlaUserRepository()
+        # 记忆台账（统一长期记忆）：与用户仓储共用全局 engine。
+        from .memory_repository_impl import SqlaMemoryRepository
+        cls._memory_repo = SqlaMemoryRepository()
         from .tag_repository_sqlite import SqliteTagRepository
         from .scene_repository_sqlite import SqliteSceneRepository
         from .user_scene_repository_sqlite import SqliteUserSceneSettingsRepo
@@ -212,6 +216,17 @@ class RepositoryFactory:
         return cls._ext_store
 
     @classmethod
+    def get_memory_repository(cls):
+        """Get memory repository instance (ledger of unified long-term memory)."""
+        cls._require_initialized()
+        if cls._memory_repo is None:
+            raise RuntimeError(
+                "Memory repository not available. "
+                "Ensure RepositoryFactory.initialize() was called."
+            )
+        return cls._memory_repo
+
+    @classmethod
     def get_edition(cls) -> Optional[str]:
         """Get current edition ("community" / "enterprise" / None)."""
         return cls._edition
@@ -253,6 +268,12 @@ class RepositoryFactory:
         cls._ext_store = store
         logger.info("External identity store injected into RepositoryFactory")
 
+    @classmethod
+    def inject_memory_repository(cls, repo) -> None:
+        """Inject memory repository instance (enterprise plugin)."""
+        cls._memory_repo = repo
+        logger.info("Memory repository injected into RepositoryFactory")
+
     # ── testing helpers ──
 
     @classmethod
@@ -270,7 +291,7 @@ class RepositoryFactory:
     def reset(cls) -> None:
         """Reset factory state (used by tests)."""
         for attr in ("_user_repo", "_scene_repo", "_tag_repo",
-                     "_user_scene_repo", "_ext_store"):
+                     "_user_scene_repo", "_ext_store", "_memory_repo"):
             repo = getattr(cls, attr, None)
             if repo is not None and hasattr(repo, "close"):
                 try:
