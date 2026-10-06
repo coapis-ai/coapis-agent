@@ -41,6 +41,9 @@ VALID_SOURCES = frozenset(
     {"upload", "write_file", "edit_file", "append_file", "reconcile"}
 )
 
+#: Deliverables-ledger status states (approved plan C1, three-state machine).
+VALID_STATUSES = frozenset({"draft", "delivered", "archived"})
+
 
 class FileLedgerService:
     """File-ledger operations. Thread-safe (sync, short transactions)."""
@@ -72,6 +75,7 @@ class FileLedgerService:
         session_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         source: str = "other",
+        title: Optional[str] = None,
     ) -> bool:
         """Insert one ledger row. Returns True on success, False otherwise.
 
@@ -105,6 +109,7 @@ class FileLedgerService:
                 size_bytes=size,
                 source=source if source in VALID_SOURCES else "other",
                 created_at=time.time(),
+                title=(title or None),
             )
             with get_session() as s:
                 s.add(rec)
@@ -153,6 +158,111 @@ class FileLedgerService:
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("file ledger list failed: %s", exc)
             return {"items": [], "total": 0, "limit": limit, "offset": offset}
+
+    # ── deliverables ledger (approved plan C1) ─────────────────────────
+
+    def resolve_path(
+        self, username: str, record_id: int
+    ) -> Optional[str]:
+        """Map a ledger row id to its file_path (owner-checked).
+
+        Returns None when the row does not exist or belongs to someone
+        else. Never raises.
+        """
+        try:
+            with get_session() as s:
+                row = s.execute(
+                    select(FileRecord.file_path).where(
+                        FileRecord.id == record_id,
+                        FileRecord.user_id == username,
+                    )
+                ).scalar_one_or_none()
+            return row
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("file ledger resolve failed: %s", exc)
+            return None
+
+    def update_record_status(
+        self,
+        username: str,
+        file_path: str,
+        status: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> bool:
+        """Move the newest row of ``(username, file_path)`` to *status*.
+
+        Optionally refreshes ``title`` / ``description`` and stamps
+        ``updated_at``. Returns False for invalid status or a missing
+        row. Never raises.
+        """
+        try:
+            if status not in VALID_STATUSES:
+                return False
+            with get_session() as s:
+                row = s.execute(
+                    select(FileRecord)
+                    .where(
+                        FileRecord.user_id == username,
+                        FileRecord.file_path == file_path,
+                    )
+                    .order_by(FileRecord.id.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                if row is None:
+                    return False
+                row.status = status
+                row.updated_at = time.time()
+                if title is not None:
+                    row.title = title
+                if description is not None:
+                    row.description = description
+            return True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("file ledger status update failed: %s", exc)
+            return False
+
+    def list_deliverables(
+        self,
+        username: str,
+        *,
+        status: Optional[str] = None,
+        session_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Distinct files (newest row wins) with ledger metadata.
+
+        Filters by the *current* status of the newest row; ordered by
+        ``updated_at`` (falling back to ``created_at``) descending.
+        Never raises.
+        """
+        try:
+            q = select(FileRecord).where(FileRecord.user_id == username)
+            if session_id:
+                q = q.where(FileRecord.session_id == session_id)
+            with get_session() as s:
+                rows = s.execute(q.order_by(FileRecord.id.desc())).all()
+            latest: "OrderedDict[str, dict]" = OrderedDict()
+            for r in rows:
+                d = r[0].to_dict()
+                latest.setdefault(d["file_path"], d)
+            items = list(latest.values())
+            if status:
+                items = [d for d in items if d.get("status") == status]
+            items.sort(
+                key=lambda d: (d.get("updated_at") or d.get("created_at") or 0),
+                reverse=True,
+            )
+            for d in items:
+                d.pop("id", None)
+            return items[:limit]
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("file ledger deliverables failed: %s", exc)
+            return []
+
+    def archive_file(self, username: str, file_path: str) -> bool:
+        """Mark the newest row of ``file_path`` as archived (soft only)."""
+        return self.update_record_status(username, file_path, "archived")
 
     def stats(self, username: str) -> dict[str, Any]:
         """Aggregate stats: distinct files, total size, by source / ext."""
@@ -323,12 +433,13 @@ def record_file_event(
     session_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     source: str = "other",
+    title: Optional[str] = None,
 ) -> bool:
     """Fire-and-forget ledger hook (never raises)."""
     try:
         return get_file_ledger().record(
             username, abs_path, session_id=session_id, agent_id=agent_id,
-            source=source,
+            source=source, title=title,
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("file ledger event failed (ignored): %s", exc)

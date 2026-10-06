@@ -37,9 +37,17 @@ class FileRecord(BaseRow):
     )
     source: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[Optional[float]] = mapped_column(REAL)
+    # Deliverables-ledger enrichment (migration 0012):
+    title: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="draft", server_default=text("'draft'")
+    )
+    updated_at: Mapped[Optional[float]] = mapped_column(REAL)
+    description: Mapped[Optional[str]] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_file_records_user", "user_id"),
         Index("idx_file_records_session", "session_id"),
         Index("idx_file_records_created", "created_at"),
+        Index("idx_file_records_status", "status"),
     )

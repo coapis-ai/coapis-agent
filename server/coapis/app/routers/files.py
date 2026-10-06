@@ -156,6 +156,12 @@ class CopyRequest(BaseModel):
     target: str
 
 
+class RecordStatusUpdate(BaseModel):
+    status: str  # draft / delivered / archived
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+
 # ═══════════════════════════════════════════════════════════
 # 辅助函数
 # ═══════════════════════════════════════════════════════════
@@ -320,6 +326,7 @@ async def upload_file(
             session_id=get_current_session_id(),
             agent_id=get_current_agent_id(),
             source="upload",
+            title=file.filename,
         )
     except Exception:
         pass
@@ -364,6 +371,66 @@ async def file_records_stats(request: Request = None):
 
     username = get_current_user(request)["username"]
     return get_file_ledger().stats(username)
+
+
+@router.patch("/records/{file_id}/status")
+@require_permission("chat:read")
+async def update_file_record_status(
+    file_id: int,
+    req: RecordStatusUpdate,
+    request: Request = None,
+):
+    """更新文件台账状态（draft/delivered/archived），可同时附 title/description"""
+    from ...foundation.file_ledger import VALID_STATUSES, get_file_ledger
+
+    username = get_current_user(request)["username"]
+    if req.status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"无效状态: {req.status}")
+    led = get_file_ledger()
+    file_path = led.resolve_path(username, file_id)
+    if file_path is None:
+        raise HTTPException(status_code=404, detail="台账条目不存在")
+    ok = led.update_record_status(
+        username, file_path, req.status,
+        title=req.title, description=req.description,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="台账条目不存在")
+    return {"success": True, "file_id": file_id, "status": req.status}
+
+
+@router.get("/deliverables")
+@require_permission("chat:read")
+async def list_deliverables(
+    status: Optional[str] = Query(None, description="按状态过滤: draft/delivered/archived"),
+    session_id: Optional[str] = Query(None, description="按会话过滤"),
+    limit: int = Query(50, ge=1, le=200),
+    request: Request = None,
+):
+    """成果台账：按文件去重（最新行代表当前状态），按最近活动排序"""
+    from ...foundation.file_ledger import get_file_ledger
+
+    username = get_current_user(request)["username"]
+    items = get_file_ledger().list_deliverables(
+        username, status=status, session_id=session_id, limit=limit,
+    )
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/records/{file_id}/archive")
+@require_permission("chat:read")
+async def archive_file_record(file_id: int, request: Request = None):
+    """归档一条文件台账（软归档，不物理删除）"""
+    from ...foundation.file_ledger import get_file_ledger
+
+    username = get_current_user(request)["username"]
+    led = get_file_ledger()
+    file_path = led.resolve_path(username, file_id)
+    if file_path is None:
+        raise HTTPException(status_code=404, detail="台账条目不存在")
+    if not led.archive_file(username, file_path):
+        raise HTTPException(status_code=404, detail="台账条目不存在")
+    return {"success": True, "file_id": file_id, "status": "archived"}
 
 
 @router.get("/download")

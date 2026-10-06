@@ -140,6 +140,7 @@ def _ledger_record(abs_path: str, source: str) -> None:
             session_id=get_current_session_id(),
             agent_id=get_current_agent_id(),
             source=source,
+            title=Path(abs_path).stem or None,
         )
     except Exception:
         pass
