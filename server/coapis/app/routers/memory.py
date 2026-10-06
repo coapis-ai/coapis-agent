@@ -41,7 +41,8 @@ async def list_memory_entries(
     offset: int = Query(default=0, ge=0),
 ) -> PageResponse:
     """Ledger listing for the signed-in user (user scope by default)."""
-    user_id = str(user.get("id", ""))
+    # Memory subsystem keys users by username (workspace naming, REME).
+    user_id = str(user.get("username") or user.get("id") or "")
     repo = RepositoryFactory.get_memory_repository()
     entries = repo.list_entries(
         scope=scope,
@@ -70,7 +71,7 @@ async def list_memory_timeline(
     offset: int = Query(default=0, ge=0),
 ) -> PageResponse:
     """Timeline listing for the signed-in user, newest first."""
-    user_id = str(user.get("id", ""))
+    user_id = str(user.get("username") or user.get("id") or "")
     repo = RepositoryFactory.get_memory_timeline_repository()
     items, total = repo.query(
         user_id=user_id,
@@ -88,7 +89,7 @@ async def recent_memory_timeline(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> RecentResponse:
     """Trailing-window timeline feed (chat-panel 'what we talked about')."""
-    user_id = str(user.get("id", ""))
+    user_id = str(user.get("username") or user.get("id") or "")
     repo = RepositoryFactory.get_memory_timeline_repository()
     items = repo.recent(user_id=user_id, hours=hours, limit=limit)
     return RecentResponse(items=items)
