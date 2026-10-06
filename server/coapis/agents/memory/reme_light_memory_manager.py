@@ -25,13 +25,21 @@ import logging
 import re
 import shutil
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from agentscope.message import Msg, TextBlock, ToolResultBlock, ToolUseBlock
 from agentscope.tool import ToolResponse
 
 from .base_memory_manager import BaseMemoryManager, memory_registry
+from .dream_outcome import (
+    RESULT_ERROR,
+    RESULT_OK,
+    RESULT_SKIPPED,
+    compute_dream_outcome,
+)
+from coapis.foundation.repository_factory import RepositoryFactory
 from .prompts import (
     MEMORY_GUIDANCE_ZH,
     MEMORY_GUIDANCE_EN,
@@ -654,22 +662,70 @@ class ReMeLightMemoryManager(BaseMemoryManager):
             and self._user_workspace != self._workspace_dir
         )
 
+        results: dict[str, str] = {}
         if has_user_ws:
-            # Sub-agent: dream both levels
-            await self._dream_level(
-                self._workspace_dir, chat_model, formatter,
-                language, level_label="智能体级",
-            )
-            await self._dream_level(
-                self._user_workspace, chat_model, formatter,
-                language, level_label="用户级",
-            )
+            # Sub-agent: dream both levels (independently fault-tolerant)
+            for level_name, ws_dir, label in (
+                ("agent", self._workspace_dir, "智能体级"),
+                ("user", self._user_workspace, "用户级"),
+            ):
+                results[level_name] = await self._safe_dream_level(
+                    ws_dir, chat_model, formatter, language,
+                    level_label=label,
+                )
         else:
             # Default agent or global: single level
-            await self._dream_level(
-                self._workspace_dir, chat_model, formatter,
-                language, level_label="",
+            results["workspace"] = await self._safe_dream_level(
+                self._workspace_dir, chat_model, formatter, language,
+                level_label="",
             )
+
+        # Aggregate outcome -> long-term ledger (one row per agent/day,
+        # upserted). Ledger failures are strictly non-fatal.
+        try:
+            status, reason, summary = compute_dream_outcome(results)
+            day = datetime.now().astimezone().strftime("%Y-%m-%d")
+            RepositoryFactory.get_memory_repository().record_outcome(
+                user_id=self._username or "",
+                day=day,
+                status=status,
+                reason=reason,
+                summary=summary,
+                agent_id=self.agent_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Dream] outcome not recorded (non-fatal): %s", exc
+            )
+
+    async def _safe_dream_level(
+        self,
+        ws_dir: Path,
+        chat_model: Any,
+        formatter: Any,
+        language: str,
+        level_label: str = "",
+    ) -> str:
+        """Run one dream level; map outcome to the result protocol.
+
+        ``_dream_level`` reports via return value (RESULT_OK /
+        RESULT_ERROR / RESULT_SKIPPED); unexpected exceptions are
+        mapped to RESULT_ERROR and logged, never propagated.
+        """
+        try:
+            res = await self._dream_level(
+                ws_dir, chat_model, formatter,
+                language, level_label=level_label,
+            )
+            if res in (RESULT_OK, RESULT_ERROR, RESULT_SKIPPED):
+                return res
+            return RESULT_OK
+        except Exception:
+            logger.exception(
+                "[Dream] level failed level=%s agent=%s",
+                level_label, self.agent_id,
+            )
+            return RESULT_ERROR
 
     async def _dream_level(
         self,
@@ -698,7 +754,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
         memory_dir = target_dir / "memory"
         if not memory_dir.exists():
             logger.info("[Dream] %sNo memory/ directory, skipping", label)
-            return
+            return RESULT_SKIPPED
 
         recent_files = list(memory_dir.glob(f"{current_date}*.md"))
         for days_ago in range(1, 4):
@@ -707,7 +763,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
 
         if not recent_files:
             logger.info("[Dream] %sNo recent memory files found, skipping", label)
-            return
+            return RESULT_SKIPPED
 
         # Step 2: Read existing MEMORY.md
         memory_file = target_dir / "MEMORY.md"
@@ -727,7 +783,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
 
         if not daily_notes:
             logger.info("[Dream] %sAll recent memory files are empty, skipping", label)
-            return
+            return RESULT_SKIPPED
 
         daily_text = "\n\n".join(daily_notes)
 
@@ -781,12 +837,13 @@ class ReMeLightMemoryManager(BaseMemoryManager):
 
             if not new_memory or len(new_memory) < 20:
                 logger.info("[Dream] %sLLM returned insufficient content, skipping", label)
-                return
+                return RESULT_SKIPPED
 
             with open(memory_file, "w", encoding="utf-8") as f:
                 f.write(new_memory + "\n")
 
             logger.info("[Dream] %sUpdated MEMORY.md (%d chars)", label, len(new_memory))
+            return RESULT_OK
 
         except Exception as e:
             logger.exception("[Dream] %sLLM consolidation failed: %s", label, e)
@@ -797,3 +854,4 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                     logger.info("[Dream] %sRestored MEMORY.md from backup", label)
                 except Exception:
                     pass
+            return RESULT_ERROR

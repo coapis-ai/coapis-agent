@@ -67,6 +67,7 @@ from .root import router as root_router
 from .commands import router as commands_router
 from .agent_stats import router as agent_stats_router
 from .local_models import router as local_models_router
+from .memory import router as memory_router
 from .voice import voice_router
 from .approval import router as approval_router
 from .user_scenes import router as user_scenes_router
@@ -120,6 +121,7 @@ router.include_router(agent_router)  # Agent identity file management
 router.include_router(console_router)
 router.include_router(cron_router)
 router.include_router(local_models_router)
+router.include_router(memory_router)
 router.include_router(mcp_router)
 router.include_router(messages_router)
 router.include_router(providers_router)

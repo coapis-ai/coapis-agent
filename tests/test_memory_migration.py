@@ -42,7 +42,7 @@ class TestMemoryManager:
     """测试 MemoryManager 简化。"""
 
     def test_only_user_and_agent_types(self):
-        from coapis.agent.memory_manager import MemoryManager
+        from coapis.agents.memory_manager import MemoryManager
         with tempfile.TemporaryDirectory() as tmp:
             mm = MemoryManager(Path(tmp))
             types = set(mm._memory_files.keys())
@@ -51,7 +51,7 @@ class TestMemoryManager:
             assert "soul" not in types
 
     def test_get_context_uses_user_and_agent(self):
-        from coapis.agent.memory_manager import MemoryManager
+        from coapis.agents.memory_manager import MemoryManager
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             (tmp / "USER.md").write_text("user prefs", encoding="utf-8")

@@ -43,6 +43,7 @@ class RepositoryFactory:
     _user_scene_repo = None  # User scene settings repo (community / enterprise: injected)
     _ext_store = None  # External identity store (community: SQLAlchemy / enterprise: injected)
     _memory_repo = None  # Memory repository (community: SQLAlchemy / enterprise: injected)
+    _memory_timeline_repo = None  # Memory timeline repository (community: SQLAlchemy / enterprise: injected)
     _edition: Optional[str] = None
     _initialized: bool = False
 
@@ -121,6 +122,9 @@ class RepositoryFactory:
         # 记忆台账（统一长期记忆）：与用户仓储共用全局 engine。
         from .memory_repository_impl import SqlaMemoryRepository
         cls._memory_repo = SqlaMemoryRepository()
+        # 记忆时间线（dream 信号晋升目标）：同样共用全局 engine。
+        from .memory_timeline_impl import SqlaTimelineRepository
+        cls._memory_timeline_repo = SqlaTimelineRepository()
         from .tag_repository_sqlite import SqliteTagRepository
         from .scene_repository_sqlite import SqliteSceneRepository
         from .user_scene_repository_sqlite import SqliteUserSceneSettingsRepo
@@ -227,6 +231,17 @@ class RepositoryFactory:
         return cls._memory_repo
 
     @classmethod
+    def get_memory_timeline_repository(cls):
+        """Get memory timeline repository instance (dream signal promotion)."""
+        cls._require_initialized()
+        if cls._memory_timeline_repo is None:
+            raise RuntimeError(
+                "Memory timeline repository not available. "
+                "Ensure RepositoryFactory.initialize() was called."
+            )
+        return cls._memory_timeline_repo
+
+    @classmethod
     def get_edition(cls) -> Optional[str]:
         """Get current edition ("community" / "enterprise" / None)."""
         return cls._edition
@@ -273,6 +288,12 @@ class RepositoryFactory:
         """Inject memory repository instance (enterprise plugin)."""
         cls._memory_repo = repo
         logger.info("Memory repository injected into RepositoryFactory")
+
+    @classmethod
+    def inject_memory_timeline_repository(cls, repo) -> None:
+        """Inject memory timeline repository instance (enterprise plugin)."""
+        cls._memory_timeline_repo = repo
+        logger.info("Memory timeline repository injected into RepositoryFactory")
 
     # ── testing helpers ──
 

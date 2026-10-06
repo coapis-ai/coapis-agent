@@ -251,14 +251,19 @@ class SqlaMemoryRepository(MemoryRepository):
     # ── dream integration ──
 
     def record_outcome(self, *, user_id: str, day: str, status: str,
-                       reason: str, summary: str) -> int:
+                       reason: str, summary: str,
+                       agent_id: str | None = None) -> int:
+        # Dream runs belong to an agent: scope="agent" + agent_id ownership.
+        # Legacy user-scoped callers (no agent_id) keep scope="user".
+        scope = "agent" if agent_id else "user"
         now = time.time()
         title = f"dream:{day}"
-        dedup = compute_dedup_key("user", "dream", title, f"{status}|{reason}")
+        dedup = compute_dedup_key(scope, "dream", title, f"{status}|{reason}")
         sf = get_session_factory()
         with sf() as s:
             row = s.scalar(
                 select(Memory).where(
+                    Memory.scope == scope,
                     Memory.user_id == user_id,
                     Memory.category == "dream",
                     Memory.title == title,
@@ -276,9 +281,9 @@ class SqlaMemoryRepository(MemoryRepository):
                 s.commit()
                 return int(row.id)
             row = Memory(
-                scope="user",
+                scope=scope,
                 user_id=user_id,
-                agent_id=None,
+                agent_id=agent_id,
                 workspace_id=None,
                 category="dream",
                 title=title,

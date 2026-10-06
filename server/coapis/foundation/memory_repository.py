@@ -23,7 +23,20 @@ Contract notes (binding for ALL implementations, community & enterprise):
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+class ScopeType(str, Enum):
+    """Memory scope vocabulary (persisted as plain strings in ``scope``).
+
+    ``str`` mixin keeps equality / SQL binding compatible with the
+    string-valued column. See module docstring for scope semantics.
+    """
+    USER = "user"
+    AGENT = "agent"
+    WORKSPACE = "workspace"
+    GLOBAL = "global"
 
 
 @dataclass
@@ -144,7 +157,8 @@ class MemoryRepository(ABC):
 
     @abstractmethod
     def record_outcome(self, *, user_id: str, day: str, status: str,
-                       reason: str, summary: str) -> int:
+                       reason: str, summary: str,
+                       agent_id: str | None = None) -> int:
         """Upsert today's dream outcome row (category=dream, source=dream).
 
         Keyed by (user_id, day): re-running the same day overwrites

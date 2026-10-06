@@ -524,16 +524,158 @@ class CronManager:
             logger.exception("heartbeat run failed")
 
     async def _dream_callback(self) -> None:
-        """Run one dream-based memory optimization task."""
+        """Nightly dream: five-step memory integration pipeline.
+
+        1. Consolidate (L3) — existing behaviour
+        2. Record outcome → memories (category=dream)
+        3. Scan recent sessions for signals → memory_timelines
+        4. Promote high-importance memories (≥0.9) → memory_timelines
+        5. Maintenance: prune timeline rows older than 90 days
+
+        Runs on the event loop thread (scheduler fires callbacks on the
+        loop), so step 1 is awaited directly. Steps 2-5 are best-effort:
+        a failure in any of them is logged and swallowed so the scheduler
+        keeps firing (design: tech_docs/记忆系统整合设计方案.md §5.2).
+        """
+        user_id = self._owner_user_id or ""
+        agent_id = self._agent_id
+        t0 = time.monotonic()
+        status = "error"
+
+        # ── Step 1: consolidate ──
         try:
-            # Run dream task
-            await self._runner.memory_manager.dream()
-            logger.debug("Dream task executed successfully")
+            result = await self._runner.memory_manager.dream()
+            status = result if isinstance(result, str) else "ok"
         except asyncio.CancelledError:
             logger.info("Dream task was cancelled")
             raise
         except Exception as e:  # pylint: disable=broad-except
-            logger.error(f"Failed to execute dream task: {e}", exc_info=True)
+            logger.error(f"Dream step1 failed: {e}", exc_info=True)
+            status = "error"
+
+        # ── Step 2: record outcome ──
+        try:
+            from datetime import datetime, timezone
+
+            from ...agents.memory.dream_outcome import compute_dream_outcome
+            from ...foundation.repository_factory import RepositoryFactory
+
+            norm_status, reason, summary = compute_dream_outcome({"L3": status})
+            RepositoryFactory.get_memory_repository().record_outcome(
+                user_id=user_id,
+                day=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                status=norm_status,
+                reason=reason,
+                summary=summary,
+            )
+        except Exception:
+            logger.exception("Dream step2 (record outcome) failed: user=%s", user_id)
+
+        # ── Step 3: signal scan ──
+        signals = 0
+        try:
+            signals = self._promote_signals(user_id, agent_id)
+        except Exception:
+            logger.exception("Dream step3 (signal scan) failed: user=%s", user_id)
+
+        # ── Step 4: promote high-importance memories ──
+        promoted_memories = 0
+        try:
+            promoted_memories = self._promote_timeline_events(user_id, agent_id)
+        except Exception:
+            logger.exception(
+                "Dream step4 (memory promotion) failed: user=%s", user_id
+            )
+
+        # ── Step 5: maintenance (90-day retention) ──
+        pruned = 0
+        try:
+            from ...foundation.repository_factory import RepositoryFactory
+
+            pruned = RepositoryFactory.get_memory_timeline_repository().maintain(
+                retention_days=90
+            )
+        except Exception:
+            logger.exception("Dream step5 (maintenance) failed: user=%s", user_id)
+
+        dur_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "Dream done: user=%s agent=%s status=%s signals=%d "
+            "memories_promoted=%d pruned=%d (%d ms)",
+            user_id, agent_id, status, signals, promoted_memories, pruned, dur_ms,
+        )
+
+    def _promote_signals(self, user_id: str, agent_id: str | None) -> int:
+        """Dream step 3: scan recent session files, promote signals."""
+        if not user_id:
+            return 0
+        from ...agents.memory.signal_extractor import extract_signals_from_session
+        from ...constant import WORKSPACES_DIR
+        from ...foundation.memory_timeline import TimelineEntry
+        from ...foundation.repository_factory import RepositoryFactory
+
+        sess_dir = WORKSPACES_DIR / user_id / "sessions"
+        if not sess_dir.is_dir():
+            return 0
+        # Most recently touched transcripts first; cap the nightly workload.
+        files = sorted(
+            (p for p in sess_dir.rglob("*.json")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:20]
+        tl = RepositoryFactory.get_memory_timeline_repository()
+        n = 0
+        for f in files:
+            for cand in extract_signals_from_session(f):
+                tl.append(TimelineEntry(
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    session_id=f.stem,
+                    signal_type=cand["signal_type"],
+                    content=cand["content"],
+                    source="dream_signal_scan",
+                    importance=0.7,
+                ))
+                n += 1
+        return n
+
+    def _promote_timeline_events(self, user_id: str, agent_id: str | None) -> int:
+        """Dream step 4: promote timeline events to memories (design section 6).
+
+        Candidates: signal_type in {decision, preference, goal},
+        importance >= 0.6, created within 7 days, promoted_at IS NULL.
+        Each is written into the ledger with source="timeline"; successful
+        rows are stamped ``promoted_at`` — the sole basis for promotion
+        de-duplication (repeated dream runs never re-promote).
+        """
+        if not user_id:
+            return 0
+        from ...agents.memory.signal_extractor import signal_to_category
+        from ...foundation.memory_repository import MemoryEntry
+        from ...foundation.repository_factory import RepositoryFactory
+
+        mem_repo = RepositoryFactory.get_memory_repository()
+        tl = RepositoryFactory.get_memory_timeline_repository()
+        candidates = tl.promotion_candidates(user_id=user_id)
+        ok_ids = []
+        for c in candidates:
+            content = (c.get("content") or "").strip()
+            if not content:
+                continue
+            mem_repo.add(MemoryEntry(
+                scope="user",
+                user_id=user_id,
+                agent_id=c.get("agent_id") or agent_id,
+                category=signal_to_category(c.get("signal_type")),
+                title=content[:50],
+                content=content,
+                source="timeline",
+                importance=min(1.0, max(0.0, float(c.get("importance") or 0.6))),
+            ))
+            ok_ids.append(int(c["id"]))
+        if ok_ids:
+            tl.mark_promoted(ok_ids, time.time())
+        return len(ok_ids)
 
     async def _cleanup_callback(self) -> None:
         """Run scheduled data cleanup — hot→warm→cold lifecycle for all users."""

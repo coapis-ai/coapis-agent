@@ -15,6 +15,7 @@ from .eval import AgentRun, AgentTask, AgentTrajectory
 from .external import ExternalBinding, ExternalSystem
 from .files import FileRecord
 from .memory import Memory
+from .memory_timeline import MemoryTimeline
 from .runtime import PermissionsConfig, TokenUsageDaily
 from .scene import Scene, Tag, UserSceneSettings
 from .state import MigrationState
@@ -31,6 +32,7 @@ __all__ = [
     "ExternalSystem",
     "FileRecord",
     "Memory",
+    "MemoryTimeline",
     "MigrationState",
     "PermissionsConfig",
     "PointTransaction",
