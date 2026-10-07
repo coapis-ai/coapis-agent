@@ -20,6 +20,7 @@ Provides memory search (keyword + LLM rerank), context compaction
 auto-extraction, and Dream-based memory consolidation — all without
 requiring reme-ai or any vector database.
 """
+import asyncio
 import json
 import logging
 import re
@@ -312,11 +313,17 @@ class ReMeLightMemoryManager(BaseMemoryManager):
         max_results: int = 5,
         min_score: float = 0.1,
     ) -> ToolResponse:
-        """Search MEMORY.md and memory/*.md files semantically.
+        """Search MEMORY.md, memory/*.md files AND the DB memory ledger.
+
+        Dual-track (batch 1 bridge): file-based results stay primary; DB
+        ledger hits (timeline signals + curated memory entries) are appended
+        as a clearly-marked supplemental section. Ledger lookup is
+        fail-safe — any error yields the plain file-based response.
 
         Use this tool before answering questions about prior work,
         decisions, dates, people, preferences, or todos. Returns top
-        relevant snippets with file paths and line numbers.
+        relevant snippets with file paths and line numbers, plus matching
+        database ledger entries when available.
 
         Args:
             query: The semantic search query.
@@ -327,11 +334,120 @@ class ReMeLightMemoryManager(BaseMemoryManager):
             ToolResponse with search results.
         """
         logger.info("[MemorySearch] Searching for: %s", query[:50])
-        return await self._file_based_search(
+        file_response = await self._file_based_search(
             query=query,
             max_results=max_results,
             min_score=min_score,
         )
+        try:
+            supplemental = await asyncio.to_thread(
+                self._ledger_search, query, max_results
+            )
+        except Exception as e:
+            logger.debug("Ledger search skipped: %s", e)
+            return file_response
+        if not supplemental:
+            return file_response
+        return self._append_supplement(file_response, supplemental)
+
+    def _ledger_search(self, query: str, max_results: int) -> str:
+        """Keyword-overlap search over DB ledger (timeline + memory entries).
+
+        Lexical baseline (batch 1); semantic upgrade lands in batch 3.
+        Runs in a worker thread — keep it bounded and read-only.
+        """
+        username = self._username
+        if not username or not query.strip():
+            return ""
+
+        tokens = self._query_tokens(query)
+        if not tokens:
+            return ""
+
+        hits: list[tuple[float, str]] = []
+
+        # Track 1: recent timeline signals (~90 days)
+        try:
+            from ...foundation.repository_factory import RepositoryFactory
+
+            tl_rows = RepositoryFactory.get_memory_timeline_repository().recent(
+                user_id=username, hours=24 * 90, limit=200
+            )
+            for row in tl_rows:
+                content = (row.get("content") or "").strip()
+                if not content:
+                    continue
+                score = self._overlap_score(content, tokens)
+                importance = row.get("importance")
+                if isinstance(importance, (int, float)) and importance >= 8:
+                    score += 0.1
+                if score > 0:
+                    label = row.get("signal_type") or "signal"
+                    hits.append((score, f"[台账-{label}] {content}"))
+        except Exception as e:
+            logger.debug("Ledger timeline track failed: %s", e)
+
+        # Track 2: curated memory entries (ILIKE substring prefilter)
+        try:
+            from ...foundation.repository_factory import RepositoryFactory
+
+            entries = RepositoryFactory.get_memory_repository().list_entries(
+                user_id=username, q=query, limit=20
+            )
+            for entry in entries:
+                text = f"{entry.title}: {entry.content}"
+                score = self._overlap_score(text, tokens)
+                if isinstance(entry.importance, (int, float)) and entry.importance >= 8:
+                    score += 0.1
+                if score > 0:
+                    hits.append((score, f"[记忆条目] {text}"))
+        except Exception as e:
+            logger.debug("Ledger memory track failed: %s", e)
+
+        if not hits:
+            return ""
+
+        hits.sort(key=lambda h: h[0], reverse=True)
+        lines = ["[记忆台账补充（数据库）]"]
+        for _, text in hits[:max_results]:
+            snippet = text.replace("\n", " ")
+            if len(snippet) > 160:
+                snippet = snippet[:160].rstrip() + "…"
+            lines.append(f"- {snippet}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _query_tokens(query: str) -> list[str]:
+        """Lowercase word tokens + CJK char bigrams (lexical baseline)."""
+        q = query.lower()
+        tokens = set(re.findall(r"[a-z0-9_]+", q))
+        cjk = re.findall(r"[\u4e00-\u9fff]", q)
+        tokens.update(a + b for a, b in zip(cjk, cjk[1:]))
+        return sorted(t for t in tokens if t)
+
+    @classmethod
+    def _overlap_score(cls, text: str, tokens: list[str]) -> float:
+        lowered = text.lower()
+        matched = sum(1 for t in tokens if t in lowered)
+        return matched / len(tokens) if tokens else 0.0
+
+    @staticmethod
+    def _append_supplement(base: ToolResponse, supplemental: str) -> ToolResponse:
+        """Append the ledger section to the file-based ToolResponse."""
+        try:
+            blocks = list(getattr(base, "content", None) or [])
+            base_text = "".join(
+                b.get("text", "")
+                for b in blocks
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+            combined = (
+                f"{base_text}\n\n{supplemental}" if base_text else supplemental
+            )
+            return ToolResponse(content=[TextBlock(type="text", text=combined)])
+        except Exception as e:
+            logger.debug("Supplement merge failed, returning base: %s", e)
+            return base
 
     async def summarize(self, messages: list[Msg], **_kwargs) -> str:
         """Extract high-value info from compacted messages → MEMORY.md."""

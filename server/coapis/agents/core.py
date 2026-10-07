@@ -865,6 +865,20 @@ class AgentCore:
             if memory_context:
                 parts.append(f"\n[MEMORY]\n{memory_context}")
 
+        # Timeline digest: 被动桥接，记忆台账 → 系统提示词（批次 1）。
+        # 只读、失败静默降级为空串，绝不影响提示词主体。
+        try:
+            from ..foundation.timeline_digest import build_timeline_digest
+
+            # 用户名来自内存管理器（ReMeLightMemoryManager._username，
+            # 构造时由 AgentApp 注入）；取不到则 digest 返回空串，静默跳过。
+            uid = getattr(memory, "_username", None)
+            digest = build_timeline_digest(user_id=uid)
+            if digest:
+                parts.append(digest)
+        except Exception as exc:
+            logger.debug("Timeline digest skipped: %s", exc)
+
         result = "\n".join(parts) if parts else self.system_prompt or ""
         logger.info("Final system prompt length: %d, parts count: %d", len(result), len(parts))
         return result
