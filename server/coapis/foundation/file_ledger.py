@@ -147,8 +147,8 @@ class FileLedgerService:
             items = list(latest.values())
             total = len(items)
             items = items[offset : offset + limit]
-            for d in items:
-                d.pop("id", None)
+            # NOTE: keep "id" exposed — the status/archive endpoints
+            # resolve records by this integer primary key.
             return {
                 "items": items,
                 "total": total,
@@ -222,6 +222,32 @@ class FileLedgerService:
             logger.warning("file ledger status update failed: %s", exc)
             return False
 
+    def _distinct_latest(
+        self,
+        username: str,
+        *,
+        session_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Distinct files (newest row wins) with ledger metadata.
+
+        Shared by :meth:`list_deliverables` and :meth:`count_deliverables`.
+        Never raises.
+        """
+        try:
+            q = select(FileRecord).where(FileRecord.user_id == username)
+            if session_id:
+                q = q.where(FileRecord.session_id == session_id)
+            with get_session() as s:
+                rows = s.execute(q.order_by(FileRecord.id.desc())).all()
+            latest: "OrderedDict[str, dict]" = OrderedDict()
+            for r in rows:
+                d = r[0].to_dict()
+                latest.setdefault(d["file_path"], d)
+            return list(latest.values())
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("file ledger deliverables failed: %s", exc)
+            return []
+
     def list_deliverables(
         self,
         username: str,
@@ -236,29 +262,31 @@ class FileLedgerService:
         ``updated_at`` (falling back to ``created_at``) descending.
         Never raises.
         """
-        try:
-            q = select(FileRecord).where(FileRecord.user_id == username)
-            if session_id:
-                q = q.where(FileRecord.session_id == session_id)
-            with get_session() as s:
-                rows = s.execute(q.order_by(FileRecord.id.desc())).all()
-            latest: "OrderedDict[str, dict]" = OrderedDict()
-            for r in rows:
-                d = r[0].to_dict()
-                latest.setdefault(d["file_path"], d)
-            items = list(latest.values())
-            if status:
-                items = [d for d in items if d.get("status") == status]
-            items.sort(
-                key=lambda d: (d.get("updated_at") or d.get("created_at") or 0),
-                reverse=True,
-            )
-            for d in items:
-                d.pop("id", None)
-            return items[:limit]
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("file ledger deliverables failed: %s", exc)
-            return []
+        items = self._distinct_latest(username, session_id=session_id)
+        if status:
+            items = [d for d in items if d.get("status") == status]
+        items.sort(
+            key=lambda d: (d.get("updated_at") or d.get("created_at") or 0),
+            reverse=True,
+        )
+        # NOTE: keep "id" exposed — clients need it to target the
+        # status/archive endpoints.
+        return items[:limit]
+
+    def count_deliverables(
+        self,
+        username: str,
+        *,
+        status: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> int:
+        """Total distinct-file count (unlimited) for the same filters as
+        :meth:`list_deliverables`. Never raises (returns 0 on failure).
+        """
+        items = self._distinct_latest(username, session_id=session_id)
+        if status:
+            items = [d for d in items if d.get("status") == status]
+        return len(items)
 
     def archive_file(self, username: str, file_path: str) -> bool:
         """Mark the newest row of ``file_path`` as archived (soft only)."""

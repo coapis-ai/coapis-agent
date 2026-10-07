@@ -524,16 +524,18 @@ class CronManager:
             logger.exception("heartbeat run failed")
 
     async def _dream_callback(self) -> None:
-        """Nightly dream: five-step memory integration pipeline.
+        """Nightly dream: four-step memory integration pipeline.
 
-        1. Consolidate (L3) — existing behaviour
-        2. Record outcome → memories (category=dream)
-        3. Scan recent sessions for signals → memory_timelines
-        4. Promote high-importance memories (≥0.9) → memory_timelines
-        5. Maintenance: prune timeline rows older than 90 days
+        1. Consolidate (L3) — the registry-backed ``memory_backend``
+           (ReMeLightMemoryManager) consolidates AND records its own
+           outcome row in the long-term ledger, so this callback must
+           NOT record it again (duplicate row per night).
+        2. Scan recent sessions for signals → memory_timelines
+        3. Promote high-importance memories (≥0.9) → memory_timelines
+        4. Maintenance: prune timeline rows older than 90 days
 
         Runs on the event loop thread (scheduler fires callbacks on the
-        loop), so step 1 is awaited directly. Steps 2-5 are best-effort:
+        loop), so step 1 is awaited directly. Steps 2-4 are best-effort:
         a failure in any of them is logged and swallowed so the scheduler
         keeps firing (design: tech_docs/记忆系统整合设计方案.md §5.2).
         """
@@ -544,8 +546,18 @@ class CronManager:
 
         # ── Step 1: consolidate ──
         try:
-            result = await self._runner.memory_manager.dream()
-            status = result if isinstance(result, str) else "ok"
+            mm = getattr(self._runner, "memory_backend", None)
+            if mm is None or not callable(getattr(mm, "dream", None)):
+                mm = self._runner.memory_manager
+            if not callable(getattr(mm, "dream", None)):
+                logger.error(
+                    "Dream step1 skipped: no memory manager with dream() "
+                    "(agent=%s user=%s)",
+                    agent_id, user_id,
+                )
+            else:
+                result = await mm.dream()
+                status = result if isinstance(result, str) else "ok"
         except asyncio.CancelledError:
             logger.info("Dream task was cancelled")
             raise
@@ -553,41 +565,23 @@ class CronManager:
             logger.error(f"Dream step1 failed: {e}", exc_info=True)
             status = "error"
 
-        # ── Step 2: record outcome ──
-        try:
-            from datetime import datetime, timezone
-
-            from ...agents.memory.dream_outcome import compute_dream_outcome
-            from ...foundation.repository_factory import RepositoryFactory
-
-            norm_status, reason, summary = compute_dream_outcome({"L3": status})
-            RepositoryFactory.get_memory_repository().record_outcome(
-                user_id=user_id,
-                day=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                status=norm_status,
-                reason=reason,
-                summary=summary,
-            )
-        except Exception:
-            logger.exception("Dream step2 (record outcome) failed: user=%s", user_id)
-
-        # ── Step 3: signal scan ──
+        # ── Step 2: signal scan ──
         signals = 0
         try:
             signals = self._promote_signals(user_id, agent_id)
         except Exception:
-            logger.exception("Dream step3 (signal scan) failed: user=%s", user_id)
+            logger.exception("Dream step2 (signal scan) failed: user=%s", user_id)
 
-        # ── Step 4: promote high-importance memories ──
+        # ── Step 3: promote high-importance memories ──
         promoted_memories = 0
         try:
             promoted_memories = self._promote_timeline_events(user_id, agent_id)
         except Exception:
             logger.exception(
-                "Dream step4 (memory promotion) failed: user=%s", user_id
+                "Dream step3 (memory promotion) failed: user=%s", user_id
             )
 
-        # ── Step 5: maintenance (90-day retention) ──
+        # ── Step 4: maintenance (90-day retention) ──
         pruned = 0
         try:
             from ...foundation.repository_factory import RepositoryFactory
@@ -596,7 +590,7 @@ class CronManager:
                 retention_days=90
             )
         except Exception:
-            logger.exception("Dream step5 (maintenance) failed: user=%s", user_id)
+            logger.exception("Dream step4 (maintenance) failed: user=%s", user_id)
 
         dur_ms = int((time.monotonic() - t0) * 1000)
         logger.info(

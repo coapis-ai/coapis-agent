@@ -21,8 +21,11 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
-    dialect = conn.dialect.name
-    ts_type = sa.DateTime(timezone=True) if dialect == "postgresql" else sa.Float()
+    # Timestamps are epoch seconds (Float) on ALL dialects — the ORM
+    # model (foundation/db/models/memory.py) declares Float, so a
+    # dialect-specific DateTime would drift from the application layer
+    # on fresh Postgres installs.
+    ts_type = sa.Float()
 
     # Idempotency guard: 0001 generates DDL from Base.metadata, so on a
     # fresh DB the memories table (and its indexes) already exist before

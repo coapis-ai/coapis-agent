@@ -411,10 +411,13 @@ async def list_deliverables(
     from ...foundation.file_ledger import get_file_ledger
 
     username = get_current_user(request)["username"]
-    items = get_file_ledger().list_deliverables(
+    led = get_file_ledger()
+    items = led.list_deliverables(
         username, status=status, session_id=session_id, limit=limit,
     )
-    return {"items": items, "total": len(items)}
+    # total reflects the FULL filtered set, not the truncated page
+    total = led.count_deliverables(username, status=status, session_id=session_id)
+    return {"items": items, "total": total}
 
 
 @router.post("/records/{file_id}/archive")

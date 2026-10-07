@@ -366,6 +366,36 @@ class Workspace:
                 r.memory_manager.agent_id = self.agent_id or "default"
             except Exception as _cm_err:
                 logger.warning("Failed to init context/memory manager for runner: %s", _cm_err)
+            # Register the registry-backed memory backend (config-driven,
+            # default "remelight") — this is the object that implements the
+            # nightly ``dream()`` pipeline. Kept separate from
+            # ``memory_manager`` above because the legacy command-dispatch
+            # API (save/prefetch/list_entries) lives on MemoryManager.
+            try:
+                from ..config.config import load_agent_config
+                from .memory.base_memory_manager import (
+                    get_memory_manager_backend,
+                )
+                _mcfg = load_agent_config(
+                    self.agent_id, workspace_dir=self.workspace_dir
+                )
+                _mm_cls = get_memory_manager_backend(
+                    getattr(
+                        _mcfg.running,
+                        "memory_manager_backend",
+                        "remelight",
+                    )
+                )
+                r.memory_backend = _mm_cls(
+                    working_dir=str(self.workspace_dir),
+                    agent_id=self.agent_id or "default",
+                    username=getattr(self, "username", None),
+                )
+            except Exception as _mb_err:
+                logger.warning(
+                    "Failed to init memory backend (dream) for runner: %s",
+                    _mb_err,
+                )
             # Manually initialize session (sync) and mark as healthy.
             # Session messages are stored under workspace_dir/sessions/ by default.
             # For the default user agent (user:{username}), store sessions under
