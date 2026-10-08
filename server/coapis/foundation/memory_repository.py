@@ -129,17 +129,22 @@ class MemoryRepository(ABC):
         scope: Optional[str] = None,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
         category: Optional[str] = None,
         q: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> List[MemoryEntry]:
-        """Filtered listing (alive rows only), newest first."""
+        """Filtered listing (alive rows only), newest first.
+
+        ``workspace_id`` (batch 2): restrict to entries owned by a
+        workspace — the hook for organization-shared memory.
+        """
 
     @abstractmethod
     def count(self, *, scope: Optional[str] = None, user_id: Optional[str] = None,
-              agent_id: Optional[str] = None, category: Optional[str] = None,
-              q: Optional[str] = None) -> int:
+              agent_id: Optional[str] = None, workspace_id: Optional[str] = None,
+              category: Optional[str] = None, q: Optional[str] = None) -> int:
         """Total matching alive rows (pre-pagination)."""
 
     @abstractmethod

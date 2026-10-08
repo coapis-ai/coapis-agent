@@ -216,11 +216,17 @@ def test_search_ledger_exception_degrades():
     check("B7 台账异常优雅降级", text == "safe")
 
 
-def test_query_tokens_cjk():
-    toks = ReMeLightMemoryManager._query_tokens("部署 方案B alpha")
-    check("B8 英文词元", "alpha" in toks and "b" in toks)
-    check("B9 中文二元组", "署方" in toks, str(toks))
-    check("B10 重叠计分", ReMeLightMemoryManager._overlap_score("部署方案B", toks) > 0.5)
+def test_weak_semantics_scoring():
+    # Batch 3: lexical overlap replaced by hash cosine (D3 always-on).
+    from coapis.foundation.hash_similarity import (
+        PROMOTE_SIM_THRESHOLD,
+        text_similarity,
+    )
+    s_close = text_similarity("部署 方案B", "选用方案B部署")
+    s_far = text_similarity("部署 方案B", "数据库连接池超时设置")
+    check("B8 近似文本高分", s_close > 0.5, f"close={s_close:.3f}")
+    check("B9 相异文本更低分", s_far < s_close, f"far={s_far:.3f} close={s_close:.3f}")
+    check("B10 晋升阈值=0.85(D2)", PROMOTE_SIM_THRESHOLD == 0.85)
 
 
 def _run(coro):
@@ -243,7 +249,7 @@ def main():
     test_search_ledger_hit_appended()
     test_search_ledger_empty_passthrough()
     test_search_ledger_exception_degrades()
-    test_query_tokens_cjk()
+    test_weak_semantics_scoring()
     failed = [r for r in RESULTS if not r[1]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} passed")
     return 1 if failed else 0

@@ -18,7 +18,11 @@ from sqlalchemy import func, or_, select
 
 from .db.engine import get_session_factory
 from .db.models.memory import Memory
-from .memory_repository import MemoryEntry, MemoryRepository
+from .hash_similarity import cosine_similarity, feature_vector
+from .memory_repository import MemoryEntry, MemoryRepository, ScopeType
+
+#: Max candidate rows pulled into the in-memory similarity pool.
+_SIMILAR_POOL_CAP = 500
 
 
 def _normalize(text: Optional[str]) -> str:
@@ -157,7 +161,7 @@ class SqlaMemoryRepository(MemoryRepository):
             return self._to_entry(row)
 
     def _apply_filters(self, stmt, *, scope=None, user_id=None, agent_id=None,
-                       category=None, q=None):
+                       workspace_id=None, category=None, q=None):
         """Append the alive-row filter set onto any SELECT over Memory."""
         stmt = stmt.where(Memory.deleted_at.is_(None))
         if scope is not None:
@@ -166,6 +170,8 @@ class SqlaMemoryRepository(MemoryRepository):
             stmt = stmt.where(Memory.user_id == user_id)
         if agent_id is not None:
             stmt = stmt.where(Memory.agent_id == agent_id)
+        if workspace_id is not None:
+            stmt = stmt.where(Memory.workspace_id == workspace_id)
         if category is not None:
             stmt = stmt.where(Memory.category == category)
         if q:
@@ -177,10 +183,11 @@ class SqlaMemoryRepository(MemoryRepository):
         return stmt
 
     def list_entries(self, *, scope=None, user_id=None, agent_id=None,
-                     category=None, q=None, limit=50, offset=0) -> List[MemoryEntry]:
+                     workspace_id=None, category=None, q=None,
+                     limit=50, offset=0) -> List[MemoryEntry]:
         stmt = self._apply_filters(
             select(Memory), scope=scope, user_id=user_id, agent_id=agent_id,
-            category=category, q=q)
+            workspace_id=workspace_id, category=category, q=q)
         stmt = stmt.order_by(Memory.created_at.desc(), Memory.id.desc())
         stmt = stmt.limit(int(limit)).offset(int(offset))
         sf = get_session_factory()
@@ -189,37 +196,55 @@ class SqlaMemoryRepository(MemoryRepository):
             return [self._to_entry(r) for r in rows]
 
     def count(self, *, scope=None, user_id=None, agent_id=None,
-              category=None, q=None) -> int:
+              workspace_id=None, category=None, q=None) -> int:
         stmt = self._apply_filters(
             select(func.count()).select_from(Memory),
             scope=scope, user_id=user_id, agent_id=agent_id,
-            category=category, q=q)
+            workspace_id=workspace_id, category=category, q=q)
         sf = get_session_factory()
         with sf() as s:
             return int(s.scalar(stmt) or 0)
 
     def find_similar(self, entry_id: int, limit: int = 5) -> List[MemoryEntry]:
+        """Rank same-scope peers by hash weak-semantic cosine (batch 3).
+
+        A bounded pool (most recent, same scope, alive) is scored in
+        Python against ``title + content``; ties break on recency.
+        """
         sf = get_session_factory()
         with sf() as s:
             src = s.get(Memory, int(entry_id))
             if src is None:
                 return []
-            toks = _tokens(src.title)
-            if not toks:
-                return []
-            conds = [Memory.title.ilike(f"%{t}%") for t in toks[:8]]
             stmt = (
                 select(Memory)
                 .where(Memory.deleted_at.is_(None))
                 .where(Memory.id != src.id)
                 .where(Memory.scope == src.scope)
-                .where(or_(*conds))
-                .order_by(Memory.importance.desc(), Memory.created_at.desc(),
-                          Memory.id.asc())
-                .limit(int(limit))
             )
-            rows = s.scalars(stmt).all()
-            return [self._to_entry(r) for r in rows]
+            # Owner scoping: similarity never crosses owners (privacy).
+            if src.scope == ScopeType.USER.value:
+                stmt = stmt.where(Memory.user_id == src.user_id)
+            elif src.scope == ScopeType.AGENT.value:
+                stmt = stmt.where(Memory.agent_id == src.agent_id)
+            elif src.scope == ScopeType.WORKSPACE.value:
+                stmt = stmt.where(Memory.workspace_id == src.workspace_id)
+            stmt = (
+                stmt.order_by(Memory.created_at.desc(), Memory.id.desc())
+                .limit(_SIMILAR_POOL_CAP)
+            )
+            pool = s.scalars(stmt).all()
+        if not pool:
+            return []
+        src_vec = feature_vector(f"{src.title or ''} {src.content or ''}")
+        scored = []
+        for r in pool:
+            sim = cosine_similarity(
+                src_vec, feature_vector(f"{r.title or ''} {r.content or ''}"))
+            if sim > 0.0:
+                scored.append((-sim, -(r.updated_at or 0.0), r.id, r))
+        scored.sort(key=lambda t: (t[0], t[1], t[2]))
+        return [self._to_entry(r) for _, _, _, r in scored[: int(limit)]]
 
     def stats(self, *, scope=None, user_id=None) -> Dict[str, Any]:
         sf = get_session_factory()

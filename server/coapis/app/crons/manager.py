@@ -644,31 +644,89 @@ class CronManager:
         """
         if not user_id:
             return 0
+        from types import SimpleNamespace
+
         from ...agents.memory.signal_extractor import signal_to_category
+        from ...foundation.hash_similarity import (
+            PROMOTE_SIM_THRESHOLD,
+            cosine_similarity,
+            feature_vector,
+        )
         from ...foundation.memory_repository import MemoryEntry
         from ...foundation.repository_factory import RepositoryFactory
 
         mem_repo = RepositoryFactory.get_memory_repository()
         tl = RepositoryFactory.get_memory_timeline_repository()
         candidates = tl.promotion_candidates(user_id=user_id)
+
+        # Existing same-user memory pool for near-duplicate detection
+        # (batch 3 weak semantics; D2 threshold 0.85).
+        try:
+            pool = mem_repo.list_entries(scope="user", user_id=user_id, limit=300)
+        except Exception:
+            logger.debug(
+                "Similarity pool load failed (promotion continues): user=%s",
+                user_id, exc_info=True,
+            )
+            pool = []
+        pool_vecs = [
+            (m, feature_vector(f"{m.title or ''} {m.content or ''}")) for m in pool
+        ]
+
         ok_ids = []
+        reinforced = 0
         for c in candidates:
             content = (c.get("content") or "").strip()
             if not content:
                 continue
+            title = content[:50]
+            imp = min(1.0, max(0.0, float(c.get("importance") or 0.6)))
+
+            # Near-duplicate check: reinforce existing entry, no new row.
+            cand_vec = feature_vector(f"{title} {content}")
+            best_m = None
+            best_sim = 0.0
+            for m, mv in pool_vecs:
+                sim = cosine_similarity(cand_vec, mv)
+                if sim > best_sim:
+                    best_sim, best_m = sim, m
+            if best_m is not None and best_sim >= PROMOTE_SIM_THRESHOLD:
+                try:
+                    mem_repo.update_importance(
+                        best_m.id,
+                        max(float(best_m.importance or 0.0), imp),
+                    )
+                    reinforced += 1
+                except Exception:
+                    logger.warning(
+                        "Failed to reinforce memory %s: user=%s",
+                        getattr(best_m, "id", "?"), user_id, exc_info=True,
+                    )
+                ok_ids.append(int(c["id"]))
+                continue
+
             mem_repo.add(MemoryEntry(
                 scope="user",
                 user_id=user_id,
                 agent_id=c.get("agent_id") or agent_id,
                 category=signal_to_category(c.get("signal_type")),
-                title=content[:50],
+                title=title,
                 content=content,
                 source="timeline",
-                importance=min(1.0, max(0.0, float(c.get("importance") or 0.6))),
+                importance=imp,
             ))
             ok_ids.append(int(c["id"]))
+            # Track the freshly-added row so later candidates can dedupe.
+            pool_vecs.append((SimpleNamespace(
+                id=-1, title=title, content=content, importance=imp,
+            ), cand_vec))
         if ok_ids:
             tl.mark_promoted(ok_ids, time.time())
+        if reinforced:
+            logger.info(
+                "Promotion reinforced %d near-duplicate(s) for user=%s",
+                reinforced, user_id,
+            )
         return len(ok_ids)
 
     async def _cleanup_callback(self) -> None:

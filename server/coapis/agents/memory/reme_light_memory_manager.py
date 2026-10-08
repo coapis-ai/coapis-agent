@@ -351,17 +351,22 @@ class ReMeLightMemoryManager(BaseMemoryManager):
         return self._append_supplement(file_response, supplemental)
 
     def _ledger_search(self, query: str, max_results: int) -> str:
-        """Keyword-overlap search over DB ledger (timeline + memory entries).
+        """Hash weak-semantic search over DB ledger (timeline + entries).
 
-        Lexical baseline (batch 1); semantic upgrade lands in batch 3.
+        Batch 3 (D3: always on): scores are cosine over signed-hash
+        ngram vectors (``foundation.hash_similarity``), replacing the
+        batch-1 lexical overlap. Importance >= 0.8 (production 0-1
+        scale) adds a small tie-break bonus.
         Runs in a worker thread — keep it bounded and read-only.
         """
         username = self._username
         if not username or not query.strip():
             return ""
 
-        tokens = self._query_tokens(query)
-        if not tokens:
+        from ...foundation.hash_similarity import cosine_similarity, feature_vector
+
+        qvec = feature_vector(query)
+        if not any(qvec):
             return ""
 
         hits: list[tuple[float, str]] = []
@@ -377,11 +382,11 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                 content = (row.get("content") or "").strip()
                 if not content:
                     continue
-                score = self._overlap_score(content, tokens)
+                score = cosine_similarity(qvec, feature_vector(content))
                 importance = row.get("importance")
-                if isinstance(importance, (int, float)) and importance >= 8:
+                if isinstance(importance, (int, float)) and importance >= 0.8:
                     score += 0.1
-                if score > 0:
+                if score > 0.05:
                     label = row.get("signal_type") or "signal"
                     hits.append((score, f"[台账-{label}] {content}"))
         except Exception as e:
@@ -396,10 +401,10 @@ class ReMeLightMemoryManager(BaseMemoryManager):
             )
             for entry in entries:
                 text = f"{entry.title}: {entry.content}"
-                score = self._overlap_score(text, tokens)
-                if isinstance(entry.importance, (int, float)) and entry.importance >= 8:
+                score = cosine_similarity(qvec, feature_vector(text))
+                if isinstance(entry.importance, (int, float)) and entry.importance >= 0.8:
                     score += 0.1
-                if score > 0:
+                if score > 0.05:
                     hits.append((score, f"[记忆条目] {text}"))
         except Exception as e:
             logger.debug("Ledger memory track failed: %s", e)
@@ -415,21 +420,6 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                 snippet = snippet[:160].rstrip() + "…"
             lines.append(f"- {snippet}")
         return "\n".join(lines)
-
-    @staticmethod
-    def _query_tokens(query: str) -> list[str]:
-        """Lowercase word tokens + CJK char bigrams (lexical baseline)."""
-        q = query.lower()
-        tokens = set(re.findall(r"[a-z0-9_]+", q))
-        cjk = re.findall(r"[\u4e00-\u9fff]", q)
-        tokens.update(a + b for a, b in zip(cjk, cjk[1:]))
-        return sorted(t for t in tokens if t)
-
-    @classmethod
-    def _overlap_score(cls, text: str, tokens: list[str]) -> float:
-        lowered = text.lower()
-        matched = sum(1 for t in tokens if t in lowered)
-        return matched / len(tokens) if tokens else 0.0
 
     @staticmethod
     def _append_supplement(base: ToolResponse, supplemental: str) -> ToolResponse:

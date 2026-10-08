@@ -35,6 +35,8 @@ async def list_memory_entries(
     user: dict = Depends(get_current_user),
     scope: ScopeType = Query(default=ScopeType.USER),
     category: str | None = Query(default=None),
+    workspace_id: str | None = Query(
+        default=None, description="Filter by workspace (org-shared memory)."),
     min_importance: float = Query(default=0.0, ge=0.0, le=1.0),
     q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=50, ge=1, le=200),
@@ -47,12 +49,15 @@ async def list_memory_entries(
     entries = repo.list_entries(
         scope=scope,
         user_id=user_id,
+        workspace_id=workspace_id,
         category=category,
         q=q,
         limit=limit,
         offset=offset,
     )
-    total = repo.count(scope=scope, user_id=user_id, category=category, q=q)
+    total = repo.count(
+        scope=scope, user_id=user_id, workspace_id=workspace_id,
+        category=category, q=q)
     items = [
         e.to_dict()
         for e in entries
