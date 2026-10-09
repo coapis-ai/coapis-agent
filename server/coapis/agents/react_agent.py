@@ -79,6 +79,11 @@ logger = logging.getLogger(__name__)
 # Valid namesake strategies for tool registration
 NamesakeStrategy = Literal["override", "skip", "raise", "rename"]
 
+# Scene priority: how many scene-declared skills get registered as core
+# (full SKILL.md injected into the prompt) per request. Beyond this cap the
+# remaining scene skills stay on-demand and trigger by keyword only.
+MAX_SCENE_CORE_SKILLS = 5
+
 
 def _wrap_tool_for_fault_tolerance(func, tool_name: str):
     """Wrap a tool function for fault tolerance.
@@ -512,7 +517,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         enabled_tools = {}
         async_execution_tools = {}
         try:
-            from coapis.config.config import load_config as _load_global_config
+            from coapis.config import load_config as _load_global_config
             _gcfg = _load_global_config()
             if _gcfg and _gcfg.tools and _gcfg.tools.builtin_tools:
                 for name, tc in _gcfg.tools.builtin_tools.items():
@@ -625,7 +630,95 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # ── Collect all skill metadata for SkillSelector index ──
         skill_meta_list: list[dict] = []
 
+        # ── S1: Scene priority skills → core registration ──
+        # The scene table is the authoritative source (D1); the runner reads it
+        # per request, so this list is always current. Order in the list IS the
+        # priority order. First MAX_SCENE_CORE_SKILLS entries are registered as
+        # core (full SKILL.md in prompt); the rest fall back to on-demand.
+        scene_names = [s for s in (request_context.get("scene_skills") or []) if s]
+        scene_name = request_context.get("scene_name", "")
+        scene_core: dict[str, Path] = {}
+        scene_overflow: list[str] = []
+        scene_ghosts: list[str] = []
+        tracker = get_trigger_tracker()
+
+        for scene_pos, skill_name in enumerate(scene_names):
+            skill_dir = working_skills_dir / skill_name
+            if not skill_dir.exists():
+                pool_dir = skill_pool_dir / skill_name
+                skill_dir = pool_dir if pool_dir.exists() else None
+            if skill_dir is None:
+                # Ghost skill: declared by the scene but never installed.
+                scene_ghosts.append(skill_name)
+                tracker.record_trigger_event(
+                    skill_name=skill_name,
+                    trigger_method="ghost",
+                    matched_keywords=[],
+                    user_message="",
+                    agent=request_context.get("agent_id", "default"),
+                    user=request_context.get("username", "unknown"),
+                    session_id=request_context.get("session_id", ""),
+                    scene_id=request_context.get("scene_id", ""),
+                    workspace_id=request_context.get("workspace_id", ""),
+                    channel=request_context.get("channel", "console"),
+                    scene_name=scene_name,
+                )
+                logger.warning(
+                    "[SceneGhost] scene '%s' declares skill '%s' which is not "
+                    "installed in workspace '%s' nor the skill pool — skipped.",
+                    scene_name, skill_name, workspace_dir,
+                )
+                continue
+
+            always_load = self._get_skill_always_load(skill_dir)
+            desc = self._get_skill_summary(skill_dir)
+            trigger_keywords = self._get_skill_trigger_keywords(skill_dir)
+            legacy_triggers = self._get_skill_triggers(
+                skill_dir, getattr(self, "_workspace_dir", None),
+            )
+            skill_meta_list.append({
+                "name": skill_name,
+                "dir": str(skill_dir),
+                "trigger_keywords": trigger_keywords,
+                "always_load": always_load,
+                "description": desc,
+                "scene_priority": True,
+                "scene_priority_rank": scene_pos + 1,
+            })
+
+            if len(scene_core) < MAX_SCENE_CORE_SKILLS:
+                if self._scan_and_register_skill(
+                    skill_name,
+                    skill_dir,
+                    "scene",
+                    ["scene_priority"],
+                    "",
+                    tracker,
+                    request_context,
+                ):
+                    scene_core[skill_name] = skill_dir
+                    self._core_skills[skill_name] = skill_dir
+                else:
+                    scene_ghosts.append(skill_name)
+            else:
+                scene_overflow.append(skill_name)
+
+        self._scene_core_skills = list(scene_core.keys())
+        self._scene_overflow_skills = scene_overflow
+        self._scene_ghost_skills = scene_ghosts
+
+        if scene_overflow:
+            logger.info(
+                "[ScenePriority] scene '%s' declares %d skills; core cap is %d — "
+                "%s stays on-demand (keyword-triggered only)",
+                scene_name, len(scene_names), MAX_SCENE_CORE_SKILLS,
+                ", ".join(scene_overflow),
+            )
+
         for skill_name in effective_skills:
+            if skill_name in scene_core:
+                # Already registered as scene-priority core.
+                continue
             skill_dir = working_skills_dir / skill_name
             # Fallback: if not in workspace, try skill pool
             if not skill_dir.exists():
@@ -675,27 +768,54 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     skill_name, legacy_triggers, skill_dir == (skill_pool_dir / skill_name),
                 )
 
+        # Scene skills beyond the core cap join the on-demand pool.
+        for skill_name in scene_overflow:
+            if skill_name in self._on_demand_skills:
+                continue
+            skill_dir = working_skills_dir / skill_name
+            if not skill_dir.exists():
+                pool_dir = skill_pool_dir / skill_name
+                skill_dir = pool_dir if pool_dir.exists() else None
+            if skill_dir is None:
+                continue
+            legacy_triggers = self._get_skill_triggers(
+                skill_dir, getattr(self, "_workspace_dir", None),
+            )
+            self._on_demand_skills[skill_name] = (skill_dir, legacy_triggers)
+            self._register_skill_summary(toolkit, skill_dir)
+
         # ── Build SkillSelector index for fast keyword matching ──
         try:
             from .utils.skill_selector import SkillSelector
-            self._skill_selector = SkillSelector({
-                "enable_llm_fallback": False,  # LLM handled by _load_on_demand_skills
-                "max_selected_skills": 15,
-                "min_keyword_length": 2,
-            })
+            self._skill_selector = SkillSelector(
+                {
+                    "enable_llm_fallback": False,  # LLM handled by _load_on_demand_skills
+                    "max_selected_skills": 15,
+                    "min_keyword_length": 2,
+                },
+                scene_skills=scene_names,
+            )
             self._skill_selector.build_index(skill_meta_list)
+            # Keep metadata handy for the scene-priority prompt segment.
+            self._skill_meta = {
+                m["name"]: m for m in skill_meta_list
+            }
             logger.info(
-                "SkillSelector index built: %d keywords, %d always-load",
+                "SkillSelector index built: %d keywords, %d always-load, %d scene-priority",
                 len(self._skill_selector.keyword_index),
                 len(self._skill_selector.always_load_skills),
+                len(scene_names),
             )
         except Exception as e:
             logger.warning("Failed to build SkillSelector index: %s", e)
             self._skill_selector = None
+            self._skill_meta = {}
 
         logger.info(
-            "Skills loaded: %d core (always_load), %d on-demand (deferred)",
+            "Skills loaded: %d core (always_load), %d on-demand (deferred), "
+            "%d scene-priority core, %d scene ghost",
             len(self._core_skills), len(self._on_demand_skills),
+            len(self._scene_core_skills), len(self._scene_ghost_skills),
         )
 
     @staticmethod
@@ -727,6 +847,46 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception:
             pass
         return ""
+
+    def _build_scene_skill_segment(self) -> str:
+        """S4: Scene-priority skill segment, placed at the very front.
+
+        Lists the scene's core skills with their descriptions and an explicit
+        instruction that the agent MUST prefer them when the request is
+        related. Placing it at the front (right after the scene header) is
+        what makes the priority binding, not a flat skill list.
+        """
+        core = getattr(self, "_scene_core_skills", [])
+        if not core:
+            return ""
+        meta = getattr(self, "_skill_meta", {})
+        scene_name = self._request_context.get("scene_name", "")
+        lines = []
+        for name in core:
+            m = meta.get(name, {})
+            desc = m.get("description", "")
+            rank = m.get("scene_priority_rank", 0)
+            desc_short = desc.strip().replace("\n", " ")
+            if len(desc_short) > 160:
+                desc_short = desc_short[:160] + "…"
+            lines.append(f"{rank}. `{name}` — {desc_short}")
+        body = "\n".join(lines)
+        overflow = getattr(self, "_scene_overflow_skills", [])
+        overflow_line = ""
+        if overflow:
+            overflow_line = (
+                "\n\n本场景还配置了这些技能（按需触发，关键词命中时自动加载）："
+                + ", ".join(f"`{n}`" for n in overflow)
+            )
+        return (
+            f"## ⭐ 本场景优先技能（强制优先，共 {len(core)} 项）\n\n"
+            "以下技能是场景"
+            + (f"「{scene_name}」" if scene_name else "")
+            + "专门配置的。当用户请求与其中任何技能相关时，**必须优先使用它们**，"
+            "不要绕开它们改用通用方式；若多个都相关，按上面的序号顺序优先。\n\n"
+            f"{body}"
+            + overflow_line
+        )
 
     @staticmethod
     def _register_skill_summary(toolkit, skill_dir: Path) -> None:
@@ -882,16 +1042,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 base_triggers = []
                 if keywords:
                     base_triggers.extend([str(t).lower() for t in keywords if t])
-                if patterns:
-                    # patterns 是正则表达式，转换为简单关键词匹配
-                    import re
-                    for pat in patterns:
-                        try:
-                            # 提取正则中的字面量部分
-                            literals = re.findall(r'[\u4e00-\u9fff\w]+', str(pat))
-                            base_triggers.extend([l.lower() for l in literals if len(l) >= 2])
-                        except Exception:
-                            pass
+                # NOTE: `patterns` are REGEXES. Flattening them into literal
+                # fragments (re.findall on the pattern) produced universal
+                # triggers like 帮我/创建/转换/处理 — e.g. pattern "帮我.*pdf"
+                # yielded the keyword "帮我", so any message starting with 帮我
+                # fired pdf/pptx/xlsx/docx. Patterns are not substring
+                # keywords; they are excluded from the keyword trigger set.
                 if intent_hints:
                     # intent_hints 也作为触发词（用于 LLM 分类辅助）
                     base_triggers.extend([str(h).lower() for h in intent_hints if h])
@@ -973,87 +1129,38 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
     @staticmethod
     def _extract_keywords_from_description(description: str) -> list[str]:
-        """Extract meaningful keywords from a skill description string.
+        """Extract high-precision trigger keywords from a description.
 
-        Strategy:
-        - Split on punctuation/delimiters into phrases
-        - For Chinese: also split on common sentence particles
-        - Filter stop words, too-short, too-long tokens
-        - Extract quoted phrases as high-priority keywords
+        Only two signals are admitted:
+        1. Quoted phrases — author-declared explicit trigger terms
+           (e.g. ``.docx``, ``Word 文档``).
+        2. Dotted file suffixes — e.g. ``.pdf``, ``.xlsx``.
+
+        The previous token-splitting strategy (split on punctuation, drop
+        stop words, keep 2-20 char tokens) flooded the trigger set with
+        generic verbs (创建/生成/转换/处理/表格/文档), which combined with
+        flattened regex patterns made almost any message fire pdf/pptx/xlsx.
         """
         import re
-        # Common stop words to exclude
-        stop_words = {
-            # English
-            "the", "a", "an", "is", "are", "was", "were", "be", "been",
-            "being", "have", "has", "had", "do", "does", "did", "will",
-            "would", "could", "should", "may", "might", "shall", "can",
-            "this", "that", "these", "those", "it", "its", "i", "me",
-            "my", "we", "our", "you", "your", "he", "she", "they",
-            "them", "their", "his", "her", "and", "or", "but", "not",
-            "no", "nor", "so", "yet", "for", "at", "by", "from", "in",
-            "into", "of", "on", "to", "with", "as", "if", "then",
-            "than", "too", "very", "just", "about", "above", "after",
-            "before", "between", "during", "through", "under", "again",
-            "further", "once", "here", "there", "when", "where", "why",
-            "how", "all", "each", "every", "both", "few", "more",
-            "most", "other", "some", "such", "only", "own", "same",
-            "use", "used", "using", "also", "any", "what", "which",
-            "who", "whom", "new", "get", "set", "run", "see", "make",
-            "skill", "tool", "file", "when", "need", "user",
-            "se", "ser", "yo", "rl", "ls", "lsm", "rowser", "sually",
-            # Chinese
-            "的", "是", "在", "了", "和", "与", "或", "但", "当",
-            "这", "那", "它", "你", "我", "他", "她", "们", "对",
-            "从", "到", "用", "被", "将", "会", "能", "可", "要",
-            "做", "有", "没", "不", "就", "都", "而", "及", "等",
-            "如果", "因为", "所以", "可以", "需要", "使用", "通过",
-            "进行", "提供", "支持", "包含", "包括", "以及", "或者",
-            "一个", "这个", "那个", "时候", "用户", "功能", "本",
-            "后", "前", "上", "下", "中", "里", "内", "外",
-            "以", "于", "则", "其", "此", "该", "让", "把",
-            "时", "地", "得", "着", "过", "来", "去", "说",
-            "如", "已", "并", "更", "再", "又", "才", "只",
-            "非", "未", "无", "每", "各", "某", "另", "其他",
-            "请", "帮", "帮帮", "一下", "什么", "怎么", "哪些",
-            "这些", "那些", "自己", "目前", "当前", "现在",
-            "适用于", "用于", "使用此", "使用本",
-        }
 
-        # 1. Extract quoted phrases first (high-priority keywords)
-        quoted = re.findall(r'[""\'`]([^""\'`]{2,})[""\'`]', description)
-        seen = set()
-        keywords = []
-        for q in quoted:
+        if not description:
+            return []
+
+        seen: set[str] = set()
+        keywords: list[str] = []
+
+        for q in re.findall(r'[""\'`]([^""\'`]{2,})[""\'`]', description):
             q = q.strip().lower()
-            if q not in seen and q not in stop_words and 2 <= len(q) <= 20:
+            if q and q not in seen:
                 seen.add(q)
                 keywords.append(q)
 
-        # 2. Remove quoted portions to avoid backtick splitting artifacts
-        cleaned = re.sub(r'[""\'`][^""\'`]{2,}[""\'`]', ' ', description)
+        for m in re.finditer(r"\.([A-Za-z][A-Za-z0-9]{1,7})", description):
+            low = m.group(1).lower()
+            if low not in seen:
+                seen.add(low)
+                keywords.append(low)
 
-        # 3. Split description into tokens on delimiters
-        #    Split on: comma, semicolon, colon, parens, brackets, pipe, slash, period, newline
-        tokens = re.split(r'[,，、;；:：\.\。\!\！\?\？\(\)（）\[\]【】\|/\n\r]+', cleaned)
-
-        for token in tokens:
-            # Further split on spaces
-            sub_tokens = token.split()
-            for w in sub_tokens:
-                # Use regex to remove leading/trailing punctuation (not word chars)
-                w = re.sub(r'^[^\w]+|[^\w]+$', '', w).lower()
-                if len(w) < 2 or len(w) > 20:
-                    continue
-                if w in stop_words or w in seen:
-                    continue
-                # Skip tokens that are mostly punctuation
-                if len(re.sub(r'[^\w]', '', w)) < 2:
-                    continue
-                seen.add(w)
-                keywords.append(w)
-
-        return keywords[:15]  # Cap at 15 keywords
 
     def _scan_and_register_skill(
         self,
@@ -1099,6 +1206,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             )
 
         # ── Register the skill ──
+        # The deferred skill was registered as a summary-only entry in
+        # toolkit.skills at startup. agentscope's register_agent_skill()
+        # raises "already registered" on a name collision, so the summary
+        # entry must be evicted before the full registration replaces it.
+        toolkit_skills = getattr(self._toolkit, "skills", None)
+        if isinstance(toolkit_skills, dict):
+            for key in (skill_name, Path(skill_dir).name):
+                toolkit_skills.pop(key, None)
         self._toolkit.register_agent_skill(str(skill_dir))
         trigger_id = tracker.record_trigger_event(
             skill_name=skill_name,
@@ -1207,8 +1322,18 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 logger.error("Failed to load on-demand skill '%s': %s", skill_name, e)
 
         # ── Phase 2: LLM classification (best-effort, for edge cases) ──
+        # D3: LLM 兜底仅在关键词全空时触发，且候选集限定为场景声明的技能
+        # （场景配置是天然先验，比全池 21 个候选更准、更省 token）。
         if not loaded:
-            llm_matched_names = self._llm_classify_skills(user_message)
+            _scene_candidates = list(
+                getattr(self._skill_selector, "scene_skills", []) or []
+            )
+            if not _scene_candidates:
+                # 无场景声明时退回全池，保持原有行为
+                _scene_candidates = None
+            llm_matched_names = self._llm_classify_skills(
+                user_message, restrict_names=_scene_candidates,
+            )
             logger.info(
                 "[TriggerDebug] LLM classification result: matched=%s",
                 llm_matched_names if llm_matched_names else "[]",
@@ -1322,13 +1447,24 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         else:
             logger.info("[TriggerDebug] No on-demand skills loaded for this message")
 
-    def _llm_classify_skills(self, user_message: str) -> list[str]:
-        """Try LLM-based intent classification. Returns matching skill names."""
+    def _llm_classify_skills(
+        self,
+        user_message: str,
+        restrict_names: list[str] | None = None,
+    ) -> list[str]:
+        """Try LLM-based intent classification. Returns matching skill names.
+
+        ``restrict_names`` narrows the candidate set — used for scene priority
+        (S2.3): when keywords found nothing, the LLM only considers the skills
+        the scene declares, which is a far better prior than the whole pool.
+        """
         try:
             from .utils.intent_classifier import classify_intent_llm
             # Build skill summaries for the classifier, including intent_hints
             summaries = {}
             for name, (skill_dir, _kw) in getattr(self, "_on_demand_skills", {}).items():
+                if restrict_names is not None and name not in restrict_names:
+                    continue
                 # 获取完整描述（不截断）
                 summary = self._get_skill_summary(skill_dir, max_len=500)
                 if not summary:
@@ -1763,10 +1899,22 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # 场景提示词应该在系统提示词的最前面，作为"最重要的智能体要求"
         scene_prompt = self._request_context.get("scene_system_prompt", "") if self._request_context else ""
         scene_name = self._request_context.get("scene_name", "") if self._request_context else ""
+        scene_segment = ""
         if scene_prompt:
             scene_header = f"# 🎯 场景身份：{scene_name}\n\n" if scene_name else "# 🎯 场景身份\n\n"
-            sys_prompt = scene_header + scene_prompt + "\n\n---\n\n" + sys_prompt
+            scene_segment = scene_header + scene_prompt + "\n\n---\n\n"
             logger.info(f"[Scene] Injected scene prompt at the beginning of system prompt (scene: {scene_name})")
+
+        # ── S4: 场景优先技能段（紧跟场景身份，置于提示词最前）──
+        skill_segment = self._build_scene_skill_segment()
+        if skill_segment:
+            scene_segment += skill_segment + "\n\n---\n\n"
+            logger.info(
+                "[ScenePriority] Injected %d scene-priority skill(s) at prompt front (scene: %s)",
+                len(getattr(self, "_scene_core_skills", [])), scene_name,
+            )
+        if scene_segment:
+            sys_prompt = scene_segment + sys_prompt
 
         # ── Plan 引导：告诉 LLM 有规划工具可用 ──
         if self.plan_notebook is not None:

@@ -388,6 +388,13 @@ async def console_chat(
         native_payload["meta"]["scene_id"] = scene_id
         logger.info(f"Scene agent mode: scene_id={scene_id}")
 
+    # ── 知识库引用：透传到 meta，供 enrich_chat_context 预查询钩子使用 ──
+    # 社区版自身不消费；企业版插件在查询前检索并把结果注入系统提示。
+    knowledge_bases = biz_params.get("knowledge_bases", [])
+    if knowledge_bases:
+        native_payload["meta"]["knowledge_bases"] = knowledge_bases
+        logger.info(f"Passing {len(knowledge_bases)} knowledge base references through meta")
+
     # ── Extract chat_id early (used in session context + chat lookup) ──
     # Check both top-level and biz_params (frontend may pass it in either place)
     request_chat_id = payload.get("chat_id") or (payload.get("biz_params") or {}).get("chat_id")

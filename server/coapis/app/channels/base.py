@@ -344,6 +344,12 @@ class BaseChannel(ABC):
                 msg.metadata = msg.metadata or {}
                 msg.metadata["scene_id"] = channel_meta["scene_id"]
                 logger.info(f"[Scene] Set msg.metadata.scene_id to {channel_meta['scene_id']}")
+            # ── 知识库引用透传：供 enrich_chat_context 预查询钩子使用 ──
+            # 社区版自身不消费该字段，仅原样带入用户消息 metadata
+            if channel_meta.get("knowledge_bases"):
+                msg.metadata = msg.metadata or {}
+                msg.metadata["knowledge_bases"] = channel_meta["knowledge_bases"]
+                logger.info(f"[KB] Set msg.metadata.knowledge_bases to {len(channel_meta['knowledge_bases'])} refs")
         
         req = AgentRequest(
             session_id=session_id,

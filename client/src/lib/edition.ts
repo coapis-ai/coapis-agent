@@ -10,8 +10,12 @@ export function isEnterpriseEdition(): boolean {
   try {
     const ps = (window as any).__pluginSystem;
     const routes: Array<{ path?: string }> = ps?.getRoutes?.() ?? [];
+    // 企业版知识库路由有两代前缀：早期为 /knowledge，现注册为 /ent/knowledge-bases。
+    // 任一存在即判定为企业版（社区版无这两类路由）。
     return routes.some(
-      (r) => typeof r?.path === "string" && r.path.startsWith("/knowledge"),
+      (r) =>
+        typeof r?.path === "string" &&
+        (r.path.startsWith("/knowledge") || r.path.startsWith("/ent/knowledge")),
     );
   } catch {
     return false;

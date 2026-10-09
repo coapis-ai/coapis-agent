@@ -47,6 +47,7 @@ import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
 import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
+import CoApisKbCitations from "./components/CoApisKbCitations";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
 import {
@@ -56,11 +57,13 @@ import {
   ResourcePlusMenu,
   MySpacePickerModal,
   KnowledgePickerModal,
-  HistorySessionsModal,
-  ModelPickerModal,
+  ScenePickerModal,
   MultiSelectPickerModal,
   type PickItem,
 } from "../../components/Chat";
+import { useChatWindow } from "../../contexts/ChatWindowContext";
+import type { SceneConfig } from "../Workbench/types";
+import ChatSessionDropdown from "./components/ChatSessionDropdown";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -656,11 +659,6 @@ export default function ChatPage() {
   const embeddedOnClose = useMemo(() => {
     return getChatGlobals().onClose;
   }, [isEmbeddedMode]);
-
-  // v2.2.2: 浮窗"展开"按钮回调（收起浮窗并跳转全屏聊天页）
-  const embeddedOnExpand = useMemo(() => {
-    return getChatGlobals().onExpand;
-  }, [isEmbeddedMode]);
   
   const chatId = useMemo(() => {
     // 嵌入式模式：使用场景会话ID
@@ -679,15 +677,73 @@ export default function ChatPage() {
   const { message } = useAppMessage();
 
   // ─── M4 资源整合：+ 菜单与各选择面板 ─────────────────────────────
-  type PickerKind =
-    | "myspace"
-    | "knowledge"
-    | "model"
-    | "session"
-    | "history"
-    | "mcp"
-    | "skill";
+  type PickerKind = "myspace" | "knowledge" | "mcp" | "skill";
   const [pickerOpen, setPickerOpen] = useState<PickerKind | null>(null);
+  const [scenePickerOpen, setScenePickerOpen] = useState(false);
+  // 顶部「历史」按钮：左侧可隐藏抽屉（会话列表，复用 ChatSessionDropdown）
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  // 历史浮层高度约束：以输入框（sender）顶部为底界，动态测量，避免盖住输入框
+  const mainAreaRef = useRef<HTMLDivElement>(null);
+  const [historyMaxHeight, setHistoryMaxHeight] = useState<number | null>(null);
+  useEffect(() => {
+    if (!historyDrawerOpen) return;
+    const compute = () => {
+      const area = mainAreaRef.current;
+      if (!area) return;
+      const ta = area.querySelector("textarea") as HTMLTextAreaElement | null;
+      const areaH = area.getBoundingClientRect().height;
+      if (!ta) {
+        setHistoryMaxHeight(Math.max(160, Math.round(areaH - 148)));
+        return;
+      }
+      // 输入框区域高度 = 容器底边 - textarea 顶边（含 textarea 下方按钮行）
+      const below = area.getBoundingClientRect().bottom - ta.getBoundingClientRect().top;
+      const h = Math.round(areaH - below - 8);
+      setHistoryMaxHeight(Math.max(160, h));
+    };
+    compute();
+    const timer = setTimeout(compute, 120);
+    window.addEventListener("resize", compute);
+    const ro = new ResizeObserver(compute);
+    const ta = mainAreaRef.current?.querySelector("textarea");
+    if (ta) ro.observe(ta);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", compute);
+      ro.disconnect();
+    };
+  }, [historyDrawerOpen]);
+  const { openChat } = useChatWindow();
+
+  // 切换场景：浮窗模式下更新全局场景（FloatingChatWindow 自动重新进入）；
+  // 全屏聊天页下进入场景会话并跳转到对应 /chat/:id
+  const handleScenePick = useCallback(
+    async (scene: { id: string; name: string }) => {
+      try {
+        const res = await api.post<{ chat_id?: string }>(
+          `/scenes/${scene.id}/enter`,
+        );
+        if (isEmbeddedMode) {
+          openChat(scene as unknown as SceneConfig);
+        } else if (res?.chat_id) {
+          navigate(`/chat/${res.chat_id}`);
+        }
+      } catch (err) {
+        console.error("[Scene] 进入场景失败:", err);
+        message.error("进入场景失败");
+      }
+    },
+    [isEmbeddedMode, openChat, navigate, message],
+  );
+
+  // 顶部「新聊天」按钮：创建空会话（sessionApi 自动注册监听并导航）
+  const handleNewChat = useCallback(async () => {
+    try {
+      await sessionApi.createSession({ name: "" });
+    } catch (err) {
+      console.error("[Chat] 新建聊天失败:", err);
+    }
+  }, []);
   const [refMcps, setRefMcps] = useState<PickItem[]>([]);
   const [refSkills, setRefSkills] = useState<PickItem[]>([]);
   const [refSessions, setRefSessions] = useState<PickItem[]>([]);
@@ -990,6 +1046,8 @@ export default function ChatPage() {
   const chatIdRef = useRef(chatId);
   const navigateRef = useRef(navigate);
   const chatRef = useRef<IAgentScopeRuntimeWebUIRef>(null);
+  // v2.2 修正：历史抽屉锚定聊天主窗口（不再盖满整个浏览器视口）
+  const chatWindowRef = useRef<HTMLDivElement>(null);
   const pendingClearHistoryRef = useRef(false);
   const requestSessionIdRef = useRef<string | null>(null);
   // ⭐ 方案2：请求级 ID + 取消上下文，避免旧请求流污染新会话
@@ -1578,9 +1636,6 @@ export default function ChatPage() {
                   }}
                   onMySpaceClick={() => openPicker("myspace")}
                   onKnowledgeClick={() => openPicker("knowledge")}
-                  onModelClick={() => openPicker("model")}
-                  onSessionClick={() => openPicker("session")}
-                  onHistoryClick={() => openPicker("history")}
                   onMcpClick={() => openPicker("mcp")}
                   onSkillClick={() => openPicker("skill")}
                 />
@@ -1730,7 +1785,23 @@ export default function ChatPage() {
             // 但 React state 中的对象是 frozen 的，直接修改会报 TypeError
             // 解决方案：使用 JSON 序列化/反序列化创建全新的对象
             const thawedOutput = JSON.parse(JSON.stringify(builderOutput));
-            
+
+            // ⭐ 知识库引用卡片：后端 enrich_chat_context 把 citations 挂到
+            // completed 响应事件，这里注入最后一条助手消息的 cards，
+            // 由 KbCitations 卡片渲染「来源」折叠列表。
+            const _kbCites = (payload as any).citations;
+            if (Array.isArray(_kbCites) && _kbCites.length > 0) {
+              let _lastAssistant = -1;
+              for (let i = thawedOutput.length - 1; i >= 0; i--) {
+                if (thawedOutput[i]?.role === "assistant") { _lastAssistant = i; break; }
+              }
+              if (_lastAssistant >= 0) {
+                const _msg = thawedOutput[_lastAssistant];
+                _msg.cards = Array.isArray(_msg.cards) ? _msg.cards : [];
+                _msg.cards.push({ code: "KbCitations", data: { citations: _kbCites } });
+              }
+            }
+
             return {
               object: "response",
               status: payload.status || "completed",
@@ -1801,6 +1872,7 @@ export default function ChatPage() {
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
+        KbCitations: CoApisKbCitations,
       },
       customToolRenderConfig: {
         ..._enhancedToolRenderConfig,
@@ -1847,6 +1919,7 @@ export default function ChatPage() {
   return (
     <ChatDisplayConfigContext.Provider value={displayConfig}>
       <div
+        ref={chatWindowRef}
         style={{
           height: "100%",
           width: "100%",
@@ -1859,11 +1932,35 @@ export default function ChatPage() {
           onShowDisplaySettings={() => setShowDisplaySettings(true)}
           isEmbeddedMode={isEmbeddedMode}
           onClose={embeddedOnClose}
-          onExpand={embeddedOnExpand}
           sceneName={sceneName}
+          onHistoryClick={() => setHistoryDrawerOpen((v) => !v)}
+          onNewChat={handleNewChat}
+          onSwitchScene={() => setScenePickerOpen(true)}
+          isPinned={isEmbeddedMode ? getChatGlobals().isPinned : undefined}
+          onTogglePin={isEmbeddedMode ? getChatGlobals().onTogglePin : undefined}
         />
         
-        {/* 主内容区域：工具栏 + 聊天区 */}
+        {/* 主内容区域：历史浮层锚（relative）+ 工具栏 + 聊天区 */}
+        <div ref={mainAreaRef} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
+        {/* 历史会话：下拉浮层 —— 悬浮在聊天区左上，底界止于输入框上方，不盖输入框 */}
+        {historyDrawerOpen && (
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              zIndex: 30,
+              maxHeight: historyMaxHeight != null ? `${historyMaxHeight}px` : "calc(100% - 148px)",
+            }}
+          >
+            <ChatSessionDropdown
+              open={historyDrawerOpen}
+              onClose={() => setHistoryDrawerOpen(false)}
+              showSearch
+              maxHeight={historyMaxHeight ?? 520}
+            />
+          </div>
+        )}
         <div className={styles.chatContentArea}>
           
           {/* 聊天区域 */}
@@ -1896,6 +1993,7 @@ export default function ChatPage() {
               />
             </ChatErrorBoundary>
           </div>
+        </div>
         </div>
 
         {/* Chat display settings modal */}
@@ -2064,22 +2162,14 @@ export default function ChatPage() {
         setPickerOpen(null);
       }}
     />
-    <ModelPickerModal
-      open={pickerOpen === "model"}
-      onClose={() => setPickerOpen(null)}
+    <ScenePickerModal
+      open={scenePickerOpen}
+      onClose={() => setScenePickerOpen(false)}
+      onPick={handleScenePick}
+      currentSceneId={sceneId}
+      embedded={isEmbeddedMode}
     />
-    <HistorySessionsModal
-      open={pickerOpen === "session" || pickerOpen === "history"}
-      mode={pickerOpen === "history" ? "reference" : "switch"}
-      onClose={() => setPickerOpen(null)}
-      onReference={(s) => {
-        setRefSessions((prev) =>
-          prev.some((x) => x.id === s.id)
-            ? prev
-            : [...prev, { id: s.id, name: s.name }],
-        );
-      }}
-    />
+
     <MultiSelectPickerModal
       open={pickerOpen === "mcp"}
       title={t("resourceMenu.mcp")}

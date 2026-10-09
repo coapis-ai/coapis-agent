@@ -1,7 +1,6 @@
 // FloatingChatWindow - 可拖拽、可缩放的浮窗组件
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Spin, message } from 'antd';
-import { useNavigate } from 'react-router-dom';
 import type { SceneConfig, EnterSceneResponse } from '../../pages/Workbench/types';
 import styles from './index.module.less';
 import { getApiToken } from '../../api/config';
@@ -76,7 +75,7 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
     return { width: initialWidth, height: initialHeight };
   });
   
-  const [isPinned, setIsPinned] = useState(false);
+  const [isPinned, setIsPinned] = useState(true); // 默认打开钉子（点击外部不关闭）
   
   // 拖拽状态（移动端禁用）
   const [isDragging, setIsDragging] = useState(false);
@@ -88,13 +87,6 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
   const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });
   
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // v2.2.2: 展开 = 收起浮窗并跳转到全屏聊天页
-  const navigate = useNavigate();
-  const handleExpand = useCallback(() => {
-    onClose?.();
-    navigate('/chat');
-  }, [onClose, navigate]);
 
   // 加载场景数据
   useEffect(() => {
@@ -120,7 +112,8 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
         setPosition({ x: initialX, y: 50 });
         setSize({ width: initialWidth, height: initialHeight });
       }
-      setIsPinned(false);
+      // 下次打开时默认钉子开启（点击外部不关闭）
+      setIsPinned(true);
     }
   }, [visible, isPinned, initialWidth, initialHeight]);
 
@@ -308,6 +301,7 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
   return (
     <div
       ref={containerRef}
+      data-floating-window=""
       className={`${styles.floatingWindow} ${isMobile ? styles.mobileWindow : ''}`}
       style={{
         left: isMobile ? '50%' : position.x,
@@ -335,7 +329,6 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
             showToolbar={true}
             compactLayout={true}
             onClose={onClose}
-            onExpand={handleExpand}
             onTogglePin={() => setIsPinned(!isPinned)}
             isPinned={isPinned}
             onDragStart={handleDragStart}
@@ -353,7 +346,6 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
             showToolbar={true}
             compactLayout={true}
             onClose={onClose}
-            onExpand={handleExpand}
             onTogglePin={() => setIsPinned(!isPinned)}
             isPinned={isPinned}
             onDragStart={handleDragStart}

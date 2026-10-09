@@ -1,0 +1,26 @@
+.picker {
+  // 弹窗内滚动时筛选条保持可见
+  .filterBar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+}
+
+.filterBar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+// Dark mode
+:global(.dark-mode) {
+  .filterBar {
+    background: #1f1f1f;
+    box-shadow: 0 2px 8px rgba(255, 255, 255, 0.05);
+  }
+}

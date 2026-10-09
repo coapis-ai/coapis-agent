@@ -4,9 +4,7 @@
     "upload": "ファイルをアップロード",
     "mySpace": "マイスペースから選択",
     "knowledge": "ナレッジを関連付け",
-    "model": "モデルを切り替え",
-    "session": "セッションを切り替え",
-    "history": "履歴セッション",
+    "scene": "シーンを切り替え",
     "more": "その他のオプション",
     "mcp": "MCP サービス",
     "skill": "スキルを指定"
@@ -1415,7 +1413,8 @@
       "pin": "ピン留め",
       "unpin": "ピン留め解除",
       "delete": "削除"
-    }
+    },
+    "pinned": "固定済み"
   },
   "security": {
     "parent": "設定",
@@ -2009,6 +2008,7 @@
     }
   },
   "resourcePicker": {
+    "noScenes": "利用可能なシーンはありません",
     "tabTree": "ファイルツリー",
     "tabLedger": "ファイル台帳",
     "filterAll": "すべて",

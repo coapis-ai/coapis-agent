@@ -19,6 +19,7 @@ export {
   KnowledgePickerModal,
   HistorySessionsModal,
   ModelPickerModal,
+  ScenePickerModal,
   MultiSelectPickerModal,
 } from './resource';
 export type { PickItem } from './resource';

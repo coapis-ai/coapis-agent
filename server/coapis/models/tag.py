@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 
@@ -57,6 +57,31 @@ class TagConfig(BaseModel):
     updated_at: Optional[datetime] = Field(default=None, description="Update timestamp")
     metadata: Optional[dict] = Field(default=None, description="Additional metadata (e.g., menu configuration)")
     category: Optional[str] = Field(default=None, description="Tag category (business, tech, system)")
+
+    @field_validator("icon", mode="before")
+    @classmethod
+    def _icon_null_default(cls, v):
+        return "🏷️" if v is None else v
+
+    @field_validator("keywords", mode="before")
+    @classmethod
+    def _keywords_null_default(cls, v):
+        return [] if v is None else v
+
+    @field_validator("related_skills", mode="before")
+    @classmethod
+    def _related_skills_null_default(cls, v):
+        return [] if v is None else v
+
+    @field_validator("sort_order", mode="before")
+    @classmethod
+    def _sort_order_null_default(cls, v):
+        return 0 if v is None else v
+
+    @field_validator("show_in_menu", "enabled", mode="before")
+    @classmethod
+    def _bool_fields_null_default(cls, v):
+        return True if v is None else v
     
     class Config:
         json_schema_extra = {

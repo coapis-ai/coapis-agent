@@ -4,9 +4,7 @@
     "upload": "Upload File",
     "mySpace": "Pick from My Space",
     "knowledge": "Attach Knowledge",
-    "model": "Switch Model",
-    "session": "Switch Session",
-    "history": "Session History",
+    "scene": "Switch Scene",
     "more": "More Options",
     "mcp": "MCP Services",
     "skill": "Specify Skills"
@@ -2186,9 +2184,12 @@
       }
     },
     "header": {
-      "switchSession": "Switch session"
+      "switchSession": "Switch session",
+      "switchScene": "Switch scene",
+      "history": "Session History"
     },
-    "newChat": "New Chat"
+    "newChat": "New Chat",
+    "pinned": "Pinned"
   },
   "security": {
     "parent": "Settings",
@@ -2708,6 +2709,7 @@
     "noAccess": "No permission to perform this action"
   },
   "resourcePicker": {
+    "noScenes": "No scenes available",
     "tabTree": "File Tree",
     "tabLedger": "File Ledger",
     "filterAll": "All",

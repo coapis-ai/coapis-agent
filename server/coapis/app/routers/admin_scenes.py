@@ -188,7 +188,13 @@ async def update_scene(
     Raises:
         HTTPException: 404 if scene not found
     """
-    result = service.update_scene(scene_id, scene_update)
+    try:
+        result = service.update_scene(scene_id, scene_update)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -196,7 +202,48 @@ async def update_scene(
         )
     
     logger.info(f"Admin {current_user.get('username')} updated scene: {scene_id}")
+
+    # ── B0.5: 场景编辑后刷新所有引用该场景的 ChatSpec 快照 ──
+    # 运行时每请求读 ChatSpec.scene_config，快照不刷新则旧技能/提示词永久生效。
+    refreshed = await _refresh_scene_snapshots(request.app, scene_id, service)
+    if refreshed:
+        logger.info(
+            f"[SceneSnapshot] Refreshed {refreshed} chat snapshot(s) for scene {scene_id}",
+        )
+
     return result
+
+
+async def _refresh_scene_snapshots(app: "FastAPI", scene_id: str, service: SceneAgentService) -> int:
+    """Rebuild scene_config snapshots on all chats bound to this scene (B0.5).
+
+    The runtime reads ``ChatSpec.scene_config`` per request, so a scene edit
+    must re-sync every already-bound chat with the same snapshot builder used
+    by ``enter_scene``. Returns the number of chats refreshed. Best-effort: a
+    failure on one user's chat manager must not fail the scene update.
+    """
+    manager = getattr(app.state, "multi_agent_manager", None)
+    if manager is None:
+        return 0
+    snapshot = service.build_snapshot(scene_id)
+    if snapshot is None:
+        return 0
+    refreshed = 0
+    try:
+        managers = manager.get_all_user_chat_managers()
+    except Exception as e:
+        logger.warning(f"[SceneSnapshot] Cannot enumerate chat managers: {e}")
+        return 0
+    for username, cm in managers.items():
+        try:
+            chats = await cm.list_chats()
+            for chat in chats:
+                if getattr(chat, "scene_id", None) == scene_id:
+                    await cm.set_scene_config(chat.id, snapshot)
+                    refreshed += 1
+        except Exception as e:
+            logger.warning(f"[SceneSnapshot] Refresh failed for user {username}: {e}")
+    return refreshed
 
 
 @router.delete("/{scene_id}")

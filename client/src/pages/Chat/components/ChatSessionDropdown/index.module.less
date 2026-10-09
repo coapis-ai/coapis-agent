@@ -1,6 +1,7 @@
 /* Dropdown container - appears below the button, aligned to the left */
 .dropdownContainer {
   width: 360px;
+  /* 默认 520px；调用方按输入框位置测量后以 inline style 覆盖 */
   max-height: 520px;
   display: flex;
   flex-direction: column;
@@ -72,11 +73,9 @@
 /* Session list wrapper */
 .listWrapper {
   flex: 1;
+  min-height: 100px;
   position: relative;
   overflow: hidden;
-  min-height: 100px;
-  max-height: 420px;
-  height: 300px;
 }
 
 .list {
@@ -89,11 +88,18 @@
   z-index: 1;
   background: transparent;
 
-  /* Hide scrollbar */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  /* Thin visible scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
   &::-webkit-scrollbar {
-    display: none;
+    width: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 3px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
 
@@ -167,5 +173,12 @@
 
   .bottomGradient {
     background: linear-gradient(0deg, #1f1f1f 0%, rgba(31, 31, 31, 0) 100%);
+  }
+
+  .list {
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.22);
+    }
   }
 }

@@ -354,33 +354,15 @@ async def enter_scene(
         logger.info(f"🔍 [enter_scene] scene_id={scene_id}, user_id={user_id}, chat_id={result.chat_id}, session_id={result.session_id}")
         
         # ⭐ 获取场景智能体的完整配置（用于保存快照）
-        scene_agent = service.get_scene_agent(scene_id)
-        scene_config_snapshot = None
-        if scene_agent:
-            # 保存场景配置快照到 ChatSpec（用于运行时叠加）
-            capabilities = scene_agent.capabilities
-            
-            # ⭐ 从场景 AGENTS.md 读取系统提示词（场景特定内容）
-            # 架构设计：场景提示词只从 AGENTS.md 读取，agent.json 仅存储元数据
-            agents_md_path = service.agents_dir / f"scene-{scene_id}" / "AGENTS.md"
-            system_prompt = ""
-            if agents_md_path.exists():
-                system_prompt = agents_md_path.read_text(encoding="utf-8")
-                logger.info(f"[enter_scene] Loaded scene prompt from AGENTS.md: {len(system_prompt)} chars")
-            else:
-                logger.warning(f"[enter_scene] AGENTS.md not found for scene: {scene_id}")
-            
-            scene_config_snapshot = {
-                "id": scene_id,
-                "name": scene_agent.name,
-                "icon": scene_agent.scene.icon if scene_agent.scene else "",
-                "system_prompt": system_prompt,  # ⭐ 从 AGENTS.md 读取完整内容
-                "skills": capabilities.skills if capabilities else [],
-                "tools": capabilities.tools if capabilities else [],
-                "knowledge_bases": capabilities.knowledge_bases if capabilities else [],
-                "welcome_message": scene_agent.welcome_message or "",
-            }
-            logger.info(f"[enter_scene] Scene config snapshot: skills={scene_config_snapshot['skills']}, prompt_len={len(scene_config_snapshot['system_prompt'])}")
+        # 单一构建入口：scene_agent_service.build_snapshot（场景编辑后同样用它刷新）
+        scene_config_snapshot = service.build_snapshot(scene_id)
+        if scene_config_snapshot:
+            logger.info(
+                f"[enter_scene] Scene config snapshot: skills={scene_config_snapshot['skills']}, "
+                f"prompt_len={len(scene_config_snapshot['system_prompt'])}"
+            )
+        else:
+            logger.warning(f"[enter_scene] No scene snapshot for scene: {scene_id}")
         
         # Create chat spec with scene config snapshot
         chat_spec = ChatSpec(

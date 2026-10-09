@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Coroutine
 
@@ -60,6 +61,11 @@ if TYPE_CHECKING:
     from ...agents.context import BaseContextManager
 
 logger = logging.getLogger(__name__)
+
+# 知识库引用（citations）上下文：query_handler 内 enrich_chat_context 钩子
+# 收集到的引用列表，经 ContextVar 传给外层 stream_query，最终挂到响应事件
+# metadata.kb_citations，供前端展示。同一请求在同一任务内流转，ContextVar 安全。
+_enrich_citations_ctx: ContextVar[list] = ContextVar("enrich_citations", default=[])
 
 
 
@@ -859,6 +865,14 @@ class AgentRunner(Runner):
                 event.created_at = created_at
                 if getattr(event, "status", None) in ("completed", "failed", "canceled"):
                     completed_response_yielded = True
+                    # 知识库引用透出：企业版 enrich_chat_context 收集并挂到
+                    # completed 响应事件，前端渲染来源卡片（Event 允许 extra）
+                    try:
+                        _kb_cites = _enrich_citations_ctx.get()
+                        if _kb_cites:
+                            event.citations = _kb_cites
+                    except LookupError:
+                        pass
             yield event
 
         # 兼容：若底层未显式产出 completed/failed/canceled 的 response，
@@ -866,12 +880,21 @@ class AgentRunner(Runner):
         if not completed_response_yielded:
             try:
                 from agentscope_runtime.engine.schemas.agent_schemas import Event
-                yield Event(
+                _fallback = Event(
                     object="response",
                     id=f"resp_{created_at}",
                     status="completed",
                     created_at=created_at,
                 )
+                # 知识库引用透出：底层流未产出 completed response 时，
+                # 兼容补发的事件同样要挂 citations，否则前端拿不到来源卡片。
+                try:
+                    _kb_cites = _enrich_citations_ctx.get()
+                    if _kb_cites:
+                        _fallback.citations = _kb_cites
+                except LookupError:
+                    pass
+                yield _fallback
             except Exception:
                 pass
 
@@ -1050,12 +1073,43 @@ class AgentRunner(Runner):
                 except Exception as e:
                     logger.warning(f"[Scene] Failed to get scene_id from request: {e}", exc_info=True)
 
+            # ⭐ D1/B3.1: 场景表为唯一权威源 —— 每轮请求都读表（多轮粘性）。
+            # ChatSpec 快照在场景编辑后不会刷新（scene_agent_service 无刷新逻辑），
+            # 所以表优先于快照；表读失败才回退快照/文件，绝不阻断聊天。
+            if scene_id:
+                try:
+                    from ...services.scene_agent_service import SceneAgentService
+                    _svc = SceneAgentService(data_dir=Path(WORKING_DIR))
+                    _db_scene = _svc.get_scene(scene_id)
+                    if _db_scene:
+                        scene_name = _db_scene.name or scene_name
+                        _table_prompt = (_db_scene.system_prompt or "").strip()
+                        if _table_prompt:
+                            scene_prompt = _table_prompt
+                        _table_skills = [s for s in (_db_scene.skills or []) if s]
+                        if _table_skills:
+                            scene_skills = _table_skills
+                        logger.info(
+                            f"[Scene] Authoritative scene config from table: scene_id={scene_id}, "
+                            f"name={scene_name}, skills={scene_skills}, "
+                            f"prompt_len={len(scene_prompt or '')}"
+                        )
+                    else:
+                        logger.info(f"[Scene] Scene {scene_id} not found in table, using snapshot")
+                except Exception as e:
+                    logger.warning(
+                        f"[Scene] Table read failed for scene_id={scene_id}, "
+                        f"fallback to snapshot: {e}"
+                    )
+
             # ⭐ 如果有 scene_id，但没有场景配置快照，才加载场景智能体配置文件
             if scene_id and not scene_prompt:
                 try:
-                    from pathlib import Path
-                    from ...constant import WORKING_DIR
-                    
+                    # NOTE: no function-local imports here. `Path` (line 25) and
+                    # `WORKING_DIR` (line 57) are module-level; re-importing them
+                    # inside this function makes them local names for the whole
+                    # function, so the earlier Path(WORKING_DIR) use at ~line 1082
+                    # raises UnboundLocalError and the scene table read 100% fails.
                     scene_agent_dir = Path(WORKING_DIR) / "agents" / f"scene-{scene_id}"
                     
                     # 优先从 AGENTS.md 读取场景系统提示词
@@ -1107,14 +1161,9 @@ class AgentRunner(Runner):
                     agent_config.display_name = scene_name
                     logger.info(f"[Scene] Set display name to '{scene_name}'")
                 
-                # 3. 场景技能优选（合并到用户技能，场景技能优先）
-                if scene_skills and hasattr(agent_config, "preferred_skills"):
-                    existing_skills = getattr(agent_config, "preferred_skills", []) or []
-                    # 场景技能在前，用户技能在后（去重）
-                    merged_skills = scene_skills + [s for s in existing_skills if s not in scene_skills]
-                    agent_config.preferred_skills = merged_skills
-                    logger.info(f"[Scene] Merged skills: {merged_skills}")
-                
+                # (B1.2) 原"场景技能合并到 preferred_skills"分支已删除：
+                # AgentProfileConfig 无 preferred_skills 字段，hasattr 恒 False，属死代码。
+                # 场景技能现由 react_agent._register_skills 的 S1 必载注册处理。
                 logger.info(f"[Scene] Scene identity merged: name={scene_name}, skills={scene_skills}, prompt_len={len(scene_prompt)}")
 
             # Override agent language with user's language preference
@@ -1370,40 +1419,9 @@ class AgentRunner(Runner):
             logger.warning(f"[MCP_DEBUG] ALL_TOOL_NAMES: {_all_names}")
             agent.set_console_output_enabled(enabled=False)
             
-            # ── Scene Skills Injection: 场景技能优选注入到 toolkit ──
-            scene_skills_ctx = base_request_context.get("scene_skills", [])
-            if scene_skills_ctx and hasattr(agent, 'toolkit') and agent.toolkit:
-                from pathlib import Path
-                from ...constant import WORKING_DIR
-                skill_pool_dir = Path(WORKING_DIR) / "skill_pool"
-                
-                injected_count = 0
-                for skill_name in scene_skills_ctx:
-                    skill_dir = skill_pool_dir / skill_name
-                    if skill_dir.exists() and skill_dir.is_dir():
-                        if hasattr(agent.toolkit, 'skills') and isinstance(agent.toolkit.skills, dict):
-                            if skill_name not in agent.toolkit.skills:
-                                skill_md = skill_dir / "SKILL.md"
-                                if skill_md.exists():
-                                    import yaml as _yaml
-                                    content = skill_md.read_text(encoding="utf-8")
-                                    summary = ""
-                                    if content.startswith("---"):
-                                        parts = content.split("---", 2)
-                                        if len(parts) >= 3:
-                                            meta = _yaml.safe_load(parts[1]) or {}
-                                            summary = meta.get("description", "") or meta.get("summary", "")
-                                
-                                agent.toolkit.skills[skill_name] = {
-                                    "name": skill_name,
-                                    "description": summary or f"场景技能: {skill_name}",
-                                    "dir": str(skill_dir),
-                                }
-                                injected_count += 1
-                                logger.info(f"[Scene] Injected skill '{skill_name}' into toolkit")
-                
-                if injected_count > 0:
-                    logger.info(f"[Scene] Total {injected_count} scene skills injected")
+            # (B1.2) 原"Scene Skills Injection"块已删除：场景技能在 agent 构建期已由
+            # _register_skills 全量进 toolkit.skills（§1.5 实证），运行期注入循环恒为空操作。
+            # 场景技能现经 base_request_context["scene_skills"] 传给 react_agent 处理。
 
             logger.debug(
                 f"Agent Query msgs {msgs}",
@@ -1563,6 +1581,51 @@ class AgentRunner(Runner):
                     # Adjust snapshot length to include the hint
                     _memory_snapshot_len = len(agent.memory.content)
                     logger.info(f"Injected file reference hint to agent.memory: {len(selected_files)} files")
+
+            # ── 插件扩展点：enrich_chat_context（查询前增强钩子）────────────
+            # 企业版在此挂知识库检索；社区版未装插件时零开销跳过。
+            # 硬性语义：8秒超时；异常/超时仅告警降级为空，绝不阻断聊天。
+            _enrich_citations: list = []
+            try:
+                from ...enterprise_plugin import is_enterprise_installed, get_enterprise_plugin
+                if is_enterprise_installed():
+                    _ep = get_enterprise_plugin()
+                    if _ep is not None and hasattr(_ep, "enrich_chat_context"):
+                        _kb_refs = []
+                        _scene_id = None
+                        if request and hasattr(request, "input") and request.input:
+                            _fm = request.input[0]
+                            if hasattr(_fm, "metadata") and isinstance(_fm.metadata, dict):
+                                _kb_refs = _fm.metadata.get("knowledge_bases") or []
+                                _scene_id = _fm.metadata.get("scene_id")
+                        _enrich_ctx = {
+                            "user_id": user_id,
+                            "scene_id": _scene_id,
+                            "agent_id": self.agent_id,
+                            "session_id": session_id,
+                            "text": query,
+                            "knowledge_bases": _kb_refs,
+                        }
+                        _enrich_res = await asyncio.wait_for(
+                            _ep.enrich_chat_context(_enrich_ctx), timeout=8,
+                        )
+                        if isinstance(_enrich_res, dict):
+                            _hint = _enrich_res.get("hint")
+                            if _hint and agent.memory:
+                                await agent.memory.add(
+                                    Msg(name="system", content=str(_hint), role="system")
+                                )
+                                # Adjust snapshot length to include the hint
+                                _memory_snapshot_len = len(agent.memory.content)
+                                logger.info("enrich_chat_context hint injected to agent.memory")
+                            _cites = _enrich_res.get("citations")
+                            if isinstance(_cites, list) and _cites:
+                                _enrich_citations = _cites[:20]
+            except Exception as _ee:
+                logger.warning(f"enrich_chat_context failed (non-fatal): {_ee}")
+
+            # 把本次请求的知识库引用交给外层 stream_query 透出到响应事件
+            _enrich_citations_ctx.set(_enrich_citations)
 
             # --- Execution: Mission Mode (phased) or standard -----
             # Collect full assistant response for evolution engine & chat persistence

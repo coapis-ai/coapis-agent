@@ -4,9 +4,7 @@
     "upload": "上传文件",
     "mySpace": "从我的空间选取",
     "knowledge": "关联知识",
-    "model": "切换模型",
-    "session": "切换会话",
-    "history": "历史会话",
+    "scene": "切换场景",
     "more": "更多选项",
     "mcp": "MCP 服务",
     "skill": "指定技能"
@@ -2093,9 +2091,12 @@
     "unpin": "取消置顶",
     "delete": "删除",
     "header": {
-      "switchSession": "切换会话"
+      "switchSession": "切换会话",
+      "switchScene": "切换场景",
+      "history": "历史会话"
     },
-    "newChat": "新聊天"
+    "newChat": "新聊天",
+    "pinned": "已固定"
   },
   "security": {
     "parent": "设置",
@@ -2758,6 +2759,7 @@
     "noAccess": "无权限执行此操作"
   },
   "resourcePicker": {
+    "noScenes": "暂无可用场景",
     "tabTree": "文件树",
     "tabLedger": "文件台账",
     "filterAll": "全部",

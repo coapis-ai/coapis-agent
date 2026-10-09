@@ -154,6 +154,33 @@ class ChatManager:
             await self._repo.upsert_chat(spec)
             return spec
 
+    async def set_scene_config(
+        self,
+        chat_id: str,
+        snapshot: dict,
+    ) -> Optional[ChatSpec]:
+        """Refresh the scene snapshot stored on a chat (B0.5).
+
+        Scene edits must propagate to chats that already entered the scene:
+        the runtime reads ``ChatSpec.scene_config`` per request, so a stale
+        snapshot would keep serving the old skills/prompt forever.
+
+        Args:
+            chat_id: Chat UUID
+            snapshot: New scene_config snapshot dict
+
+        Returns:
+            Updated chat spec, or None if chat not found
+        """
+        async with self._lock:
+            existing = await self._repo.get_chat(chat_id)
+            if existing is None:
+                return None
+            merged = existing.model_copy(update={"scene_config": snapshot})
+            merged.updated_at = datetime.now(timezone.utc)
+            await self._repo.upsert_chat(merged)
+            return merged
+
     async def patch_chat(
         self,
         chat_id: str,

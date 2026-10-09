@@ -122,6 +122,29 @@ class SceneAgentService:
     # Scene Configuration Management
     # -------------------------------------------------------------------------
     
+    def _validate_skill_names(self, skills: list[str]) -> list[str]:
+        """B0.2: 写入校验 —— 场景声明的技能必须真实存在于技能池。
+
+        幽灵技能在**写入时**被拒绝（400），而不是运行时静默跳过——这是
+        幽灵数据（19 表引用 + 12 agent.json）的源头治理。
+
+        Raises:
+            ValueError: 技能名在技能池中不存在（含空名）。
+        """
+        if not skills:
+            return []
+        names = [s for s in skills if s and s.strip()]
+        if len(names) != len(skills):
+            raise ValueError("场景技能列表含空值")
+        from ..agents.skills_manager import get_skill_pool_dir
+        pool = get_skill_pool_dir()
+        ghosts = [s for s in names if not (pool / s).is_dir()]
+        if ghosts:
+            raise ValueError(
+                f"场景技能不存在于技能池: {ghosts}（技能池: {pool}）"
+            )
+        return names
+
     @staticmethod
     def _parse_dt(value):
         """Parse timestamp arriving as str (SQLite) or datetime (enterprise PG)."""
@@ -272,6 +295,9 @@ class SceneAgentService:
         Raises:
             ValueError: If scene ID already exists
         """
+        # B0.2: 写入校验 —— 幽灵技能在写入时被拒绝
+        self._validate_skill_names(scene_create.skills or [])
+
         if self._enterprise_repo:
             return self._create_scene_in_repository(scene_create, created_by)
         
@@ -412,6 +438,10 @@ class SceneAgentService:
         Returns:
             Updated SceneConfig or None if not found
         """
+        # B0.2: 写入校验 —— 只在显式提交 skills 时校验（exclude_unset 语义）
+        if "skills" in scene_update.model_dump(exclude_unset=True):
+            self._validate_skill_names(scene_update.skills or [])
+
         if self._enterprise_repo:
             return self._update_scene_in_repository(scene_id, scene_update)
         
@@ -597,7 +627,50 @@ class SceneAgentService:
             data = json.load(f)
         
         return SceneAgentConfig(**data)
-    
+
+    def build_snapshot(self, scene_id: str) -> Optional[Dict[str, Any]]:
+        """Build the runtime scene snapshot stored on ChatSpec.scene_config.
+
+        Single source of truth: ``enter_scene`` writes it when a chat enters a
+        scene, and scene edits rebuild it for already-bound chats (B0.5). The
+        runtime reads skills/system_prompt from this snapshot per request, so
+        keeping one builder avoids the snapshot drifting from the scene table.
+
+        Args:
+            scene_id: Scene ID (e.g., meeting-minutes)
+
+        Returns:
+            Snapshot dict, or None if the scene does not exist.
+        """
+        scene_config = self.get_scene(scene_id)
+        if not scene_config:
+            return None
+        scene_agent = self.get_scene_agent(scene_id)
+
+        # System prompt lives in the scene agent's AGENTS.md (same source as
+        # enter_scene); fall back to the scene table field if missing.
+        agents_file = self.agents_dir / f"scene-{scene_id}" / "AGENTS.md"
+        system_prompt = scene_config.system_prompt
+        if agents_file.exists():
+            system_prompt = agents_file.read_text(encoding="utf-8")
+
+        capabilities = scene_agent.capabilities if scene_agent else None
+        return {
+            "id": scene_id,
+            "name": scene_config.name,
+            "icon": scene_config.icon,
+            "system_prompt": system_prompt,
+            "skills": (capabilities.skills if capabilities else scene_config.skills) or [],
+            "tools": (capabilities.tools if capabilities else []) or [],
+            "knowledge_bases": (
+                capabilities.knowledge_bases if capabilities else []
+            ) or [],
+            "welcome_message": (
+                scene_agent.welcome_message if scene_agent
+                else scene_config.welcome_message
+            ) or "",
+        }
+
     def _create_scene_agent(
         self,
         scene_config: SceneConfig,

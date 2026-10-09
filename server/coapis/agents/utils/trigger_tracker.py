@@ -65,6 +65,12 @@ class TriggerEvent:
     user: str = "unknown"
     agent: str = "default"
     session_id: str = ""
+    # Scene context (optional) — lets ghost/priority events be attributed to
+    # the scene that declared them.
+    scene_id: str = ""
+    scene_name: str = ""
+    workspace_id: str = ""
+    channel: str = ""
     timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -77,6 +83,10 @@ class TriggerEvent:
             "user": self.user,
             "agent": self.agent,
             "session_id": self.session_id,
+            "scene_id": self.scene_id,
+            "scene_name": self.scene_name,
+            "workspace_id": self.workspace_id,
+            "channel": self.channel,
             "timestamp": self.timestamp,
         }
 
@@ -165,6 +175,10 @@ class TriggerTracker:
         user: str = "unknown",
         agent: str = "default",
         session_id: str = "",
+        scene_id: str = "",
+        scene_name: str = "",
+        workspace_id: str = "",
+        channel: str = "",
     ) -> str:
         """Create a new trigger event and return its trigger_id.
 
@@ -178,6 +192,10 @@ class TriggerTracker:
             user=user,
             agent=agent,
             session_id=session_id,
+            scene_id=scene_id,
+            scene_name=scene_name,
+            workspace_id=workspace_id,
+            channel=channel,
         )
         self._active[event.trigger_id] = event
 

@@ -1,0 +1,127 @@
+.kb-citations {
+  margin: 8px 0 2px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fafafa;
+  overflow: hidden;
+
+  .kb-citations-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+    color: #595959;
+
+    .kb-citations-icon {
+      color: #1677ff;
+    }
+
+    .kb-citations-title {
+      flex: 1;
+      font-weight: 500;
+    }
+
+    .kb-citations-caret {
+      font-size: 11px;
+      color: #8c8c8c;
+    }
+  }
+
+  .kb-citations-body {
+    border-top: 1px solid #f0f0f0;
+    padding: 4px 12px 10px;
+  }
+
+  .kb-citation-item {
+    padding: 6px 0;
+
+    .kb-citation-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #434343;
+
+      .kb-citation-idx {
+        color: #1677ff;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+
+      .kb-citation-doc-icon {
+        color: #8c8c8c;
+        flex-shrink: 0;
+      }
+
+      .kb-citation-title {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 500;
+      }
+
+      .kb-citation-kb {
+        flex-shrink: 0;
+        color: #8c8c8c;
+        background: #f0f0f0;
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 11px;
+      }
+
+      .kb-citation-score {
+        flex-shrink: 0;
+        color: #52c41a;
+        font-size: 11px;
+      }
+    }
+
+    .kb-citation-snippet {
+      margin-top: 4px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #666;
+      background: #fff;
+      border-left: 2px solid #e0e0e0;
+      padding: 4px 8px;
+      border-radius: 2px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+}
+
+// 暗色主题
+.dark {
+  .kb-citations {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+
+    .kb-citations-header {
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .kb-citations-body {
+      border-top-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .kb-citation-item .kb-citation-top {
+      color: rgba(255, 255, 255, 0.85);
+
+      .kb-citation-kb {
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.6);
+      }
+    }
+
+    .kb-citation-item .kb-citation-snippet {
+      background: rgba(255, 255, 255, 0.03);
+      color: rgba(255, 255, 255, 0.65);
+      border-left-color: rgba(255, 255, 255, 0.15);
+    }
+  }
+}

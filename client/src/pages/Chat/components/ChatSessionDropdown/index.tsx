@@ -114,6 +114,8 @@ interface ChatSessionDropdownProps {
   onSearchChange?: (keyword: string) => void;
   /** 选择模式：提供后点击会话不跳转，而是回调（M4 历史会话引用芯片） */
   onSelect?: (session: { id: string; name: string }) => void;
+  /** 最大高度（px）：调用方按输入框位置测量传入，避免盖住输入框/超出显示区 */
+  maxHeight?: number;
 }
 
 /** Format an ISO 8601 timestamp to YYYY-MM-DD HH:mm:ss */
@@ -433,7 +435,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   }, [contextMenuSessionId, localSessions, t, handleEditStart, handlePinToggle, handleDelete]);
 
   return (
-    <div className={styles.dropdownContainer}>
+    <div className={styles.dropdownContainer} style={props.maxHeight ? { maxHeight: props.maxHeight } : undefined}>
       {/* Header bar */}
       <div className={styles.header}>
         <div className={styles.headerLeft}>

@@ -37,6 +37,22 @@
   gap: 8px;
 }
 
+/* 顶部栏按钮组：间隔稍微大点（12px）；gap 需 flex 容器才生效 */
+.leftSection {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 12px;
+}
+
+.rightSection {
+  display: flex;
+  flex-shrink: 0;
+  gap: 10px;
+  align-items: center;
+}
+
 .sessionTitle {
   font-size: 16px;
   font-weight: 600;
@@ -96,7 +112,7 @@
 }
 
 .switchBtn {
-  margin-left: 8px;
+  margin-left: 0;
   color: rgba(0, 0, 0, 0.45);
 
   :global(.dark-mode) & {

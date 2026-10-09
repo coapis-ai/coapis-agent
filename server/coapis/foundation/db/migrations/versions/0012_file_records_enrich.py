@@ -27,15 +27,32 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _existing_columns(table: str) -> set:
+    insp = sa.inspect(op.get_bind())
+    return {c["name"] for c in insp.get_columns(table)}
+
+
+def _existing_indexes(table: str) -> set:
+    insp = sa.inspect(op.get_bind())
+    return {i["name"] for i in insp.get_indexes(table)}
+
+
 def upgrade() -> None:
-    op.add_column("file_records", sa.Column("title", sa.Text(), nullable=True))
-    op.add_column(
-        "file_records",
-        sa.Column("status", sa.Text(), server_default="draft", nullable=False),
-    )
-    op.add_column("file_records", sa.Column("updated_at", sa.REAL(), nullable=True))
-    op.add_column("file_records", sa.Column("description", sa.Text(), nullable=True))
-    op.create_index("idx_file_records_status", "file_records", ["status"])
+    cols = _existing_columns("file_records")
+    idxs = _existing_indexes("file_records")
+    if "title" not in cols:
+        op.add_column("file_records", sa.Column("title", sa.Text(), nullable=True))
+    if "status" not in cols:
+        op.add_column(
+            "file_records",
+            sa.Column("status", sa.Text(), server_default="draft", nullable=False),
+        )
+    if "updated_at" not in cols:
+        op.add_column("file_records", sa.Column("updated_at", sa.REAL(), nullable=True))
+    if "description" not in cols:
+        op.add_column("file_records", sa.Column("description", sa.Text(), nullable=True))
+    if "idx_file_records_status" not in idxs:
+        op.create_index("idx_file_records_status", "file_records", ["status"])
 
 
 def downgrade() -> None:
