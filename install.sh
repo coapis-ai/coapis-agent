@@ -455,10 +455,10 @@ install_dev() {
     cd client
     npm ci
     
-    # 安装后端依赖
+    # 安装后端依赖（-c 应用 CVE 安全约束，见 server/constraints.txt）
     info "安装后端依赖..."
     cd ../server
-    pip install -e .
+    pip install -c constraints.txt -e .
     cd ..
     
     # 配置

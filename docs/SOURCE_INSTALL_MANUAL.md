@@ -152,8 +152,9 @@ coapis-agent/
 │   │   ├── security/         ← 安全模块
 │   │   ├── constant.py       ← 全局常量（WORKING_DIR 等）
 │   │   └── __init__.py       ← 入口（加载环境变量）
-│   ├── pyproject.toml        ← 包定义（35 个直接依赖）
-│   ├── requirements.txt      ← 完整依赖（48 个，含补充依赖）⚠️ 注意差异
+│   ├── pyproject.toml        ← 包定义（43 个直接依赖 + 12 组 extras，权威源）
+│   ├── requirements.txt      ← 核心依赖镜像（43 项，与 pyproject 逐项一致）+ 注释可选块
+│   ├── constraints.txt       ← CVE 安全约束（pip -c 使用）
 │   ├── setup.py              ← setuptools 入口
 │   └── deploy/               ← 部署脚本
 │       ├── Dockerfile        ← 源码构建 Dockerfile
@@ -176,21 +177,20 @@ coapis-agent/
 
 ```bash
 cd server
-pip install -e .
+pip install -c constraints.txt -e .
 ```
 
-这会安装 `pyproject.toml` 中声明的 **35 个直接依赖**。
+这会安装 `pyproject.toml` 中声明的 **43 个直接依赖**，并套用 `constraints.txt` 的 CVE 安全约束。
 
-#### 3.3.2 完整安装（包含补充依赖）
+#### 3.3.2 完整安装（含可选功能）
 
 ```bash
 cd server
-pip install -e .
-pip install -r requirements.txt
+pip install -c constraints.txt -e ".[channels,wecom,browser,documents,search,matrix]"
 ```
 
-⚠️ **注意**: `requirements.txt` 包含 **48 个依赖**，比 `pyproject.toml` 多 13 个。
-详见 [第五节：依赖差异分析](#五依赖差异分析)。
+`requirements.txt` 的核心依赖与 `pyproject.toml` **逐项一致**（43 项），两者等价，任选其一即可；文件末尾的注释块对应各 extras，`pip install -r` 不会安装注释项。
+详见 [第五节：依赖清单说明](#五依赖清单说明)。
 
 #### 3.3.3 按需安装渠道依赖
 
@@ -324,82 +324,76 @@ uvicorn coapis.app.main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 五、依赖差异分析 ⚠️
+## 五、依赖清单说明
 
-### 5.1 pyproject.toml vs requirements.txt 差异
+### 5.1 pyproject.toml 与 requirements.txt 的关系
 
-**这是源码安装最大的坑**。两个文件声明的依赖不一致：
+两者**核心依赖逐项镜像**（各 43 项），任选其一即可完整安装，不存在"哪个文件缺依赖"的问题。
 
-| 依赖 | pyproject.toml | requirements.txt | 风险等级 |
-|------|---------------|------------------|---------|
-| `python-frontmatter` | ❌ 缺失 | ✅ `>=1.3.0` | 🔴 **P0** |
-| `fastapi` | ❌ 缺失 | ✅ `>=0.100.0,<1.0.0` | 🔴 **P0** |
-| `pydantic` | ❌ 缺失 | ✅ `>=2.0.0,<3.0.0` | 🔴 **P0** |
-| `pydantic-settings` | ❌ 缺失 | ✅ `>=2.0.0` | 🔴 **P0** |
-| `starlette` | ❌ 缺失 | ✅ `>=0.27.0` | 🔴 **P0** |
-| `click` | ❌ 缺失 | ✅ `>=8.0.0` | 🔴 **P0** |
-| `aiohttp` | ❌ 缺失 | ✅ `>=3.9.0` | 🔴 **P0** |
-| `websockets` | ❌ 缺失 | ✅ `>=13.0` | 🔴 **P0** |
-| `mcp` | ❌ 缺失 | ✅ `>=1.0.0` | 🔴 **P0** |
-| `rich` | ❌ 缺失 | ✅ `>=13.0.0` | 🟡 **P1** |
-| `psutil` | ❌ 缺失 | ✅ `>=6.0.0` | 🟡 **P1** |
-| `orjson` | ❌ 缺失 | ✅ `>=3.9` | 🟡 **P1** |
-| `alibabacloud-tea-util` | ❌ 缺失 | ✅ `>=0.3.0` | 🟡 **P1** |
-| `anthropic` | ❌ 缺失 | ✅ `>=0.10.0` | 🟡 **P1** |
-| `openai` | ❌ 缺失 | ✅ `>=2.0.0,<=2.33.0` | 🟡 **P1** |
+| 文件 | 定位 | 说明 |
+|------|------|------|
+| `pyproject.toml` | 权威源（`pip install -e .` 读取） | 43 项核心依赖 + 12 组 extras |
+| `requirements.txt` | 镜像 + 可选块 | 核心 43 项与 pyproject 一致；末尾注释块对应 extras，`pip install -r` 不会安装注释项 |
 
-### 5.2 影响分析
+extras 一览（`pip install -e ".[名称]"`）：
 
-**仅执行 `pip install -e .`（基于 pyproject.toml）的后果**：
+| extras | 内容 | 缺失后果 |
+|--------|------|---------|
+| `channels` | Discord/钉钉/飞书/Telegram/Twilio/Matrix SDK | 对应渠道不可用 |
+| `wecom` | 企业微信 SDK（公共 PyPI，实测 1.0.2） | 企微渠道不可用 |
+| `browser` | playwright + browser-use | 浏览器工具不可用（装后需 `playwright install chromium`） |
+| `documents` | pymupdf4llm / python-pptx / openpyxl / python-docx | PDF/PPTX/XLSX/DOCX 读取不可用（懒加载，不影响启动） |
+| `search` | duckduckgo_search / tavily-python | 对应搜索后端不可用 |
+| `matrix` | markdown-it-py / linkify-it-py | Matrix 富文本降级为纯文本 |
+| `local` / `whisper` / `sip` / `sip-livekit` | 本地模型 / 语音 / VoIP | 对应功能不可用 |
+| `dev` | pytest / pytest-asyncio / pytest-cov / hypothesis / pre-commit | 测试与预提交 |
 
-| 缺失依赖 | 影响功能 | 症状 |
-|---------|---------|------|
-| `fastapi` + `starlette` | Web API 服务 | `ModuleNotFoundError: No module named 'fastapi'` |
-| `pydantic` | 数据验证 | `ModuleNotFoundError: No module named 'pydantic'` |
-| `click` | CLI 命令 | `coapis` 命令无法运行 |
-| `python-frontmatter` | 技能管理 | `ModuleNotFoundError: No module named 'frontmatter'` |
-| `aiohttp` | 部分渠道/工具 | 运行时异步 HTTP 请求失败 |
-| `mcp` | MCP 协议支持 | MCP 工具无法加载 |
-| `websockets` | WebSocket 支持 | 流式输出可能失败 |
+一致性校验方式见 `tech_docs/dependency-env-audit-2026-10-09.md`。
 
-### 5.3 推荐安装顺序
+### 5.2 隐性必需项（已显式声明，无需手动补装）
+
+这些包在源码里是**模块级 import**，但过去未写进依赖清单——干净环境装完即崩。现已全部声明：
+
+| 依赖 | 声明方式 | 为什么必需 | 缺失症状 |
+|------|---------|-----------|---------|
+| `greenlet` | `sqlalchemy[asyncio]>=2.0` | SQLAlchemy asyncio 层必需（`agentscope.memory` 导入链） | `import agentscope` 直接 `ImportError`，应用无法启动 |
+| `tqdm` | `tqdm>=4.0` | `agentscope.evaluate` 模块级 import | `import agentscope` 直接 `ModuleNotFoundError` |
+| `typing_extensions` | `typing_extensions>=4.6` | `agents/schema.py` 模块级直接 import | `ModuleNotFoundError` |
+| `tzdata` | `tzdata>=2024.1` | 时区数据（精简镜像/Windows） | `ZoneInfoNotFoundError` |
+| `python-socks` | `python-socks>=2.5.3` | 代理支持 | 代理渠道连接失败 |
+
+> 注意 `agents/memory` 的 `try/except` 会吞掉 `ImportError`——这类缺失在运行时表现为**功能静默失效**（无报错、功能缺失），比启动崩溃更难发现。
+
+### 5.3 推荐安装方式
 
 ```bash
 cd server
 
-# 第一步：安装 pyproject.toml 声明的依赖
-pip install -e .
+# 核心安装 + CVE 安全约束（constraints.txt 为 2026-05-08 pip-audit 的锁定版本）
+pip install -c constraints.txt -e .
 
-# 第二步：安装 requirements.txt 中的补充依赖
-pip install fastapi pydantic pydantic-settings starlette click \
-    aiohttp websockets mcp rich psutil orjson \
-    alibabacloud-tea-util anthropic openai \
-    python-frontmatter
+# 按需追加 extras（示例：全渠道 + 浏览器 + 文档解析）
+pip install -e ".[channels,wecom,browser,documents,search,matrix]"
+
+# 浏览器自动化需要额外下载浏览器内核
+playwright install chromium
 ```
 
 ---
 
 ## 六、已知问题与解决方案
 
-### 6.1 🔴 P0: pyproject.toml 缺失关键依赖
+### 6.1 ✅ 已修复：pyproject.toml 缺失关键依赖（2026-10-09）
 
-**问题**: `pyproject.toml` 的 `dependencies` 列表不完整，缺失 `fastapi`、`pydantic`、`click` 等核心依赖。
+**原问题**: `pyproject.toml` 的 `dependencies` 列表不完整，缺失 `sqlalchemy`、`alembic`、`typing_extensions` 等。
 
-**根因**: 这些依赖被 `agentscope` 传递依赖覆盖，但版本不可控。
+**根因**: 这些依赖被 `agentscope` 传递依赖覆盖，版本不可控；`sqlalchemy`/`alembic` 甚至完全无传递覆盖。
 
-**症状**: `pip install -e .` 后，`coapis` 命令可能因版本不匹配而失败。
+**原症状**: 干净环境 `pip install -e .` 后启动即崩——`_app.py` 启动时 `RepositoryFactory.initialize()` → `db/migrate.py` → `alembic` 直接 `ImportError`；且 `agents/memory` 的 `try/except` 会吞掉 `ImportError`，导致记忆系统**静默失效**（无报错、功能缺失）。
 
-**解决方案**:
-```bash
-# 方案一：手动安装缺失依赖（推荐）
-pip install fastapi pydantic pydantic-settings starlette click
+**修复**: `sqlalchemy>=2.0`、`alembic>=1.13`、`typing_extensions>=4.6` 已写入 `pyproject.toml` 核心依赖，`requirements.txt` 同步镜像；`constraints.txt` 通过 `pip -c` 生效（Dockerfile builder 与 install.sh 均已接入）。
 
-# 方案二：使用 requirements.txt
-pip install -r requirements.txt
-
-# 方案三（长期修复）: 在 pyproject.toml 中补充缺失依赖
-# 需要修改代码，此处不展开
-```
+**当前状态**: 无需任何手动补装。隐性缺口 `greenlet` / `tqdm` 见 §5.2。
 
 ### 6.2 🔴 P0: wecom-aibot-python-sdk 可能不可用
 

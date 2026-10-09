@@ -30,6 +30,8 @@ WORKDIR /build
 # 先 COPY 依赖描述文件（很少变，缓存稳定）
 COPY server/pyproject.toml ./pyproject.toml
 COPY server/setup.py ./setup.py
+# 安全约束（CVE 锁定版本，2026-05-08 pip-audit）— 之前全仓库无引用，此处生效
+COPY server/constraints.txt ./constraints.txt
 
 # 创建最小包结构，让 pip install 能读取动态版本号
 # 版本号为临时值，仅用于安装依赖；运行时使用 COPY 的完整源码
@@ -38,7 +40,7 @@ RUN mkdir -p coapis && \
     echo "" > coapis/__init__.py
 
 # 安装依赖到独立前缀（改源码不触发重新安装）
-RUN pip install --prefix=/install --no-cache-dir . && \
+RUN pip install --prefix=/install --no-cache-dir -c constraints.txt . && \
     rm -rf /install/lib/python3.11/site-packages/coapis*
 
 
@@ -159,6 +161,18 @@ RUN pip install --no-cache-dir \
 # browser-use 会拉 mcp 2.x（与 agentscope 不兼容），锁回 1.29.0
 RUN pip install --no-cache-dir "mcp==1.29.0" \
     && echo "✅ mcp pinned to 1.29.0"
+
+# 懒加载功能依赖（对应 pyproject extras: documents / search / matrix）
+# 之前全仓库无声明，镜像里这些功能在运行时静默不可用
+RUN pip install --no-cache-dir \
+    "pymupdf4llm>=0.1.0" \
+    "python-pptx>=1.0.0" \
+    "openpyxl>=3.1.0" \
+    "duckduckgo_search>=8.0.0" \
+    "tavily-python>=0.5.0" \
+    "markdown-it-py>=3.0.0" \
+    "linkify-it-py>=2.0.0" \
+    && echo "✅ documents + search + matrix extras installed"
 
 ENV COAPIS_IMAGE_VARIANT=full
 

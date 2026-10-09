@@ -68,8 +68,18 @@ dependencies = [
     "anthropic>=0.10.0",
 
     # ── 数据层（统一 SQLAlchemy + Alembic，见 tech_docs/data-layer-sqlalchemy-unified-plan.md）──
-    "sqlalchemy>=2.0",
+    # 启动硬依赖：_app.py 启动时 RepositoryFactory.initialize() → db/migrate.py → alembic
+    # [asyncio] 用于拉入 greenlet：agentscope.memory 的导入链需要 SQLAlchemy asyncio
+    "sqlalchemy[asyncio]>=2.0",
     "alembic>=1.13",
+
+    # ── 类型支持（agents/schema.py 模块级直接 import，不依赖传递依赖兜底）──
+    "typing_extensions>=4.6",
+
+    # ── agentscope 导入链的隐性必需项 ──
+    # import agentscope → agentscope.evaluate → from tqdm import tqdm
+    # 缺失时 `import agentscope` 直接 ModuleNotFoundError，应用无法启动
+    "tqdm>=4.0",
 
     # ── 其他 ──
     "python-socks>=2.5.3",
@@ -127,7 +137,7 @@ channels = [
     "matrix-nio>=0.24.0",
 ]
 wecom = [
-    # 企业微信 SDK（私有包，不在公共 PyPI，需从私有源或本地安装）
+    # 企业微信 SDK（公共 PyPI 可安装，实测版本 1.0.2）
     "wecom-aibot-python-sdk>=1.0.0",
 ]
 dev = [
@@ -142,6 +152,25 @@ local = [
 ]
 browser = [
     "playwright>=1.49.0",
+    # browser_use 是浏览器工具的运行时（agents/core.py 显式探测），缺失则浏览器工具不可用
+    "browser-use>=0.13.0",
+]
+documents = [
+    # doc_reader 懒加载：缺失时对应格式读取不可用，不影响启动
+    "pymupdf4llm>=0.1.0",
+    "python-pptx>=1.0.0",
+    "openpyxl>=3.1.0",
+    "python-docx>=1.1.0",
+]
+search = [
+    # web_search 懒加载后端：缺失时该后端不可用（默认后端 browser 不受影响）
+    "duckduckgo_search>=8.0.0",
+    "tavily-python>=0.5.0",
+]
+matrix = [
+    # Matrix 渠道富文本渲染，缺失时降级为纯文本转义
+    "markdown-it-py>=3.0.0",
+    "linkify-it-py>=2.0.0",
 ]
 whisper = [
     "openai-whisper>=20231117",
