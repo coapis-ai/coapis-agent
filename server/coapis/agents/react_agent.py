@@ -38,6 +38,7 @@ from anyio import ClosedResourceError
 from pydantic import BaseModel
 
 from ..app.mcp import HttpStatefulClient, StdIOStatefulClient
+from ..app.mcp.description_sanitizer import wrap_client_list_tools
 from .command_handler import CommandHandler
 from .hooks import BootstrapHook
 from .runtime.hooks import HookManager, HookPhase, HookState
@@ -2198,6 +2199,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         """
         for i, client in enumerate(self._mcp_clients):
             client_name = getattr(client, "name", repr(client))
+            # Strip "call me at conversation start" clauses that some MCP
+            # servers embed in tool descriptions. Those descriptions reach
+            # the LLM as part of the tool schema, and make the agent fire
+            # statistics tools on a plain greeting.
+            client = wrap_client_list_tools(client)
+            self._mcp_clients[i] = client
             try:
                 await self.toolkit.register_mcp_client(
                     client,
@@ -2214,6 +2221,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 )
                 recovered_client = await self._recover_mcp_client(client)
                 if recovered_client is not None:
+                    recovered_client = wrap_client_list_tools(recovered_client)
                     self._mcp_clients[i] = recovered_client
                     try:
                         await self.toolkit.register_mcp_client(
