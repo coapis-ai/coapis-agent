@@ -611,30 +611,34 @@ def _get_active_model_info():
 
         manager = ProviderManager.get_instance()
 
-        # Try to get agent-specific model first
-        active = None
+        # 与 model_factory 共用同一解析入口（用户全局偏好 → 智能体默认 →
+        # 全局默认）。若两处各算各的，聊天用模型 A、多模态判断用模型 B，
+        # 图片上传会出现"模型不支持"的误警告。
+        active_slot = None
         try:
             agent_id = get_current_agent_id()
-            agent_config = load_agent_config(agent_id)
-            if agent_config.active_model:
-                active = agent_config.active_model
+            from ..app.agent_context import get_current_username
+            from ..app.routers.user_model_prefs import resolve_chat_model_slot
+
+            active_slot = resolve_chat_model_slot(get_current_username(), agent_id)
         except Exception:
             pass
 
-        # Fallback to global active model
-        if not active:
+        if not active_slot:
             active = manager.get_active_model()
+            if not active:
+                return None, None
+            provider_id, model_id = active.provider_id, active.model
+        else:
+            provider_id, model_id = active_slot
 
-        if not active:
-            return None, None
-
-        provider = manager.get_provider(active.provider_id)
+        provider = manager.get_provider(provider_id)
         if not provider:
             return None, None
 
         for m in provider.models + provider.extra_models:
-            if m.id == active.model:
-                return m, active.model
+            if m.id == model_id:
+                return m, model_id
         return None, None
     except Exception:
         return None, None

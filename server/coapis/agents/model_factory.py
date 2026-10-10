@@ -1019,6 +1019,23 @@ def create_model_and_formatter(
         except Exception:
             pass
 
+    # 用户全局偏好优先于智能体默认（用户级，不分智能体/场景）。
+    # resolve_chat_model_slot 内部已实现 用户→智能体→全局 三级回退，
+    # 偏好指向的 provider 被删/禁用时静默回退，不会崩聊天链路。
+    try:
+        from ..app.agent_context import get_current_username
+        from ..config.config import ModelSlotConfig
+        from ..app.routers.user_model_prefs import resolve_chat_model_slot
+
+        user_slot = resolve_chat_model_slot(get_current_username(), agent_id)
+        if user_slot:
+            model_slot = ModelSlotConfig(
+                provider_id=user_slot[0],
+                model=user_slot[1],
+            )
+    except Exception:
+        logger.debug("User model preference lookup failed", exc_info=True)
+
     # Create chat model from agent-specific or global config
     if model_slot and model_slot.provider_id and model_slot.model:
         # Use agent-specific model

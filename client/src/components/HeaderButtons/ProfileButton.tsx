@@ -12,9 +12,9 @@ import { useTranslation } from 'react-i18next';
 import { useUser } from '../../contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
-import { useModelChoice } from '@/lib/modelChoice';
+import { useModelPrefs } from '@/lib/modelChoice';
+import { userModelPrefsApi } from '../../api/modules/user_model_prefs';
 import { languageApi } from '../../api/modules/language';
-import api from '@/api';
 
 const roleColorMap: Record<string, string> = {
   visitor: 'default',
@@ -29,22 +29,41 @@ const ProfileButton: React.FC = () => {
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const { themeMode, setThemeMode } = useTheme();
-  const { setChoice } = useModelChoice();
-  const [models, setModels] = useState<{ id: string; name: string; provider?: string }[]>([]);
+  const { chat: chatSlot, setChat } = useModelPrefs();
+  const [models, setModels] = useState<
+    { id: string; name: string; providerId: string; provider?: string }[]
+  >([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
 
-  // 模型选择列表（懒加载一次，与 + 菜单的 ModelPickerModal 同源）
+  // 模型选择列表（懒加载一次）：只取聊天模型（model_type=llm）
+  // 后端 /models/available 未过滤类型会把 qwen3-embedding 这类嵌入模型混进来
   useEffect(() => {
     if (!user || modelsLoaded) return;
     setModelsLoading(true);
-    api
-      .get('/models/available')
+    userModelPrefsApi
+      .getAvailableModels("chat")
       .then((res: unknown) => {
-        // /api/models/available → { global_models: [{id,name,provider_id,provider_name}] }
-        const r = res as { global_models?: { id: string; name: string; provider_name?: string }[] };
+        const r = res as {
+          global_models?: {
+            id: string;
+            name: string;
+            provider_id?: string;
+            provider_name?: string;
+            model_type?: string;
+          }[];
+        };
         const list = Array.isArray(r?.global_models) ? r.global_models : [];
-        setModels(list.map((m) => ({ id: m.id, name: m.name, provider: m.provider_name })));
+        setModels(
+          list
+            .filter((m) => (m.model_type ?? "chat") === "chat")
+            .map((m) => ({
+              id: m.id,
+              name: m.name,
+              providerId: m.provider_id ?? '',
+              provider: m.provider_name,
+            })),
+        );
       })
       .catch(() => setModels([]))
       .finally(() => {
@@ -73,14 +92,25 @@ const ProfileButton: React.FC = () => {
 
   const curLang = i18n.resolvedLanguage || i18n.language || '';
 
+  const isCurrent = (m: { providerId: string; id: string }) =>
+    chatSlot.model === m.id && (chatSlot.providerId ?? '') === m.providerId;
+
   const modelChildren = [
-    { key: 'auto', label: t('header.profile.auto'), disabled: true },
+    {
+      key: 'auto',
+      label: t('header.profile.auto'),
+      icon: !chatSlot.model ? <CheckOutlined /> : undefined,
+      onClick: () =>
+        setChat({ providerId: null, model: null, name: null }).catch(() => {}),
+    },
+    { type: 'divider' as const },
     ...(modelsLoading
       ? [{ key: '__loading__', label: <Spin size="small" />, disabled: true }]
       : models.length === 0
         ? [{ key: '__none__', label: t('resourcePicker.noModels'), disabled: true }]
         : models.map((m) => ({
-            key: m.id,
+            key: `${m.providerId}::${m.id}`,
+            icon: isCurrent(m) ? <CheckOutlined /> : undefined,
             label: (
               <span>
                 {m.name}
@@ -89,7 +119,10 @@ const ProfileButton: React.FC = () => {
                 )}
               </span>
             ),
-            onClick: () => setChoice({ id: m.id, name: m.name }),
+            onClick: () =>
+              setChat({ providerId: m.providerId, model: m.id, name: m.name }).catch(
+                () => {},
+              ),
           }))),
   ];
 

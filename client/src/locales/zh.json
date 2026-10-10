@@ -7,7 +7,8 @@
     "scene": "切换场景",
     "more": "更多选项",
     "mcp": "MCP 服务",
-    "skill": "指定技能"
+    "skill": "指定技能",
+    "model": "聊天模型"
   },
   "externalNav": {
     "bindingRequired": "您尚未绑定该外部系统账号，暂无法访问，请先完成账号绑定。"
@@ -2096,7 +2097,14 @@
       "history": "历史会话"
     },
     "newChat": "新聊天",
-    "pinned": "已固定"
+    "pinned": "已固定",
+    "modelChips": {
+      "llm": "聊天模型",
+      "systemDefault": "系统默认",
+      "tipChat": "选择聊天模型（对你的所有智能体与场景生效）",
+      "noModels": "暂无可用模型，请先在设置中配置",
+      "saveFailed": "保存模型偏好失败"
+    }
   },
   "security": {
     "parent": "设置",

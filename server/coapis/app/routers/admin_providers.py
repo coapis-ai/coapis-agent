@@ -203,12 +203,23 @@ async def test_provider_connection(
 
 @router.get("/models/available")
 @require_permission("models:read")
-async def get_public_available_models(request: Request) -> Dict[str, Any]:
+async def get_public_available_models(
+    request: Request,
+    types: Optional[str] = None,
+) -> Dict[str, Any]:
     """获取可用模型池（所有用户可见）.
-    
+
     遍历 ProviderManager 中所有 provider，
     isAvailable = isConfigured && hasModels 的自动过滤。
+
+    Args:
+        types: 可选逗号分隔的类型过滤（chat,embedding,rerank,audio,vision）。
+            模型条目始终带 ``model_type``，前端按类型筛选芯片列表时需要它
+            ——Ollama 一个 provider 同时提供 chat 与 embedding 模型。
     """
+    type_filter = {
+        t.strip() for t in types.split(",") if t.strip()
+    } if types else None
     global_models = []
     
     try:
@@ -248,19 +259,34 @@ async def get_public_available_models(request: Request) -> Dict[str, Any]:
                 if isinstance(m, str):
                     model_id = m
                     model_name = m
+                    model_type = None
                 elif isinstance(m, dict):
                     model_id = m.get("id", "")
                     model_name = m.get("name", model_id)
+                    model_type = m.get("model_type")
                 else:
                     continue
-                
-                if model_id and model_id not in seen_model_ids:
+
+                if not model_id:
+                    continue
+
+                # 老数据（纯字符串模型列表）没有类型标注，按名称关键词推断
+                if not model_type:
+                    from ...providers.model_type import infer_model_type
+
+                    model_type = infer_model_type(model_id, model_name)
+
+                if type_filter and model_type not in type_filter:
+                    continue
+
+                if model_id not in seen_model_ids:
                     seen_model_ids.add(model_id)
                     global_models.append({
                         "id": model_id,
                         "name": model_name,
                         "provider_id": pid,
                         "provider_name": pname,
+                        "model_type": model_type,
                     })
     except Exception as e:
         logger.error("Failed to read models from ProviderManager: %s", e)

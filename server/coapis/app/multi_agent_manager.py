@@ -237,6 +237,53 @@ class MultiAgentManager:
             logger.info(f"Destroyed agent: {agent_id}")
             return True
 
+    async def reload_agent(self, agent_id: str, username: str = None) -> int:
+        """Evict cached workspace instance(s) so config/model changes take effect.
+
+        模型与智能体配置在 workspace 构造时绑定并被缓存，改完偏好/配置后
+        必须把缓存实例踢掉，下一次访问会按最新配置惰性重建（get_agent 的
+        lazy-loading 路径）。本方法**只驱逐内存实例**，不删目录、不删配置，
+        与 destroy_agent 严格区分。
+
+        匹配三类缓存键：
+        - 复合键 "{username}:{agent_id}"（显式传 username 时）
+        - 全局键 "global:{agent_id}"
+        - 后缀 ":<agent_id>"（调用方只传 agent_id 时，如 agent_id="user:admin"
+          对应缓存键 "admin:user:admin"）
+
+        Returns: 驱逐的实例数（0 表示无缓存实例，改动下次自然生效）。
+        """
+        keys = []
+        if username:
+            keys.append(f"{username}:{agent_id}")
+        keys.append(f"global:{agent_id}")
+        keys.append(agent_id)  # 旧格式/裸 agent_id
+        suffix = f":{agent_id}"
+        for key in list(self._workspaces.keys()):
+            if key.endswith(suffix) and key not in keys:
+                keys.append(key)
+
+        evicted = 0
+        async with self._lock:
+            for key in keys:
+                ws = self._workspaces.pop(key, None)
+                if ws is None:
+                    continue
+                if getattr(ws, "status", "stopped") == "running":
+                    try:
+                        await ws.stop()
+                    except Exception as e:
+                        logger.warning(f"reload_agent: stop() for '{key}' failed: {e}")
+                # 重置缓存的 LLM client，确保重建时按新模型创建
+                if getattr(ws, "core", None) is not None:
+                    ws.core._client = None
+                evicted += 1
+                logger.info(
+                    f"reload_agent: evicted cached workspace '{key}' "
+                    f"(re-initialized on next access)"
+                )
+        return evicted
+
     def get_workspace(self, agent_id: str, username: str = None) -> Optional[Workspace]:
         """Get workspace by agent ID (supports user isolation).
         

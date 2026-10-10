@@ -265,7 +265,16 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # Create model and formatter using factory method
         model, formatter = create_model_and_formatter(agent_id=agent_config.id)
-        model_info = (
+        # 打印**真正解析出来的**模型，而不是 agent_config.active_model：
+        # 用户全局偏好会在 model_factory 内覆盖智能体默认，用 active_model
+        # 打日志会显示成与实际调用不一致（排查模型选择问题时误导最大）。
+        real_slot = getattr(model, "model_key", None)
+        if not real_slot:
+            inner = getattr(model, "_inner", None)
+            pid = getattr(inner, "_provider_id", None)
+            mname = getattr(inner, "model_name", None)
+            real_slot = f"{pid}/{mname}" if pid and mname else None
+        model_info = real_slot or (
             f"{agent_config.active_model.provider_id}/"
             f"{agent_config.active_model.model}"
             if agent_config.active_model

@@ -8,6 +8,7 @@ import {
   SparkApiLine,
 } from "@agentscope-ai/icons";
 import { FolderOpenOutlined, ThunderboltOutlined } from "@agentscope-ai/icons-override-antd";
+import { RobotOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { isEnterpriseEdition } from "@/lib/edition";
 import styles from "./resource.module.less";
@@ -19,6 +20,8 @@ export interface ResourcePlusMenuProps {
   onMySpaceClick: () => void;
   /** 附加知识（仅企业版显示） */
   onKnowledgeClick: () => void;
+  /** 选择聊天模型（打开 ModelPickerModal，写入用户全局偏好） */
+  onModelClick: () => void;
   /** MCP 服务（引用为芯片） */
   onMcpClick: () => void;
   /** 指定技能（引用为芯片） */
@@ -37,11 +40,13 @@ const SHOW_TECH_ITEMS = false;
  * M4/T4.1：输入框左下角 "+" 资源菜单（取代原回形针）。
  *
  * 设计原则（v2.2.3 修正）：本菜单只放"输入类资源"——
- * 上传文件 / 我的空间 / 关联知识（企业版）。
+ * 上传文件 / 我的空间 / 关联知识（企业版）/ 聊天模型。
  * - 切换场景：归顶部按钮（AppstoreOutlined），菜单里取消，避免两个入口。
  * - MCP / 技能：对普通用户有技术门槛，暂时隐藏（见 SHOW_TECH_ITEMS），
  *   方向是聊天侧自动触发，不靠用户手选。
- * 会话管理（历史、新聊天）归顶部按钮；模型切换、显示设置归右上角个人菜单。
+ * - 模型：菜单里保留入口（弹窗选择，写入用户全局偏好）；右上角个人菜单
+ *   也有模型子菜单，两处写同一份偏好，不会互相打架。
+ * 会话管理（历史、新聊天）归顶部按钮；显示设置归右上角个人菜单。
  *
  * 注意：本组件整体位于 Sender 的 attachments.trigger 插槽内（被 antd Upload 包裹）。
  * - 「上传」快捷按钮与菜单里的「上传文件」项【不能】stopPropagation，
@@ -107,6 +112,7 @@ export default function ResourcePlusMenu(props: ResourcePlusMenuProps) {
       {menuItem(t("resourceMenu.mySpace"), <FolderOpenOutlined />, props.onMySpaceClick)}
       {showKnowledge &&
         menuItem(t("resourceMenu.knowledge"), <SparkBookLine />, props.onKnowledgeClick)}
+      {menuItem(t("resourceMenu.model"), <RobotOutlined />, props.onModelClick)}
       {SHOW_TECH_ITEMS && (
         <>
           <div style={{ height: 1, background: "var(--color-border-secondary, rgba(0,0,0,0.06))", margin: "6px 0" }} />

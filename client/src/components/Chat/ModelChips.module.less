@@ -1,0 +1,85 @@
+// 模型芯片（LLM / 嵌入 / 重排）
+// 位于聊天输入区 actionAffix，与"文字数/能力标签"同排
+
+.chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 14px;
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.65);
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.16);
+  }
+}
+
+.chipIcon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.chipLabel {
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.chipValue {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.chipCaret {
+  font-size: 9px;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+// 深色模式
+:global(.dark-mode) {
+  .chip {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: rgba(255, 255, 255, 0.75);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+  }
+
+  .chipIcon {
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .chipLabel {
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .chipValue {
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .chipCaret {
+    color: rgba(255, 255, 255, 0.45);
+  }
+}

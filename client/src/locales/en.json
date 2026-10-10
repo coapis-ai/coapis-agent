@@ -7,7 +7,8 @@
     "scene": "Switch Scene",
     "more": "More Options",
     "mcp": "MCP Services",
-    "skill": "Specify Skills"
+    "skill": "Specify Skills",
+    "model": "Chat Model"
   },
   "externalNav": {
     "bindingRequired": "You have not linked an account for this external system. Access is blocked until you complete the binding."
@@ -2189,7 +2190,14 @@
       "history": "Session History"
     },
     "newChat": "New Chat",
-    "pinned": "Pinned"
+    "pinned": "Pinned",
+    "modelChips": {
+      "llm": "Chat model",
+      "systemDefault": "System default",
+      "tipChat": "Choose chat model (applies to all your agents and scenes)",
+      "noModels": "No models available, configure them in Settings first",
+      "saveFailed": "Failed to save model preference"
+    }
   },
   "security": {
     "parent": "Settings",

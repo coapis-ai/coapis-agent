@@ -7,6 +7,7 @@ export { ReferenceHint } from './ReferenceHint';
 export { ModelCapabilityHint } from './ModelCapabilityHint';
 export { ModelCapabilityTag } from './ModelCapabilityTag';
 export { ChatInputFooter } from './ChatInputFooter';
+export { default as ModelChips } from './ModelChips';
 
 export { useToolbarState } from './hooks/useToolbarState';
 export { useFileTree } from './hooks/useFileTree';

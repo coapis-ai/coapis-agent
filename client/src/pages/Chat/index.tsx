@@ -54,9 +54,11 @@ import {
   useToolbarState,
   ChatInputFooter,
   ModelCapabilityTag,
+  ModelChips,
   ResourcePlusMenu,
   MySpacePickerModal,
   KnowledgePickerModal,
+  ModelPickerModal,
   ScenePickerModal,
   MultiSelectPickerModal,
   type PickItem,
@@ -677,7 +679,7 @@ export default function ChatPage() {
   const { message } = useAppMessage();
 
   // ─── M4 资源整合：+ 菜单与各选择面板 ─────────────────────────────
-  type PickerKind = "myspace" | "knowledge" | "mcp" | "skill";
+  type PickerKind = "myspace" | "knowledge" | "mcp" | "skill" | "model";
   const [pickerOpen, setPickerOpen] = useState<PickerKind | null>(null);
   const [scenePickerOpen, setScenePickerOpen] = useState(false);
   // 顶部「历史」按钮：左侧可隐藏抽屉（会话列表，复用 ChatSessionDropdown）
@@ -1636,6 +1638,7 @@ export default function ChatPage() {
                   }}
                   onMySpaceClick={() => openPicker("myspace")}
                   onKnowledgeClick={() => openPicker("knowledge")}
+                  onModelClick={() => openPicker("model")}
                   onMcpClick={() => openPicker("mcp")}
                   onSkillClick={() => openPicker("skill")}
                 />
@@ -1683,8 +1686,28 @@ export default function ChatPage() {
             }
           />
         ),
-        // 右下角操作区 - 显示模型能力
-        actionAffix: <ModelCapabilityTag caps={multimodalCaps} />,
+        // 右下角操作区：模型芯片（LLM/嵌入/重排）+ 模型能力标签
+        actionAffix: (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              width: "100%",
+            }}
+          >
+            <ModelChips />
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                justifyContent: "flex-end",
+              }}
+            >
+              <ModelCapabilityTag caps={multimodalCaps} />
+            </div>
+          </div>
+        ),
       },
       session: {
         multiple: true,
@@ -2161,6 +2184,10 @@ export default function ChatPage() {
         });
         setPickerOpen(null);
       }}
+    />
+    <ModelPickerModal
+      open={pickerOpen === "model"}
+      onClose={() => setPickerOpen(null)}
     />
     <ScenePickerModal
       open={scenePickerOpen}

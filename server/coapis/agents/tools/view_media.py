@@ -161,23 +161,39 @@ async def _probe_multimodal_if_needed(
         if model_info is None or model_info.supports_multimodal is not None:
             return None
 
-        # Resolve agent-specific active model (mirrors _get_active_model_info)
+        # Resolve active model with the same entry point as model_factory /
+        # prompt (user global pref → agent default → global). Keeping one
+        # resolver avoids a capability check that disagrees with the model
+        # actually used for the chat.
         manager = ProviderManager.get_instance()
-        active = None
+        active_slot = None
         try:
-            from ...app.agent_context import get_current_agent_id
-            from ...config.config import load_agent_config
+            from ...app.agent_context import (
+                get_current_agent_id,
+                get_current_username,
+            )
+            from ...app.routers.user_model_prefs import resolve_chat_model_slot
 
-            agent_id = get_current_agent_id()
-            agent_config = load_agent_config(agent_id)
-            if agent_config.active_model:
-                active = agent_config.active_model
+            active_slot = resolve_chat_model_slot(
+                get_current_username(),
+                get_current_agent_id(),
+            )
         except Exception:
             pass
-        if not active:
+
+        if not active_slot:
             active = manager.get_active_model()
-        if not active:
-            return None
+            if not active:
+                return None
+            active_slot = (active.provider_id, active.model)
+
+        # 统一成带 .provider_id/.model 的对象，下游探针代码不变
+        from types import SimpleNamespace
+
+        active = SimpleNamespace(
+            provider_id=active_slot[0],
+            model=active_slot[1],
+        )
 
         if media_type == "image":
             logger.info(
