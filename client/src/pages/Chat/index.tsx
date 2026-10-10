@@ -13,7 +13,6 @@ import {
 import { SparkCopyLine } from "@agentscope-ai/icons";
 import { usePlugins } from "../../plugins/PluginContext";
 import { useTranslation } from "react-i18next";
-import { useModelChoice } from "@/lib/modelChoice";
 import { useLocation, useNavigate } from "react-router-dom";
 import sessionApi from "./sessionApi";
 import defaultConfig, { getDefaultConfig } from "./OptionsPanel/defaultConfig";
@@ -750,8 +749,6 @@ export default function ChatPage() {
   const [refSessions, setRefSessions] = useState<PickItem[]>([]);
   const [mcpOptions, setMcpOptions] = useState<PickItem[]>([]);
   const [skillOptions, setSkillOptions] = useState<PickItem[]>([]);
-  const { choice: modelChoice, clearChoice: clearModelChoice } =
-    useModelChoice();
 
   const openPicker = useCallback(
     (kind: PickerKind) => {
@@ -1655,14 +1652,6 @@ export default function ChatPage() {
           <ChatInputFooter
             files={selectedFiles}
             knowledge={selectedKnowledge}
-            model={
-              modelChoice.name
-                ? {
-                    id: modelChoice.id ?? modelChoice.name,
-                    name: modelChoice.name,
-                  }
-                : null
-            }
             mcps={refMcps}
             skills={refSkills}
             sessions={refSessions}
@@ -1672,7 +1661,6 @@ export default function ChatPage() {
             onRemoveKnowledge={(id) => {
               setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
             }}
-            onRemoveModel={() => clearModelChoice()}
             onRemoveMcp={(id) =>
               setRefMcps(prev => prev.filter(x => x.id !== id))
             }
@@ -1939,8 +1927,7 @@ export default function ChatPage() {
     selectedFiles,
     selectedKnowledge,
     // M5 联调修复：afterUI 芯片行引用的状态必须进依赖，
-    // 否则选中模型/MCP/技能/会话后芯片不实时刷新（要刷新页面才对）
-    modelChoice,
+    // 否则选中 MCP/技能/会话后芯片不实时刷新（要刷新页面才对）
     refMcps,
     refSkills,
     refSessions,

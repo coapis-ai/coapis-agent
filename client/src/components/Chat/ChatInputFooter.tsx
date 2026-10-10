@@ -1,11 +1,11 @@
 // 聊天输入框底部引用条
-// 单行显示已选择的资源芯片（文件/知识库/模型/MCP/技能/会话引用），超长省略
+// 单行显示已选择的资源芯片（文件/知识库/MCP/技能/会话引用），超长省略
+// 模型不在这里显示：模型选择归输入框左侧的芯片（ModelChips），避免两处重复
 
 import { Tag, Tooltip } from 'antd';
 import {
   FileOutlined,
   BookOutlined,
-  RobotOutlined,
   ApiOutlined,
   ThunderboltOutlined,
   HistoryOutlined,
@@ -24,8 +24,6 @@ interface ChatInputFooterProps {
   onRemoveFile: (id: string) => void;
   onRemoveKnowledge: (id: string) => void;
   /** M4 新增芯片（均可选，向后兼容） */
-  model?: RefChip | null;
-  onRemoveModel?: () => void;
   mcps?: RefChip[];
   onRemoveMcp?: (id: string) => void;
   skills?: RefChip[];
@@ -34,12 +32,11 @@ interface ChatInputFooterProps {
   onRemoveSession?: (id: string) => void;
 }
 
-type ChipKind = 'file' | 'knowledge' | 'model' | 'mcp' | 'skill' | 'session';
+type ChipKind = 'file' | 'knowledge' | 'mcp' | 'skill' | 'session';
 
 const CHIP_ICON: Record<ChipKind, React.ReactNode> = {
   file: <FileOutlined />,
   knowledge: <BookOutlined />,
-  model: <RobotOutlined />,
   mcp: <ApiOutlined />,
   skill: <ThunderboltOutlined />,
   session: <HistoryOutlined />,
@@ -55,8 +52,6 @@ export function ChatInputFooter({
   knowledge,
   onRemoveFile,
   onRemoveKnowledge,
-  model,
-  onRemoveModel,
   mcps = [],
   onRemoveMcp,
   skills = [],
@@ -65,7 +60,6 @@ export function ChatInputFooter({
   onRemoveSession,
 }: ChatInputFooterProps) {
   const items: Array<{ kind: ChipKind; id: string; name: string }> = [
-    ...(model ? [{ kind: 'model' as const, id: model.id, name: model.name }] : []),
     ...files.map(f => ({ kind: 'file' as const, name: f.name, id: f.id })),
     ...knowledge.map(k => ({ kind: 'knowledge' as const, name: k.name, id: k.id })),
     ...mcps.map(m => ({ kind: 'mcp' as const, name: m.name, id: m.id })),
@@ -90,7 +84,6 @@ export function ChatInputFooter({
     switch (kind) {
       case 'file': onRemoveFile(id); break;
       case 'knowledge': onRemoveKnowledge(id); break;
-      case 'model': onRemoveModel?.(); break;
       case 'mcp': onRemoveMcp?.(id); break;
       case 'skill': onRemoveSkill?.(id); break;
       case 'session': onRemoveSession?.(id); break;
