@@ -151,22 +151,3 @@ export function ModelChoiceProvider({ children }: { children: React.ReactNode })
 export function useModelPrefs() {
   return useContext(Ctx);
 }
-
-/**
- * 兼容旧调用点（ProfileButton 等只认 {id, name} 的组件）。
- * setChoice 保留当前 providerId，避免成对写入时把 provider 抹掉——
- * 后端要求 (provider_id, model) 成对有效，只传模型名会校验失败。
- */
-export function useModelChoice() {
-  const { chat, setChat } = useModelPrefs();
-  return {
-    choice: { id: chat.model, name: chat.name },
-    setChoice: (c: { id: string | null; name: string | null }) =>
-      setChat({
-        providerId: chat.providerId,
-        model: c.id,
-        name: c.name ?? c.id,
-      }),
-    clearChoice: () => setChat(EMPTY_SLOT),
-  };
-}
