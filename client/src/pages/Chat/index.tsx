@@ -86,6 +86,8 @@ import {
   normalizeContentUrls,
   extractTextFromMessage,
   setTextareaValue,
+  loadSceneNames,
+  parseSceneId,
   type CopyableResponse,
   type RuntimeLoadingBridgeApi,
 } from "./utils";
@@ -642,6 +644,11 @@ export default function ChatPage() {
   // 使用状态管理window参数，确保在参数注入后能正确读取
   const [sceneName, setSceneName] = useState<string>('');
   const [sceneWelcomeMessage, setSceneWelcomeMessage] = useState<string>('');
+  // 场景 id→名称映射（/scenes 一次加载并缓存），用于非嵌入模式解析当前会话所属场景
+  const [sceneNames, setSceneNames] = useState<Record<string, string>>({});
+  // 会话列表变更计数：ChatSessionHeader 在库的 SessionsContext.Provider 之外，
+  // 读不到 useChatAnywhereSessionsState()，只能靠 sessionApi（数据源头）驱动重渲染
+  const [sessionTick, setSessionTick] = useState(0);
   // sceneShowToolbar 预留给 ChatWrapper 控制，暂未使用
   // const [sceneShowToolbar, setSceneShowToolbar] = useState<boolean>(true);
   
@@ -653,6 +660,11 @@ export default function ChatPage() {
       setSceneWelcomeMessage(g.welcomeMessage || '');
     }
   }, [isEmbeddedMode]);
+
+  // 加载场景 id→名称映射（模块级缓存，仅首次请求 /scenes）
+  useEffect(() => {
+    loadSceneNames().then(setSceneNames);
+  }, []);
   
   // 嵌入式模式的回调函数
   const embeddedOnClose = useMemo(() => {
@@ -1097,6 +1109,30 @@ export default function ChatPage() {
   // get updated session names after backend auto-rename.
   const { setSessions } = useChatAnywhereSessionsState();
 
+  /**
+   * 当前会话（标题与场景标识的数据源）。
+   * 必须取自 sessionApi：ChatSessionHeader 位于库的 SessionsContext.Provider
+   * 之外，useChatAnywhereSessionsState() 在这里只能拿到默认空值。
+   * sessionTick 在会话列表/会话名更新时自增，触发重新取值。
+   */
+  const currentSessionData = useMemo(
+    () => sessionApi.currentSession,
+    [sessionTick, chatId],
+  );
+  const chatName = currentSessionData?.name?.trim() ?? "";
+
+  /**
+   * 当前会话所属场景名：
+   * - 嵌入模式：沿用 chatGlobals 注入的场景名
+   * - 非嵌入模式：从会话 sessionId（`scene:<scene_id>:<agent>`）解析，
+   *   这样「切换场景」进入的会话也能显示场景标识
+   */
+  const activeSceneName = useMemo(() => {
+    if (isEmbeddedMode) return sceneName;
+    const sid = parseSceneId(currentSessionData?.sessionId);
+    return sid ? (sceneNames[sid] ?? "") : "";
+  }, [isEmbeddedMode, sceneName, currentSessionData, sceneNames]);
+
   // Tell sessionApi which session to put first in getSessionList, so the library's
   // useMount auto-selects the correct session without an extra getSession round-trip.
   // CRITICAL: This must be set BEFORE AgentScopeRuntimeWebUI renders
@@ -1209,6 +1245,8 @@ export default function ChatPage() {
     // so ChatSessionHeader re-renders with updated session names (auto-rename).
     sessionApi.onSessionListUpdated = (sessions) => {
       setSessions(sessions);
+      // 驱动 ChatSessionHeader 重渲染（标题/场景标识取自 sessionApi）
+      setSessionTick((t) => t + 1);
     };
 
     // When a new session's realId (backend UUID) is resolved during createSession,
@@ -1997,7 +2035,8 @@ export default function ChatPage() {
           onShowDisplaySettings={() => setShowDisplaySettings(true)}
           isEmbeddedMode={isEmbeddedMode}
           onClose={embeddedOnClose}
-          sceneName={sceneName}
+          sceneName={activeSceneName}
+          chatName={chatName}
           onHistoryClick={() => setHistoryDrawerOpen((v) => !v)}
           onNewChat={handleNewChat}
           onSwitchScene={() => setScenePickerOpen(true)}

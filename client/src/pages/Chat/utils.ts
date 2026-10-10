@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+import api from "@/api";
 import { chatApi } from "../../api/modules/chat";
 export type CopyableContent = {
   type?: string;
@@ -204,4 +205,49 @@ export function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
   textarea.selectionStart = textarea.selectionEnd = value.length;
   const event = new Event("input", { bubbles: true });
   textarea.dispatchEvent(event);
+}
+
+// ---------------------------------------------------------------------------
+// Scene utilities
+// ---------------------------------------------------------------------------
+
+/** Parse the scene id from a scene session's sessionId (`scene:<scene_id>:<agent>`).
+ * Returns "" for non-scene sessions. Scene ids contain dashes, so splitting on
+ * `:` is safer than parsing the chat id (`scene-<scene_id>-<user>`). */
+export function parseSceneId(sessionId?: string): string {
+  if (!sessionId || !sessionId.startsWith("scene:")) return "";
+  return sessionId.split(":")[1] ?? "";
+}
+
+// ---------------------------------------------------------------------------
+// Scene name cache
+// ---------------------------------------------------------------------------
+
+let sceneNames: Record<string, string> = {};
+let sceneNamesPromise: Promise<Record<string, string>> | null = null;
+
+/** Load the scene id→name map once per page load (cached). Failures resolve to
+ * an empty map and reset the cache so the next mount can retry. */
+export function loadSceneNames(): Promise<Record<string, string>> {
+  if (sceneNamesPromise) return sceneNamesPromise;
+  sceneNamesPromise = api
+    .get<{ scenes?: { id: string; name: string }[] }>("/scenes")
+    .then((resp) => {
+      const list = Array.isArray(resp) ? resp : (resp?.scenes ?? []);
+      sceneNames = {};
+      for (const s of list) {
+        if (s?.id && s?.name) sceneNames[s.id] = s.name;
+      }
+      return sceneNames;
+    })
+    .catch(() => {
+      sceneNamesPromise = null; // allow retry on next mount
+      return {};
+    });
+  return sceneNamesPromise;
+}
+
+/** Synchronous lookup of a scene name from the cache ("" if not loaded/known). */
+export function getCachedSceneName(sceneId: string): string {
+  return sceneNames[sceneId] ?? "";
 }

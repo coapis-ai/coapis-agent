@@ -17,8 +17,10 @@ interface ChatSessionHeaderProps {
   isEmbeddedMode: boolean;
   /** 关闭回调（嵌入模式） */
   onClose?: () => void;
-  /** 场景名称（嵌入模式） */
+  /** 当前会话所属场景名（嵌入模式来自 chatGlobals，非嵌入模式由会话 sessionId 解析） */
   sceneName?: string;
+  /** 当前会话名（后端在回复后自动写入，如「你好」；空=尚无会话名） */
+  chatName?: string;
   /** 打开历史会话（左侧按钮） */
   onHistoryClick?: () => void;
   /** 新建聊天（左侧按钮） */
@@ -43,6 +45,7 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
   isEmbeddedMode,
   onClose,
   sceneName,
+  chatName,
   onHistoryClick,
   onNewChat,
   onSwitchScene,
@@ -50,6 +53,17 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
   onTogglePin,
 }) => {
   const { t } = useTranslation();
+
+  /**
+   * 标题取值：
+   * - 嵌入模式（浮窗）：场景名优先（沿用既有语义，浮窗标题即场景名）
+   * - 非嵌入模式：会话名优先，无会话名时回退「新聊天」
+   * chatName 由 Chat 页从 sessionApi.currentSession 取值传入（本组件在库的
+   * SessionsContext.Provider 之外，读不到 useChatAnywhereSessionsState()）。
+   */
+  const title = isEmbeddedMode
+    ? sceneName || chatName || t("chat.newChat")
+    : chatName || t("chat.newChat");
 
   return (
     <div className={styles.chatSessionHeader}>
@@ -81,12 +95,11 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
           onClick={onNewChat}
           className={styles.newChatBtn}
         />
-        <span className={styles.sessionTitle}>
-          {sceneName || t("chat.newChat")}
-        </span>
+        <span className={styles.sessionTitle}>{title}</span>
+        {/* 场景标识：非嵌入模式下，当前会话属于某场景时显示场景名 */}
         {sceneName && !isEmbeddedMode && (
           <Tag icon={<PushpinFilled />} color="gold" className={styles.pinned}>
-            {t("chat.pinned")}
+            {sceneName}
           </Tag>
         )}
       </div>
