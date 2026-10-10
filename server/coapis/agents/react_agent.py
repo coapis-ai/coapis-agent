@@ -63,6 +63,7 @@ from .utils.tool_result_cache import get_cache, is_idempotent
 from .utils import process_file_and_media_blocks_in_message
 from .runtime_dependency import RuntimeDependencyManager, _install_dependency_from_error
 from ..constant import (
+    AGENTS_DIR,
     MEDIA_UNSUPPORTED_PLACEHOLDER,
     WORKING_DIR,
 )
@@ -160,6 +161,50 @@ def _wrap_tool_for_fault_tolerance(func, tool_name: str):
             pass
         _sync_wrapper.original_func = getattr(func, 'original_func', func)
         return _sync_wrapper
+
+
+async def _run_scene_evolution(
+    agent: "CoApisAgent",
+    scene_id: str,
+    scene_name: str,
+    message: str,
+    response: str,
+    user_id: str,
+) -> None:
+    """Evolve a scene's shared knowledge base from one conversation.
+
+    Runs as a detached task after POST_EXECUTE so the user's reply is never
+    delayed. Shared entries land in the scene's global agent directory
+    (``agents/scene-{scene_id}/MEMORY.md``), which every member of that scene
+    reads from.
+    """
+    from ..constant import AGENTS_DIR
+    from ..evolution.dual_layer_evolution import DualLayerEvolutionEngine
+
+    try:
+        # The engine resolves agents_dir as data_dir / "agents"; passing
+        # AGENTS_DIR.parent makes it resolve to the authoritative AGENTS_DIR.
+        engine = DualLayerEvolutionEngine(
+            data_dir=AGENTS_DIR.parent,
+            model=agent.model,
+        )
+        shared, personal = await engine.evolve(
+            scene_id=scene_id,
+            user_id=user_id,
+            conversation=[
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": response},
+            ],
+            metadata={"scene_name": scene_name},
+        )
+        logger.info(
+            "Scene evolution %s: shared=%s personal=%s",
+            scene_id,
+            (shared[:60] if shared else None),
+            (personal[:60] if personal else None),
+        )
+    except Exception as exc:
+        logger.warning("Scene evolution failed for %s: %s", scene_id, exc)
 
 
 class CoApisAgent(ToolGuardMixin, ReActAgent):
@@ -433,6 +478,38 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 return HookState.CONTINUE
 
         manager.register(_AuditLogHook())
+
+        # Scene shared-memory evolution (POST_EXECUTE). A chat that runs inside
+        # a scene evolves that scene's shared knowledge base. Scene identity is
+        # passed explicitly by POST_EXECUTE. Non-scene chats are skipped, and
+        # the work is detached so the reply is never delayed.
+        agent = self
+
+        class _SceneEvolutionHook(BaseHook):
+            builtin = True
+            phase = HookPhase.POST_EXECUTE
+
+            async def run(self, ctx):
+                data = ctx.data or {}
+                scene_id = data.get("scene_id", "")
+                message = data.get("message", "")
+                response = data.get("response", "")
+                if not scene_id or not message or not response:
+                    return HookState.CONTINUE
+                # Personal memory is keyed by username (WORKSPACES_DIR /
+                # username); request_context carries user_id, which the runner
+                # resolves to the workspace owner.
+                asyncio.create_task(_run_scene_evolution(
+                    agent,
+                    scene_id,
+                    data.get("scene_name", ""),
+                    message,
+                    response,
+                    data.get("username") or data.get("user_id") or "",
+                ))
+                return HookState.CONTINUE
+
+        manager.register(_SceneEvolutionHook())
 
     async def _run_hook(self, phase, data: dict | None = None) -> None:
         """Run runtime hooks for a given phase; ignore short-circuit/skip."""
@@ -1717,14 +1794,60 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 if amem:
                     agent_memory = amem
 
-            # Build core memory: user-level first, then agent-level
+            # --- Scene-level memory (Level 3: shared scene evolution) ---
+            # Scene agents are an independent category: definition lives in
+            # AGENTS_DIR/scene-{scene_id}/ (owner=system, user-independent).
+            # Its MEMORY.md accumulates experience shared across all users.
+            # Non-scene chats (scene_id empty) are completely unaffected.
+            scene_memory = ""
+            scene_id = (
+                self._request_context.get("scene_id", "")
+                if self._request_context
+                else ""
+            )
+            if scene_id:
+                scene_mem_file = AGENTS_DIR / f"scene-{scene_id}" / "MEMORY.md"
+                if scene_mem_file.exists():
+                    smem = scene_mem_file.read_text(encoding="utf-8").strip()
+                    # All scene MEMORY.md files are created as placeholders
+                    # (title + "## 进化记录" marker, no entries). Injecting that
+                    # header would add pure noise to every scene chat. Only the
+                    # content after the marker carries real shared experience.
+                    if "## 进化记录" in smem:
+                        smem = smem.split("## 进化记录", 1)[1].strip()
+                    if smem:
+                        scene_memory = smem
+
+            # Build core memory: user-level, then agent-level, then scene-level
             core_memory = ""
             if user_memory:
                 core_memory += f"## 用户记忆\n{user_memory}\n\n"
             if user_profile:
                 core_memory += f"## 用户画像\n{user_profile}\n\n"
             if agent_memory:
-                core_memory += f"## 智能体记忆\n{agent_memory}"
+                core_memory += f"## 智能体记忆\n{agent_memory}\n\n"
+
+            # Scene layer is the FIRST to be dropped when the core quota is
+            # exhausted: user-level memory must survive.
+            if scene_memory:
+                _core_limit = injector.quota.get_injection_limit("core")
+                _base_tokens = injector._count_tokens(core_memory)
+                _scene_block = f"## 场景共享经验\n{scene_memory}"
+                _scene_tokens = injector._count_tokens(_scene_block)
+                if _base_tokens + _scene_tokens <= _core_limit:
+                    core_memory += _scene_block
+                    logger.info(
+                        "[MemoryInjector] scene layer injected: scene_id=%s, "
+                        "%d tokens (core %d/%d)",
+                        scene_id, _scene_tokens,
+                        _base_tokens + _scene_tokens, _core_limit,
+                    )
+                else:
+                    logger.info(
+                        "[MemoryInjector] scene layer skipped (core quota): "
+                        "scene_id=%s, scene=%d tokens, core=%d/%d used",
+                        scene_id, _scene_tokens, _base_tokens, _core_limit,
+                    )
 
             core_memory = core_memory.strip()
 
@@ -3469,6 +3592,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 "user_id": self._request_context.get("user_id"),
                 "message": query,
                 "response": response.get_text_content() if response else None,
+                # Scene evolution needs the scene identity; the hook registry
+                # only carries agent_id/user_id by default.
+                "scene_id": self._request_context.get("scene_id", ""),
+                "scene_name": self._request_context.get("scene_name", ""),
+                "username": self._request_context.get("username", ""),
             })
         except Exception:
             pass

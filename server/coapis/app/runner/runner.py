@@ -1149,6 +1149,33 @@ class AgentRunner(Runner):
                 except Exception as e:
                     logger.warning(f"[Scene] Failed to load scene config from file: {e}")
             
+            # ── B: Scene shared memory (cross-user knowledge base) ──
+            # DualLayerEvolution writes scene-level knowledge into
+            # agents/scene-{scene_id}/MEMORY.md. That file is the scene's
+            # shared brain: every member of the scene must see it, so it is
+            # appended to the scene prompt. Capacity is already bounded by the
+            # engine's trim, so this stays within the memory ceiling.
+            if scene_id:
+                try:
+                    scene_memory_path = (
+                        Path(WORKING_DIR) / "agents" / f"scene-{scene_id}" / "MEMORY.md"
+                    )
+                    if scene_memory_path.exists():
+                        shared_memory = scene_memory_path.read_text(encoding="utf-8").strip()
+                        if shared_memory:
+                            scene_prompt = (
+                                f"{scene_prompt}\n\n{shared_memory}"
+                                if scene_prompt else shared_memory
+                            )
+                            logger.info(
+                                f"[Scene] Injected shared memory for scene "
+                                f"{scene_id}: {len(shared_memory)} chars"
+                            )
+                except Exception as e:
+                    logger.warning(
+                        f"[Scene] Shared memory read failed for {scene_id}: {e}"
+                    )
+
             # ⭐ 将场景身份注入到 agent_config
             if scene_id and scene_prompt:
                 # 1. 场景系统提示词作为"最重要的要求"前置
