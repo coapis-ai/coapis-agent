@@ -58,7 +58,6 @@ import {
   ResourcePlusMenu,
   MySpacePickerModal,
   KnowledgePickerModal,
-  ModelPickerModal,
   ScenePickerModal,
   MultiSelectPickerModal,
   type PickItem,
@@ -679,7 +678,7 @@ export default function ChatPage() {
   const { message } = useAppMessage();
 
   // ─── M4 资源整合：+ 菜单与各选择面板 ─────────────────────────────
-  type PickerKind = "myspace" | "knowledge" | "mcp" | "skill" | "model";
+  type PickerKind = "myspace" | "knowledge" | "mcp" | "skill";
   const [pickerOpen, setPickerOpen] = useState<PickerKind | null>(null);
   const [scenePickerOpen, setScenePickerOpen] = useState(false);
   // 顶部「历史」按钮：左侧可隐藏抽屉（会话列表，复用 ChatSessionDropdown）
@@ -2192,10 +2191,6 @@ export default function ChatPage() {
         });
         setPickerOpen(null);
       }}
-    />
-    <ModelPickerModal
-      open={pickerOpen === "model"}
-      onClose={() => setPickerOpen(null)}
     />
     <ScenePickerModal
       open={scenePickerOpen}

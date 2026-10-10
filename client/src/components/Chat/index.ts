@@ -19,7 +19,6 @@ export {
   MySpacePickerModal,
   KnowledgePickerModal,
   HistorySessionsModal,
-  ModelPickerModal,
   ScenePickerModal,
   MultiSelectPickerModal,
 } from './resource';
