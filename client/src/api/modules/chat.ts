@@ -20,10 +20,18 @@ const FILES_PREVIEW = "/files/preview";
 
 export const chatApi = {
   /** Upload a file for chat attachment. Returns URL path for content. */
-  uploadFile: async (file: File): Promise<ChatUploadResponse> => {
+  uploadFile: async (
+    file: File,
+    chatId?: string,
+    sessionId?: string,
+  ): Promise<ChatUploadResponse> => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("path", "media");
+    // 聊天 UUID：后端写入文件台账的 chat_id，"本会话文件"过滤依赖它
+    if (chatId) formData.append("chat_id", chatId);
+    // 本地会话 id：新会话建号前上传时 chat_id 为空，靠它事后补写
+    if (sessionId) formData.append("session_id", sessionId);
     const response = await fetch(getApiUrl("/myfiles/upload"), {
       method: "POST",
       headers: buildAuthHeaders(),
@@ -33,6 +41,30 @@ export const chatApi = {
       const text = await response.text().catch(() => "");
       throw new Error(
         `Upload failed: ${response.status} ${response.statusText}${
+          text ? ` - ${response.statusText}` : ""
+        }`,
+      );
+    }
+    return response.json();
+  },
+
+  /** 把建会话前上传的台账行补写 chat_id（只改 chat_id 为空的行）。 */
+  attachChatFiles: async (
+    sessionId: string,
+    chatId: string,
+  ): Promise<{ success: boolean; updated: number }> => {
+    const response = await fetch(
+      getApiUrl("/myfiles/records/attach-chat"),
+      {
+        method: "POST",
+        headers: buildAuthHeaders(),
+        body: JSON.stringify({ session_id: sessionId, chat_id: chatId }),
+      },
+    );
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `attach-chat failed: ${response.status} ${response.statusText}${
           text ? ` - ${text}` : ""
         }`,
       );

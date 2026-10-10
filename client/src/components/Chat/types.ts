@@ -2,6 +2,13 @@
 
 import type { ReactNode } from 'react';
 
+/** 通用可选项（会话引用等选择器共用） */
+export interface PickItem {
+  id: string;
+  name: string;
+  desc?: string;
+}
+
 /**
  * 文件信息
  */

@@ -20,9 +20,9 @@ export {
   KnowledgePickerModal,
   HistorySessionsModal,
   ScenePickerModal,
-  MultiSelectPickerModal,
 } from './resource';
-export type { PickItem } from './resource';
+export type { PickItem } from './types';
+export type { SessionFile } from './resource';
 
 export type {
   FileInfo,

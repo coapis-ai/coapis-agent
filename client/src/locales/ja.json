@@ -1,14 +1,16 @@
 {
   "resourceMenu": {
-    "title": "リソースを追加",
-    "upload": "ファイルをアップロード",
     "mySpace": "マイスペースから選択",
+    "sessionFiles": "このチャットのファイル",
+    "upload": "ファイルをアップロード",
     "knowledge": "ナレッジを関連付け",
-    "scene": "シーンを切り替え",
-    "more": "その他のオプション",
-    "mcp": "MCP サービス",
-    "skill": "スキルを指定",
-    "model": "チャットモデル"
+    "back": "戻る",
+    "uploadNew": "＋ ファイルをアップロード",
+    "mySpaceAll": "すべてのファイル",
+    "noSessionFiles": "このチャットにファイルがありません",
+    "history": "チャット履歴",
+    "session": "セッション",
+    "scene": "シーンを切り替え"
   },
   "common": {
     "save": "保存",
@@ -2016,18 +2018,15 @@
     }
   },
   "resourcePicker": {
-    "noScenes": "利用可能なシーンはありません",
     "tabTree": "ファイルツリー",
     "tabLedger": "ファイル台帳",
     "filterAll": "すべて",
     "filterSession": "このセッションで生成",
     "filterUpload": "自分がアップロード",
+    "recent": "最近使用",
     "selectedCount": "{{count}} 件選択済み",
     "noRecords": "記録がありません",
-    "autoUnavailable": "自動ルーティング（近日公開）",
-    "clearModel": "モデルをクリア",
-    "noModels": "選択可能なモデルはありません",
-    "current": "使用中"
+    "noModels": "選択可能なモデルはありません"
   },
   "tasks": {
     "title": "タスク",

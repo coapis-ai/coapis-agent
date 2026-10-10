@@ -17,7 +17,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import sessionApi from "./sessionApi";
 import defaultConfig, { getDefaultConfig } from "./OptionsPanel/defaultConfig";
 import { chatApi } from "../../api/modules/chat";
-import { skillApi } from "../../api/modules/skill";
 import api from "@/api";
 import { getApiUrl } from "../../api/config";
 import { buildAuthHeaders } from "../../api/authHeaders";
@@ -58,8 +57,8 @@ import {
   MySpacePickerModal,
   KnowledgePickerModal,
   ScenePickerModal,
-  MultiSelectPickerModal,
   type PickItem,
+  type SessionFile,
 } from "../../components/Chat";
 import { useChatWindow } from "../../contexts/ChatWindowContext";
 import type { SceneConfig } from "../Workbench/types";
@@ -677,8 +676,17 @@ export default function ChatPage() {
   const { message } = useAppMessage();
 
   // ─── M4 资源整合：+ 菜单与各选择面板 ─────────────────────────────
-  type PickerKind = "myspace" | "knowledge" | "mcp" | "skill";
+  // MCP / 技能入口已按 D6 删除（菜单、弹窗、i18n 键一并移除）。
+  type PickerKind = "myspace" | "knowledge";
   const [pickerOpen, setPickerOpen] = useState<PickerKind | null>(null);
+  // 我的空间弹窗的初始视图/过滤（由「+」菜单二级项指定：最近使用/本会话/全部文件）
+  const [mySpaceView, setMySpaceView] = useState<"tree" | "ledger">("tree");
+  const [mySpaceFilter, setMySpaceFilter] = useState<"all" | "session" | "upload">(
+    "all",
+  );
+  // 本会话文件：按 chat_id 过滤的台账行（D1）。旧数据 chat_id=NULL，
+  // 所以「本会话」只覆盖新产生的文件（D2，接受的现状）。
+  const [sessionFiles, setSessionFiles] = useState<SessionFile[]>([]);
   const [scenePickerOpen, setScenePickerOpen] = useState(false);
   // 顶部「历史」按钮：左侧可隐藏抽屉（会话列表，复用 ChatSessionDropdown）
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
@@ -744,49 +752,40 @@ export default function ChatPage() {
       console.error("[Chat] 新建聊天失败:", err);
     }
   }, []);
-  const [refMcps, setRefMcps] = useState<PickItem[]>([]);
-  const [refSkills, setRefSkills] = useState<PickItem[]>([]);
   const [refSessions, setRefSessions] = useState<PickItem[]>([]);
-  const [mcpOptions, setMcpOptions] = useState<PickItem[]>([]);
-  const [skillOptions, setSkillOptions] = useState<PickItem[]>([]);
 
-  const openPicker = useCallback(
-    (kind: PickerKind) => {
-      setPickerOpen(kind);
-      if (kind === "mcp" && mcpOptions.length === 0) {
-        api
-          .get("/mcp")
-          .then((data: any) => {
-            const list = Array.isArray(data) ? data : [];
-            setMcpOptions(
-              list
-                .filter((m: any) => m.enabled !== false)
-                .map((m: any) => ({
-                  id: m.key ?? m.id,
-                  name: m.name,
-                  desc: m.description || "",
-                })),
-            );
-          })
-          .catch(() => setMcpOptions([]));
-      }
-      if (kind === "skill" && skillOptions.length === 0) {
-        skillApi
-          .listSkills()
-          .then((list: any[]) => {
-            setSkillOptions(
-              (Array.isArray(list) ? list : []).map((s: any) => ({
-                id: s.name,
-                name: s.name,
-                desc: s.description || "",
-              })),
-            );
-          })
-          .catch(() => setSkillOptions([]));
-      }
-    },
-    [mcpOptions.length, skillOptions.length],
-  );
+  const openPicker = useCallback((kind: PickerKind) => {
+    setPickerOpen(kind);
+  }, []);
+
+  // 本会话文件：按 chat_id 拉台账（D1）。菜单打开时刷新，保证新上传/新生成的文件即时出现。
+  const refreshSessionFiles = useCallback(async () => {
+    if (!chatId) {
+      setSessionFiles([]);
+      return;
+    }
+    try {
+      const resp = (await api.get(
+        `/myfiles/records?limit=100&chat_id=${encodeURIComponent(chatId)}`,
+      )) as { items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
+      const rows = Array.isArray(resp) ? resp : (resp?.items ?? []);
+      setSessionFiles(
+        rows.map((r) => {
+          const p = String(r.file_path ?? "");
+          return {
+            path: p,
+            name: p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p,
+            size: Number(r.size_bytes ?? 0),
+            source: String(r.source ?? "other"),
+            mime_type: r.mime_type ? String(r.mime_type) : undefined,
+          };
+        }),
+      );
+    } catch {
+      setSessionFiles([]);
+    }
+  }, [chatId]);
+
   const { approvals } = useApprovalContext();
   const [approvalRequests, setApprovalRequests] = useState<
     Map<string, ApprovalMessageData>
@@ -810,6 +809,34 @@ export default function ChatPage() {
     setSelectedFiles,
     setSelectedKnowledge,
   } = useToolbarState();
+
+  // D4：勾选即生效 —— 点一下加入会话引用，再点一下移出。
+  const toggleSessionFile = useCallback(
+    (f: SessionFile) => {
+      setSelectedFiles((prev) => {
+        if (prev.some((x) => x.path === f.path)) {
+          return prev.filter((x) => x.path !== f.path);
+        }
+        return [
+          ...prev,
+          {
+            id: f.path,
+            name: f.name,
+            path: f.path,
+            type: "file",
+            size: f.size,
+            mimeType: f.mime_type,
+          },
+        ];
+      });
+    },
+    [setSelectedFiles],
+  );
+
+  // 切换聊天时预取一次，保证菜单打开即有数据（不必等点击）
+  useEffect(() => {
+    refreshSessionFiles();
+  }, [refreshSessionFiles]);
 
   // Sync authenticated username to window for AgentScope Runtime session API
   // IMPORTANT: Set immediately on mount to ensure window.currentUserId is available
@@ -1190,6 +1217,15 @@ export default function ChatPage() {
     // backend might not associate it with the correct chat.
     sessionApi.onSessionRealIdResolved = (_localId: string, realId: string) => {
       chatIdRef.current = realId;
+      // 新会话建号前上传的文件 chat_id 为空，此刻补写，让「本会话文件」能看到
+      if (_localId && realId) {
+        chatApi
+          .attachChatFiles(_localId, realId)
+          .then((r) => {
+            if (r.updated > 0) refreshSessionFiles();
+          })
+          .catch((e) => console.warn("[ledger] attach-chat failed:", e));
+      }
     };
 
     return () => {
@@ -1507,12 +1543,19 @@ export default function ChatPage() {
           return;
         }
 
-        const res = await chatApi.uploadFile(file);
+        // 新会话建号前 chatId 为空，带上本地会话 id 让台账行可事后补写
+        const res = await chatApi.uploadFile(
+          file,
+          chatId,
+          window.currentSessionId,
+        );
         onProgress?.({ percent: 100 });
         // 直接传文件相对路径给 Agent（如 /media/{filename}），
         // 由后端 _resolve_media_url 解析为实际工作区路径。
         // 不再包装为 preview URL，避免 Agent 读错文件。
         onSuccess({ url: res.url });
+        // 上传已带 chat_id，刷新台账让「本会话文件」立刻能看到它
+        refreshSessionFiles();
       } catch (e) {
         // 处理文件已存在的情况（409 Conflict）
         if (e instanceof Error && e.message.includes("409")) {
@@ -1523,7 +1566,7 @@ export default function ChatPage() {
         }
       }
     },
-    [multimodalCaps, t],
+    [multimodalCaps, t, chatId, refreshSessionFiles],
   );
 
   const options = useMemo(() => {
@@ -1632,10 +1675,25 @@ export default function ChatPage() {
                     // 故意不 stopPropagation：让点击冒泡到外层 antd Upload，
                     // 打开原生文件选择（保留 Sender 原生上传流程）
                   }}
-                  onMySpaceClick={() => openPicker("myspace")}
+                  onMySpaceClick={() => {
+                    setMySpaceView("tree");
+                    setMySpaceFilter("all");
+                    openPicker("myspace");
+                  }}
+                  onRecentClick={() => {
+                    setMySpaceView("ledger");
+                    setMySpaceFilter("all");
+                    openPicker("myspace");
+                  }}
+                  onSessionModalClick={() => {
+                    setMySpaceView("ledger");
+                    setMySpaceFilter("session");
+                    openPicker("myspace");
+                  }}
                   onKnowledgeClick={() => openPicker("knowledge")}
-                  onMcpClick={() => openPicker("mcp")}
-                  onSkillClick={() => openPicker("skill")}
+                  sessionFiles={sessionFiles}
+                  selectedPaths={new Set(selectedFiles.map((f) => f.path))}
+                  onToggleSessionFile={toggleSessionFile}
                 />
               </Tooltip>
             );
@@ -1652,8 +1710,6 @@ export default function ChatPage() {
           <ChatInputFooter
             files={selectedFiles}
             knowledge={selectedKnowledge}
-            mcps={refMcps}
-            skills={refSkills}
             sessions={refSessions}
             onRemoveFile={(id) => {
               setSelectedFiles(prev => prev.filter(f => f.id !== id));
@@ -1661,12 +1717,6 @@ export default function ChatPage() {
             onRemoveKnowledge={(id) => {
               setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
             }}
-            onRemoveMcp={(id) =>
-              setRefMcps(prev => prev.filter(x => x.id !== id))
-            }
-            onRemoveSkill={(id) =>
-              setRefSkills(prev => prev.filter(x => x.id !== id))
-            }
             onRemoveSession={(id) =>
               setRefSessions(prev => prev.filter(x => x.id !== id))
             }
@@ -1927,9 +1977,7 @@ export default function ChatPage() {
     selectedFiles,
     selectedKnowledge,
     // M5 联调修复：afterUI 芯片行引用的状态必须进依赖，
-    // 否则选中 MCP/技能/会话后芯片不实时刷新（要刷新页面才对）
-    refMcps,
-    refSkills,
+    // 否则选中会话后芯片不实时刷新（要刷新页面才对）
     refSessions,
   ]);
 
@@ -2166,7 +2214,9 @@ export default function ChatPage() {
         });
         setPickerOpen(null);
       }}
-      currentSessionId={chatId}
+      chatId={chatId}
+      initialView={mySpaceView}
+      initialFilter={mySpaceFilter}
     />
     <KnowledgePickerModal
       open={pickerOpen === "knowledge"}
@@ -2187,40 +2237,6 @@ export default function ChatPage() {
       embedded={isEmbeddedMode}
     />
 
-    <MultiSelectPickerModal
-      open={pickerOpen === "mcp"}
-      title={t("resourceMenu.mcp")}
-      items={mcpOptions}
-      loading={false}
-      selectedIds={refMcps.map((i) => i.id)}
-      onOk={(ids: string[]) => {
-        setRefMcps(
-          ids.map((id: string) => {
-            const opt = mcpOptions.find((o) => o.id === id);
-            return { id, name: opt?.name ?? id, desc: opt?.desc };
-          }),
-        );
-        setPickerOpen(null);
-      }}
-      onClose={() => setPickerOpen(null)}
-    />
-    <MultiSelectPickerModal
-      open={pickerOpen === "skill"}
-      title={t("resourceMenu.skill")}
-      items={skillOptions}
-      loading={false}
-      selectedIds={refSkills.map((i) => i.id)}
-      onOk={(ids: string[]) => {
-        setRefSkills(
-          ids.map((id: string) => {
-            const opt = skillOptions.find((o) => o.id === id);
-            return { id, name: opt?.name ?? id, desc: opt?.desc };
-          }),
-        );
-        setPickerOpen(null);
-      }}
-      onClose={() => setPickerOpen(null)}
-    />
     </ChatDisplayConfigContext.Provider>
   );
 }

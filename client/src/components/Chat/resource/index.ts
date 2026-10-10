@@ -3,5 +3,4 @@ export { default as MySpacePickerModal } from "./MySpacePickerModal";
 export { default as KnowledgePickerModal } from "./KnowledgePickerModal";
 export { default as HistorySessionsModal } from "./HistorySessionsModal";
 export { default as ScenePickerModal } from "./ScenePickerModal";
-export { default as MultiSelectPickerModal } from "./MultiSelectPickerModal";
-export type { PickItem } from "./MultiSelectPickerModal";
+export type { SessionFile } from "./ResourcePlusMenu";

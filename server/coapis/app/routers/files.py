@@ -249,6 +249,8 @@ async def upload_file(
     category: str = Form("files"),
     overwrite: str = Form("false"),
     relative_path: str = Form(""),  # 文件夹上传时的完整相对路径
+    chat_id: str = Form(""),  # 聊天 UUID，用于"本会话文件"归属（D1）
+    session_id: str = Form(""),  # 前端本地会话 id，新会话建号前上传时唯一可用标识
     request: Request = None,
 ):
     """上传文件"""
@@ -323,7 +325,8 @@ async def upload_file(
         record_file_event(
             username,
             str(led_abs),
-            session_id=get_current_session_id(),
+            session_id=session_id or get_current_session_id(),
+            chat_id=chat_id or None,
             agent_id=get_current_agent_id(),
             source="upload",
             title=file.filename,
@@ -345,6 +348,7 @@ async def upload_file(
 @require_permission("chat:read")
 async def list_file_records(
     session_id: Optional[str] = Query(None, description="按会话过滤"),
+    chat_id: Optional[str] = Query(None, description="按聊天 UUID 过滤（本会话文件）"),
     source: Optional[str] = Query(None, description="按来源过滤: upload/write_file/edit_file/append_file/reconcile"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -357,6 +361,7 @@ async def list_file_records(
     return get_file_ledger().list_records(
         username,
         session_id=session_id,
+        chat_id=chat_id,
         source=source,
         limit=limit,
         offset=offset,
@@ -418,6 +423,36 @@ async def list_deliverables(
     # total reflects the FULL filtered set, not the truncated page
     total = led.count_deliverables(username, status=status, session_id=session_id)
     return {"items": items, "total": total}
+
+
+@router.post("/records/attach-chat")
+@require_permission("chat:read")
+async def attach_chat_records(
+    body: dict,
+    request: Request = None,
+):
+    """把建会话之前上传的台账行补写 chat_id。
+
+    新会话在首条消息发出前没有 chat UUID，此时上传的文件 ``chat_id`` 为
+    null。会话创建后前端调用本端点，把该会话里尚未归属会话的行补上 chat_id。
+    只更新 ``chat_id IS NULL`` 的行，已归属其他会话的历史行不会被改写。
+    """
+    from ...foundation.file_ledger import get_file_ledger
+
+    username = get_current_user(request)["username"]
+    session_id = str(body.get("session_id") or "")
+    chat_id = str(body.get("chat_id") or "")
+    if not session_id or not chat_id:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id 与 chat_id 均不能为空",
+        )
+    count = get_file_ledger().attach_chat(
+        username,
+        session_id=session_id,
+        chat_id=chat_id,
+    )
+    return {"success": True, "updated": count}
 
 
 @router.post("/records/{file_id}/archive")

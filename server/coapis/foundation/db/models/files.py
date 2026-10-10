@@ -30,6 +30,10 @@ class FileRecord(BaseRow):
     )
     user_id: Mapped[str] = mapped_column(Text, nullable=False)
     session_id: Mapped[Optional[str]] = mapped_column(Text)
+    # Chat UUID (frontend chatId). session_id is the channel-resolved form
+    # ("console:alice"), which cannot identify a single chat; per-chat file
+    # filtering needs this. Migration 0013.
+    chat_id: Mapped[Optional[str]] = mapped_column(Text)
     agent_id: Mapped[Optional[str]] = mapped_column(Text)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     size_bytes: Mapped[Optional[int]] = mapped_column(
@@ -48,6 +52,7 @@ class FileRecord(BaseRow):
     __table_args__ = (
         Index("idx_file_records_user", "user_id"),
         Index("idx_file_records_session", "session_id"),
+        Index("idx_file_records_chat", "chat_id"),
         Index("idx_file_records_created", "created_at"),
         Index("idx_file_records_status", "status"),
     )

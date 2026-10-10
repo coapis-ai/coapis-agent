@@ -11,8 +11,12 @@ interface MySpacePickerModalProps {
   onClose: () => void;
   /** 确认选择（与现有 selectedFiles 合并去重） */
   onConfirm: (files: FileInfo[]) => void;
-  /** 当前会话 ID（用于"本会话生成"过滤） */
-  currentSessionId?: string;
+  /** 聊天 UUID（chat_id），"本会话"过滤依赖它（D1） */
+  chatId?: string;
+  /** 打开时的初始视图（"全部文件"走文件树，其余走台账） */
+  initialView?: "tree" | "ledger";
+  /** 打开时的初始过滤 */
+  initialFilter?: FilterKey;
 }
 
 interface LedgerRecord {
@@ -21,7 +25,8 @@ interface LedgerRecord {
   size_bytes: number;
   source: string;
   session_id: string | null;
-  created_at: string | null;
+  chat_id?: string | null;
+  created_at: string | number | null;
   mime_type?: string;
 }
 
@@ -40,15 +45,28 @@ function basename(p: string): string {
   return idx >= 0 ? p.slice(idx + 1) : p;
 }
 
+function timeLabel(v: string | number | null): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "number") {
+    const d = new Date(v * 1000);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  return String(v).slice(5, 16).replace("T", " ");
+}
+
 /**
- * M4/T4.3：从我的空间选择面板。
+ * M4/T4.3：我的空间选择面板。
  * 两个视图：文件树浏览（复用 FileTreeSelector）+ 台账列表（GET /api/myfiles/records，
- * 支持 全部 / 本会话生成 / 我上传的 三种过滤）。
+ * 支持 全部 / 本会话 / 我上传的 三种过滤）。
+ *
+ * "本会话"用 chat_id 过滤（D1）。旧数据的 chat_id 为 NULL，所以本会话只覆盖
+ * 新产生的文件（D2）—— 这是接受的现状，不做回填。
  */
 export default function MySpacePickerModal(props: MySpacePickerModalProps) {
   const { t } = useTranslation();
-  const [view, setView] = useState<"tree" | "ledger">("tree");
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const [view, setView] = useState<"tree" | "ledger">(props.initialView ?? "tree");
+  const [filter, setFilter] = useState<FilterKey>(props.initialFilter ?? "all");
   const [records, setRecords] = useState<LedgerRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedMap, setSelectedMap] = useState<Map<string, FileInfo>>(new Map());
@@ -59,9 +77,7 @@ export default function MySpacePickerModal(props: MySpacePickerModalProps) {
     try {
       const params: Record<string, string> = { limit: "100" };
       if (filter === "upload") params.source = "upload";
-      if (filter === "session" && props.currentSessionId) {
-        params.session_id = props.currentSessionId;
-      }
+      if (filter === "session" && props.chatId) params.chat_id = props.chatId;
       const qs = new URLSearchParams(params).toString();
       // 兼容两种响应形态：信封 {items:[...]} 或裸数组 [...]（网关/版本差异）
       const resp = (await api.get(`/myfiles/records?${qs}`)) as
@@ -72,17 +88,13 @@ export default function MySpacePickerModal(props: MySpacePickerModalProps) {
         : Array.isArray(resp?.items)
           ? resp!.items
           : [];
-      if (filter === "session") {
-        // "本会话生成" = 本会话且非用户上传
-        items = items.filter((r) => r.source !== "upload");
-      }
       setRecords(items);
     } catch {
       setRecords([]);
     } finally {
       setLoading(false);
     }
-  }, [props.open, filter, props.currentSessionId]);
+  }, [props.open, filter, props.chatId]);
 
   useEffect(() => {
     if (view === "ledger") refreshLedger();
@@ -127,8 +139,8 @@ export default function MySpacePickerModal(props: MySpacePickerModalProps) {
 
   const handleClose = () => {
     setSelectedMap(new Map());
-    setFilter("all");
-    setView("tree");
+    setFilter(props.initialFilter ?? "all");
+    setView(props.initialView ?? "tree");
     props.onClose();
   };
 
@@ -233,7 +245,7 @@ export default function MySpacePickerModal(props: MySpacePickerModalProps) {
                     </span>
                     <span className={styles.recordMeta}>
                       {SOURCE_LABEL[rec.source] ?? rec.source}
-                      {rec.created_at ? ` · ${String(rec.created_at).slice(5, 16).replace("T", " ")}` : ""}
+                      {timeLabel(rec.created_at) ? ` · ${timeLabel(rec.created_at)}` : ""}
                     </span>
                   </div>
                 ))}

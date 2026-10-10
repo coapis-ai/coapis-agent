@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from ..constant import WORKING_DIR, WORKSPACES_DIR
 from .db.engine import get_session
@@ -73,6 +73,7 @@ class FileLedgerService:
         abs_path: Optional[str],
         *,
         session_id: Optional[str] = None,
+        chat_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         source: str = "other",
         title: Optional[str] = None,
@@ -104,6 +105,7 @@ class FileLedgerService:
             rec = FileRecord(
                 user_id=uid,
                 session_id=session_id or None,
+                chat_id=chat_id or None,
                 agent_id=agent_id or None,
                 file_path=rel,
                 size_bytes=size,
@@ -125,6 +127,7 @@ class FileLedgerService:
         username: str,
         *,
         session_id: Optional[str] = None,
+        chat_id: Optional[str] = None,
         source: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
@@ -134,6 +137,8 @@ class FileLedgerService:
             q = select(FileRecord).where(FileRecord.user_id == username)
             if session_id:
                 q = q.where(FileRecord.session_id == session_id)
+            if chat_id:
+                q = q.where(FileRecord.chat_id == chat_id)
             if source:
                 q = q.where(FileRecord.source == source)
             with get_session() as s:
@@ -221,6 +226,44 @@ class FileLedgerService:
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("file ledger status update failed: %s", exc)
             return False
+
+    def attach_chat(
+        self,
+        username: str,
+        *,
+        session_id: str,
+        chat_id: str,
+        source: Optional[str] = None,
+    ) -> int:
+        """Back-fill ``chat_id`` onto rows recorded before the chat existed.
+
+        A brand-new chat has no chat UUID until the first message is sent,
+        so uploads made on the empty chat page land with ``chat_id = NULL``.
+        Once the chat is created this stamps those rows onto *chat_id*, so
+        "本会话文件" sees them.
+
+        Only touches rows that are **still unassigned** (``chat_id IS NULL``)
+        for this user + session — legacy rows already belonging to another
+        chat are never re-tagged. Returns rows updated; never raises.
+        """
+        try:
+            if not session_id or not chat_id:
+                return 0
+            with get_session() as s:
+                q = update(FileRecord).where(
+                    FileRecord.user_id == username,
+                    FileRecord.session_id == session_id,
+                    FileRecord.chat_id.is_(None),
+                )
+                if source:
+                    q = q.where(FileRecord.source == source)
+                res = s.execute(
+                    q.values(chat_id=chat_id, updated_at=time.time()),
+                )
+                return res.rowcount or 0
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("file ledger chat attach failed: %s", exc)
+            return 0
 
     def _distinct_latest(
         self,
@@ -459,6 +502,7 @@ def record_file_event(
     abs_path: Optional[str],
     *,
     session_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     source: str = "other",
     title: Optional[str] = None,
@@ -466,8 +510,8 @@ def record_file_event(
     """Fire-and-forget ledger hook (never raises)."""
     try:
         return get_file_ledger().record(
-            username, abs_path, session_id=session_id, agent_id=agent_id,
-            source=source, title=title,
+            username, abs_path, session_id=session_id, chat_id=chat_id,
+            agent_id=agent_id, source=source, title=title,
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("file ledger event failed (ignored): %s", exc)

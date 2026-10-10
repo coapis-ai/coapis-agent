@@ -249,7 +249,32 @@ async def _load_agent_model(
     """Load the model configured for a specific agent."""
     workspace = await get_agent_for_request(request, agent_id=agent_id)
     agent_config = load_agent_config(workspace.agent_id)
-    return agent_config.active_model
+    active = agent_config.active_model
+    if active and not active.provider_id and active.model:
+        # agent.json 只写了 model、没写 provider_id（历史数据/手工编辑）。
+        # 前端发消息前有闸门要求 provider_id 非空，空值会弹"未配置模型"
+        # 并拒发请求。这里按模型反查提供商，让槽位始终自洽。
+        resolved = await _resolve_provider_for_model(request, active.model)
+        if resolved:
+            active.provider_id = resolved
+    return active
+
+
+async def _resolve_provider_for_model(
+    request: Request,
+    model: str,
+) -> str:
+    """Find the provider id that serves *model* ("" when none matches)."""
+    try:
+        manager = get_provider_manager(request)
+        for info in await manager.list_provider_info():
+            for m in info.models:
+                if m.id == model:
+                    return info.id
+        return ""
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("provider resolution failed for model %s: %s", model, exc)
+        return ""
 
 
 @router.get(

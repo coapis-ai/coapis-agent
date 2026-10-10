@@ -1,14 +1,16 @@
 {
   "resourceMenu": {
-    "title": "添加资源",
-    "upload": "上传文件",
     "mySpace": "从我的空间选取",
+    "sessionFiles": "本会话文件",
+    "upload": "上传文件",
     "knowledge": "关联知识",
-    "scene": "切换场景",
-    "more": "更多选项",
-    "mcp": "MCP 服务",
-    "skill": "指定技能",
-    "model": "聊天模型"
+    "back": "返回",
+    "uploadNew": "＋ 上传新文件",
+    "mySpaceAll": "全部文件",
+    "noSessionFiles": "本会话还没有文件",
+    "history": "历史会话",
+    "session": "会话",
+    "scene": "切换场景"
   },
   "externalNav": {
     "bindingRequired": "您尚未绑定该外部系统账号，暂无法访问，请先完成账号绑定。"
@@ -2767,18 +2769,15 @@
     "noAccess": "无权限执行此操作"
   },
   "resourcePicker": {
-    "noScenes": "暂无可用场景",
     "tabTree": "文件树",
     "tabLedger": "文件台账",
     "filterAll": "全部",
     "filterSession": "本会话生成",
     "filterUpload": "我上传的",
+    "recent": "最近使用",
     "selectedCount": "已选 {{count}} 项",
     "noRecords": "暂无记录",
-    "autoUnavailable": "自动路由（暂未开放）",
-    "clearModel": "清除模型",
-    "noModels": "暂无可用模型",
-    "current": "使用中"
+    "noModels": "暂无可用模型"
   },
   "tasks": {
     "title": "任务",

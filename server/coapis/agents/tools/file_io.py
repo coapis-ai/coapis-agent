@@ -130,6 +130,7 @@ def _ledger_record(abs_path: str, source: str) -> None:
         from ...config.context import get_current_username
         from ...config.session_context import (
             get_current_agent_id,
+            get_current_chat_id,
             get_current_session_id,
         )
         from ...foundation.file_ledger import record_file_event
@@ -138,6 +139,7 @@ def _ledger_record(abs_path: str, source: str) -> None:
             get_current_username(),
             abs_path,
             session_id=get_current_session_id(),
+            chat_id=get_current_chat_id(),
             agent_id=get_current_agent_id(),
             source=source,
             title=Path(abs_path).stem or None,
