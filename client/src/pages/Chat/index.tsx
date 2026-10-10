@@ -1638,7 +1638,6 @@ export default function ChatPage() {
                   }}
                   onMySpaceClick={() => openPicker("myspace")}
                   onKnowledgeClick={() => openPicker("knowledge")}
-                  onModelClick={() => openPicker("model")}
                   onMcpClick={() => openPicker("mcp")}
                   onSkillClick={() => openPicker("skill")}
                 />
@@ -1687,6 +1686,16 @@ export default function ChatPage() {
           />
         ),
         // 右下角操作区：模型芯片（LLM/嵌入/重排）+ 模型能力标签
+        // 模型芯片：放在语音按钮左侧（prefix 插槽里语音按钮先渲染，用 order:-1 排到它前面）
+        prefix: (
+          <div
+            style={{ display: "inline-flex", alignItems: "center", order: -1 }}
+            data-testid="model-chip-affix"
+          >
+            <ModelChips />
+          </div>
+        ),
+        // 右下角操作区：模型能力标签
         actionAffix: (
           <div
             style={{
@@ -1696,7 +1705,6 @@ export default function ChatPage() {
               width: "100%",
             }}
           >
-            <ModelChips />
             <div
               style={{
                 flex: 1,

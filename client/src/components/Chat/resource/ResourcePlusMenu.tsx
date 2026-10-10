@@ -8,7 +8,6 @@ import {
   SparkApiLine,
 } from "@agentscope-ai/icons";
 import { FolderOpenOutlined, ThunderboltOutlined } from "@agentscope-ai/icons-override-antd";
-import { RobotOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { isEnterpriseEdition } from "@/lib/edition";
 import styles from "./resource.module.less";
@@ -20,8 +19,6 @@ export interface ResourcePlusMenuProps {
   onMySpaceClick: () => void;
   /** 附加知识（仅企业版显示） */
   onKnowledgeClick: () => void;
-  /** 选择聊天模型（打开 ModelPickerModal，写入用户全局偏好） */
-  onModelClick: () => void;
   /** MCP 服务（引用为芯片） */
   onMcpClick: () => void;
   /** 指定技能（引用为芯片） */
@@ -112,7 +109,6 @@ export default function ResourcePlusMenu(props: ResourcePlusMenuProps) {
       {menuItem(t("resourceMenu.mySpace"), <FolderOpenOutlined />, props.onMySpaceClick)}
       {showKnowledge &&
         menuItem(t("resourceMenu.knowledge"), <SparkBookLine />, props.onKnowledgeClick)}
-      {menuItem(t("resourceMenu.model"), <RobotOutlined />, props.onModelClick)}
       {SHOW_TECH_ITEMS && (
         <>
           <div style={{ height: 1, background: "var(--color-border-secondary, rgba(0,0,0,0.06))", margin: "6px 0" }} />

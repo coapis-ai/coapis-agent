@@ -8,6 +8,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useModelPrefs, type ModelSlot } from "../../lib/modelChoice";
 import { userModelPrefsApi } from "../../api/modules/user_model_prefs";
+import { providerApi } from "../../api/modules/provider";
 import styles from "./ModelChips.module.less";
 
 /** /models/available 返回的模型条目（带 model_type） */
@@ -56,10 +57,21 @@ export function ModelChips() {
   const { t } = useTranslation();
   const { chat, setChat } = useModelPrefs();
   const [models, setModels] = useState<AvailableModel[]>([]);
+  const [activeLlm, setActiveLlm] = useState<{ provider_id?: string; model?: string } | null>(null);
   const [openKind, setOpenKind] = useState<ChipKind | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    // 系统默认聊天模型（未手动选择时芯片显示它的名字）
+    providerApi
+      .getActiveModels({ scope: "global" })
+      .then((data: any) => {
+        if (cancelled) return;
+        setActiveLlm(data?.active_llm ?? null);
+      })
+      .catch(() => {
+        /* 拉取失败：芯片回退显示"系统默认"文字 */
+      });
     userModelPrefsApi
       .getAvailableModels()
       .then((data: any) => {
@@ -165,7 +177,15 @@ export function ModelChips() {
       }
     }
 
-    const displayName = slot.model ? (slot.name ?? slot.model) : null;
+    // 未手动选择时显示"系统默认聊天模型"的名字（从 active_llm 解析显示名）
+    const defaultModelName = activeLlm?.model
+      ? (models.find(
+          (m) => m.provider_id === activeLlm.provider_id && m.id === activeLlm.model,
+        )?.name ?? activeLlm.model)
+      : null;
+    const displayName = slot.model
+      ? (slot.name ?? slot.model)
+      : defaultModelName;
 
     return (
       <Dropdown
@@ -205,9 +225,6 @@ export function ModelChips() {
           }
         >
           <span className={styles.chipIcon}>{meta.icon}</span>
-          <span className={styles.chipLabel}>
-            {t(meta.labelKey, meta.labelDefault)}
-          </span>
           <span className={styles.chipValue}>
             {displayName ?? t("chat.modelChips.systemDefault", "系统默认")}
           </span>
