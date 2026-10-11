@@ -56,7 +56,6 @@ import {
   ResourcePlusMenu,
   CascadePickerModal,
   ScenePickerModal,
-  type PickItem,
   type SessionFile,
 } from "../../components/Chat";
 import type { CascadeNode } from "../../components/CascadeMenu/CascadeMenu";
@@ -762,7 +761,6 @@ export default function ChatPage() {
       console.error("[Chat] 新建聊天失败:", err);
     }
   }, []);
-  const [refSessions, setRefSessions] = useState<PickItem[]>([]);
 
   const openPicker = useCallback((mode: PickerMode) => {
     setPickerMode(mode);
@@ -1778,16 +1776,16 @@ export default function ChatPage() {
           <ChatInputFooter
             files={selectedFiles}
             knowledge={selectedKnowledge}
-            sessions={refSessions}
             onRemoveFile={(id) => {
               setSelectedFiles(prev => prev.filter(f => f.id !== id));
             }}
             onRemoveKnowledge={(id) => {
               setSelectedKnowledge(prev => prev.filter(k => k.id !== id));
             }}
-            onRemoveSession={(id) =>
-              setRefSessions(prev => prev.filter(x => x.id !== id))
-            }
+            onClearAll={() => {
+              setSelectedFiles([]);
+              setSelectedKnowledge([]);
+            }}
           />
         ),
         // 右下角操作区：模型芯片（LLM/嵌入/重排）+ 模型能力标签
@@ -2044,9 +2042,6 @@ export default function ChatPage() {
     sessionApi,
     selectedFiles,
     selectedKnowledge,
-    // M5 联调修复：afterUI 芯片行引用的状态必须进依赖，
-    // 否则选中会话后芯片不实时刷新（要刷新页面才对）
-    refSessions,
   ]);
 
   return (

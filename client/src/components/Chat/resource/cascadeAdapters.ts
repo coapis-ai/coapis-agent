@@ -70,6 +70,7 @@ async function loadMySpaceDir(dir: string): Promise<CascadeNode[]> {
           key: it.path,
           name: it.name,
           kind: "group",
+          usage: "working-path",
           meta: it.items_count ? String(it.items_count) : undefined,
           payload: { path: it.path, type: "folder" },
         }
@@ -77,6 +78,7 @@ async function loadMySpaceDir(dir: string): Promise<CascadeNode[]> {
           key: it.path,
           name: it.name,
           kind: "item",
+          usage: "reference",
           meta: sizeLabel(it.size ?? 0),
           payload: { path: it.path, type: "file", size: it.size },
         },
@@ -156,6 +158,7 @@ async function loadSession(chatId?: string): Promise<CascadeNode[]> {
       key: p,
       name: basename(p),
       kind: "item",
+      usage: "reference",
       meta: `${SOURCE_LABEL[String(r.source ?? "other")] ?? String(r.source ?? "")} · ${sizeLabel(Number(r.size_bytes ?? 0))}`,
       payload: { path: p, type: "file", size: Number(r.size_bytes ?? 0) },
     });
@@ -182,6 +185,7 @@ async function loadKnowledgeBases(): Promise<CascadeNode[]> {
     key: `kb:${String(b.id)}`,
     name: String(b.name ?? b.id),
     kind: "group",
+    usage: "retrieval",
     meta: b.chunk_count ? String(b.chunk_count) : undefined,
     payload: { id: String(b.id), name: String(b.name ?? b.id) },
   }));
@@ -235,6 +239,7 @@ async function loadSearch(kw: string): Promise<CascadeNode[]> {
       key: p,
       name: basename(p),
       kind: "item",
+      usage: "reference",
       meta: p.slice(0, p.lastIndexOf("/") >= 0 ? p.lastIndexOf("/") : p.length),
       payload: { path: p, type: "file", size: Number(r.size_bytes ?? 0) },
     });

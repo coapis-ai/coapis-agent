@@ -992,6 +992,11 @@ class AgentRunner(Runner):
 
                     set_current_username(user_id)
                     set_current_workspace_dir(WORKSPACES_DIR / user_id)
+                    # 每次请求先清空目录引用：本次没选目录时不能沿用上一轮
+                    # 的目录，否则相对路径会解析到上次选中的目录里。
+                    from ...config.context import set_current_folder_ref
+
+                    set_current_folder_ref(None)
                 except Exception:
                     logger.debug(
                         "Failed to set session context for user %s",
@@ -1610,6 +1615,35 @@ class AgentRunner(Runner):
                         "用 read_file 并传该文件的绝对路径。]"
                     )
 
+                    # A1：目录引用 = 设置对话工作目录。
+                    # shell / file_io / glob_search 的默认工作目录就是
+                    # get_current_workspace_dir()，把它设成目录的真实绝对路径后，
+                    # 相对路径直接在该目录内解析，智能体不再靠猜路径。
+                    # 多目录时取第一个为主工作目录，其余仍由提示词列出绝对路径。
+                    primary = files_root / str(dir_refs[0].get("path", "")).strip("/")
+                    if primary.is_dir():
+                        from ...config.session_context import (
+                            set_current_workspace_dir as _set_wd,
+                        )
+                        from ...config.context import (
+                            set_current_workspace_dir as _set_wd_legacy,
+                            set_current_folder_ref,
+                        )
+                        # 目录引用记进专用上下文：react_agent 每次 reply 会把
+                        # 工作目录重设回 agent 的 workspace，只有这个变量能
+                        # 让目录引用活到工具调用；file_io 的相对路径也靠它
+                        # 落在被引用的目录内。
+                        set_current_folder_ref(primary)
+                        _set_wd(primary)
+                        _set_wd_legacy(primary)
+                        logger.info(
+                            f"[A1] 工作目录已设为目录引用: {primary}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[A1] 目录引用路径不存在，未设置工作目录: {primary}"
+                        )
+
                 if file_refs:
                     file_list = ", ".join([f"{f.get('name', 'unknown')} (path: {f.get('path', 'unknown')})" for f in file_refs])
 
@@ -1682,6 +1716,44 @@ class AgentRunner(Runner):
                                 _enrich_citations = _cites[:20]
             except Exception as _ee:
                 logger.warning(f"enrich_chat_context failed (non-fatal): {_ee}")
+
+            # ── A7：社区版知识库引用注入 ─────────────────────────────
+            # 社区版没有知识库检索工具（knowledge_base_service 源码已随
+            # t1-kb-cleanup 移除，检索由企业版插件 enrich_chat_context 提供）。
+            # 此前前端勾选的知识库一路传进 metadata，却没有任何消费者——用户勾了，
+            # 智能体完全不知道，界面给了入口但选择被静默吞掉。
+            # 这里把选择如实送达智能体，并说明社区版无检索能力：智能体应当告知
+            # 用户需要企业版，而不是假装已经读取知识库。
+            try:
+                from ...enterprise_plugin import is_enterprise_installed as _is_ep
+                if not _is_ep():
+                    _kb_refs_ui = []
+                    if request and hasattr(request, "input") and request.input:
+                        _fm2 = request.input[0]
+                        if hasattr(_fm2, "metadata") and isinstance(_fm2.metadata, dict):
+                            _kb_refs_ui = _fm2.metadata.get("knowledge_bases") or []
+                    _kb_names = ", ".join(
+                        [
+                            str(k.get("name") or k.get("id"))
+                            for k in _kb_refs_ui
+                            if isinstance(k, dict)
+                        ]
+                    )
+                    if _kb_names and agent.memory:
+                        await agent.memory.add(
+                            Msg(
+                                name="system",
+                                content=(
+                                    f"[用户勾选了以下知识库：{_kb_names}。当前是社区版，"
+                                    "没有知识库检索工具，无法读取知识库内容。请如实告知用户"
+                                    "知识库检索需要企业版，不要假装已经读取知识库。]"
+                                ),
+                                role="system",
+                            )
+                        )
+                        logger.info(f"[A7] 社区版知识库引用已注入: {_kb_names}")
+            except Exception as _a7e:
+                logger.warning(f"[A7] 知识库引用注入失败(非致命): {_a7e}")
 
             # 把本次请求的知识库引用交给外层 stream_query 透出到响应事件
             _enrich_citations_ctx.set(_enrich_citations)

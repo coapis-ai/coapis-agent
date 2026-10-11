@@ -9,7 +9,13 @@
     "history": "历史会话",
     "session": "会话",
     "scene": "切换场景",
-    "searchAll": "🔍 搜索全部文件…"
+    "searchAll": "🔍 搜索全部文件…",
+    "references": "引用资源",
+    "refCount": "已选 {{n}} 项",
+    "clearAll": "清空",
+    "workingPath": "工作路径",
+    "workingPathHint": "工作路径：智能体可访问该目录下的文件",
+    "moreRefs": "还有 {{n}} 项未显示"
   },
   "externalNav": {
     "bindingRequired": "您尚未绑定该外部系统账号，暂无法访问，请先完成账号绑定。"

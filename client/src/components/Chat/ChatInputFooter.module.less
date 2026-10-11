@@ -54,6 +54,40 @@
   white-space: nowrap;
 }
 
+// 「已选 N 项」计数标签（设计第四区）
+.count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-right: 2px;
+
+  :global(.dark-mode) & {
+    color: rgba(255, 255, 255, 0.55);
+  }
+}
+
+// 目录引用（工作路径）：与文件引用可分辨
+.folderTag {
+  border-color: var(--color-primary, #1677ff);
+}
+
+.folderBadge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--color-primary, #1677ff);
+  background: rgba(22, 119, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.clearBtn {
+  flex-shrink: 0;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
 // 深色模式
 :global(.dark-mode) {
   .refTag {

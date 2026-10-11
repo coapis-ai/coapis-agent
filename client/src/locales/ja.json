@@ -9,7 +9,13 @@
     "history": "チャット履歴",
     "session": "セッション",
     "scene": "シーンを切り替え",
-    "searchAll": "🔍 全ファイルを検索…"
+    "searchAll": "🔍 全ファイルを検索…",
+    "references": "参照",
+    "refCount": "選択 {{n}}",
+    "clearAll": "クリア",
+    "workingPath": "作業パス",
+    "workingPathHint": "作業パス：エージェントはこのディレクトリ内のファイルにアクセスできます",
+    "moreRefs": "他 {{n}} 件表示されず"
   },
   "common": {
     "save": "保存",

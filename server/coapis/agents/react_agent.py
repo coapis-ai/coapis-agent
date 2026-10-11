@@ -361,24 +361,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             agent_config.id, self.max_iters, self._loop_protection_threshold
         )
 
-        # ── ToolSchemaRouter: dynamic schema trimming ──
-        from .utils.tool_schema_router import ToolSchemaRouter
-        self._schema_router = ToolSchemaRouter()
-        self._enable_full_schemas = False  # Toggle via /tools full
-        # Wrap toolkit.get_json_schemas to apply per-turn filtering
-        _original_get_schemas = self.toolkit.get_json_schemas
-
-        def _filtered_get_schemas():
-            """Tool schema filtering — DISABLED for now.
-
-            ToolSchemaRouter + QRR filtering was causing important tools
-            (web_search, browser_use etc.) to be silently dropped from LLM
-            context, making the agent unable to use them.
-            Returning all schemas until the routing logic is more robust.
-            """
-            return _original_get_schemas()
-
-        self.toolkit.get_json_schemas = _filtered_get_schemas
+        # ToolSchemaRouter 已摘除（D3 拍板：删除）。历史：接线后恒为恒等变换，
+        # QRR 动态裁剪曾把 web_search / browser_use 从 LLM 上下文里静默丢掉，
+        # 智能体直接不会用它们。tool_schema_router.py 现为零引用死文件，待清理；
+        # 若将来要恢复动态裁剪，必须重验「工具不被静默丢弃」再接线。
+        # 设计债记录见 tech_docs/设计方案-实现偏离审计报告-2026-10-11.md（P1）。
 
         # Configure agentscope built-in memory compression
         self.compression_config = self._build_compression_config(
@@ -2853,7 +2840,9 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         Calls ``super()._reasoning`` to keep the ToolGuardMixin
         interception active.
         """
-        # --- Cache recent messages for ToolSchemaRouter ---
+        # --- Cache recent messages ---
+        # 消费者是 ThinkingBudget（下方按最近消息分类/兜底提取 user_query）。
+        # 早期注释写的是 ToolSchemaRouter，该路由已摘除，缓存不能跟着删。
         try:
             memory_msgs = await self.memory.get_memory()
             self._recent_tool_msgs = [
@@ -3438,7 +3427,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             set_current_shell_command_timeout,
         )
 
-        set_current_workspace_dir(self._workspace_dir)
+        # 目录引用优先：用户在聊天里选了目录作为引用时，工作目录必须是该
+        # 目录，否则这里会把 runner 设好的目录冲回 agent 的 workspace，
+        # 相对路径就落不回被引用的目录。
+        from ..config.context import get_current_folder_ref
+
+        set_current_workspace_dir(get_current_folder_ref() or self._workspace_dir)
         light_ctx = self._agent_config.running.light_context_config
         pruning_config = light_ctx.tool_result_pruning_config
         set_current_recent_max_bytes(

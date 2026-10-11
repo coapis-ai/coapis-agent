@@ -1,3 +1,12 @@
+> **状态（2026-10-11 标注）：方案A 已废弃，未实现。**
+> 本方案的「聊天页右侧工作空间侧边栏」（`WorkspaceSidebar`，含文件/记忆/知识库/搜索）
+> 全仓零实现。它被「+」菜单的通用级联菜单（`components/CascadeMenu/` +
+> `Chat/resource/cascadeAdapters.ts`）取代：资源选择改为「点击开列 + hover 200ms
+> 展开下级 + 勾选即生效」，目录勾选=工作路径引用。
+> 本文件保留作历史底稿，**不要按它实现**。现状权威见
+> `tech_docs/design/file-selection-semantics.md` 与
+> `tech_docs/设计方案-实现偏离审计报告-2026-10-11.md`。
+
 # 工作空间与知识库整合设计方案
 
 ## 📋 需求背景

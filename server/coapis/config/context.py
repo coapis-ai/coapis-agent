@@ -49,6 +49,33 @@ def set_current_workspace_dir(workspace_dir: Path | None) -> None:
     current_workspace_dir.set(workspace_dir)
 
 
+# Context variable to store the folder reference selected in the chat UI.
+# When the user picks a folder as a conversation reference, relative paths
+# resolve inside that folder and it becomes the conversation working directory.
+current_folder_ref: ContextVar[Path | None] = ContextVar(
+    "current_folder_ref",
+    default=None,
+)
+
+
+def get_current_folder_ref() -> Path | None:
+    """Get the selected folder reference from context.
+
+    Returns:
+        Path to the referenced folder, or None when no folder is referenced.
+    """
+    return current_folder_ref.get()
+
+
+def set_current_folder_ref(folder_ref: Path | None) -> None:
+    """Set the selected folder reference in context.
+
+    Args:
+        folder_ref: Path to the referenced folder, or None to clear it.
+    """
+    current_folder_ref.set(folder_ref)
+
+
 # Context variable to store the recent_max_bytes limit
 current_recent_max_bytes: ContextVar[int | None] = ContextVar(
     "current_recent_max_bytes",

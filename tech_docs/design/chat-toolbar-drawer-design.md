@@ -1,3 +1,12 @@
+> **状态（2026-10-11 标注）：交互形态已被取代，本文件的「抽屉 + 树形勾选 + 弹窗」不再有效。**
+> 用户明确要求：菜单不是点击钻取或弹窗，而是**光标移上去（hover-intent 200ms）就在右侧
+> 展开下一级列**，点击一级行才开始，勾选即生效，目录行勾选=整目录引用（工作路径）。
+> 权威实现：`client/src/components/CascadeMenu/CascadeMenu.tsx`（列式级联、每列上限
+> 200、超出显示「…还有 N 项」、窄屏单列下钻、键盘 ↑↓→←空格）与
+> `client/src/components/Chat/resource/ResourcePlusMenu.tsx`。
+> 第四区「引用提示 + 计数 + 清空」已并入 `ChatInputFooter`（`ReferenceHint` 已摘除导出）。
+> 本文件保留作历史底稿，**不要按它实现**。
+
 # 聊天界面工具栏优化方案 - 侧边抽屉式设计
 
 ## 💡 核心想法

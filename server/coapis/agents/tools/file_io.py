@@ -32,6 +32,7 @@ from .utils import (
 )
 from ...config.context import (
     get_current_workspace_dir,
+    get_current_folder_ref,
     get_current_recent_max_bytes,
 )
 from ...constant import WORKING_DIR, TRUNCATION_NOTICE_MARKER
@@ -58,6 +59,12 @@ def _resolve_file_path(file_path: str) -> str:
     if path.is_absolute():
         return str(path)
     else:
+        # 目录引用激活时，相对路径在被引用的目录内解析——这是「目录引用 =
+        # 设置对话工作目录」的真实语义；否则相对路径仍从 workspace/files/
+        # 根解析，智能体只能自己补目录前缀（实测会先失败一次）。
+        folder_ref = get_current_folder_ref()
+        if folder_ref is not None:
+            return str(Path(folder_ref) / file_path)
         # Use current workspace_dir from context, fallback to WORKING_DIR
         workspace_dir = get_current_workspace_dir() or WORKING_DIR
         # 确保 workspace_dir 是 Path 对象
@@ -86,6 +93,14 @@ def _resolve_write_path(file_path: str) -> str:
     path = Path(file_path).expanduser()
     if path.is_absolute():
         return str(path)
+
+    # 目录引用激活时写入落在被引用的目录内，与读取保持一致，避免读写
+    # 落在不同目录导致智能体「写了却读不到」。
+    folder_ref = get_current_folder_ref()
+    if folder_ref is not None:
+        ref_dir = Path(folder_ref)
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        return str(ref_dir / file_path)
 
     workspace_dir = get_current_workspace_dir() or WORKING_DIR
     # 确保 workspace_dir 是 Path 对象

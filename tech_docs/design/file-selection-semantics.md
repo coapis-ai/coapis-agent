@@ -1,3 +1,34 @@
+> **现状（2026-10-11 更新）：产品语义成立，技术契约以本节为准（下方旧 JSON 已失效）。**
+>
+> **真实数据契约**（前端 → 后端）：没有 `selected_folders` 数组，目录与文件混在同一个
+> `selected_files` 里，用 `type` 区分：
+>
+> ```json
+> {
+>   "selected_files": [
+>     { "id": "/docs", "name": "docs", "type": "folder" },
+>     { "id": "/docs/report.pdf", "name": "report.pdf", "type": "file", "size": 12345 }
+>   ]
+> }
+> ```
+>
+> **`usage` 字段在 UI 契约里（`CascadeNode`，`components/CascadeMenu/CascadeMenu.tsx`）**，
+> 取值 `"working-path" | "reference" | "retrieval"`，由 `cascadeAdapters.ts` 按数据源赋值
+> （我的空间目录=working-path，文件=reference，知识库=retrieval）。它驱动 UI 图标与提示语
+> 分流，**不随请求传给后端**——后端按 `type` 分流，语义等价。
+>
+> **后端行为（`coapis/app/runner/runner.py`）**：
+> - `type=="folder"` → 把对话工作目录设为该目录的真实绝对路径
+>   （`set_current_workspace_dir`，shell/file_io/glob_search 的相对路径据此解析），
+>   并注入提示词列出**真实绝对路径 + 真实工具名**（`glob_search` / `read_file`）。
+>   历史版本引用不存在的 `list_files` 且只给虚拟相对路径，已修。
+> - `type=="file"` → 注入文件引用提示（含 `doc_reader` 提示）。
+> - 多目录时取第一个为主工作目录，其余仅由提示词列出。
+>
+> **UI（`ChatInputFooter`）**：单行芯片 + 「已选 N 项」计数 + 「清空」；目录芯片用
+> 📁 图标与「工作路径」标记，与文件引用可分辨；超 4 项折叠为 `+N`。
+> 方案2（用户手动指定 参考/使用）未实现，维持「简单模式」推荐。
+
 # 文件选择的产品语义设计
 
 ## 🎯 核心理念

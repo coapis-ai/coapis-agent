@@ -1,56 +1,60 @@
 // 聊天输入框底部引用条
-// 单行显示已选择的资源芯片（文件/知识库/会话引用），超长省略
+// 单行显示已选择的资源芯片（工作路径/文件/知识库），超长省略
 // 模型不在这里显示：模型选择归输入框左侧的芯片（ModelChips），避免两处重复
 // MCP / 技能芯片已按 D6 删除（无后端接线，恒为空）
+// 会话引用已删除（A5：refSessions 是空壳——无入口写入、无出口发送，无后端消费者）
 
-import { Tag, Tooltip } from 'antd';
+import { Tag, Tooltip, Button } from 'antd';
 import {
   FileOutlined,
   BookOutlined,
-  HistoryOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { FileInfo, KnowledgeInfo } from './types';
 import styles from './ChatInputFooter.module.less';
-
-export interface RefChip {
-  id: string;
-  name: string;
-}
 
 interface ChatInputFooterProps {
   files: FileInfo[];
   knowledge: KnowledgeInfo[];
   onRemoveFile: (id: string) => void;
   onRemoveKnowledge: (id: string) => void;
-  sessions?: RefChip[];
-  onRemoveSession?: (id: string) => void;
+  /** 清空全部引用（设计第四区：引用提示 + 清空） */
+  onClearAll?: () => void;
 }
 
-type ChipKind = 'file' | 'knowledge' | 'session';
+type ChipKind = 'folder' | 'file' | 'knowledge';
 
 const CHIP_ICON: Record<ChipKind, React.ReactNode> = {
+  folder: <FolderOpenOutlined />,
   file: <FileOutlined />,
   knowledge: <BookOutlined />,
-  session: <HistoryOutlined />,
 };
 
 /**
  * 聊天输入框底部引用条
- * 单行显示，超长省略
- * 无引用时显示占位文字
+ * - 目录引用用 📁 图标 + 「工作路径」标记，与文件引用可分辨（P0-3）
+ * - 左侧显示「已选 N 项」计数，右侧「清空」（设计第四区）
+ * - 单行显示，超过 4 项折叠为 +N
  */
 export function ChatInputFooter({
   files,
   knowledge,
   onRemoveFile,
   onRemoveKnowledge,
-  sessions = [],
-  onRemoveSession,
+  onClearAll,
 }: ChatInputFooterProps) {
+  const { t } = useTranslation();
+
+  // 目录在前：工作路径是上下文骨架，先看到它更符合心智
   const items: Array<{ kind: ChipKind; id: string; name: string }> = [
-    ...files.map(f => ({ kind: 'file' as const, name: f.name, id: f.id })),
-    ...knowledge.map(k => ({ kind: 'knowledge' as const, name: k.name, id: k.id })),
-    ...sessions.map(s => ({ kind: 'session' as const, name: s.name, id: s.id })),
+    ...files
+      .filter((f) => f.type === 'folder')
+      .map((f) => ({ kind: 'folder' as const, name: f.name, id: f.id })),
+    ...files
+      .filter((f) => f.type !== 'folder')
+      .map((f) => ({ kind: 'file' as const, name: f.name, id: f.id })),
+    ...knowledge.map((k) => ({ kind: 'knowledge' as const, name: k.name, id: k.id })),
   ];
 
   const totalCount = items.length;
@@ -60,7 +64,7 @@ export function ChatInputFooter({
     return (
       <div className={styles.footer}>
         <div className={styles.placeholder}>
-          引用资源
+          {t('resourceMenu.references', '引用资源')}
         </div>
       </div>
     );
@@ -68,9 +72,13 @@ export function ChatInputFooter({
 
   const handleRemove = (kind: ChipKind, id: string) => {
     switch (kind) {
-      case 'file': onRemoveFile(id); break;
-      case 'knowledge': onRemoveKnowledge(id); break;
-      case 'session': onRemoveSession?.(id); break;
+      case 'folder':
+      case 'file':
+        onRemoveFile(id);
+        break;
+      case 'knowledge':
+        onRemoveKnowledge(id);
+        break;
     }
   };
 
@@ -82,27 +90,61 @@ export function ChatInputFooter({
   return (
     <div className={styles.footer}>
       <div className={styles.left}>
+        <span className={styles.count}>
+          {t('resourceMenu.refCount', '已选 {{n}} 项', { n: totalCount })}
+        </span>
+
         {displayItems.map((item) => (
-          <Tag
+          <Tooltip
             key={`${item.kind}:${item.id}`}
-            closable
-            onClose={(e) => {
-              e.preventDefault();
-              handleRemove(item.kind, item.id);
-            }}
-            className={styles.refTag}
+            title={
+              item.kind === 'folder'
+                ? t('resourceMenu.workingPathHint', '工作路径：智能体可访问该目录下的文件')
+                : item.name
+            }
           >
-            {CHIP_ICON[item.kind]}
-            <span className={styles.refName}>{item.name}</span>
-          </Tag>
+            <Tag
+              closable
+              onClose={(e) => {
+                e.preventDefault();
+                handleRemove(item.kind, item.id);
+              }}
+              className={`${styles.refTag} ${
+                item.kind === 'folder' ? styles.folderTag : ''
+              }`}
+            >
+              {CHIP_ICON[item.kind]}
+              <span className={styles.refName}>{item.name}</span>
+              {item.kind === 'folder' && (
+                <span className={styles.folderBadge}>
+                  {t('resourceMenu.workingPath', '工作路径')}
+                </span>
+              )}
+            </Tag>
+          </Tooltip>
         ))}
-        
+
         {remainingCount > 0 && (
-          <Tooltip title={`还有 ${remainingCount} 项未显示`}>
+          <Tooltip
+            title={t('resourceMenu.moreRefs', '还有 {{n}} 项未显示', {
+              n: remainingCount,
+            })}
+          >
             <Tag className={styles.refTag}>+{remainingCount}</Tag>
           </Tooltip>
         )}
       </div>
+
+      {onClearAll && (
+        <Button
+          type="link"
+          size="small"
+          className={styles.clearBtn}
+          onClick={onClearAll}
+        >
+          {t('resourceMenu.clearAll', '清空')}
+        </Button>
+      )}
     </div>
   );
 }

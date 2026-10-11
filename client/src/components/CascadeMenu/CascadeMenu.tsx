@@ -33,6 +33,14 @@ export interface CascadeNode {
   kind: "group" | "item" | "action" | "divider" | "more";
   /** 右侧灰色元信息（大小 / 来源 / 篇数…） */
   meta?: string;
+  /**
+   * 用法语义（设计 §3.1 要求，此前契约里没有这个字段）：
+   * 说明该节点被引用后智能体怎么用——
+   * working-path=工作路径（智能体可访问该目录下的文件），
+   * reference=自动参考（读取文件内容），retrieval=检索（知识库）。
+   * UI 据此在引用条图标与提示语分流，目录引用不再与文件引用长得一样。
+   */
+  usage?: "working-path" | "reference" | "retrieval";
   /** group 的子项总数（未加载时也能显示计数） */
   count?: number;
   /** 默认 true；false 时该行只展示不可勾选（如知识库文档） */
