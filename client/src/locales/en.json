@@ -1,16 +1,15 @@
 {
   "resourceMenu": {
-    "mySpace": "Pick from My Space",
+    "mySpace": "My Space",
     "sessionFiles": "Files in this chat",
     "upload": "Upload File",
     "knowledge": "Attach Knowledge",
     "back": "Back",
     "uploadNew": "＋ Upload new file",
-    "mySpaceAll": "All files",
-    "noSessionFiles": "No files in this chat yet",
     "history": "Chat history",
     "session": "Session",
-    "scene": "Switch Scene"
+    "scene": "Switch Scene",
+    "searchAll": "🔍 Search all files…"
   },
   "externalNav": {
     "bindingRequired": "You have not linked an account for this external system. Access is blocked until you complete the binding."
@@ -2719,20 +2718,19 @@
     "noAccess": "No permission to perform this action"
   },
   "resourcePicker": {
-    "tabTree": "File Tree",
-    "tabLedger": "File Ledger",
-    "filterAll": "All",
-    "filterSession": "Generated in this session",
-    "filterUpload": "My uploads",
-    "recent": "Recently used",
-    "selectedCount": "{{count}} selected",
-    "noRecords": "No records",
-    "noModels": "No models available"
+    "noModels": "No models available",
+    "searchResults": "Search results",
+    "searchPlaceholder": "Search all files (name / path)…"
   },
   "tasks": {
     "title": "Tasks",
     "placeholderTitle": "Task center coming soon",
     "placeholderDesc": "Long-running task overview, progress tracking and artifact links arrive in the next release. Start tasks in chat for now and review them here later.",
     "startChat": "Start a task in chat"
+  },
+  "cascade": {
+    "filter": "Filter…",
+    "empty": "Nothing here yet",
+    "more": "… {{n}} more not shown"
   }
 }

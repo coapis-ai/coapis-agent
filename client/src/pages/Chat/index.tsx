@@ -54,12 +54,13 @@ import {
   ModelCapabilityTag,
   ModelChips,
   ResourcePlusMenu,
-  MySpacePickerModal,
-  KnowledgePickerModal,
+  CascadePickerModal,
   ScenePickerModal,
   type PickItem,
   type SessionFile,
 } from "../../components/Chat";
+import type { CascadeNode } from "../../components/CascadeMenu/CascadeMenu";
+import { invalidateCascade } from "../../components/Chat/resource/cascadeAdapters";
 import { useChatWindow } from "../../contexts/ChatWindowContext";
 import type { SceneConfig } from "../Workbench/types";
 import ChatSessionDropdown from "./components/ChatSessionDropdown";
@@ -687,15 +688,12 @@ export default function ChatPage() {
   const runtimeLoadingBridgeRef = useRef<RuntimeLoadingBridgeApi | null>(null);
   const { message } = useAppMessage();
 
-  // ─── M4 资源整合：+ 菜单与各选择面板 ─────────────────────────────
+  // ─── M4 资源整合：+ 菜单与资源浮层 ─────────────────────────────
   // MCP / 技能入口已按 D6 删除（菜单、弹窗、i18n 键一并移除）。
-  type PickerKind = "myspace" | "knowledge";
-  const [pickerOpen, setPickerOpen] = useState<PickerKind | null>(null);
-  // 我的空间弹窗的初始视图/过滤（由「+」菜单二级项指定：最近使用/本会话/全部文件）
-  const [mySpaceView, setMySpaceView] = useState<"tree" | "ledger">("tree");
-  const [mySpaceFilter, setMySpaceFilter] = useState<"all" | "session" | "upload">(
-    "all",
-  );
+  // 菜单层用通用 CascadeMenu 直接勾选（D4：点一下即生效，无确认按钮）；
+  // 浮层只承担跨目录检索与知识库选择（D3：检索需要搜索框，菜单层做不好）。
+  type PickerMode = "files" | "knowledge";
+  const [pickerMode, setPickerMode] = useState<PickerMode | null>(null);
   // 本会话文件：按 chat_id 过滤的台账行（D1）。旧数据 chat_id=NULL，
   // 所以「本会话」只覆盖新产生的文件（D2，接受的现状）。
   const [sessionFiles, setSessionFiles] = useState<SessionFile[]>([]);
@@ -766,8 +764,8 @@ export default function ChatPage() {
   }, []);
   const [refSessions, setRefSessions] = useState<PickItem[]>([]);
 
-  const openPicker = useCallback((kind: PickerKind) => {
-    setPickerOpen(kind);
+  const openPicker = useCallback((mode: PickerMode) => {
+    setPickerMode(mode);
   }, []);
 
   // 本会话文件：按 chat_id 拉台账（D1）。菜单打开时刷新，保证新上传/新生成的文件即时出现。
@@ -823,30 +821,56 @@ export default function ChatPage() {
   } = useToolbarState();
 
   // D4：勾选即生效 —— 点一下加入会话引用，再点一下移出。
-  const toggleSessionFile = useCallback(
-    (f: SessionFile) => {
-      setSelectedFiles((prev) => {
-        if (prev.some((x) => x.path === f.path)) {
-          return prev.filter((x) => x.path !== f.path);
-        }
-        return [
-          ...prev,
-          {
-            id: f.path,
-            name: f.name,
-            path: f.path,
-            type: "file",
-            size: f.size,
-            mimeType: f.mime_type,
-          },
-        ];
-      });
+  // 勾选集合：文件用后端全路径，知识库用 `kb:<id>`（与 CascadeMenu 的 key 命名一致）
+  const checkedKeys = useMemo(
+    () =>
+      new Set([
+        ...selectedFiles.map((f) => f.path),
+        ...selectedKnowledge.map((k) => `kb:${k.id}`),
+      ]),
+    [selectedFiles, selectedKnowledge],
+  );
+
+  // D4：勾选即生效 —— 点一下加入会话引用，再点一下移出。
+  const toggleCascadeNode = useCallback(
+    (node: CascadeNode) => {
+      if (node.key.startsWith("kb:")) {
+        const id = node.key.slice(3);
+        setSelectedKnowledge((prev) =>
+          prev.some((k) => k.id === id)
+            ? prev.filter((k) => k.id !== id)
+            : [...prev, { id, name: node.name }],
+        );
+        return;
+      }
+      const payload = node.payload as
+        | { path?: string; size?: number }
+        | undefined;
+      // 目录行（我的空间里的 group）= 目录引用：只记一条目录，由后端提示词
+      // 让智能体自己列目录内容（D2 + 「目录勾选只显示目录引用」）
+      const isDir = node.kind === "group" && node.key.startsWith("/");
+      const path = payload?.path ?? node.key;
+      setSelectedFiles((prev) =>
+        prev.some((x) => x.path === path)
+          ? prev.filter((x) => x.path !== path)
+          : [
+              ...prev,
+              {
+                id: path,
+                name: node.name,
+                path,
+                type: isDir ? "folder" : "file",
+                size: payload?.size,
+              },
+            ],
+      );
     },
-    [setSelectedFiles],
+    [setSelectedFiles, setSelectedKnowledge],
   );
 
   // 切换聊天时预取一次，保证菜单打开即有数据（不必等点击）
   useEffect(() => {
+    invalidateCascade();
     refreshSessionFiles();
   }, [refreshSessionFiles]);
 
@@ -1433,6 +1457,9 @@ export default function ChatPage() {
         // 添加文件引用（file:// URL）供后端工具处理
         // 后端返回的 path 已经是相对于 workspace/files/ 的路径
         selectedFiles.forEach(file => {
+          // 目录引用只走 biz_params.file_refs（后端注入目录提示词），
+          // 不能当成 file:// 附件传给模型——目录不是文件
+          if (file.type === "folder") return;
           // 移除开头的 /，直接传递相对路径
           const filePath = file.path.startsWith('/') 
             ? file.path.slice(1) 
@@ -1594,6 +1621,8 @@ export default function ChatPage() {
         onSuccess({ url: res.url });
         // 上传已带 chat_id，刷新台账让「本会话文件」立刻能看到它
         refreshSessionFiles();
+        // 目录/台账缓存随之失效，菜单下次打开读到新文件
+        invalidateCascade();
       } catch (e) {
         // 处理文件已存在的情况（409 Conflict）
         if (e instanceof Error && e.message.includes("409")) {
@@ -1605,6 +1634,42 @@ export default function ChatPage() {
       }
     },
     [multimodalCaps, t, chatId, refreshSessionFiles],
+  );
+
+  // ── 稳定的「+ 资源菜单」trigger 身份 ────────────────────────────────
+  // Sender 的 attachments.trigger 由 React.createElement(trigger, {disabled}) 渲染。
+  // 若每次渲染都新建这个函数，React 会把它当成「新的组件类型」，把整棵子树
+  // （含 Popover）卸载重挂载 —— 现象就是「勾选一个文件后 + 菜单自动关闭」。
+  // 用 ref 桥接最新 props：函数身份恒定，子树只做普通 re-render，菜单保持打开。
+  const resourceTriggerRender = useRef<(p: any) => React.ReactElement>(
+    () => <React.Fragment />,
+  );
+  resourceTriggerRender.current = (props: any) => {
+    const tooltipKey = multimodalCaps.supportsMultimodal
+      ? multimodalCaps.supportsImage && !multimodalCaps.supportsVideo
+        ? "chat.attachments.tooltipImageOnly"
+        : "chat.attachments.tooltip"
+      : "chat.attachments.tooltipNoMultimodal";
+    return (
+      <Tooltip title={t(tooltipKey, { limit: CHAT_ATTACHMENT_MAX_MB })}>
+        <ResourcePlusMenu
+          disabled={!!props?.disabled}
+          onUploadClick={() => {
+            // 故意不 stopPropagation：让点击冒泡到外层 antd Upload，
+            // 打开原生文件选择（保留 Sender 原生上传流程）
+          }}
+          onOpenModal={openPicker}
+          checked={checkedKeys}
+          onToggle={toggleCascadeNode}
+          chatId={chatId}
+          sessionCount={sessionFiles.length}
+        />
+      </Tooltip>
+    );
+  };
+  const resourceTrigger = useMemo(
+    () => (props: any) => resourceTriggerRender.current(props),
+    [],
   );
 
   const options = useMemo(() => {
@@ -1699,43 +1764,8 @@ export default function ChatPage() {
         beforeSubmit: handleBeforeSubmit,
         allowSpeech: true,
         attachments: {
-          trigger: function (props: any) {
-            const tooltipKey = multimodalCaps.supportsMultimodal
-              ? multimodalCaps.supportsImage && !multimodalCaps.supportsVideo
-                ? "chat.attachments.tooltipImageOnly"
-                : "chat.attachments.tooltip"
-              : "chat.attachments.tooltipNoMultimodal";
-            return (
-              <Tooltip title={t(tooltipKey, { limit: CHAT_ATTACHMENT_MAX_MB })}>
-                <ResourcePlusMenu
-                  disabled={!!props?.disabled}
-                  onUploadClick={() => {
-                    // 故意不 stopPropagation：让点击冒泡到外层 antd Upload，
-                    // 打开原生文件选择（保留 Sender 原生上传流程）
-                  }}
-                  onMySpaceClick={() => {
-                    setMySpaceView("tree");
-                    setMySpaceFilter("all");
-                    openPicker("myspace");
-                  }}
-                  onRecentClick={() => {
-                    setMySpaceView("ledger");
-                    setMySpaceFilter("all");
-                    openPicker("myspace");
-                  }}
-                  onSessionModalClick={() => {
-                    setMySpaceView("ledger");
-                    setMySpaceFilter("session");
-                    openPicker("myspace");
-                  }}
-                  onKnowledgeClick={() => openPicker("knowledge")}
-                  sessionFiles={sessionFiles}
-                  selectedPaths={new Set(selectedFiles.map((f) => f.path))}
-                  onToggleSessionFile={toggleSessionFile}
-                />
-              </Tooltip>
-            );
-          },
+          // 身份稳定的 trigger（见上方 resourceTrigger）—— 勾选文件后菜单不会被关闭
+          trigger: resourceTrigger,
           customRequest: handleFileUpload,
         },
         placeholder: t("chat.inputPlaceholder"),
@@ -2242,31 +2272,13 @@ export default function ChatPage() {
     </div>
 
 
-    {/* ─── M4 资源整合：各选择面板 ─────────────────────────────────── */}
-    <MySpacePickerModal
-      open={pickerOpen === "myspace"}
-      onClose={() => setPickerOpen(null)}
-      onConfirm={(files) => {
-        setSelectedFiles((prev) => {
-          const seen = new Set(prev.map((f) => f.path));
-          return [...prev, ...files.filter((f) => !seen.has(f.path))];
-        });
-        setPickerOpen(null);
-      }}
-      chatId={chatId}
-      initialView={mySpaceView}
-      initialFilter={mySpaceFilter}
-    />
-    <KnowledgePickerModal
-      open={pickerOpen === "knowledge"}
-      onClose={() => setPickerOpen(null)}
-      onConfirm={(items) => {
-        setSelectedKnowledge((prev) => {
-          const seen = new Set(prev.map((k) => k.id));
-          return [...prev, ...items.filter((k) => !seen.has(k.id))];
-        });
-        setPickerOpen(null);
-      }}
+    {/* ─── M4 资源整合：资源浮层（跨目录检索 / 知识库选择） ─────────── */}
+    <CascadePickerModal
+      open={pickerMode !== null}
+      mode={pickerMode ?? "files"}
+      onClose={() => setPickerMode(null)}
+      checked={checkedKeys}
+      onToggle={toggleCascadeNode}
     />
     <ScenePickerModal
       open={scenePickerOpen}

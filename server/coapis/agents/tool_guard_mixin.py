@@ -717,6 +717,10 @@ class ToolGuardMixin:
             format_findings_summary,
         )
 
+        # `tool_input` is referenced below (audit logging); it must be derived
+        # from `tool_call` here — it is not a parameter of this method.
+        tool_input = tool_call.get("input", {}) or {}
+
         lang = self._tool_guard_ui_lang()
 
         def tg(key: str) -> str:
@@ -828,6 +832,9 @@ class ToolGuardMixin:
         """
         from coapis.security.tool_guard.approval import ApprovalDecision
         from coapis.config.session_context import get_current_chat_id
+
+        # Audit logging below references `tool_input`; derive it from tool_call.
+        tool_input = tool_call.get("input", {}) or {}
 
         session_id = str(self._request_context.get("session_id") or "")
         user_id = str(self._request_context.get("user_id") or "")
@@ -1211,6 +1218,9 @@ class ToolGuardMixin:
             format_findings_summary,
         )
 
+        # Audit logging below references `tool_input`; derive it from tool_call.
+        tool_input = tool_call.get("input", {}) or {}
+
         lang = self._tool_guard_ui_lang()
 
         def tg(key: str) -> str:
@@ -1303,6 +1313,9 @@ class ToolGuardMixin:
         from coapis.security.tool_guard.approval import (
             format_findings_summary,
         )
+
+        # Audit logging below references `tool_input`; derive it from tool_call.
+        tool_input = tool_call.get("input", {}) or {}
 
         lang = self._tool_guard_ui_lang()
 

@@ -1,16 +1,15 @@
 {
   "resourceMenu": {
-    "mySpace": "从我的空间选取",
+    "mySpace": "我的空间",
     "sessionFiles": "本会话文件",
     "upload": "上传文件",
     "knowledge": "关联知识",
     "back": "返回",
     "uploadNew": "＋ 上传新文件",
-    "mySpaceAll": "全部文件",
-    "noSessionFiles": "本会话还没有文件",
     "history": "历史会话",
     "session": "会话",
-    "scene": "切换场景"
+    "scene": "切换场景",
+    "searchAll": "🔍 搜索全部文件…"
   },
   "externalNav": {
     "bindingRequired": "您尚未绑定该外部系统账号，暂无法访问，请先完成账号绑定。"
@@ -2769,20 +2768,19 @@
     "noAccess": "无权限执行此操作"
   },
   "resourcePicker": {
-    "tabTree": "文件树",
-    "tabLedger": "文件台账",
-    "filterAll": "全部",
-    "filterSession": "本会话生成",
-    "filterUpload": "我上传的",
-    "recent": "最近使用",
-    "selectedCount": "已选 {{count}} 项",
-    "noRecords": "暂无记录",
-    "noModels": "暂无可用模型"
+    "noModels": "暂无可用模型",
+    "searchResults": "搜索结果",
+    "searchPlaceholder": "搜索全部文件（按文件名/路径）…"
   },
   "tasks": {
     "title": "任务",
     "placeholderTitle": "任务中心即将上线",
     "placeholderDesc": "长任务的执行概览、进度追踪与产物关联将在下一版本提供。现在可以先在聊天里发起任务，稍后在这里统一查看。",
     "startChat": "去聊天发起任务"
+  },
+  "cascade": {
+    "filter": "过滤…",
+    "empty": "这里还没有内容",
+    "more": "…还有 {{n}} 项未显示"
   }
 }

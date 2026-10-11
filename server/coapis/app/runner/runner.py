@@ -1584,22 +1584,54 @@ class AgentRunner(Runner):
                         logger.info(f"Found selected_files in msgs[0].metadata: {selected_files}")
             
             if selected_files and isinstance(selected_files, list) and len(selected_files) > 0:
-                # Build file hint message
-                file_list = ", ".join([f"{f.get('name', 'unknown')} (path: {f.get('path', 'unknown')})" for f in selected_files])
-                
-                # Detect file types for doc_reader hint
-                file_types = set()
-                for f in selected_files:
-                    name = f.get("name", "")
-                    if "." in name:
-                        ext = name.split(".")[-1].lower()
-                        if ext in ["pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls"]:
-                            file_types.add(ext.upper())
-                
-                if file_types:
-                    hint_text = f"[用户选择了以下文件：{file_list}。请使用 doc_reader 工具读取这些 {', '.join(sorted(file_types))} 文件。文件路径已提供，无需搜索。]"
-                else:
-                    hint_text = f"[用户选择了以下文件：{file_list}。文件路径已提供，无需搜索。]"
+                # 目录引用与文件引用分开（前端 type: "folder" | "file"）
+                dir_refs = [f for f in selected_files if f.get("type") == "folder"]
+                file_refs = [f for f in selected_files if f.get("type") != "folder"]
+
+                hint_parts: list[str] = []
+
+                if dir_refs:
+                    # 目录引用必须给出"真实存在的绝对路径 + 真实存在的工具名"。
+                    # 历史版本写的是 list_files（本项目没有这个工具），且只给
+                    # `/公司制度` 这种虚拟相对路径，智能体只能靠猜（ls / glob /
+                    # 相对路径反复试错），路径解析连续失败。
+                    files_root = Path(self.workspace_dir or WORKING_DIR) / "files"
+                    dir_list = ", ".join(
+                        [
+                            f"{f.get('name', 'unknown')} (绝对路径: "
+                            f"{files_root / str(f.get('path', '')).strip('/')} )"
+                            for f in dir_refs
+                        ]
+                    )
+                    hint_parts.append(
+                        f"[用户选择了以下目录：{dir_list}。这些是目录引用，不是单个文件，"
+                        "不要直接读取目录本身。要查看目录内容，用 glob_search"
+                        "（pattern=\"*\"，path 传上面的绝对路径）；要读其中某个文件，"
+                        "用 read_file 并传该文件的绝对路径。]"
+                    )
+
+                if file_refs:
+                    file_list = ", ".join([f"{f.get('name', 'unknown')} (path: {f.get('path', 'unknown')})" for f in file_refs])
+
+                    # Detect file types for doc_reader hint
+                    file_types = set()
+                    for f in file_refs:
+                        name = f.get("name", "")
+                        if "." in name:
+                            ext = name.split(".")[-1].lower()
+                            if ext in ["pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls"]:
+                                file_types.add(ext.upper())
+
+                    if file_types:
+                        hint_parts.append(
+                            f"[用户选择了以下文件：{file_list}。请使用 doc_reader 工具读取这些 {', '.join(sorted(file_types))} 文件。文件路径已提供，无需搜索。]"
+                        )
+                    else:
+                        hint_parts.append(
+                            f"[用户选择了以下文件：{file_list}。文件路径已提供，无需搜索。]"
+                        )
+
+                hint_text = " ".join(hint_parts)
                 
                 # Inject hint to agent.memory (AI will see it, but not persisted)
                 # Msg already imported at top of file
