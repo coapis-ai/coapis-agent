@@ -74,12 +74,14 @@ workspaces/
 .reme_store_v1
 .bootstrap_completed
 
-# --- Debug / temp scripts (root directory) ---
-debug_config*.py
-fix_*.py
-find_bad_jobs.py
-test_*.py
-verify_*.py
+# --- Debug / temp scripts (root directory only) ---
+# 必须带前导 / 锚定到仓库根：不带 / 的 test_*.py 会匹配任意深度，
+# 把 tests/ 下的真测试文件全部吞掉（实测 13 个测试从未进仓库）。
+/debug_config*.py
+/fix_*.py
+/find_bad_jobs.py
+/test_*.py
+/verify_*.py
 
 # --- Dev test scripts ---
 tests/dev/

@@ -246,6 +246,36 @@ def test_integration():
                                reason="boom", summary="s3")
     check("outcome 不同日新建行", oid3 != oid1)
 
+    # 9. dedup_key 必须含 owner —— 多 agent 同日同结果不得撞全局 UNIQUE
+    #    （生产 dev 的 nightly dream 就是在这里抛 IntegrityError 中断流水线）
+    a1 = repo.record_outcome(user_id="", day="2020-02-02", status="skipped",
+                             reason="no_input", summary="workspace=skipped",
+                             agent_id="global_default")
+    a2 = repo.record_outcome(user_id="", day="2020-02-02", status="skipped",
+                             reason="no_input", summary="workspace=skipped",
+                             agent_id="user:oa")
+    check("多agent同日同结果各自建行(不撞唯一约束)", a1 != a2,
+          f"{a1} vs {a2}")
+    check("agent A 的结果不被 agent B 覆盖",
+          (repo.get(a1).agent_id == "global_default"
+           and repo.get(a2).agent_id == "user:oa"))
+
+    # 10. 跨用户同内容必须各自成行（旧公式无 owner → 全局查重把 B 的记忆
+    #     塌进 A 的行，B 的台账永远看不到）
+    before_u1 = repo.count(user_id="u1")
+    b1 = repo.add(MemoryEntry(scope="user", user_id="u1", category="fact",
+                              title="T", content="完全相同的内容xyz",
+                              importance=0.6, source="conversation"))
+    b2 = repo.add(MemoryEntry(scope="user", user_id="u2", category="fact",
+                              title="T", content="完全相同的内容xyz",
+                              importance=0.6, source="conversation"))
+    check("跨用户同内容各自独立成行", b1 != b2, f"{b1} vs {b2}")
+    check("u2 能看到自己的记忆", repo.count(user_id="u2", q="完全相同的内容xyz") == 1)
+    check("u1 计数只 +1（不被 u2 写入影响）",
+          repo.count(user_id="u1") == before_u1 + 1,
+          f"{repo.count(user_id='u1')} vs {before_u1}+1")
+    check("u1 的行归属未被 u2 改写", repo.get(b1).user_id == "u1")
+
     reset_engine()
 
 
