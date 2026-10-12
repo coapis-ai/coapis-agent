@@ -67,6 +67,61 @@ class FileLedgerService:
 
     # ── write ─────────────────────────────────────────────────────────
 
+    def _sync_resource(
+        self,
+        username: str,
+        rel_path: str,
+        *,
+        session_id: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> None:
+        """Append-only wiring to the resource ledger (R1).
+
+        The existing 11 methods keep their signatures and behaviour;
+        ``file_records`` stays the event stream and audit source. This helper
+        only **adds** calls to ``ResourceLedger`` and swallows every error, so
+        a broken resource ledger can never affect the file ledger or the
+        message path.
+        """
+        try:
+            from .resource_ledger import get_resource_ledger
+
+            rl = get_resource_ledger()
+            owner_id = username or "shared"
+            key = rl.register(
+                owner_scope="user",
+                owner_id=owner_id,
+                kind="file",
+                path=rel_path,
+            )
+            if not key:
+                return
+            if session_id:
+                rl.attach_ref(
+                    resource_key=key,
+                    referrer_kind="session",
+                    referrer_id=session_id,
+                )
+            if chat_id:
+                rl.attach_ref(
+                    resource_key=key,
+                    referrer_kind="chat",
+                    referrer_id=chat_id,
+                )
+            if agent_id:
+                rl.attach_ref(
+                    resource_key=key,
+                    referrer_kind="agent",
+                    referrer_id=agent_id,
+                    role="producer",
+                )
+            if status:
+                rl.mark_status(key, status)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("resource ledger sync failed (ignored): %s", exc)
+
     def record(
         self,
         username: Optional[str],
@@ -115,6 +170,13 @@ class FileLedgerService:
             )
             with get_session() as s:
                 s.add(rec)
+            self._sync_resource(
+                uid,
+                rel,
+                session_id=session_id,
+                chat_id=chat_id,
+                agent_id=agent_id,
+            )
             return True
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("file ledger record failed (ignored): %s", exc)
@@ -250,6 +312,17 @@ class FileLedgerService:
             if not session_id or not chat_id:
                 return 0
             with get_session() as s:
+                # Paths stamped by this call, so the resource ledger can attach
+                # the chat referrer on the same rows (append-only wiring).
+                stamped = s.execute(
+                    select(FileRecord.file_path).where(
+                        FileRecord.user_id == username,
+                        FileRecord.session_id == session_id,
+                        FileRecord.chat_id.is_(None),
+                    ).where(
+                        FileRecord.source == source if source else True
+                    ).distinct()
+                ).scalars().all()
                 q = update(FileRecord).where(
                     FileRecord.user_id == username,
                     FileRecord.session_id == session_id,
@@ -260,7 +333,28 @@ class FileLedgerService:
                 res = s.execute(
                     q.values(chat_id=chat_id, updated_at=time.time()),
                 )
-                return res.rowcount or 0
+                rowcount = res.rowcount or 0
+            if rowcount:
+                try:
+                    from .resource_ledger import get_resource_ledger
+
+                    rl = get_resource_ledger()
+                    for rel in stamped:
+                        key = rl.register(
+                            owner_scope="user",
+                            owner_id=username or "shared",
+                            kind="file",
+                            path=rel,
+                        )
+                        if key:
+                            rl.attach_ref(
+                                resource_key=key,
+                                referrer_kind="chat",
+                                referrer_id=chat_id,
+                            )
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug("resource ledger chat attach skipped: %s", exc)
+            return rowcount
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("file ledger chat attach failed: %s", exc)
             return 0
@@ -333,7 +427,23 @@ class FileLedgerService:
 
     def archive_file(self, username: str, file_path: str) -> bool:
         """Mark the newest row of ``file_path`` as archived (soft only)."""
-        return self.update_record_status(username, file_path, "archived")
+        ok = self.update_record_status(username, file_path, "archived")
+        if ok:
+            try:
+                from .resource_ledger import get_resource_ledger
+
+                rl = get_resource_ledger()
+                key = rl.register(
+                    owner_scope="user",
+                    owner_id=username or "shared",
+                    kind="file",
+                    path=file_path,
+                )
+                if key:
+                    rl.mark_status(key, "archived")
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("resource ledger archive sync skipped: %s", exc)
+        return ok
 
     def stats(self, username: str) -> dict[str, Any]:
         """Aggregate stats: distinct files, total size, by source / ext."""
@@ -522,7 +632,10 @@ async def start_file_ledger_maintenance(hour: int = 3) -> None:
     """Initial reconcile at startup, then a daily sweep at local ``hour:00``.
 
     Runs forever; every iteration is individually guarded so a failure
-    can never kill the loop.
+    can never kill the loop. Each iteration runs the file-ledger reconcile
+    **and** the resource-contract sweep (FS→DB, one direction, never deletes
+    FS files) so ``resources.fs_present`` / orphan status stay true without
+    an admin having to call the sweep endpoint.
     """
     while True:
         try:
@@ -531,6 +644,19 @@ async def start_file_ledger_maintenance(hour: int = 3) -> None:
             logger.info("file ledger reconcile: %s", res)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("file ledger reconcile failed: %s", exc)
+        try:
+            loop = asyncio.get_running_loop()
+            from .resource_ledger import get_resource_ledger
+
+            rep = await loop.run_in_executor(
+                None, lambda: get_resource_ledger().sweep(full=True)
+            )
+            logger.info(
+                "resource sweep: %s",
+                {k: v for k, v in rep.items() if not isinstance(v, list)},
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("resource sweep failed: %s", exc)
         now = datetime.now()
         nxt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
         if nxt <= now:

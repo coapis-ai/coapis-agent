@@ -321,6 +321,32 @@ def _normalize_chat_spec(spec) -> Dict[str, Any]:
     return result
 
 
+def _release_chat_refs(chat_id: str, session_id: str = "") -> None:
+    """R2 hook: release every resource ref owned by a deleted chat.
+
+    Fire-and-forget by design — a ledger failure must never break the delete
+    path (same rule as the file ledger hooks). Resources left with zero refs
+    move to ``orphan`` inside the ledger, not here.
+
+    Both identifiers are released: refs are keyed by the chat **UUID** when the
+    frontend created the chat, and by the **session_id** when the chat came
+    from a channel session (console/wecom) with no UUID at write time.
+    Releasing only the UUID would leave channel-session refs dangling.
+    """
+    try:
+        from ...foundation.resource_ledger import get_resource_ledger
+
+        rl = get_resource_ledger()
+        n = 0
+        for kind_id in (chat_id, session_id):
+            if kind_id:
+                n += rl.detach_refs_by_referrer("chat", kind_id)
+        if n:
+            logger.info("chat %s deleted: released %d resource refs", chat_id[:16], n)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("resource ref release skipped for chat %s: %s", chat_id[:16], exc)
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────
 
 @router.get("/chats")
@@ -693,7 +719,10 @@ async def delete_chat(
     deleted = await cm.delete_chats([chat_id])
     if not deleted:
         raise HTTPException(status_code=404, detail="Chat not found")
-    
+
+    # R2: 会话删除 → 解除该会话的全部资源引用；refs 清空的资源流转为 orphan。
+    _release_chat_refs(chat_id, getattr(spec, "session_id", "") or "")
+
     return ChatDeleteResponse(success=True, chat_id=chat_id)
 
 
@@ -713,7 +742,7 @@ async def batch_delete_chats(
 
     # For each chat_id, find the ChatManager that owns it
     # Group by ChatManager for efficient batch deletion
-    cm_to_ids: Dict[Any, List[str]] = {}  # ChatManager -> [chat_ids]
+    cm_to_ids: Dict[Any, List[tuple]] = {}  # ChatManager -> [(chat_id, session_id)]
 
     for chat_id in chat_ids:
         # Try primary ChatManager first
@@ -727,13 +756,18 @@ async def batch_delete_chats(
         # ENFORCE USER ISOLATION
         if not is_admin and spec.user_id != username:
             continue
-        cm_to_ids.setdefault(target_cm, []).append(chat_id)
+        cm_to_ids.setdefault(target_cm, []).append(
+            (chat_id, getattr(spec, "session_id", "") or "")
+        )
 
     total_deleted = 0
-    for target_cm, ids in cm_to_ids.items():
-        deleted = await target_cm.delete_chats(ids)
+    for target_cm, pairs in cm_to_ids.items():
+        deleted = await target_cm.delete_chats([cid for cid, _ in pairs])
         if deleted:
-            total_deleted += len(ids)
+            total_deleted += len(pairs)
+            # R2: 会话删除 → 解除该会话的全部资源引用（refs 清空 → orphan）
+            for cid, sid in pairs:
+                _release_chat_refs(cid, sid)
 
     if total_deleted == 0:
         raise HTTPException(status_code=404, detail="No chats found to delete")

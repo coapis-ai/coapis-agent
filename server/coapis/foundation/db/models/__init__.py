@@ -17,6 +17,7 @@ from .files import FileRecord
 from .memory import Memory
 from .memory_timeline import MemoryTimeline
 from .runtime import PermissionsConfig, TokenUsageDaily
+from .resources import Resource, ResourceRef
 from .scene import Scene, Tag, UserSceneSettings
 from .state import MigrationState
 from .usage import PointTransaction, TokenUsage
@@ -36,6 +37,8 @@ __all__ = [
     "MigrationState",
     "PermissionsConfig",
     "PointTransaction",
+    "Resource",
+    "ResourceRef",
     "Scene",
     "Tag",
     "TokenUsage",

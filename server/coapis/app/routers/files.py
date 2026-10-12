@@ -689,3 +689,58 @@ async def get_usage(request: Request = None):
         "max_gb": cfg["max_user_space_gb"],
         "percent": round(usage / cfg["max_user_space"] * 100, 2) if cfg["max_user_space"] > 0 else 0,
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# 资源清单面（R1）：resources / resource_refs 的读面与巡检
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/resources")
+@require_permission("chat:read")
+async def list_resources(
+    kind: Optional[str] = Query(None, description="按类型过滤: file/db/kb/mcp/web"),
+    status: Optional[str] = Query(None, description="按状态过滤: draft/official/orphan/archived"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    request: Request = None,
+):
+    """资源清单（每资源一行，含引用者计数）。软删行不出现。"""
+    from ...foundation.resource_ledger import get_resource_ledger
+
+    username = get_current_user(request)["username"]
+    items = get_resource_ledger().list_resources(
+        owner_scope="user",
+        owner_id=username,
+        kind=kind,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    return {"items": items, "limit": limit, "offset": offset}
+
+
+@router.get("/resources/stats")
+@require_permission("chat:read")
+async def resource_stats(request: Request = None):
+    """资源清单汇总（状态/类型分布、孤儿数、FS 缺失数）"""
+    from ...foundation.resource_ledger import get_resource_ledger
+
+    username = get_current_user(request)["username"]
+    return get_resource_ledger().stats(owner_scope="user", owner_id=username)
+
+
+@router.post("/resources/sweep")
+@require_permission("admin:admin")
+async def resource_sweep(
+    full: bool = Query(True, description="full=true 时同时报告 FS 有但无台账行的文件"),
+    request: Request = None,
+):
+    """巡检（FS → DB 单向）。**永不删除 FS 文件**。
+
+    报告三类：FS 已消失的台账行、refs 清空的孤儿资源、FS 有但无台账行的文件。
+    """
+    from ...foundation.resource_ledger import get_resource_ledger
+
+    report = get_resource_ledger().sweep(full=full)
+    logger.info("resource sweep by admin: %s", {k: v for k, v in report.items() if not isinstance(v, list)})
+    return report
