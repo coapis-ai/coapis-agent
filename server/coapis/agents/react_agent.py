@@ -363,8 +363,9 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # ToolSchemaRouter 已摘除（D3 拍板：删除）。历史：接线后恒为恒等变换，
         # QRR 动态裁剪曾把 web_search / browser_use 从 LLM 上下文里静默丢掉，
-        # 智能体直接不会用它们。tool_schema_router.py 现为零引用死文件，待清理；
-        # 若将来要恢复动态裁剪，必须重验「工具不被静默丢弃」再接线。
+        # 智能体直接不会用它们。tool_schema_router.py 已移入 .trash/deadcode_20261012/
+        # （2026-10-12 治理层放行）；若将来要恢复动态裁剪，从回收站取回，
+        # 必须先重验「工具不被静默丢弃」再接线。
         # 设计债记录见 tech_docs/设计方案-实现偏离审计报告-2026-10-11.md（P1）。
 
         # Configure agentscope built-in memory compression
