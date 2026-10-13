@@ -194,8 +194,9 @@ sip-livekit = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 # 两份测试树（coapis/tests 与 tests）存在同名文件，prepend 模式会撞
-# "import file mismatch"；importlib 模式按文件路径导入，同名不冲突。
-importmode = "importlib"
+# "import file mismatch"。pytest 9 的 ini 里没有 importmode 这个键（只有 CLI
+# 的 --import-mode），写在 ini 里会被静默忽略并告警，所以走 addopts。
+addopts = ["--import-mode=importlib"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as unit tests",

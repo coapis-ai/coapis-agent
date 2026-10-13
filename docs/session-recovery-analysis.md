@@ -1,5 +1,12 @@
 # 会话状态恢复深度分析
 
+> **状态更新（2026-10-13，commit `f63b456`）**：本文提到的 SEM（`server/coapis/agents/session_execution/`，
+> 即 `SessionState` / `SessionExecutionManager` 分级干预）已整体删除。原因：`token_warning_threshold` /
+> `token_block_threshold` 从未被任何代码读取（分级干预实际不存在），干预生效时直接命令模型
+> "基于已有信息直接给出结论"——在被拦的工具调用没拿到数据的情况下逼模型硬编结论，等于制造幻觉；
+> 且状态永不重置、没有任何 agent 声明启用过它。防"跑飞"由 `server/coapis/agents/utils/tool_call_guard.py`
+> 的 ToolCallGuard 承担。下文对 SEM 的描述保留作历史分析，不再反映现状。
+
 ## 问题场景
 
 用户在聊天中（可能正在进行流式响应），此时：
@@ -37,9 +44,9 @@ class TaskTracker:
 - ❌ 后端重启后状态丢失
 - ❌ 无法持久化正在运行的任务
 
-### 2. SessionState（内存级）
+### 2. SessionState（内存级）— 已删除（2026-10-13）
 
-**位置**: `server/coapis/agents/session_execution/state.py`
+**位置**: ~~`server/coapis/agents/session_execution/state.py`~~（该目录已随 commit `f63b456` 移除）
 
 **职责**:
 - 追踪会话执行状态（迭代次数、token消耗、工具调用历史）
