@@ -86,7 +86,6 @@ from .admin_providers import router as admin_providers_router
 from .input_guard import router as input_guard_router
 from .tool_guard import router as tool_guard_router
 from .user_model_prefs import router as user_model_prefs_router
-from .session_execution import router as session_execution_router
 from ..inbox import router as inbox_router
 from ..setup import router as setup_router
 from ..onboarding import router as onboarding_router
@@ -180,11 +179,6 @@ router.include_router(tags_router)
 
 # Menu management router
 router.include_router(menus_router)
-
-# Session Execution Manager API
-from .session_execution import router as session_execution_router
-router.include_router(session_execution_router)
-
 
 router.include_router(inbox_router)
 router.include_router(setup_router)
