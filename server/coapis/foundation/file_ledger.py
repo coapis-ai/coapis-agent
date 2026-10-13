@@ -635,7 +635,10 @@ async def start_file_ledger_maintenance(hour: int = 3) -> None:
     can never kill the loop. Each iteration runs the file-ledger reconcile
     **and** the resource-contract sweep (FS→DB, one direction, never deletes
     FS files) so ``resources.fs_present`` / orphan status stay true without
-    an admin having to call the sweep endpoint.
+    an admin having to call the sweep endpoint. ``backfill=True`` also registers
+    legacy files that predate the ledger (台账上线前的存量) — only for owners
+    that really exist in the users table; agent workspaces / eval sandboxes are
+    reported as ``unowned`` and left alone.
     """
     while True:
         try:
@@ -649,7 +652,7 @@ async def start_file_ledger_maintenance(hour: int = 3) -> None:
             from .resource_ledger import get_resource_ledger
 
             rep = await loop.run_in_executor(
-                None, lambda: get_resource_ledger().sweep(full=True)
+                None, lambda: get_resource_ledger().sweep(full=True, backfill=True)
             )
             logger.info(
                 "resource sweep: %s",

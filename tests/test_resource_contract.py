@@ -46,6 +46,17 @@ def _setup():
     ws = tmp / "workspaces"
     for u in ("alice", "bob"):
         (ws / u / "files" / "report").mkdir(parents=True)
+    # 巡检有归属闸门：owner 不在用户表里的目录划入 unowned（只报告、不补登记）。
+    # alice/bob 必须是真用户，否则 full sweep 的 unledgered 口径根本测不到。
+    import time as _t
+
+    from coapis.foundation.db.engine import get_session as _gs
+    from coapis.foundation.db.models.user import User as _U
+
+    with _gs() as s:
+        for u in ("alice", "bob"):
+            s.add(_U(id=f"u_{u}", username=u, password_hash="x", salt="x",
+                     created_at=_t.time()))
     return tmp, ws
 
 
@@ -106,10 +117,12 @@ def main():
 
     # ── 2. 巡检发现孤儿（FS 有、refs 空） ────────────────────────────
     rep = rl.sweep()
-    check("巡检报告含四个计数键",
-          {"fs_missing", "fs_present", "orphans", "unledgered"} <= set(rep), str(rep))
-    check("巡检报告可列出三类清单（§6）",
-          {"fs_missing_list", "orphan_list", "unledgered_list"} <= set(rep), str(sorted(rep)))
+    check("巡检报告含计数键（含 unowned/noise_skipped/backfilled）",
+          {"fs_missing", "fs_present", "orphans", "unledgered",
+           "unowned", "noise_skipped", "backfilled"} <= set(rep), str(rep))
+    check("巡检报告可列出四类清单（§6）",
+          {"fs_missing_list", "orphan_list", "unledgered_list", "unowned_list"}
+          <= set(rep), str(sorted(rep)))
     check("refs 空的资源判为孤儿", rep["orphans"] == 1, f"orphans={rep['orphans']}")
     bob = rl.list_resources(owner_scope="user", owner_id="bob")[0]
     check("孤儿状态流转为 orphan", bob["status"] == "orphan", f"status={bob['status']}")
@@ -285,6 +298,44 @@ def main():
           len(rl.list_resources(owner_scope="user", owner_id="bob", limit=1)) == 1
           and total_bob > 1,
           f"total={total_bob}")
+
+    # ── 巡检口径：噪音目录 / 无主目录 / 补登记 ─────────────────────
+    import time as _t2
+
+    from coapis.foundation.db.engine import get_session as _gs2
+    from coapis.foundation.db.models.user import User as _U2
+
+    with _gs2() as s:
+        s.add(_U2(id="u_carol", username="carol", password_hash="x", salt="x",
+                  created_at=_t2.time()))
+    carol = ws / "carol" / "files"
+    carol.mkdir(parents=True)
+    (carol / "legacy.md").write_text("legacy")          # 台账上线前的存量
+    (carol / ".trash").mkdir()
+    (carol / ".trash" / "deleted.md").write_text("x")   # 软删归档：不是资源
+    (ws / "eval_sandbox" / "files").mkdir(parents=True)
+    (ws / "eval_sandbox" / "files" / "clone.md").write_text("clone")
+
+    rep_b = rl.sweep(full=True, backfill=True)
+    check("噪音目录(.trash)不计入 unledgered", rep_b["noise_skipped"] >= 1,
+          f"noise_skipped={rep_b['noise_skipped']}")
+    check("无主目录划入 unowned 而不是 unledgered",
+          any(x["owner_id"] == "eval_sandbox" for x in rep_b["unowned_list"]),
+          str(rep_b["unowned_list"]))
+    check("补登记只补真用户（alice/loose.txt + carol/legacy.md）",
+          rep_b["backfilled"] == 2
+          and any(r["path"] == "legacy.md"
+                  for r in rl.list_resources(owner_scope="user", owner_id="carol")),
+          f"backfilled={rep_b['backfilled']}")
+    check("补登记不给无主目录造行",
+          rl.list_resources(owner_scope="user", owner_id="eval_sandbox") == [])
+    check("补登记的行带 source=backfill",
+          rl.list_resources(owner_scope="user", owner_id="carol")[0]["source"]
+          == "backfill",
+          str(rl.list_resources(owner_scope="user", owner_id="carol")))
+    rep_c = rl.sweep(full=True, backfill=True)
+    check("补登记幂等（第二轮不再产生新行）", rep_c["backfilled"] == 0,
+          f"backfilled={rep_c['backfilled']}")
 
     # ── 汇总 ─────────────────────────────────────────────────────────
     failed = [r for r in RESULTS if not r[1]]

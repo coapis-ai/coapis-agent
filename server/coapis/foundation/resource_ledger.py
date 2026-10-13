@@ -48,8 +48,24 @@ from .db.models.resources import (
     ResourceRef,
     make_resource_key,
 )
+from .db.models.user import User
 
 logger = logging.getLogger(__name__)
+
+#: 噪音目录：里面的东西不是用户的"资源"。``.trash`` 是软删归档、``.temp`` 是
+#: 脚本暂存。补扫/巡检与消费面补扫共用这一份定义，避免两边口径漂移。
+#: （实测 dev：1242 条 unledgered 里 298 条来自 ``.trash``/``.temp``。）
+NOISE_DIR_PARTS = frozenset({
+    ".trash", ".temp", ".git", "__pycache__", "node_modules", "venv",
+    ".venv", "site-packages", ".ipynb_checkpoints",
+})
+
+#: 工作区根下从来不是用户的目录（系统产物）。评测沙箱、agent 工作区、已删除
+#: 账号的残留由 ``_known_usernames()`` 判定，这里只硬挡系统目录。
+NON_USER_WORKSPACE_DIRS = frozenset({"system"})
+
+#: 单次补扫最多登记多少个文件（防止一次巡检写爆数据库）。
+BACKFILL_CAP = 5000
 
 
 class ResourceLedger:
@@ -124,6 +140,7 @@ class ResourceLedger:
                             title=title or None,
                             status="draft",
                             size_bytes=size,
+                            source=source or "hook",
                             fs_present=1,
                             first_seen_at=now,
                             last_seen_at=now,
@@ -292,28 +309,39 @@ class ResourceLedger:
 
     # ── sweep (FS → DB, one-way) ─────────────────────────────────────
 
-    def sweep(self, *, full: bool = False) -> dict:
+    def sweep(self, *, full: bool = False, backfill: bool = False) -> dict:
         """Reconcile the ledger against the filesystem. **Never deletes files.**
 
         Report keys:
         * ``fs_missing`` — ledger rows whose file is gone (``fs_present=0``)
         * ``fs_present`` — rows verified present
         * ``orphans`` — resources with zero refs (status moved to orphan)
-        * ``unledgered`` — files on FS with no ledger row
-        * ``fs_missing_list`` / ``orphan_list`` / ``unledgered_list`` — the
-          three lists the contract requires the report to be able to *enumerate*
-          (§6), capped at ``report_cap`` entries so the response stays bounded.
+        * ``unledgered`` — files on FS with no ledger row **and a real user owner**
+        * ``unowned`` — files under a workspace dir that is not a known user
+          (agent workspace、评测沙箱、已删除账号的残留)。只报告、**不补登记**：
+          凭空造一个 owner 会把别人的文件挂到不存在的用户名下。
+        * ``noise_skipped`` — 落在 ``NOISE_DIR_PARTS`` 里的文件（软删归档/暂存）
+        * ``backfilled`` — ``backfill=True`` 时实际新建的台账行数
+        * ``fs_missing_list`` / ``orphan_list`` / ``unledgered_list`` /
+          ``unowned_list`` — the lists the contract requires the report to be
+          able to *enumerate* (§6), capped at ``report_cap`` entries so the
+          response stays bounded.
         """
         report = {
             "fs_missing": 0,
             "fs_present": 0,
             "orphans": 0,
             "unledgered": 0,
+            "unowned": 0,
+            "noise_skipped": 0,
+            "backfilled": 0,
             "fs_missing_list": [],
             "orphan_list": [],
             "unledgered_list": [],
+            "unowned_list": [],
         }
         cap = 200
+        pending: list[tuple[str, str]] = []
         try:
             with get_session() as s:
                 rows = s.execute(
@@ -353,31 +381,90 @@ class ResourceLedger:
                             )
 
                 if full:
+                    users = self._known_usernames()
                     for owner_id, root in self._user_file_roots():
                         if not root.exists():
                             continue
                         known = seen.get(owner_id, set())
+                        # users 表读不到时 users=None，退回旧口径（全部算 unledgered），
+                        # 不能因为查不到用户就把真用户的文件划成无主。
+                        unowned_owner = users is not None and owner_id not in users
                         for f in root.rglob("*"):
-                            if f.is_file():
-                                rel = f.relative_to(root).as_posix()
-                                if rel not in known:
-                                    report["unledgered"] += 1
-                                    if len(report["unledgered_list"]) < cap:
-                                        report["unledgered_list"].append(
-                                            {"owner_id": owner_id, "path": rel}
-                                        )
+                            if not f.is_file():
+                                continue
+                            rel = f.relative_to(root).as_posix()
+                            if NOISE_DIR_PARTS.intersection(
+                                f.relative_to(root).parts
+                            ):
+                                report["noise_skipped"] += 1
+                                continue
+                            if rel in known:
+                                continue
+                            if unowned_owner:
+                                report["unowned"] += 1
+                                if len(report["unowned_list"]) < cap:
+                                    report["unowned_list"].append(
+                                        {"owner_id": owner_id, "path": rel}
+                                    )
+                                continue
+                            report["unledgered"] += 1
+                            if len(report["unledgered_list"]) < cap:
+                                report["unledgered_list"].append(
+                                    {"owner_id": owner_id, "path": rel}
+                                )
+                            if backfill and len(pending) < BACKFILL_CAP:
+                                pending.append((owner_id, rel))
+
+            # 补登记放在外层 session 之外：register() 自带一个 session，
+            # 在巡检事务里嵌套开第二个 session 会把锁顺序搞乱。
+            if backfill and pending:
+                for owner_id, rel in pending:
+                    key = self.register(
+                        owner_scope="user",
+                        owner_id=owner_id,
+                        kind="file",
+                        path=rel,
+                        title=Path(rel).name,
+                        source="backfill",
+                    )
+                    if key:
+                        report["backfilled"] += 1
+                logger.info(
+                    "resource sweep backfilled %d legacy file(s)", report["backfilled"]
+                )
             return report
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("resource ledger sweep failed (ignored): %s", exc)
             return report
 
     def _user_file_roots(self):
-        """Yield (username, files_root) for every workspace on disk."""
+        """Yield (username, files_root) for every workspace on disk.
+
+        系统目录（``workspaces/system``，放评测报告等）直接跳过；评测沙箱
+        ``eval_*``、agent 工作区、已删除账号的残留由 ``_known_usernames()`` 在
+        巡检里划成 ``unowned``，不在这里硬删。
+        """
         if not self._ws.exists():
             return
         for d in sorted(self._ws.iterdir()):
-            if d.is_dir():
-                yield d.name, d / "files"
+            if not d.is_dir():
+                continue
+            if d.name in NON_USER_WORKSPACE_DIRS or d.name in NOISE_DIR_PARTS:
+                continue
+            yield d.name, d / "files"
+
+    def _known_usernames(self) -> Optional[set[str]]:
+        """用户表里的用户名；读不到返回 ``None``（调用方退回旧口径）。
+
+        作用是把"有主但没台账行的文件"和"根本不是用户的工作区目录"分开：后者
+        补登记等于凭空造 owner。
+        """
+        try:
+            with get_session() as s:
+                return set(s.execute(select(User.username)).scalars().all())
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("resource ledger user lookup failed (ignored): %s", exc)
+            return None
 
     # ── read ──────────────────────────────────────────────────────────
 

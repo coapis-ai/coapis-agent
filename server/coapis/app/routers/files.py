@@ -748,14 +748,19 @@ async def resource_stats(request: Request = None):
 @require_permission("admin:admin")
 async def resource_sweep(
     full: bool = Query(True, description="full=true 时同时报告 FS 有但无台账行的文件"),
+    backfill: bool = Query(
+        False,
+        description="backfill=true 时把存量文件补登记进台账（仅限用户表里真实存在的 owner）",
+    ),
     request: Request = None,
 ):
     """巡检（FS → DB 单向）。**永不删除 FS 文件**。
 
-    报告三类：FS 已消失的台账行、refs 清空的孤儿资源、FS 有但无台账行的文件。
+    报告四类：FS 已消失的台账行、refs 清空的孤儿资源、FS 有但无台账行的文件、
+    以及"根本不是用户的工作区目录"里的文件（``unowned``，只报告不补登记）。
     """
     from ...foundation.resource_ledger import get_resource_ledger
 
-    report = get_resource_ledger().sweep(full=full)
+    report = get_resource_ledger().sweep(full=full, backfill=backfill)
     logger.info("resource sweep by admin: %s", {k: v for k, v in report.items() if not isinstance(v, list)})
     return report

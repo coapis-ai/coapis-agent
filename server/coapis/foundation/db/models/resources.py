@@ -83,6 +83,11 @@ class Resource(BaseRow):
     size_bytes: Mapped[int] = mapped_column(
         Integer, default=0, server_default=text("0")
     )
+    #: 这一行是怎么来的：``hook``（工具调用时登记）/ ``backfill``（巡检补登记
+    #: 的台账上线前存量）/ ``reconcile``。写入后不再改写——来源是历史事实。
+    source: Mapped[str] = mapped_column(
+        Text, nullable=False, default="hook", server_default=text("'hook'")
+    )
     #: Written by the sweep only: does the file exist on the filesystem?
     fs_present: Mapped[int] = mapped_column(
         Integer, default=1, server_default=text("1")

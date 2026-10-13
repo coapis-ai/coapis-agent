@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from ...foundation.resource_ledger import NOISE_DIR_PARTS
 from .contract import (
     MAX_DISCOVER_ITEMS,
     MAX_FETCH_CHARS,
@@ -48,10 +49,8 @@ _DOC_SUFFIXES = {
 
 #: 扫描时跳过的噪音目录（这些目录里的文件不是用户的"资源"，占了配额会让
 #: 真正的文档被挤出清单——实测 .temp 里的脚本能吃掉整个扫描预算）。
-_SKIP_DIR_PARTS = {
-    ".trash", ".temp", "__pycache__", "node_modules", ".git", "venv",
-    ".venv", "site-packages", ".ipynb_checkpoints",
-}
+#: 口径与巡检面共用同一份定义，避免两边一个把 .trash 当资源、另一个不当。
+_SKIP_DIR_PARTS = NOISE_DIR_PARTS
 
 #: 文档与文本各自的扫描配额。文档单独配额，保证"看得见自己的文档"。
 _DOC_QUOTA = 20
