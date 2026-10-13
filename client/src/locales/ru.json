@@ -2059,9 +2059,13 @@
     "dimAI": "Создано ИИ",
     "dimSession": "По сессиям",
     "dimDate": "По дате",
+    "dimNone": "Без группировки",
+    "dimSourceLabel": "Источник:",
+    "dimGroupLabel": "Группировка:",
+    "dimViewLabel": "Вид:",
     "aiGenerated": "Создано ИИ",
     "sessionGroup": "Сессия",
-    "undated": "Без даты",
-    "dimLabel": "Вид:"
+    "noSession": "Без сессии",
+    "undated": "Без даты"
   }
 }

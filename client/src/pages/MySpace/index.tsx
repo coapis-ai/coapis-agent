@@ -105,9 +105,12 @@ const MySpacePage: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [fileTypeFilter, setFileTypeFilter] = useState<string>('all');
-  // 五维筛选（设计 §1.3-C）：全部 / 我上传的 / AI 生成的 / 按会话 / 按日期
-  // 来源与会话归属一律以台账为准，不靠目录约定猜。
+  // 来源（全部/我上传的/AI 生成的）与分组视图（不分组/按会话/按日期）是**正交的
+  // 两个维度**，各自一个控件。以前五个值挤在同一个 Segmented 里：选了"按会话
+  // 分组"就把来源筛选顶掉了，选"AI 生成"又会把分组顶掉——互斥语义被塞进同一个
+  // state，用户看到的是"筛选器互相打架"。
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [groupMode, setGroupMode] = useState<'none' | 'session' | 'date'>('none');
   const [ledger, setLedger] = useState<Record<string, any>>({});
   const [usage, setUsage] = useState<{ usage_mb: number; limit_mb: number; usage_percent: number } | null>(null);
   const [renameModal, setRenameModal] = useState<{ visible: boolean; item: any; value: string }>({
@@ -196,18 +199,22 @@ const MySpacePage: React.FC = () => {
 
   // 台账一次拉全（分页到底），建 path -> 记录 的索引。
   // 台账是来源/会话归属的唯一权威，拉不到就退化为「全部」视图，不弹错误。
+  // 分页步长必须 ≤ 后端契约上限（/records 的 limit 是 le=100）：超了整页 422，
+  // 台账索引为空 → 来源筛选 / ✨ / 按会话分组 全部静默失效。
   const loadLedger = useCallback(async () => {
     try {
       const map: Record<string, any> = {};
       let offset = 0;
-      for (let i = 0; i < 20; i++) {
-        const res: any = await api.get(`${FILES_API}/records?limit=200&offset=${offset}`);
-        for (const r of res.items ?? []) {
+      const PAGE = 100;
+      for (let i = 0; i < 30; i++) {
+        const res: any = await api.get(`${FILES_API}/records?limit=${PAGE}&offset=${offset}`);
+        const got = res.items ?? [];
+        for (const r of got) {
           const key = String(r.file_path ?? '').replace(/^\/+/, '');
           if (key) map[key] = r;
         }
-        offset += 200;
-        if (offset >= (res.total ?? 0)) break;
+        offset += PAGE;
+        if (got.length < PAGE || offset >= (res.total ?? 0)) break;
       }
       setLedger(map);
     } catch {
@@ -613,8 +620,9 @@ const MySpacePage: React.FC = () => {
   });
 
   let grouped: any[] = sourceFiltered;
-  if (sourceFilter === 'session') {
+  if (groupMode === 'session') {
     const withChat = sourceFiltered.filter((i: any) => ledgerMeta(i)?.chat_id);
+    const noChat = sourceFiltered.filter((i: any) => !ledgerMeta(i)?.chat_id);
     const sorted = [...withChat].sort((a, b) =>
       String(ledgerMeta(a)!.chat_id).localeCompare(String(ledgerMeta(b)!.chat_id)),
     );
@@ -623,21 +631,28 @@ const MySpacePage: React.FC = () => {
       (i) => String(ledgerMeta(i)!.chat_id),
       (i) => ledgerMeta(i)?.title || t('myspace.sessionGroup', '会话'),
     );
-  } else if (sourceFilter === 'date') {
+    // 没有台账会话归属的文件不能凭空消失，单独一组兜住
+    if (noChat.length) {
+      grouped = grouped.concat(
+        buildGrouped(noChat, () => '__no_chat__', () => t('myspace.noSession', '无会话归属')),
+      );
+    }
+  } else if (groupMode === 'date') {
+    const dateLabel = (i: any) => {
+      const ts = ledgerMeta(i)?.created_at;
+      if (!ts) return t('myspace.undated', '未记录日期');
+      // en-CA 的日期顺序就是 ISO 的 年-月-日，固定时区保证分组按东八区日历归天
+      return new Intl.DateTimeFormat('en-CA', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        timeZone: 'Asia/Shanghai',
+      }).format(new Date(ts * 1000));
+    };
     const sorted = [...sourceFiltered].sort(
       (a, b) => (ledgerMeta(b)?.created_at ?? 0) - (ledgerMeta(a)?.created_at ?? 0),
     );
-    grouped = buildGrouped(
-      sorted,
-      (i) => {
-        const ts = ledgerMeta(i)?.created_at;
-        return ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : t('myspace.undated', '未记录日期');
-      },
-      (i) => {
-        const ts = ledgerMeta(i)?.created_at;
-        return ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : t('myspace.undated', '未记录日期');
-      },
-    );
+    grouped = buildGrouped(sorted, dateLabel, dateLabel);
   }
 
   const filteredItems = grouped.filter((item: any) => {
@@ -743,9 +758,9 @@ const MySpacePage: React.FC = () => {
           <Select.Option value="texts">{t('myspace.textFiles')}</Select.Option>
         </Select>
 
-        {/* 五维筛选（设计 §1.3-C）：前 3 项是来源过滤，后 2 项是视图模式 */}
+        {/* 来源维度（设计 §1.3-C）：只筛来源，不再兼职分组 */}
         <span style={{ fontSize: 12, color: 'var(--color-text-secondary, #888)' }}>
-          {t('myspace.dimLabel', '视图：')}
+          {t('myspace.dimSourceLabel', '来源：')}
         </span>
         <Segmented
           size="small"
@@ -755,8 +770,21 @@ const MySpacePage: React.FC = () => {
             { value: 'all', label: t('myspace.dimAll', '全部') },
             { value: 'upload', label: t('myspace.dimUploaded', '我手动上传') },
             { value: 'ai', label: t('myspace.dimAI', 'AI 生成') },
-            { value: 'session', label: t('myspace.dimSession', '按会话分组') },
-            { value: 'date', label: t('myspace.dimDate', '按日期排序') },
+          ]}
+        />
+
+        {/* 分组维度：与来源正交，两者可同时生效 */}
+        <span style={{ fontSize: 12, color: 'var(--color-text-secondary, #888)' }}>
+          {t('myspace.dimGroupLabel', '分组：')}
+        </span>
+        <Segmented
+          size="small"
+          value={groupMode}
+          onChange={(v) => setGroupMode(String(v) as 'none' | 'session' | 'date')}
+          options={[
+            { value: 'none', label: t('myspace.dimNone', '不分组') },
+            { value: 'session', label: t('myspace.dimSession', '按会话') },
+            { value: 'date', label: t('myspace.dimDate', '按日期') },
           ]}
         />
 
@@ -785,25 +813,19 @@ const MySpacePage: React.FC = () => {
           </Tooltip>
         )}
         
-        {/* 视图切换 */}
-        <Space>
-          <Tooltip title={t('myspace.listView')}>
-            <Button
-              type={viewMode === 'list' ? 'primary' : 'text'}
-              icon={<UnorderedListOutlined />}
-              size="small"
-              onClick={() => setViewMode('list')}
-            />
-          </Tooltip>
-          <Tooltip title={t('myspace.gridView')}>
-            <Button
-              type={viewMode === 'grid' ? 'primary' : 'text'}
-              icon={<AppstoreOutlined />}
-              size="small"
-              onClick={() => setViewMode('grid')}
-            />
-          </Tooltip>
-        </Space>
+        {/* 视图维度：卡片 / 列表 */}
+        <span style={{ fontSize: 12, color: 'var(--color-text-secondary, #888)' }}>
+          {t('myspace.dimViewLabel', '视图：')}
+        </span>
+        <Segmented
+          size="small"
+          value={viewMode}
+          onChange={(v) => setViewMode(String(v) as 'list' | 'grid')}
+          options={[
+            { value: 'grid', label: <AppstoreOutlined /> },
+            { value: 'list', label: <UnorderedListOutlined /> },
+          ]}
+        />
 
         {/* 本地访问方式 */}
         <Divider type="vertical" style={{ margin: '0 8px' }} />
@@ -1026,7 +1048,14 @@ const MySpacePage: React.FC = () => {
                   }}
                 >
                   <div style={{ fontSize: 36, marginBottom: 8 }}>{getFileIcon(item)}</div>
-                  <Text ellipsis style={{ display: 'block', fontSize: 13 }}>{item.name}</Text>
+                  <Text ellipsis style={{ display: 'block', fontSize: 13 }}>
+                    {item.name}
+                    {isAI(item) && (
+                      <Tooltip title={t('myspace.aiGenerated', 'AI 生成')}>
+                        <span style={{ marginLeft: 4, color: '#736dff' }}>✨</span>
+                      </Tooltip>
+                    )}
+                  </Text>
                   {item.type === 'file' && <Text type="secondary" style={{ fontSize: 11 }}>{formatSize(item.size)}</Text>}
                   
                   {/* Hover 操作遮罩层 - 按钮放在底部 */}

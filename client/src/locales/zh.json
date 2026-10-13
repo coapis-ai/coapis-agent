@@ -2687,12 +2687,16 @@
     "dimAll": "全部",
     "dimUploaded": "我手动上传",
     "dimAI": "AI 生成",
-    "dimSession": "按会话分组",
-    "dimDate": "按日期排序",
+    "dimSession": "按会话",
+    "dimDate": "按日期",
+    "dimNone": "不分组",
+    "dimSourceLabel": "来源：",
+    "dimGroupLabel": "分组：",
+    "dimViewLabel": "视图：",
     "aiGenerated": "AI 生成",
     "sessionGroup": "会话",
-    "undated": "未记录日期",
-    "dimLabel": "视图："
+    "noSession": "无会话归属",
+    "undated": "未记录日期"
   },
   "monitoring": {
     "title": "系统监控",

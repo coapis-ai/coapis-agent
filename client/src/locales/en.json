@@ -2636,12 +2636,16 @@
     "dimAll": "All",
     "dimUploaded": "My uploads",
     "dimAI": "AI generated",
-    "dimSession": "Group by session",
-    "dimDate": "Sort by date",
+    "dimSession": "By session",
+    "dimDate": "By date",
+    "dimNone": "No grouping",
+    "dimSourceLabel": "Source:",
+    "dimGroupLabel": "Group:",
+    "dimViewLabel": "View:",
     "aiGenerated": "AI-generated",
     "sessionGroup": "Session",
-    "undated": "Undated",
-    "dimLabel": "View:"
+    "noSession": "No session",
+    "undated": "Undated"
   },
   "monitoring": {
     "title": "System Monitoring",

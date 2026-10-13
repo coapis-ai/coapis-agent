@@ -2042,11 +2042,15 @@
     "dimAll": "すべて",
     "dimUploaded": "自分のアップロード",
     "dimAI": "AI生成",
-    "dimSession": "セッション別",
-    "dimDate": "日付順",
+    "dimSession": "セッション",
+    "dimDate": "日付",
+    "dimNone": "グループ化なし",
+    "dimSourceLabel": "ソース：",
+    "dimGroupLabel": "グループ化：",
+    "dimViewLabel": "表示：",
     "aiGenerated": "AI生成",
     "sessionGroup": "会話",
-    "undated": "日付なし",
-    "dimLabel": "表示："
+    "noSession": "セッションなし",
+    "undated": "日付なし"
   }
 }
