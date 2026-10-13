@@ -51,14 +51,15 @@ jobs:
           # greenlet 由 sqlalchemy[asyncio] 带入，tqdm 已在 pyproject 核心声明
           pip install -c server/constraints.txt -e "./server[dev]"
 
-      # 必须从仓库根目录跑：server/tests/unit/test_session_execution 用
-      # `from server.coapis...` 导入，靠命名空间包解析（server/ 无 __init__.py）
+      # 必须从仓库根目录跑：server/tests 里部分用例用 `from server.coapis...`
+      # 导入，靠命名空间包解析（server/ 无 __init__.py）
       #
-      # 只跑不依赖外部服务的单元测试。tests/ 根目录下的脚本式测试（模块级 sys.exit、
-      # 打硬编码端口 4103/8000 的 E2E 脚本）不是 pytest 测试，会在收集阶段崩掉整轮，
-      # 因此不纳入 CI。
+      # 只跑不依赖外部服务的测试（unit + 外部认证 + foundation + 插件注册 +
+      # 评测体系 + 计划分级器，全部走 sqlite/tmp_path）。仓库根 tests/ 下的
+      # 脚本式测试（模块级 sys.exit、打硬编码端口 4103/8000 的 E2E 探针）不是
+      # pytest 测试，会在收集阶段崩掉整轮，因此不纳入 CI。
       - name: Run unit tests
-        run: python -m pytest server/tests/unit server/tests/test_external_auth.py server/tests/test_foundation.py server/tests/test_plugin_registry_extension.py -v --cov=server/coapis --cov-report=xml
+        run: python -m pytest server/tests/unit server/tests/agent_eval server/tests/plan_exec server/tests/test_external_auth.py server/tests/test_foundation.py server/tests/test_plugin_registry_extension.py -v --cov=server/coapis --cov-report=xml
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
