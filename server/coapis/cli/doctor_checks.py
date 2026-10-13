@@ -448,6 +448,32 @@ def _playwright_chromium_bundle_present() -> bool:
     return False
 
 
+def dependency_notes(cfg: Config | None) -> list[str]:
+    """Skill/runtime library readiness (read-only hints).
+
+    Skills declare ``requirements.txt`` under ``workspaces/*/skills/``; a
+    missing library only surfaces when the skill is invoked, so report it
+    up front. Same check the server runs at startup.
+    """
+    from ..constant import WORKSPACES_DIR
+    from ..utils.deps_check import check_dependencies, format_warnings
+
+    missing = check_dependencies(WORKSPACES_DIR)
+    if not missing:
+        return []
+    lines = format_warnings(missing)
+    notes = [
+        f"{pkg} is missing — {', '.join(sorted(set(reasons)))}. Install with: "
+        f"'{sys.executable}' -m pip install {pkg}"
+        for pkg, reasons in sorted(missing.items())
+    ]
+    notes.append(
+        f"dependency self-check: {len(lines)} package(s) missing "
+        "(set COAPIS_AUTO_INSTALL_DEPS=1 to auto-install at startup)",
+    )
+    return notes
+
+
 def browser_automation_notes(cfg: Config | None) -> list[str]:
     """``browser_use`` / Playwright readiness (read-only hints).
 

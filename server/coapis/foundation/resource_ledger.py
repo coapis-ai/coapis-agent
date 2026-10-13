@@ -388,10 +388,16 @@ class ResourceLedger:
         owner_id: str,
         kind: Optional[str] = None,
         status: Optional[str] = None,
+        chat_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
-        """Resources with derived ref counts. Never raises (returns [])."""
+        """Resources with derived ref counts. Never raises (returns []).
+
+        ``chat_id`` filters through ``resource_refs`` (the only source of
+        reference truth) instead of a denormalised column: a resource shows up
+        for a chat only if that chat actually references it.
+        """
         try:
             with get_session() as s:
                 stmt = select(Resource).where(
@@ -403,6 +409,13 @@ class ResourceLedger:
                     stmt = stmt.where(Resource.kind == kind)
                 if status:
                     stmt = stmt.where(Resource.status == status)
+                if chat_id:
+                    ref_keys = (
+                        select(ResourceRef.resource_key)
+                        .where(ResourceRef.referrer_kind == "chat")
+                        .where(ResourceRef.referrer_id == chat_id)
+                    )
+                    stmt = stmt.where(Resource.resource_key.in_(ref_keys))
                 stmt = stmt.order_by(Resource.last_seen_at.desc()).limit(limit).offset(offset)
                 rows = s.execute(stmt).scalars().all()
                 out = []
@@ -414,6 +427,44 @@ class ResourceLedger:
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("resource ledger list failed (ignored): %s", exc)
             return []
+
+    def count_resources(
+        self,
+        *,
+        owner_scope: str,
+        owner_id: str,
+        kind: Optional[str] = None,
+        status: Optional[str] = None,
+        chat_id: Optional[str] = None,
+    ) -> int:
+        """Total matching rows (pre-pagination). Filters mirror ``list_resources``.
+
+        The paginated read面 returns ``limit`` rows; the UI needs the unpaginated
+        total to render "还有 N 项未加载". If the two filter sets ever diverge the
+        tail row lies, so this method is deliberately a copy of the same clauses.
+        """
+        try:
+            with get_session() as s:
+                stmt = select(func.count()).select_from(Resource).where(
+                    Resource.owner_scope == owner_scope
+                ).where(Resource.owner_id == owner_id).where(
+                    Resource.deleted_at.is_(None)
+                )
+                if kind:
+                    stmt = stmt.where(Resource.kind == kind)
+                if status:
+                    stmt = stmt.where(Resource.status == status)
+                if chat_id:
+                    ref_keys = (
+                        select(ResourceRef.resource_key)
+                        .where(ResourceRef.referrer_kind == "chat")
+                        .where(ResourceRef.referrer_id == chat_id)
+                    )
+                    stmt = stmt.where(Resource.resource_key.in_(ref_keys))
+                return int(s.execute(stmt).scalar() or 0)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("resource ledger count failed (ignored): %s", exc)
+            return 0
 
     def stats(self, *, owner_scope: str, owner_id: str) -> dict:
         """Status/kind breakdown plus orphan and FS-missing counts."""

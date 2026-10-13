@@ -10,6 +10,12 @@
   flex-shrink: 0;
 }
 
+/* 独立层面板：二级及以后的级联列，脱离宿主容器单独成层 */
+.floatColumn {
+  background: var(--color-bg-container, #fff);
+  box-sizing: border-box;
+}
+
 /* 细滚动条：列式菜单里默认滚动条太粗，视觉压迫 */
 .cascadeColumn::-webkit-scrollbar {
   width: 6px;

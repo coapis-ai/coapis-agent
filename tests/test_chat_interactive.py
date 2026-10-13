@@ -15,7 +15,7 @@ import os
 import subprocess
 from datetime import datetime
 
-BASE_URL = "http://localhost:4103"
+BASE_URL = os.environ.get("COAPIS_TEST_BASE_URL", "http://localhost:4300")
 TOKEN = None
 RESULTS = []
 

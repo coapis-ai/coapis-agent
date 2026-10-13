@@ -1,6 +1,6 @@
 ---
 name: browser-use
-description: Use Browser-Use for complex web automation (multi-step login, form filling, posting, data scraping). Use this when the built-in browser tool (snapshot→act) falls short — it's a dedicated browser AI agent that completes the entire workflow autonomously from a single task prompt. Triggers: browser-use, web automation, auto login, auto form fill, auto posting, web control, complex web operations.
+description: "Use Browser-Use for complex web automation (multi-step login, form filling, posting, data scraping). Use this when the built-in browser tool (snapshot→act) falls short — it's a dedicated browser AI agent that completes the entire workflow autonomously from a single task prompt. Triggers: browser-use, web automation, auto login, auto form fill, auto posting, web control, complex web operations."
 metadata:
   coapis:
     priority: on-demand

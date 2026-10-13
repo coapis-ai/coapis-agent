@@ -4,7 +4,9 @@
 import requests
 import json
 
-BASE_URL = "http://localhost:8000"
+import os
+
+BASE_URL = os.environ.get("COAPIS_TEST_BASE_URL", "http://localhost:4300")
 
 def test_scene_session():
     """测试场景会话延续"""

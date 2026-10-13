@@ -47,6 +47,7 @@ from .doctor_checks import (
     active_llm_local_failure_hint,
     api_target_mismatch_note,
     browser_automation_notes,
+    dependency_notes,
     check_agent_json_profiles,
     check_agent_profile_workspaces,
     check_agent_workspace_writable,
@@ -572,6 +573,17 @@ def run_doctor_checks(
                 click.style("OK", fg="green") + " — no skill layout warnings",
             )
 
+        click.echo("\n=== Dependencies (skill/runtime libraries) ===")
+        dep_notes = dependency_notes(cfg)
+        if dep_notes:
+            for line in dep_notes:
+                click.echo(click.style("Note:", fg="yellow") + f" {line}")
+        else:
+            click.echo(
+                click.style("OK", fg="green")
+                + " — all skill-declared libraries are present",
+            )
+
         click.echo("\n=== Browser (browser_use / Playwright) ===")
         br_notes = browser_automation_notes(cfg)
         if br_notes:
@@ -659,6 +671,17 @@ def run_doctor_checks(
             + _skipped_when_cfg_invalid
             + ". Fix the config file, then re-run `coapis doctor`.",
         )
+        click.echo("\n=== Dependencies (skill/runtime libraries) ===")
+        dep_notes = dependency_notes(cfg)
+        if dep_notes:
+            for line in dep_notes:
+                click.echo(click.style("Note:", fg="yellow") + f" {line}")
+        else:
+            click.echo(
+                click.style("OK", fg="green")
+                + " — all skill-declared libraries are present",
+            )
+
         click.echo("\n=== Browser (browser_use / Playwright) ===")
         br_skip = browser_automation_notes(None)
         if br_skip:

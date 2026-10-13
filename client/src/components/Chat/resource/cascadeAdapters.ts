@@ -7,7 +7,7 @@ import type { CascadeNode } from "@/components/CascadeMenu/CascadeMenu";
  * CascadeMenu 不认识「文件」「知识库」，它只调用 `load(node)`。本文件把
  * 三个真实数据源映射成 CascadeNode，并维护缓存：
  *
- * - 本会话文件：GET /myfiles/records?chat_id=<uuid>
+ * - 本会话文件：GET /myfiles/resources?chat_id=<uuid>（资源契约，refs 表反查）
  * - 我的空间：  GET /myfiles/list?path=<dir>&category=files
  * - 关联知识：  GET /knowledge/bases → GET /knowledge/bases/{id}/documents
  *
@@ -36,14 +36,6 @@ function basename(p: string): string {
   const i = p.lastIndexOf("/");
   return i >= 0 ? p.slice(i + 1) : p;
 }
-
-const SOURCE_LABEL: Record<string, string> = {
-  upload: "上传",
-  write_file: "生成",
-  edit_file: "编辑",
-  append_file: "追加",
-  reconcile: "对账",
-};
 
 interface ListItems {
   items?: Array<{
@@ -99,19 +91,24 @@ async function loadMySpaceDir(dir: string): Promise<CascadeNode[]> {
 }
 
 /**
- * 台账分页拉取：后端 limit 上限 100（>100 会被校验拒绝），用 offset 翻页。
- * 返回原始行 + 后端 total，供调用方折算「还有 N 项未加载」的尾巴计数。
+ * 资源清单分页拉取：走资源契约 `GET /myfiles/resources`（每资源一行、已去重、
+ * 带 status 与引用者计数），不再读 `file_records` 事件流。
+ *
+ * 后端 limit 上限 200，用 offset 翻页（每页 100，最多 5 页）。`total` 是分页前
+ * 总数，供调用方折算「还有 N 项未加载」的尾巴行 —— 没有 total 被截断的记录会
+ * 静默消失。
  */
-async function fetchRecords(
-  query: string,
+async function fetchResources(
+  chatId?: string,
   maxPages = 5,
 ): Promise<{ rows: Array<Record<string, unknown>>; total: number }> {
   const PAGE = 100;
   const rows: Array<Record<string, unknown>> = [];
   let total = 0;
   for (let p = 0; p < maxPages; p++) {
+    const tail = chatId ? `&chat_id=${encodeURIComponent(chatId)}` : "";
     const resp = (await api.get(
-      `/myfiles/records?limit=${PAGE}&offset=${p * PAGE}${query}`,
+      `/myfiles/resources?limit=${PAGE}&offset=${p * PAGE}${tail}`,
     )) as { items?: Array<Record<string, unknown>>; total?: number };
     const items = resp?.items ?? [];
     rows.push(...items);
@@ -119,6 +116,32 @@ async function fetchRecords(
     if (items.length < PAGE || rows.length >= total) break;
   }
   return { rows, total };
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  draft: "草稿",
+  official: "正式",
+  orphan: "孤儿",
+  archived: "归档",
+};
+
+/** 资源行 → 级联节点。key 用后端全路径，与 selectedFiles.path 同源。 */
+function resourceNode(r: Record<string, unknown>): CascadeNode {
+  const p = String(r.path ?? "");
+  const refs = Number(r.ref_count ?? 0);
+  const parts = [
+    STATUS_LABEL[String(r.status ?? "")] ?? String(r.status ?? ""),
+    refs > 1 ? `引用${refs}处` : refs === 1 ? "本会话引用" : "未引用",
+    sizeLabel(Number(r.size_bytes ?? 0)),
+  ].filter(Boolean);
+  return {
+    key: p,
+    name: String(r.title ?? basename(p)),
+    kind: "item",
+    usage: "reference",
+    meta: parts.join(" · "),
+    payload: { path: p, type: "file", size: Number(r.size_bytes ?? 0) },
+  };
 }
 
 /** 把后端截断的差额折算成 CascadeMenu 的 more 计数节点（渲染成尾巴行） */
@@ -143,25 +166,15 @@ async function loadSession(chatId?: string): Promise<CascadeNode[]> {
   const ck = `session:${chatId}`;
   const cached = cache.get(ck);
   if (cached) return cached;
-  // 台账 limit 上限是 100（>100 会被后端校验拒绝并返回 VALIDATION_ERROR），
-  // 所以用 offset 分页拉，最多 5 页（500 条），并保留 total 用于尾巴计数。
-  const { rows, total } = await fetchRecords(
-    `&chat_id=${encodeURIComponent(chatId)}`,
-  );
+  // 会话文件 = 资源契约里被本 chat 引用过的那一行（refs 表反查，非冗余列）。
+  const { rows, total } = await fetchResources(chatId);
   const seen = new Set<string>();
   const nodes: CascadeNode[] = [];
   for (const r of rows) {
-    const p = String(r.file_path ?? "");
+    const p = String(r.path ?? "");
     if (!p || seen.has(p)) continue;
     seen.add(p);
-    nodes.push({
-      key: p,
-      name: basename(p),
-      kind: "item",
-      usage: "reference",
-      meta: `${SOURCE_LABEL[String(r.source ?? "other")] ?? String(r.source ?? "")} · ${sizeLabel(Number(r.size_bytes ?? 0))}`,
-      payload: { path: p, type: "file", size: Number(r.size_bytes ?? 0) },
-    });
+    nodes.push(resourceNode(r));
   }
   appendMore(nodes, ck, total, rows.length);
   cache.set(ck, nodes);
@@ -218,26 +231,27 @@ async function loadKnowledgeDocs(kbId: string): Promise<CascadeNode[]> {
 }
 
 /**
- * 跨目录检索：走台账（/myfiles/records，按文件去重的最新写入）。
- * 后端无服务端 search 参数，所以分页拉台账（最多 5 页 = 500 条）后本地过滤；
+ * 跨目录检索：走资源契约（/myfiles/resources，每资源一行）。
+ * 后端无服务端 search 参数，所以分页拉清单（最多 5 页 = 500 条）后本地过滤；
  * 超出抓取窗口的记录以 more 计数节点呈现为尾巴行，不静默吞掉。
+ * 检索场景下 meta 优先展示所在目录（跨目录找文件时目录比状态更有用）。
  */
 async function loadSearch(kw: string): Promise<CascadeNode[]> {
   const ck = `search:${kw}`;
   const cached = cache.get(ck);
   if (cached) return cached;
-  const { rows, total } = await fetchRecords("");
+  const { rows, total } = await fetchResources();
   const lower = kw.toLowerCase();
   const seen = new Set<string>();
   const nodes: CascadeNode[] = [];
   for (const r of rows) {
-    const p = String(r.file_path ?? "");
+    const p = String(r.path ?? "");
     if (!p || seen.has(p)) continue;
     if (!p.toLowerCase().includes(lower)) continue;
     seen.add(p);
     nodes.push({
       key: p,
-      name: basename(p),
+      name: String(r.title ?? basename(p)),
       kind: "item",
       usage: "reference",
       meta: p.slice(0, p.lastIndexOf("/") >= 0 ? p.lastIndexOf("/") : p.length),

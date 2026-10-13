@@ -225,6 +225,8 @@ export function ModelChips() {
           }
         >
           <span className={styles.chipIcon}>{meta.icon}</span>
+          {/* ✨ = 未手动选择，走系统/智能体默认（设计第四区：自动态可见） */}
+          {!slot.model && <span className={styles.chipAuto}>✨</span>}
           <span className={styles.chipValue}>
             {displayName ?? t("chat.modelChips.systemDefault", "系统默认")}
           </span>

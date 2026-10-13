@@ -462,7 +462,12 @@ class DefaultModelSlot(BaseModel):
 
     provider_id: str = Field(..., description="Provider ID")
     model_id: str = Field(..., description="Model ID")
-    model_type: ModelType = Field(..., description="Model type")
+    # 槽位名（chat/embedding/...）本身就是权威的类型，所以这里刻意可选：
+    # 历史落盘文件（to_dict 曾漏写 model_type）必须能读回来。
+    # 消费方一律按槽位名取（get_by_type），不读这个字段。
+    model_type: ModelType = Field(
+        default="chat", description="Model type（槽位名的冗余副本，可选以兼容旧文件）"
+    )
 
 
 class DefaultModelsConfig(BaseModel):
@@ -499,8 +504,12 @@ class DefaultModelsConfig(BaseModel):
         for field in ["chat", "embedding", "rerank", "audio", "vision"]:
             slot = getattr(self, field)
             if slot:
+                # model_type 必须写出去：to_dict 曾漏掉它，而 DefaultModelSlot
+                # 把它声明为必填，于是自己写出去的文件自己读不回来——每次启动
+                # 都报 "Failed to load default models" 并把默认模型重置成空。
                 result[field] = {
                     "provider_id": slot.provider_id,
                     "model_id": slot.model_id,
+                    "model_type": slot.model_type,
                 }
         return result

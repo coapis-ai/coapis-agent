@@ -2052,5 +2052,16 @@
     "filter": "Фильтр…",
     "empty": "Здесь пусто",
     "more": "…ещё {{n}}"
+  },
+  "myspace": {
+    "dimAll": "Все",
+    "dimUploaded": "Мои загрузки",
+    "dimAI": "Создано ИИ",
+    "dimSession": "По сессиям",
+    "dimDate": "По дате",
+    "aiGenerated": "Создано ИИ",
+    "sessionGroup": "Сессия",
+    "undated": "Без даты",
+    "dimLabel": "Вид:"
   }
 }

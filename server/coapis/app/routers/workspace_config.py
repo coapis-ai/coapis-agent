@@ -565,9 +565,8 @@ async def update_running_config(
 ) -> Dict[str, Any]:
     """Update agent running configuration."""
     from coapis.config.config import load_agent_config, save_agent_config
-    from coapis.agents.workspace import get_request_agent_id
-    
-    agent_id = get_request_agent_id(request)
+
+    agent_id = _get_selected_agent_id(request)
     if not agent_id:
         raise HTTPException(status_code=400, detail="Agent ID not found")
     

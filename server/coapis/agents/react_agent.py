@@ -524,9 +524,18 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             CompressionConfig if compression is enabled, None otherwise.
         """
         try:
-            from agentscope.agent._react_agent import (
-                _ReActAgentWithToolkit as ReActAgentWithToolkit,
-            )
+            try:
+                from agentscope.agent._react_agent import (
+                    _ReActAgentWithToolkit as ReActAgentWithToolkit,
+                )
+            except ImportError:
+                # agentscope 1.0.21 已无 _ReActAgentWithToolkit（旧私有类名）。
+                # 现版 ReActAgent 就是带 toolkit 的基类，用兜底导入；
+                # 否则整个压缩配置被静默禁用 → 上下文无限增长 →
+                # MODEL_CONTEXT_LENGTH_EXCEEDED。
+                from agentscope.agent import (
+                    ReActAgent as ReActAgentWithToolkit,
+                )
 
             CompressionConfig = ReActAgentWithToolkit.CompressionConfig
 
@@ -750,7 +759,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             trigger_keywords = self._get_skill_trigger_keywords(skill_dir)
             legacy_triggers = self._get_skill_triggers(
                 skill_dir, getattr(self, "_workspace_dir", None),
-            )
+            ) or []
             skill_meta_list.append({
                 "name": skill_name,
                 "dir": str(skill_dir),
@@ -811,7 +820,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             # (NOT _get_skill_triggers which mixes in patterns/hints)
             trigger_keywords = self._get_skill_trigger_keywords(skill_dir)
             # Keep legacy triggers for _load_on_demand_skills Phase 2 fallback
-            legacy_triggers = self._get_skill_triggers(skill_dir, getattr(self, '_workspace_dir', None))
+            legacy_triggers = self._get_skill_triggers(skill_dir, getattr(self, '_workspace_dir', None)) or []
             desc = self._get_skill_summary(skill_dir)
 
             # Build metadata for SkillSelector (clean keywords only)
@@ -855,7 +864,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 continue
             legacy_triggers = self._get_skill_triggers(
                 skill_dir, getattr(self, "_workspace_dir", None),
-            )
+            ) or []
             self._on_demand_skills[skill_name] = (skill_dir, legacy_triggers)
             self._register_skill_summary(toolkit, skill_dir)
 
@@ -1236,6 +1245,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 seen.add(low)
                 keywords.append(low)
 
+        return keywords
 
     def _scan_and_register_skill(
         self,
@@ -1341,7 +1351,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             _intent_summaries[skill_name] = summary
             register_on_demand_skills({
                 skill_name: {
-                    "trigger_keywords": list(self._on_demand_skills[skill_name][1]),
+                    "trigger_keywords": list(self._on_demand_skills[skill_name][1] or []),
                     "description": summary,
                 }
             })

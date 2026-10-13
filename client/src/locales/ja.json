@@ -2037,5 +2037,16 @@
     "filter": "絞り込み…",
     "empty": "ここに項目はありません",
     "more": "…他 {{n}} 件"
+  },
+  "myspace": {
+    "dimAll": "すべて",
+    "dimUploaded": "自分のアップロード",
+    "dimAI": "AI生成",
+    "dimSession": "セッション別",
+    "dimDate": "日付順",
+    "aiGenerated": "AI生成",
+    "sessionGroup": "会話",
+    "undated": "日付なし",
+    "dimLabel": "表示："
   }
 }

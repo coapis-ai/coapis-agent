@@ -160,6 +160,10 @@ FALLBACK_DANGEROUS_PATTERNS: List[str] = [
     r"chmod\s+[0-7]*[7][0-7]*\s+(/|/etc/|/usr/|/bin/|/sbin/)",
     # P0: 禁止解释器内联执行（-c, -e, --eval）
     r"(python3?|node|ruby|perl|php)\s+(-c|--eval|-e)\s",
+    # P0: 禁止交互式 REPL —— 裸解释器（无参数）就是任意代码执行入口；
+    #     -i/--interactive 跑完脚本后仍会进 REPL，同样放行任意代码。
+    r"(python3?|node|ruby|perl|php)\s*$",
+    r"(python3?|node|ruby|perl|php)\s+(-i|--interactive)\b",
     # 禁止通过解释器模块执行命令
     r"python3?\s+-m\s+(subprocess|os|pty|shutil)",
     # 禁止通过 heredoc 绕过

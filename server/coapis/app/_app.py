@@ -353,6 +353,13 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
     if not _init_ok:
         logger.error("System initialization check failed — some features may not work")
 
+    # Skill/runtime dependency self-check: skills declare requirements.txt
+    # (e.g. openpyxl, python-pptx) and nothing previously verified them, so a
+    # listed skill can fail at invocation time because its library is absent.
+    from ..utils.deps_check import run_startup_dependency_check
+
+    run_startup_dependency_check(WORKSPACES_DIR)
+
     # Create core managers (instant — no I/O)
     logger.debug("Initializing MultiAgentManager...")
     multi_agent_manager = MultiAgentManager(base_dir=WORKSPACES_DIR)

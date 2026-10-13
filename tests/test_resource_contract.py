@@ -264,6 +264,28 @@ def main():
           ("session", "console:bob") in roles and ("chat", "chat-77") in roles,
           str(roles))
 
+    # ── R3 消费面：chat_id 过滤 + 分页前总数（前端尾巴行的正确性依赖它） ──
+    only = rl.list_resources(owner_scope="user", owner_id="bob", chat_id="chat-77")
+    check("chat_id 过滤只返回被该会话引用过的资源",
+          len(only) == 1 and only[0]["path"] == "report/late.md",
+          str([r["path"] for r in only]))
+    empty = rl.list_resources(owner_scope="user", owner_id="bob", chat_id="chat-none")
+    check("无引用的 chat_id 返回空（不是全量兜底）", empty == [], str(empty))
+
+    listed_all = rl.list_resources(owner_scope="user", owner_id="bob", limit=500)
+    total_bob = rl.count_resources(owner_scope="user", owner_id="bob")
+    check("count_resources 与 list_resources 过滤集一致（尾巴行不撒谎）",
+          total_bob == len(listed_all),
+          f"count={total_bob} listed={len(listed_all)}")
+    check("count_resources 的 chat 过滤与 list 一致",
+          rl.count_resources(owner_scope="user", owner_id="bob", chat_id="chat-77")
+          == len(only),
+          f"count={rl.count_resources(owner_scope='user', owner_id='bob', chat_id='chat-77')} list={len(only)}")
+    check("分页截断可见：limit=1 只返回 1 行但 total 仍是全量",
+          len(rl.list_resources(owner_scope="user", owner_id="bob", limit=1)) == 1
+          and total_bob > 1,
+          f"total={total_bob}")
+
     # ── 汇总 ─────────────────────────────────────────────────────────
     failed = [r for r in RESULTS if not r[1]]
     print(f"\n总计: {len(RESULTS)} | 通过: {len(RESULTS) - len(failed)} | 失败: {len(failed)}")

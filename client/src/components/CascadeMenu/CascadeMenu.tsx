@@ -68,6 +68,12 @@ export interface CascadeMenuProps {
   rootWidth?: number;
   /** 一级列首行自动展开（搜索态：结果列直接呈现，不需要再点一下） */
   autoOpenRoot?: boolean;
+  /**
+   * 独立层模式（D1/D2/D3 拍板）：一级列留在宿主容器里，二级及以后渲染成
+   * 脱离文档流的浮动面板（position:fixed，锚定在打开它的那一行右侧，越界左翻）。
+   * 宿主容器尺寸恒定 → 弹层不会因新增列而重算位置（修「上蹿下跳」）。
+   */
+  portal?: boolean;
 }
 
 function sizeLabel(n?: number): string {
@@ -88,6 +94,7 @@ export default function CascadeMenu(props: CascadeMenuProps) {
     narrow,
     rootWidth = 200,
     autoOpenRoot,
+    portal,
   } = props;
   const { t } = useTranslation();
 
@@ -99,9 +106,13 @@ export default function CascadeMenu(props: CascadeMenuProps) {
     level: 0,
     index: -1,
   });
+  // 独立层面板的锚点：level（子列下标）→ 打开它的那一行的左右/顶部坐标
+  const [anchors, setAnchors] = useState<Record<number, { left: number; top: number; right: number }>>({});
   // 用 ref 做「已加载」判定，避免 useCallback 依赖 state 造成闭包过期
   const childrenRef = useRef<Record<string, CascadeNode[]>>({});
   const hoverTimer = useRef<number | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const colRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   useEffect(
     () => () => {
@@ -129,8 +140,15 @@ export default function CascadeMenu(props: CascadeMenuProps) {
   );
 
   const openAt = useCallback(
-    (level: number, node: CascadeNode) => {
+    (level: number, node: CascadeNode, rect?: { left: number; top: number; right: number }) => {
       setOpenPath((prev) => [...prev.slice(0, level), node.key]);
+      // 收起比新列更深的层，并同步丢掉它们的锚点，避免残留面板定位到旧坐标
+      setAnchors((prev) => {
+        const next: Record<number, { left: number; top: number; right: number }> = {};
+        for (let i = 1; i <= level; i++) if (prev[i]) next[i] = prev[i];
+        if (rect) next[level + 1] = rect;
+        return next;
+      });
       void ensure(node);
     },
     [ensure],
@@ -146,20 +164,28 @@ export default function CascadeMenu(props: CascadeMenuProps) {
     }
   }, [autoOpenRoot, roots, ensure]);
 
-  const handleEnter = (level: number, node: CascadeNode) => {
-    if (node.kind === "action") return;
-    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-    // hover-intent：200ms 才展开，斜着扫鼠标不会一路炸开子列
-    hoverTimer.current = window.setTimeout(() => openAt(level, node), 200);
+  const rowRect = (e: React.MouseEvent) => {
+    const el = e.currentTarget as HTMLDivElement;
+    const b = el.getBoundingClientRect();
+    return { left: b.left, top: b.top, right: b.right };
   };
 
-  const handleClick = (level: number, node: CascadeNode) => {
+  const handleEnter = (level: number, node: CascadeNode, e: React.MouseEvent) => {
+    if (node.kind === "action") return;
+    // 锚点必须同步取（事件结束后 currentTarget 可能已卸载）
+    const rect = rowRect(e);
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+    // hover-intent：200ms 才展开，斜着扫鼠标不会一路炸开子列
+    hoverTimer.current = window.setTimeout(() => openAt(level, node, rect), 200);
+  };
+
+  const handleClick = (level: number, node: CascadeNode, e: React.MouseEvent) => {
     if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
     if (node.kind === "action") {
       node.onAction?.();
       return;
     }
-    openAt(level, node);
+    openAt(level, node, rowRect(e));
     if (onToggle && node.kind === "item" && node.selectable !== false) {
       // 叶子：点行即勾选/取消（D4：点一下即生效）
       onToggle(node);
@@ -191,7 +217,12 @@ export default function CascadeMenu(props: CascadeMenuProps) {
     } else if (e.key === "ArrowRight") {
       const node = col[focus.index];
       if (node?.kind === "group") {
-        openAt(level, node);
+        // 键盘没有鼠标锚点：用整列右边缘 + 行高估算锚点
+        const b = colRefs.current[level]?.getBoundingClientRect();
+        const rect = b
+          ? { left: b.left, top: b.top + focus.index * 28, right: b.right }
+          : undefined;
+        openAt(level, node, rect);
         setFocus({ level: level + 1, index: 0 });
       }
     } else if (e.key === "ArrowLeft") {
@@ -223,18 +254,51 @@ export default function CascadeMenu(props: CascadeMenuProps) {
       level > 0 && loadingKey === (openPath[level - 1] ?? "");
     const isRoot = level === 0;
 
+    // 独立层：二级及以后脱离文档流，宿主容器尺寸恒定 → 弹层不重算位置
+    const float = !!portal && level > 0 && !narrow;
+    const colW = isRoot ? rootWidth : 220;
+    let style: React.CSSProperties = {
+      width: colW,
+      maxHeight: height,
+      borderRight: float
+        ? "none"
+        : level === visibleCols.length - 1
+          ? "none"
+          : "1px solid var(--color-border-secondary, rgba(0,0,0,0.06))",
+    };
+    if (float) {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const a = anchors[level] ?? (() => {
+        const b = wrapRef.current?.getBoundingClientRect();
+        return b ? { left: b.left, top: b.top, right: b.right } : { left: 0, top: 0, right: 0 };
+      })();
+      // D2：右侧空间不足时左翻，并 clamp 到视口
+      let left = a.right;
+      if (left + colW > vw - 8) left = Math.max(8, a.left - colW);
+      let top = a.top;
+      if (top + height > vh - 8) top = Math.max(8, vh - 8 - height);
+      style = {
+        ...style,
+        position: "fixed",
+        left,
+        top,
+        background: "var(--color-bg-container, #fff)",
+        border: "1px solid var(--color-border-secondary, rgba(0,0,0,0.08))",
+        borderRadius: 8,
+        boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+        zIndex: 1200 + level,
+      };
+    }
+
     return (
       <div
         key={`col-${level}`}
-        className={styles.cascadeColumn}
-        style={{
-          width: isRoot ? rootWidth : 220,
-          maxHeight: height,
-          borderRight:
-            level === visibleCols.length - 1
-              ? "none"
-              : "1px solid var(--color-border-secondary, rgba(0,0,0,0.06))",
+        ref={(el) => {
+          colRefs.current[level] = el;
         }}
+        className={`${styles.cascadeColumn} ${float ? styles.floatColumn : ""}`}
+        style={style}
       >
         {level > 0 && items.length > 8 && (
           <input
@@ -280,9 +344,9 @@ export default function CascadeMenu(props: CascadeMenuProps) {
                 title={node.name}
                 onClick={(e) => {
                   if (!node.bubble) e.stopPropagation();
-                  handleClick(level, node);
+                  handleClick(level, node, e);
                 }}
-                onMouseEnter={() => handleEnter(level, node)}
+                onMouseEnter={(e) => handleEnter(level, node, e)}
               >
                 {selectable ? (
                   <span
@@ -354,6 +418,7 @@ export default function CascadeMenu(props: CascadeMenuProps) {
 
   return (
     <div
+      ref={wrapRef}
       className={styles.cascadeWrap}
       role="menu"
       tabIndex={0}

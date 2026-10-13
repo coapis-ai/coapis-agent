@@ -227,6 +227,9 @@ _COMMAND_PATTERNS: List[Tuple[CommandCategory, str, str]] = [
 
     # CODE EXEC (inline — before script)
     (CommandCategory.CODE_EXEC_INLINE, r"(python3?|node|ruby|perl|php)\s+(-c|--eval|-e)\s", "interpreter inline"),
+    # 交互式 REPL：裸解释器（无参数）与 -i/--interactive 都是任意代码执行入口
+    (CommandCategory.CODE_EXEC_INLINE, r"(python3?|node|ruby|perl|php)\s*$", "interpreter REPL"),
+    (CommandCategory.CODE_EXEC_INLINE, r"(python3?|node|ruby|perl|php)\s+(-i|--interactive)\b", "interpreter interactive flag"),
 
     # CODE EXEC (script — safe)
     (CommandCategory.CODE_EXEC_SCRIPT, r"(python3?|node)\s+\S+\.(py|js)", "script execution"),

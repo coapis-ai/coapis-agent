@@ -700,6 +700,10 @@ async def get_usage(request: Request = None):
 async def list_resources(
     kind: Optional[str] = Query(None, description="按类型过滤: file/db/kb/mcp/web"),
     status: Optional[str] = Query(None, description="按状态过滤: draft/official/orphan/archived"),
+    chat_id: Optional[str] = Query(
+        None,
+        description="按会话过滤：经 resource_refs 反查该会话引用过的资源（不读冗余列）",
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     request: Request = None,
@@ -708,15 +712,26 @@ async def list_resources(
     from ...foundation.resource_ledger import get_resource_ledger
 
     username = get_current_user(request)["username"]
-    items = get_resource_ledger().list_resources(
+    ledger = get_resource_ledger()
+    items = ledger.list_resources(
         owner_scope="user",
         owner_id=username,
         kind=kind,
         status=status,
+        chat_id=chat_id,
         limit=limit,
         offset=offset,
     )
-    return {"items": items, "limit": limit, "offset": offset}
+    # total 是分页前的总数：前端把差额渲染成「还有 N 项未加载」尾巴行，
+    # 缺 total 会让被 limit 截断的记录静默消失。
+    total = ledger.count_resources(
+        owner_scope="user",
+        owner_id=username,
+        kind=kind,
+        status=status,
+        chat_id=chat_id,
+    )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/resources/stats")

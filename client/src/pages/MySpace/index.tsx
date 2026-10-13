@@ -17,6 +17,7 @@ import {
   Tabs,
   Drawer,
   Dropdown,
+  Segmented,
 } from 'antd';
 import type { InputRef } from 'antd';
 import {
@@ -104,6 +105,10 @@ const MySpacePage: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [fileTypeFilter, setFileTypeFilter] = useState<string>('all');
+  // 五维筛选（设计 §1.3-C）：全部 / 我上传的 / AI 生成的 / 按会话 / 按日期
+  // 来源与会话归属一律以台账为准，不靠目录约定猜。
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [ledger, setLedger] = useState<Record<string, any>>({});
   const [usage, setUsage] = useState<{ usage_mb: number; limit_mb: number; usage_percent: number } | null>(null);
   const [renameModal, setRenameModal] = useState<{ visible: boolean; item: any; value: string }>({
     visible: false,
@@ -189,10 +194,32 @@ const MySpacePage: React.FC = () => {
     }
   }, []);
 
+  // 台账一次拉全（分页到底），建 path -> 记录 的索引。
+  // 台账是来源/会话归属的唯一权威，拉不到就退化为「全部」视图，不弹错误。
+  const loadLedger = useCallback(async () => {
+    try {
+      const map: Record<string, any> = {};
+      let offset = 0;
+      for (let i = 0; i < 20; i++) {
+        const res: any = await api.get(`${FILES_API}/records?limit=200&offset=${offset}`);
+        for (const r of res.items ?? []) {
+          const key = String(r.file_path ?? '').replace(/^\/+/, '');
+          if (key) map[key] = r;
+        }
+        offset += 200;
+        if (offset >= (res.total ?? 0)) break;
+      }
+      setLedger(map);
+    } catch {
+      // 台账不可用：筛选维度自动失效，列表照常显示
+    }
+  }, []);
+
   useEffect(() => {
     loadFiles();
     loadUsage();
     loadConfig();
+    loadLedger();
   }, [activeCategory]);
 
   // Tab 切换时重置路径
@@ -554,15 +581,74 @@ const MySpacePage: React.FC = () => {
 
   // 过滤后的列表
   const displayItems = isSearching ? searchResults : items;
-  const filteredItems = fileTypeFilter === 'all' 
-    ? displayItems 
-    : displayItems.filter(item => {
-        if (fileTypeFilter === 'folders') return item.type === 'directory';
-        if (fileTypeFilter === 'files') return item.type === 'file';
-        if (fileTypeFilter === 'images') return item.mimeType?.startsWith('image/');
-        if (fileTypeFilter === 'texts') return item.mimeType?.startsWith('text/') || item.mimeType === 'application/json';
-        return true;
-      });
+
+  // 台账元数据：path -> {source, chat_id, created_at}
+  const ledgerMeta = (item: any) =>
+    ledger[String(item.path ?? '').replace(/^\/+/, '')] ?? null;
+  const isAI = (item: any) => {
+    const m = ledgerMeta(item);
+    return !!m && m.source !== 'upload';
+  };
+
+  // 来源维度筛选 + 会话/日期分组视图
+  const buildGrouped = (list: any[], keyOf: (i: any) => string, labelOf: (i: any) => string) => {
+    const groups = new Map<string, any[]>();
+    for (const it of list) {
+      const k = keyOf(it);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(it);
+    }
+    const out: any[] = [];
+    for (const [k, arr] of groups) {
+      out.push({ type: 'group', key: k, name: labelOf(arr[0]), groupSize: arr.length });
+      out.push(...arr);
+    }
+    return out;
+  };
+
+  const sourceFiltered = displayItems.filter((item: any) => {
+    if (sourceFilter === 'upload') return ledgerMeta(item)?.source === 'upload';
+    if (sourceFilter === 'ai') return isAI(item);
+    return true;
+  });
+
+  let grouped: any[] = sourceFiltered;
+  if (sourceFilter === 'session') {
+    const withChat = sourceFiltered.filter((i: any) => ledgerMeta(i)?.chat_id);
+    const sorted = [...withChat].sort((a, b) =>
+      String(ledgerMeta(a)!.chat_id).localeCompare(String(ledgerMeta(b)!.chat_id)),
+    );
+    grouped = buildGrouped(
+      sorted,
+      (i) => String(ledgerMeta(i)!.chat_id),
+      (i) => ledgerMeta(i)?.title || t('myspace.sessionGroup', '会话'),
+    );
+  } else if (sourceFilter === 'date') {
+    const sorted = [...sourceFiltered].sort(
+      (a, b) => (ledgerMeta(b)?.created_at ?? 0) - (ledgerMeta(a)?.created_at ?? 0),
+    );
+    grouped = buildGrouped(
+      sorted,
+      (i) => {
+        const ts = ledgerMeta(i)?.created_at;
+        return ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : t('myspace.undated', '未记录日期');
+      },
+      (i) => {
+        const ts = ledgerMeta(i)?.created_at;
+        return ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : t('myspace.undated', '未记录日期');
+      },
+    );
+  }
+
+  const filteredItems = grouped.filter((item: any) => {
+    if (item.type === 'group') return true;
+    if (fileTypeFilter === 'all') return true;
+    if (fileTypeFilter === 'folders') return item.type === 'directory';
+    if (fileTypeFilter === 'files') return item.type === 'file';
+    if (fileTypeFilter === 'images') return item.mimeType?.startsWith('image/');
+    if (fileTypeFilter === 'texts') return item.mimeType?.startsWith('text/') || item.mimeType === 'application/json';
+    return true;
+  });
 
   // 面包屑
   const breadcrumbItems = currentPath.split('/').filter(Boolean).reduce((acc: any[], _, index) => {
@@ -656,7 +742,24 @@ const MySpacePage: React.FC = () => {
           <Select.Option value="images">{t('myspace.images')}</Select.Option>
           <Select.Option value="texts">{t('myspace.textFiles')}</Select.Option>
         </Select>
-        
+
+        {/* 五维筛选（设计 §1.3-C）：前 3 项是来源过滤，后 2 项是视图模式 */}
+        <span style={{ fontSize: 12, color: 'var(--color-text-secondary, #888)' }}>
+          {t('myspace.dimLabel', '视图：')}
+        </span>
+        <Segmented
+          size="small"
+          value={sourceFilter}
+          onChange={(v) => setSourceFilter(String(v))}
+          options={[
+            { value: 'all', label: t('myspace.dimAll', '全部') },
+            { value: 'upload', label: t('myspace.dimUploaded', '我手动上传') },
+            { value: 'ai', label: t('myspace.dimAI', 'AI 生成') },
+            { value: 'session', label: t('myspace.dimSession', '按会话分组') },
+            { value: 'date', label: t('myspace.dimDate', '按日期排序') },
+          ]}
+        />
+
         <div style={{ flex: 1 }} />
         
         {/* 只读提示 */}
@@ -826,7 +929,8 @@ const MySpacePage: React.FC = () => {
               locale={{ emptyText: <Empty description={t('myspace.emptyFolder')} /> }}
               renderItem={(item: any) => (
                 <List.Item
-                  actions={[
+                  style={item.type === 'group' ? { background: 'rgba(115,109,255,0.06)', padding: '6px 12px' } : undefined}
+                  actions={item.type === 'group' ? [] : [
                     item.type === 'file' && (
                       <Tooltip key="download" title={t('myspace.download')}>
                         <Button type="text" icon={<DownloadOutlined />} onClick={() => handleDownload(item)} />
@@ -851,15 +955,31 @@ const MySpacePage: React.FC = () => {
                   ].filter(Boolean)}
                 >
                   <div
-                    onClick={() => handleDoubleClick(item)}
-                    onDoubleClick={() => handleDoubleClick(item)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', cursor: 'pointer' }}
+                    onClick={() => item.type !== 'group' && handleDoubleClick(item)}
+                    onDoubleClick={() => item.type !== 'group' && handleDoubleClick(item)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', cursor: item.type === 'group' ? 'default' : 'pointer' }}
                   >
-                    {getFileIcon(item)}
-                    <Text strong style={{ flex: 1 }}>{item.name}</Text>
-                    {item.type === 'file' && <Text type="secondary" style={{ width: 80 }}>{formatSize(item.size)}</Text>}
-                    {item.type === 'file' && <Text type="secondary" style={{ width: 160 }}>{formatTime(item.modified)}</Text>}
-                    {item.type === 'directory' && <Tag color="blue">{t('myspace.folder')}</Tag>}
+                    {item.type === 'group' ? (
+                      <Text strong style={{ color: '#736dff' }}>
+                        {item.name}
+                        <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>{item.groupSize}</Text>
+                      </Text>
+                    ) : (
+                      <>
+                        {getFileIcon(item)}
+                        <Text strong style={{ flex: 1 }}>
+                          {item.name}
+                          {isAI(item) && (
+                            <Tooltip title={t('myspace.aiGenerated', 'AI 生成')}>
+                              <span style={{ marginLeft: 4, color: '#736dff' }}>✨</span>
+                            </Tooltip>
+                          )}
+                        </Text>
+                        {item.type === 'file' && <Text type="secondary" style={{ width: 80 }}>{formatSize(item.size)}</Text>}
+                        {item.type === 'file' && <Text type="secondary" style={{ width: 160 }}>{formatTime(item.modified)}</Text>}
+                        {item.type === 'directory' && <Tag color="blue">{t('myspace.folder')}</Tag>}
+                      </>
+                    )}
                   </div>
                 </List.Item>
               )}
@@ -878,6 +998,12 @@ const MySpacePage: React.FC = () => {
               {loading && <LoadingOutlined style={{ fontSize: 24, color: '#736dff', margin: '40px auto' }} />}
               {!loading && filteredItems.length === 0 && <Empty description={t('myspace.emptyFolder')} style={{ margin: '40px auto' }} />}
               {!loading && filteredItems.map((item: any) => (
+                item.type === 'group' ? (
+                  <div key={`g-${item.key}`} style={{ width: '100%', color: '#736dff', fontWeight: 600 }}>
+                    {item.name}
+                    <span style={{ color: 'rgba(0,0,0,0.45)', fontWeight: 400, marginLeft: 8 }}>{item.groupSize}</span>
+                  </div>
+                ) : (
                 <div
                   key={item.path}
                   style={{
@@ -932,6 +1058,7 @@ const MySpacePage: React.FC = () => {
                     </div>
                   </div>
                 </div>
+                )
               ))}
             </div>
           )}

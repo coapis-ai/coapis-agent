@@ -32,16 +32,38 @@ def _normalize(text: Optional[str]) -> str:
     return re.sub(r"\s+", " ", text.strip()).lower()
 
 
-def compute_dedup_key(scope: str, category: str, title: Optional[str],
-                      content: Optional[str]) -> str:
-    """sha256 over normalized (scope, category, title, content)."""
+def compute_dedup_key(owner: str, scope: str, category: str,
+                      title: Optional[str], content: Optional[str]) -> str:
+    """sha256 over normalized (owner, scope, category, title, content).
+
+    ``owner`` is the row's identity key (see ``owner_of``). It MUST be part
+    of the hash: the UNIQUE constraint on ``dedup_key`` is global, so a key
+    that omits the owner makes two different owners' identical rows collide
+    — the second INSERT raises IntegrityError, and the global dedup lookup
+    in ``add()`` silently attributes the second writer's memory to the first.
+    """
     raw = "|".join([
+        owner,
         scope,
         category,
         _normalize(title),
         _normalize(content),
     ])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def owner_of(entry: MemoryEntry) -> str:
+    """Identity component of the dedup key, per scope.
+
+    ``scope`` decides which identity owns the row:
+    ``user`` → user_id, ``agent`` → agent_id, ``workspace`` → workspace_id.
+    Missing identity falls back to the user_id so the key stays non-empty.
+    """
+    if entry.scope == "agent":
+        return entry.agent_id or entry.user_id or ""
+    if entry.scope == "workspace":
+        return entry.workspace_id or entry.user_id or ""
+    return entry.user_id or ""
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]{2,}|[\u4e00-\u9fff]{2,}")
@@ -60,7 +82,8 @@ class SqlaMemoryRepository(MemoryRepository):
     def add(self, entry: MemoryEntry) -> int:
         now = time.time()
         entry.dedup_key = compute_dedup_key(
-            entry.scope, entry.category, entry.title, entry.content
+            owner_of(entry), entry.scope, entry.category,
+            entry.title, entry.content,
         )
         sf = get_session_factory()
         with sf() as s:
@@ -283,17 +306,24 @@ class SqlaMemoryRepository(MemoryRepository):
         scope = "agent" if agent_id else "user"
         now = time.time()
         title = f"dream:{day}"
-        dedup = compute_dedup_key(scope, "dream", title, f"{status}|{reason}")
+        dedup = compute_dedup_key(
+            f"{user_id}|{agent_id}", scope, "dream", title,
+            f"{status}|{reason}",
+        )
         sf = get_session_factory()
         with sf() as s:
-            row = s.scalar(
-                select(Memory).where(
-                    Memory.scope == scope,
-                    Memory.user_id == user_id,
-                    Memory.category == "dream",
-                    Memory.title == title,
-                ).order_by(Memory.id.desc()).limit(1)
+            stmt = select(Memory).where(
+                Memory.scope == scope,
+                Memory.user_id == user_id,
+                Memory.category == "dream",
+                Memory.title == title,
             )
+            # Agent-owned dream rows are keyed by agent_id as well as the
+            # (often empty) user_id — filtering on user_id alone lets one
+            # agent overwrite another agent's row for the same day.
+            if scope == "agent":
+                stmt = stmt.where(Memory.agent_id == agent_id)
+            row = s.scalar(stmt.order_by(Memory.id.desc()).limit(1))
             # status/reason ride in content (stable columns only).
             payload = f"status={status}; reason={reason}; summary={summary}"
             if row is not None:

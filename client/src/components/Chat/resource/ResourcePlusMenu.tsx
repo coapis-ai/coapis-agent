@@ -130,6 +130,7 @@ export default function ResourcePlusMenu(props: ResourcePlusMenuProps) {
         height={narrow ? 260 : 320}
         rootWidth={narrow ? 150 : 168}
         narrow={narrow}
+        portal
       />
     </div>
   );

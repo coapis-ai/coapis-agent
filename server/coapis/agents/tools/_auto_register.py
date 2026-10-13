@@ -24,6 +24,7 @@ from . import session_search
 from . import doc_reader
 from . import skill_manager
 from . import daily_memory  # Daily memory recording tool
+from . import resource_search  # 资源契约消费面：统一资源检索（file/db/kb/mcp/web）
 
 # ── Runtime / dependency ──
 from . import install_dependency  # Shared Runtime Pool package installer

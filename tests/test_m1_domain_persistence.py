@@ -166,7 +166,12 @@ def main():
     svc = TagService(system_dir)
     check("M1: TagService 使用社区仓储", getattr(svc, "_community_repo", None) is not None)
     tags = svc.list_tags()
-    check("M1: list_tags 读出 3 个标签", tags.total == 3, f"got {tags.total}")
+    # 播种 3 条 + RepositoryFactory.initialize() 会播种默认标签 tasks-menu → 4
+    check("M1: list_tags 读出 4 个标签（3 播种 + 默认 tasks-menu）",
+          tags.total == 4, f"got {tags.total} ids={sorted(t.id for t in tags.tags)}")
+    check("M1: 播种的 3 条标签都在",
+          {"tag_dim_1", "tag_cat_1", "tag_no_date"} <= {t.id for t in tags.tags},
+          f"got {sorted(t.id for t in tags.tags)}")
     cat_tags = svc.list_tags(tag_type="category")
     check("M1: 按类型过滤（category=1）", cat_tags.total == 1, f"got {cat_tags.total}")
     one = svc.get_tag("tag_dim_1")
@@ -195,9 +200,10 @@ def main():
     conn = sqlite3.connect(str(db_path))
     check("M1: 创建标签落 DB",
           conn.execute("SELECT COUNT(*) FROM tags WHERE id=?", (created.id,)).fetchone()[0] == 1)
-    # tags.json 不应被改写（只读备份）
+    # tags.json 不应被改写（只读备份）—— 播种源是 3 条
     json_tags = json.loads((tmp / "tags.json").read_text(encoding="utf-8"))
-    check("M1: tags.json 未被改写（仍 2 条）", len(json_tags.get("tags", [])) == 2)
+    check("M1: tags.json 未被改写（仍 3 条）", len(json_tags.get("tags", [])) == 3,
+          f"got {len(json_tags.get('tags', []))}")
     conn.close()
 
     # 删除标签 → DB 消失

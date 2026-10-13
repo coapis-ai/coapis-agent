@@ -2632,7 +2632,16 @@
     "macStep1": "In Finder, click 'Go' -> 'Connect to Server...' (Cmd+K)",
     "macStep2": "Enter the WebDAV URL (format: dav://serverIP or domain)",
     "macStep3": "Click 'Connect', select 'Registered User', enter username and password/Token",
-    "webdavTip": "After WebDAV mapping, you can directly view, edit, upload/download content in 'My Space - Files' from your local file manager, with real-time cloud sync."
+    "webdavTip": "After WebDAV mapping, you can directly view, edit, upload/download content in 'My Space - Files' from your local file manager, with real-time cloud sync.",
+    "dimAll": "All",
+    "dimUploaded": "My uploads",
+    "dimAI": "AI generated",
+    "dimSession": "Group by session",
+    "dimDate": "Sort by date",
+    "aiGenerated": "AI-generated",
+    "sessionGroup": "Session",
+    "undated": "Undated",
+    "dimLabel": "View:"
   },
   "monitoring": {
     "title": "System Monitoring",

@@ -68,6 +68,20 @@ _SYSTEMS_DIRECT = {
 }
 
 
+# NOT NULL 列的缺省值 —— 必须与 models/external.py 的 ``default`` 一致。
+# 缺失字段不能填 None：``external_systems`` 除 identity_token_ttl 外全部 NOT NULL，
+# 填 None 会让 INSERT 抛 IntegrityError（实测 save_systems 传入不含 icon 的
+# dict 即 500）。identity_token_ttl 是唯一可空列，故不进此表。
+_SYSTEMS_NOT_NULL_DEFAULTS = {
+    "name": "",
+    "icon": "",
+    "description": "",
+    "login_type": "password",
+    "client_id": "",
+    "auth_mode": "",
+}
+
+
 def _sys_dumps(value: Any, kind: str) -> str:
     if value is None:
         value = [] if kind == "list" else {}
@@ -213,10 +227,9 @@ class SqlaExternalIdentityStore:
                 out[key] = str(system.get("provider_id") or "")
             elif key in _SYSTEMS_DIRECT and key in system:
                 out[key] = system[key]
-            elif key == "name":
-                out[key] = ""  # NOT NULL 且无 server_default，缺省补空串
             else:
-                out[key] = None
+                # NOT NULL 列缺省补默认值；唯一可空列(identity_token_ttl)保持 None。
+                out[key] = _SYSTEMS_NOT_NULL_DEFAULTS.get(key)
         out["sso"] = _sys_dumps(system.get("sso"), "object")
         out["user_mapping"] = _sys_dumps(system.get("user_mapping"), "object")
         out["credential"] = _sys_dumps(system.get("credential"), "object")

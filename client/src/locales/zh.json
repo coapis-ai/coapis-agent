@@ -2683,7 +2683,16 @@
     "macStep1": "在 Finder 中点击\"前往\" -> \"连接服务器...\" (Cmd+K)",
     "macStep2": "输入 WebDAV URL（格式：dav://服务器IP或域名）",
     "macStep3": "点击\"连接\"，选择\"注册用户\"，输入用户名和密码/Token",
-    "webdavTip": "WebDAV 映射后，您可以在本地文件管理器中直接查看、编辑、上传/下载\"我的空间 - 文件\"中的内容，与云端实时同步。"
+    "webdavTip": "WebDAV 映射后，您可以在本地文件管理器中直接查看、编辑、上传/下载\"我的空间 - 文件\"中的内容，与云端实时同步。",
+    "dimAll": "全部",
+    "dimUploaded": "我手动上传",
+    "dimAI": "AI 生成",
+    "dimSession": "按会话分组",
+    "dimDate": "按日期排序",
+    "aiGenerated": "AI 生成",
+    "sessionGroup": "会话",
+    "undated": "未记录日期",
+    "dimLabel": "视图："
   },
   "monitoring": {
     "title": "系统监控",

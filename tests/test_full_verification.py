@@ -3,7 +3,9 @@
 import requests
 import json
 
-BASE = "http://localhost:4103"
+import os
+
+BASE = os.environ.get("COAPIS_TEST_BASE_URL", "http://localhost:4300")
 results = {"pass": 0, "fail": 0, "details": []}
 
 
