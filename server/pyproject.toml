@@ -196,8 +196,6 @@ asyncio_default_fixture_loop_scope = "function"
 # 两份测试树（coapis/tests 与 tests）存在同名文件，prepend 模式会撞
 # "import file mismatch"；importlib 模式按文件路径导入，同名不冲突。
 importmode = "importlib"
-# 一次性容器探针：硬编码 /app 路径 + 引用不存在的 AppFixture，收集期即崩。
-addopts = "--ignore=tests/test_probe_sso.py --ignore=coapis/tests/test_probe_sso.py"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as unit tests",
