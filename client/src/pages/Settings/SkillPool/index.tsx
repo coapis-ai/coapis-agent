@@ -70,7 +70,7 @@ function SkillPoolPage() {
                 >
                   {t("skills.clearSelection")}
                 </Button>
-                <PermissionGuard module="skill-pool" action="delete">
+                <PermissionGuard module="skills" action="delete">
                   <Button
                     danger
                     icon={<DeleteOutlined />}
@@ -134,7 +134,7 @@ function SkillPoolPage() {
                 </div>
                 <div className={styles.headerActionsRight}>
                   <Tooltip title={t("skillPool.uploadZipHint")}>
-                    <PermissionGuard module="skill-pool" action="write">
+                    <PermissionGuard module="skills" action="write">
                       <Button
                         type="default"
                         icon={<UploadOutlined />}
@@ -145,7 +145,7 @@ function SkillPoolPage() {
                     </PermissionGuard>
                   </Tooltip>
                   <Tooltip title={t("skillPool.importHubHint")}>
-                    <PermissionGuard module="skill-pool" action="write">
+                    <PermissionGuard module="skills" action="write">
                       <Button
                         type="default"
                         icon={<ImportOutlined />}
@@ -159,7 +159,7 @@ function SkillPoolPage() {
                     {t("skills.batchOperation")}
                   </Button>
                   <Tooltip title={t("skills.createSkillHint")}>
-                    <PermissionGuard module="skill-pool" action="write">
+                    <PermissionGuard module="skills" action="write">
                       <Button
                         type="primary"
                         className={styles.primaryActionButton}

@@ -428,7 +428,12 @@ async def list_mcp_gateway_tools(request: Request) -> List[Dict[str, Any]]:
     "/mcp/gateway/call",
     summary="Call an MCP tool through the unified gateway.",
 )
-@require_permission("mcp:write")
+# 调用工具 = “使用”，不是“配置写”。
+# 全局 MCP 池由 admin 配置（见 get_global_mcp_pool_agent_id + workspace 合并逻辑），
+# 策略是“admin 配了，所有登录用户都可用”；本路由操作的始终是调用者自己
+# workspace 的 MCP manager，出站身份也是 per-user 的（见 external_identity），
+# 因此门槛取 mcp:read。配置的增删改仍由 mcp:write 把守（见下方各路由）。
+@require_permission("mcp:read")
 async def call_mcp_gateway_tool(
     request: Request,
     body: MCPGatewayCallRequest,

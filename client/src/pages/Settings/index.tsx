@@ -27,7 +27,7 @@ import {
 } from '@ant-design/icons';
 import { permissionsApi } from '../../api/modules/permissions';
 import { useUser } from '../../contexts/UserContext';
-import { MENU_TO_PERMISSION_MODULE } from '../../config/permissionMapping';
+import { isMenuKeyAllowed } from '../../config/permissionMapping';
 import styles from './index.module.css';
 
 const { Title, Text } = Typography;
@@ -69,21 +69,9 @@ export default function Settings() {
       });
   }, [user]);
 
-  // 检查模块权限
-  const isModuleAllowed = (menuKey: string): boolean => {
-    if (!permissionsLoaded) return true; // 加载中显示
-    if (allowedModules.includes('all')) return true; // admin 角色
-    
-    // 获取对应的权限模块
-    const permModule = MENU_TO_PERMISSION_MODULE[menuKey];
-    if (!permModule) {
-      // 不在权限映射中，默认允许（如设置页面本身）
-      return true;
-    }
-    
-    // 检查权限
-    return allowedModules.includes(permModule);
-  };
+  // 检查模块权限（判定逻辑与侧栏共用同一实现，避免两处漂移）
+  const isModuleAllowed = (menuKey: string): boolean =>
+    isMenuKeyAllowed(menuKey, allowedModules, permissionsLoaded);
 
   // 过滤功能模块
   const filterFeatures = (features: any[]) => {

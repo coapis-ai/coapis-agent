@@ -27,11 +27,11 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
-from fastapi import APIRouter, HTTPException, Query, Body, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from ..runner.models import ChatUpdate
-from ..permissions import require_permission
+from ..permissions import require_perm, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +60,7 @@ def _is_default_chat_name(name: Optional[str]) -> bool:
     return False
 
 
-@require_permission("chat:read")
-@router.get("/console/push-messages")
+@router.get("/console/push-messages", dependencies=[Depends(require_perm("chat:read"))])
 async def get_push_messages(
     request: Request,
     session_id: str = Query(None),
@@ -182,8 +181,7 @@ async def get_push_messages(
     }
 
 
-@require_permission("debug:read")
-@router.get("/console/debug/backend-logs")
+@router.get("/console/debug/backend-logs", dependencies=[Depends(require_perm("debug:read"))])
 async def get_backend_logs(
     request: Request,
     lines: int = Query(200),
@@ -284,8 +282,7 @@ def _extract_native_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@require_permission("chat:send")
-@router.post("/console/chat")
+@router.post("/console/chat", dependencies=[Depends(require_perm("chat:send"))])
 async def console_chat(
     request: Request,
     payload: Optional[Dict[str, Any]] = Body(default=None),
@@ -566,8 +563,7 @@ async def console_chat(
     )
 
 
-@require_permission("chat:read")
-@router.get("/console/sessions")
+@router.get("/console/sessions", dependencies=[Depends(require_perm("chat:read"))])
 async def get_console_sessions(
     request: Request,
     agent_id: str = Query(""),
@@ -635,8 +631,7 @@ async def get_console_sessions(
     }
 
 
-@require_permission("chat:write")
-@router.post("/console/sessions/{session_id}/rename")
+@router.post("/console/sessions/{session_id}/rename", dependencies=[Depends(require_perm("chat:write"))])
 async def rename_session(
     request: Request,
     session_id: str,
@@ -681,8 +676,7 @@ async def rename_session(
     return {"ok": True, "name": new_name}
 
 
-@require_permission("chat:write")
-@router.delete("/console/sessions/{session_id}")
+@router.delete("/console/sessions/{session_id}", dependencies=[Depends(require_perm("chat:write"))])
 async def delete_session(
     request: Request,
     session_id: str,
@@ -725,8 +719,7 @@ async def delete_session(
     return {"ok": True}
 
 
-@require_permission("chat:write")
-@router.post("/console/chat/stop")
+@router.post("/console/chat/stop", dependencies=[Depends(require_perm("chat:write"))])
 async def stop_chat(
     request: Request,
     chat_id: str = Query(..., description="Chat ID to stop"),

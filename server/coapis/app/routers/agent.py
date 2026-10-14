@@ -17,11 +17,11 @@
 
 """Agent file management API."""
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..utils import schedule_agent_reload
-from ..permissions.decorators import require_permission
+from ..permissions.decorators import require_perm, require_permission
 from ...config import (
     load_config,
     save_config,
@@ -58,8 +58,7 @@ class MdFileContent(BaseModel):
     response_model=list[MdFileInfo],
     summary="List working files",
     description="List all working files (uses active agent)",
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def list_working_files(
     request: Request,
 ) -> list[MdFileInfo]:
@@ -84,8 +83,7 @@ async def list_working_files(
     response_model=MdFileContent,
     summary="Read a working file",
     description="Read a working markdown file (uses active agent)",
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def read_working_file(
     md_name: str,
     request: Request,
@@ -110,8 +108,7 @@ async def read_working_file(
     response_model=dict,
     summary="Write a working file",
     description="Create or update a working file (uses active agent)",
-)
-@require_permission("agents:write")
+ dependencies=[Depends(require_perm("agents:write"))])
 async def write_working_file(
     md_name: str,
     body: MdFileContent,
@@ -135,8 +132,7 @@ async def write_working_file(
     response_model=list[MdFileInfo],
     summary="List memory files",
     description="List all memory files (uses active agent)",
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def list_memory_files(
     request: Request,
 ) -> list[MdFileInfo]:
@@ -161,8 +157,7 @@ async def list_memory_files(
     response_model=MdFileContent,
     summary="Read a memory file",
     description="Read a memory markdown file (uses active agent)",
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def read_memory_file(
     md_name: str,
     request: Request,
@@ -187,8 +182,7 @@ async def read_memory_file(
     response_model=dict,
     summary="Write a memory file",
     description="Create or update a memory file (uses active agent)",
-)
-@require_permission("agents:write")
+ dependencies=[Depends(require_perm("agents:write"))])
 async def write_memory_file(
     md_name: str,
     body: MdFileContent,
@@ -211,8 +205,7 @@ async def write_memory_file(
     "/language",
     summary="Get agent language",
     description="Get the language setting for agent MD files (en/zh/ru)",
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def get_agent_language(request: Request) -> dict:
     """Get agent language setting for current agent."""
     workspace = await get_agent_for_request(request)
@@ -230,8 +223,7 @@ async def get_agent_language(request: Request) -> dict:
         "Update the language for agent MD files (en/zh/ru). "
         "Optionally copies MD files for the new language to agent workspace."
     ),
-)
-@require_permission("agents:write")
+ dependencies=[Depends(require_perm("agents:write"))])
 async def put_agent_language(
     request: Request,
     body: dict = Body(
@@ -291,8 +283,7 @@ async def put_agent_language(
         "Get the audio handling mode for incoming voice messages. "
         'Values: "auto", "native".'
     ),
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def get_audio_mode() -> dict:
     """Get audio mode setting."""
     config = load_config()
@@ -307,8 +298,7 @@ async def get_audio_mode() -> dict:
         '"auto": transcribe if provider available, else file placeholder; '
         '"native": send audio directly to model (may need ffmpeg).'
     ),
-)
-@require_permission("agents:write")
+ dependencies=[Depends(require_perm("agents:write"))])
 async def put_audio_mode(
     body: dict = Body(
         ...,
@@ -340,8 +330,7 @@ async def put_audio_mode(
         "Get the transcription provider type. "
         'Values: "disabled", "whisper_api", "local_whisper".'
     ),
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def get_transcription_provider_type() -> dict:
     """Get transcription provider type setting."""
     config = load_config()
@@ -361,8 +350,7 @@ async def get_transcription_provider_type() -> dict:
         '"whisper_api": remote Whisper endpoint; '
         '"local_whisper": locally installed openai-whisper.'
     ),
-)
-@require_permission("agents:write")
+ dependencies=[Depends(require_perm("agents:write"))])
 async def put_transcription_provider_type(
     body: dict = Body(
         ...,
@@ -397,8 +385,7 @@ async def put_transcription_provider_type(
         "Check whether the local whisper provider can be used. "
         "Returns availability of ffmpeg and openai-whisper."
     ),
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def get_local_whisper_status() -> dict:
     """Check local whisper dependencies."""
     from ...agents.utils.audio_transcription import (
@@ -415,8 +402,7 @@ async def get_local_whisper_status() -> dict:
         "List providers capable of audio transcription (Whisper API). "
         "Returns available providers and the configured selection."
     ),
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def get_transcription_providers() -> dict:
     """List transcription-capable providers and configured selection."""
     from ...agents.utils.audio_transcription import (
@@ -437,8 +423,7 @@ async def get_transcription_providers() -> dict:
         "Set the provider to use for audio transcription. "
         'Use empty string "" to unset.'
     ),
-)
-@require_permission("agents:write")
+ dependencies=[Depends(require_perm("agents:write"))])
 async def put_transcription_provider(
     body: dict = Body(
         ...,
@@ -461,8 +446,7 @@ async def put_transcription_provider(
     response_model=AgentsRunningConfig,
     summary="Get agent running config",
     description="Get running configuration for active agent",
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def get_agents_running_config(
     request: Request,
 ) -> AgentsRunningConfig:
@@ -477,8 +461,7 @@ async def get_agents_running_config(
     response_model=AgentsRunningConfig,
     summary="Update agent running config",
     description="Update running configuration for active agent",
-)
-@require_permission("agents:write")
+ dependencies=[Depends(require_perm("agents:write"))])
 async def put_agents_running_config(
     running_config: AgentsRunningConfig = Body(
         ...,
@@ -503,8 +486,7 @@ async def put_agents_running_config(
     response_model=list[str],
     summary="Get system prompt files",
     description="Get system prompt files for active agent",
-)
-@require_permission("agents:read")
+ dependencies=[Depends(require_perm("agents:read"))])
 async def get_system_prompt_files(
     request: Request,
 ) -> list[str]:
@@ -519,8 +501,7 @@ async def get_system_prompt_files(
     response_model=list[str],
     summary="Update system prompt files",
     description="Update system prompt files for active agent",
-)
-@require_permission("agents:write")
+ dependencies=[Depends(require_perm("agents:write"))])
 async def put_system_prompt_files(
     files: list[str] = Body(
         ...,

@@ -29,7 +29,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { KEY_TO_PATH } from "./constants";
 // import { DEFAULT_OPEN_KEYS } from "./constants";  // unused — 2026-07-21
 import { getAgentDisplayName, isDefaultAgent } from "../utils/agentDisplayName";
-import { MENU_TO_PERMISSION_MODULE } from "../config/permissionMapping";
+import { isMenuKeyAllowed } from "../config/permissionMapping";
 import { useMenuItems, FALLBACK_MENU_ITEMS } from "../config/menuConfig";
 
 // ── Layout ────────────────────────────────────────────────────────────────
@@ -130,31 +130,13 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
    * Reverse map: sidebar menu key -> permission module key.
    * Uses unified permission mapping.
    */
-  const MENU_TO_PERMISSION_KEY: Record<string, string> = {
-    ...MENU_TO_PERMISSION_MODULE,
-    // collapsedNavItems uses "workspace" key for myspace module
-    workspace: "myspace",
-  };
-
-  /** Check if a module is allowed for current user */
-  const isModuleAllowed = (menuKey: string): boolean => {
-    if (!permissionsLoaded) return true; // Allow while loading (prevent flicker)
-    if (allowedModules.includes("all")) return true; // Admin
-    
-    // ⭐ 新菜单项（workbench, my-scenes, settings）不在 MENU_TO_PERMISSION_KEY 映射中
-    // 如果菜单项不在映射中，默认允许（因为用户说"菜单不涉及权限，对所有用户开放"）
-    const permKey = MENU_TO_PERMISSION_KEY[menuKey];
-    if (!permKey) {
-      // 不在权限映射中，默认允许
-      return true;
-    }
-    
-    // 在权限映射中，检查权限
-    if (allowedModules.includes(menuKey)) return true;
-    if (allowedModules.includes(permKey)) return true;
-    
-    return false;
-  };
+  /**
+   * Check if a module is allowed for current user.
+   * 判定逻辑统一在 permissionMapping.isMenuKeyAllowed（与设置页共用），
+   * 侧栏不再用菜单 key 兜底 —— 兜底曾把映射名错的问题掩盖掉。
+   */
+  const isModuleAllowed = (menuKey: string): boolean =>
+    isMenuKeyAllowed(menuKey, allowedModules, permissionsLoaded);
   
   /** Filter menu items based on permissions */
   const filterMenuItems = (items: any[]): any[] => {

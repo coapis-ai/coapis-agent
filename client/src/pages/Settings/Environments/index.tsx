@@ -316,7 +316,7 @@ function EnvironmentsPage() {
           </div>
 
           {/* ---- Add button ---- */}
-          <PermissionGuard module="environments" action="write">
+          <PermissionGuard module="admin" action="admin">
             <AddButton onClick={addRow} />
           </PermissionGuard>
         </div>

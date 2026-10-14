@@ -6,9 +6,6 @@
     "chat": {
       "description": "聊天"
     },
-    "myspace": {
-      "description": "我的空间"
-    },
     "skills": {
       "description": "技能"
     },
@@ -17,9 +14,6 @@
     },
     "channels": {
       "description": "频道"
-    },
-    "sessions": {
-      "description": "会话"
     },
     "cron-jobs": {
       "description": "定时任务"
@@ -33,26 +27,11 @@
     "mcp": {
       "description": "MCP"
     },
-    "agent-config": {
-      "description": "运行配置"
-    },
-    "agent-stats": {
-      "description": "运行统计"
-    },
     "agents": {
       "description": "智能体管理"
     },
-    "voice-transcription": {
-      "description": "语音转写"
-    },
-    "skill-pool": {
-      "description": "技能池"
-    },
     "security": {
       "description": "安全"
-    },
-    "token-usage": {
-      "description": "Token用量"
     },
     "backups": {
       "description": "备份恢复"
@@ -77,10 +56,6 @@
     "debug": {
       "description": "调试"
     },
-    "system": {
-      "description": "系统配置",
-      "adminOnly": true
-    },
     "profile": {
       "description": "个人资料"
     },
@@ -91,32 +66,122 @@
   "roles": {
     "user": {
       "name": "用户",
-      "description": "普通用户，拥有除管理功能外的所有权限",
+      "description": "普通用户，日常协作功能全开，管理类只读，系统级不可见",
       "modules": {
-        "chat": {"read": true, "create": true, "update": true, "delete": true},
-        "myspace": {"read": true, "create": true, "update": true, "delete": true},
-        "skills": {"read": true, "create": true, "update": true, "delete": true},
-        "models": {"read": true, "create": true, "update": true, "delete": true},
-        "channels": {"read": true, "create": true, "update": true, "delete": true},
-        "sessions": {"read": true, "create": true, "update": true, "delete": true},
-        "cron-jobs": {"read": true, "create": true, "update": true, "delete": true},
-        "heartbeat": {"read": true, "create": true, "update": true, "delete": true},
-        "tools": {"read": true, "create": true, "update": true, "delete": true},
-        "mcp": {"read": true, "create": true, "update": true, "delete": true},
-        "agent-config": {"read": true, "create": true, "update": true, "delete": true},
-        "agent-stats": {"read": true, "create": true, "update": true, "delete": true},
-        "agents": {"read": true, "create": true, "update": true, "delete": true},
-        "voice-transcription": {"read": true, "create": true, "update": true, "delete": true},
-        "skill-pool": {"read": true, "create": true, "update": true, "delete": true},
-        "security": {"read": true, "create": true, "update": true, "delete": true},
-        "token-usage": {"read": true, "create": true, "update": true, "delete": true},
-        "backups": {"read": true, "create": true, "update": true, "delete": true},
-        "evolution": {"read": true, "create": true, "update": true, "delete": true},
-        "scene": {"read": true, "create": true, "update": true, "delete": true},
-        "tag": {"read": true, "create": true, "update": true, "delete": true},
-        "debug": {"read": true, "create": true, "update": true, "delete": true},
-        "profile": {"read": true, "create": true, "update": true, "delete": true},
-        "acp": {"read": true, "create": true, "update": true, "delete": true}
+        "acp": {
+          "read": false,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "admin": {
+          "read": false,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "agents": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "audit": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "backups": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "channels": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "chat": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "cron-jobs": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "debug": {
+          "read": false,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "evolution": {
+          "read": false,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "heartbeat": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "mcp": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "models": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "profile": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": false
+        },
+        "scene": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "security": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "skills": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": true
+        },
+        "tag": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        },
+        "tools": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false
+        }
       }
     },
     "admin": {

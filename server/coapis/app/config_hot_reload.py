@@ -37,6 +37,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
+from .permissions.decorators import require_permission
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,13 +178,19 @@ router = APIRouter(prefix="/config/reload", tags=["Config Hot Reload"])
 
 
 @router.post("")
-async def reload_config():
-    """Manually reload configuration."""
+@require_permission("admin:admin")
+async def reload_config(request: Request):
+    """Manually reload configuration.
+
+    ⚠️ 这条路由与 config_router 里的同名路由重复注册：FastAPI 按注册顺序
+    匹配，谁先注册谁生效。历史上这里没有权限门，一旦挂载顺序变化，任何
+    登录用户都能热重载全系统配置，所以补上与 config_router 一致的
+    admin:admin 门，消除这个顺序依赖。
+    """
     if config_manager is None:
         raise HTTPException(status_code=503, detail="Config hot reload not initialized")
-    
-    result = config_manager.reload_manual()
-    return result
+
+    return config_manager.reload_manual()
 
 
 @router.get("/status")

@@ -25,8 +25,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from ..permissions.decorators import require_permission
-from fastapi import APIRouter, Form, HTTPException, Request, UploadFile, File
+from ..permissions.decorators import require_perm, require_permission
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ...backup import (
@@ -79,8 +79,7 @@ def _cleanup_stale_uploads() -> None:
                 pass
 
 
-@router.post("/stream", summary="Create backup with SSE progress stream")
-@require_permission("admin:admin")
+@router.post("/stream", summary="Create backup with SSE progress stream", dependencies=[Depends(require_perm("admin:admin"))])
 async def create_backup_stream(req: CreateBackupRequest):
     """Create a backup and stream progress via SSE.
 
@@ -105,8 +104,7 @@ async def create_backup_stream(req: CreateBackupRequest):
     )
 
 
-@router.get("", response_model=list[BackupMeta], summary="List backups")
-@require_permission("backups:read")
+@router.get("", response_model=list[BackupMeta], summary="List backups", dependencies=[Depends(require_perm("backups:read"))])
 async def list_backups_route(request: Request):
     return await list_backups()
 
@@ -119,8 +117,7 @@ async def list_backups_route(request: Request):
     "/delete",
     response_model=DeleteBackupsResponse,
     summary="Delete backups",
-)
-@require_permission("admin:admin")
+ dependencies=[Depends(require_perm("admin:admin"))])
 async def delete_backups_route(req: DeleteBackupsRequest):
     return await delete_backups(req.ids)
 
@@ -210,8 +207,7 @@ async def _handle_fresh_upload(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/import", response_model=BackupMeta, summary="Import backup zip")
-@require_permission("admin:admin")
+@router.post("/import", response_model=BackupMeta, summary="Import backup zip", dependencies=[Depends(require_perm("admin:admin"))])
 async def import_backup_route(
     file: UploadFile = File(default=None, description="Backup zip archive"),
     pending_token: str | None = Form(default=None),
@@ -240,8 +236,7 @@ async def import_backup_route(
     "/{backup_id}",
     response_model=BackupDetail,
     summary="Backup detail",
-)
-@require_permission("backups:read")
+ dependencies=[Depends(require_perm("backups:read"))])
 async def get_backup_route(backup_id: str):
     detail = await get_backup(backup_id)
     if detail is None:
@@ -249,8 +244,7 @@ async def get_backup_route(backup_id: str):
     return detail
 
 
-@router.post("/{backup_id}/restore", summary="Restore backup")
-@require_permission("admin:admin")
+@router.post("/{backup_id}/restore", summary="Restore backup", dependencies=[Depends(require_perm("admin:admin"))])
 async def restore_backup(
     backup_id: str,
     req: RestoreBackupRequest,
@@ -278,8 +272,7 @@ async def restore_backup(
     return {"ok": True}
 
 
-@router.get("/{backup_id}/export", summary="Export backup as zip")
-@require_permission("admin:admin")
+@router.get("/{backup_id}/export", summary="Export backup as zip", dependencies=[Depends(require_perm("admin:admin"))])
 async def export_backup_route(backup_id: str):
     try:
         zip_path, _ = await export_backup(backup_id)

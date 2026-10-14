@@ -226,7 +226,7 @@ function AgentConfigPage() {
         >
           {t("common.reset")}
         </Button>
-        <PermissionGuard module="agent-config" action="write">
+        <PermissionGuard module="agents" action="write">
           <Button type="primary" onClick={handleSave} loading={saving}>
             {t("common.save")}
           </Button>

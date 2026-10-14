@@ -43,7 +43,7 @@ function SessionsPage() {
   const { message } = useAppMessage();
 
   useEffect(() => {
-    checkPermissions(["sessions:delete"]);
+    checkPermissions(["chat:delete"]);
   }, []);
 
   useEffect(() => {
@@ -176,7 +176,7 @@ function SessionsPage() {
               onChannelChange={setFilterChannel}
             />
             {selectedRowKeys.length > 0 && (
-              <PermissionGuard module="sessions" action="delete">
+              <PermissionGuard module="chat" action="delete">
                 <Button type="primary" danger onClick={handleBatchDelete}>
                   {t("sessions.batchDeleteButton")} ({selectedRowKeys.length})
                 </Button>

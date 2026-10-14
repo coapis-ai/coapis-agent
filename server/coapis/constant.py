@@ -539,7 +539,10 @@ PUBLIC_PREFIXES: tuple = (
     "/api/scenes/categories/grouped",  # Categories for workbench
     "/api/scenes/recommendations",  # Scene recommendations (read-only)
     "/api/scenes/hot",  # Hot scenes (read-only)
-    "/api/admin/tags",  # Tag list for workbench (read-only)
+    # ⚠️ 只放开菜单端点，不放整段前缀：/api/admin/tags 前缀下的请求会被鉴权
+    # 中间件标记为 anonymous，路由上的 @require_permission("tag:read") 拿不到
+    # 用户名 → 已登录用户访问标签列表恒 401（实测 admin 也 401）。
+    "/api/admin/tags/menu",  # Tag menu for workbench (read-only, 登录前渲染用)
     "/api/menus",  # Main menu configuration (read-only from tags.json)
     # Model management APIs (read-only, for default model selector)
     "/api/models/by-type",  # Get models by type (read-only)

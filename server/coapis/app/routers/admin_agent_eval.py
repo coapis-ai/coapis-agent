@@ -33,10 +33,10 @@ from typing import Any, Optional
 
 import coapis
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from ..permissions.decorators import require_permission
+from ..permissions.decorators import require_perm, require_permission
 from ...foundation.db.engine import get_session_factory
 from ...foundation.db.models import AgentRun, AgentTask, AgentTrajectory
 from ...agent_eval.dataset.loader import list_categories, load_tasks
@@ -62,8 +62,7 @@ class RunTriggerRequest(BaseModel):
 # --------------------------------------------------------------------- #
 # dataset
 # --------------------------------------------------------------------- #
-@router.get("/admin/agent-eval/categories")
-@require_permission("admin:admin")
+@router.get("/admin/agent-eval/categories", dependencies=[Depends(require_perm("admin:admin"))])
 async def get_categories() -> dict[str, Any]:
     cats = list_categories()
     tasks = load_tasks()
@@ -72,8 +71,7 @@ async def get_categories() -> dict[str, Any]:
     }}
 
 
-@router.get("/admin/agent-eval/tasks")
-@require_permission("admin:admin")
+@router.get("/admin/agent-eval/tasks", dependencies=[Depends(require_perm("admin:admin"))])
 async def get_tasks(
     category: Optional[str] = Query(None),
 ) -> dict[str, Any]:
@@ -86,8 +84,7 @@ async def get_tasks(
 # --------------------------------------------------------------------- #
 # runs
 # --------------------------------------------------------------------- #
-@router.get("/admin/agent-eval/runs")
-@require_permission("admin:admin")
+@router.get("/admin/agent-eval/runs", dependencies=[Depends(require_perm("admin:admin"))])
 async def list_runs(
     agent_id: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
@@ -113,8 +110,7 @@ async def list_runs(
         ]}
 
 
-@router.get("/admin/agent-eval/runs/{run_id}")
-@require_permission("admin:admin")
+@router.get("/admin/agent-eval/runs/{run_id}", dependencies=[Depends(require_perm("admin:admin"))])
 async def get_run_detail(run_id: int) -> dict[str, Any]:
     factory = get_session_factory()
     with factory() as session:
@@ -143,8 +139,7 @@ async def get_run_detail(run_id: int) -> dict[str, Any]:
 # --------------------------------------------------------------------- #
 # trigger
 # --------------------------------------------------------------------- #
-@router.post("/admin/agent-eval/runs")
-@require_permission("admin:admin")
+@router.post("/admin/agent-eval/runs", dependencies=[Depends(require_perm("admin:admin"))])
 async def trigger_runs(req: RunTriggerRequest) -> dict[str, Any]:
     """Launch the benchmark in a detached subprocess (non-blocking)."""
     # Package mode: coapis.* must stay importable, so cwd is the directory
@@ -168,15 +163,13 @@ async def trigger_runs(req: RunTriggerRequest) -> dict[str, Any]:
 # --------------------------------------------------------------------- #
 # report
 # --------------------------------------------------------------------- #
-@router.get("/admin/agent-eval/report/latest")
-@require_permission("admin:admin")
+@router.get("/admin/agent-eval/report/latest", dependencies=[Depends(require_perm("admin:admin"))])
 async def latest_report() -> dict[str, Any]:
     factory = get_session_factory()
     return build_report(factory)
 
 
-@router.post("/admin/agent-eval/report")
-@require_permission("admin:admin")
+@router.post("/admin/agent-eval/report", dependencies=[Depends(require_perm("admin:admin"))])
 async def refresh_report() -> dict[str, Any]:
     factory = get_session_factory()
     path = await asyncio.to_thread(emit_report, factory)
@@ -187,8 +180,7 @@ async def refresh_report() -> dict[str, Any]:
 # --------------------------------------------------------------------- #
 # baseline / online trajectories / weekly report
 # --------------------------------------------------------------------- #
-@router.get("/admin/agent-eval/baseline")
-@require_permission("admin:admin")
+@router.get("/admin/agent-eval/baseline", dependencies=[Depends(require_perm("admin:admin"))])
 async def get_baseline() -> dict[str, Any]:
     """Latest benchmark batch summary (per-category pass rates + averages)."""
     from collections import defaultdict
@@ -218,8 +210,7 @@ async def get_baseline() -> dict[str, Any]:
     }
 
 
-@router.get("/admin/agent-eval/trajectories")
-@require_permission("admin:admin")
+@router.get("/admin/agent-eval/trajectories", dependencies=[Depends(require_perm("admin:admin"))])
 async def list_trajectories(
     online_only: bool = Query(False, description="只返回在线采样（run_id IS NULL）"),
     limit: int = Query(100, ge=1, le=500),
@@ -250,8 +241,7 @@ async def list_trajectories(
     }
 
 
-@router.get("/admin/agent-eval/report/weekly")
-@require_permission("admin:admin")
+@router.get("/admin/agent-eval/report/weekly", dependencies=[Depends(require_perm("admin:admin"))])
 async def weekly_report_now(force: bool = Query(False)) -> dict[str, Any]:
     """Render the weekly report on demand. With ``force=true`` it is also
     written to disk (same path as the Friday 18:00 job)."""

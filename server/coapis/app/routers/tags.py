@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ...models.tag import (
@@ -42,7 +42,7 @@ from ...models.tag import (
 )
 from ..services.tag_service import TagService
 from ..auth import get_current_user
-from ..permissions.decorators import require_permission
+from ..permissions.decorators import require_perm, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +63,7 @@ def get_tag_service() -> TagService:
     return _tag_service
 
 
-@router.get("", response_model=TagListResponse)
-@require_permission("tag:read")
+@router.get("", response_model=TagListResponse, dependencies=[Depends(require_perm("tag:read"))])
 async def list_tags(
     tag_type: Optional[TagType] = Query(None, description="Filter by tag type"),
     parent_id: Optional[str] = Query(None, description="Filter by parent tag ID"),
@@ -168,8 +167,7 @@ async def get_tag(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("", response_model=TagConfig)
-@require_permission("tag:create")
+@router.post("", response_model=TagConfig, dependencies=[Depends(require_perm("tag:create"))])
 async def create_tag(
     tag_request: TagCreateRequest,
     current_user: dict = Depends(get_current_user),
@@ -195,8 +193,7 @@ async def create_tag(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/{tag_id}", response_model=TagConfig)
-@require_permission("tag:update")
+@router.put("/{tag_id}", response_model=TagConfig, dependencies=[Depends(require_perm("tag:update"))])
 async def update_tag(
     tag_id: str,
     tag_request: TagUpdateRequest,
@@ -228,8 +225,7 @@ async def update_tag(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{tag_id}")
-@require_permission("tag:delete")
+@router.delete("/{tag_id}", dependencies=[Depends(require_perm("tag:delete"))])
 async def delete_tag(
     tag_id: str,
     current_user: dict = Depends(get_current_user),

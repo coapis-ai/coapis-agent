@@ -47,7 +47,6 @@ import {
 import { useTranslation } from 'react-i18next';
 import { api, getApiUrl } from '@/api';
 import { buildAuthHeaders } from '@/api/authHeaders';
-import { usePermission } from '@/hooks/usePermission';
 import AgentIdentityPanel from './AgentIdentityPanel';
 
 const FILES_API = '/myfiles';
@@ -92,8 +91,9 @@ const formatTime = (timestamp: number) => {
 
 const MySpacePage: React.FC = () => {
   const { t } = useTranslation();
-  const { hasPermission } = usePermission();
-  const canDelete = hasPermission("myspace:delete");
+  // 我的空间是用户自有数据：后端对 /api/myspace/* 走所有权快速通道放行，
+  // 权限矩阵里没有（也不该有）"myspace" 这个模块，所以前端不做门控。
+  const canDelete = true;
   
   // 当前激活的类别
   const [activeCategory, setActiveCategory] = useState('files');

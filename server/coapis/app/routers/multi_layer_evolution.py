@@ -574,33 +574,3 @@ async def get_bucket_stats(
     if not cross_engine:
         return {}
     return cross_engine.get_bucket_stats()
-
-
-# =========================================================================
-# Backward Compatibility - Proxy to old endpoints
-# =========================================================================
-
-@router.get("/evolution/status")
-@require_permission("evolution:read")
-async def get_evolution_status_proxy(
-    request: Request,
-    agent_id: str = Query("default", description="Agent ID"),
-):
-    """Proxy to old evolution status endpoint for backward compatibility."""
-    manager = _get_manager(request)
-    agent_id = _resolve_agent_id(request, agent_id)
-    workspace = manager.get_workspace(agent_id, username=_get_username(request))
-    if not workspace:
-        raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
-
-    engine = workspace.evolution_engine
-    if not engine:
-        return {"enabled": False, "message": "Evolution engine not configured"}
-
-    return {
-        "enabled": engine.enabled,
-        "agent_id": agent_id,
-        "current_session": engine._current_session_id,
-        "trajectory_count": len(engine._current_trajectory),
-        "pending_experiences": len(engine._pending_experiences),
-    }

@@ -47,6 +47,77 @@ def _fmt_tokens(n: int) -> str:
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
 
+def _governance_floor_truncate(
+    agent: "CoApisAgent",
+    tool_result: ToolResponse,
+) -> bool:
+    """治理层兜底截断（治理地基 片1 · 接入现成截断函数）。
+
+    工具结果裁剪（``tool_result_pruning_config.enabled``）关闭时，此前**没有任何
+    截断**——超大工具结果原样进上下文，直接顶爆窗口。治理层给一条地板：
+    即便裁剪关闭，超过预算的工具结果也按阶梯 L1（头尾保留）截断，并留下可见说明。
+
+    刻意做成薄接线：只处理纯文本块，不复制裁剪器的落盘/元数据逻辑（那是
+    ``_truncate_tool_result`` 的职责，裁剪开启时由它接管）。
+
+    Returns:
+        True 表示做了截断（调用方需重算 token）。治理层不可用时返回 False，
+        绝不因治理层缺失而中断对话。
+    """
+    try:
+        from ...governance import (
+            LimitKind,
+            GovernanceUnavailable,
+            choose_tier,
+            ledger_for_agent,
+            truncate_head_tail,
+        )
+    except Exception:  # pragma: no cover - 治理层缺失时静默放行
+        return False
+
+    try:
+        cfg = load_agent_config(agent.agent_id)
+        ledger = ledger_for_agent(
+            running_config=cfg.running,
+            context_config=getattr(cfg.running, "context_compact", None),
+            pruning_config=getattr(cfg.running, "tool_result_pruning_config", None),
+        )
+        limit = ledger.limit(LimitKind.TOOL_RESULT_BYTES)
+    except (GovernanceUnavailable, Exception):  # pragma: no cover
+        return False
+
+    changed = False
+    for block in tool_result.content:
+        text = block.get("text") if isinstance(block, dict) else None
+        if not text:
+            continue
+        plan = choose_tier(len(text), limit)
+        if plan.is_full:
+            continue
+        # 地板只做到 L1：更深的降级（分段/摘要/分治）需要工具语义，
+        # 属于片4/片5 的职责，不在兜底路径里越权。
+        if plan.tier.value > "L1":
+            pass
+        kept = truncate_head_tail(text, limit.budget)
+        if len(kept) >= len(text):
+            continue
+        notice = (
+            f"\n\n[治理层 {plan.tier.value}] {plan.note}"
+            f"（原文 {len(text)} 字符，保留 {len(kept)}）"
+        )
+        if isinstance(block, dict):
+            block["text"] = kept + notice
+            changed = True
+    if changed:
+        ledger.record(LimitKind.TOOL_RESULT_BYTES, 0)
+        logger.info(
+            "governance floor truncation applied (budget=%d, source=%s)",
+            limit.budget,
+            limit.source,
+        )
+    return changed
+
+
 @context_registry.register("light")
 class LightContextManager(BaseContextManager):
     """Context manager for the community edition.

@@ -35,14 +35,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from agentscope_runtime.engine.schemas.exception import (
     AppBaseException,
 )
 
-from ..permissions.decorators import require_permission
+from ..permissions.decorators import require_perm, require_permission
 
 from ...agents.skills_hub import (
     SkillImportCancelled,
@@ -643,8 +643,7 @@ def _build_pool_skill_specs() -> list[PoolSkillSpec]:
     return specs
 
 
-@router.get("")
-@require_permission("skills:read")
+@router.get("", dependencies=[Depends(require_perm("skills:read"))])
 async def list_skills(request: Request) -> list[SkillSpec]:
     workspace_dir = await _request_workspace_dir(request)
     # Ensure global defaults are synced before listing
@@ -654,8 +653,7 @@ async def list_skills(request: Request) -> list[SkillSpec]:
     return [s for s in all_skills if s.source != "global"]
 
 
-@router.post("/refresh")
-@require_permission("skills:read")
+@router.post("/refresh", dependencies=[Depends(require_perm("skills:read"))])
 async def refresh_skills(request: Request) -> list[SkillSpec]:
     """Force reconcile and return updated workspace skill list."""
     workspace_dir = await _request_workspace_dir(request)
@@ -665,8 +663,7 @@ async def refresh_skills(request: Request) -> list[SkillSpec]:
     return [s for s in all_skills if s.source != "global"]
 
 
-@router.get("/hub/search")
-@require_permission("skills:write")
+@router.get("/hub/search", dependencies=[Depends(require_perm("skills:write"))])
 async def search_hub(
     q: str = "",
     limit: int = 20,
@@ -684,8 +681,7 @@ async def search_hub(
     ]
 
 
-@router.get("/workspaces")
-@require_permission("skills:write")
+@router.get("/workspaces", dependencies=[Depends(require_perm("skills:write"))])
 async def list_workspace_skill_sources() -> list[WorkspaceSkillSummary]:
     summaries: list[WorkspaceSkillSummary] = []
     workspaces = list_workspaces()
@@ -702,8 +698,7 @@ async def list_workspace_skill_sources() -> list[WorkspaceSkillSummary]:
     return summaries
 
 
-@router.post("/hub/install/start", response_model=HubInstallTask)
-@require_permission("skills:write")
+@router.post("/hub/install/start", response_model=HubInstallTask, dependencies=[Depends(require_perm("skills:write"))])
 async def start_install_from_hub(
     request_body: HubInstallRequest,
     request: Request,
@@ -732,8 +727,7 @@ async def start_install_from_hub(
     return task
 
 
-@router.get("/hub/install/status/{task_id}", response_model=HubInstallTask)
-@require_permission("skills:write")
+@router.get("/hub/install/status/{task_id}", response_model=HubInstallTask, dependencies=[Depends(require_perm("skills:write"))])
 async def get_hub_install_status(task_id: str) -> HubInstallTask:
     task = await _hub_task_get(task_id)
     if task is None:
@@ -741,8 +735,7 @@ async def get_hub_install_status(task_id: str) -> HubInstallTask:
     return task
 
 
-@router.post("/hub/install/cancel/{task_id}")
-@require_permission("skills:write")
+@router.post("/hub/install/cancel/{task_id}", dependencies=[Depends(require_perm("skills:write"))])
 async def cancel_hub_install(request: Request, task_id: str) -> dict[str, Any]:
     async with _hub_install_lock:
         task = _hub_install_tasks.get(task_id)
@@ -765,30 +758,26 @@ async def cancel_hub_install(request: Request, task_id: str) -> dict[str, Any]:
     return {"task_id": task_id, "status": "cancelled"}
 
 
-@router.get("/pool")
-@require_permission("skills:read")
+@router.get("/pool", dependencies=[Depends(require_perm("skills:read"))])
 async def list_pool_skills(request: Request) -> list[PoolSkillSpec]:
     return _build_pool_skill_specs()
 
 
-@router.post("/pool/refresh")
-@require_permission("skills:write")
+@router.post("/pool/refresh", dependencies=[Depends(require_perm("skills:write"))])
 async def refresh_pool_skills(request: Request) -> list[PoolSkillSpec]:
     """Force reconcile and return updated pool skill list."""
     reconcile_pool_manifest()
     return _build_pool_skill_specs()
 
 
-@router.get("/pool/builtin-sources")
-@require_permission("skills:read")
+@router.get("/pool/builtin-sources", dependencies=[Depends(require_perm("skills:read"))])
 async def list_pool_builtin_sources(request: Request) -> list[BuiltinImportSpec]:
     return [
         BuiltinImportSpec(**item) for item in list_builtin_import_candidates()
     ]
 
 
-@router.get("/pool/builtin-notice")
-@require_permission("skills:read")
+@router.get("/pool/builtin-notice", dependencies=[Depends(require_perm("skills:read"))])
 async def get_pool_builtin_notice(request: Request) -> BuiltinUpdateNotice:
     notice = get_pool_builtin_update_notice()
     return BuiltinUpdateNotice(
@@ -813,8 +802,7 @@ async def get_pool_builtin_notice(request: Request) -> BuiltinUpdateNotice:
     )
 
 
-@router.post("")
-@require_permission("skills:read")
+@router.post("", dependencies=[Depends(require_perm("skills:read"))])
 async def create_skill(
     request: Request,
     body: CreateSkillRequest,
@@ -849,8 +837,7 @@ async def create_skill(
     return {"created": True, "name": created}
 
 
-@router.post("/upload")
-@require_permission("skills:read")
+@router.post("/upload", dependencies=[Depends(require_perm("skills:read"))])
 async def upload_skill_zip(
     request: Request,
     file: UploadFile = File(...),
@@ -905,8 +892,7 @@ async def upload_skill_zip(
     return result
 
 
-@router.post("/export")
-@require_permission("skills:read")
+@router.post("/export", dependencies=[Depends(require_perm("skills:read"))])
 async def export_skills(
     request: Request,
     body: ExportSkillsRequest,
@@ -958,8 +944,7 @@ async def export_skills(
     )
 
 
-@router.post("/pool/create")
-@require_permission("skills:write")
+@router.post("/pool/create", dependencies=[Depends(require_perm("skills:write"))])
 async def create_pool_skill(request: Request, body: CreateSkillRequest) -> dict[str, Any]:
     try:
         created = SkillPoolService().create_skill(
@@ -984,8 +969,7 @@ async def create_pool_skill(request: Request, body: CreateSkillRequest) -> dict[
     return {"created": True, "name": created}
 
 
-@router.put("/pool/save")
-@require_permission("skills:write")
+@router.put("/pool/save", dependencies=[Depends(require_perm("skills:write"))])
 async def save_pool_skill(request: Request, body: SavePoolSkillRequest) -> dict[str, Any]:
     """Save one pool skill.
 
@@ -1012,8 +996,7 @@ async def save_pool_skill(request: Request, body: SavePoolSkillRequest) -> dict[
     return result
 
 
-@router.post("/pool/upload-zip")
-@require_permission("skills:write")
+@router.post("/pool/upload-zip", dependencies=[Depends(require_perm("skills:write"))])
 async def upload_skill_pool_zip(request: Request,
     file: UploadFile = File(...),
     target_name: str = "",
@@ -1050,8 +1033,7 @@ async def upload_skill_pool_zip(request: Request,
     return result
 
 
-@router.post("/pool/import")
-@require_permission("skills:write")
+@router.post("/pool/import", dependencies=[Depends(require_perm("skills:write"))])
 async def import_skill_pool_from_hub(request: Request,
     body: HubInstallRequest,
 ) -> dict[str, Any]:
@@ -1077,8 +1059,7 @@ async def import_skill_pool_from_hub(request: Request,
     }
 
 
-@router.post("/pool/upload")
-@require_permission("skills:write")
+@router.post("/pool/upload", dependencies=[Depends(require_perm("skills:write"))])
 async def upload_workspace_skill_to_pool(request: Request,
     body: UploadToPoolRequest,
 ) -> dict[str, Any]:
@@ -1181,8 +1162,7 @@ def _build_download_plan(
     return plan
 
 
-@router.post("/pool/download")
-@require_permission("skills:read")
+@router.post("/pool/download", dependencies=[Depends(require_perm("skills:read"))])
 async def download_pool_skill_to_workspaces(request: Request,
     body: DownloadFromPoolRequest,
 ) -> dict[str, Any]:
@@ -1307,8 +1287,7 @@ async def download_pool_skill_to_workspaces(request: Request,
     return {"downloaded": downloaded}
 
 
-@router.post("/pool/import-builtin")
-@require_permission("skills:write")
+@router.post("/pool/import-builtin", dependencies=[Depends(require_perm("skills:write"))])
 async def import_pool_builtins(request: Request,
     body: ImportBuiltinRequest,
 ) -> dict[str, Any]:
@@ -1326,8 +1305,7 @@ async def import_pool_builtins(request: Request,
     return result
 
 
-@router.post("/pool/{skill_name}/update-builtin")
-@require_permission("skills:write")
+@router.post("/pool/{skill_name}/update-builtin", dependencies=[Depends(require_perm("skills:write"))])
 async def update_pool_builtin(request: Request,
     skill_name: str,
     body: UpdateBuiltinRequest | None = Body(default=None),
@@ -1345,8 +1323,7 @@ async def update_pool_builtin(request: Request,
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.delete("/pool/{skill_name}")
-@require_permission("skills:write")
+@router.delete("/pool/{skill_name}", dependencies=[Depends(require_perm("skills:write"))])
 async def delete_pool_skill(request: Request, skill_name: str) -> dict[str, Any]:
     deleted = SkillPoolService().delete_skill(skill_name)
     if not deleted:
@@ -1357,8 +1334,7 @@ async def delete_pool_skill(request: Request, skill_name: str) -> dict[str, Any]
     return {"deleted": True}
 
 
-@router.get("/pool/{skill_name}/config")
-@require_permission("skills:write")
+@router.get("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
 async def get_pool_skill_config(request: Request, skill_name: str) -> dict[str, Any]:
     manifest = read_skill_pool_manifest()
     entry = manifest.get("skills", {}).get(skill_name)
@@ -1367,8 +1343,7 @@ async def get_pool_skill_config(request: Request, skill_name: str) -> dict[str, 
     return {"config": entry.get("config", {})}
 
 
-@router.put("/pool/{skill_name}/config")
-@require_permission("skills:write")
+@router.put("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
 async def update_pool_skill_config(request: Request,
     skill_name: str,
     body: SkillConfigRequest,
@@ -1388,8 +1363,7 @@ async def update_pool_skill_config(request: Request,
     return {"updated": True}
 
 
-@router.delete("/pool/{skill_name}/config")
-@require_permission("skills:write")
+@router.delete("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
 async def delete_pool_skill_config(request: Request, skill_name: str) -> dict[str, Any]:
     manifest_path = get_pool_skill_manifest_path()
 
@@ -1420,8 +1394,7 @@ def _validate_tags(tags: list[str]) -> list[str]:
     return cleaned
 
 
-@router.put("/pool/{skill_name}/tags")
-@require_permission("skills:write")
+@router.put("/pool/{skill_name}/tags", dependencies=[Depends(require_perm("skills:write"))])
 async def update_pool_skill_tags(request: Request,
     skill_name: str,
     tags: list[str],
@@ -1436,8 +1409,7 @@ async def update_pool_skill_tags(request: Request,
     return {"updated": True, "tags": tags}
 
 
-@router.post("/batch-delete")
-@require_permission("skills:write")
+@router.post("/batch-delete", dependencies=[Depends(require_perm("skills:write"))])
 async def batch_delete_skills(
     request: Request,
     skills: list[str],
@@ -1462,8 +1434,7 @@ async def batch_delete_skills(
     return {"results": results}
 
 
-@router.post("/pool/batch-delete")
-@require_permission("skills:write")
+@router.post("/pool/batch-delete", dependencies=[Depends(require_perm("skills:write"))])
 async def batch_delete_pool_skills(request: Request,
     skills: list[str],
 ) -> dict[str, Any]:
@@ -1485,8 +1456,7 @@ async def batch_delete_pool_skills(request: Request,
     return {"results": results}
 
 
-@router.post("/batch-disable")
-@require_permission("skills:write")
+@router.post("/batch-disable", dependencies=[Depends(require_perm("skills:write"))])
 async def batch_disable_skills(
     request: Request,
     skills: list[str],
@@ -1497,8 +1467,7 @@ async def batch_disable_skills(
     return {"results": results}
 
 
-@router.post("/batch-enable")
-@require_permission("skills:write")
+@router.post("/batch-enable", dependencies=[Depends(require_perm("skills:write"))])
 async def batch_enable_skills(
     request: Request,
     skills: list[str],
@@ -1525,8 +1494,7 @@ async def batch_enable_skills(
     return {"results": results}
 
 
-@router.post("/{skill_name}/disable")
-@require_permission("skills:write")
+@router.post("/{skill_name}/disable", dependencies=[Depends(require_perm("skills:write"))])
 async def disable_skill(
     request: Request,
     skill_name: str,
@@ -1542,8 +1510,7 @@ async def disable_skill(
     return {"disabled": True, **result}
 
 
-@router.post("/{skill_name}/enable")
-@require_permission("skills:write")
+@router.post("/{skill_name}/enable", dependencies=[Depends(require_perm("skills:write"))])
 async def enable_skill(
     request: Request,
     skill_name: str,
@@ -1566,8 +1533,7 @@ async def enable_skill(
     return {"enabled": True, **result}
 
 
-@router.delete("/{skill_name}")
-@require_permission("skills:write")
+@router.delete("/{skill_name}", dependencies=[Depends(require_perm("skills:write"))])
 async def delete_skill(
     request: Request,
     skill_name: str,
@@ -1584,8 +1550,7 @@ async def delete_skill(
     return {"deleted": True}
 
 
-@router.get("/{skill_name}/files/{file_path:path}")
-@require_permission("skills:read")
+@router.get("/{skill_name}/files/{file_path:path}", dependencies=[Depends(require_perm("skills:read"))])
 async def load_skill_file(
     request: Request,
     skill_name: str,
@@ -1601,8 +1566,7 @@ async def load_skill_file(
     return {"content": content}
 
 
-@router.put("/save")
-@require_permission("skills:write")
+@router.put("/save", dependencies=[Depends(require_perm("skills:write"))])
 async def save_workspace_skill(
     request: Request,
     body: SaveSkillRequest,
@@ -1633,8 +1597,7 @@ async def save_workspace_skill(
     return result
 
 
-@router.put("/{skill_name}/channels")
-@require_permission("skills:write")
+@router.put("/{skill_name}/channels", dependencies=[Depends(require_perm("skills:write"))])
 async def update_skill_channels_endpoint(
     request: Request,
     skill_name: str,
@@ -1654,8 +1617,7 @@ async def update_skill_channels_endpoint(
     return {"updated": True, "channels": channels}
 
 
-@router.put("/{skill_name}/tags")
-@require_permission("skills:write")
+@router.put("/{skill_name}/tags", dependencies=[Depends(require_perm("skills:write"))])
 async def update_skill_tags(
     request: Request,
     skill_name: str,
@@ -1675,8 +1637,7 @@ async def update_skill_tags(
     return {"updated": True, "tags": tags}
 
 
-@router.get("/{skill_name}/config")
-@require_permission("skills:read")
+@router.get("/{skill_name}/config", dependencies=[Depends(require_perm("skills:read"))])
 async def get_skill_config_endpoint(
     request: Request,
     skill_name: str,
@@ -1689,8 +1650,7 @@ async def get_skill_config_endpoint(
     return {"config": entry.get("config", {})}
 
 
-@router.put("/{skill_name}/config")
-@require_permission("skills:write")
+@router.put("/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
 async def update_skill_config_endpoint(
     request: Request,
     skill_name: str,
@@ -1716,8 +1676,7 @@ async def update_skill_config_endpoint(
     return {"updated": True}
 
 
-@router.delete("/{skill_name}/config")
-@require_permission("skills:write")
+@router.delete("/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
 async def delete_skill_config_endpoint(
     request: Request,
     skill_name: str,
@@ -1759,15 +1718,13 @@ def _write_categories(data: dict[str, Any]) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-@router.get("/categories")
-@require_permission("skills:read")
+@router.get("/categories", dependencies=[Depends(require_perm("skills:read"))])
 async def list_categories() -> list[dict[str, Any]]:
     data = _read_categories()
     return sorted(data.get("categories", []), key=lambda c: c.get("sort_order", 99))
 
 
-@router.post("/categories")
-@require_permission("skills:write")
+@router.post("/categories", dependencies=[Depends(require_perm("skills:write"))])
 async def create_category(request: Request) -> dict[str, Any]:
     body = await request.json()
     key = body.get("key", "").strip()
@@ -1789,8 +1746,7 @@ async def create_category(request: Request) -> dict[str, Any]:
     return cat
 
 
-@router.put("/categories/{key}")
-@require_permission("skills:write")
+@router.put("/categories/{key}", dependencies=[Depends(require_perm("skills:write"))])
 async def update_category(key: str, request: Request) -> dict[str, Any]:
     body = await request.json()
     data = _read_categories()
@@ -1807,8 +1763,7 @@ async def update_category(key: str, request: Request) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail=f"Category '{key}' not found")
 
 
-@router.delete("/categories/{key}")
-@require_permission("skills:write")
+@router.delete("/categories/{key}", dependencies=[Depends(require_perm("skills:write"))])
 async def delete_category(key: str) -> dict[str, Any]:
     data = _read_categories()
     cats = data.get("categories", [])
@@ -1823,8 +1778,7 @@ async def delete_category(key: str) -> dict[str, Any]:
 # 效能评估 API
 # ──────────────────────────────────────────
 
-@router.get("/metrics")
-@require_permission("skills:read")
+@router.get("/metrics", dependencies=[Depends(require_perm("skills:read"))])
 async def get_skill_metrics(
     sort_by: str = "composite_score",
     limit: int = 100,
@@ -1845,8 +1799,7 @@ async def get_skill_metrics(
     }
 
 
-@router.get("/metrics/{skill_name}")
-@require_permission("skills:read")
+@router.get("/metrics/{skill_name}", dependencies=[Depends(require_perm("skills:read"))])
 async def get_skill_metric_detail(skill_name: str) -> dict[str, Any]:
     """获取单个技能的效能指标详情。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -1860,8 +1813,7 @@ async def get_skill_metric_detail(skill_name: str) -> dict[str, Any]:
     return metric
 
 
-@router.post("/metrics/refresh")
-@require_permission("skills:write")
+@router.post("/metrics/refresh", dependencies=[Depends(require_perm("skills:write"))])
 async def refresh_skill_metrics() -> dict[str, Any]:
     """强制刷新效能指标缓存。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -1871,8 +1823,7 @@ async def refresh_skill_metrics() -> dict[str, Any]:
     return summary
 
 
-@router.get("/metrics/user/{user_id}")
-@require_permission("skills:read")
+@router.get("/metrics/user/{user_id}", dependencies=[Depends(require_perm("skills:read"))])
 async def get_user_skill_metrics(user_id: str) -> dict[str, Any]:
     """获取指定用户在所有技能上的效能指标概览。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -1886,8 +1837,7 @@ async def get_user_skill_metrics(user_id: str) -> dict[str, Any]:
     }
 
 
-@router.get("/metrics/{skill_name}/user/{user_id}")
-@require_permission("skills:read")
+@router.get("/metrics/{skill_name}/user/{user_id}", dependencies=[Depends(require_perm("skills:read"))])
 async def get_user_skill_metric_detail(skill_name: str, user_id: str) -> dict[str, Any]:
     """获取指定用户在指定技能上的效能指标详情。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -1906,8 +1856,7 @@ async def get_user_skill_metric_detail(skill_name: str, user_id: str) -> dict[st
 # 版本管理 API
 # ──────────────────────────────────────────
 
-@router.get("/{skill_name}/versions")
-@require_permission("skills:read")
+@router.get("/{skill_name}/versions", dependencies=[Depends(require_perm("skills:read"))])
 async def get_skill_versions(skill_name: str) -> dict[str, Any]:
     """获取技能的版本历史列表。"""
     from coapis.skill_evolution.version_manager import list_versions
@@ -1920,8 +1869,7 @@ async def get_skill_versions(skill_name: str) -> dict[str, Any]:
     }
 
 
-@router.post("/{skill_name}/rollback/{version}")
-@require_permission("skills:write")
+@router.post("/{skill_name}/rollback/{version}", dependencies=[Depends(require_perm("skills:write"))])
 async def rollback_skill_version(
     skill_name: str,
     version: str,
@@ -1968,8 +1916,7 @@ async def rollback_skill_version(
 # 触发词用户级覆盖 API
 # ──────────────────────────────────────────
 
-@router.get("/{skill_name}/triggers")
-@require_permission("skills:read")
+@router.get("/{skill_name}/triggers", dependencies=[Depends(require_perm("skills:read"))])
 async def get_skill_triggers(
     skill_name: str,
     request: Request,
@@ -2008,8 +1955,7 @@ async def get_skill_triggers(
     }
 
 
-@router.put("/{skill_name}/triggers")
-@require_permission("skills:write")
+@router.put("/{skill_name}/triggers", dependencies=[Depends(require_perm("skills:write"))])
 async def update_skill_triggers(
     skill_name: str,
     request: Request,
@@ -2074,8 +2020,7 @@ async def update_skill_triggers(
 # 技能自进化 API
 # ──────────────────────────────────────────
 
-@router.get("/{skill_name}/improve/analyze")
-@require_permission("skills:read")
+@router.get("/{skill_name}/improve/analyze", dependencies=[Depends(require_perm("skills:read"))])
 async def analyze_skill_issues(skill_name: str) -> dict[str, Any]:
     """分析技能的触发词问题和内容问题。
 
@@ -2101,8 +2046,7 @@ async def analyze_skill_issues(skill_name: str) -> dict[str, Any]:
     }
 
 
-@router.post("/{skill_name}/improve/suggest")
-@require_permission("skills:write")
+@router.post("/{skill_name}/improve/suggest", dependencies=[Depends(require_perm("skills:write"))])
 async def generate_skill_suggestion(
     skill_name: str,
     body: dict[str, Any] = None,
@@ -2145,8 +2089,7 @@ async def generate_skill_suggestion(
     }
 
 
-@router.get("/suggestions")
-@require_permission("skills:read")
+@router.get("/suggestions", dependencies=[Depends(require_perm("skills:read"))])
 async def list_skill_suggestions(
     skill_name: str = None,
     status: str = None,
@@ -2168,8 +2111,7 @@ async def list_skill_suggestions(
     }
 
 
-@router.post("/suggestions/{suggestion_id}/approve")
-@require_permission("skills:write")
+@router.post("/suggestions/{suggestion_id}/approve", dependencies=[Depends(require_perm("skills:write"))])
 async def approve_skill_suggestion(suggestion_id: str) -> dict[str, Any]:
     """审批通过技能改进建议。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -2203,8 +2145,7 @@ async def approve_skill_suggestion(suggestion_id: str) -> dict[str, Any]:
 # 晋升/退役管理 API
 # ──────────────────────────────────────────
 
-@router.get("/promotion/candidates")
-@require_permission("skills:read")
+@router.get("/promotion/candidates", dependencies=[Depends(require_perm("skills:read"))])
 async def get_promotion_candidates() -> dict[str, Any]:
     """获取晋升候选技能列表。
 
@@ -2220,8 +2161,7 @@ async def get_promotion_candidates() -> dict[str, Any]:
     }
 
 
-@router.post("/promotion/{skill_name}/approve")
-@require_permission("skills:write")
+@router.post("/promotion/{skill_name}/approve", dependencies=[Depends(require_perm("skills:write"))])
 async def approve_promotion(skill_name: str) -> dict[str, Any]:
     """审批通过技能晋升为全局技能。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -2246,8 +2186,7 @@ async def approve_promotion(skill_name: str) -> dict[str, Any]:
     return {"success": True, "candidate": result}
 
 
-@router.post("/promotion/{skill_name}/reject")
-@require_permission("skills:write")
+@router.post("/promotion/{skill_name}/reject", dependencies=[Depends(require_perm("skills:write"))])
 async def reject_promotion(skill_name: str) -> dict[str, Any]:
     """拒绝技能晋升。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -2260,8 +2199,7 @@ async def reject_promotion(skill_name: str) -> dict[str, Any]:
     return {"success": True, "candidate": result}
 
 
-@router.get("/retirement/candidates")
-@require_permission("skills:read")
+@router.get("/retirement/candidates", dependencies=[Depends(require_perm("skills:read"))])
 async def get_retirement_candidates() -> dict[str, Any]:
     """获取退役候选技能列表。
 
@@ -2277,8 +2215,7 @@ async def get_retirement_candidates() -> dict[str, Any]:
     }
 
 
-@router.post("/cross-agent/trigger-optimization")
-@require_permission("skills:write")
+@router.post("/cross-agent/trigger-optimization", dependencies=[Depends(require_perm("skills:write"))])
 async def report_trigger_optimization(
     request: Request,
     body: dict[str, Any] = None,
@@ -2323,8 +2260,7 @@ async def report_trigger_optimization(
     }
 
 
-@router.get("/cross-agent/trigger-aggregation/{skill_name}")
-@require_permission("skills:read")
+@router.get("/cross-agent/trigger-aggregation/{skill_name}", dependencies=[Depends(require_perm("skills:read"))])
 async def get_trigger_aggregation(
     skill_name: str,
     signal_type: str = None,
@@ -2344,8 +2280,7 @@ async def get_trigger_aggregation(
     }
 
 
-@router.post("/debug/trigger-analysis")
-@require_permission("skills:read")
+@router.post("/debug/trigger-analysis", dependencies=[Depends(require_perm("skills:read"))])
 async def debug_trigger_analysis(
     request: Request,
     payload: dict[str, Any] = Body(...),
@@ -2499,8 +2434,7 @@ async def debug_trigger_analysis(
     }
 
 
-@router.post("/suggestions/{suggestion_id}/reject")
-@require_permission("skills:write")
+@router.post("/suggestions/{suggestion_id}/reject", dependencies=[Depends(require_perm("skills:write"))])
 async def reject_skill_suggestion(suggestion_id: str) -> dict[str, Any]:
     """拒绝技能改进建议。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -2511,305 +2445,4 @@ async def reject_skill_suggestion(suggestion_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Suggestion not found")
 
     return {"success": True, "suggestion": result}
-
-
-# ──────────────────────────────────────────
-# 晋升/退役管理 API
-# ──────────────────────────────────────────
-
-@router.get("/promotion/candidates")
-@require_permission("skills:read")
-async def get_promotion_candidates() -> dict[str, Any]:
-    """获取晋升候选技能列表。
-
-    晋升条件：≥3 用户使用、效能分≥0.7、存在≥30 天。
-    """
-    from coapis.skill_evolution.engine import get_evolution_engine
-
-    engine = get_evolution_engine()
-    candidates = engine.detect_promotion_candidates()
-    return {
-        "candidates": candidates,
-        "total": len(candidates),
-    }
-
-
-@router.post("/promotion/{skill_name}/approve")
-@require_permission("skills:write")
-async def approve_promotion(skill_name: str) -> dict[str, Any]:
-    """审批通过技能晋升为全局技能。"""
-    from coapis.skill_evolution.engine import get_evolution_engine
-
-    engine = get_evolution_engine()
-    result = engine.approve_promotion(skill_name)
-    if not result:
-        raise HTTPException(status_code=404, detail="Promotion candidate not found")
-
-    # 通知桥接层
-    try:
-        from coapis.skill_evolution.bridge import get_skill_evolution_bridge
-        bridge = get_skill_evolution_bridge()
-        bridge.notify_skill_improved(
-            skill_name=skill_name,
-            improvement_type="promoted_to_global",
-            description=f"技能晋升为全局技能（composite_score={result['composite_score']}，users={result['user_count']}）",
-        )
-    except Exception:
-        pass
-
-    return {"success": True, "candidate": result}
-
-
-@router.post("/promotion/{skill_name}/reject")
-@require_permission("skills:write")
-async def reject_promotion(skill_name: str) -> dict[str, Any]:
-    """拒绝技能晋升。"""
-    from coapis.skill_evolution.engine import get_evolution_engine
-
-    engine = get_evolution_engine()
-    result = engine.reject_promotion(skill_name)
-    if not result:
-        raise HTTPException(status_code=404, detail="Promotion candidate not found")
-
-    return {"success": True, "candidate": result}
-
-
-@router.get("/retirement/candidates")
-@require_permission("skills:read")
-async def get_retirement_candidates() -> dict[str, Any]:
-    """获取退役候选技能列表。
-
-    退役条件：90 天零触发 或 连续 5 次执行失败。
-    """
-    from coapis.skill_evolution.engine import get_evolution_engine
-
-    engine = get_evolution_engine()
-    candidates = engine.detect_retirement_candidates()
-    return {
-        "candidates": candidates,
-        "total": len(candidates),
-    }
-
-
-@router.post("/cross-agent/trigger-optimization")
-@require_permission("skills:write")
-async def report_trigger_optimization(
-    request: Request,
-    body: dict[str, Any] = None,
-) -> dict[str, Any]:
-    """上报触发词优化信号到跨 Agent 进化系统。
-
-    当 ≥3 个不同用户独立提出相同优化时，该优化可晋升为全局。
-    """
-    from coapis.evolution.cross_agent_evolution import CrossAgentEvolution
-
-    body = body or {}
-    skill_name = body.get("skill_name", "")
-    trigger_keyword = body.get("trigger_keyword", "")
-    signal_type = body.get("signal_type", "false_negative")
-    confidence = body.get("confidence", 0.7)
-
-    if not skill_name or not trigger_keyword:
-        raise HTTPException(status_code=400, detail="skill_name and trigger_keyword required")
-
-    # 获取用户信息
-    workspace_dir = await _request_workspace_dir(request)
-    user_id = body.get("user_id", "anonymous")
-
-    # 获取或创建 CrossAgentEvolution 实例
-    cae = CrossAgentEvolution(data_dir=workspace_dir.parent.parent / "system")
-    entry = cae.report_trigger_enhancement(
-        skill_name=skill_name,
-        trigger_keyword=trigger_keyword,
-        signal_type=signal_type,
-        source_user=user_id,
-        confidence=confidence,
-    )
-
-    # 聚合检查
-    aggregated = cae.aggregate_trigger_enhancements(skill_name, signal_type)
-
-    return {
-        "success": True,
-        "entry_id": entry.id,
-        "aggregated": aggregated,
-        "promotable_items": [a for a in aggregated if a.get("promotable")],
-    }
-
-
-@router.get("/cross-agent/trigger-aggregation/{skill_name}")
-@require_permission("skills:read")
-async def get_trigger_aggregation(
-    skill_name: str,
-    signal_type: str = None,
-) -> dict[str, Any]:
-    """获取跨用户的触发词优化聚合结果。"""
-    from coapis.evolution.cross_agent_evolution import CrossAgentEvolution
-
-    cae = CrossAgentEvolution(data_dir=Path(os.environ.get("COAPIS_WORKING_DIR", str(Path.home() / ".coapis"))) / "system")
-    aggregated = cae.aggregate_trigger_enhancements(skill_name, signal_type)
-
-    return {
-        "skill_name": skill_name,
-        "signal_type": signal_type,
-        "aggregation": aggregated,
-        "total": len(aggregated),
-        "promotable_count": len([a for a in aggregated if a.get("promotable")]),
-    }
-
-
-@router.post("/debug/trigger-analysis")
-@require_permission("skills:read")
-async def debug_trigger_analysis(
-    request: Request,
-    payload: dict[str, Any] = Body(...),
-) -> dict[str, Any]:
-    """调试技能触发分析 — 输入消息，返回完整的触发决策链路。
-
-    Request body:
-        {
-            "message": "帮我写个报告",
-            "channel": "wecom",  // optional, default "console"
-            "workspace_dir": "/path/to/workspace"  // optional
-        }
-
-    Response:
-        {
-            "available_skills": [...],
-            "llm_classification": [...],
-            "keyword_matches": {skill: {triggers, matched, result}},
-            "filtered_out": [...],
-            "would_load": [...]
-        }
-    """
-    from ...agents.skills_manager import (
-        ensure_skills_initialized,
-        get_workspace_skills_dir,
-        resolve_effective_skills,
-    )
-    from ...agents.react_agent import CoApisAgent
-    from pathlib import Path as P
-
-    message = payload.get("message", "")
-    channel = payload.get("channel", "console")
-    ws_dir = payload.get("workspace_dir", "")
-
-    if not message:
-        raise HTTPException(status_code=400, detail="message is required")
-
-    # 确定 workspace
-    if not ws_dir:
-        from ...constant import WORKING_DIR
-        workspace_dir = P(WORKING_DIR)
-    else:
-        workspace_dir = P(ws_dir)
-
-    # 初始化技能
-    ensure_skills_initialized(workspace_dir)
-    working_skills_dir = get_workspace_skills_dir(workspace_dir)
-
-    from ...agents.skills_manager import get_skill_pool_dir
-    skill_pool_dir = get_skill_pool_dir()
-
-    # 获取有效技能
-    effective_skills = resolve_effective_skills(workspace_dir, channel)
-
-    # 分类 core / on-demand
-    core_skills = []
-    on_demand_skills = {}
-
-    for skill_name in effective_skills:
-        skill_dir = working_skills_dir / skill_name
-        if not skill_dir.exists():
-            pool_dir = skill_pool_dir / skill_name
-            if pool_dir.exists():
-                skill_dir = pool_dir
-            else:
-                continue
-
-        priority = CoApisAgent._get_skill_priority(skill_dir)
-        if priority == "on-demand":
-            triggers = CoApisAgent._get_skill_triggers(skill_dir, workspace_dir)
-            on_demand_skills[skill_name] = {
-                "skill_dir": str(skill_dir),
-                "triggers": triggers,
-                "triggers_count": len(triggers),
-            }
-        else:
-            core_skills.append(skill_name)
-
-    # 模拟关键词匹配
-    msg_lower = message.lower()
-    keyword_matches = {}
-    would_load_llm = []
-    would_load_keyword = []
-    filtered_out = []
-
-    for skill_name, info in on_demand_skills.items():
-        triggers = info["triggers"]
-        matched = [kw for kw in triggers if kw in msg_lower]
-        result = "matched" if matched else "no_match"
-        if not triggers:
-            result = "no_triggers"
-        keyword_matches[skill_name] = {
-            "triggers_sample": triggers[:10],
-            "triggers_count": len(triggers),
-            "matched": matched,
-            "result": result,
-        }
-        if matched:
-            would_load_keyword.append(skill_name)
-        elif result != "no_triggers":
-            filtered_out.append(skill_name)
-
-    # 尝试 LLM 分类（best-effort）
-    llm_classification = []
-    try:
-        from ...agents.utils.intent_classifier import classify_intent_llm
-        summaries = {}
-        for name, info in on_demand_skills.items():
-            # 读取描述
-            skill_md = P(info["skill_dir"]) / "SKILL.md"
-            if skill_md.exists():
-                content = skill_md.read_text(encoding="utf-8")[:2000]
-                if "---" in content:
-                    parts = content.split("---", 2)
-                    if len(parts) >= 3:
-                        import yaml
-                        meta = yaml.safe_load(parts[1]) or {}
-                        desc = str(meta.get("description", ""))[:200]
-                        hints = meta.get("triggers", {}).get("intent_hints", [])
-                        if hints:
-                            summaries[name] = f"{desc} ||| {', '.join(hints)}"
-                        elif desc:
-                            summaries[name] = desc
-        if summaries:
-            import asyncio
-            result = await classify_intent_llm(message, summaries, timeout=5.0)
-            llm_classification = result if result else []
-    except Exception as e:
-        llm_classification = [f"error: {str(e)[:100]}"]
-
-    # 汇总
-    all_would_load = list(set(would_load_llm + would_load_keyword))
-
-    return {
-        "message": message,
-        "channel": channel,
-        "workspace": str(workspace_dir),
-        "summary": {
-            "core_skills_count": len(core_skills),
-            "on_demand_skills_count": len(on_demand_skills),
-            "llm_matched_count": len(llm_classification),
-            "keyword_matched_count": len(would_load_keyword),
-            "would_load_count": len(all_would_load),
-        },
-        "core_skills": core_skills,
-        "available_on_demand": list(on_demand_skills.keys()),
-        "llm_classification": llm_classification,
-        "keyword_matches": keyword_matches,
-        "would_load": all_would_load,
-        "filtered_out": filtered_out,
-    }
-
 

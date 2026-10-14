@@ -21,10 +21,16 @@ Loads permissions from config/permissions.json, supports hot-reload.
 """
 
 from .manager import PermissionManager
-from .decorators import require_permission, require_role, require_module_access
+from .decorators import (
+    require_perm,
+    require_permission,
+    require_role,
+    require_module_access,
+)
 
 __all__ = [
     "PermissionManager",
+    "require_perm",
     "require_permission",
     "require_role",
     "require_module_access",
