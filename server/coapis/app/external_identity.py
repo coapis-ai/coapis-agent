@@ -19,6 +19,11 @@
 身份通过 ContextVar（任务级，无竞态）传递，入口只需 set 一次：
 - runner.query_handler（覆盖 web/企微/cron 所有 agent 执行）
 - routers/mcp.py（MCP API 直调）
+
+MCP 出站的身份**按请求携带**（见 RequestIdentityRegistry）：MCP 的 HTTP
+发送任务是连接期创建、跨用户共享的常驻任务，不继承调用方的 ContextVar；
+共享连接上并发多用户时，把身份存在 client 实例上必然串号。因此发送侧按
+JSON-RPC 请求 id 登记调用方，注入侧按同一 id 反查——隔离单位是"请求"。
 """
 
 from __future__ import annotations
@@ -31,7 +36,7 @@ import os
 import threading
 import time
 from contextvars import ContextVar
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -473,39 +478,144 @@ async def _httpx_identity_hook(request) -> None:
     await _httpx_identity_core(request)
 
 
-def make_bound_identity_hook(
-    get_identity: Callable[[], Optional[str]],
-) -> Callable[..., Any]:
-    """生成绑定到特定 MCP client 实例的 httpx 请求钩子。
 
-    streamable_http 的发送通道是连接期创建的常驻任务，不会继承触发
-    调用的业务任务的 ContextVar（身份丢失会导致 Bearer/签名头缺失）。
-    这里把调用时刻显式捕获的"调用方身份"传入，并在发送任务里临时置入
-    ContextVar，从而复用既有的 outbound_headers/passthrough/签名逻辑。
+
+# ──────────────────────────────────────────────────────────────────────
+# 请求级身份登记（B2：身份随请求走，不随连接走）
+# ──────────────────────────────────────────────────────────────────────
+
+
+class RequestIdentityRegistry:
+    """JSON-RPC 请求 id → 调用方用户名 的短寿命登记表。
+
+    为什么需要它：MCP 的 HTTP 发送任务（streamable_http 的 post_writer、
+    sse 的 post_writer）是**连接期创建的常驻任务**，不继承触发调用的业务
+    任务里的 ContextVar；而共享连接上同时可能有多个用户的请求在飞。把身份
+    存在 client 实例属性上 = 单格子竞态（后写者赢）。
+
+    正确单位是**请求**：
+      - 发送侧（业务任务，ContextVar 可用）：`ClientSession.send_request`
+        在调用方任务里把 SessionMessage 投进 write_stream → 我们的代理流
+        按 JSON-RPC id 登记调用方身份；
+      - 注入侧（每请求独立任务）：httpx 请求钩子从请求体里取回同一个 id，
+        反查身份，在本任务内置入 ContextVar 后注入头，随即释放。
+
+    于是身份与请求一一对应，没有任何跨用户共享的可变格子；连接仍是共享的
+    （1 条连接多路复用），并发不受影响。
     """
 
-    async def hook(request) -> None:
-        ident = get_identity()
-        logger.warning(
-            "[IDENTITY_DEBUG] bound_hook url=%s ident=%r ctxvar=%r",
-            getattr(request, "url", ""), ident,
-            _CURRENT_IDENTITY_USER.get(),
-        )
-        if not ident:
-            await _httpx_identity_core(request)
+    def __init__(self, max_age: float = 900.0, max_entries: int = 4096) -> None:
+        self._owners: Dict[Any, Tuple[Optional[str], float]] = {}
+        self._max_age = max_age
+        self._max_entries = max_entries
+
+    def tag(self, request_id: Any, username: Optional[str]) -> None:
+        """登记（在调用方任务里调用）。username 为 None 表示无归属（如握手）。"""
+        now = time.monotonic()
+        self._owners[request_id] = (username, now)
+        self._sweep(now)
+
+    def lookup(self, request_id: Any) -> Optional[str]:
+        rec = self._owners.get(request_id)
+        if rec is None:
+            return None
+        if time.monotonic() - rec[1] > self._max_age:
+            self._owners.pop(request_id, None)
+            return None
+        return rec[0]
+
+    def release(self, request_id: Any) -> None:
+        self._owners.pop(request_id, None)
+
+    def clear(self) -> None:
+        self._owners.clear()
+
+    def _sweep(self, now: float) -> None:
+        owners = self._owners
+        if len(owners) <= self._max_entries:
+            if len(owners) > 64:
+                for rid, (_, ts) in list(owners.items()):
+                    if now - ts > self._max_age:
+                        owners.pop(rid, None)
             return
-        token = _CURRENT_IDENTITY_USER.set(ident)
+        for rid, (_, ts) in list(owners.items()):
+            if now - ts > self._max_age:
+                owners.pop(rid, None)
+        while len(owners) > self._max_entries:
+            oldest = min(owners.items(), key=lambda kv: kv[1][1])[0]
+            owners.pop(oldest, None)
+
+    def __len__(self) -> int:
+        return len(self._owners)
+
+
+def jsonrpc_id_of_request(request: Any) -> Optional[Any]:
+    """从 httpx 请求体里取 JSON-RPC 请求 id（取不到返回 None）。
+
+    通知类消息（notifications/initialized 等）没有 id → None。
+    """
+    try:
+        if getattr(request, "method", "") != "POST":
+            return None
+        content = request.content
+        if not content or b'"id"' not in content:
+            return None
+        payload = json.loads(content)
+        if not isinstance(payload, dict):
+            return None
+        rid = payload.get("id")
+        if isinstance(rid, bool) or not isinstance(rid, (int, str)):
+            return None
+        return rid
+    except Exception:  # pragma: no cover - 防御
+        return None
+
+
+def make_request_identity_hook(
+    registry: RequestIdentityRegistry,
+) -> Callable[..., Any]:
+    """按请求隔离身份的 httpx 请求钩子（MCP 出站唯一注入点）。
+
+    运行在发送任务里（每请求一个独立任务），ContextVar 天然隔离；身份从
+    registry 按请求 id 反查得到，不读任何共享格子。
+
+    非外部系统 URL → 直接返回（内网 MCP 流量的零成本快路径，连 body 都不解析）。
+    """
+
+    async def hook(request: Any) -> None:
+        url = str(getattr(request, "url", ""))
+        if find_external_system(url) is None:
+            return  # 不属于任何已配置外部系统：原样放行
+        rid = jsonrpc_id_of_request(request)
+        if rid is None:
+            logger.debug(
+                "[IDENTITY] 无 JSON-RPC id 的外部请求（通知类）→ 裸放行 url=%s",
+                url,
+            )
+            return
+        username = registry.lookup(rid)
+        if not username:
+            # 握手/无用户上下文：由外部业务系统自行判定（与 optional 模式一致）
+            logger.warning(
+                "[IDENTITY] 请求 id=%s 无调用方身份（握手期/无用户上下文）"
+                "→ 裸放行 url=%s",
+                rid,
+                url,
+            )
+            return
+        token = _CURRENT_IDENTITY_USER.set(username)
         try:
             await _httpx_identity_core(request)
         finally:
             _CURRENT_IDENTITY_USER.reset(token)
+            registry.release(rid)
 
     return hook
 
 
 def create_identity_httpx_client_factory(
     *extra_request_hooks,
-    identity_getter: Optional[Callable[[], Optional[str]]] = None,
+    identity_registry: Optional[RequestIdentityRegistry] = None,
 ):
     """MCP SDK ``httpx_client_factory``：创建的 client 自动挂身份注入 hook。
 
@@ -515,8 +625,8 @@ def create_identity_httpx_client_factory(
     ``extra_request_hooks``：附加的请求钩子（如 MCP 访问日志钩子），
     排在身份注入之后，保证身份头先就位。
 
-    ``identity_getter``：按 client 实例捕获调用方身份的取值函数（发送
-    通道常驻任务不继承业务 ContextVar 时用）；为 None 时用全局钩子。
+    ``identity_registry``：该连接的请求级身份登记表（B2 正路）；为 None 时
+    退回全局钩子（按当前任务 ContextVar 注入，仅适用于无共享连接的调用）。
     """
     def factory(
         headers: Optional[Dict[str, str]] = None,
@@ -537,8 +647,8 @@ def create_identity_httpx_client_factory(
         if auth is not None:
             client_kwargs["auth"] = auth
         identity_hook = (
-            make_bound_identity_hook(identity_getter)
-            if identity_getter is not None
+            make_request_identity_hook(identity_registry)
+            if identity_registry is not None
             else _httpx_identity_hook
         )
         client_kwargs["event_hooks"] = {

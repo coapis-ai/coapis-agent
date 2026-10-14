@@ -656,6 +656,65 @@ class ContextCompactConfig(BaseModel):
         description="Whether to include thinking blocks when compacting",
     )
 
+    # --- single-engine calibration (upstream ReActAgent compression) -------
+    # Coapis no longer runs its own compaction. The one and only automatic
+    # compactor is agentscope's ReActAgent._compress_memory_if_needed, which
+    # counts tokens with CharTokenCounter over the *formatted* prompt.  The
+    # thresholds below are therefore expressed in formatted characters.
+    # Measured on the dev session state (qwen3-30b-a3b, real tokenizer vs.
+    # byte heuristics): 4.68 formatted chars/token, 2.05 raw bytes/token.
+    formatted_chars_per_token: float = Field(
+        default=4.7,
+        ge=2.0,
+        le=8.0,
+        description=(
+            "Calibrated formatted-chars-per-token factor used to convert "
+            "the compaction threshold/reserve from tokens into the character "
+            "budget that upstream actually counts."
+        ),
+    )
+
+    keep_recent_default: int = Field(
+        default=12,
+        ge=2,
+        le=60,
+        description=(
+            "Initial number of recent message groups upstream keeps "
+            "uncompressed before the token-budget policy recomputes it each "
+            "reasoning step."
+        ),
+    )
+
+    keep_recent_min: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        description=(
+            "Floor for the token-budget-derived keep_recent (never keep "
+            "fewer than this many recent message groups)."
+        ),
+    )
+
+    keep_recent_max: int = Field(
+        default=30,
+        ge=2,
+        le=100,
+        description=(
+            "Ceiling for the token-budget-derived keep_recent (avoid a "
+            "reserve that is large enough to re-trigger compression)."
+        ),
+    )
+
+    compaction_model_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional dedicated model for compaction summaries "
+            "('<provider>:<model>'). None = reuse the session model, which "
+            "is the recommended default: no extra wiring and the summary "
+            "inherits the user's active model preference."
+        ),
+    )
+
 
 class ToolResultPruningConfig(BaseModel):
     """Tool result pruning configuration."""

@@ -1076,6 +1076,58 @@ def create_model_and_formatter(
     return wrapped_model, formatter
 
 
+def create_model_and_formatter_from_ref(
+    model_ref: str,
+) -> tuple[ChatModelBase, FormatterBase]:
+    """Build a model + matching formatter from a ``provider_id:model_name`` ref.
+
+    Used for a dedicated compaction model: upstream compresses with
+    ``compression_config.compression_model or self.model`` but formats the
+    compression prompt with ``compression_config.compression_formatter or
+    self.formatter``.  Swapping the model without swapping the formatter is a
+    silent format mismatch, so the pair is built together here — exactly like
+    :func:`create_model_and_formatter` does for the session model, with the
+    same token-recording and retry/rate-limit wrapping.
+
+    Args:
+        model_ref: Reference like ``"ollama:qwen3:8b"``.
+
+    Returns:
+        (retry-wrapped chat model, formatter for that model class).
+
+    Raises:
+        ProviderError: The reference is malformed or the provider/model is
+            not configured.
+    """
+    provider_id, sep, model_name = model_ref.rpartition(":")
+    if not sep or not provider_id or not model_name:
+        raise ProviderError(
+            message=(
+                f"compaction_model_id must look like 'provider:model', "
+                f"got {model_ref!r}."
+            ),
+        )
+
+    manager = ProviderManager.get_instance()
+    provider = manager.get_provider(provider_id)
+    if provider is None:
+        raise ProviderError(
+            message=f"Provider '{provider_id}' not found for compaction model.",
+        )
+
+    model = provider.get_chat_model_instance(model_name)
+    formatter = _create_formatter_instance(type(model))
+    wrapped_model = TokenRecordingModelWrapper(provider_id, model)
+    return (
+        RetryChatModel(
+            wrapped_model,
+            retry_config=None,
+            rate_limit_config=None,
+        ),
+        formatter,
+    )
+
+
 def _create_formatter_instance(
     chat_model_class: Type[ChatModelBase],
 ) -> FormatterBase:

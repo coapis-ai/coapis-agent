@@ -143,6 +143,33 @@ class BaseContextManager(ABC):
             Optionally modified ``kwargs``, or ``None`` if no change.
         """
 
+    async def post_reasoning(
+        self,
+        agent: Any,
+        kwargs: dict[str, Any],
+        output: Any,
+    ) -> Msg | None:
+        """Hook invoked after each reasoning step.
+
+        Compaction runs upstream at the start of the reasoning step, so this
+        is where a backend collects the pieces compaction left behind:
+        archiving the messages it marked, purging them from working memory,
+        and handing them to long-term memory.  The base implementation is a
+        no-op, so backends that do not care about that bookkeeping stay
+        unchanged.
+
+        Return ``None`` to leave the reasoning output unchanged, or return a
+        replacement ``Msg``.
+
+        Args:
+            agent: The owning agent instance.
+            kwargs: Keyword arguments that were passed into ``_reasoning``.
+            output: The message produced by the reasoning step.
+
+        Returns:
+            A replacement ``Msg``, or ``None`` if no change.
+        """
+
     @abstractmethod
     async def post_acting(
         self,

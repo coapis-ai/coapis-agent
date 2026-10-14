@@ -663,6 +663,30 @@ async def check_agent_task(
     )
 
 
+def _inherit_parent_plan_scope(child_session_id: str) -> None:
+    """把父会话的方案授权域继承给子智能体（片0 · 剔除破坏性）。
+
+    父会话无授权域/未确认时不继承，子智能体走正常审批流程。
+    """
+    try:
+        from coapis.agpts.runtime import get_current_session_id
+        from coapis.plan.scope import derive_subagent_scope
+
+        parent_session_id = str(get_current_session_id() or "")
+        if not parent_session_id:
+            return
+        scope = derive_subagent_scope(parent_session_id, child_session_id)
+        if scope is not None:
+            logger.info(
+                "subagent inherited plan scope: parent=%s child=%s max=%s",
+                parent_session_id,
+                child_session_id,
+                scope.max_semantics.value,
+            )
+    except Exception:  # pragma: no cover - 治理层不可用时不阻断派生
+        logger.debug("subagent plan-scope inheritance skipped", exc_info=True)
+
+
 def _generate_subagent_session_id() -> str:
     """Generate a short session ID for a spawned subagent."""
     return f"sub-{str(uuid4())[:8]}"
@@ -714,6 +738,10 @@ async def spawn_subagent(
         )
 
     subagent_session_id = _generate_subagent_session_id()
+
+    # 子智能体继承父会话的方案授权域（片0）：
+    # 继承除"破坏性"之外的全部，窗口更短，越界仍回落单独审批。
+    _inherit_parent_plan_scope(subagent_session_id)
 
     if fork:
         return _tool_text_response(

@@ -189,8 +189,18 @@ class AgentContext(InMemoryMemory):
         """Get the compressed summary of the memory."""
         return self._compressed_summary
 
-    def update_compressed_summary(self, summary: str) -> None:
+    async def update_compressed_summary(self, summary: str) -> None:
         """Update the compressed summary of the memory.
+
+        The signature must stay ``async``.  Upstream
+        ``ReActAgent._compress_memory_if_needed`` calls it as
+
+            await self.memory.update_compressed_summary(...)
+
+        and this class overrides the async base method.  A sync override
+        makes that statement ``await None``, which raises ``TypeError`` the
+        first time compression actually fires — i.e. the compaction path
+        breaks exactly when it starts working.
 
         Args:
             summary: The compressed summary text to store.
@@ -232,31 +242,55 @@ class AgentContext(InMemoryMemory):
 
         self._compressed_summary = state_dict.get("_compressed_summary", "")
 
-    async def mark_messages_compressed(
-        self,
-        messages: list[Msg],
-    ) -> int:
-        """Mark messages as compressed, persist them to dialog,
-        and remove from memory.
+    async def archive_compressed_and_purge(self) -> list[Msg]:
+        """Archive upstream-compressed messages to dialog storage, then
+        physically delete them from working memory.
 
-        This method:
-        1. Persists the given messages to the dialog storage
-        2. Removes them from memory
+        Upstream ``ReActAgent._compress_memory_if_needed`` summarizes the old
+        prefix and flags those messages with ``MemoryMark.COMPRESSED``.  They
+        stay in ``self.content`` forever unless someone removes them, which
+        means every later prompt re-formats dead weight and the persisted
+        session state keeps growing.  This closes the loop in one place:
 
-        Args:
-            messages: List of messages to mark as compressed.
+        1. Persist the marked messages to ``dialog/*.jsonl`` (nothing is lost
+           — the full transcript stays on disk).
+        2. Drop them from ``self.content``.
 
         Returns:
-            Number of messages marked as compressed.
+            The archived messages in original order, so callers can feed them
+            to long-term memory summarization.
         """
-        if not messages:
-            return 0
+        marked = [
+            msg
+            for msg, marks in self.content
+            if _MemoryMark.COMPRESSED in marks
+        ]
+        if not marked:
+            return []
 
-        # Persist messages to dialog storage instead of compressed
-        await self._append_messages_to_dialog(messages)
+        try:
+            archived = await self._append_messages_to_dialog(marked)
+        except Exception:
+            # If the archive write fails, keep live memory intact: losing the
+            # transcript is worse than carrying dead weight.
+            logger.exception("Failed to archive compressed messages to dialog.")
+            return []
 
-        # Remove messages from memory
-        msg_ids = {msg.id for msg in messages}
+        if archived < len(marked):
+            # ``_append_messages_to_dialog`` swallows its own errors and
+            # reports how many messages it actually wrote.  A short count
+            # means part of the transcript is not on disk, so the purge is
+            # cancelled and the next compaction attempt retries it.
+            logger.warning(
+                "Archived only %d/%d compressed message(s); keeping them in "
+                "working memory and retrying on the next compaction.",
+                archived,
+                len(marked),
+            )
+            return []
+
+        msg_ids = {msg.id for msg in marked}
+
         initial_size = len(self.content)
         self.content = [
             (msg, marks)
@@ -266,10 +300,12 @@ class AgentContext(InMemoryMemory):
         removed_count = initial_size - len(self.content)
 
         logger.info(
-            f"Marked {removed_count} messages as compressed "
-            f"and removed from memory",
+            "Archived + purged %d compressed message(s); %d remain in "
+            "working memory.",
+            removed_count,
+            len(self.content),
         )
-        return removed_count
+        return marked
 
     def clear_compressed_summary(self):
         """Clear the compressed summary."""

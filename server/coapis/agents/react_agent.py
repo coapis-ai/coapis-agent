@@ -42,7 +42,10 @@ from ..app.mcp.description_sanitizer import wrap_client_list_tools
 from .command_handler import CommandHandler
 from .hooks import BootstrapHook
 from .runtime.hooks import HookManager, HookPhase, HookState
-from .model_factory import create_model_and_formatter
+from .model_factory import (
+    create_model_and_formatter,
+    create_model_and_formatter_from_ref,
+)
 from .prompt import (
     build_multimodal_hint,
     build_system_prompt_from_working_dir,
@@ -295,6 +298,9 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         running_config = agent_config.running
         self._language = agent_config.language
 
+        # 方案授权域：记录"计划涉及出入、待用户确认方案"的原因（片0）
+        self._plan_scope_pending_reason: str | None = None
+
         # Initialize toolkit with built-in tools
         toolkit = self._create_toolkit(namesake_strategy=namesake_strategy)
 
@@ -485,33 +491,37 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
     def _build_compression_config(
         self, running_config, model
     ) -> "CompressionConfig | None":
-        """Build agentscope CompressionConfig from agent's running config.
+        """Build agentscope's CompressionConfig — the only compactor in Coapis.
 
-        Uses the light_context_config.context_compact_config settings to
-        configure agentscope's built-in memory compression mechanism.
+        Two things used to be wrong here.
+
+        1. ``trigger_threshold``.  Upstream measures the **formatted prompt**
+           with ``CharTokenCounter``, i.e. it counts characters.  The old
+           conversion used ``token_count_estimate_divisor`` (4), a *raw-bytes*
+           heuristic for a different counter, while a formatted prompt
+           measures ~4.7 chars/token on the dev model.  That put the trigger
+           at ~156% of the model window: compaction could only have fired
+           after the request had already overflowed.  It is now calibrated by
+           ``formatted_chars_per_token``.
+        2. ``keep_recent=3`` was a hardcoded guess.  The default comes from
+           config, and ``LightContextManager.pre_reasoning`` re-derives it
+           per step from the live token budget.
 
         Args:
             running_config: The agent's running configuration.
-            model: The LLM model instance for compression.
+            model: The session model.  Upstream compresses with
+                ``compression_config.compression_model or self.model``, so
+                leaving ``compression_model`` as None reuses this model;
+                ``compaction_model_id`` overrides it.
 
         Returns:
-            CompressionConfig if compression is enabled, None otherwise.
+            CompressionConfig if compaction is enabled, None otherwise.
         """
         try:
-            try:
-                from agentscope.agent._react_agent import (
-                    _ReActAgentWithToolkit as ReActAgentWithToolkit,
-                )
-            except ImportError:
-                # agentscope 1.0.21 已无 _ReActAgentWithToolkit（旧私有类名）。
-                # 现版 ReActAgent 就是带 toolkit 的基类，用兜底导入；
-                # 否则整个压缩配置被静默禁用 → 上下文无限增长 →
-                # MODEL_CONTEXT_LENGTH_EXCEEDED。
-                from agentscope.agent import (
-                    ReActAgent as ReActAgentWithToolkit,
-                )
+            from agentscope.agent import ReActAgent
+            from agentscope.token import CharTokenCounter
 
-            CompressionConfig = ReActAgentWithToolkit.CompressionConfig
+            CompressionConfig = ReActAgent.CompressionConfig
 
             lcc = running_config.light_context_config
             ccc = lcc.context_compact_config
@@ -520,38 +530,58 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 logger.debug("Context compaction disabled in config")
                 return None
 
-            # Calculate threshold in tokens
-            trigger_threshold = int(
-                running_config.max_input_length * ccc.compact_threshold_ratio
+            trigger_tokens = int(
+                running_config.max_input_length * ccc.compact_threshold_ratio,
+            )
+            char_threshold = int(
+                trigger_tokens * ccc.formatted_chars_per_token,
             )
 
-            # Use CharTokenCounter for lightweight estimation
-            from agentscope.token import CharTokenCounter
-
-            token_counter = CharTokenCounter()
-
-            # CharTokenCounter counts characters, so multiply threshold
-            # by avg chars per token (~4) to align with token-based config
-            # Use the configured divisor for accurate conversion
-            divisor = lcc.token_count_estimate_divisor
-            char_threshold = trigger_threshold * divisor
+            compression_model = None
+            compression_formatter = None
+            if ccc.compaction_model_id:
+                try:
+                    (
+                        compression_model,
+                        compression_formatter,
+                    ) = create_model_and_formatter_from_ref(
+                        ccc.compaction_model_id,
+                    )
+                except Exception as exc:
+                    compression_model = None
+                    compression_formatter = None
+                    logger.warning(
+                        "compaction_model_id %r is unusable (%s); "
+                        "compressing with the session model instead.",
+                        ccc.compaction_model_id,
+                        exc,
+                    )
 
             config = CompressionConfig(
                 enable=True,
-                agent_token_counter=token_counter,
+                agent_token_counter=CharTokenCounter(),
                 trigger_threshold=char_threshold,
-                keep_recent=3,
+                keep_recent=ccc.keep_recent_default,
+                compression_model=compression_model,
+                compression_formatter=compression_formatter,
             )
             logger.info(
-                f"Memory compression enabled: trigger_threshold="
-                f"{trigger_threshold} tokens (~{char_threshold} chars), "
-                f"keep_recent=3"
+                "Memory compaction enabled: trigger=%d formatted chars "
+                "(= %d tokens at %.2f chars/token, window %d), "
+                "keep_recent=%d, model=%s",
+                char_threshold,
+                trigger_tokens,
+                ccc.formatted_chars_per_token,
+                running_config.max_input_length,
+                ccc.keep_recent_default,
+                ccc.compaction_model_id or "session model",
             )
             return config
         except Exception as e:
             logger.warning(
-                f"Failed to build compression config: {e}. "
-                "Memory compression disabled."
+                "Failed to build compression config: %s. "
+                "Memory compaction disabled.",
+                e,
             )
             return None
 
@@ -2060,8 +2090,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         )
         logger.debug("Registered bootstrap hook")
 
-        # Context manager hooks - delegate compaction / tool-result pruning
-        # to the context manager's lifecycle methods
+        # Context manager hooks.  Compaction itself runs upstream inside
+        # ReActAgent._reasoning's wrapper; these hooks only do the hygiene
+        # around it: size the kept tail before it, archive + purge after it,
+        # prune tool results after acting.
         if self.context_manager is not None:
             self.register_instance_hook(
                 hook_type="pre_reply",
@@ -2072,6 +2104,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 hook_type="pre_reasoning",
                 hook_name="context_pre_reasoning",
                 hook=self.context_manager.pre_reasoning,
+            )
+            self.register_instance_hook(
+                hook_type="post_reasoning",
+                hook_name="context_post_reasoning",
+                hook=self.context_manager.post_reasoning,
             )
             self.register_instance_hook(
                 hook_type="post_acting",
@@ -2739,6 +2776,61 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             return
         setattr(formatter, "_coapis_force_strip_media", enabled)
 
+    async def _sync_plan_scope(self) -> None:
+        """按当前计划同步方案授权域（片0 · 计划门禁）。
+
+        口径：计划源于方案，方案必须经过确认；计划里除非涉及"出入"
+        （对外发消息/写外部系统/破坏性），可直接执行。
+        - 纯读取/工作区内动作 → 授权域直接生效；
+        - 涉及出入/破坏性 → 授权域挂起，注入"先确认方案"提示，
+          期间所有需审批的动作回落单独审批（不静默放行）。
+        """
+        notebook = getattr(self, "plan_notebook", None)
+        if notebook is None:
+            return
+        session_id = str(self._request_context.get("session_id") or "")
+        if not session_id:
+            return
+        try:
+            from coapis.plan.scope import sync_session_scope
+
+            plan = getattr(notebook, "current_plan", None)
+            verdict, reason = sync_session_scope(session_id, plan)
+        except Exception:  # pragma: no cover - 治理层不可用时不影响对话
+            logger.debug("plan-scope sync skipped", exc_info=True)
+            return
+
+        if verdict == "pending":
+            if self._plan_scope_pending_reason != reason:
+                self._plan_scope_pending_reason = reason
+                await self._inject_plan_confirm_hint(reason)
+            return
+        if getattr(self, "_plan_scope_pending_reason", None):
+            # 计划已变更且不再需要确认，清掉挂起提示
+            self._plan_scope_pending_reason = None
+
+    async def _inject_plan_confirm_hint(self, reason: str) -> None:
+        """提示智能体：当前计划涉及出入，先向用户确认方案再执行。"""
+        try:
+            from agentscope.message import Msg, TextBlock
+
+            hint = (
+                f"<plan-confirmation-required>{reason}。"
+                "请先向用户说明方案要点并取得确认，再执行涉及出入的步骤；"
+                "确认前可继续执行计划内的只读/工作区内步骤。"
+                "</plan-confirmation-required>"
+            )
+            await self.memory.add(
+                Msg(
+                    "system",
+                    [TextBlock(type="text", text=hint)],
+                    "system",
+                    name="plan_confirmation_required_hint",
+                ),
+            )
+        except Exception:  # pragma: no cover
+            logger.debug("plan-confirm hint injection skipped", exc_info=True)
+
     # pylint: disable=too-many-branches
     async def _reasoning(
         self,
@@ -2769,6 +2861,9 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             ]
         except Exception:
             self._recent_tool_msgs = []
+
+        # --- 方案授权域同步（片0）：按当前计划语义授予/挂起授权域 ---
+        await self._sync_plan_scope()
 
         # --- Thinking budget control ---
         try:

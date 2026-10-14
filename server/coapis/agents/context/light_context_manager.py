@@ -26,26 +26,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Set
 
-from agentscope.agent import ReActAgent
-from agentscope.formatter import FormatterBase
 from agentscope.message import Msg, TextBlock
-from agentscope.model import ChatModelBase
 
 from .agent_context import AgentContext
-from .as_msg_handler import AsMsgHandler
 from .base_context_manager import BaseContextManager, context_registry
-from .compactor_prompts import (
-    INITIAL_USER_MESSAGE_EN,
-    INITIAL_USER_MESSAGE_ZH,
-    SYSTEM_PROMPT_EN,
-    SYSTEM_PROMPT_ZH,
-    UPDATE_USER_MESSAGE_EN,
-    UPDATE_USER_MESSAGE_ZH,
-)
 from ..model_factory import create_model_and_formatter
 from ..tools.utils import truncate_text_output, DEFAULT_MAX_BYTES
 from ..utils import get_token_counter
-from ..utils.estimate_token_counter import EstimatedTokenCounter
 from ...config.config import load_agent_config
 from ...constant import TRUNCATION_NOTICE_MARKER
 
@@ -62,14 +49,17 @@ def _fmt_tokens(n: int) -> str:
 
 @context_registry.register("light")
 class LightContextManager(BaseContextManager):
-    """Context manager for agents with compaction support.
+    """Context manager for the community edition.
 
-    Handles conversation context compaction and the agent context object.
+    Compaction itself lives upstream (agentscope's
+    ``ReActAgent._compress_memory_if_needed``); this manager owns the
+    hygiene around it.
 
     Responsibilities:
     - Tool-result pruning via _prune_tool_result()
-    - Context-size checking via _check_context()
-    - Message compaction via _compact_context()
+    - Sizing the tail upstream keeps (pre_reasoning → keep_recent)
+    - Archiving + purging what upstream compressed (post_reasoning)
+    - Manual ``/compact`` on the same upstream contract (compact_context)
     - Agent context retrieval via get_agent_context()
     """
 
@@ -350,271 +340,9 @@ class LightContextManager(BaseContextManager):
 
         return messages
 
-    @staticmethod
-    async def _check_context(
-        messages: list[Msg],
-        context_compact_threshold: int,
-        context_compact_reserve: int,
-        as_token_counter: EstimatedTokenCounter,
-    ) -> tuple[list[Msg], list[Msg], int, int]:
-        """Check context size and determine if compaction is needed.
-
-        Uses AsMsgHandler to analyze messages and split them into
-        messages_to_compact and messages_to_keep based on token thresholds.
-
-        Args:
-            messages: List of conversation messages to check.
-            context_compact_threshold: Token threshold triggering compaction.
-            context_compact_reserve: Token limit for messages to keep.
-            as_token_counter: Token counter instance.
-
-        Returns:
-            Tuple of (messages_to_compact, messages_to_keep,
-            total_tokens, keep_tokens):
-            - messages_to_compact: Older messages exceeding reserve limit.
-            - messages_to_keep: Recent messages within reserve limit.
-            - total_tokens: Total token count of all messages.
-            - keep_tokens: Token count of messages to keep.
-        """
-        msg_handler = AsMsgHandler(as_token_counter)
-        return await msg_handler.context_check(
-            messages=messages,
-            context_compact_threshold=context_compact_threshold,
-            context_compact_reserve=context_compact_reserve,
-        )
-
-    @staticmethod
-    def _is_valid_summary(content: str) -> bool:
-        """Check if the summary content is valid.
-
-        Args:
-            content: The summary content to validate.
-
-        Returns:
-            True if valid, False otherwise.
-        """
-        if not content or not content.strip():
-            return False
-        if "##" not in content:
-            return False
-        return True
-
-    async def _compact_context(
-        self,
-        messages: list[Msg],
-        previous_summary: str = "",
-        extra_instruction: str = "",
-        as_llm: ChatModelBase | None = None,
-        as_llm_formatter: FormatterBase | None = None,
-        as_token_counter: EstimatedTokenCounter | None = None,
-        language: str = "en",
-        max_input_length: int = 100000,
-        compact_ratio: float = 0.5,
-        add_thinking_block: bool = True,
-        **_kwargs,
-    ) -> dict:
-        """Compact messages into a condensed summary.
-
-        Args:
-            messages: List of messages to compact.
-            previous_summary: Previous summary to update.
-            extra_instruction: Extra instruction for compaction.
-            as_llm: LLM model instance.
-            as_llm_formatter: Formatter for LLM output.
-            as_token_counter: Token counter instance.
-            language: Language for prompts ("en" or "zh").
-            max_input_length: Maximum input length for token calculation.
-            compact_ratio: Ratio for compact threshold calculation.
-            add_thinking_block: Whether to include thinking blocks.
-
-        Returns:
-            Dict with keys:
-            - success: Whether compaction produced a valid result.
-            - reason: Failure reason (empty string on success).
-            - user_message: The prompt sent to the LLM.
-            - history_compact: The compacted summary text.
-            - is_valid: Whether the summary passed format validation.
-            - before_tokens: Token count of messages before compaction.
-            - after_tokens: Token count of the compacted summary.
-        """
-        if not messages:
-            return {
-                "success": False,
-                "reason": "empty messages",
-                "user_message": "",
-                "history_compact": "",
-                "is_valid": False,
-                "before_tokens": 0,
-                "after_tokens": 0,
-            }
-
-        agent_config = load_agent_config(self.agent_id)
-
-        # Use provided token counter or get from config
-        token_counter = as_token_counter or get_token_counter(agent_config)
-
-        msg_handler = AsMsgHandler(token_counter)
-        before_token_count = await msg_handler.count_msgs_token(messages)
-
-        # Calculate compact threshold
-        memory_compact_threshold = int(max_input_length * compact_ratio)
-
-        history_formatted_str: str = await msg_handler.format_msgs_to_str(
-            messages=messages,
-            context_compact_threshold=memory_compact_threshold,
-            include_thinking=add_thinking_block,
-        )
-        after_token_count = await msg_handler.count_str_token(
-            history_formatted_str,
-        )
-        logger.info(
-            f"Compactor before_token_count={before_token_count} "
-            f"after_token_count={after_token_count}",
-        )
-
-        if not history_formatted_str:
-            logger.warning(f"No history to compact. messages={messages}")
-            return {
-                "success": False,
-                "reason": "formatted history is empty",
-                "user_message": "",
-                "history_compact": "",
-                "is_valid": False,
-                "before_tokens": before_token_count,
-                "after_tokens": 0,
-            }
-
-        # Select prompts based on language
-        is_zh = language.lower() == "zh"
-        system_prompt = SYSTEM_PROMPT_ZH if is_zh else SYSTEM_PROMPT_EN
-        initial_user_msg = (
-            INITIAL_USER_MESSAGE_ZH if is_zh else INITIAL_USER_MESSAGE_EN
-        )
-        update_user_msg = (
-            UPDATE_USER_MESSAGE_ZH if is_zh else UPDATE_USER_MESSAGE_EN
-        )
-
-        # Create ReActAgent for compaction
-        agent = ReActAgent(
-            name="coapis_compactor",
-            model=as_llm,
-            sys_prompt=system_prompt,
-            formatter=as_llm_formatter,
-        )
-        agent.set_console_output_enabled(False)
-
-        # Build user message
-        if previous_summary:
-            user_message: str = (
-                f"# conversation\n{history_formatted_str}\n\n"
-                f"# previous-summary\n{previous_summary}\n\n{update_user_msg}"
-            )
-        else:
-            user_message = (
-                f"# conversation\n{history_formatted_str}\n\n"
-                f"{initial_user_msg}"
-            )
-
-        if extra_instruction:
-            user_message += f"\n\n# extra-instruction\n{extra_instruction}"
-
-        logger.info(
-            f"Compactor sys_prompt={agent.sys_prompt} "
-            f"user_message={user_message[:500]}...",
-        )
-
-        compact_msg: Msg = await agent.reply(
-            Msg(
-                name="compactor",
-                role="user",
-                content=user_message,
-            ),
-        )
-
-        history_compact: str = compact_msg.get_text_content() or ""
-        is_valid: bool = self._is_valid_summary(history_compact)
-
-        if not is_valid:
-            reason = (
-                "empty summary"
-                if not history_compact.strip()
-                else "invalid format (missing ## header)"
-            )
-            logger.warning(
-                f"Invalid summary result: {history_compact[:200]}...",
-            )
-            return {
-                "success": False,
-                "reason": reason,
-                "user_message": user_message,
-                "history_compact": history_compact,
-                "is_valid": False,
-                "before_tokens": before_token_count,
-                "after_tokens": await msg_handler.count_str_token(
-                    history_compact,
-                ),
-            }
-
-        after_tokens = await msg_handler.count_str_token(history_compact)
-        logger.info(f"Compactor Result:\n{history_compact[:500]}...")
-
-        return {
-            "success": True,
-            "reason": "",
-            "user_message": user_message,
-            "history_compact": history_compact,
-            "is_valid": True,
-            "before_tokens": before_token_count,
-            "after_tokens": after_tokens,
-        }
-
-    async def _compact_context_safe(
-        self,
-        messages: list[Msg],
-        previous_summary: str = "",
-        extra_instruction: str = "",
-        as_llm: ChatModelBase | None = None,
-        as_llm_formatter: FormatterBase | None = None,
-        as_token_counter: EstimatedTokenCounter | None = None,
-        language: str = "en",
-        max_input_length: int = 100000,
-        compact_ratio: float = 0.5,
-        add_thinking_block: bool = True,
-        **_kwargs,
-    ) -> dict:
-        """Safe wrapper for _compact_context with fallback on failure.
-
-        Args: Same as _compact_context.
-
-        Returns:
-            Dict with same keys as _compact_context, guaranteed to return
-            a valid dict even on exception.
-        """
-        try:
-            return await self._compact_context(
-                messages=messages,
-                previous_summary=previous_summary,
-                extra_instruction=extra_instruction,
-                as_llm=as_llm,
-                as_llm_formatter=as_llm_formatter,
-                as_token_counter=as_token_counter,
-                language=language,
-                max_input_length=max_input_length,
-                compact_ratio=compact_ratio,
-                add_thinking_block=add_thinking_block,
-                **_kwargs,
-            )
-        except Exception as e:
-            logger.exception("Context compaction failed: %s", e)
-            return {
-                "success": False,
-                "reason": f"LLM error: {e}",
-                "user_message": "",
-                "history_compact": "",
-                "is_valid": False,
-                "before_tokens": 0,
-                "after_tokens": 0,
-            }
+    # ------------------------------------------------------------------
+    # Manual compaction (/compact): the same engine as the automatic path
+    # ------------------------------------------------------------------
 
     async def compact_context(
         self,
@@ -622,41 +350,136 @@ class LightContextManager(BaseContextManager):
         previous_summary: str = "",
         extra_instruction: str = "",
     ) -> dict:
-        """Public interface for context compaction.
+        """Compact messages with the upstream compression contract.
+
+        Coapis has exactly one compaction engine: agentscope's
+        ``ReActAgent._compress_memory_if_needed``.  A manual ``/compact``
+        cannot call it, because the command path builds a ``CommandHandler``
+        without an agent instance — so instead of shipping a second
+        summarizer, this reuses the *same* config object: the same
+        ``compression_prompt``, the same ``summary_template``, the same
+        ``summary_schema``, the same token accounting.  A manual summary and
+        an automatic one are therefore interchangeable, and compacting a
+        session either way produces the same kind of memory.
+
+        The previous implementation built its own prompt, its own 6-section
+        template, its own validity checks and a throwaway ``ReActAgent`` to
+        run it through — a second compactor with a second definition of a
+        good summary, ~265 lines of it.  Removed.
 
         Args:
-            messages: List of messages to compact.
-            previous_summary: Previous summary to update (if exists).
-            extra_instruction: Extra instruction for compaction.
+            messages: Messages to compact.
+            previous_summary: Earlier summary to fold into the new one.
+            extra_instruction: Optional user instruction for the summary.
 
         Returns:
             Dict with keys: success, reason, history_compact,
             before_tokens, after_tokens.
         """
-        agent_config = load_agent_config(self.agent_id)
-        running_config = agent_config.running
-        ccc = running_config.light_context_config.context_compact_config
+        empty: dict = {
+            "success": False,
+            "reason": "",
+            "history_compact": "",
+            "before_tokens": 0,
+            "after_tokens": 0,
+        }
+        if not messages:
+            empty["reason"] = "empty messages"
+            return empty
+
+        try:
+            from agentscope.agent import ReActAgent
+            from agentscope.token import CharTokenCounter
+        except ImportError as e:
+            empty["reason"] = f"agentscope compression unavailable: {e}"
+            return empty
+
+        # trigger_threshold=1 / keep_recent=1: a manual request compacts
+        # everything it was handed, whatever the automatic budget says.
+        compression_config = ReActAgent.CompressionConfig(
+            enable=True,
+            agent_token_counter=CharTokenCounter(),
+            trigger_threshold=1,
+            keep_recent=1,
+        )
+
+        compression_prompt = compression_config.compression_prompt
+        if extra_instruction:
+            compression_prompt = f"{compression_prompt}\n\n{extra_instruction}"
+
+        history = list(messages)
+        if previous_summary:
+            history.insert(0, Msg("user", previous_summary, "user"))
 
         model, formatter = create_model_and_formatter(self.agent_id)
 
-        result = await self._compact_context_safe(
-            messages=messages,
-            previous_summary=previous_summary,
-            extra_instruction=extra_instruction,
-            as_llm=model,
-            as_llm_formatter=formatter,
-            as_token_counter=get_token_counter(agent_config),
-            language=agent_config.language,
-            max_input_length=running_config.max_input_length,
-            compact_ratio=ccc.compact_threshold_ratio,
-            add_thinking_block=ccc.compact_with_thinking_block,
+        prompt = await formatter.format(
+            [
+                Msg(
+                    "system",
+                    "You compress conversation history. Produce only the "
+                    "structured summary the user message asks for; never "
+                    "continue the dialogue.",
+                    "system",
+                ),
+                *history,
+                Msg("user", compression_prompt, "user"),
+            ],
+        )
+
+        token_counter = compression_config.agent_token_counter
+        before_tokens = await token_counter.count(prompt)
+
+        try:
+            res = await model(
+                prompt,
+                structured_model=compression_config.summary_schema,
+            )
+            last_chunk = res
+            if getattr(model, "stream", False):
+                last_chunk = None
+                async for chunk in res:
+                    last_chunk = chunk
+        except Exception as e:
+            logger.exception("Manual compaction model call failed: %s", e)
+            empty["reason"] = f"model call failed: {e}"
+            empty["before_tokens"] = before_tokens
+            return empty
+
+        if last_chunk is None or not getattr(last_chunk, "metadata", None):
+            logger.error("Manual compaction produced no structured summary.")
+            empty["reason"] = "no structured summary generated"
+            empty["before_tokens"] = before_tokens
+            return empty
+
+        try:
+            history_compact = compression_config.summary_template.format(
+                **last_chunk.metadata,
+            )
+        except (KeyError, ValueError) as e:
+            logger.exception("Summary template formatting failed: %s", e)
+            empty["reason"] = f"summary template failed: {e}"
+            empty["before_tokens"] = before_tokens
+            return empty
+
+        after_tokens = await token_counter.count(
+            await formatter.format([Msg("user", history_compact, "user")]),
+        )
+
+        logger.info(
+            "Manual compaction: %d message(s), %d -> %d counter tokens "
+            "(model %s).",
+            len(messages),
+            before_tokens,
+            after_tokens,
+            getattr(model, "model_name", "?"),
         )
         return {
-            "success": result.get("success", False),
-            "reason": result.get("reason", ""),
-            "history_compact": result.get("history_compact", ""),
-            "before_tokens": result.get("before_tokens", 0),
-            "after_tokens": result.get("after_tokens", 0),
+            "success": True,
+            "reason": "",
+            "history_compact": history_compact,
+            "before_tokens": before_tokens,
+            "after_tokens": after_tokens,
         }
 
     # ------------------------------------------------------------------
@@ -728,233 +551,146 @@ class LightContextManager(BaseContextManager):
         agent: "CoApisAgent",
         kwargs: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Check context size and compact memory when threshold is exceeded.
+        """Size the tail that upstream keeps, before upstream decides.
 
-        Mirrors the compaction logic from ``MemoryCompactionHook`` but
-        excludes tool-result pruning, which is handled by
-        ``post_acting``.
+        Compaction itself is agentscope's job:
+        ``ReActAgent._compress_memory_if_needed`` runs at the top of every
+        reasoning iteration, measures the *formatted* prompt with
+        ``CharTokenCounter`` and summarizes everything older than
+        ``keep_recent`` message groups.  This hook does not summarize
+        anything any more — the old in-hook compactor (token estimate,
+        threshold check, "🔄 context compaction started", the LLM call, the
+        ✅/❌ report) is gone, because a second compactor inside a hook is
+        how the two compressors used to fight each other.
+
+        What remains is cheap and mechanical: re-derive ``keep_recent`` from
+        the live token budget, so the tail upstream keeps is sized by tokens
+        rather than by a constant baked into the config.
         """
+        compression_config = getattr(agent, "compression_config", None)
+        memory = getattr(agent, "memory", None)
+        if (
+            compression_config is None
+            or not compression_config.enable
+            or memory is None
+        ):
+            return None
+
+        agent_config = load_agent_config(self.agent_id)
+        running = agent_config.running
+        ccc = running.light_context_config.context_compact_config
+
+        # Half of the compression budget stays raw: the newest exchanges are
+        # the ones whose exact wording matters (tool output, file paths,
+        # numbers the next step will reuse).
+        budget_tokens = int(
+            running.max_input_length * ccc.compact_threshold_ratio * 0.5,
+        )
+        keep_recent = await self._compute_keep_recent(
+            memory,
+            budget_tokens=budget_tokens,
+            chars_per_token=ccc.formatted_chars_per_token,
+            keep_recent_min=ccc.keep_recent_min,
+            keep_recent_max=ccc.keep_recent_max,
+        )
+        if keep_recent != compression_config.keep_recent:
+            logger.debug(
+                "keep_recent adjusted %d -> %d for the current token budget.",
+                compression_config.keep_recent,
+                keep_recent,
+            )
+            compression_config.keep_recent = keep_recent
+        return None
+
+    @staticmethod
+    async def _compute_keep_recent(
+        memory: "AgentContext",
+        budget_tokens: int,
+        chars_per_token: float,
+        keep_recent_min: int,
+        keep_recent_max: int,
+    ) -> int:
+        """Count how many recent messages fit inside *budget_tokens*.
+
+        Upstream counts a tool-use / tool-result pair as one group when it
+        applies ``keep_recent``; counting plain messages is therefore
+        conservative — it keeps fewer groups, never more.  The result is
+        clamped so a session can never be squeezed below the configured floor
+        nor kept uncompressed past the ceiling.
+        """
+        messages = await memory.get_memory(prepend_summary=False)
+        budget_chars = budget_tokens * chars_per_token
+        used = 0.0
+        kept = 0
+        for msg in reversed(messages):
+            used += len(str(msg.content))
+            kept += 1
+            if used >= budget_chars and kept >= keep_recent_min:
+                break
+        return max(keep_recent_min, min(keep_recent_max, kept))
+
+    async def post_reasoning(
+        self,
+        agent: "CoApisAgent",
+        kwargs: dict[str, Any],
+        output: Any,
+    ) -> Msg | None:
+        """Archive what upstream compressed, then purge it from memory.
+
+        Upstream summarizes the old prefix and marks it ``COMPRESSED``, but
+        never removes it.  Every later prompt re-formats that dead weight, the
+        persisted session state grows forever, and the token-usage cache keeps
+        paying for messages that no longer matter.  This hook closes the loop:
+
+        1. full transcript appended to ``dialog/*.jsonl`` — nothing is lost;
+        2. messages removed from working memory;
+        3. archived messages handed to the long-term memory manager, so a
+           compaction event is also what produces durable memories.
+
+        Runs after every reasoning step and costs a single scan when nothing
+        was compressed.
+        """
+        memory = getattr(agent, "memory", None)
+        if memory is None or not hasattr(memory, "archive_compressed_and_purge"):
+            return None
 
         try:
-            memory_manager = agent.memory_manager
-            if memory_manager is None:
-                return None
+            archived = await memory.archive_compressed_and_purge()
+        except Exception as e:
+            logger.warning("Could not archive compressed messages: %s", e)
+            return None
 
-            agent_config = load_agent_config(self.agent_id)
-            running_config = agent_config.running
-            token_counter = get_token_counter(agent_config)
+        if not archived:
+            return None
 
-            memory = agent.memory
-            system_prompt = agent.sys_prompt
-            compressed_summary = memory.get_compressed_summary()
-            sys_token_count = await token_counter.count(
-                messages=[],
-                text=(system_prompt or ""),
-            )
-            summary_token_count = await token_counter.count(
-                messages=[],
-                text=(compressed_summary or ""),
-            )
-            str_token_count = sys_token_count + summary_token_count
-
-            ccc = running_config.light_context_config.context_compact_config
-            context_compact_threshold = int(
-                running_config.max_input_length * ccc.compact_threshold_ratio,
-            )
-            context_compact_reserve = int(
-                running_config.max_input_length * ccc.reserve_threshold_ratio,
-            )
-            left_compact_threshold = (
-                context_compact_threshold - str_token_count
-            )
-
-            if left_compact_threshold <= 0:
-                logger.warning(
-                    "The context_compact_threshold is set too low; "
-                    "the combined token length of system_prompt and "
-                    "compressed_summary exceeds the configured threshold. "
-                    "Alternatively, you could use /clear to reset the context "
-                    "and compressed_summary, ensuring the total remains "
-                    "below the threshold.",
+        agent_config = load_agent_config(self.agent_id)
+        memory_manager = getattr(agent, "memory_manager", None)
+        rlmc = getattr(agent_config.running, "reme_light_memory_config", None)
+        if rlmc is not None and rlmc.summarize_when_compact:
+            if memory_manager is not None:
+                try:
+                    memory_manager.add_summarize_task(messages=archived)
+                except Exception as e:
+                    logger.warning("Long-term memory linkage failed: %s", e)
+            else:
+                logger.debug(
+                    "Compacted %d message(s) but the agent has no memory "
+                    "manager; skipping reme summarization.",
+                    len(archived),
                 )
-                return None
 
-            messages = await memory.get_memory(prepend_summary=False)
-
-            (
-                messages_to_compact,
-                messages_to_keep,
-                ctx_total_tokens,
-                ctx_keep_tokens,
-            ) = await self._check_context(
-                messages=messages,
-                context_compact_threshold=left_compact_threshold,
-                context_compact_reserve=context_compact_reserve,
-                as_token_counter=token_counter,
-            )
-
-            if not messages_to_compact:
-                return None
-
-            # Build context status info for printing
-            max_len = running_config.max_input_length
-            total_msgs = len(messages)
-            compact_count = len(messages_to_compact)
-            keep_count = len(messages_to_keep)
-
-            total_tokens = str_token_count + ctx_total_tokens
-            keep_tokens = ctx_keep_tokens
-
-            pct = total_tokens / max_len * 100 if max_len > 0 else 0
-            token_line = (
-                f"📝 {_fmt_tokens(total_tokens)} / "
-                f"{_fmt_tokens(max_len)} ({pct:.0f}%)"
-            )
-
+        summary = memory.get_compressed_summary() or ""
+        try:
             await self._print_status_message(
                 agent,
-                f"🔄 Context compaction started... Context "
-                f"Status: {token_line} 💬 {total_msgs} msgs -> "
-                f"compact({compact_count}) + keep({keep_count})",
+                f"🗜️ **Context compacted**\n\n"
+                f"- {len(archived)} message(s) archived to dialog and dropped "
+                f"from the working context\n"
+                f"- rolling summary is now {len(summary)} characters",
             )
-
-            if ccc.enabled:
-                result = await self._compact_context_safe(
-                    messages=messages_to_compact,
-                    previous_summary=memory.get_compressed_summary(),
-                    as_llm=agent.model,
-                    as_llm_formatter=agent.formatter,
-                    as_token_counter=token_counter,
-                    language=agent_config.language,
-                    max_input_length=running_config.max_input_length,
-                    compact_ratio=ccc.compact_threshold_ratio,
-                    add_thinking_block=ccc.compact_with_thinking_block,
-                )
-
-                compact_content = (
-                    result.get("history_compact", "")
-                    if result.get("success")
-                    else ""
-                )
-                if not compact_content:
-                    reason = result.get("reason", "unknown")
-                    # Fallback: retry with larger reserve to keep more history.
-                    # left_compact_threshold (~80% of max_input_length) is much
-                    # larger than context_compact_reserve (~10%), so using it
-                    # as the reserve allows keeping more messages in context.
-                    (
-                        fallback_to_compact,
-                        fallback_to_keep,
-                        ctx_total_tokens,
-                        ctx_keep_tokens,
-                    ) = await self._check_context(
-                        messages=messages,
-                        context_compact_threshold=left_compact_threshold,
-                        context_compact_reserve=left_compact_threshold,
-                        as_token_counter=token_counter,
-                    )
-                    messages_to_compact = fallback_to_compact
-                    messages_to_keep = fallback_to_keep
-                    compact_content = memory.get_compressed_summary() or ""
-                    keep_count = len(messages_to_keep)
-                    compact_count = len(messages_to_compact)
-                    total_tokens = str_token_count + ctx_total_tokens
-                    pct = total_tokens / max_len * 100 if max_len > 0 else 0
-                    token_line = (
-                        f"📝 {_fmt_tokens(total_tokens)} / "
-                        f"{_fmt_tokens(max_len)} ({pct:.0f}%)"
-                    )
-                    if compact_count > 0:
-                        msg_line = (
-                            f"💬 Fallback: keep({keep_count})"
-                            f" + drop({compact_count})"
-                        )
-                    else:
-                        msg_line = f"💬 Fallback: keep({keep_count}) msgs"
-                    await self._print_status_message(
-                        agent,
-                        f"❌ Context compaction failed ({reason}) "
-                        f"Context Status: {token_line} {msg_line}",
-                    )
-                else:
-                    after_total = (
-                        sys_token_count
-                        + result.get("after_tokens", 0)
-                        + keep_tokens
-                    )
-                    after_pct = (
-                        after_total / max_len * 100 if max_len > 0 else 0
-                    )
-                    after_token_line = (
-                        f"📝 {_fmt_tokens(after_total)} / "
-                        f"{_fmt_tokens(max_len)} ({after_pct:.0f}%)"
-                    )
-                    await self._print_status_message(
-                        agent,
-                        f"✅ Context compaction completed! "
-                        f"Context Status: {after_token_line} "
-                        f"💬 {keep_count} msgs",
-                    )
-            else:
-                # Fallback: retry with larger reserve to keep more history.
-                # left_compact_threshold (~80% of max_input_length) is much
-                # larger than context_compact_reserve (~10%), so using it as
-                # the reserve allows keeping more messages in context.
-                (
-                    fallback_to_compact,
-                    fallback_to_keep,
-                    ctx_total_tokens,
-                    ctx_keep_tokens,
-                ) = await self._check_context(
-                    messages=messages,
-                    context_compact_threshold=left_compact_threshold,
-                    context_compact_reserve=left_compact_threshold,
-                    as_token_counter=token_counter,
-                )
-                messages_to_compact = fallback_to_compact
-                messages_to_keep = fallback_to_keep
-                compact_content = memory.get_compressed_summary() or ""
-                keep_count = len(messages_to_keep)
-                compact_count = len(messages_to_compact)
-                total_tokens = str_token_count + ctx_total_tokens
-                pct = total_tokens / max_len * 100 if max_len > 0 else 0
-                token_line = (
-                    f"📝 {_fmt_tokens(total_tokens)} / "
-                    f"{_fmt_tokens(max_len)} ({pct:.0f}%)"
-                )
-                if compact_count > 0:
-                    msg_line = (
-                        f"💬 Fallback: keep({keep_count})"
-                        f" + drop({compact_count})"
-                    )
-                else:
-                    msg_line = f"💬 Fallback: keep({keep_count}) msgs"
-                await self._print_status_message(
-                    agent,
-                    f"⏭️ Context compaction skipped (disabled) "
-                    f"Context Status: {token_line} {msg_line}",
-                )
-
-            updated_count = await memory.mark_messages_compressed(
-                messages_to_compact,
-            )
-            logger.info(f"Marked {updated_count} messages as compacted")
-
-            rlmc = running_config.reme_light_memory_config
-            if messages_to_compact and rlmc.summarize_when_compact:
-                memory_manager.add_summarize_task(
-                    messages=messages_to_compact,
-                )
-
-            await memory.update_compressed_summary(compact_content)
-
-        except Exception as e:
-            logger.exception(
-                "Failed to compact memory in pre_reasoning hook: %s",
-                e,
-                exc_info=True,
-            )
-
+        except Exception:
+            # Status lines are UX sugar; compaction must not depend on them.
+            logger.debug("Could not show the compaction status line.", exc_info=True)
         return None
 
     async def post_acting(

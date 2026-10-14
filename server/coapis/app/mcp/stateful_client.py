@@ -44,13 +44,13 @@ from mcp.client.stdio import StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
 
-from agentscope.mcp import MCPToolFunction, StatefulClientBase
+from agentscope.mcp import StatefulClientBase
 
 from ..external_identity import (
-    _httpx_identity_hook,
+    RequestIdentityRegistry,
     create_identity_httpx_client_factory,
     get_identity_username,
-    make_bound_identity_hook,
+    make_request_identity_hook,
     outbound_headers,
     IdentityError,
 )
@@ -59,86 +59,55 @@ from .access_log import make_request_hook, make_response_hook
 logger = logging.getLogger(__name__)
 
 
-def _make_pending_header_merge_hook(owner: Any) -> Any:
-    """同步 httpx 请求钩子：把异步侧预解析好的身份头合并进请求。
+class _IdentityTaggingWriteStream:
+    """包一层 MCP 的 write_stream：发送侧按请求 id 登记调用方身份。
 
-    httpx 的 event_hooks 是同步回调，不能 await；因此身份头的解析
-    （含 token 续期的异步逻辑）放在工具调用的异步上下文里完成，
-    钩子只做纯同步的字典合并。
+    ``ClientSession.send_request`` 运行在**调用方的业务任务**里，此处
+    ContextVar 可用 → 取到真实调用方；而 streamable_http / sse 的发送任务
+    是连接期创建的常驻任务（每请求再派一个独立任务），ContextVar 不继承。
+    于是把"请求 id → 调用方用户"登记进 registry，httpx 请求钩子在发送任务
+    里按请求体里的同一 id 反查身份 → 身份随请求走，无共享格子、无串号。
+
+    只实现 BaseSession 实际用到的方法（send / 异步上下文管理 / aclose），
+    其余属性透传给内层流。
     """
 
-    def _merge(request: Any) -> None:
-        hdrs = getattr(owner, "_pending_identity_headers", None)
-        if hdrs:
-            for k, v in hdrs.items():
-                request.headers[k] = v
+    def __init__(
+        self,
+        inner: Any,
+        registry: RequestIdentityRegistry,
+        client_name: str = "",
+    ) -> None:
+        self._inner = inner
+        self._registry = registry
+        self._name = client_name
 
-    return _merge
-
-
-async def _prepare_identity(owner: Any, url: str) -> None:
-    """在异步调用侧捕获业务身份并预解析出站身份头。"""
-    username = get_identity_username()
-    logger.debug(
-        "[IDENTITY_DEBUG] prepare client=%s username=%r url=%s",
-        getattr(owner, "name", "?"), username, url,
-    )
-    owner._call_identity = username
-    owner._pending_identity_headers = {}
-    if username and url:
+    async def send(self, session_message: Any) -> None:
         try:
-            from ..external_identity import outbound_headers
-
-            owner._pending_identity_headers = (
-                await outbound_headers(url, username) or {}
+            root = session_message.message.root
+            rid = getattr(root, "id", None)
+            if isinstance(rid, (int, str)) and not isinstance(rid, bool):
+                self._registry.tag(rid, get_identity_username())
+        except Exception as exc:  # 登记失败绝不影响发送
+            logger.debug(
+                "MCP client '%s': 身份登记失败（降级裸请求）: %s",
+                self._name, exc,
             )
-        except Exception:
-            logger.exception(
-                "MCP client '%s': 出站身份头预解析失败（降级为裸请求）",
-                getattr(owner, "name", "?"),
-            )
-            owner._pending_identity_headers = {}
-        if not owner._pending_identity_headers:
-            logger.warning(
-                "MCP client '%s': 用户 %s 无可解析的出站身份（未绑定/无 token）"
-                "→ 降级为裸请求, url=%s",
-                getattr(owner, "name", "?"), username, url,
-            )
+        await self._inner.send(session_message)
+
+    async def __aenter__(self) -> Any:
+        return await self._inner.__aenter__()
+
+    async def __aexit__(self, *exc_info: Any) -> Any:
+        return await self._inner.__aexit__(*exc_info)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._inner, item)
 
 
-class _IdentityMCPToolFunction(MCPToolFunction):
-    """MCPToolFunction 的子类，在调用时刻捕获业务身份。
-
-    Toolkit 通过 ``isinstance(tool_func, MCPToolFunction)`` 识别 MCP 工具，
-    并从实例属性取 name/description/json_schema/mcp_name，因此这里直接
-    复制内部函数的全部元数据（不调用父类 __init__），保证工具注册行为
-    与原函数完全一致；仅 ``__call__`` 额外做一件事：把当前 ContextVar
-    里的用户名存入所属 client 的 ``_call_identity``，供 httpx 身份钩子
-    在常驻发送通道注入 Authorization/HMAC 头。
-    """
-
-    def __init__(self, *, inner: MCPToolFunction, owner: Any) -> None:
-        self.mcp_name = inner.mcp_name
-        self.name = inner.name
-        self.description = inner.description
-        self.json_schema = inner.json_schema
-        self.wrap_tool_result = inner.wrap_tool_result
-        self.timeout = inner.timeout
-        self.client_gen = inner.client_gen
-        self.session = inner.session
-        self._identity_owner = owner
-        self._identity_inner = inner
-
-    async def __call__(self, **kwargs: Any) -> Any:
-        owner = self._identity_owner
-        prev_identity = owner._call_identity
-        prev_headers = owner._pending_identity_headers
-        await _prepare_identity(owner, getattr(owner, "url", ""))
-        try:
-            return await self._identity_inner(**kwargs)
-        finally:
-            owner._call_identity = prev_identity
-            owner._pending_identity_headers = prev_headers
 
 # Connection retry policy (shared by stdio/http clients).
 # Before the cap: exponential backoff (2,4,8,16,30s). After the cap: a
@@ -211,9 +180,6 @@ class StdIOStatefulClient(StatefulClientBase):
             )
 
         self.name = name
-        # 本次工具调用预解析好的出站身份头（httpx 事件钩子是同步的，
-        # 不能在钩子里 await 异步的 token 解析，故在异步调用侧先算好）。
-        self._pending_identity_headers: Dict[str, str] = {}
         self.server_params = StdioServerParameters(
             command=command,
             args=args or [],
@@ -233,9 +199,8 @@ class StdIOStatefulClient(StatefulClientBase):
         self.session: ClientSession | None = None
         self.is_connected = False
 
-        # 调用方身份（call_tool 时刻捕获，供发送通道常驻任务的
-        # 身份钩子读取；streamable_http 发送任务不继承业务 ContextVar）
-        self._call_identity: str | None = None
+        # 请求级身份登记表（每次连接一份；见 _IdentityTaggingWriteStream）
+        self._identity_registry: RequestIdentityRegistry | None = None
 
         # Tool cache
         self._cached_tools = None
@@ -257,12 +222,25 @@ class StdIOStatefulClient(StatefulClientBase):
             try:
                 logger.debug(f"Connecting MCP client: {self.name}")
 
+                # 每次连接一份请求级身份登记表：JSON-RPC 请求 id 在新会话里
+                # 从 0 重新计数，登记表必须随之重置，避免跨会话串 id
+                self._identity_registry = RequestIdentityRegistry()
+
                 # Enter context manager in THIS task
                 async with AsyncExitStack() as stack:
                     context = await stack.enter_async_context(
                         stdio_client(self.server_params),
                     )
                     read_stream, write_stream = context[0], context[1]
+
+                    # 发送侧身份登记（B2）：ClientSession 在调用方任务里把
+                    # 请求投进这个代理流 → 按 JSON-RPC id 登记调用方；httpx
+                    # 钩子在发送任务里按同一 id 反查身份注入出站头。
+                    write_stream = _IdentityTaggingWriteStream(
+                        write_stream,
+                        self._identity_registry,
+                        self.name,
+                    )
 
                     # Initialize session
                     self.session = ClientSession(read_stream, write_stream)
@@ -291,6 +269,8 @@ class StdIOStatefulClient(StatefulClientBase):
                     self.session = None
                     self.is_connected = False
                     self._cached_tools = None
+                    if self._identity_registry is not None:
+                        self._identity_registry.clear()
 
                     if self._reload_event.is_set():
                         logger.info(f"Reloading MCP client: {self.name}")
@@ -507,27 +487,6 @@ class StdIOStatefulClient(StatefulClientBase):
         self._cached_tools = res.tools
         return res.tools
 
-    async def get_callable_function(
-        self,
-        func_name: str,
-        wrap_tool_result: bool = True,
-        execution_timeout: float | None = None,
-    ):
-        """Toolkit 入口的工具函数包一层出站身份捕获。
-
-        agentscope Toolkit 通过本方法取得 MCP 工具函数，其内部
-        MCPToolFunction 直接引用 session.call_tool，绕过我们的
-        call_tool 覆写——因此在这里再包一层：调用时刻捕获业务身份
-        到 _call_identity，供 httpx 身份钩子在发送通道注入
-        （发送任务常驻，不继承业务 ContextVar）。
-        """
-        fn = await super().get_callable_function(
-            func_name,
-            wrap_tool_result=wrap_tool_result,
-            execution_timeout=execution_timeout,
-        )
-        return _IdentityMCPToolFunction(inner=fn, owner=self)
-
     async def call_tool(self, name: str, arguments: dict | None = None):
         """Call a tool on the MCP server.
 
@@ -543,17 +502,10 @@ class StdIOStatefulClient(StatefulClientBase):
         """
         self._validate_connection()
 
-        # 显式把调用方身份传给发送通道：streamable_http 的发送任务是
-        # 连接期创建的常驻任务，不继承本业务的 ContextVar，若不在此
-        # 捕获，httpx 身份钩子在发送侧将解析不到用户（Bearer/签名丢失）。
-        prev_identity = self._call_identity
-        prev_headers = self._pending_identity_headers
-        await _prepare_identity(self, getattr(self, "url", ""))
-        try:
-            return await self.session.call_tool(name, arguments or {})
-        finally:
-            self._call_identity = prev_identity
-            self._pending_identity_headers = prev_headers
+        # 出站身份不在这里传递：_IdentityTaggingWriteStream 在发送侧
+        # 按 JSON-RPC 请求 id 登记调用方，httpx 钩子在发送任务里按同一
+        # id 反查注入 —— 隔离单位是请求，共享连接上多用户并发不串号。
+        return await self.session.call_tool(name, arguments or {})
 
     def _validate_connection(self) -> None:
         """Validate the connection to the MCP server.
@@ -624,9 +576,6 @@ class HttpStatefulClient(StatefulClientBase):
             raise TypeError(f"url must be str, got {type(url).__name__}")
 
         self.name = name
-        # 本次工具调用预解析好的出站身份头（httpx 事件钩子是同步的，
-        # 不能在钩子里 await 异步的 token 解析，故在异步调用侧先算好）。
-        self._pending_identity_headers: Dict[str, str] = {}
         self.transport = transport
         self.url = url
         self.headers = headers
@@ -644,9 +593,8 @@ class HttpStatefulClient(StatefulClientBase):
         self.session: ClientSession | None = None
         self.is_connected = False
 
-        # 调用方身份（call_tool 时刻捕获，供发送通道常驻任务的
-        # 身份钩子读取；streamable_http 发送任务不继承业务 ContextVar）
-        self._call_identity: str | None = None
+        # 请求级身份登记表（每次连接一份；见 _IdentityTaggingWriteStream）
+        self._identity_registry: RequestIdentityRegistry | None = None
 
         # Tool cache
         self._cached_tools = None
@@ -659,6 +607,10 @@ class HttpStatefulClient(StatefulClientBase):
         while not self._stop_event.is_set():
             try:
                 logger.debug(f"Connecting MCP client: {self.name}")
+
+                # 每次连接一份请求级身份登记表：JSON-RPC 请求 id 在新会话里
+                # 从 0 重新计数，登记表必须随之重置，避免跨会话串 id
+                self._identity_registry = RequestIdentityRegistry()
 
                 # Enter context manager in THIS task
                 async with AsyncExitStack() as stack:
@@ -677,8 +629,9 @@ class HttpStatefulClient(StatefulClientBase):
                         )
 
                         # Configure httpx client with MCP-recommended timeouts
-                        # + outbound identity assertion hook (per-request,
-                        # only touches URLs of configured external systems)
+                        # + outbound identity assertion hook (request-scoped:
+                        # identity is looked up by JSON-RPC request id, so a
+                        # shared connection never mixes users)
                         # + full request/response access log (diagnostics)
                         http_client = httpx.AsyncClient(
                             headers=self.headers or {},
@@ -690,8 +643,8 @@ class HttpStatefulClient(StatefulClientBase):
                             ),
                             event_hooks={
                                 "request": [
-                                    make_bound_identity_hook(
-                                        lambda: self._call_identity
+                                    make_request_identity_hook(
+                                        self._identity_registry
                                     ),
                                     make_request_hook(self.name),
                                 ],
@@ -723,7 +676,7 @@ class HttpStatefulClient(StatefulClientBase):
                                 httpx_client_factory=(
                                     create_identity_httpx_client_factory(
                                         make_request_hook(self.name),
-                                        identity_getter=lambda: self._call_identity,
+                                        identity_registry=self._identity_registry,
                                     )
                                 ),
                                 **self.client_kwargs,
@@ -731,6 +684,15 @@ class HttpStatefulClient(StatefulClientBase):
                         )
 
                     read_stream, write_stream = context[0], context[1]
+
+                    # 发送侧身份登记（B2）：ClientSession 在调用方任务里把
+                    # 请求投进这个代理流 → 按 JSON-RPC id 登记调用方；httpx
+                    # 钩子在发送任务里按同一 id 反查身份注入出站头。
+                    write_stream = _IdentityTaggingWriteStream(
+                        write_stream,
+                        self._identity_registry,
+                        self.name,
+                    )
 
                     # Initialize session
                     self.session = ClientSession(read_stream, write_stream)
@@ -759,6 +721,8 @@ class HttpStatefulClient(StatefulClientBase):
                     self.session = None
                     self.is_connected = False
                     self._cached_tools = None
+                    if self._identity_registry is not None:
+                        self._identity_registry.clear()
 
                     if self._reload_event.is_set():
                         logger.info(f"Reloading MCP client: {self.name}")
@@ -941,27 +905,6 @@ class HttpStatefulClient(StatefulClientBase):
         self._cached_tools = res.tools
         return res.tools
 
-    async def get_callable_function(
-        self,
-        func_name: str,
-        wrap_tool_result: bool = True,
-        execution_timeout: float | None = None,
-    ):
-        """Toolkit 入口的工具函数包一层出站身份捕获。
-
-        agentscope Toolkit 通过本方法取得 MCP 工具函数，其内部
-        MCPToolFunction 直接引用 session.call_tool，绕过我们的
-        call_tool 覆写——因此在这里再包一层：调用时刻捕获业务身份
-        到 _call_identity，供 httpx 身份钩子在发送通道注入
-        （发送任务常驻，不继承业务 ContextVar）。
-        """
-        fn = await super().get_callable_function(
-            func_name,
-            wrap_tool_result=wrap_tool_result,
-            execution_timeout=execution_timeout,
-        )
-        return _IdentityMCPToolFunction(inner=fn, owner=self)
-
     async def call_tool(self, name: str, arguments: dict | None = None):
         """Call a tool on the MCP server.
 
@@ -1002,17 +945,10 @@ class HttpStatefulClient(StatefulClientBase):
                 f"External system identity verification failed: {e}"
             ) from e
 
-        # 显式把调用方身份传给发送通道：streamable_http 的发送任务是
-        # 连接期创建的常驻任务，不继承本业务的 ContextVar，若不在此
-        # 捕获，httpx 身份钩子在发送侧将解析不到用户（Bearer/签名丢失）。
-        prev_identity = self._call_identity
-        prev_headers = self._pending_identity_headers
-        await _prepare_identity(self, getattr(self, "url", ""))
-        try:
-            return await self.session.call_tool(name, arguments or {})
-        finally:
-            self._call_identity = prev_identity
-            self._pending_identity_headers = prev_headers
+        # 出站身份不在这里传递：_IdentityTaggingWriteStream 在发送侧
+        # 按 JSON-RPC 请求 id 登记调用方，httpx 钩子在发送任务里按同一
+        # id 反查注入 —— 隔离单位是请求，共享连接上多用户并发不串号。
+        return await self.session.call_tool(name, arguments or {})
 
     def _validate_connection(self) -> None:
         """Validate the connection to the MCP server.

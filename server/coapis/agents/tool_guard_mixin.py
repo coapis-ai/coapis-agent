@@ -118,6 +118,63 @@ class ToolGuardMixin:
         if not hasattr(self, "_tool_guard_engine"):
             self._init_tool_guard()
 
+    def _plan_scope_covers(self, tool_name: str, tool_input: dict) -> bool:
+        """是否被"已确认方案"的授权域覆盖（片0 · 方案授权域）。
+
+        覆盖 → 本次动作免单独审批；破坏性动作与越界动作不覆盖，
+        继续走正常审批流程。判定失败时按"不覆盖"处理（fail-open 到审批）。
+        """
+        session_id = str(self._request_context.get("session_id") or "")
+        if not session_id:
+            return False
+        try:
+            from coapis.plan.scope import evaluate_scope
+        except Exception:  # pragma: no cover - 模块缺失时不影响主流程
+            return False
+        try:
+            decision = evaluate_scope(session_id, tool_name, tool_input or {})
+        except Exception:  # pragma: no cover
+            logger.warning("plan-scope evaluation failed", exc_info=True)
+            return False
+        if decision.covered:
+            logger.info(
+                "plan-scope covered: tool=%s plan=%s session=%s (%s)",
+                tool_name,
+                decision.plan_id,
+                session_id,
+                decision.reason,
+            )
+            self._record_plan_scope_audit(tool_name, decision, approved=True)
+            return True
+        logger.debug(
+            "plan-scope not covered: tool=%s session=%s (%s)",
+            tool_name,
+            session_id,
+            decision.reason,
+        )
+        if decision.plan_id:
+            self._record_plan_scope_audit(tool_name, decision, approved=False)
+        return False
+
+    def _record_plan_scope_audit(self, tool_name: str, decision, approved: bool) -> None:
+        """把方案授权域的放行/回落写入审计日志（失败不影响主流程）。"""
+        try:
+            from .security.audit_logger import AuditLogger, create_audit_event
+
+            ev = create_audit_event(
+                event_type="tool_plan_scope",
+                tool_name=tool_name,
+                result="allowed" if approved else "fallback_to_approval",
+                reason=decision.reason,
+                metadata={
+                    "plan_id": decision.plan_id,
+                    "semantics": decision.semantics.value,
+                },
+            )
+            AuditLogger.log(ev)
+        except Exception:  # pragma: no cover - 审计不可用时静默
+            pass
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -363,6 +420,11 @@ class ToolGuardMixin:
                 tool_input,
                 guard_result=denied_result,
             )
+
+        # ── 方案授权域：已确认方案内、未越界的动作免单独审批 ──
+        # 破坏性动作与越界动作不被覆盖，继续走下面的审批流程。
+        if self._plan_scope_covers(tool_name, tool_input):
+            return None
 
         # ── InputGuardEngine: input content detection (ALL tools) ──
         # Detects prompt injection, data exfiltration, path traversal

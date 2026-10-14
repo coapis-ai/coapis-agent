@@ -1,0 +1,166 @@
+# =============================================================================
+# CoApis 动作语义分级表（片0 · 限制治理地基）
+# -----------------------------------------------------------------------------
+# 真相源：本文件。代码内置默认仅在文件缺失时兜底。
+# 消费方：计划门禁 / 方案授权域 / 子智能体继承 / 治理阶梯。
+#
+# 六档语义（由轻到重）：
+#   read            纯读取，零副作用
+#   external_read   对外发起读取，不改变外部状态
+#   local_write     工作区内新增/修改，可回滚
+#   local_delete    本地删除/覆盖，恢复成本高
+#   external_write  对外产生"出入"（发消息/发帖/写外部系统/推送）
+#   destructive     破坏性且不可逆
+#
+# 口径（用户拍板 2026-10-14）：
+#   计划除非涉及出入，可直接执行；涉及出入必须先经方案确认。
+#   破坏性永不被计划授权域覆盖，一律单独审批。
+#   子智能体继承除破坏性之外的全部能力。
+# =============================================================================
+version: 1
+
+thresholds:
+  plan_auto_execute_max: local_write
+  scope_auto_approve_max: local_write
+  subagent_max: external_write
+  unknown: external_write
+
+# 显式判为破坏性的工具（覆盖 tools 表）
+destructive_tools:
+  - delete_session
+  - drop_database
+  - delete_all
+  - browser_cdp
+
+# 工具名 → 语义（只列需要与内置默认不同、或需显式声明的项）
+tools:
+  # 读取
+  read_file: read
+  view_image: read
+  view_video: read
+  grep_search: read
+  glob_search: read
+  list_agents: read
+  get_current_time: read
+  get_token_usage: read
+  memory_search: read
+  recall_history: read
+  desktop_screenshot: read
+  check_agent_task: read
+  # 对外读取
+  web_search: external_read
+  web_fetch: external_read
+  resource_search: external_read
+  # 工作区写入
+  write_file: local_write
+  edit_file: local_write
+  create_dir: local_write
+  move_file: local_write
+  copy_file: local_write
+  send_file_to_user: local_write
+  materialize_skill: local_write
+  test_runner: local_write
+  code_runner: local_write
+  # 本地删除
+  delete_file: local_delete
+  remove_file: local_delete
+  cleanup: local_delete
+  # 对外出入
+  chat_with_agent: external_write
+  submit_to_agent: external_write
+  spawn_subagent: external_write
+  cron_scheduler: external_write
+  install_dependency: external_write
+  deploy_helper: external_write
+  git_ops: external_write
+  # 破坏性
+  auto_heal: destructive
+  security_ops: destructive
+
+# 破坏性命令模式（命中即 destructive，优先于命令风险等级）
+destructive_patterns:
+  - '\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\b'
+  - '\brm\s+-[a-zA-Z]+\s+/(?:\s|$)'
+  - '\bmkfs(\.|\s)'
+  - '\bdd\s+if='
+  - '\bdrop\s+(table|database|schema)\b'
+  - '\btruncate\s+table\b'
+  - ':\(\)\s*\{\s*:\|:&\s*\}\s*;'
+  - '>\s*/dev/(sd|nvme|hd)'
+  - '\bgit\s+push\b.*(--force\b|-f\b)'
+  - '\bgit\s+(reset\s+--hard|clean\s+-[a-zA-Z]*f)\b'
+  - '\bdocker\s+(system\s+prune|volume\s+rm)\b'
+  - '\bkubectl\s+delete\b'
+  - '\bchmod\s+-R\s+777\s+/(?:\s|$)'
+  - '\b(curl|wget)\b.*\|\s*(ba)?sh\b'
+  - '\bshutdown\b|\breboot\b'
+
+# 计划文本里的"出入/破坏"线索（命中则计划必须先确认）
+side_effect_keywords:
+  - 发送
+  - 发消息
+  - 推送
+  - 通知
+  - 发帖
+  - 发邮件
+  - 发布
+  - 上传
+  - 提交到
+  - 调用外部
+  - 第三方
+  - 线上
+  - 生产
+  - 删除
+  - 清空
+  - 清除
+  - 销毁
+  - 卸载
+  - 重置
+  - 覆盖
+  - 授权
+  - 凭证
+  - 令牌
+  - 密码
+  - send
+  - notify
+  - publish
+  - post
+  - email
+  - webhook
+  - push
+  - deploy
+  - delete
+  - remove
+  - destroy
+  - purge
+  - truncate
+  - token
+  - secret
+  - credential
+
+# 计划文本里的"纯读取"线索（命中且无出入线索 → 可直接执行）
+read_only_keywords:
+  - 读取
+  - 查看
+  - 列出
+  - 检索
+  - 搜索
+  - 统计
+  - 分析
+  - 汇总
+  - 对比
+  - 核对
+  - 检查
+  - 梳理
+  - 解读
+  - 摘录
+  - 翻译
+  - 解释
+  - read
+  - list
+  - search
+  - grep
+  - show
+  - count
+  - analyze
+  - compare
