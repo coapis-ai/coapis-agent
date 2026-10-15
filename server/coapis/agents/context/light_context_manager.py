@@ -47,10 +47,25 @@ def _fmt_tokens(n: int) -> str:
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
 
+def _normalize_output(output: Any) -> list[Any]:
+    """工具结果 output 归一为块列表。
+
+    agentscope 里 ``output`` 可能是裸字符串、单块、或块列表；
+    治理地板要三种形态都吃得下，不能因结构差异抛异常。
+    """
+    if isinstance(output, list):
+        return output
+    if isinstance(output, str):
+        return [{"type": "text", "text": output}]
+    if isinstance(output, dict):
+        return [output]
+    return []
+
+
 def _governance_floor_truncate(
-    agent: "CoApisAgent",
-    tool_result: ToolResponse,
-) -> bool:
+    messages: list[Msg],
+    limit: Any,
+) -> int:
     """治理层兜底截断（治理地基 片1 · 接入现成截断函数）。
 
     工具结果裁剪（``tool_result_pruning_config.enabled``）关闭时，此前**没有任何
@@ -60,58 +75,50 @@ def _governance_floor_truncate(
     刻意做成薄接线：只处理纯文本块，不复制裁剪器的落盘/元数据逻辑（那是
     ``_truncate_tool_result`` 的职责，裁剪开启时由它接管）。
 
+    Args:
+        messages: 本轮记忆中的消息（就地修改其中的工具结果块）。
+        limit: 治理层台账里的工具结果限制。
+
     Returns:
-        True 表示做了截断（调用方需重算 token）。治理层不可用时返回 False，
-        绝不因治理层缺失而中断对话。
+        被截断的块数。治理层不可用时返回 0，绝不因治理层缺失而中断对话。
     """
-    try:
-        from ...governance import (
-            LimitKind,
-            GovernanceUnavailable,
-            choose_tier,
-            ledger_for_agent,
-            truncate_head_tail,
-        )
-    except Exception:  # pragma: no cover - 治理层缺失时静默放行
-        return False
+    from ...governance import choose_tier, truncate_head_tail
 
-    try:
-        cfg = load_agent_config(agent.agent_id)
-        ledger = ledger_for_agent(
-            running_config=cfg.running,
-            context_config=getattr(cfg.running, "context_compact", None),
-            pruning_config=getattr(cfg.running, "tool_result_pruning_config", None),
-        )
-        limit = ledger.limit(LimitKind.TOOL_RESULT_BYTES)
-    except (GovernanceUnavailable, Exception):  # pragma: no cover
-        return False
-
-    changed = False
-    for block in tool_result.content:
-        text = block.get("text") if isinstance(block, dict) else None
-        if not text:
+    changed = 0
+    for msg in messages:
+        content = getattr(msg, "content", None)
+        if not isinstance(content, list):
             continue
-        plan = choose_tier(len(text), limit)
-        if plan.is_full:
-            continue
-        # 地板只做到 L1：更深的降级（分段/摘要/分治）需要工具语义，
-        # 属于片4/片5 的职责，不在兜底路径里越权。
-        if plan.tier.value > "L1":
-            pass
-        kept = truncate_head_tail(text, limit.budget)
-        if len(kept) >= len(text):
-            continue
-        notice = (
-            f"\n\n[治理层 {plan.tier.value}] {plan.note}"
-            f"（原文 {len(text)} 字符，保留 {len(kept)}）"
-        )
-        if isinstance(block, dict):
-            block["text"] = kept + notice
-            changed = True
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            raw_output = block.get("output")
+            items = _normalize_output(raw_output)
+            for item in items:
+                if not isinstance(item, dict) or item.get("type") != "text":
+                    continue
+                text = item.get("text") or ""
+                plan = choose_tier(len(text), limit)
+                if plan.is_full:
+                    continue
+                # 地板只做到 L1：更深的降级（分段/摘要/分治）需要工具语义，
+                # 属于片4/片5 的职责，不在兜底路径里越权。
+                kept = truncate_head_tail(text, limit.budget)
+                if len(kept) >= len(text):
+                    continue
+                item["text"] = (
+                    kept
+                    + f"\n\n[治理层 {plan.tier.value}] {plan.note}"
+                    + f"（原文 {len(text)} 字符，保留 {len(kept)}）"
+                )
+                changed += 1
+            if isinstance(raw_output, str) and items:
+                # 裸字符串形态：归一化出的块是临时对象，必须写回原字段
+                block["output"] = items[0].get("text", raw_output)
     if changed:
-        ledger.record(LimitKind.TOOL_RESULT_BYTES, 0)
         logger.info(
-            "governance floor truncation applied (budget=%d, source=%s)",
+            "governance floor truncation applied: %d block(s), budget=%d, source=%s",
+            changed,
             limit.budget,
             limit.source,
         )
@@ -302,6 +309,32 @@ class LightContextManager(BaseContextManager):
                         encoding,
                     )
         return output
+
+    async def _governance_floor_pass(
+        self,
+        agent: "CoApisAgent",
+        messages: list[Msg],
+    ) -> int:
+        """治理层地板：读取台账预算，对超限文本块做 L1 截断。
+
+        治理层不可用时返回 0 并放行——治理层缺失绝不能中断对话。
+        """
+        try:
+            from ...governance import LimitKind, ledger_for_agent
+
+            cfg = load_agent_config(agent.agent_id)
+            ledger = ledger_for_agent(
+                running_config=cfg.running,
+                context_config=getattr(cfg.running, "context_compact", None),
+                pruning_config=getattr(cfg.running, "tool_result_pruning_config", None),
+            )
+            limit = ledger.limit(LimitKind.TOOL_RESULT_BYTES)
+        except Exception:  # 治理层缺失/配置缺失 → 放行
+            return 0
+        changed = _governance_floor_truncate(messages, limit)
+        if changed:
+            ledger.record(LimitKind.TOOL_RESULT_BYTES, changed)
+        return changed
 
     async def _prune_tool_result(
         self,
@@ -780,6 +813,11 @@ class LightContextManager(BaseContextManager):
 
             memory = agent.memory
             messages = await memory.get_memory(prepend_summary=False)
+
+            # 治理层地板（治理地基 片1）：裁剪器只处理 tool_result 块，
+            # 工具直接返回的超大 text 块此前无人截断；由地板兜住。
+            await self._governance_floor_pass(agent, messages)
+
             await self._prune_tool_result(
                 messages=messages,
                 recent_n=trc.pruning_recent_n,
