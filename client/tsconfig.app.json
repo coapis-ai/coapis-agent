@@ -25,7 +25,7 @@
     "paths": {
       "@/*": ["src/*"],
       "@enterprise/*": ["src/enterprise/*"],
-      "@coapis-c2a/renderer/*": ["../../coapis-c2a/typescript/c2a-renderer-react/src/*"]
+      "@coapis-c2a/renderer/*": ["./vendor/coapis-c2a/typescript/c2a-renderer-react/src/*"]
     }
   },
   "include": ["src"],

@@ -95,12 +95,15 @@ RUN pip install --no-cache-dir python-docx==1.1.0 && \
 # 从 builder 阶段复制编译好的 Python 包
 COPY --from=builder /install /usr/local
 
-# C2A 协议与工具（独立项目 coapis-c2a，本地路径依赖 — 依赖方案 A）
-# 构建前必须执行: bash server/deploy/vendor_c2a.sh
-# （把 ../coapis-c2a/server/{c2a_protocol,c2a_tools} 拷入 server/_vendor_c2a）
-COPY server/_vendor_c2a ./_vendor_c2a
+# C2A 协议与工具（coapis-c2a 已合并进本仓库 client/vendor/，无需外部路径、无需预跑脚本）
+COPY client/vendor/coapis-c2a/server/c2a_protocol ./_vendor_c2a/c2a_protocol
+COPY client/vendor/coapis-c2a/server/c2a_tools ./_vendor_c2a/c2a_tools
 RUN pip install --no-cache-dir ./_vendor_c2a/c2a_protocol ./_vendor_c2a/c2a_tools \
     && rm -rf ./_vendor_c2a
+
+# C2A 消息 schema（c2a_tools 运行时按 C2A_SCHEMA_DIR 查找）
+COPY client/vendor/coapis-c2a/schemas /app/vendor/coapis-c2a/schemas
+ENV C2A_SCHEMA_DIR=/app/vendor/coapis-c2a/schemas
 
 WORKDIR /app
 

@@ -33,7 +33,7 @@ from .schema_gen import auto_generate_schema, merge_with_manual_schema
 
 logger = logging.getLogger(__name__)
 
-# ── C2A (coapis-c2a 独立项目) — MCP 工具定义中的卡片元数据提取 ──
+# ── C2A（已合并进本仓库 vendor/coapis-c2a）— MCP 工具定义中的卡片元数据提取 ──
 # 逻辑位于 c2a_protocol 包；未安装时降级为「无元数据」，不影响工具注册。
 try:
     from c2a_protocol import extract_tool_metadata as _extract_mcp_tool_metadata

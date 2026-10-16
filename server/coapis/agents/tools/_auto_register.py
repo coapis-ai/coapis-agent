@@ -29,7 +29,7 @@ from . import resource_search  # 资源契约消费面：统一资源检索（fi
 # ── Runtime / dependency ──
 from . import install_dependency  # Shared Runtime Pool package installer
 
-# ── C2A (Chat-to-Action) — one-click injection from the coapis-c2a package ──
+# ── C2A (Chat-to-Action) — one-click injection from the vendored c2a package ──
 # Registers the `c2a_render_card` tool (data tables + row links). The module
 # is guarded so the backend still starts when c2a-tools is not installed.
 try:

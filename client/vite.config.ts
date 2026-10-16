@@ -32,10 +32,10 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(__dirname, "./src"),
         // 企业版扩展入口（社区版为空实现，企业版覆盖 src/enterprise/）
         "@enterprise": path.resolve(__dirname, "./src/enterprise"),
-        // C2A 渲染器（coapis-c2a 独立项目，本地路径依赖，直接吃 TSX 源码）
+        // C2A 渲染器（coapis-c2a 已合并进 client/vendor/，直接吃 TSX 源码）
         "@coapis-c2a/renderer": path.resolve(
           __dirname,
-          "../../coapis-c2a/typescript/c2a-renderer-react/src",
+          "./vendor/coapis-c2a/typescript/c2a-renderer-react/src",
         ),
       },
     },
@@ -43,8 +43,8 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: 5173,
       fs: {
-        // 允许访问 coapis-c2a 独立项目的源码（C2A 渲染器）
-        allow: [path.resolve(__dirname, "../../")],
+        // C2A 渲染器在 client/vendor/ 内，dev server 文件访问范围收紧到 client
+        allow: [path.resolve(__dirname, ".")],
       },
       proxy: {
         "/api": {
