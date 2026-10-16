@@ -140,9 +140,6 @@ export const securityApi = {
       body: JSON.stringify(body),
     }),
 
-  getBuiltinRules: () =>
-    request<ToolGuardRule[]>("/config/security/tool-guard/builtin-rules"),
-
   // ── File Guard ─────────────────────────────────────────────────
 
   getFileGuard: () => request<FileGuardResponse>("/config/security/file-guard"),

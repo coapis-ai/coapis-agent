@@ -106,10 +106,14 @@ class ToolGuardMixin:
 
     def _init_tool_guard(self) -> None:
         """Lazy-init tool-guard components (called once)."""
-        from coapis.security.tool_guard.engine import get_guard_engine
+        # C4: the unified engine is the ONLY guard engine. The legacy
+        # ToolGuardEngine (rule_guardian + shell guardian chain) is retired,
+        # so every decision — command rules, evasion, path layer, access
+        # control — comes from one evaluator reading one config source.
+        from coapis.security.tool_guard.unified_engine import get_unified_engine
         from coapis.app.approvals import get_approval_service
 
-        self._tool_guard_engine = get_guard_engine()
+        self._tool_guard_engine = get_unified_engine()
         self._tool_guard_approval_service = get_approval_service()
         self._tool_guard_pending_info: dict | None = None
         self._tool_guard_lock = asyncio.Lock()
@@ -475,45 +479,41 @@ class ToolGuardMixin:
         except Exception as exc:
             logger.debug("InputGuardEngine error (non-blocking): %s", exc)
 
-        # ── UnifiedToolGuardEngine: command classification (shell only) ──
-        # Replaces CommandRiskClassifier with 108-command + 29-rule + 7-evasion
-        # pipeline.  Non-shell tools skip this layer (already handled by
-        # InputGuardEngine above).
-        if tool_name == "execute_shell_command":
+        # ── UnifiedToolGuardEngine: the single guard engine (C4) ──
+        # Shell commands: command classification + global rules + evasion.
+        # Every tool (shell or not): access control + file-path layer.
+        # Input content detection (prompt injection / exfiltration) stays in
+        # InputGuardEngine above.  The legacy engine chain is retired, so
+        # exactly one evaluator produces exactly one decision per tool call.
+        guard_result = None
+        if tool_name:
             try:
-                if not hasattr(self, "_unified_guard_engine"):
-                    from ..security.tool_guard.unified_engine import (
-                        UnifiedToolGuardEngine,
-                    )
-                    self._unified_guard_engine = UnifiedToolGuardEngine()
-                # Set owner context for workspace-scoped demotion rules
+                # Workspace-scoped demotion rules need the owner identity.
                 _ug_ctx = getattr(self, "_request_context", None) or {}
                 _ug_owner = _ug_ctx.get("user_id") or _ug_ctx.get("username", "")
                 if _ug_owner:
-                    self._unified_guard_engine._context["owner"] = _ug_owner
-                _ue = self._unified_guard_engine.process_command(
-                    tool_name, tool_input,
-                )
+                    engine._context["owner"] = _ug_owner
+
+                _ue = engine.process_command(tool_name, tool_input)
                 _ue_action = _ue.get("action", "allow")
+                _ue_findings = [
+                    GuardFinding(
+                        id=f"unified-{_mr['id']}",
+                        rule_id=_mr["id"],
+                        category=GuardThreatCategory.COMMAND_INJECTION,
+                        severity=GuardSeverity(_mr.get("severity", "HIGH")),
+                        title=_mr["id"],
+                        description=_mr.get("description", ""),
+                        tool_name=tool_name,
+                        param_name="command",
+                        matched_value=_ue.get("command", "")[:200],
+                        matched_pattern=_mr.get("matched_text", ""),
+                        guardian="unified_tool_guard_engine",
+                    )
+                    for _mr in _ue.get("matched_rules", [])
+                ]
+
                 if _ue_action == "block":
-                    _ue_findings = [
-                        GuardFinding(
-                            id=f"unified-{_mr['id']}",
-                            rule_id=_mr["id"],
-                            category=GuardThreatCategory.COMMAND_INJECTION,
-                            severity=GuardSeverity(
-                                _mr.get("severity", "HIGH"),
-                            ),
-                            title=_mr["id"],
-                            description=_mr.get("description", ""),
-                            tool_name=tool_name,
-                            param_name="command",
-                            matched_value=_ue.get("command", "")[:200],
-                            matched_pattern=_mr.get("matched_text", ""),
-                            guardian="unified_tool_guard_engine",
-                        )
-                        for _mr in _ue.get("matched_rules", [])
-                    ]
                     logger.warning(
                         "UnifiedToolGuardEngine: BLOCK tool=%s level=%s reason=%s",
                         tool_name, _ue.get("level"), _ue.get("reason"),
@@ -527,24 +527,6 @@ class ToolGuardMixin:
                         ),
                     )
                 if _ue_action == "confirm":
-                    _ue_findings = [
-                        GuardFinding(
-                            id=f"unified-{_mr['id']}",
-                            rule_id=_mr["id"],
-                            category=GuardThreatCategory.COMMAND_INJECTION,
-                            severity=GuardSeverity(
-                                _mr.get("severity", "HIGH"),
-                            ),
-                            title=_mr["id"],
-                            description=_mr.get("description", ""),
-                            tool_name=tool_name,
-                            param_name="command",
-                            matched_value=_ue.get("command", "")[:200],
-                            matched_pattern=_mr.get("matched_text", ""),
-                            guardian="unified_tool_guard_engine",
-                        )
-                        for _mr in _ue.get("matched_rules", [])
-                    ]
                     logger.info(
                         "UnifiedToolGuardEngine: CONFIRM tool=%s level=%s reason=%s",
                         tool_name, _ue.get("level"), _ue.get("reason"),
@@ -557,42 +539,38 @@ class ToolGuardMixin:
                             guardians_used=["unified_tool_guard_engine"],
                         ),
                     )
-                # audit / allow → fall through to execution-level logic
+                # audit / allow → carry the very same evaluation into the
+                # execution-level policy below (severity view).
+                if _ue_action == "audit" or _ue.get(
+                    "matched_rules",
+                ) or _ue.get("evasion_flags"):
+                    guard_result = engine.result_from_check(
+                        tool_name, tool_input, _ue,
+                    )
             except Exception as exc:
-                logger.debug(
+                logger.warning(
                     "UnifiedToolGuardEngine error (non-blocking): %s", exc,
                 )
 
-        # Role-based policy: admin gets relaxed checks for low-risk tools
-        if user_role == "admin" and exec_level.is_smart_mode():
-            # Admin can auto-allow even MEDIUM risk in SMART mode
-            guarded = engine.is_guarded(tool_name)
-            guard_result = engine.guard(
+        # Admin smart mode: auto-allow low/medium risk for admin users
+        if (
+            user_role == "admin"
+            and exec_level.is_smart_mode()
+            and guard_result is not None
+            and guard_result.max_severity
+            in (GuardSeverity.INFO, GuardSeverity.LOW, GuardSeverity.MEDIUM)
+        ):
+            logger.info(
+                "Tool guard: Admin auto-allowing tool '%s' "
+                "(severity: %s, role: admin)",
                 tool_name,
-                tool_input,
-                only_always_run=not guarded,
+                guard_result.max_severity.value,
             )
-
-            if guard_result is not None and guard_result.findings:
-                max_sev = guard_result.max_severity
-                if max_sev in (GuardSeverity.INFO, GuardSeverity.LOW, GuardSeverity.MEDIUM):
-                    logger.info(
-                        "Tool guard: Admin auto-allowing tool '%s' "
-                        "(severity: %s, role: admin)",
-                        tool_name,
-                        max_sev.value,
-                    )
-                    return None
+            return None
 
         # STRICT mode: all tools need approval
         if exec_level.requires_approval_for_all_tools():
             if self._should_require_approval():
-                # Run guard checks
-                guard_result = engine.guard(
-                    tool_name,
-                    tool_input,
-                    only_always_run=False,
-                )
                 # If no findings, create INFO-level finding for STRICT mode
                 if guard_result is None or not guard_result.findings:
                     guard_result = self._create_info_guard_result(
@@ -607,14 +585,7 @@ class ToolGuardMixin:
                 )
             return None
 
-        # Run guard checks for AUTO/SMART modes
-        guarded = engine.is_guarded(tool_name)
-        guard_result = engine.guard(
-            tool_name,
-            tool_input,
-            only_always_run=not guarded,
-        )
-
+        # No findings → tool executes normally
         if guard_result is None or not guard_result.findings:
             return None
 

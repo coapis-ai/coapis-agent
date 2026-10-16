@@ -44,7 +44,65 @@ _TOOL_FILE_PARAMS: dict[str, tuple[str, ...]] = {
     # agentscope built-ins (may be enabled by users)
     "view_text_file": ("file_path", "path"),
     "write_text_file": ("file_path", "path"),
+    # Browser / media / screenshot tools: every parameter below is a *file*
+    # path (screenshot save, pdf export, download target, snapshot dump).
+    # Before C2 these tools fell through to the generic "looks like a path"
+    # scan, which ignores ``file:///etc/shadow`` and relative escapes.
+    "browser_control": (
+        "path",
+        "filename",
+        "snapshot_filename",
+        "url",
+        "target_url",
+        "start_element",
+        "end_element",
+    ),
+    "browser_use": (
+        "path",
+        "filename",
+        "snapshot_filename",
+        "url",
+        "target_url",
+        "start_element",
+        "end_element",
+    ),
+    "desktop_screenshot": ("path",),
+    "view_image": ("image_path",),
+    "view_video": ("video_path",),
 }
+
+# Parameters whose value is a JSON **array of paths** (as a string, as sent
+# by the console, or as a real list, as sent by a direct API call).
+_JSON_ARRAY_PARAMS: frozenset[str] = frozenset(
+    {"paths_json", "paths", "files", "file_paths"},
+)
+
+# Parameters of *non-shell* tools that embed shell commands (console batch
+# runner, browser batch).  The engine only ever saw ``command``.
+_EMBEDDED_COMMAND_PARAMS: frozenset[str] = frozenset(
+    {"actions_json", "commands", "script"},
+)
+
+# Container parameters that carry nested tool calls / forwarded prompts.
+# ``requests`` is the cross-agent surface (chat_with_agent / submit_to_agent),
+# ``batch`` is spawn_subagent's fan-out; both used to be invisible to the
+# path layer, so a path handed to a peer agent was never checked here.
+_NESTED_SCAN_KEYS: frozenset[str] = frozenset(
+    {
+        "actions_json",
+        "requests",
+        "batch",
+        "paths_json",
+        "paths",
+        "fields_json",
+        "values_json",
+    },
+)
+
+# Shell tools whose ``command`` is executed verbatim.
+_SHELL_TOOLS: frozenset[str] = frozenset(
+    {"execute_shell_command", "run_shell_command", "shell"},
+)
 
 _SECRET_DIR_CURRENT_NAME = ".coapis.secret"
 
@@ -115,7 +173,7 @@ _SENSITIVE_FILE_NAMES: frozenset[str] = frozenset({
     ".azure",
     ".gcloud",
     # System credential files
-    "shadow", "passwd",
+    "shadow", "gshadow", "passwd", "sudoers",
     ".pgpass", ".my.cnf", ".mylogin.cnf",
     # History files (may leak sensitive commands)
     ".bash_history", ".zsh_history", ".python_history",
@@ -219,29 +277,31 @@ def _normalize_path(raw_path: str) -> str:
 
 
 def _is_file_guard_enabled() -> bool:
-    """Check ``security.file_guard.enabled`` from config."""
-    try:
-        from coapis.config import load_config
+    """Path-layer switch, read from the single source (``path_guard.enabled``).
 
-        return bool(load_config().security.file_guard.enabled)
+    C2: the YAML in ``SYSTEM_DIR`` is the only config source; ``config.json``
+    is no longer consulted (it used to make the console switch invisible to
+    the engine that decides tool calls).
+    """
+    try:
+        from ..config_store import path_guard_enabled
+
+        return path_guard_enabled()
     except Exception:
         return True
 
 
 def _load_sensitive_files_from_config() -> list[str]:
-    """Load ``security.file_guard.sensitive_files`` from config.json.
+    """Sensitive paths from the single source (``path_guard.sensitive_files``).
 
     When the configured list is empty (fresh install), fall back to
     ``_DEFAULT_DENY_DIRS`` so the secret directory is protected by
     default.
     """
     try:
-        from coapis.config import load_config
+        from ..config_store import sensitive_files
 
-        configured = list(
-            load_config().security.file_guard.sensitive_files or [],
-        )
-        return ensure_file_guard_paths(configured)
+        return ensure_file_guard_paths(sensitive_files())
     except Exception:
         return list(_DEFAULT_DENY_DIRS)
 

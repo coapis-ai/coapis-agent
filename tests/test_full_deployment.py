@@ -118,11 +118,14 @@ def test_skill_metrics_user():
 # 5. 安全模块
 # ═══════════════════════════════════════════════════════════════
 def test_security_rules():
-    # 安全规则端点路径为 /api/config/security/tool-guard/builtin-rules
+    # C3: /builtin-rules 是恒空死端点，已删除（404）；内置规则的唯一真源是
+    # global-rules（统一引擎读的同一份 YAML）。
     r = requests.get(f"{BASE_URL}/api/config/security/tool-guard/builtin-rules", headers=HEADERS, timeout=10)
-    data = r.json() if r.status_code == 200 else []
+    assert r.status_code == 404, f"builtin-rules should be retired, got {r.status_code}"
+    g = requests.get(f"{BASE_URL}/api/config/security/tool-guard/global-rules", headers=HEADERS, timeout=10)
+    data = g.json() if g.status_code == 200 else []
     rules_count = len(data) if isinstance(data, list) else 0
-    assert r.status_code == 200 and rules_count >= 20, f"builtin rules count={rules_count}"
+    assert g.status_code == 200 and rules_count >= 20, f"global rules count={rules_count}"
 
 def test_security_config():
     r = requests.get(f"{BASE_URL}/api/config/security/tool-guard", headers=HEADERS, timeout=10)

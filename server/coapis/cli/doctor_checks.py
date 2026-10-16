@@ -569,22 +569,39 @@ def browser_automation_notes(cfg: Config | None) -> list[str]:
 
 
 def security_baseline_notes(cfg: Config) -> list[str]:
-    """Non-fatal security hints."""
+    """Non-fatal security hints.
+
+    Tool-guard / path-guard state comes from the single YAML source (C2),
+    not from config.json.
+    """
     notes: list[str] = []
-    if not cfg.security.tool_guard.enabled:
+    try:
+        from ..security.tool_guard.config_store import (
+            load_raw,
+            path_guard_enabled,
+        )
+
+        tg_enabled = bool(
+            (load_raw().get("access_control") or {}).get("enabled", True),
+        )
+    except Exception:  # pragma: no cover - doctor must not crash
+        tg_enabled = True
+        path_guard_enabled = True  # type: ignore[assignment]
+
+    if not tg_enabled:
         notes.append(
-            "security.tool_guard.enabled is false — dangerous shell commands "
-            "are not filtered.",
+            "tool_guard access_control.enabled is false — dangerous shell "
+            "commands are not filtered.",
         )
     if cfg.security.skill_scanner.mode == "off":
         notes.append(
             "security.skill_scanner.mode is off — skills are not scanned "
             "before install.",
         )
-    if not cfg.security.file_guard.enabled:
+    if not path_guard_enabled:
         notes.append(
-            "security.file_guard.enabled is false — sensitive path blocking "
-            "is off.",
+            "tool_guard path_guard.enabled is false — sensitive path "
+            "blocking is off.",
         )
     return notes
 

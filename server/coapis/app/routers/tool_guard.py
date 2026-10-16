@@ -16,12 +16,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-import yaml
 from fastapi import APIRouter, Body, HTTPException, Request
+from pydantic import BaseModel
 
-from ...constant import DATA_DIR
 from ...security.tool_guard.unified_engine import get_unified_engine, reset_engine
 from ...security.tool_guard.unified_models import ToolGuardConfig
 from ..permissions.decorators import require_permission
@@ -30,36 +29,41 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tool-guard"])
 
-# ── Config file path ────────────────────────────────────────────────
-TOOL_GUARD_YAML = DATA_DIR.parent / "system" / "tool_guard.yaml"
-# Fallback: server/coapis/system/tool_guard.yaml
-if not TOOL_GUARD_YAML.exists():
-    TOOL_GUARD_YAML = Path(__file__).resolve().parents[2] / "system" / "tool_guard.yaml"
+# ── Config file path (single source, C2/C3) ─────────────────────────
+# The unified engine resolves the very same path; a console write is always
+# visible to the engine after reload.  ``COAPIS_TOOL_GUARD_YAML`` overrides.
+from ...security.tool_guard.config_store import (  # noqa: E402
+    load_raw as _store_load,
+    resolve_yaml_path,
+    save_raw as _store_save,
+)
+
+TOOL_GUARD_YAML = resolve_yaml_path()
+
+
+def config_file_path() -> Path:
+    """Expose the resolved single-source path (tests / diagnostics)."""
+    return resolve_yaml_path()
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
 def _load_yaml_config() -> dict:
-    """Load the raw YAML config as a dict."""
-    if not TOOL_GUARD_YAML.exists():
-        logger.warning("tool_guard.yaml not found at %s", TOOL_GUARD_YAML)
-        return {}
-    try:
-        with open(TOOL_GUARD_YAML, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.error("Failed to load tool_guard.yaml: %s", e)
-        return {}
+    """Load the raw YAML config as a dict (single source)."""
+    return _store_load()
 
 
 def _save_yaml_config(data: dict) -> None:
-    """Save the full YAML config."""
-    TOOL_GUARD_YAML.parent.mkdir(parents=True, exist_ok=True)
-    with open(TOOL_GUARD_YAML, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False, width=120)
-    # Reload the engine
-    reset_engine()
-    logger.info("Saved tool_guard.yaml and reset engine")
+    """Save the full YAML config and reload the engine.
+
+    The reload is part of the save, not an optional extra: the engine is a
+    process-wide singleton holding a parsed copy of this file, so a console
+    write that skips it stays invisible until the service restarts.  Measured
+    on dev 2026-10-15: every guard PUT wrote the YAML and none reloaded, so
+    flipping the master switch had no effect on running sessions.
+    """
+    _store_save(data)
+    _reload_engine()
 
 
 def _reload_engine() -> None:
@@ -289,8 +293,13 @@ async def test_command(
 
 @router.get("/config/security/tool-guard")
 @require_permission("security:read")
-async def get_tool_guard_legacy(request: Request) -> Dict[str, Any]:
-    """Legacy: Get tool guard config (access_control + evasion_checks)."""
+async def get_tool_guard_config(request: Request) -> Dict[str, Any]:
+    """Tool guard master config (``access_control`` + evasion toggles).
+
+    C3: this is the *only* implementation of this path — the old
+    ``config.py`` handler that read ``config.json`` was removed, so the
+    console switch and the engine share one source.
+    """
     data = _load_yaml_config()
     ac = data.get("access_control", {})
     return {
@@ -305,11 +314,11 @@ async def get_tool_guard_legacy(request: Request) -> Dict[str, Any]:
 
 @router.put("/config/security/tool-guard")
 @require_permission("security:write")
-async def update_tool_guard_legacy(
+async def update_tool_guard_config(
     request: Request,
     body: Dict[str, Any] = Body(...),
 ) -> Dict[str, Any]:
-    """Legacy: Update tool guard config."""
+    """Update the tool guard master config and reload the engine."""
     data = _load_yaml_config()
     ac = data.get("access_control", {})
     for key in ("enabled", "guarded_tools", "denied_tools", "custom_rules", "disabled_rules"):
@@ -322,63 +331,79 @@ async def update_tool_guard_legacy(
     return body
 
 
-@router.get("/config/security/tool-guard/builtin-rules")
+# ── File guard (path layer) — reads/writes the same YAML (C3) ─────────
+
+
+class FileGuardResponse(BaseModel):
+    enabled: bool = True
+    paths: List[str] = []
+
+
+class FileGuardUpdateBody(BaseModel):
+    enabled: Optional[bool] = None
+    paths: Optional[List[str]] = None
+
+
+@router.get("/config/security/file-guard")
 @require_permission("security:read")
-async def get_builtin_rules_legacy(request: Request) -> List[Dict[str, Any]]:
-    """Legacy: Get built-in rules (redirects to unified rules)."""
+async def get_file_guard(request: Request) -> FileGuardResponse:
+    """Path-layer settings (``path_guard`` section of the single source)."""
     data = _load_yaml_config()
-    return data.get("rules", [])
+    pg = data.get("path_guard", {}) or {}
+    from ...security.tool_guard.guardians.file_guardian import (
+        ensure_file_guard_paths,
+    )
+
+    return FileGuardResponse(
+        enabled=bool(pg.get("enabled", True)),
+        paths=ensure_file_guard_paths(pg.get("sensitive_files") or []),
+    )
 
 
-@router.get("/config/security/shell-guard/rules")
-@require_permission("security:read")
-async def get_shell_guard_rules_legacy(request: Request) -> List[Dict[str, Any]]:
-    """Legacy: Get shell guard rules (redirects to unified rules)."""
-    data = _load_yaml_config()
-    return data.get("rules", [])
-
-
-@router.put("/config/security/shell-guard/rules")
+@router.put("/config/security/file-guard")
 @require_permission("security:write")
-async def update_shell_guard_rules_legacy(
+async def update_file_guard(
     request: Request,
-    body: List[Dict[str, Any]] = Body(...),
-) -> Dict[str, Any]:
-    """Legacy: Update shell guard rules."""
+    body: FileGuardUpdateBody = Body(...),
+) -> FileGuardResponse:
+    """Update path-layer settings; the engine reloads on save."""
     data = _load_yaml_config()
-    data["rules"] = body
+    pg = data.get("path_guard", {}) or {}
+
+    if body.enabled is not None:
+        pg["enabled"] = body.enabled
+    if body.paths is not None:
+        from ...security.tool_guard.guardians.file_guardian import (
+            ensure_file_guard_paths,
+        )
+
+        pg["sensitive_files"] = ensure_file_guard_paths(body.paths)
+    data["path_guard"] = pg
     _save_yaml_config(data)
-    return {"status": "saved", "count": len(body)}
+
+    return await get_file_guard(request)
+
+
+# ── Shell evasion toggles (UI panel; same YAML source) ───────────────
 
 
 @router.get("/config/security/shell-guard/evasion-checks")
 @require_permission("security:read")
-async def get_shell_evasion_checks_legacy(request: Request) -> Dict[str, Any]:
-    """Legacy: Get shell evasion checks."""
+async def get_shell_evasion_checks(request: Request) -> Dict[str, Any]:
+    """Shell evasion toggles (``evasion_checks`` section)."""
     data = _load_yaml_config()
     return {"evasion_checks": data.get("evasion_checks", {})}
 
 
 @router.put("/config/security/shell-guard/evasion-checks")
 @require_permission("security:write")
-async def update_shell_evasion_checks_legacy(
+async def update_shell_evasion_checks(
     request: Request,
     body: Dict[str, Any] = Body(...),
 ) -> Dict[str, Any]:
-    """Legacy: Update shell evasion checks."""
+    """Update shell evasion toggles."""
     checks = body.get("evasion_checks", body)
     data = _load_yaml_config()
     data["evasion_checks"] = checks
     _save_yaml_config(data)
     return {"evasion_checks": checks}
-
-
-@router.get("/config/security/shell-guard/config")
-@require_permission("security:read")
-async def get_shell_guard_config_legacy(request: Request) -> Dict[str, Any]:
-    """Legacy: Get shell guard summary config."""
-    data = _load_yaml_config()
-    return {
-        "global_rules_count": len(data.get("global_rules", [])),
-        "evasion_checks": data.get("evasion_checks", {}),
-    }

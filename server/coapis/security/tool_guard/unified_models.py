@@ -42,6 +42,25 @@ class AccessControlConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Path Guard (file-target layer)
+# ---------------------------------------------------------------------------
+
+
+class PathGuardConfig(BaseModel):
+    """File-path layer inside the unified engine.
+
+    Backed by :class:`FilePathToolGuardian`, which enforces the
+    ``security.file_guard`` sensitive-path list (secret dirs, ``.env``,
+    SSH private keys, ``/etc/shadow``, ``sudoers`` …).  The unified engine
+    runs it for **every** tool call — shell commands get path extraction,
+    file tools get their path parameters, everything else gets a
+    path-like token scan.
+    """
+
+    enabled: bool = True
+
+
+# ---------------------------------------------------------------------------
 # Command Classification (L0-L4)
 # ---------------------------------------------------------------------------
 
@@ -184,6 +203,9 @@ class ToolGuardConfig(BaseModel):
 
     access_control: AccessControlConfig = Field(
         default_factory=AccessControlConfig,
+    )
+    path_guard: PathGuardConfig = Field(
+        default_factory=PathGuardConfig,
     )
     evasion_checks: dict[str, bool] = Field(
         default_factory=lambda: {

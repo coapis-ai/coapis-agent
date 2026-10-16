@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # This program is free software: you can redistribute it and/or modify
@@ -15,131 +14,21 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tool-guard utility helpers.
-
-* Configuration resolution – which tools to guard and which to deny.
-* Structured logging for guard findings.
-"""
+"""Shared helpers for the tool-guard framework."""
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Iterable
-
-from ...constant import EnvVarLoader
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .models import ToolGuardResult
 
-logger = logging.getLogger(__name__)
-
-_DEFAULT_GUARDED_TOOLS = frozenset(
-    {
-        "execute_shell_command",
-        "read_file",
-        "write_file",
-        "edit_file",
-        "append_file",
-        "send_file_to_user",
-        "view_text_file",
-        "write_text_file",
-    },
-)
+logger = logging.getLogger("coapis.tool_guard")
 
 
-def _parse_guarded_tokens(tokens: Iterable[str]) -> set[str] | None:
-    """Parse guarded tool tokens into scope set.
-
-    ``None`` means guard all tools.
-    """
-    normalized = {item.strip() for item in tokens if item and item.strip()}
-    if not normalized:
-        return set()
-
-    lowered = {item.lower() for item in normalized}
-    if "*" in lowered or "all" in lowered:
-        return None
-    if lowered.issubset({"none", "off", "false", "0"}):
-        return set()
-
-    return normalized
-
-
-def _load_config_tool_guard():
-    """Load ``ToolGuardConfig`` from config.json via the Pydantic model.
-
-    Returns ``None`` when config cannot be loaded.
-    """
-    try:
-        from coapis.config import load_config
-
-        return load_config().security.tool_guard
-    except Exception:
-        return None
-
-
-def resolve_guarded_tools(
-    user_defined: set[str] | list[str] | tuple[str, ...] | None = None,
-) -> set[str] | None:
-    """Resolve guarded tools set.
-
-    Priority:
-    1) constructor-provided ``user_defined``
-    2) ``COAPIS_TOOL_GUARD_TOOLS`` env var
-    3) ``config.json`` -> ``security.tool_guard.guarded_tools``
-    4) built-in high-risk default set
-
-    Returns
-    -------
-    set[str] | None
-        ``None`` means guard all tools.
-    """
-    if user_defined is not None:
-        return _parse_guarded_tokens(user_defined)
-
-    raw = EnvVarLoader.get_str("COAPIS_TOOL_GUARD_TOOLS") or None
-    if raw is not None:
-        normalized = raw.strip().lower()
-        if normalized in {"*", "all"}:
-            return None
-        if normalized in {"", "none", "off", "false", "0"}:
-            return set()
-        return _parse_guarded_tokens(raw.split(","))
-
-    cfg = _load_config_tool_guard()
-    if cfg is not None and cfg.guarded_tools is not None:
-        return _parse_guarded_tokens(cfg.guarded_tools)
-
-    return set(_DEFAULT_GUARDED_TOOLS)
-
-
-def resolve_denied_tools(
-    user_defined: set[str] | list[str] | tuple[str, ...] | None = None,
-) -> set[str]:
-    """Resolve the set of tools that are unconditionally denied.
-
-    Priority:
-    1) constructor-provided ``user_defined``
-    2) ``COAPIS_TOOL_GUARD_DENIED_TOOLS`` env var (comma-separated)
-    3) ``config.json`` -> ``security.tool_guard.denied_tools``
-    4) built-in default (empty)
-
-    Returns
-    -------
-    set[str]
-        Tool names that must be auto-rejected without user approval.
-    """
-    if user_defined is not None:
-        return set(user_defined)
-
-    raw = EnvVarLoader.get_str("COAPIS_TOOL_GUARD_DENIED_TOOLS") or None
-    if raw is not None:
-        return {t.strip() for t in raw.split(",") if t.strip()}
-
-    cfg = _load_config_tool_guard()
-    if cfg is not None and cfg.denied_tools:
-        return set(cfg.denied_tools)
-
-    return set()
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 
 
 def log_findings(tool_name: str, result: "ToolGuardResult") -> None:
@@ -177,3 +66,14 @@ def log_findings(tool_name: str, result: "ToolGuardResult") -> None:
         result.max_severity.value,
         result.guard_duration_seconds,
     )
+
+
+# ---------------------------------------------------------------------------
+# Retired (C2/C5)
+# ---------------------------------------------------------------------------
+#
+# ``resolve_guarded_tools`` / ``resolve_denied_tools`` / ``_load_config_tool_guard``
+# used to merge three sources (constructor arg → env var → config.json →
+# built-in defaults) for the legacy engine.  Access control now lives only in
+# ``access_control`` of the single YAML source and is read by
+# ``UnifiedToolGuardEngine`` directly, so the resolvers are gone.

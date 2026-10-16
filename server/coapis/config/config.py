@@ -1800,55 +1800,15 @@ class ToolsConfig(BaseModel):
         return self
 
 
-class ToolGuardRuleConfig(BaseModel):
-    """A single user-defined guard rule (stored in config.json)."""
-
-    id: str
-    tools: List[str] = Field(default_factory=list)
-    params: List[str] = Field(default_factory=list)
-    category: str = "command_injection"
-    severity: str = "HIGH"
-    patterns: List[str] = Field(default_factory=list)
-    exclude_patterns: List[str] = Field(default_factory=list)
-    description: str = ""
-    remediation: str = ""
-
-
-def _default_shell_evasion_checks() -> Dict[str, bool]:
-    """Return default shell-evasion checks (all enabled at startup)."""
-    return {
-        "command_substitution": True,
-        "obfuscated_flags": True,
-        "backslash_escaped_whitespace": True,
-        "backslash_escaped_operators": True,
-        "newlines": True,
-        "comment_quote_desync": True,
-        "quoted_newline": True,
-    }
-
-
-class ToolGuardConfig(BaseModel):
-    """Tool guard settings under ``security.tool_guard``.
-
-    ``guarded_tools``: ``None`` → use built-in default set; empty list → guard
-    nothing; non-empty list → guard only those tools.
-    """
-
-    enabled: bool = True
-    guarded_tools: Optional[List[str]] = None
-    denied_tools: List[str] = Field(default_factory=list)
-    custom_rules: List[ToolGuardRuleConfig] = Field(default_factory=list)
-    disabled_rules: List[str] = Field(default_factory=list)
-    shell_evasion_checks: Dict[str, bool] = Field(
-        default_factory=_default_shell_evasion_checks,
-    )
-
-
-class FileGuardConfig(BaseModel):
-    """File guard settings under ``security.file_guard``."""
-
-    enabled: bool = True
-    sensitive_files: List[str] = Field(default_factory=list)
+# ── Tool guard / file guard config models ─────────────────────────────
+#
+# REMOVED by C2 (single source of truth).  Tool-guard and path-guard settings
+# live exclusively in ``{WORKING_DIR}/system/tool_guard.yaml`` and are read
+# through ``coapis.security.tool_guard.config_store``.  The old
+# ``security.tool_guard`` / ``security.file_guard`` sections of config.json
+# were a *second* source: the console wrote them while the engine that
+# actually decided tool calls read the YAML, so console switches silently did
+# nothing.  Legacy keys left in an existing config.json are ignored.
 
 
 class SkillScannerWhitelistEntry(BaseModel):
@@ -1892,10 +1852,13 @@ class SkillScannerConfig(BaseModel):
 
 
 class SecurityConfig(BaseModel):
-    """Top-level ``security`` section in config.json."""
+    """Top-level ``security`` section in config.json.
 
-    tool_guard: ToolGuardConfig = Field(default_factory=ToolGuardConfig)
-    file_guard: FileGuardConfig = Field(default_factory=FileGuardConfig)
+    C2: ``tool_guard`` / ``file_guard`` moved out of config.json into the
+    single YAML source (``{WORKING_DIR}/system/tool_guard.yaml``); stale keys
+    in an existing config.json are ignored.
+    """
+
     skill_scanner: SkillScannerConfig = Field(
         default_factory=SkillScannerConfig,
     )

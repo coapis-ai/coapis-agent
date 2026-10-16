@@ -35,6 +35,7 @@ from .unified_models import (
     PatternRule,
     ToolGuardConfig,
 )
+from .config_store import resolve_yaml_path
 from .models import GuardFinding, GuardSeverity, GuardThreatCategory
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,14 @@ logger = logging.getLogger(__name__)
 # Config loader
 # ---------------------------------------------------------------------------
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "system" / "tool_guard.yaml"
+#: Single source of truth (C2): the runtime YAML in ``SYSTEM_DIR``, seeded
+#: from the shipped defaults.  Console routes resolve the *same* path.
+_CONFIG_PATH = resolve_yaml_path()
+
+
+def config_path() -> Path:
+    """The YAML file this engine reads (identical to the console's target)."""
+    return _CONFIG_PATH
 
 
 def _load_config() -> ToolGuardConfig:
@@ -58,6 +66,52 @@ def _load_config() -> ToolGuardConfig:
     except Exception as exc:
         logger.error("Failed to load tool_guard.yaml: %s", exc)
         return ToolGuardConfig()
+
+
+# ---------------------------------------------------------------------------
+# Action helpers
+# ---------------------------------------------------------------------------
+
+# Escalation order for the final decision: the strictest contributor wins.
+_ACTION_ORDER: dict[str, int] = {
+    "allow": 0,
+    "audit": 1,
+    "confirm": 2,
+    "block": 3,
+}
+
+# Minimum action implied by a finding's severity.  Keeps the unified engine
+# at least as strict as the legacy severity-driven approval model
+# (CRITICAL → block, HIGH → user approval).
+_SEV_MIN_ACTION: dict[str, str] = {
+    "CRITICAL": "block",
+    "HIGH": "confirm",
+    "MEDIUM": "audit",
+    "LOW": "audit",
+    "INFO": "allow",
+}
+
+
+def _sev_min_action(severity: Any) -> str:
+    """Map a severity (enum or string) to its minimum implied action."""
+    name = getattr(severity, "value", severity)
+    return _SEV_MIN_ACTION.get(str(name).upper(), "audit")
+
+
+def _max_action(*actions: str) -> str:
+    """Return the strictest action among *actions* (default ``allow``)."""
+    best = "allow"
+    for a in actions:
+        if _ACTION_ORDER.get(str(a).lower(), 0) > _ACTION_ORDER.get(best, 0):
+            best = str(a).lower()
+    return best
+
+
+def _effective_rule_action(rule: PatternRule) -> str:
+    """Authored action raised to the floor implied by the rule's severity."""
+    authored = str(rule.action or "audit").lower()
+    floor = _sev_min_action(rule.severity)
+    return _max_action(authored, floor)
 
 
 # ---------------------------------------------------------------------------
@@ -466,11 +520,13 @@ class UnifiedToolGuardEngine:
         self._compiled_rules: list[tuple[PatternRule, list[re.Pattern], list[re.Pattern]]] = []
         self._compile_rules()
         self._load_evasion_guardian()
+        self._load_path_guardian()
         logger.info(
-            "UnifiedToolGuardEngine loaded: %d commands, %d global_rules, %d evasion checks",
+            "UnifiedToolGuardEngine loaded: %d commands, %d global_rules, %d evasion checks, path layer=%s",
             len(self._config.commands),
             len(self._config.global_rules),
             len(self._config.evasion_checks),
+            "on" if getattr(self, "_path_guardian", None) else "off",
         )
 
     # ------------------------------------------------------------------
@@ -481,11 +537,17 @@ class UnifiedToolGuardEngine:
     def config(self) -> ToolGuardConfig:
         return self._config
 
+    @property
+    def enabled(self) -> bool:
+        """Master switch — ``access_control.enabled`` of the single source."""
+        return bool(self._config.access_control.enabled)
+
     def reload(self) -> None:
         """Reload config from YAML and recompile rules."""
         self._config = _load_config()
         self._compile_rules()
         self._load_evasion_guardian()
+        self._load_path_guardian()
         logger.info("UnifiedToolGuardEngine reloaded")
 
     def _compile_rules(self) -> None:
@@ -514,6 +576,56 @@ class UnifiedToolGuardEngine:
             self._evasion_guardian = ShellEvasionGuardian()
         except Exception as exc:
             logger.warning("Failed to load ShellEvasionGuardian: %s", exc)
+
+    def _load_path_guardian(self) -> None:
+        """Load the file-path guardian (``security.file_guard`` backed).
+
+        Disabled by ``path_guard.enabled: false``.  Failures degrade to
+        ``None`` (path layer skipped) — never to a crash.
+        """
+        self._path_guardian = None
+        cfg = getattr(self._config, "path_guard", None)
+        if cfg is not None and not cfg.enabled:
+            logger.info("UnifiedToolGuardEngine: path layer disabled by config")
+            return
+        try:
+            from .guardians.file_guardian import FilePathToolGuardian
+            self._path_guardian = FilePathToolGuardian()
+        except Exception as exc:
+            logger.warning("Failed to load FilePathToolGuardian: %s", exc)
+
+    def _path_findings(
+        self,
+        tool_name: str,
+        params: dict[str, Any],
+    ) -> list[GuardFinding]:
+        """Run the file-path layer over a tool call."""
+        guardian = getattr(self, "_path_guardian", None)
+        if guardian is None:
+            return []
+        try:
+            return guardian.guard(tool_name, params) or []
+        except Exception as exc:
+            logger.warning("Path guardian failed (tool=%s): %s", tool_name, exc)
+            return []
+
+    def _path_action(self, findings: list[GuardFinding]) -> str:
+        """Strictest action implied by path findings."""
+        return _max_action(*(_sev_min_action(f.severity) for f in findings))
+
+    @staticmethod
+    def _finding_to_dict(finding: GuardFinding, action: str) -> dict[str, Any]:
+        """Normalise a :class:`GuardFinding` into the ``matched_rules`` shape."""
+        return {
+            "id": finding.rule_id or finding.id,
+            "severity": str(getattr(finding.severity, "value", finding.severity)),
+            "category": str(getattr(finding.category, "value", finding.category)),
+            "description": finding.description,
+            "action": action,
+            "matched_text": (finding.matched_value or "")[:200],
+        }
+
+
 
     # ------------------------------------------------------------------
     # Layer 1: Access Control
@@ -554,21 +666,15 @@ class UnifiedToolGuardEngine:
     ) -> list[tuple[PatternRule, re.Match]]:
         """Match rules against the command string.
 
-        Returns only rules that actually match.  For L0 commands,
-        returns empty list (optimization).
-        """
-        # L0 optimization: skip rule matching
-        if cmd_name:
-            entry = self._config.commands.get(cmd_name)
-            if entry and entry.level == "L0":
-                return []
-        # Fallback: if _extract_command_name returned None (e.g. bare "env"),
-        # check if the raw command string itself is a known L0 command.
-        if not cmd_name:
-            entry = self._config.commands.get(command_str.strip())
-            if entry and entry.level == "L0":
-                return []
+        Returns only rules that actually match.
 
+        .. note:: An earlier "L0 optimization" skipped rule matching for
+           safe commands.  It was removed: global rules detect content
+           patterns (``$IFS``, control chars, ``jq system()``, ``env``
+           dumps, base64→shell …) that are independent of the leading
+           command, so skipping L0 silently disabled 10+ rules.  Running
+           30 rules per call costs microseconds.
+        """
         # Also skip if command is disabled
         disabled = set(self._config.access_control.disabled_rules)
 
@@ -670,14 +776,35 @@ class UnifiedToolGuardEngine:
         """
         t0 = time.monotonic()
 
+        # ── Path layer: file-target protection for EVERY tool call ──
+        # (secret dirs, .env, SSH keys, /etc/shadow, sudoers … from
+        #  security.file_guard).  Shell commands get path extraction,
+        #  file tools get their path params, others get a path-token scan.
+        path_findings = self._path_findings(tool_name, params)
+        path_action = self._path_action(path_findings)
+
         # Extract command string from params
         command_str = params.get("command", "")
         if not command_str:
-            # Non-shell tool — just check access control
+            # Non-shell tool — access control + path layer apply.
             if self.is_denied(tool_name):
                 return _make_result(
                     action="block",
                     reason=f"Tool '{tool_name}' is denied",
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                )
+            if path_action != "allow":
+                matched = [
+                    self._finding_to_dict(f, path_action) for f in path_findings
+                ]
+                self._audit_log_safely(
+                    path_action, None, f"{tool_name} {params.get('file_path', '')}",
+                    "L0", "path_layer", matched, [],
+                )
+                return _make_result(
+                    action=path_action,
+                    matched_rules=matched,
+                    reason="path_layer: sensitive file target",
                     duration_ms=(time.monotonic() - t0) * 1000,
                 )
             return _make_result(action="allow", duration_ms=(time.monotonic() - t0) * 1000)
@@ -688,6 +815,28 @@ class UnifiedToolGuardEngine:
                 action="block",
                 command=command_str,
                 reason=f"Tool '{tool_name}' is denied",
+                duration_ms=(time.monotonic() - t0) * 1000,
+            )
+
+        # Guarded scope: tools outside ``access_control.guarded_tools`` get the
+        # path layer only (parity with the legacy ``only_always_run`` path).
+        if not self.is_guarded(tool_name):
+            if path_action != "allow":
+                matched = [self._finding_to_dict(f, path_action) for f in path_findings]
+                self._audit_log_safely(
+                    path_action, None, command_str, "L0", "path_layer", matched, [],
+                )
+                return _make_result(
+                    action=path_action,
+                    command=command_str,
+                    matched_rules=matched,
+                    reason="path_layer: sensitive file target",
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                )
+            return _make_result(
+                action="allow",
+                command=command_str,
+                reason="tool not in guarded_tools",
                 duration_ms=(time.monotonic() - t0) * 1000,
             )
 
@@ -772,7 +921,13 @@ class UnifiedToolGuardEngine:
                 matched_rules = []
                 findings = []
                 for rule, match in rule_matches:
-                    matched_rules.append({"rule_id": rule.id, "match": match.group()})
+                    r_action = _effective_rule_action(rule)
+                    matched_rules.append({"rule_id": rule.id, "match": match.group(),
+                                          "id": rule.id, "severity": rule.severity,
+                                          "category": rule.category,
+                                          "description": rule.description,
+                                          "action": r_action,
+                                          "matched_text": match.group(0)[:200]})
                     findings.append(GuardFinding(
                         id=rule.id,
                         rule_id=rule.id,
@@ -787,7 +942,12 @@ class UnifiedToolGuardEngine:
                         remediation=rule.remediation,
                         guardian="global_rule",
                     ))
-                final_action = "block"
+                final_action = _max_action(
+                    *(_effective_rule_action(rule) for rule, _ in rule_matches),
+                    path_action,
+                )
+                if final_action == "allow":
+                    final_action = "audit"
                 self._audit_log_safely(
                     final_action, cmd_name, command_str, level or "L0",
                     "global_rule_override", matched_rules, findings,
@@ -798,6 +958,22 @@ class UnifiedToolGuardEngine:
                     command=cmd_name or command_str,
                     reason="global_rule_override",
                     matched_rules=matched_rules,
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                )
+
+            # Path layer must not be bypassed by demotion either.
+            if path_action != "allow":
+                matched = [self._finding_to_dict(f, path_action) for f in path_findings]
+                self._audit_log_safely(
+                    path_action, cmd_name, command_str, level or "L0",
+                    "path_layer", matched, [],
+                )
+                return _make_result(
+                    action=path_action,
+                    level=level,
+                    command=cmd_name or command_str,
+                    matched_rules=matched,
+                    reason="path_layer: sensitive file target",
                     duration_ms=(time.monotonic() - t0) * 1000,
                 )
 
@@ -825,16 +1001,9 @@ class UnifiedToolGuardEngine:
                 "severity": rule.severity,
                 "category": rule.category,
                 "description": rule.description,
-                "action": rule.action,
+                "action": _effective_rule_action(rule),
                 "matched_text": match.group(0)[:200],
             })
-
-        # Check if any rule demands blocking
-        blocked_rule = None
-        for mr in matched_rules:
-            if mr["action"] == "block":
-                blocked_rule = mr
-                break
 
         # ── Layer 4: Evasion Detection ──
         evasion_findings = self.check_evasion(command_str)
@@ -846,70 +1015,52 @@ class UnifiedToolGuardEngine:
                 "description": ef.description,
             })
 
-        # ── Decision (for non-demoted commands) ──
-
-        if blocked_rule:
-            self._audit_log_safely(
-                "block", cmd_name, command_str, level or "L0",
-                f"Rule {blocked_rule['id']}: {blocked_rule['description']}",
-                matched_rules, evasion_flags,
-            )
-            return _make_result(
-                action="block",
-                level=level,
-                command=cmd_name or command_str,
-                matched_rules=matched_rules,
-                evasion_flags=evasion_flags,
-                reason=f"Rule {blocked_rule['id']}: {blocked_rule['description']}",
-                duration_ms=(time.monotonic() - t0) * 1000,
-            )
-
-        if evasion_flags and level in ("L3", "L4"):
-            self._audit_log_safely(
-                "block", cmd_name, command_str, level or "L0",
-                f"Evasion detected on {level} command",
-                matched_rules, evasion_flags,
-            )
-            return _make_result(
-                action="block",
-                level=level,
-                command=cmd_name or command_str,
-                matched_rules=matched_rules,
-                evasion_flags=evasion_flags,
-                reason=f"Evasion detected on {level} command",
-                duration_ms=(time.monotonic() - t0) * 1000,
-            )
-
-        if matched_rules or evasion_flags:
-            self._audit_log_safely(
-                "audit", cmd_name, command_str, level or "L0",
-                "Findings detected but no block condition met",
-                matched_rules, evasion_flags,
-            )
-            return _make_result(
-                action="audit",
-                level=level,
-                command=cmd_name or command_str,
-                matched_rules=matched_rules,
-                evasion_flags=evasion_flags,
-                reason="Findings detected but no block condition met",
-                duration_ms=(time.monotonic() - t0) * 1000,
-            )
-
-        # No rules matched — use command-level default action
+        # ── Decision: strictest contributor wins ──
+        # Severity floors keep parity with the legacy severity-driven
+        # approval model: CRITICAL → block, HIGH → confirm (user approval).
+        rule_action = _max_action(*[mr["action"] for mr in matched_rules])
+        evasion_action = _max_action(
+            *(_sev_min_action(ef.severity) for ef in evasion_findings),
+        )
         cmd_entry = self._config.commands.get(cmd_name) if cmd_name else None
-        default_action = cmd_entry.action if cmd_entry else "allow"
-        if default_action in ("audit", "confirm"):
-            self._audit_log_safely(
-                default_action, cmd_name, command_str, level or "L0",
-                f"Command-level default: {default_action}",
-                [], [],
+        default_action = (cmd_entry.action if cmd_entry else "allow") or "allow"
+
+        final_action = _max_action(
+            rule_action, evasion_action, path_action, default_action,
+        )
+
+        if final_action == "allow":
+            return _make_result(
+                action="allow",
+                level=level,
+                command=cmd_name or command_str,
+                reason="No findings",
+                duration_ms=(time.monotonic() - t0) * 1000,
             )
+
+        reasons = []
+        if rule_action == final_action and matched_rules:
+            top = next(mr for mr in matched_rules if mr["action"] == final_action)
+            reasons.append(f"Rule {top['id']}: {top['description']}")
+        if evasion_action == final_action and evasion_flags:
+            reasons.append("evasion pattern detected")
+        if path_action == final_action and path_findings:
+            reasons.append("path_layer: sensitive file target")
+        if default_action == final_action:
+            reasons.append(f"command-level default: {default_action}")
+
+        reason = "; ".join(reasons) or "findings detected"
+        self._audit_log_safely(
+            final_action, cmd_name, command_str, level or "L0",
+            reason, matched_rules, evasion_flags,
+        )
         return _make_result(
-            action=default_action,
+            action=final_action,
             level=level,
             command=cmd_name or command_str,
-            reason=f"Command-level default: {default_action}",
+            matched_rules=matched_rules,
+            evasion_flags=evasion_flags,
+            reason=reason,
             duration_ms=(time.monotonic() - t0) * 1000,
         )
 
@@ -926,8 +1077,20 @@ class UnifiedToolGuardEngine:
     ) -> "ToolGuardCompatResult":
         """Compatibility wrapper that returns a ToolGuardResult-like object."""
         result_dict = self.process_command(tool_name, params)
+        return self.result_from_check(tool_name, params, result_dict)
 
-        # Build GuardFinding list
+    def result_from_check(
+        self,
+        tool_name: str,
+        params: dict[str, Any],
+        result_dict: dict[str, Any],
+    ) -> "ToolGuardCompatResult":
+        """Build the compat result from an already-computed ``process_command`` result.
+
+        The mixin runs the engine once per tool call and needs the findings
+        view (severities) for its execution-level policy; re-running
+        ``process_command`` here would evaluate the same command twice.
+        """
         findings: list[GuardFinding] = []
         for mr in result_dict.get("matched_rules", []):
             findings.append(GuardFinding(
@@ -954,6 +1117,25 @@ class UnifiedToolGuardEngine:
                 param_name="command",
                 matched_value=result_dict.get("command", ""),
             ))
+
+        # Path-layer findings (sensitive file targets) are reported as
+        # matched_rules by process_command; surface them to callers too.
+        for mr in result_dict.get("matched_rules", []):
+            if mr.get("category") == "sensitive_file_access" and mr.get("id") in (
+                "SENSITIVE_FILE_BLOCK", "SENSITIVE_FILE_OUT_OF_WORKSPACE",
+            ):
+                findings.append(GuardFinding(
+                    id=f"path-{mr['id']}-{int(time.time()*1000)}",
+                    rule_id=mr["id"],
+                    category=GuardThreatCategory.SENSITIVE_FILE_ACCESS,
+                    severity=_SEVERITY_MAP.get(mr.get("severity", "HIGH"), GuardSeverity.HIGH),
+                    title=mr.get("description", ""),
+                    description=mr.get("description", ""),
+                    tool_name=tool_name,
+                    param_name="file_path",
+                    matched_value=mr.get("matched_text", ""),
+                    guardian="file_path_tool_guardian",
+                ))
 
         return ToolGuardCompatResult(
             tool_name=tool_name,

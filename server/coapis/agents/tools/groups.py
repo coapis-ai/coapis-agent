@@ -29,6 +29,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Tools registered only when an optional integration is importable (the
+# registry skips them silently when the package is absent — see
+# ``tools/_auto_register.py``). They are legitimate rows in the group table,
+# so a host test venv without the integration must not read them as drift.
+OPTIONAL_INTEGRATION_TOOLS: frozenset[str] = frozenset({"c2a_render_card"})
+
 TOOL_GROUPS: dict[str, dict[str, Any]] = {
     # ── always active: capabilities every turn may need ──
     # ``basic`` is agentscope's built-in group: it is always active, excluded

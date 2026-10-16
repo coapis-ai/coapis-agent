@@ -24,6 +24,7 @@ import pytest  # noqa: E402
 from agentscope.tool import Toolkit  # noqa: E402
 
 from coapis.agents.tools.groups import (  # noqa: E402
+    OPTIONAL_INTEGRATION_TOOLS,
     TOOL_GROUPS,
     TOOL_GROUP_MAP,
     active_groups_for_query,
@@ -82,7 +83,11 @@ def test_group_table_covers_registry():
         "registered tools without a group would land in the always-active "
         f"core group: {drift['missing']}"
     )
-    assert not drift["extra"], f"stale group rows: {drift['extra']}"
+    # 组表允许登记"可选集成"的工具（c2a_render_card 等）。宿主机测试环境没装
+    # 那个集成时注册表里自然没有它——这是环境差异，不是陈旧行。dev/生产容器
+    # 装了 c2a_tools，该行就是有效登记。
+    stale = [t for t in drift["extra"] if t not in OPTIONAL_INTEGRATION_TOOLS]
+    assert not stale, f"stale group rows: {stale}"
 
 
 def test_group_map_is_derived_from_groups():
