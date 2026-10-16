@@ -332,6 +332,31 @@ class DualLayerEvolutionEngine:
             {"role": "user", "content": prompt},
         ]
 
+        # Same budget rule as the chat gate: this path calls the provider
+        # with a raw client, so nothing else ever measured its prompt.
+        from ..agents.context.context_budget import budget_background_prompt
+
+        running = None
+        try:
+            from ..config.config import load_agent_config
+
+            running = load_agent_config("default").running
+        except Exception:
+            running = None
+
+        messages = budget_background_prompt(
+            messages,
+            model,
+            running_config=running,
+            source="dual_layer_evolution",
+        )
+        if not messages:
+            logger.warning(
+                "[DualLayerEvolution] prompt does not fit the model "
+                "window; skipping this extraction.",
+            )
+            return ""
+
         if hasattr(model, "client"):
             response = await asyncio.wait_for(
                 model.client.chat.completions.create(

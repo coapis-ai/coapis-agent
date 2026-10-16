@@ -172,13 +172,9 @@ class EvalRunner:
         """
         context = await self.workspace._get_chat_context(chat_id)
         context.add_message("user", text)
-        # Hermetic isolation: drop any stale compression-cache state left by a
-        # previous task's chat (the product-level fix in ContextCompressor
-        # guards this; belt & braces for benchmark integrity).
-        try:
-            self.workspace.core.compressor.clear_cache()
-        except AttributeError:
-            pass
+        # Hermetic isolation: the budget rule is stateless now (window_source
+        # + context_budget), so there is no compression cache left by a
+        # previous task's chat to clear.
         collected: list[str] = []
 
         async def _consume() -> None:

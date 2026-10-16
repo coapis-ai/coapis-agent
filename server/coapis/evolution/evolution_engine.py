@@ -745,24 +745,55 @@ class EvolutionEngine:
         max_retries = 3
         timeout_seconds = 30
 
+        # Same budget rule as the chat gate (D6): these paths call the
+        # provider with a raw client, so nothing else measured the prompt.
+        from ..agents.context.context_budget import budget_background_prompt
+
+        def _running_cfg():
+            try:
+                from ..config.config import load_agent_config
+
+                return load_agent_config(
+                    self._current_agent_id or self.agent_id or "default",
+                ).running
+            except Exception:
+                return None
+
+        def _budgeted(msgs, model_obj):
+            return budget_background_prompt(
+                msgs,
+                model_obj,
+                running_config=_running_cfg(),
+                source="evolution_engine",
+            )
+
+        _system_row = {
+            "role": "system",
+            "content": (
+                "You are a memory review assistant. "
+                "Analyze conversations and extract valuable insights. "
+                "Output concise, actionable items."
+            ),
+        }
+
         for attempt in range(max_retries):
             try:
                 # Try agent_core (ExperienceExtractor pattern)
                 if self.agent_core and hasattr(self.agent_core, "client"):
+                    _msgs = _budgeted(
+                        [_system_row, {"role": "user", "content": prompt}],
+                        self.agent_core,
+                    )
+                    if not _msgs:
+                        logger.warning(
+                            "Review prompt does not fit the model window; "
+                            "skipping this review.",
+                        )
+                        return ""
                     response = await asyncio.wait_for(
                         self.agent_core.client.chat.completions.create(
                             model=self.agent_core.model,
-                            messages=[
-                                {
-                                    "role": "system",
-                                    "content": (
-                                        "You are a memory review assistant. "
-                                        "Analyze conversations and extract valuable insights. "
-                                        "Output concise, actionable items."
-                                    ),
-                                },
-                                {"role": "user", "content": prompt},
-                            ],
+                            messages=_msgs,
                             max_tokens=1000,
                             temperature=0.3,
                         ),
@@ -777,13 +808,26 @@ class EvolutionEngine:
                 config = load_config()
                 model, _ = create_model_and_formatter(config)
                 if model and hasattr(model, "client"):
+                    _msgs = _budgeted(
+                        [
+                            {
+                                "role": "system",
+                                "content": "You are a review assistant.",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        model,
+                    )
+                    if not _msgs:
+                        logger.warning(
+                            "Review prompt does not fit the model window; "
+                            "skipping this review.",
+                        )
+                        return ""
                     response = await asyncio.wait_for(
                         model.client.chat.completions.create(
                             model=model.model_name,
-                            messages=[
-                                {"role": "system", "content": "You are a review assistant."},
-                                {"role": "user", "content": prompt},
-                            ],
+                            messages=_msgs,
                             max_tokens=1000,
                             temperature=0.3,
                         ),

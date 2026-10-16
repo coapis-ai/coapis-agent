@@ -2282,8 +2282,18 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         Useful after load_session_state to ensure the prompt reflects
         the latest AGENTS.md / SOUL.md / PROFILE.md on disk.
 
-        Updates both self._sys_prompt and the first system-role
-        message stored in self.memory.content (if one exists).
+        Only ``self._sys_prompt`` is updated.  AgentScope does **not** keep
+        the system prompt in ``self.memory``: ``ReActAgent._reasoning``
+        prepends a fresh ``Msg("system", self.sys_prompt, "system")`` on
+        every call, so the rebuilt prompt is exactly what the model sees.
+
+        The previous implementation overwrote the first ``role="system"``
+        message found in memory.  In this codebase that message is never the
+        system prompt — it is an injected turn, in 41 of 100 sampled dev
+        sessions a tool-result carrier — so the loop destroyed tool results,
+        left a dangling ``tool_use``, and manufactured the mid-list system
+        message that strict chat templates answer with ``500 System message
+        must be at the beginning`` (系统消息位置问题 §2.4).
         """
         self._sys_prompt = self._build_sys_prompt()
 
@@ -2342,7 +2352,6 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             group.description = (
                 f"MCP server '{client_name}' tools: {shown}{more}."
             )
-
 
     async def register_mcp_clients(
         self,

@@ -438,6 +438,141 @@ def _drop_unpaired_tool_results(msgs: list[Msg]) -> list[Msg]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# System-message position governance (系统消息位置治理 —— 治本 M1)
+# ---------------------------------------------------------------------------
+
+_SYSTEM_GOVERNANCE_ENV = "COAPIS_SYSTEM_MSG_GOVERNANCE"
+
+
+def _system_governance_enabled() -> bool:
+    """Knob for system-message position governance: ``on`` (default) | ``off``.
+
+    Deliberately **not** tied to ``COAPIS_MODEL_COMPAT_MODE``.  A mid-list
+    ``role=system`` turn is a hard failure on strict chat templates — local
+    llama.cpp Jinja templates answer ``500 System message must be at the
+    beginning``, Anthropic rejects the role outright — not a content rewrite
+    worth a shadow week.  Shadowing it means shipping the crash (dev log
+    2026-10-14 10:36/10:39: 8 × 500, 4 retries each, user saw a dead chat).
+    """
+    raw = (os.environ.get(_SYSTEM_GOVERNANCE_ENV) or "on").strip().lower()
+    return raw not in ("off", "0", "false", "no", "disable", "disabled")
+
+
+def _system_text_of(msg: Msg) -> str:
+    """Concatenate the readable text of *msg* (non-text blocks are ignored)."""
+    parts: list[str] = []
+    for block in _blocks_of(msg):
+        if isinstance(block, dict):
+            if block.get("type") == "text":
+                text = block.get("text") or ""
+                if text.strip():
+                    parts.append(text)
+        else:
+            text = str(block)
+            if text.strip():
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def _hoist_system_messages(msgs: list[Msg]) -> list[Msg]:
+    """Merge mid-list *prose* system turns into the leading system turn.
+
+    Why this exists: CoApis injects instructions (selected-file hints,
+    knowledge-base hints, tool-guard and plan-gate hints) as
+    ``role="system"`` messages **into the middle of the stored history**.
+    AgentScope keeps the real system prompt out of memory and prepends it at
+    reasoning time, so those injections land at index 2/4/5/60 … — exactly
+    the shape strict chat templates refuse to render.
+
+    Rules:
+    - ``role="system"`` messages carrying ``tool_use``/``tool_result`` blocks
+      stay **exactly where they are**: the OpenAI family renders them as
+      ``role=tool`` and the Anthropic path (``model_factory._format_anthropic
+      messages``) converts them to ``user``.  Both are positionally valid,
+      and moving them would break the tool-call chain.
+    - Prose system messages are removed from their position and their text is
+      appended, in order of appearance, to the leading system turn — created
+      at index 0 when the history has no system turn at all.
+    - Text is **merged, never dropped**.  These hints are instructions to the
+      model; deleting them changes behaviour and is what the 方案 §5.3
+      warning is about.
+    - Media blocks on a hoisted message are preserved in a ``user`` turn so
+      nothing is lost (system-role media is not accepted by any provider).
+    """
+    texts: list[str] = []
+    media_leftovers: list[Msg] = []
+    out: list[Msg] = []
+
+    for index, msg in enumerate(msgs):
+        if msg.role == "system" and not _has_tool_blocks(msg):
+            is_head = index == 0
+            text = _system_text_of(msg)
+            media = [
+                dict(block)
+                for block in _blocks_of(msg)
+                if isinstance(block, dict)
+                and block.get("type") in _MEDIA_BLOCK_TYPES
+            ]
+            if is_head:
+                # The leading system turn is the system prompt slot: keep it
+                # exactly as stored and let later hints merge into it.
+                out.append(msg)
+                continue
+            if text:
+                texts.append(text)
+            if media:
+                media_leftovers.append(
+                    Msg(
+                        name="user",
+                        content=media,
+                        role="user",
+                        metadata=dict(msg.metadata or {}),
+                    ),
+                )
+            continue
+        out.append(msg)
+
+    if not texts and not media_leftovers:
+        return msgs
+
+    if not texts:
+        out[1:1] = media_leftovers
+        return out
+
+    merged = "\n\n".join(texts)
+
+    if out and out[0].role == "system" and not _has_tool_blocks(out[0]):
+        head = out[0]
+        blocks = [
+            dict(block)
+            if isinstance(block, dict)
+            else {"type": "text", "text": str(block)}
+            for block in _blocks_of(head)
+        ]
+        blocks.append({"type": "text", "text": merged})
+        head.content = blocks
+    else:
+        out.insert(
+            0,
+            Msg(name="system", content=[{"type": "text", "text": merged}], role="system"),
+        )
+
+    if media_leftovers:
+        # Keep them right after the leading system turn: they belong to the
+        # same instruction, and a user turn at index 1 is always legal.
+        out[1:1] = media_leftovers
+
+    logger.info(
+        "system-msg-governance: hoisted %d prose system turn(s) into the "
+        "leading system turn (%d -> %d messages)",
+        len(texts),
+        len(msgs),
+        len(out),
+    )
+    return out
+
+
 def _apply_compatibility_pass(
     msgs: list[Msg],
     *,
@@ -477,6 +612,11 @@ def normalize_messages_for_model_request(
 ) -> list[Msg]:
     """Return a normalized copy for provider request formatting.
 
+    This is the single throat every CoApis provider request passes through
+    (``model_factory._normalize_messages_for_formatter`` is its only caller),
+    which is why request-shape governance lives here and not in the stored
+    history.
+
     Args:
         msgs: Source messages (will **not** be mutated).
         supports_multimodal: Whether the target model handles media.
@@ -506,6 +646,12 @@ def normalize_messages_for_model_request(
     if not supports_multimodal:
         _strip_media_blocks_in_place(normalized)
 
+    # System-position governance runs *outside* the compat knob on purpose:
+    # strict templates hard-fail with 500 on a mid-list system turn, so this
+    # cannot wait behind a shadow-observation window (方案 D3).
+    if _system_governance_enabled():
+        normalized = _hoist_system_messages(normalized)
+
     mode = _compat_mode()
     if mode == "off":
         return normalized
@@ -526,6 +672,8 @@ __all__ = [
     "_drop_empty_assistant_messages",
     "_drop_empty_user_messages",
     "_drop_unpaired_tool_results",
+    "_hoist_system_messages",
     "_merge_adjacent_tool_messages",
     "_pair_tool_use_ids",
+    "_system_governance_enabled",
 ]

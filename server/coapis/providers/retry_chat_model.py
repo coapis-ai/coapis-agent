@@ -154,8 +154,51 @@ def _get_httpx_retryable() -> tuple[type[Exception], ...]:
     return _httpx_retryable
 
 
+# Deterministic request-shape failures.  These are not transient: the same
+# payload fails identically on every attempt, so retrying buys nothing and
+# costs the user ~11s of a dead chat before the error surfaces (dev log
+# 2026-10-14 10:36 / 10:39: a mid-list ``role=system`` turn produced 4
+# identical 500s from a strict Jinja chat template).
+_SHAPE_ERROR_PATTERNS = (
+    "system message must be at the beginning",
+    "system message must be the first",
+    "system message must be first",
+    "system messages must come first",
+    "system role is reserved",
+    "must be the first message",
+    "tool_use_id not found",
+    "invalid tool_use_id",
+    "tool_use_id does not exist",
+    "must have non-empty content",
+    "messages must not be empty",
+)
+
+
+def _is_request_shape_error(exc: BaseException) -> bool:
+    """Return *True* when *exc* is a deterministic request-shape rejection.
+
+    Matched on the message text because the shape rules live in the server's
+    chat template (Jinja ``raise_exception``), not in the HTTP status: the
+    same fault arrives as 500 from a local template, 400 from OpenAI-style
+    validation, and 400 from Anthropic.
+    """
+    text = str(exc).lower()
+    hit = next((p for p in _SHAPE_ERROR_PATTERNS if p in text), None)
+    if hit is None:
+        return False
+    logger.warning(
+        "LLM request shape error (%s) — not retryable, failing fast: %s",
+        hit,
+        str(exc)[:300],
+    )
+    return True
+
+
 def _is_retryable(exc: Exception) -> bool:
     """Return *True* if *exc* should trigger a retry."""
+    if _is_request_shape_error(exc):
+        return False
+
     retryable = (
         _get_openai_retryable()
         + _get_anthropic_retryable()

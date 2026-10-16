@@ -177,10 +177,21 @@ def _resolve_media_url(url: str) -> str:
       /{filename}        → workspaces/{user}/files/{filename}  (legacy)
     """
     from ...config.context import get_current_workspace_dir, get_current_username
-    
+
     # Already an absolute URL – nothing to resolve
-    if url.startswith("http://") or url.startswith("https://") or url.startswith("file://"):
+    if url.startswith("http://") or url.startswith("https://"):
         return url
+
+    # ``file://`` is only usable with an absolute path (``file:///abs/x.docx``).
+    # The chat UI used to send ``file://{name}``, where the name sits in the
+    # netloc slot and the path is empty: ``url2pathname`` then yielded "", the
+    # block was treated as a failed download and the model got
+    # "[Error: Unknown file source type or empty data]" with no path at all.
+    # Such URIs fall through to the filename lookup below.
+    if url.startswith("file://"):
+        _uri_path = urllib.parse.urlparse(url).path
+        if _uri_path.startswith("/") and os.path.basename(_uri_path):
+            return url
     
     workspace_dir = get_current_workspace_dir()
     username = get_current_username()
@@ -197,6 +208,9 @@ def _resolve_media_url(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     # 关键：先解码 URL 编码（如 %E6%B5%8B%E8%AF%95 → 测试）
     basename = urllib.parse.unquote(os.path.basename(parsed.path))
+    if not basename and parsed.scheme == "file":
+        # file://{name} —— 旧前端把文件名放在 netloc 位
+        basename = urllib.parse.unquote(parsed.netloc)
     if not basename:
         return url
     
@@ -220,6 +234,57 @@ def _resolve_media_url(url: str) -> str:
     
     logger.warning("_resolve_media_url: file not found for url=%s, basename=%s, workspace_dir=%s", url, basename, workspace_dir)
     return url
+
+
+def _lookup_uploaded_file(filename: str) -> Optional[str]:
+    """Locate an uploaded/selected file by bare name, returning an abs path.
+
+    Chat file references reach the agent as bare names (the ``+`` picker) or as
+    ``biz_params.file_refs`` entries, while the bytes live in one of several
+    directories.  Probing the process CWD (the old behaviour) never finds them,
+    so every lookup failed and the model was left without a usable path.
+    Search order mirrors ``_resolve_media_url`` plus the folder reference:
+    folder_ref → workspace/files/media → workspace/files → workspace/media →
+    global media dir.
+    """
+    from ...config.context import get_current_folder_ref, get_current_workspace_dir
+
+    name = os.path.basename((filename or "").strip())
+    if not name:
+        return None
+
+    candidates: list[Path] = []
+    folder_ref = get_current_folder_ref()
+    if folder_ref:
+        candidates.append(Path(folder_ref) / name)
+    workspace_dir = get_current_workspace_dir()
+    if workspace_dir:
+        ws = Path(workspace_dir)
+        candidates += [
+            ws / "files" / "media" / name,
+            ws / "files" / name,
+            ws / "media" / name,
+            ws / name,
+        ]
+    try:
+        from ...constant import DEFAULT_MEDIA_DIR
+
+        candidates.append(Path(DEFAULT_MEDIA_DIR) / name)
+    except Exception:  # constant unavailable (tests with stubbed config)
+        pass
+
+    for cand in candidates:
+        try:
+            if cand.is_file():
+                logger.info(
+                    "_lookup_uploaded_file: %s -> %s",
+                    filename,
+                    cand,
+                )
+                return str(cand)
+        except OSError:
+            continue
+    return None
 
 
 def _media_type_from_path(path: str) -> str:
@@ -489,6 +554,13 @@ async def _process_single_block(
 
     try:
         local_path = await _process_single_file_block(source, filename)
+
+        if not local_path and block_type == "file" and filename:
+            # The block carried a name without a usable path (e.g. the old
+            # ``file://{name}`` shape).  Search the workspace for the file
+            # before declaring the block unusable, so the model still gets a
+            # real absolute path instead of an error string.
+            local_path = _lookup_uploaded_file(filename)
 
         if local_path:
             if block_type == "audio":

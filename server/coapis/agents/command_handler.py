@@ -113,6 +113,39 @@ class CommandHandler(ConversationCommandHandlerMixin):
         self.memory_manager: "BaseMemoryManager" = memory_manager
         self.context_manager: "BaseContextManager" = context_manager
 
+    def _window_info(self):
+        """The ``WindowInfo`` for the active model, from the compaction source."""
+        from .context.window_source import reported_window_for, resolve_window
+
+        agent_config = self._get_agent_config()
+        running = agent_config.running
+        active = getattr(agent_config, "active_model", None)
+        reported = reported_window_for(
+            getattr(active, "provider_id", None),
+            getattr(active, "model", None),
+        )
+
+        class _Reported:
+            max_sequence_length = reported
+
+        ccc = running.light_context_config.context_compact_config
+        return resolve_window(
+            _Reported(),
+            running,
+            chars_per_token=ccc.formatted_chars_per_token,
+        )
+
+    def _effective_window(self) -> int:
+        """Window shown to the user: the model's own, not the config guess.
+
+        ``/compact`` and ``/history`` report "N/M tokens (P%)".  Using
+        ``max_input_length`` for M made the percentage fiction — a 32768-token
+        model displayed against 131072 read as 25% full when it was at the
+        edge.  Same source as the compaction trigger, so what the user sees
+        and what the gate enforces cannot diverge.
+        """
+        return self._window_info().effective_tokens
+
     def _get_agent_config(self):
         """Get hot-reloaded agent config.
 
@@ -184,7 +217,7 @@ class CommandHandler(ConversationCommandHandlerMixin):
         if not result.get("success"):
             reason = result.get("reason", "unknown")
             before = result.get("before_tokens", 0)
-            max_len = self._get_agent_config().running.max_input_length
+            max_len = self._effective_window()
             before_pct = (
                 f"{before / max_len * 100:.0f}%" if max_len > 0 else "N/A"
             )
@@ -203,7 +236,7 @@ class CommandHandler(ConversationCommandHandlerMixin):
         await self.memory.update_compressed_summary(compact_content)
         before = result.get("before_tokens", 0)
         after = result.get("after_tokens", 0)
-        max_len = self._get_agent_config().running.max_input_length
+        max_len = self._effective_window()
         await self.memory.clear_content()
         before_pct = f"{before / max_len * 100:.0f}%" if max_len > 0 else "N/A"
         after_pct = f"{after / max_len * 100:.0f}%" if max_len > 0 else "N/A"
@@ -291,7 +324,8 @@ class CommandHandler(ConversationCommandHandlerMixin):
         agent_config = self._get_agent_config()
         running_config = agent_config.running
         history_str = await self.memory.get_history_str(
-            max_input_length=running_config.max_input_length,
+            max_input_length=self._effective_window(),
+            window=self._window_info(),
         )
 
         # Truncate if too long
