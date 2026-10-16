@@ -51,7 +51,14 @@ class ModelInfo(BaseModel):
     )
     max_sequence_length: int | None = Field(
         default=None,
-        description="Maximum sequence length (for embedding models)",
+        description=(
+            "Context window the model itself reports, in tokens.  For chat "
+            "models this is the authoritative window (Ollama "
+            "``details.context_length``, vLLM ``max_model_len``, OpenAI "
+            "``meta.n_ctx``); for embedding models it is the embedding "
+            "input limit.  ``None`` means the provider does not report it, "
+            "and callers fall back to ``RunningConfig.max_input_length``."
+        ),
     )
     
     # Multimodal support (for chat/vision models)

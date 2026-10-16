@@ -22,6 +22,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import aiofiles
 import aiofiles.os
@@ -329,11 +330,22 @@ class AgentContext(InMemoryMemory):
         self.content.clear()
         logger.info("Cleared all messages from memory")
 
-    async def estimate_tokens(self, max_input_length: int) -> dict:
+    async def estimate_tokens(
+        self,
+        max_input_length: int,
+        window: Any = None,
+    ) -> dict:
         """Estimate token usage for current memory.
 
         Args:
             max_input_length: Max input length for context usage calculation.
+                Ignored when *window* is given — the window is the truth.
+            window: ``WindowInfo`` of the model that will consume this
+                history.  When passed, tokens are converted from measured
+                characters with the **same calibration the compaction gate
+                uses**, and the percentage is taken against the *effective*
+                window, so what the user reads and what triggers compaction
+                cannot diverge.  ``None`` keeps the legacy char/4 estimate.
 
         Returns:
             Dict containing detailed token statistics:
@@ -341,8 +353,9 @@ class AgentContext(InMemoryMemory):
             - compressed_summary_tokens: Tokens in compressed summary
             - messages_tokens: Tokens in messages
             - estimated_tokens: Total estimated tokens
-            - max_input_length: Max input length from config
+            - max_input_length: Window the percentage was measured against
             - context_usage_ratio: Usage percentage
+            - measured_chars: Raw character measurement (calibrated basis)
             - messages_detail: List of per-message AsMsgStat objects
         """
         messages = await self.get_memory(prepend_summary=False)
@@ -360,12 +373,31 @@ class AgentContext(InMemoryMemory):
         # Calculate total message tokens from stats
         messages_tokens = sum(stat.total_tokens for stat in messages_detail)
         estimated_tokens = messages_tokens + compressed_summary_tokens
+        denominator = max_input_length
+
+        # Same-source path: measure characters exactly like the budget gate
+        # does (``len(str(msg.content))``) and convert with the calibrated
+        # chars/token.  The char/4 counter below under-reports by ~3.6x at
+        # the 1.1 calibration, which is why sessions read as "room left"
+        # and then overflowed.
+        measured_chars = sum(len(str(msg.content)) for msg in messages) + len(
+            compressed_summary,
+        )
+        if window is not None:
+            effective = int(getattr(window, "effective_tokens", 0) or 0)
+            if effective > 0:
+                estimated_tokens = window.to_tokens(measured_chars)
+                messages_tokens = window.to_tokens(
+                    measured_chars - len(compressed_summary),
+                )
+                compressed_summary_tokens = window.to_tokens(
+                    len(compressed_summary),
+                )
+                denominator = effective
 
         # Calculate context usage ratio
         context_usage_ratio = (
-            (estimated_tokens / max_input_length * 100)
-            if max_input_length > 0
-            else 0
+            (estimated_tokens / denominator * 100) if denominator > 0 else 0
         )
 
         return {
@@ -373,21 +405,27 @@ class AgentContext(InMemoryMemory):
             "compressed_summary_tokens": compressed_summary_tokens,
             "messages_tokens": messages_tokens,
             "estimated_tokens": estimated_tokens,
-            "max_input_length": max_input_length,
+            "max_input_length": denominator,
             "context_usage_ratio": context_usage_ratio,
+            "measured_chars": measured_chars,
             "messages_detail": messages_detail,
         }
 
-    async def get_history_str(self, max_input_length: int) -> str:
+    async def get_history_str(
+        self,
+        max_input_length: int,
+        window: Any = None,
+    ) -> str:
         """Get formatted history string similar to /history command output.
 
         Args:
             max_input_length: Max input length for context usage calculation.
+            window: ``WindowInfo`` forwarded to :meth:`estimate_tokens`.
 
         Returns:
             Formatted string containing conversation history details
         """
-        stats = await self.estimate_tokens(max_input_length)
+        stats = await self.estimate_tokens(max_input_length, window=window)
 
         lines = []
         for i, msg_stat in enumerate(stats["messages_detail"], 1):
@@ -405,6 +443,13 @@ class AgentContext(InMemoryMemory):
                 f"{blocks_info}\n    preview: {msg_stat.preview}",
             )
 
+        calibration = getattr(window, "chars_per_token", None)
+        basis = (
+            f"- Measured: {stats['measured_chars']} chars "
+            f"at {calibration} chars/token\n"
+            if window is not None and calibration
+            else ""
+        )
         return (
             f"**Conversation History**\n\n"
             f"- Total messages: {stats['total_messages']}\n"
@@ -412,6 +457,7 @@ class AgentContext(InMemoryMemory):
             f"- Max input length: {stats['max_input_length']}\n"
             f"- Context usage: "
             f"{stats['context_usage_ratio']:.1f}%\n"
+            f"{basis}"
             f"- Compressed summary tokens: "
             f"{stats['compressed_summary_tokens']}\n\n" + "\n\n".join(lines)
         )

@@ -40,6 +40,8 @@ from pydantic import BaseModel
 from ..app.mcp import HttpStatefulClient, StdIOStatefulClient
 from ..app.mcp.description_sanitizer import wrap_client_list_tools
 from .command_handler import CommandHandler
+from .context.context_budget import build_budget_guard
+from .context.window_source import resolve_for_model
 from .hooks import BootstrapHook
 from .runtime.hooks import HookManager, HookPhase, HookState
 from .model_factory import (
@@ -378,8 +380,23 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # 设计债记录见 tech_docs/设计方案-实现偏离审计报告-2026-10-11.md（P1）。
 
         # Configure agentscope built-in memory compression
+        #
+        # The window is resolved once, here: the budget gate needs it even
+        # when compaction is switched off ("no compaction" must not mean "no
+        # limit"), and _build_compression_config consumes the same number, so
+        # the gate and the compactor cannot disagree about what fits.
+        self.compression_window = resolve_for_model(
+            model,
+            running_config,
+            chars_per_token=(
+                running_config.light_context_config.context_compact_config
+                .formatted_chars_per_token
+            ),
+        )
         self.compression_config = self._build_compression_config(
-            running_config, model
+            running_config,
+            model,
+            window=self.compression_window,
         )
 
         # Register memory tools provided by the memory manager
@@ -401,6 +418,29 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 self.context_manager.get_agent_context()
             )
             logger.debug("Context manager configured")
+
+        # ── Context budget gate (D3: cover every call site) ──
+        # Compaction measures sys_prompt + history and never sees the tool
+        # schemas, which are the biggest fixed cost we pay on every step.
+        # Wrapping the model is the only place that sees the real prompt,
+        # and every consumer (AgentCore, evolution, evaluation) calls the
+        # same model object, so they are gated by construction.
+        _ccc = running_config.light_context_config.context_compact_config
+        self.context_guard = build_budget_guard(
+            self.model,
+            self.compression_window,
+            compact_threshold_ratio=_ccc.compact_threshold_ratio,
+            keep_chars_floor=int(
+                self.compression_window.to_chars(
+                    self.compression_window.effective_tokens
+                    * _ccc.compact_threshold_ratio
+                    * 0.5,
+                ),
+            ),
+            memory_provider=lambda: getattr(self, "memory", None),
+            agent_name=agent_config.id,
+        )
+        self.model = self.context_guard
 
         # Setup command handler
         self.command_handler = CommandHandler(
@@ -492,7 +532,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             logger.debug("Hook errors in %s: %s", phase, ctx.errors)
 
     def _build_compression_config(
-        self, running_config, model
+        self, running_config, model, window=None
     ) -> "CompressionConfig | None":
         """Build agentscope's CompressionConfig — the only compactor in Coapis.
 
@@ -529,16 +569,24 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             lcc = running_config.light_context_config
             ccc = lcc.context_compact_config
 
+            if window is None:
+                # Window comes from the model itself (D1), scaled by the
+                # safety factor; max_input_length is only the fallback.
+                # See agents/context/window_source.py — the single source.
+                window = resolve_for_model(
+                    model,
+                    running_config,
+                    chars_per_token=ccc.formatted_chars_per_token,
+                )
+
             if not ccc.enabled:
                 logger.debug("Context compaction disabled in config")
                 return None
 
             trigger_tokens = int(
-                running_config.max_input_length * ccc.compact_threshold_ratio,
+                window.effective_tokens * ccc.compact_threshold_ratio,
             )
-            char_threshold = int(
-                trigger_tokens * ccc.formatted_chars_per_token,
-            )
+            char_threshold = window.to_chars(trigger_tokens)
 
             compression_model = None
             compression_formatter = None
@@ -570,12 +618,13 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             )
             logger.info(
                 "Memory compaction enabled: trigger=%d formatted chars "
-                "(= %d tokens at %.2f chars/token, window %d), "
+                "(= %d tokens at %.2f chars/token), window=%d (%s), "
                 "keep_recent=%d, model=%s",
                 char_threshold,
                 trigger_tokens,
-                ccc.formatted_chars_per_token,
-                running_config.max_input_length,
+                window.chars_per_token,
+                window.effective_tokens,
+                window.source,
                 ccc.keep_recent_default,
                 ccc.compaction_model_id or "session model",
             )
@@ -2238,17 +2287,6 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         """
         self._sys_prompt = self._build_sys_prompt()
 
-        if self.memory is None:
-            logger.warning(
-                "rebuild_sys_prompt: self.memory is None, "
-                "skipping in-memory system prompt update.",
-            )
-            return
-
-        for msg, _marks in self.memory.content:
-            if msg.role == "system":
-                msg.content = self.sys_prompt
-            break
     def _ensure_mcp_group(self, client_name: str) -> str:
         """Create (once) the tool group an MCP server's tools belong to.
 

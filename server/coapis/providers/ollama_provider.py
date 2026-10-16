@@ -17,13 +17,17 @@
 
 """An Ollama provider implementation."""
 
+import logging
 import os
-from typing import Any
+from typing import Any, List
 
 from agentscope.model import ChatModelBase
 from openai import AsyncOpenAI
 
 from coapis.providers.openai_provider import OpenAIProvider
+from coapis.providers.provider import ModelInfo
+
+logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(OpenAIProvider):
@@ -68,6 +72,70 @@ class OllamaProvider(OpenAIProvider):
             api_key=api_key,
             timeout=timeout,
         )
+
+    async def _fetch_context_windows(
+        self,
+        timeout: float = 5,
+    ) -> dict[str, int]:
+        """Context windows as Ollama itself reports them.
+
+        Ollama's OpenAI-compatible ``/v1/models`` payload carries no
+        ``meta`` on many builds, so the only place the window is published
+        is the native endpoint ``/api/tags`` under
+        ``details.context_length`` (verified against a local Ollama:
+        ``qwen3-embedding:0.6b`` -> 32768).  Without this, every Ollama chat
+        model looks like it has no reported window and callers fall back to
+        the configured ``max_input_length``.
+        """
+        import httpx
+
+        url = self._normalize_base_url(self.base_url) + "/api/tags"
+        windows: dict[str, int] = {}
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                rows = (response.json() or {}).get("models") or []
+        except Exception as exc:  # unreachable server must not break listing
+            logger.debug("Ollama context-window probe failed: %s", exc)
+            return windows
+
+        for row in rows:
+            name = str(row.get("name") or row.get("model") or "").strip()
+            if not name:
+                continue
+            details = row.get("details") or {}
+            tokens = details.get("context_length")
+            try:
+                tokens = int(tokens)
+            except (TypeError, ValueError):
+                continue
+            if tokens >= 512:
+                windows[name] = tokens
+        return windows
+
+    async def fetch_models(self, timeout: float = 5) -> List[ModelInfo]:
+        """Fetch available models, enriched with each model's own window."""
+        models = await super().fetch_models(timeout=timeout)
+        if not models:
+            return models
+        windows = await self._fetch_context_windows(timeout=timeout)
+        if not windows:
+            return models
+        for model in models:
+            if model.max_sequence_length is not None:
+                continue
+            tokens = windows.get(model.id)
+            if tokens is None:
+                # Aliases: "/v1/models" may report "qwen3:8b" while tags
+                # list the full name, and vice versa.
+                for name, value in windows.items():
+                    if name.split(":")[0] == model.id.split(":")[0]:
+                        tokens = value
+                        break
+            if tokens is not None:
+                model.max_sequence_length = tokens
+        return models
 
     async def check_model_connection(
         self,

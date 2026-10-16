@@ -140,9 +140,89 @@ class AgentCore:
         # Session state for foundation memory injection
         self._session_initialized = False
 
-        # Context compressor — always instantiated, triggers based on token/message thresholds
-        from .context_compressor import ContextCompressor
-        self.compressor = ContextCompressor(self, min_tokens=8000, max_tokens=12000)
+        # Context budget — the same window, trigger ratio and floor the ReAct
+        # gate uses (window_source).  The second compaction engine
+        # (ContextCompressor) is gone; one rule decides what fits.
+        self._window: Any = None
+
+    def context_window(self) -> Any:
+        """Resolved context window for this core's model (cached)."""
+        from .context.window_source import reported_window_for, resolve_window
+
+        if self._window is None:
+            provider_id = self.config.get("provider_id")
+
+            class _Reported:
+                max_sequence_length = reported_window_for(
+                    provider_id,
+                    self.model,
+                )
+
+            running = None
+            try:
+                from ..config.config import load_agent_config
+
+                running = load_agent_config(
+                    self.config.get("agent_id") or "default",
+                ).running
+            except Exception:
+                running = None
+            self._window = resolve_window(_Reported(), running)
+        return self._window
+
+    def trim_to_budget(
+        self,
+        messages: list,
+        tools: Any = None,
+        system: str | None = None,
+    ) -> list:
+        """Prune the oldest messages so the request fits the window.
+
+        ``system`` is measured too: the system prompt is fixed overhead the
+        provider charges on every step, and AgentCore passes it separately
+        from the history, so a budget check that ignored it would keep
+        under-counting exactly the way the old compressor did.
+
+        Raises:
+            ContextOverflowError: The request cannot fit even after pruning.
+                Callers surface this to the user instead of sending an
+                oversized request and taking a provider 400.
+        """
+        from .context.context_budget import trim_messages_to_budget
+
+        window = self.context_window()
+        ratio = 0.8
+        try:
+            from ..config.config import load_agent_config
+
+            ratio = (
+                load_agent_config(
+                    self.config.get("agent_id") or "default",
+                ).running.light_context_config.context_compact_config
+                .compact_threshold_ratio
+            )
+        except Exception:
+            pass
+        measured = (
+            [{"role": "system", "content": system}] + list(messages or [])
+            if system
+            else list(messages or [])
+        )
+        kept, dropped, _snap = trim_messages_to_budget(
+            measured,
+            window,
+            compact_threshold_ratio=ratio,
+            tools=tools,
+        )
+        if dropped:
+            logger.info(
+                "AgentCore trimmed %d oldest message(s) to fit the window",
+                len(dropped),
+            )
+        # Drop the synthetic system row again if we injected one.
+        if system and kept and kept[0].get("role") == "system":
+            return kept[1:]
+        return kept
 
     @property
     def client(self) -> AsyncOpenAI:
@@ -186,13 +266,19 @@ class AgentCore:
         """
         system = self._build_system_prompt(skills, memory, is_initial, query)
 
-        # Compress history if needed
-        messages = await self.compressor.compress(messages, self.model)
-
         # Get on-demand tools (core tools + query-relevant tools)
         openai_tools = None
         if tools:
             openai_tools = tools.get_openai_tools(query=query, core_only=not is_initial)
+
+        # Budget check must see the whole request — system prompt and tool
+        # schemas are the fixed overhead, and they are what used to be left
+        # out of the accounting.
+        messages = self.trim_to_budget(
+            messages,
+            tools=openai_tools,
+            system=system,
+        )
 
         result = await self._call_llm(system, messages, tools=openai_tools)
         content = result.get("content", "")
@@ -292,7 +378,9 @@ class AgentCore:
             context: ChatContext instance (has .get_messages() and .add_message())
             memory: MemoryManager instance
             skills: SkillManager instance
-            compressor: ContextCompressor instance (prefer over self.compressor)
+            compressor: Ignored.  The budget rule lives in one place
+                (window_source + context_budget); callers used to hand in a
+                ContextCompressor and get a second, divergent policy.
             is_initial: Whether this is the first message in session
             tools: ToolRegistry instance for on-demand tool selection
             show_tool_details: If True, yield 🔧 tool markers into output text.
@@ -308,9 +396,14 @@ class AgentCore:
         query = message or ""
         system = self._build_system_prompt(skills, memory, is_initial, query)
 
-        # Compress history if needed (use passed compressor or self.compressor)
-        active_compressor = compressor or self.compressor
-        messages = await active_compressor.compress(messages, self.model)
+        # Budget check runs on the assembled request (system + history +
+        # tool schemas), not on the history alone — that is the whole prompt
+        # the provider is about to be charged for.
+        messages = self.trim_to_budget(
+            messages,
+            tools=openai_tools,
+            system=system,
+        )
 
         # Get on-demand tools (core tools + query-relevant tools)
         openai_tools = None
@@ -335,6 +428,12 @@ class AgentCore:
         any_text_yielded = False
         try:
             for _tool_round in range(self.max_tool_calls):
+                # Tool rounds append assistant + tool messages each time, so
+                # the request grows mid-turn; re-check every round.
+                request_params["messages"] = self.trim_to_budget(
+                    request_params["messages"],
+                    tools=request_params.get("tools"),
+                )
                 # Debug: dump messages for JSON issue diagnosis
                 _msgs_for_log = [{"role": m.get("role"), "content": str(m.get("content", ""))[:200]} for m in request_params["messages"]]
                 logger.info(f"LLM request: model={request_params.get('model')} msgs={len(request_params['messages'])} tools={len(request_params.get('tools') or [])}")
@@ -556,8 +655,7 @@ class AgentCore:
         self._session_initialized = False
         self._cached_system_prompt = None
         self._last_memory_context = None
-        # Clear compressor cache and tool usage hint cache
-        self.compressor.clear_cache()
+        # Window cache is per-model, not per-session: keep it.
         # Force rebuild system prompt on next request
         self._cached_system_prompt = None
         if self.foundation_manager:

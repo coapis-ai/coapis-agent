@@ -30,6 +30,7 @@ from agentscope.message import Msg, TextBlock
 
 from .agent_context import AgentContext
 from .base_context_manager import BaseContextManager, context_registry
+from .window_source import compute_keep_recent, resolve_for_model
 from ..model_factory import create_model_and_formatter
 from ..tools.utils import truncate_text_output, DEFAULT_MAX_BYTES
 from ..utils import get_token_counter
@@ -686,14 +687,20 @@ class LightContextManager(BaseContextManager):
 
         # Half of the compression budget stays raw: the newest exchanges are
         # the ones whose exact wording matters (tool output, file paths,
-        # numbers the next step will reuse).
+        # numbers the next step will reuse).  The window itself comes from
+        # the model's own report (window_source), not from max_input_length.
+        window = resolve_for_model(
+            agent.model,
+            running,
+            chars_per_token=ccc.formatted_chars_per_token,
+        )
         budget_tokens = int(
-            running.max_input_length * ccc.compact_threshold_ratio * 0.5,
+            window.effective_tokens * ccc.compact_threshold_ratio * 0.5,
         )
         keep_recent = await self._compute_keep_recent(
             memory,
             budget_tokens=budget_tokens,
-            chars_per_token=ccc.formatted_chars_per_token,
+            chars_per_token=window.chars_per_token,
             keep_recent_min=ccc.keep_recent_min,
             keep_recent_max=ccc.keep_recent_max,
         )
@@ -714,24 +721,18 @@ class LightContextManager(BaseContextManager):
         keep_recent_min: int,
         keep_recent_max: int,
     ) -> int:
-        """Count how many recent messages fit inside *budget_tokens*.
+        """Delegate to :func:`window_source.compute_keep_recent`.
 
-        Upstream counts a tool-use / tool-result pair as one group when it
-        applies ``keep_recent``; counting plain messages is therefore
-        conservative — it keeps fewer groups, never more.  The result is
-        clamped so a session can never be squeezed below the configured floor
-        nor kept uncompressed past the ceiling.
+        Kept as a method for existing callers and tests; the rule itself
+        lives in one place so every budget consumer sizes tails the same way.
         """
-        messages = await memory.get_memory(prepend_summary=False)
-        budget_chars = budget_tokens * chars_per_token
-        used = 0.0
-        kept = 0
-        for msg in reversed(messages):
-            used += len(str(msg.content))
-            kept += 1
-            if used >= budget_chars and kept >= keep_recent_min:
-                break
-        return max(keep_recent_min, min(keep_recent_max, kept))
+        return await compute_keep_recent(
+            memory,
+            budget_tokens=budget_tokens,
+            chars_per_token=chars_per_token,
+            keep_recent_min=keep_recent_min,
+            keep_recent_max=keep_recent_max,
+        )
 
     async def post_reasoning(
         self,

@@ -24,6 +24,7 @@ from agentscope.message import Msg
 from coapis.agents.context.agent_context import AgentContext
 from coapis.agents.context.base_context_manager import BaseContextManager
 from coapis.agents.context.light_context_manager import LightContextManager
+from coapis.agents.utils.estimate_token_counter import EstimatedTokenCounter
 from coapis.config.config import AgentsRunningConfig as RunningConfig
 
 
@@ -141,10 +142,11 @@ class TestCompressionConfig:
     """Threshold is calibrated in *formatted prompt* characters."""
 
     @staticmethod
-    def _build(ratio=0.8, chars=4.7, keep=15, model_id=""):
+    def _build(ratio=0.8, chars=4.7, keep=15, model_id="", safety=0.5):
         from coapis.agents.react_agent import CoApisAgent
 
         running = RunningConfig(max_input_length=100_000)
+        running.context_window_safety_factor = safety
         ccc = running.light_context_config.context_compact_config
         ccc.compact_threshold_ratio = ratio
         ccc.formatted_chars_per_token = chars
@@ -156,15 +158,30 @@ class TestCompressionConfig:
         config = self._build()
         assert config is not None
         assert config.enable
-        assert config.trigger_threshold == int(100_000 * 0.8 * 4.7)
+        # _running() calibrates 4.7 formatted chars/token:
+        # 100000 * 0.5 safety factor = 50000 effective window,
+        # * 0.8 ratio = 40000 tokens, * 4.7 chars/token = 188000 chars.
+        assert config.trigger_threshold == int(50_000 * 0.8 * 4.7)
         assert config.keep_recent == 15
 
     def test_divisor_change_does_not_move_the_trigger(self):
         """The old code multiplied by ``token_count_estimate_divisor`` (4),
         which put the trigger at ~156% of the window.  The calibrated field
         must be the one that decides."""
-        assert self._build(chars=2.0).trigger_threshold == 160_000
-        assert self._build(chars=4.7).trigger_threshold == 376_000
+        assert self._build(chars=2.0).trigger_threshold == 80_000
+        assert self._build(chars=4.7).trigger_threshold == 188_000
+
+    def test_safety_factor_shrinks_the_budgeted_window(self):
+        """D1: the advertised window is not the usable one.
+
+        Halving the safety factor must halve the trigger — the budget is
+        derived from the *effective* window, never the advertised one.
+        """
+        assert self._build(safety=0.5).trigger_threshold == 188_000
+        assert self._build(safety=1.0).trigger_threshold == 376_000
+        assert self._build(safety=0.9).trigger_threshold == int(
+            100_000 * 0.9 * 0.8 * 4.7
+        )
 
     def test_disabled_returns_none(self):
         from coapis.agents.react_agent import CoApisAgent
@@ -236,6 +253,276 @@ class TestPostReasoningHookContract:
         assert inspect.iscoroutinefunction(
             LightContextManager.post_reasoning,
         )
+
+
+class TestBackgroundPromptBudget:
+    """D6: raw-client background calls reuse the gate's budget."""
+
+    @staticmethod
+    def _window(tokens=2000, chars=1.1):
+        from coapis.agents.context.window_source import WindowInfo
+
+        return WindowInfo(
+            reported_tokens=tokens,
+            effective_tokens=tokens,
+            source="model_self_report",
+            chars_per_token=chars,
+        )
+
+    def test_fitting_prompt_is_untouched(self):
+        from coapis.agents.context.context_budget import fit_prompt_to_budget
+
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "short prompt"},
+        ]
+        assert fit_prompt_to_budget(msgs, self._window()) == msgs
+
+    def test_oversized_prompt_is_truncated_not_sent(self):
+        from coapis.agents.context.context_budget import fit_prompt_to_budget
+
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "x" * 20_000},
+        ]
+        out = fit_prompt_to_budget(msgs, self._window(tokens=2000))
+        total = sum(len(str(m)) for m in out)
+        assert total <= 2000
+        body = out[1]["content"]
+        assert "truncated by context budget" in body
+        # Head and tail survive: the cut is in the middle.
+        assert body.startswith("xxxx")
+        assert body.endswith("xxxx")
+
+    def test_fixed_overhead_too_big_skips_the_call(self):
+        """Nothing left to cut means the task is refused, not crashed."""
+        from coapis.agents.context.context_budget import fit_prompt_to_budget
+
+        msgs = [
+            {"role": "system", "content": "s" * 5000},
+            {"role": "user", "content": "x" * 5000},
+        ]
+        assert fit_prompt_to_budget(msgs, self._window(tokens=100)) == []
+
+    def test_wrapper_never_breaks_a_call(self):
+        from coapis.agents.context.context_budget import (
+            budget_background_prompt,
+        )
+
+        msgs = [{"role": "user", "content": "hi"}]
+        # Unmeasurable model (None) must return the prompt unchanged.
+        assert budget_background_prompt(msgs, None, source="t") == msgs
+
+
+class TestHistoryDisplayUsesGateCalibration:
+    """D5: what the user reads is what the gate enforces."""
+
+    @staticmethod
+    def _window(tokens=1000, chars=1.1):
+        from coapis.agents.context.window_source import WindowInfo
+
+        return WindowInfo(
+            reported_tokens=tokens,
+            effective_tokens=tokens,
+            source="model_self_report",
+            chars_per_token=chars,
+        )
+
+    def test_window_path_measures_chars_with_the_calibration(self):
+        ctx = AgentContext(token_counter=EstimatedTokenCounter())
+        msgs = [_msg("x" * 1100) for _ in range(2)]
+        asyncio.run(ctx.add(msgs[0]))
+        asyncio.run(ctx.add(msgs[1]))
+        stats = asyncio.run(
+            ctx.estimate_tokens(1_000_000, window=self._window()),
+        )
+        assert stats["measured_chars"] == 2200
+        assert stats["estimated_tokens"] == int(2200 / 1.1)
+        # The advertised 1_000_000 is ignored: the effective window is truth.
+        assert stats["max_input_length"] == 1000
+        assert round(stats["context_usage_ratio"]) == 200
+
+    def test_legacy_path_survives_without_a_window(self):
+        ctx = AgentContext(token_counter=EstimatedTokenCounter())
+        asyncio.run(ctx.add(_msg("hello")))
+        stats = asyncio.run(ctx.estimate_tokens(1000))
+        assert stats["max_input_length"] == 1000
+        assert stats["estimated_tokens"] >= 1
+
+
+def _window(tokens: int, chars_per_token: float = 1.1):
+    from coapis.agents.context.window_source import WindowInfo
+
+    return WindowInfo(
+        reported_tokens=tokens,
+        effective_tokens=tokens,
+        source="model_self_report",
+        chars_per_token=chars_per_token,
+    )
+
+
+def _heavy_tools(count: int, desc_chars: int) -> list[dict]:
+    """A tool schema list of roughly ``count * (desc_chars + 60)`` chars."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": f"tool_{i}",
+                "description": "d" * desc_chars,
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        for i in range(count)
+    ]
+
+
+class TestAffordableFloor:
+    """The history floor is a ceiling, not a target.
+
+    Dev 2026-10-16: agent ``user:admin`` pays ~48K chars of fixed overhead
+    (system prompt + skills + 45 tool schemas) against a 65536-char window
+    with a configured 28835-char floor.  ``fixed + floor > window``, so every
+    chat answered ``MODEL_CONTEXT_LENGTH_EXCEEDED`` — the floor blocked the
+    very pruning that would have saved the call.
+    """
+
+    def test_configured_floor_wins_when_the_window_can_pay(self):
+        from coapis.agents.context.context_budget import affordable_floor
+
+        assert affordable_floor(65536, 10000, 28835) == 28835
+
+    def test_floor_caps_to_what_the_window_spares(self):
+        """An unaffordable floor drops to the hard minimum, not to zero."""
+        from coapis.agents.context.context_budget import (
+            MIN_KEEP_CHARS,
+            affordable_floor,
+        )
+
+        # 48113 of fixed overhead leaves 17423 of a 65536 window: the
+        # configured 28835 cannot be honoured, so the barrier is the last
+        # exchange, not a number no call can pay.
+        assert affordable_floor(65536, 48113, 28835) == MIN_KEEP_CHARS
+
+    def test_never_below_the_hard_minimum(self):
+        from coapis.agents.context.context_budget import (
+            MIN_KEEP_CHARS,
+            affordable_floor,
+        )
+
+        # A window with no room at all still keeps the last exchange rather
+        # than sending an empty prompt; the overflow message reports it.
+        assert affordable_floor(65536, 65000, 28835) == MIN_KEEP_CHARS
+        assert affordable_floor(1000, 1000, 28835) == MIN_KEEP_CHARS
+
+    def test_unpayable_floor_prunes_and_the_call_fits(self, tmp_path):
+        """The admin scenario: heavy fixed overhead must prune, not refuse."""
+        from coapis.agents.context.context_budget import ContextBudgetGuard
+
+        window = _window(65536)
+        ctx = AgentContext(token_counter=None, dialog_path=str(tmp_path))
+        for _ in range(8):
+            asyncio.run(ctx.add(_msg("h" * 3000, role="user")))
+        guard = ContextBudgetGuard(
+            None,
+            window=window,
+            keep_chars_floor=28835,
+            memory_provider=lambda: ctx,
+            agent_name="user:admin",
+        )
+        tools = _heavy_tools(45, 900)
+        msgs = [{"role": "system", "content": "s" * 3111}] + [
+            {"role": "user", "content": "h" * 3000} for _ in range(8)
+        ]
+        before = len(msgs)
+        snapshot = asyncio.run(guard.enforce(msgs, tools))
+        assert snapshot.total_chars <= snapshot.budget_chars
+        assert guard.pruned_events == 1
+        assert guard.overflow_events == 0
+        # The system row stays at the head and the newest rows survive: the
+        # cut is at the oldest end, in order.
+        assert len(msgs) < before
+        assert msgs[0]["role"] == "system"
+        assert msgs[-1]["content"] == "h" * 3000
+
+    def test_pruning_applies_to_the_call_that_triggered_it(self, tmp_path):
+        """Purging memory alone shrinks the *next* prompt, not this one.
+
+        The guard must trim the prompt it is about to send, otherwise the
+        overflowing call goes out oversized and the user gets the provider's
+        opaque context-length error.
+        """
+        from coapis.agents.context.context_budget import ContextBudgetGuard
+
+        ctx = AgentContext(token_counter=None, dialog_path=str(tmp_path))
+        for _ in range(6):
+            asyncio.run(ctx.add(_msg("m" * 2000, role="user")))
+        guard = ContextBudgetGuard(
+            None,
+            window=_window(30000),
+            keep_chars_floor=4000,
+            memory_provider=lambda: ctx,
+            agent_name="trim",
+        )
+        tools = _heavy_tools(20, 900)
+        msgs = [{"role": "system", "content": "s" * 500}] + [
+            {"role": "user", "content": "u" * 4000} for _ in range(6)
+        ]
+        snapshot = asyncio.run(guard.enforce(msgs, tools))
+        assert snapshot.total_chars <= snapshot.budget_chars
+        # The list handed back to the caller is the trimmed one: what the
+        # gate measured is what the model receives (history excludes the
+        # system row, which lives in fixed overhead).
+        assert msgs[0]["role"] == "system"
+        assert (
+            sum(len(str(m)) for m in msgs[1:]) == snapshot.history_chars
+        )
+
+    def test_fixed_overhead_alone_overflow_names_the_cause(self):
+        """No history size fits: the message must name fixed overhead."""
+        from coapis.agents.context.context_budget import (
+            ContextBudgetGuard,
+            ContextOverflowError,
+        )
+
+        guard = ContextBudgetGuard(
+            None,
+            window=_window(20000),
+            keep_chars_floor=12000,
+            memory_provider=lambda: None,
+            agent_name="heavy",
+        )
+        tools = _heavy_tools(20, 1000)
+        msgs = [{"role": "system", "content": "s" * 500}] + [
+            {"role": "user", "content": "u" * 1000} for _ in range(5)
+        ]
+        with pytest.raises(ContextOverflowError) as excinfo:
+            asyncio.run(guard.enforce(msgs, tools))
+        text = str(excinfo.value)
+        assert "fixed overhead alone" in text
+        assert "tool schemas" in text
+        assert guard.overflow_events == 1
+
+    def test_trim_path_clamps_the_floor_too(self):
+        """The AgentCore path shares the clamp, so the two cannot disagree."""
+        from coapis.agents.context.context_budget import (
+            trim_messages_to_budget,
+        )
+
+        window = _window(32000)
+        tools = _heavy_tools(25, 900)
+        msgs = [{"role": "system", "content": "s" * 1000}] + [
+            {"role": "user", "content": "u" * 1500} for _ in range(10)
+        ]
+        kept, dropped, snapshot = trim_messages_to_budget(
+            msgs,
+            window,
+            keep_chars_floor=12000,
+            tools=tools,
+        )
+        assert dropped
+        assert snapshot.total_chars <= snapshot.budget_chars
+        assert kept[0]["role"] == "system"
+        assert kept[-1]["content"] == "u" * 1500
 
 
 if __name__ == "__main__":

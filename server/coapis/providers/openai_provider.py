@@ -73,6 +73,50 @@ class OpenAIProvider(Provider):
         )
 
     @staticmethod
+    def _extract_context_length(row: Any) -> int | None:
+        """Read the context window a server reports for one model.
+
+        There is no single field for this.  What we have seen in the wild:
+
+        - Ollama ``/v1/models``: ``meta.n_ctx`` (newer builds) — older
+          builds report nothing here and only expose
+          ``/api/tags -> details.context_length`` (see OllamaProvider).
+        - vLLM / SGLang: ``max_model_len``.
+        - OpenAI-compatible gateways: ``context_length`` / ``n_ctx``.
+
+        Values are in tokens.  Anything non-positive or absurdly small is
+        treated as "not reported" so callers fall back to configuration
+        instead of computing a budget from a 1-token window.
+        """
+        meta = getattr(row, "meta", None)
+        candidates = []
+        if isinstance(meta, dict):
+            candidates += [
+                meta.get("n_ctx"),
+                meta.get("context_length"),
+                meta.get("max_model_len"),
+            ]
+        elif meta is not None:
+            candidates += [
+                getattr(meta, "n_ctx", None),
+                getattr(meta, "context_length", None),
+                getattr(meta, "max_model_len", None),
+            ]
+        candidates += [
+            getattr(row, "max_model_len", None),
+            getattr(row, "context_length", None),
+            getattr(row, "n_ctx", None),
+        ]
+        for value in candidates:
+            try:
+                tokens = int(value)
+            except (TypeError, ValueError):
+                continue
+            if tokens >= 512:
+                return tokens
+        return None
+
+    @staticmethod
     def _normalize_models_payload(payload: Any) -> List[ModelInfo]:
         models: List[ModelInfo] = []
         rows = getattr(payload, "data", [])
@@ -83,7 +127,15 @@ class OpenAIProvider(Provider):
             model_name = (
                 str(getattr(row, "name", "") or model_id).strip() or model_id
             )
-            models.append(ModelInfo(id=model_id, name=model_name))
+            models.append(
+                ModelInfo(
+                    id=model_id,
+                    name=model_name,
+                    max_sequence_length=(
+                        OpenAIProvider._extract_context_length(row)
+                    ),
+                ),
+            )
 
         deduped: List[ModelInfo] = []
         seen: set[str] = set()

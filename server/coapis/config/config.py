@@ -663,14 +663,22 @@ class ContextCompactConfig(BaseModel):
     # thresholds below are therefore expressed in formatted characters.
     # Measured on the dev session state (qwen3-30b-a3b, real tokenizer vs.
     # byte heuristics): 4.68 formatted chars/token, 2.05 raw bytes/token.
+    # The policy constant below is deliberately *below* the measured value
+    # (拍板 D2, 2026-10-15): counting fewer characters per token makes the
+    # trigger fire earlier, which is the safe direction — a threshold that is
+    # too high means compaction never fires and requests die with 400.
     formatted_chars_per_token: float = Field(
-        default=4.7,
-        ge=2.0,
+        default=1.1,
+        ge=0.5,
         le=8.0,
         description=(
-            "Calibrated formatted-chars-per-token factor used to convert "
-            "the compaction threshold/reserve from tokens into the character "
-            "budget that upstream actually counts."
+            "Formatted-chars-per-token factor used to convert the "
+            "compaction threshold/reserve into the character budget that "
+            "upstream actually counts.  Measured on the dev model: 4.68 "
+            "(2.04 Chinese, 3.35 code).  Default 1.1 is a deliberate "
+            "safety margin below the measurement: lower = compaction "
+            "fires earlier.  Raise toward the measured value only after "
+            "measuring real overflow rates."
         ),
     )
 
@@ -740,10 +748,14 @@ class ToolResultPruningConfig(BaseModel):
     )
 
     pruning_recent_msg_max_bytes: int = Field(
-        default=50000,
+        default=12000,
         ge=1000,
         description=(
-            "Byte threshold for recent messages in tool result pruning"
+            "Byte threshold for recent messages in tool result pruning. "
+            "Calibrated against the measured 1.1 chars/token of a formatted "
+            "prompt: the old 50000 floor let a single recent tool result "
+            "occupy ~45k tokens — a quarter to a full window — and was the "
+            "amplifier behind context overflow on 32k models."
         ),
     )
 
@@ -962,7 +974,27 @@ class AgentsRunningConfig(BaseModel):
         default=128 * 1024,  # 128K = 131072 tokens
         ge=1000,
         description=(
-            "Maximum input length (tokens) for the model context window"
+            "Fallback context window in tokens.  The authoritative window "
+            "comes from the model itself (Ollama details.context_length, "
+            "vLLM max_model_len, OpenAI meta.n_ctx); this value is used "
+            "only when the provider reports nothing, and acts as an "
+            "operator cap when set below the reported window.  See "
+            "coapis/agents/context/window_source.py."
+        ),
+    )
+
+    context_window_safety_factor: float = Field(
+        default=0.5,
+        ge=0.05,
+        le=1.0,
+        description=(
+            "Fraction of the model's self-reported window that Coapis "
+            "actually budgets against.  The model's number counts raw "
+            "tokens and ignores the fixed overhead we inject (system "
+            "prompt, tool schemas) plus the completion, so the effective "
+            "usable window is smaller than advertised.  0.5 is the "
+            "calibrated default; raise it only after measuring real "
+            "overflow rates."
         ),
     )
 
