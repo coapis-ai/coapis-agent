@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.1.0] - 2026-10-16
+
+> 覆盖 v1.0.6 → v1.1.0 共 65 次提交（v1.0.7 ~ v1.0.9 为生产线上小步版本，未单独记录条目，一并并入本版本）。
+
+### 新增 · 记忆体系
+
+- **记忆整合四阶段 dream 流水线** —— 信号提取 → 两级 dream → 长期台账 → 时间线，配套成果台账 API。
+- **成果台账升级** —— `file_records` 扩列 `title/status/updated_at/description`，巡检补登记台账上线前的存量文件，来源可审计。
+- **记忆台账桥接** —— 时间线摘要注入系统提示词；`memory_search` 双轨（文件 ∪ 台账）。
+- **workspace 作用域接口补全 + 哈希弱语义相似度** —— 记忆按 workspace 隔离，检索容忍表述差异。
+- **场景共享记忆读写与跨用户共同进化**。
+- 记忆/时间线 API 改按 username 维度过滤，与记忆子系统口径对齐。
+
+### 新增 · 上下文与工具预算
+
+- **ToolManager：工具分组 + 元工具按需装备** —— 工具不再全量常驻，模型自助装备；实测首轮工具 schema **44,677 → 14,336 字符（-67.9%）**。
+- **上下文预算单一来源** —— 窗口大小取模型自报值（Ollama 实测 102,400，此前配置虚构 131,072），按实测 1.1 字符/token 换算；全部 LLM 调用点接入预算闸门；**删除第二台压缩器（839 行）**，上游成为唯一压缩器。
+- **治理地基** —— 模型限制单一来源台账 + 六档降级阶梯 + 六项模型兼容清洗函数 + 影子观测开关。
+
+### 新增 · 权限与安全
+
+- **权限门 fail-closed 迁移 + 快速通道收紧 + 死模块清理** —— 修复 52 条门失效与 175 条快速通道越权。
+- **MCP 出站身份按请求隔离** —— 令牌不再跨用户串号（并发 12 次实测零串号）；`gateway/call` 权限键由 `mcp:write` 修正为 `mcp:read`，普通用户可调用工具。
+- **账号分裂根治** + 全链路访问日志 + 401 竞态防护（无 token 请求不再清除刚设置的令牌）。
+- 删除休眠的 SEM 会话执行分级干预（-1,578 行）。
+
+### 新增 · 会话与资源
+
+- **资源契约 R1/R2** —— 清单面 + 巡检 + 会话删除流转；资源契约消费面（文件/台账统一适配）。
+- **通用级联资源菜单** + 目录引用语义治本 + 引用条收口 + 级联子菜单独立层。
+- **我的空间筛选拆成来源 / 分组 / 视图三个正交控件**（五维文案）。
+- **会话文件归属/共享** + 模型解析自愈。
+- 聊天标题显示会话名（不再恒为"新聊天"）；修复聊天页 `/api/chats` 每秒 30 次轮询死循环。
+
+### 新增 · 模型管理
+
+- 用户全局模型偏好接线 + 模型芯片按类型分流 + **模型切换热重载修复**（切换即时生效）。
+- 场景技能触发权威化；移除僵尸 ModelPickerModal 与 useModelChoice 兼容层。
+
+### 新增 · 评测与治理
+
+- **M0 智能体能力评测体系** —— 40 题基线（首测通过率 27.5% / 均分 0.531）。
+- **ComplexityClassifier 计划授权判级** —— 规则判级 + lite judge，20 题校准 80%。
+
+### 变更 · 配置语义（升级需注意）
+
+- `max_input_length` 由"窗口真值"降级为**显式覆盖/兜底**；`max_sequence_length` 降级为兜底。
+- `formatted_chars_per_token` 4.7 → **1.1**（实测标定）；工具结果裁剪阈值 50,000 → **12,000** 字符。
+- 新增开关 `tool_groups_enabled`（默认开，关闭即回到全量注入）；`shadow_mode_enabled` 默认关闭。
+- 版本号来源：`COAPIS_VERSION` 环境变量（dev 1.1.0）。
+
+### 修复 · 数据库与部署
+
+- 企业版启动自动执行 `alembic upgrade head` + 修复全新库迁移漂移 + 迁移 0007 PG 兼容。
+- `foundation.db` 缺 `__init__` 致 DB 通道恒失效；停用 `token_usage_details.json` 迁移。
+- 统一 bcrypt 哈希；`jwt_secret` 支持 `COAPIS_JWT_SECRET` 环境变量（env 优先于 auth.json）。
+- 定时任务三重执行与投递断裂根治；主动推送支持 `console:{username}` 兜底投递。
+
+### 工程
+
+- **依赖体检** —— `requirements.txt` 镜像 `pyproject` 声明（补 sqlalchemy/alembic 等启动级依赖）+ CI 真化。
+- **测试树合并** —— 两份测试树合并为 `server/tests` 一份；修 pytest 失效配置键与裸跑崩溃。
+- 剥离 C2A 代码至独立项目 `coapis-c2a`，本仓只留集成接缝。
+
+---
+
 ## [v0.13.0] - 2026-08-06
 
 ### Fixed

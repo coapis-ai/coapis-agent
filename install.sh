@@ -19,7 +19,7 @@ ENV_EXAMPLE_URL="https://raw.githubusercontent.com/${REPO}/main/docker/_common/.
 
 # ── 镜像版本配置 ──────────────────────────────────────────────────
 # 查看可用版本: https://github.com/coapis-ai/coapis-agent/pkgs/container/server
-DEFAULT_VERSION="v0.9.11"
+DEFAULT_VERSION="v1.1.0"
 COAPIS_VERSION="${COAPIS_VERSION:-$DEFAULT_VERSION}"
 COAPIS_IMAGE="ghcr.io/${REPO}/server:${COAPIS_VERSION}"
 
