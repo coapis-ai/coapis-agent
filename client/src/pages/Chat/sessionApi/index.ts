@@ -559,6 +559,17 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     null;
 
   /**
+   * ⚠️ COAPIS FIX (F3): throttle + short-lived cache for getSessionList.
+   * Several independent triggers can fire within the same second (dropdown open,
+   * SSE completion, the 2s/8s cascade timers, agent switch). Without a floor they
+   * each issued their own GET /api/chats. This is the safety net; the real loop
+   * was cut at the source (F1/F2).
+   */
+  private _lastListFetchAt = 0;
+  private _lastListResult: IAgentScopeRuntimeWebUISession[] | null = null;
+  private static readonly MIN_LIST_FETCH_MS = 800;
+
+  /**
    * Deduplicates concurrent getSession calls for the same sessionId.
    * Key: sessionId, Value: in-flight promise for getSession.
    */
@@ -654,10 +665,40 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     } as ExtendedSession;
   }
 
+  /**
+   * ⚠️ COAPIS FIX (F4): identity of the logged-in user, taken from the auth token.
+   * Returns "" when unavailable so callers fall back to session data.
+   *
+   * ⚠️ CoApis tokens are "<base64url(payload)>.<signature>" — TWO segments, not a
+   * three-part JWS. The payload is segment **0**. Code that reads segment 1 gets the
+   * hex signature, atob()s it into garbage and silently loses the identity (that was
+   * the latent bug in getSessionList's fallback as well).
+   */
+  private getAuthUserId(): string {
+    try {
+      const token = getApiToken();
+      if (!token) return "";
+      const b64 = token.split(".")[0].replace(/-/g, "+").replace(/_/g, "/");
+      const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+      const payload = JSON.parse(atob(padded));
+      const sub = payload?.sub || payload?.username || "";
+      return sub === DEFAULT_USER_ID ? "" : sub;
+    } catch {
+      return "";
+    }
+  }
+
   private updateWindowVariables(session: ExtendedSession): void {
     window.currentSessionId = session.sessionId || "";
     this._currentSessionId = session.sessionId || session.id || null;
-    window.currentUserId = session.userId || DEFAULT_USER_ID;
+    // ⚠️ COAPIS FIX (F4): the authenticated identity must never be *downgraded* by
+    // session data. Legacy chats carry user_id="default"; copying that into
+    // window.currentUserId made every subsequent list query filter by
+    // user_id=default, so a real user (e.g. admin) suddenly saw none of their own
+    // chats after opening one legacy conversation.
+    const sessionUser =
+      session.userId && session.userId !== DEFAULT_USER_ID ? session.userId : "";
+    window.currentUserId = this.getAuthUserId() || sessionUser || DEFAULT_USER_ID;
     window.currentChannel = session.channel || DEFAULT_CHANNEL;
   }
 
@@ -717,10 +758,27 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     this._lastSessionListAgentId = null;
     // Clear in-flight session requests to prevent stale data after agent switch
     this.sessionRequests.clear();
+    // ⚠️ COAPIS FIX (F3): invalidation makes the throttle cache stale too.
+    this._lastListResult = null;
+    this._lastListFetchAt = 0;
   }
 
   async getSessionList() {
     if (this.sessionListRequest) return this.sessionListRequest;
+
+    // ⚠️ COAPIS FIX (F3): a hidden tab has nothing visible to refresh; background
+    // tabs were burning requests for minutes on end.
+    if (typeof document !== "undefined" && document.hidden && this._sessions.length) {
+      return this._sessions;
+    }
+
+    // ⚠️ COAPIS FIX (F3): throttle — reuse the result fetched moments ago.
+    if (
+      this._lastListResult &&
+      Date.now() - this._lastListFetchAt < SessionApi.MIN_LIST_FETCH_MS
+    ) {
+      return this._lastListResult;
+    }
 
     // Reset the loaded flag when the agent changes, so callers can tell the
     // difference between "not loaded yet" and "no sessions exist".
@@ -728,7 +786,13 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     if (this._lastSessionListAgentId !== currentAgent) {
       this._lastSessionListAgentId = currentAgent;
       this._sessionListLoaded = false;
+      // ⚠️ COAPIS FIX (F3): an agent switch must always refetch immediately.
+      this._lastListResult = null;
+      this._lastListFetchAt = 0;
     }
+
+    // ⚠️ COAPIS FIX (F3): mark the fetch time before the request is issued.
+    this._lastListFetchAt = Date.now();
 
     this.sessionListRequest = (async () => {
       try {
@@ -737,15 +801,9 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         // Get userId from window or JWT token
         let userId = window.currentUserId;
         if (!userId) {
-          try {
-            const token = getApiToken();
-            if (token) {
-              const payload = JSON.parse(atob(token.split(".")[1] || ""));
-              userId = payload?.sub || payload?.username || "";
-            }
-          } catch {
-            // ignore
-          }
+          // ⚠️ COAPIS FIX (F4): shared parser — the old inline version read token
+          // segment 1 (the signature) and therefore never resolved a user id.
+          userId = this.getAuthUserId();
         }
         const channel = window.currentChannel;
         const agentId = useAgentStore.getState().selectedAgent;
@@ -807,9 +865,13 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         }
 
         // Handle preferredChatId (move preferred session to front)
+        // ⚠️ COAPIS FIX (F2): do NOT clear preferredChatId after use. Clearing it
+        // re-opened the guard in Chat/index.tsx (`preferredChatId !== chatId`), which
+        // turned a render-phase refresh into an infinite render→fetch→setState→render
+        // loop (~30 req/s on GET /api/chats while simply sitting on the chat page).
+        // Keeping it set is idempotent: the current chat just stays pinned first.
         if (this.preferredChatId) {
           const preferredId = this.preferredChatId;
-          this.preferredChatId = null;
           const idx = this._sessions.findIndex(
             (s) => s.id === preferredId || (s as ExtendedSession).realId === preferredId,
           );
@@ -820,12 +882,16 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         }
 
         // Notify React so the sidebar re-renders with updated names
+        this._lastListResult = result;
         this.onSessionListUpdated?.(result);
         this._sessionListLoaded = true;
         return result;
       } catch (err) {
         console.error(`[sessionApi] getSessionList error:`, err);
         this._sessionListLoaded = false;
+        // ⚠️ COAPIS FIX (F3): never cache a failure — the next caller must retry.
+        this._lastListResult = null;
+        this._lastListFetchAt = 0;
         throw err;
       } finally {
         this.sessionListRequest = null;

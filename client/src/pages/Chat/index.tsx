@@ -1009,8 +1009,10 @@ export default function ChatPage() {
       }
 
       // Use currentSessionId (root session) instead of request.sessionId (sub-agent session)
-      // Priority: chatId (UUID) > window.currentSessionId
-      const rootSessionId = chatId || window.currentSessionId || "";
+      // ⭐ R1: 审批卡本身已按当前会话过滤，chatId 是权威；再退到该审批自带的
+      // rootSessionId（每审批身份）；全局 window 只作最后兜底。
+      const rootSessionId =
+        chatId || request.rootSessionId || window.currentSessionId || "";
       console.log("[Approval] Sending approve command:", {
         requestId,
         rootSessionId,
@@ -1057,7 +1059,9 @@ export default function ChatPage() {
       if (!request) return;
 
       // Use currentSessionId (root session) instead of request.sessionId (sub-agent session)
-      const rootSessionId = window.currentSessionId || chatId || "";
+      // ⭐ R1: 与 approve 分支统一（原先这里是 window 优先、chatId 兜底，两处相反）。
+      const rootSessionId =
+        chatId || request.rootSessionId || window.currentSessionId || "";
 
       try {
         // Add exit animation class
@@ -1098,6 +1102,8 @@ export default function ChatPage() {
   );
 
   const lastSessionIdRef = useRef<string | null>(null);
+  /** ⚠️ COAPIS FIX (F5): signature of the last session list pushed into React. */
+  const lastListSignatureRef = useRef<string>("");
   /** Tracks the stale auto-selected session ID that was skipped on init, so we can suppress its late-arriving onSessionSelected callback. */
   const staleAutoSelectedIdRef = useRef<string | null>(null);
   /** When true, skip the next onSessionSelected callback — set by ChatSessionInitializer to break the URL↔session sync loop. */
@@ -1159,13 +1165,17 @@ export default function ChatPage() {
   // useMount auto-selects the correct session without an extra getSession round-trip.
   // CRITICAL: This must be set BEFORE AgentScopeRuntimeWebUI renders
   // In embedded mode, chatId is already set from window.__CHAT_SESSION_ID__
+  // ⚠️ COAPIS FIX (F1): keep ONLY the idempotent marker assignment in this
+  // render-phase block. The invalidateSessionList()+getSessionList() pair that used
+  // to sit here was the entry point of an infinite render→fetch→setState→render
+  // loop: every list refresh cleared preferredChatId (in sessionApi), which
+  // re-opened the `!== chatId` guard above, so each Chat re-render issued a new
+  // GET /api/chats, whose completion notified React (onSessionListUpdated) and
+  // re-rendered Chat again — measured at ~30 requests/second while the user is
+  // simply sitting on the chat page. List refreshes are now driven by *events*
+  // only (SSE completion, dropdown open, agent switch, new chat).
   if (chatId && sessionApi.preferredChatId !== chatId) {
     sessionApi.preferredChatId = chatId;
-    // If session list is already loaded, force reload to apply preferredChatId
-    if ((sessionApi as any)._sessionListLoaded) {
-      sessionApi.invalidateSessionList();
-      sessionApi.getSessionList();
-    }
   }
 
   // Register session API event callbacks for URL synchronization
@@ -1266,6 +1276,18 @@ export default function ChatPage() {
     // Sync sessionApi's internal session list with the library's React state,
     // so ChatSessionHeader re-renders with updated session names (auto-rename).
     sessionApi.onSessionListUpdated = (sessions) => {
+      // ⚠️ COAPIS FIX (F5): notify React only when the list content actually
+      // changed (ids / names / generating flags). Previously every list refresh
+      // bumped sessionTick, forcing a full Chat re-render — the amplifier that
+      // turned the render-phase fetch into a self-sustaining loop.
+      const signature = sessions
+        .map(
+          (s) =>
+            `${(s as any).realId || s.id}|${s.name}|${(s as any).generating ? 1 : 0}`,
+        )
+        .join(",");
+      if (signature === lastListSignatureRef.current) return;
+      lastListSignatureRef.current = signature;
       setSessions(sessions);
       // 驱动 ChatSessionHeader 重渲染（标题/场景标识取自 sessionApi）
       setSessionTick((t) => t + 1);
@@ -1465,9 +1487,11 @@ export default function ChatPage() {
           
           rewrittenContent.push({
             type: "file",
-            source: {
-              url: `file://${filePath}`,
-            },
+            // 与上传附件同构：后端 _resolve_media_url 认 "/media/x" 与 "/x"
+            // 两种形态并解析成磁盘绝对路径。旧写法 `file://{name}` 把文件名
+            // 放在 netloc 位，url2pathname 解析为空，整条文件链路直接崩成
+            // "[Error: Unknown file source type or empty data]"。
+            source: { type: "url", url: `/${filePath}` },
             filename: file.name,
           });
         });
@@ -1504,7 +1528,14 @@ export default function ChatPage() {
 
       const requestBody = {
         input: rewrittenInput,
-        session_id: window.currentSessionId || session?.session_id || "",
+        // ⭐ R1: 优先级反转。`session` 来自运行时传入的本条消息所属会话
+        // （input[last].session），是**每会话**身份；window.currentSessionId 是**全局单值**，
+        // 多会话并发时它指向最后打开的那个会话，旧写法优先取它 → 消息发进别人的会话。
+        session_id:
+          session?.session_id ||
+          chatIdRef.current ||
+          window.currentSessionId ||
+          "",
         user_id: window.currentUserId || session?.user_id || DEFAULT_USER_ID,
         channel: window.currentChannel || session?.channel || DEFAULT_CHANNEL,
         stream: true,
@@ -1606,12 +1637,12 @@ export default function ChatPage() {
           return;
         }
 
-        // 新会话建号前 chatId 为空，带上本地会话 id 让台账行可事后补写
-        const res = await chatApi.uploadFile(
-          file,
-          chatId,
-          window.currentSessionId,
-        );
+        // ⭐ R1: 只有「新会话尚未建号」时才需要带本地会话 id 供台账事后补写，
+        // 此时 window.currentSessionId 正是本会话的本地 id（createEmptySession 刚写入）。
+        // 已有 chatId 时不再传全局值——多会话并发下它指向最后打开的那个会话，
+        // 会把文件挂到别的会话台账上。
+        const localSessionId = chatId ? undefined : window.currentSessionId;
+        const res = await chatApi.uploadFile(file, chatId, localSessionId);
         onProgress?.({ percent: 100 });
         // 直接传文件相对路径给 Agent（如 /media/{filename}），
         // 由后端 _resolve_media_url 解析为实际工作区路径。
@@ -1988,7 +2019,13 @@ export default function ChatPage() {
             headers,
             body: JSON.stringify({
               reconnect: true,
-              session_id: window.currentSessionId || data.session_id,
+              // ⭐ R1: 后端把运行队列键在 chat.id 上（console.py: tracker.attach(chat.id)），
+              // 且 chat_id 优先于 session_id 定位会话（console.py:397/442）。旧写法只发
+              // session_id 且优先取全局 window 变量——切去新会话再回来时，全局变量已指向
+              // 新会话，后端按 session_id 匹配到别的 chat，attach 不到原来那次运行，
+              // 现象就是「回到原会话发现已经中断」。chat_id 才是权威身份。
+              chat_id: chatIdRef.current || undefined,
+              session_id: data.session_id || window.currentSessionId || "",
               user_id: window.currentUserId || DEFAULT_USER_ID,
               channel: window.currentChannel || DEFAULT_CHANNEL,
             }),

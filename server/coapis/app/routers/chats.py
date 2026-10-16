@@ -600,10 +600,36 @@ async def get_chat(
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
 
+    # ── Self-healing: verify status against TaskTracker ──────────────────
+    # If ChatSpec.status says "running" but TaskTracker has no active task,
+    # the task was lost (backend restart / crash / OOM). Fix the persisted
+    # status so the frontend doesn't get stuck on a phantom "generating"
+    # spinner (same logic as list_chats, applied to single-chat reads).
+    effective_status = spec.status
+    if effective_status == "running" and resolved_agent_id:
+        try:
+            ws = _find_workspace_for_agent(request, resolved_agent_id, username)
+            tracker = getattr(ws, "task_tracker", None) if ws else None
+            if tracker:
+                tracker_status = await tracker.get_status(chat_id)
+                if tracker_status == "idle":
+                    effective_status = "idle"
+                    from ..runner.models import ChatUpdate
+                    await cm.patch_chat(chat_id, ChatUpdate(status="idle"))
+                    logger.info(
+                        "get_chat: self-healed stale 'running' status for chat %s",
+                        chat_id[:16],
+                    )
+        except Exception as e:
+            logger.debug(
+                "get_chat: TaskTracker status check skipped for chat %s: %s",
+                chat_id[:16], e,
+            )
+
     return {
         "spec": _normalize_chat_spec(spec),
         "messages": messages,
-        "status": spec.status,
+        "status": effective_status,
         "total_count": total_count,
         "has_more": total_count > limit or (before is not None),
     }
