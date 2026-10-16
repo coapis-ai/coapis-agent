@@ -283,6 +283,9 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self._env_context = env_context
         self._request_context = dict(request_context or {})
         self._mcp_clients = mcp_clients or []
+        # MCP servers get one tool group each (ToolManager); keywords come
+        # from the server name so a query naming a server pre-equips it.
+        self._mcp_group_keywords: dict[str, set[str]] = {}
         self._namesake_strategy = namesake_strategy
         self._workspace_dir = workspace_dir or WORKING_DIR
         self._task_tracker = task_tracker
@@ -617,8 +620,61 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # ── Discover tools from plugin registry ──
         from .tools.registry import get_registered_tools
+        from .tools.groups import (
+            TOOL_GROUPS,
+            group_of,
+            validate_against_registry,
+        )
+
         registered = get_registered_tools()
         tool_functions = {name: reg.func for name, reg in registered.items()}
+
+        # ── Tool groups (ToolManager) ──
+        # Only the always-active groups stay in the model's tool schema from
+        # step 1; the rest are equipped on demand through the meta tool
+        # ``reset_equipped_tools`` (upstream semantics: absolute, so every
+        # call re-derives the active set). Measured on dev: builtin schema
+        # 32080 -> 8266 chars at step 1 (-74%).
+        groups_enabled = getattr(
+            self._agent_config.running,
+            "tool_groups_enabled",
+            True,
+        )
+        if groups_enabled:
+            for group_name, spec in TOOL_GROUPS.items():
+                if spec.get("always_active"):
+                    # ``basic`` is agentscope's built-in always-active group:
+                    # upstream refuses to create it and excludes it from the
+                    # catalog; registering a tool with group_name="basic"
+                    # creates it. Core tools therefore can never be switched
+                    # off by the model.
+                    continue
+                toolkit.create_tool_group(
+                    group_name,
+                    description=spec["description"],
+                    active=False,
+                )
+
+        # Data-pack descriptions are language-aware. They used to be applied
+        # only to the registry field, which never reached the schema because
+        # registration reads the function docstring — passing them via
+        # ``func_description`` is what makes the pack take effect.
+        func_descriptions: dict[str, str] = {}
+        try:
+            from coapis.system.data_loader import load_tool_descriptions
+
+            func_descriptions = load_tool_descriptions(self._language) or {}
+        except Exception:
+            func_descriptions = {}
+
+        drift = validate_against_registry(set(tool_functions))
+        if drift["missing"] or drift["extra"]:
+            logger.warning(
+                "Tool group table drifted from registry: ungrouped=%s "
+                "(they land in the always-active core group), stale=%s",
+                drift["missing"],
+                drift["extra"],
+            )
 
         # Register only enabled tools
         for tool_name, tool_func in tool_functions.items():
@@ -638,12 +694,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
             toolkit.register_tool_function(
                 wrapped_func,
+                group_name=(
+                    group_of(tool_name) if groups_enabled else "basic"
+                ),
+                func_description=func_descriptions.get(tool_name) or None,
                 namesake_strategy=namesake_strategy,
                 async_execution=async_exec,
             )
             logger.debug(
-                "Registered tool: %s (async_execution=%s)",
+                "Registered tool: %s (group=%s, async_execution=%s)",
                 tool_name,
+                group_of(tool_name) if groups_enabled else "basic",
                 async_exec,
             )
 
@@ -677,7 +738,51 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     f"Failed to register task management tools: {e}",
                 )
 
+        # ── Meta tool: the model's entry point to the tool catalog ──
+        # ``get_json_schemas`` auto-generates its parameter schema from the
+        # registered group descriptions, so the catalog costs ~100 chars per
+        # group (measured: 12 groups ≈ 2.3K chars) while the gated tools it
+        # can summon are what leaves the schema. Upstream's own docstring
+        # already states the absolute semantics, so it is used verbatim.
+        if groups_enabled:
+            try:
+                toolkit.register_tool_function(
+                    toolkit.reset_equipped_tools,
+                    namesake_strategy=namesake_strategy,
+                )
+                logger.debug("Registered tool-group meta tool")
+            except Exception as e:
+                logger.warning("Failed to register reset_equipped_tools: %s", e)
+
         return toolkit
+
+    def apply_query_preactivation(self, query: str) -> list[str]:
+        """Pre-equip tool groups whose keywords match the incoming *query*.
+
+        A step-1 latency optimization only: ``reset_equipped_tools`` has
+        absolute semantics, so the first call the model makes re-derives the
+        active set from scratch. Returns the groups activated (empty when the
+        query matches nothing, in which case only the core group is equipped).
+        """
+        from .tools.groups import active_groups_for_query
+
+        hits = set(active_groups_for_query(query or ""))
+        lowered = (query or "").lower()
+        for group_name, keywords in (self._mcp_group_keywords or {}).items():
+            if group_name in hits:
+                continue
+            if any(k in lowered for k in keywords):
+                hits.add(group_name)
+        if not hits:
+            return []
+        groups = sorted(hits)
+        try:
+            self.toolkit.update_tool_groups(groups, active=True)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Tool group pre-activation failed: %s", e)
+            return []
+        logger.info("Tool groups pre-activated for query: %s", ", ".join(groups))
+        return groups
 
     def _register_skills(self, toolkit: Toolkit) -> None:
         """Load and register skills from workspace directory.
@@ -2144,6 +2249,62 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             if msg.role == "system":
                 msg.content = self.sys_prompt
             break
+    def _ensure_mcp_group(self, client_name: str) -> str:
+        """Create (once) the tool group an MCP server's tools belong to.
+
+        MCP tools used to sit in the always-active ``basic`` group, so every
+        server's full schema was sent on every step. Giving each server its
+        own group moves that cost out of step 1; the server name becomes a
+        pre-activation keyword.
+        """
+        import re as _re
+
+        if not getattr(
+            self._agent_config.running,
+            "tool_groups_enabled",
+            True,
+        ):
+            return "basic"
+
+        slug = _re.sub(r"[^0-9a-zA-Z]+", "_", str(client_name)).strip("_").lower()
+        group_name = f"mcp_{slug}" if slug else "mcp_server"
+        if group_name not in self.toolkit.groups:
+            self.toolkit.create_tool_group(
+                group_name,
+                description=f"Tools from MCP server '{client_name}'.",
+                active=False,
+            )
+            tokens = {
+                t.lower()
+                for t in _re.split(r"[^0-9a-zA-Z]+", str(client_name))
+                if len(t) >= 3
+            }
+            tokens.add(str(client_name).lower())
+            self._mcp_group_keywords[group_name] = tokens
+        return group_name
+
+    def _finalize_mcp_group_description(self, group_name: str, client_name: str) -> None:
+        """Put the server's tool names into the catalog entry.
+
+        The group description is the only thing the model sees before it
+        equips the group, so naming the tools is what makes an MCP server
+        discoverable at all.
+        """
+        group = self.toolkit.groups.get(group_name)
+        if group is None:
+            return
+        tool_names = sorted(
+            name[len("mcp_"):] if name.startswith("mcp_") else name
+            for name, tool in self.toolkit.tools.items()
+            if tool.group == group_name
+        )
+        if tool_names:
+            shown = ", ".join(tool_names[:12])
+            more = f", +{len(tool_names) - 12} more" if len(tool_names) > 12 else ""
+            group.description = (
+                f"MCP server '{client_name}' tools: {shown}{more}."
+            )
+
 
     async def register_mcp_clients(
         self,
@@ -2164,12 +2325,15 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             # statistics tools on a plain greeting.
             client = wrap_client_list_tools(client)
             self._mcp_clients[i] = client
+            mcp_group = self._ensure_mcp_group(client_name)
             try:
                 await self.toolkit.register_mcp_client(
                     client,
+                    group_name=mcp_group,
                     namesake_strategy=namesake_strategy,
                     execution_timeout=client.timeout,
                 )
+                self._finalize_mcp_group_description(mcp_group, client_name)
             except (ClosedResourceError, asyncio.CancelledError) as error:
                 if self._should_propagate_cancelled_error(error):
                     raise
@@ -2185,9 +2349,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     try:
                         await self.toolkit.register_mcp_client(
                             recovered_client,
+                            group_name=mcp_group,
                             namesake_strategy=namesake_strategy,
-                            exeution_timeout=client.timeout,
+                            execution_timeout=client.timeout,
                         )
+                        self._finalize_mcp_group_description(mcp_group, client_name)
                         continue
                     except asyncio.CancelledError as recover_error:
                         if self._should_propagate_cancelled_error(

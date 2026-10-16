@@ -834,6 +834,17 @@ class AgentsRunningConfig(BaseModel):
         ),
     )
 
+    tool_groups_enabled: bool = Field(
+        default=True,
+        description=(
+            "ToolManager: keep only the always-active tool groups in the "
+            "model's tool schema and let the model equip the remaining "
+            "groups on demand via reset_equipped_tools (measured: builtin "
+            "schema 32080 -> 8266 chars at step 1). Set false to put every "
+            "tool back into the always-visible schema."
+        ),
+    )
+
     llm_retry_enabled: bool = Field(
         default=LLM_MAX_RETRIES > 0,
         description="Whether to auto-retry transient LLM API errors",

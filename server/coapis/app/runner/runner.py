@@ -1450,6 +1450,20 @@ class AgentRunner(Runner):
             )
             logger.warning(f"[MCP_DEBUG] ALL_TOOL_NAMES: {_all_names}")
             agent.set_console_output_enabled(enabled=False)
+
+            # ToolManager: pre-equip the tool groups whose keywords match the
+            # incoming query, so step 1 already carries the tools the task
+            # needs. Step-1 only — the model's own reset_equipped_tools call
+            # re-derives the active set from scratch (absolute semantics).
+            try:
+                pre_equipped = agent.apply_query_preactivation(query or "")
+                if pre_equipped:
+                    logger.debug(
+                        "Pre-equipped tool groups: %s",
+                        ", ".join(pre_equipped),
+                    )
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug("Tool group pre-activation skipped: %s", e)
             
             # (B1.2) 原"Scene Skills Injection"块已删除：场景技能在 agent 构建期已由
             # _register_skills 全量进 toolkit.skills（§1.5 实证），运行期注入循环恒为空操作。

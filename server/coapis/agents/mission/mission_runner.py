@@ -176,12 +176,26 @@ def validate_prd(prd: dict[str, Any]) -> list[str]:
 
 
 def migrate_tools_to_group(agent: Any) -> None:
-    """Move implementation tools from 'basic' into a dedicated group.
+    """Move implementation tools into a dedicated group.
 
     Must be called *after* agent construction but *before* the first
     ``reply()`` in Phase 2.  Idempotent — safe to call multiple times.
+
+    ToolManager compatibility (2026-10-16): builtin tools now live in
+    keyword-driven groups (``core``, ``browser``, ``media``, …) whose
+    activation the model controls via ``reset_equipped_tools``.  Rewriting
+    ``tool.group`` steals a tool from its original group, so after a Mission
+    the model can no longer equip it — ``browser_use`` stranded in
+    ``mission_impl`` stays invisible even after the model activates its own
+    groups.  The original group is recorded here and handed back by
+    :func:`restore_tools`.
     """
     toolkit = agent.toolkit
+    ownership = getattr(agent, "_mission_tool_ownership", None)
+    if ownership is None:
+        ownership = {}
+        agent._mission_tool_ownership = ownership
+
     if MISSION_IMPL_GROUP in toolkit.groups:
         return
 
@@ -197,6 +211,7 @@ def migrate_tools_to_group(agent: Any) -> None:
 
     for tool_name in IMPLEMENTATION_TOOLS:
         if tool_name in toolkit.tools:
+            ownership[tool_name] = toolkit.tools[tool_name].group
             toolkit.tools[tool_name].group = MISSION_IMPL_GROUP
 
 
@@ -212,10 +227,36 @@ def set_phase2_tool_restrictions(agent: Any) -> None:
 
 
 def restore_tools(agent: Any) -> None:
-    """Re-activate implementation tools (cleanup / Phase 1)."""
+    """Re-activate implementation tools (cleanup / Phase 1).
+
+    Also returns the migrated tools to the groups they came from, so
+    ToolManager's keyword pre-activation and ``reset_equipped_tools`` keep
+    reaching them after a Mission ends.
+    """
     if MISSION_IMPL_GROUP in agent.toolkit.groups:
         agent.toolkit.update_tool_groups([MISSION_IMPL_GROUP], active=True)
         logger.info("Mission: restored tool group '%s'", MISSION_IMPL_GROUP)
+
+    ownership = getattr(agent, "_mission_tool_ownership", None) or {}
+    restored = []
+    for tool_name, original_group in list(ownership.items()):
+        tool = agent.toolkit.tools.get(tool_name)
+        if tool is None:
+            continue
+        # ``basic`` is agentscope's built-in group: always active, and absent
+        # from ``toolkit.groups`` — so it is a valid destination by definition.
+        if original_group != "basic" and original_group not in agent.toolkit.groups:
+            continue
+        tool.group = original_group
+        restored.append(tool_name)
+    if restored:
+        # Tools are back in their own groups; clear the map so a later
+        # Mission records current ownership instead of reusing stale rows.
+        ownership.clear()
+        logger.info(
+            "Mission: returned tools to their original groups: %s",
+            ", ".join(sorted(restored)),
+        )
 
 
 # ── Phase helpers ────────────────────────────────────────────────────────
