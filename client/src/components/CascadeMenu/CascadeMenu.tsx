@@ -20,6 +20,8 @@ import styles from "./cascade.module.less";
  * - 光标移到某行 200ms（hover-intent）后在右侧展开下一级列，鼠标移出菜单
  *   不清空已展开的列（避免扫读时菜单抖动）；
  * - 每列上限 maxItems（默认 200），超出显示「…还有 N 项」尾巴；
+ * - 展开即刷新（refreshOnOpen，默认开）：光标落到某行、点击展开、键盘 → 进入
+ *   子列时强制重读该节点子项；旧清单在刷新期间保留，尾部标「刷新中…」；
  * - 窄屏（narrow）单列下钻 + 返回上级；
  * - 键盘：↑↓ 列内移动，→ 进入子列，← 回父列，空格/回车勾选，Esc 交父层。
  */
@@ -55,7 +57,8 @@ export interface CascadeNode {
 
 export interface CascadeMenuProps {
   roots: CascadeNode[];
-  load: (node: CascadeNode) => Promise<CascadeNode[]>;
+  /** 给定节点 → 其子节点。force=true 时调用方必须绕开自己的缓存真读数据源 */
+  load: (node: CascadeNode, force?: boolean) => Promise<CascadeNode[]>;
   checked?: Set<string>;
   onToggle?: (node: CascadeNode) => void;
   /** 每列最多渲染条数（D5：200） */
@@ -74,6 +77,18 @@ export interface CascadeMenuProps {
    * 宿主容器尺寸恒定 → 弹层不会因新增列而重算位置（修「上蹿下跳」）。
    */
   portal?: boolean;
+  /**
+   * 展开即刷新（默认 true）：光标移到某行（hover-intent 命中）、点击展开、
+   * 键盘 → 进入子列时，强制重新拉取该节点的子项。
+   *
+   * 为什么必须有：antd Popover 默认不销毁内容，菜单关闭后本组件仍然挂载，
+   * `childrenRef` 缓存与 `openPath` 会一路活到页面卸载。缺了这一项，
+   * 「在别处上传/生成文件 → 回到聊天打开菜单」永远看到旧清单
+   * （实测：重开菜单 0 次 /myfiles/list 请求）。
+   */
+  refreshOnOpen?: boolean;
+  /** 同一节点两次强制拉取的最小间隔（ms），防鼠标扫动把接口打爆 */
+  refreshMinInterval?: number;
 }
 
 function sizeLabel(n?: number): string {
@@ -95,12 +110,16 @@ export default function CascadeMenu(props: CascadeMenuProps) {
     rootWidth = 200,
     autoOpenRoot,
     portal,
+    refreshOnOpen = true,
+    refreshMinInterval = 1200,
   } = props;
   const { t } = useTranslation();
 
   const [children, setChildren] = useState<Record<string, CascadeNode[]>>({});
   const [openPath, setOpenPath] = useState<string[]>([]);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
+  // 有旧数据时的「后台刷新中」标记：与 loadingKey 分开，刷新期间旧清单不消失
+  const [refreshingKey, setRefreshingKey] = useState<string | null>(null);
   const [filters, setFilters] = useState<Record<number, string>>({});
   const [focus, setFocus] = useState<{ level: number; index: number }>({
     level: 0,
@@ -110,6 +129,10 @@ export default function CascadeMenu(props: CascadeMenuProps) {
   const [anchors, setAnchors] = useState<Record<number, { left: number; top: number; right: number }>>({});
   // 用 ref 做「已加载」判定，避免 useCallback 依赖 state 造成闭包过期
   const childrenRef = useRef<Record<string, CascadeNode[]>>({});
+  // 同一节点的并发拉取去重（hover 反复扫过同一行只发一次请求）
+  const inflightRef = useRef<Record<string, Promise<CascadeNode[]>>>({});
+  // 每个节点上次真读数据源的时间戳，配合 refreshMinInterval 做节流
+  const lastFetchRef = useRef<Record<string, number>>({});
   const hoverTimer = useRef<number | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const colRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -121,22 +144,53 @@ export default function CascadeMenu(props: CascadeMenuProps) {
     [],
   );
 
+  /**
+   * 取某节点的子项。
+   *
+   * - 无缓存：必拉（整列 loading）。
+   * - 有缓存 + force（展开动作）：默认必拉（整列保持旧清单，尾部标「刷新中」），
+   *   只受 refreshMinInterval 节流与 inflight 去重约束。
+   * - 有缓存 + 非 force（键盘预取）：直接吃缓存。
+   */
   const ensure = useCallback(
-    async (node: CascadeNode) => {
+    async (node: CascadeNode, force = false) => {
       if (node.kind !== "group") return;
-      if (childrenRef.current[node.key]) return;
-      setLoadingKey(node.key);
-      let kids: CascadeNode[] = [];
-      try {
-        kids = await load(node);
-      } catch {
-        kids = [];
+      const key = node.key;
+      const hasCache = !!childrenRef.current[key];
+      const throttled =
+        Date.now() - (lastFetchRef.current[key] ?? 0) < refreshMinInterval;
+      if (hasCache && !(force && refreshOnOpen && !throttled)) return;
+      const pending = inflightRef.current[key];
+      if (pending) {
+        await pending;
+        return;
       }
-      childrenRef.current[node.key] = kids;
-      setChildren({ ...childrenRef.current });
-      setLoadingKey(null);
+      if (hasCache) setRefreshingKey(key);
+      else setLoadingKey(key);
+      const task = (async () => {
+        let kids: CascadeNode[] = [];
+        try {
+          kids = await load(node, force && refreshOnOpen);
+        } catch {
+          // 刷新失败保留旧清单：宁可用旧数据，不要把用户的目录清空
+          kids = childrenRef.current[key] ?? [];
+        }
+        childrenRef.current[key] = kids;
+        lastFetchRef.current[key] = Date.now();
+        setChildren({ ...childrenRef.current });
+        return kids;
+      })();
+      inflightRef.current[key] = task;
+      try {
+        await task;
+      } finally {
+        delete inflightRef.current[key];
+        // 只清自己那一次的标记，避免并发拉取互相抹掉 loading
+        setLoadingKey((k) => (k === key ? null : k));
+        setRefreshingKey((k) => (k === key ? null : k));
+      }
     },
-    [load],
+    [load, refreshOnOpen, refreshMinInterval],
   );
 
   const openAt = useCallback(
@@ -149,7 +203,7 @@ export default function CascadeMenu(props: CascadeMenuProps) {
         if (rect) next[level + 1] = rect;
         return next;
       });
-      void ensure(node);
+      void ensure(node, true);
     },
     [ensure],
   );
@@ -160,7 +214,7 @@ export default function CascadeMenu(props: CascadeMenuProps) {
     const r = roots[0];
     if (r && r.kind === "group") {
       setOpenPath([r.key]);
-      void ensure(r);
+      void ensure(r, true);
     }
   }, [autoOpenRoot, roots, ensure]);
 
@@ -250,8 +304,10 @@ export default function CascadeMenu(props: CascadeMenuProps) {
       : rest;
     const shown = matched.slice(0, maxItems);
     const hidden = matched.length - shown.length + (moreNode?.count ?? 0);
-    const loading =
-      level > 0 && loadingKey === (openPath[level - 1] ?? "");
+    const parentKey = level > 0 ? (openPath[level - 1] ?? "") : "";
+    // 整列转圈只在「什么都没有」时出现；有旧数据时走 refreshing 尾巴，清单不闪空
+    const loading = level > 0 && loadingKey === parentKey && rest.length === 0;
+    const refreshing = level > 0 && refreshingKey === parentKey;
     const isRoot = level === 0;
 
     // 独立层：二级及以后脱离文档流，宿主容器尺寸恒定 → 弹层不重算位置
@@ -395,6 +451,11 @@ export default function CascadeMenu(props: CascadeMenuProps) {
         {hidden > 0 && (
           <div className={styles.cascadeTail}>
             {t("cascade.more", "…还有 {{n}} 项未显示", { n: hidden })}
+          </div>
+        )}
+        {refreshing && (
+          <div className={styles.cascadeTail}>
+            {t("cascade.refreshing", "刷新中…")}
           </div>
         )}
         {narrow && columns.length > 1 && level === visibleCols.length - 1 && (

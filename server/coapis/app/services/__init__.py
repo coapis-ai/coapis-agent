@@ -17,34 +17,16 @@
 """CoApis Services Layer.
 
 This package contains service-level abstractions that encapsulate
-external system interactions (Seafile, etc.) and provide a unified
+the file service (local workspace backend) and provide a unified
 interface for the rest of the application.
 """
 
-from .seafile_client import SeafileClient, SeafileConfig, SeafileError
-from .file_service import (
-    FileService,
-    FileServiceFactory,
-    LocalFileBackend,
-    SeafileFileBackend,
-    FileInfo,
-)
-from .user_sync_service import (
-    UserSyncService,
-    UserSyncConfig,
-    SyncResult,
-)
+
+from .file_service import FileService, FileServiceFactory, LocalFileBackend, FileInfo
 
 __all__ = [
-    "SeafileClient",
-    "SeafileConfig",
-    "SeafileError",
     "FileService",
     "FileServiceFactory",
     "LocalFileBackend",
-    "SeafileFileBackend",
     "FileInfo",
-    "UserSyncService",
-    "UserSyncConfig",
-    "SyncResult",
 ]

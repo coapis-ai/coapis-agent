@@ -116,7 +116,9 @@ export default function ResourcePlusMenu(props: ResourcePlusMenuProps) {
   }, [t, showKnowledge, props.sessionCount, props.onOpenModal]);
 
   const load = useMemo(
-    () => (node: CascadeNode) => cascadeLoad(node, props.chatId),
+    () =>
+      (node: CascadeNode, force?: boolean) =>
+        cascadeLoad(node, props.chatId, force),
     [props.chatId],
   );
 

@@ -42,7 +42,12 @@ from pydantic import BaseModel
 from ..auth import get_current_user
 from ..permissions import require_permission
 from ...constant import WORKSPACES_DIR
-from ..services.file_service import FileServiceFactory, FileInfo as ServiceFileInfo
+from ..services.file_service import (
+    FileServiceFactory,
+    FileInfo as ServiceFileInfo,
+    SEARCH_LIMIT,
+    sort_file_infos,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +126,9 @@ class FileListResponse(BaseModel):
     items: List[FileInfo]
     total: int
     path: str
+    # 搜索命中达到上限时的诚实标记（带 search 时才会为 True），不静默截断
+    truncated: bool = False
+    limit: int = 0
 
     model_config = {"populate_by_name": True}
 
@@ -219,26 +227,74 @@ async def list_files(
     order = f"-{sort_by}" if sort_order == "desc" else sort_by
     
     file_service = FileServiceFactory.get_service()
-    service_files = await file_service.list_files(
-        username=username,
-        path=path,
-        category=category,
-        order=order,
-    )
-    
-    # Apply search filter
+
+    # 搜索走服务层那**一份**实现（与 GET /myfiles/search 完全同一份代码）：
+    # 递归子树、匹配完整相对路径、排除噪音目录、目录在前。
+    # 这里不再另写一个"只筛当前目录文件名"的过滤——同一功能只允许一条
+    # 实现路径，两个入口的语义、排序、上限因此天然一致。
     if search:
-        service_files = [f for f in service_files if search.lower() in f.name.lower()]
+        service_files, hit_total = await file_service.search_files(
+            username=username,
+            query=search,
+            category=category,
+            path=path,
+        )
+        service_files = sort_file_infos(service_files, order)
+    else:
+        service_files = await file_service.list_files(
+            username=username,
+            path=path,
+            category=category,
+            order=order,
+        )
+        hit_total = len(service_files)
     
     # Apply pagination
-    total = len(service_files)
+    total = hit_total
     start = (page - 1) * page_size
     service_files = service_files[start:start + page_size]
     
     # Convert to frontend format
     files = [_service_info_to_file_info(f) for f in service_files]
     
-    return FileListResponse(items=files, total=total, path=path)
+    return FileListResponse(
+        items=files, total=total, path=path,
+        truncated=hit_total > len(files), limit=SEARCH_LIMIT if search else 0,
+    )
+
+
+@router.get("/search")
+@require_permission("chat:read")
+async def search_files(
+    keyword: str = Query(..., min_length=1, description="Search keyword"),
+    path: str = Query("/", description="Search subtree root"),
+    category: str = Query("files", description="File category"),
+    limit: int = Query(SEARCH_LIMIT, ge=1, le=SEARCH_LIMIT, description="Max hits"),
+    request: Request = None,
+):
+    """搜索文件（递归子树）。
+
+    与 `/list?search=` 共用服务层 `FileService.search_files` **同一份实现**：
+    递归、匹配完整相对路径（`a/b` 能命中 `a/b.pptx`）、排除噪音目录
+    （`.trash`/`.temp`/`.git`…，与资源台账同一份口径）、目录在前按名排序。
+    命中达到 `limit` 时 `truncated=true`，不静默吞掉。
+
+    响应形状与 `/list` 对齐（`items` 里是同一套 FileInfo），前端两个视图
+    渲染逻辑可以完全复用。
+    """
+    username = get_current_user(request)["username"]
+    file_service = FileServiceFactory.get_service()
+    hits, hit_total = await file_service.search_files(
+        username=username, query=keyword, category=category, path=path, limit=limit,
+    )
+    return {
+        "items": [_service_info_to_file_info(f) for f in hits],
+        "total": hit_total,
+        "truncated": hit_total > len(hits),
+        "limit": limit,
+        "path": path,
+        "keyword": keyword,
+    }
 
 
 @router.post("/upload")

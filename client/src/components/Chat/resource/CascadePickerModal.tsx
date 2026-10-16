@@ -45,7 +45,11 @@ export default function CascadePickerModal(props: CascadePickerModalProps) {
       : [{ key: SPACE_ROOT_KEY, name: t("resourceMenu.mySpace"), kind: "group" as const }];
   }, [kw, mode, t]);
 
-  const load = useMemo(() => (node: CascadeNode) => cascadeLoad(node), []);
+  const load = useMemo(
+    () =>
+      (node: CascadeNode, force?: boolean) => cascadeLoad(node, undefined, force),
+    [],
+  );
 
   return (
     <Modal

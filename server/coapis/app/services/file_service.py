@@ -34,17 +34,53 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import time
 import mimetypes
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from enum import Enum
 
 from fastapi import UploadFile, HTTPException
 from fastapi.responses import FileResponse
 
+# 噪音目录口径与台账巡检共用同一份定义：搜索排除的目录必须和台账登记的
+# 目录一致，否则会出现"台账里有、搜索搜不到"这类对不上的口径。
+from ...foundation.resource_ledger import NOISE_DIR_PARTS
+
 logger = logging.getLogger(__name__)
+
+# ── 搜索参数（单一来源）─────────────────────────────────────────────
+# 搜索只有一个实现（``FileService.search_files``），两个入口
+# （``GET /myfiles/search`` 与 ``GET /myfiles/list?search=``）都走它，
+# 因此这些上限对两条路径同时生效，不会各定一套。
+SEARCH_LIMIT = 200        # 单次最多返回多少条命中
+SEARCH_MAX_DEPTH = 12     # 相对搜索起点的最大递归深度
+SEARCH_MAX_SCAN = 20000   # 单次最多遍历多少个条目（防超大树把请求卡死）
+
+
+def sort_file_infos(files: List[FileInfo], order: str = "name") -> List[FileInfo]:
+    """文件条目排序的**唯一**实现：目录在前，组内按 ``order`` 键。
+
+    ``GET /myfiles/list`` 与搜索（``/search``、``/list?search=``）共用它，
+    两个入口的排序口径不会分叉。``order`` 前缀 ``-`` 表示倒序，
+    支持 ``name`` / ``time`` / ``size``。
+    """
+    reverse = order.startswith("-")
+    key = order.lstrip("-") or "name"
+    if key == "time":
+        rank = lambda f: f.modified_at
+    elif key == "size":
+        rank = lambda f: f.size
+    else:
+        rank = lambda f: f.name.lower()
+    out = list(files)
+    out.sort(key=rank, reverse=reverse)
+    # 稳定排序把目录整体提到前面，组内保留上一步的排序结果
+    out.sort(key=lambda f: not f.is_dir)
+    return out
 
 
 # ═══════════════════════════════════════════════════════════
@@ -296,17 +332,31 @@ class FileService(ABC):
         self,
         username: str,
         query: str,
-        category: str = "files"
-    ) -> List[FileInfo]:
-        """Search for files.
-        
+        category: str = "files",
+        path: str = "/",
+        limit: int = SEARCH_LIMIT,
+    ) -> Tuple[List[FileInfo], int]:
+        """Search files recursively under ``path``.
+
+        这是"搜索"这个功能**唯一**的实现。两个入口都走它：
+
+        - ``GET /myfiles/search``（我的空间搜索框、资源选择器的跨目录检索）
+        - ``GET /myfiles/list?search=``（当前目录内筛选）
+
+        语义因此天然一致，不会一个递归一个平铺、一个排噪音目录一个不排。
+
         Args:
             username: Username for data isolation
-            query: Search query
+            query: 不区分大小写的子串，匹配对象是**完整相对路径**
+                （所以 ``a/b`` 能命中目录 ``a`` 下的 ``b.txt``）
             category: File category
-            
+            path: 搜索起点（``/`` = 整个 category 子树）
+            limit: 最多返回多少条
+
         Returns:
-            List of matching FileInfo
+            ``(matches, total)``：上限内的命中列表（目录在前、按名排序）与
+            **命中总数**。``total > len(matches)`` 即表示被 ``limit`` 截断，
+            调用方据此渲染"还有 N 条"，不静默吞掉。
         """
         pass
     
@@ -399,17 +449,8 @@ class LocalFileBackend(FileService):
                 parent_dir=path
             ))
         
-        # Sort
-        reverse = order.startswith("-")
-        key = order.lstrip("-")
-        if key == "name":
-            files.sort(key=lambda f: f.name.lower(), reverse=reverse)
-        elif key == "time":
-            files.sort(key=lambda f: f.modified_at, reverse=reverse)
-        elif key == "size":
-            files.sort(key=lambda f: f.size, reverse=reverse)
-        
-        return files
+        # 排序走统一实现（与搜索同一份口径）
+        return sort_file_infos(files, order)
     
     async def upload_file(
         self,
@@ -626,31 +667,73 @@ class LocalFileBackend(FileService):
         self,
         username: str,
         query: str,
-        category: str = "files"
-    ) -> List[FileInfo]:
+        category: str = "files",
+        path: str = "/",
+        limit: int = SEARCH_LIMIT,
+    ) -> Tuple[List[FileInfo], bool]:
         user_dir = self._get_user_dir(username, category)
-        
-        results = []
+        # 搜索起点同样过越权校验：传 ../other_user 必须 403，与 /list 同口径
+        root = self._resolve_path(user_dir, path)
+
+        if not root.exists():
+            raise HTTPException(status_code=404, detail="Path not found")
+        if not root.is_dir():
+            raise HTTPException(status_code=400, detail="Not a directory")
+
         query_lower = query.lower()
-        
-        for root, dirs, files in user_dir.walk():
-            for name in files:
-                if query_lower in name.lower():
-                    item = root / name
+        root_rel = root.relative_to(user_dir)
+        root_depth = len(root_rel.parts)
+        limit = max(1, min(int(limit or SEARCH_LIMIT), SEARCH_LIMIT))
+
+        hits: List[FileInfo] = []
+        total = 0          # 命中总数（不受 limit 影响，供前端折算「还有 N 条」）
+        scanned = 0
+        capped = False
+
+        # 用 os.walk 而不是 Path.walk：镜像跑的是 Python 3.11，Path.walk 是
+        # 3.12 才加的方法，在这里会直接 AttributeError（实测）。
+        for cur, dirnames, filenames in os.walk(root):
+            cur_path = Path(cur)
+            rel = cur_path.relative_to(user_dir)
+
+            # 深度封顶 + 噪音目录（.trash/.temp/.git/... 与台账同一份口径）：
+            # 从 dirnames 里摘掉，os.walk 就不会再往下走。
+            if len(rel.parts) - root_depth >= SEARCH_MAX_DEPTH:
+                dirnames[:] = []
+            else:
+                dirnames[:] = [d for d in dirnames if d not in NOISE_DIR_PARTS]
+
+            for name in sorted(dirnames) + sorted(filenames):
+                scanned += 1
+                if scanned > SEARCH_MAX_SCAN:
+                    capped = True
+                    break
+                if query_lower not in str(rel / name).lower():
+                    continue
+                item = cur_path / name
+                try:
                     stat = item.stat()
-                    mime_type, _ = mimetypes.guess_type(name)
-                    results.append(FileInfo(
-                        path=f"/{str(item.relative_to(user_dir))}",
-                        name=name,
-                        size=stat.st_size,
-                        is_dir=False,
-                        mime_type=mime_type or "",
-                        created_at=stat.st_ctime,
-                        modified_at=stat.st_mtime,
-                        parent_dir="/" + "/".join(str(root.relative_to(user_dir)).split("/"))
-                    ))
-        
-        return results
+                except OSError:  # 断链 symlink、并发删除
+                    continue
+                total += 1
+                if len(hits) >= limit:
+                    continue  # 达到上限后只计数不收集：计数不额外增加遍历成本
+                mime_type, _ = mimetypes.guess_type(name)
+                hits.append(FileInfo(
+                    path=f"/{rel / name}",
+                    name=name,
+                    size=stat.st_size if item.is_file() else 0,
+                    is_dir=item.is_dir(),
+                    mime_type=mime_type or "",
+                    created_at=stat.st_ctime,
+                    modified_at=stat.st_mtime,
+                    parent_dir=f"/{rel}" if rel.parts else "/",
+                ))
+            if capped:
+                break
+
+        # 目录在前、名字在后：与 /list 共用同一份排序实现
+        return sort_file_infos(hits, "name"), total
     
     async def get_usage(
         self,
@@ -669,303 +752,22 @@ class LocalFileBackend(FileService):
 
 # ═══════════════════════════════════════════════════════════
 # Seafile File Backend
-# ═══════════════════════════════════════════════════════════
-
-class SeafileFileBackend(FileService):
-    """Seafile backend for file operations.
-    
-    Maps each user to a Seafile repository for file storage.
-    """
-    
-    def __init__(self, seafile_client: 'SeafileClient'):  # noqa: F821
-        self.client = seafile_client
-        self._repo_cache: Dict[str, str] = {}  # username -> repo_id
-    
-    async def _get_repo_id(self, username: str) -> str:
-        """Get or create repository for user."""
-        if username in self._repo_cache:
-            return self._repo_cache[username]
-        
-        # Try to find existing repo
-        repos = await self.client.list_repos(username)
-        for repo in repos:
-            if repo.name == f"{username}-files":
-                self._repo_cache[username] = repo.repo_id
-                return repo.repo_id
-        
-        # Create new repo
-        repo = await self.client.create_repo(
-            name=f"{username}-files",
-            username=username,
-            description=f"Files for user {username}"
-        )
-        self._repo_cache[username] = repo.repo_id
-        return repo.repo_id
-    
-    async def list_files(
-        self,
-        username: str,
-        path: str = "/",
-        category: str = "files",
-        order: str = "name"
-    ) -> List[FileInfo]:
-        repo_id = await self._get_repo_id(username)
-        
-        # Seafile stores files in repo root, use category as subdirectory
-        seafile_path = f"/{category}{path}" if category != "files" else path
-        
-        files = await self.client.list_files(repo_id, seafile_path, order)
-        
-        # Convert Seafile FileInfo to our FileInfo
-        result = []
-        for f in files:
-            result.append(FileInfo(
-                path=f.path,
-                name=f.name,
-                size=f.size,
-                is_dir=f.is_dir,
-                mime_type=f.mime_type,
-                created_at=f.created_at,
-                modified_at=f.modified_at,
-                id=f.id,
-                parent_dir=f.parent_dir,
-                repo_id=f.repo_id
-            ))
-        
-        return result
-    
-    async def upload_file(
-        self,
-        username: str,
-        path: str,
-        file: UploadFile,
-        category: str = "files"
-    ) -> FileInfo:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_path = f"/{category}{path}" if category != "files" else path
-        
-        result = await self.client.upload_file(repo_id, seafile_path, file)
-        
-        return FileInfo(
-            path=result.path,
-            name=result.name,
-            size=result.size,
-            is_dir=False,
-            mime_type=result.mime_type,
-            created_at=result.created_at,
-            modified_at=result.modified_at,
-            id=result.id,
-            parent_dir=result.parent_dir,
-            repo_id=result.repo_id
-        )
-    
-    async def download_file(
-        self,
-        username: str,
-        path: str,
-        category: str = "files"
-    ) -> FileResponse:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_path = f"/{category}{path}" if category != "files" else path
-        
-        content = await self.client.download_file(repo_id, seafile_path)
-        
-        # Return as FileResponse
-        import io
-        from fastapi.responses import Response
-        
-        filename = path.split("/")[-1]
-        mime_type, _ = mimetypes.guess_type(filename)
-        
-        return Response(
-            content=content,
-            media_type=mime_type or "application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-    
-    async def preview_file(
-        self,
-        username: str,
-        path: str,
-        category: str = "files"
-    ) -> Dict[str, Any]:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_path = f"/{category}{path}" if category != "files" else path
-        
-        file_info = await self.client.get_file_info(repo_id, seafile_path)
-        mime_type, _ = mimetypes.guess_type(file_info.name)
-        
-        if mime_type and mime_type.startswith("text/"):
-            content = await self.client.download_file(repo_id, seafile_path)
-            return {
-                "type": "text",
-                "content": content.decode("utf-8", errors="replace"),
-                "mime_type": mime_type
-            }
-        
-        if mime_type and mime_type.startswith("image/"):
-            return {
-                "type": "image",
-                "mime_type": mime_type,
-                "url": f"/myfiles/preview?path={path}&category={category}"
-            }
-        
-        return {
-            "type": "other",
-            "mime_type": mime_type or "application/octet-stream",
-            "size": file_info.size
-        }
-    
-    async def delete_file(
-        self,
-        username: str,
-        path: str,
-        category: str = "files"
-    ) -> bool:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_path = f"/{category}{path}" if category != "files" else path
-        
-        return await self.client.delete_file(repo_id, seafile_path)
-    
-    async def rename_file(
-        self,
-        username: str,
-        old_path: str,
-        new_name: str,
-        category: str = "files"
-    ) -> bool:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_path = f"/{category}{old_path}" if category != "files" else old_path
-        
-        return await self.client.rename(repo_id, seafile_path, new_name)
-    
-    async def mkdir(
-        self,
-        username: str,
-        path: str,
-        category: str = "files"
-    ) -> bool:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_path = f"/{category}{path}" if category != "files" else path
-        
-        return await self.client.mkdir(repo_id, seafile_path)
-    
-    async def move_file(
-        self,
-        username: str,
-        source_path: str,
-        dest_path: str,
-        category: str = "files"
-    ) -> bool:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_source = f"/{category}{source_path}" if category != "files" else source_path
-        seafile_dest = f"/{category}{dest_path}" if category != "files" else dest_path
-        
-        return await self.client.move(repo_id, seafile_source, repo_id, seafile_dest)
-    
-    async def copy_file(
-        self,
-        username: str,
-        source_path: str,
-        dest_path: str,
-        category: str = "files"
-    ) -> bool:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_source = f"/{category}{source_path}" if category != "files" else source_path
-        seafile_dest = f"/{category}{dest_path}" if category != "files" else dest_path
-        
-        return await self.client.copy(repo_id, seafile_source, repo_id, seafile_dest)
-    
-    async def search_files(
-        self,
-        username: str,
-        query: str,
-        category: str = "files"
-    ) -> List[FileInfo]:
-        repo_id = await self._get_repo_id(username)
-        
-        seafile_path = f"/{category}" if category != "files" else "/"
-        
-        files = await self.client.search_files(query, repo_id, seafile_path)
-        
-        result = []
-        for f in files:
-            result.append(FileInfo(
-                path=f.path,
-                name=f.name,
-                size=f.size,
-                is_dir=f.is_dir,
-                mime_type=f.mime_type,
-                created_at=f.created_at,
-                modified_at=f.modified_at,
-                id=f.id,
-                parent_dir=f.parent_dir,
-                repo_id=f.repo_id
-            ))
-        
-        return result
-    
-    async def get_usage(
-        self,
-        username: str,
-        category: str = "files"
-    ) -> int:
-        repo_id = await self._get_repo_id(username)
-        
-        repo = await self.client.get_repo(repo_id)
-        return repo.size
-
-
-# ═══════════════════════════════════════════════════════════
-# File Service Factory
-# ═══════════════════════════════════════════════════════════
-
 class FileServiceFactory:
-    """Factory for creating file service instances.
-    
-    Supports switching between Local and Seafile backends
-    based on configuration.
-    """
+    """Factory for the file service (local workspace backend)."""
     
     _instance: Optional[FileService] = None
-    _backend_type: str = "local"  # "local" or "seafile"
-    
-    @classmethod
-    def set_backend(cls, backend_type: str, **kwargs):
-        """Set file backend type.
-        
-        Args:
-            backend_type: "local" or "seafile"
-            **kwargs: Backend-specific configuration
-        """
-        cls._backend_type = backend_type
-        cls._instance = None  # Reset instance
-    
+
     @classmethod
     def get_service(cls) -> FileService:
-        """Get file service instance.
-        
-        Returns:
-            FileService instance
+        """Get the file service instance.
+
+        只有一种后端：本地工作区。Seafile 已随产品移出，代码一并移除，
+        所以这里不再有后端切换分支——"文件功能"从此只有一条实现路径。
         """
         if cls._instance is None:
-            if cls._backend_type == "seafile":
-                from .seafile_client import SeafileClient, SeafileConfig
-                config = SeafileConfig(**kwargs)
-                client = SeafileClient(config)
-                cls._instance = SeafileFileBackend(client)
-            else:
-                from ...constant import WORKSPACES_DIR
-                cls._instance = LocalFileBackend(WORKSPACES_DIR)
-        
+            from ...constant import WORKSPACES_DIR
+            cls._instance = LocalFileBackend(WORKSPACES_DIR)
+
         return cls._instance
     
     @classmethod

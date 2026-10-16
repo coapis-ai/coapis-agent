@@ -49,10 +49,13 @@ interface ListItems {
   total?: number;
 }
 
-async function loadMySpaceDir(dir: string): Promise<CascadeNode[]> {
+async function loadMySpaceDir(dir: string, force = false): Promise<CascadeNode[]> {
   const ck = `files:${dir}`;
-  const cached = cache.get(ck);
-  if (cached) return cached;
+  // force：展开动作触发的刷新，跳过缓存真读后端
+  if (!force) {
+    const cached = cache.get(ck);
+    if (cached) return cached;
+  }
   const data = (await api.get(
     `/myfiles/list?path=${encodeURIComponent(dir)}&category=files&page_size=200`,
   )) as ListItems;
@@ -161,11 +164,16 @@ function appendMore(
   }
 }
 
-async function loadSession(chatId?: string): Promise<CascadeNode[]> {
+async function loadSession(
+  chatId?: string,
+  force = false,
+): Promise<CascadeNode[]> {
   if (!chatId) return [];
   const ck = `session:${chatId}`;
-  const cached = cache.get(ck);
-  if (cached) return cached;
+  if (!force) {
+    const cached = cache.get(ck);
+    if (cached) return cached;
+  }
   // 会话文件 = 资源契约里被本 chat 引用过的那一行（refs 表反查，非冗余列）。
   const { rows, total } = await fetchResources(chatId);
   const seen = new Set<string>();
@@ -181,19 +189,24 @@ async function loadSession(chatId?: string): Promise<CascadeNode[]> {
   return nodes;
 }
 
-async function loadKnowledgeBases(): Promise<CascadeNode[]> {
+async function loadKnowledgeBases(force = false): Promise<CascadeNode[]> {
   const ck = "kb";
-  const cached = cache.get(ck);
-  if (cached) return cached;
+  if (!force) {
+    const cached = cache.get(ck);
+    if (cached) return cached;
+  }
   let bases: Array<Record<string, unknown>> = [];
   try {
     const data = (await api.get("/knowledge/bases")) as {
       bases?: Array<Record<string, unknown>>;
     };
     bases = data.bases ?? [];
-  } catch {
+  } catch (err) {
+    // API 调用失败时返回空数组，但记录错误以便调试
+    console.warn("加载知识库列表失败:", err);
     bases = [];
   }
+  
   const nodes: CascadeNode[] = bases.map((b) => ({
     key: `kb:${String(b.id)}`,
     name: String(b.name ?? b.id),
@@ -202,14 +215,21 @@ async function loadKnowledgeBases(): Promise<CascadeNode[]> {
     meta: b.chunk_count ? String(b.chunk_count) : undefined,
     payload: { id: String(b.id), name: String(b.name ?? b.id) },
   }));
+  
+  // 如果没有知识库，缓存一个空数组（避免重复请求）
   cache.set(ck, nodes);
   return nodes;
 }
 
-async function loadKnowledgeDocs(kbId: string): Promise<CascadeNode[]> {
+async function loadKnowledgeDocs(
+  kbId: string,
+  force = false,
+): Promise<CascadeNode[]> {
   const ck = `kb:${kbId}:docs`;
-  const cached = cache.get(ck);
-  if (cached) return cached;
+  if (!force) {
+    const cached = cache.get(ck);
+    if (cached) return cached;
+  }
   let docs: Array<Record<string, unknown>> = [];
   try {
     const data = (await api.get(
@@ -231,52 +251,72 @@ async function loadKnowledgeDocs(kbId: string): Promise<CascadeNode[]> {
 }
 
 /**
- * 跨目录检索：走资源契约（/myfiles/resources，每资源一行）。
- * 后端无服务端 search 参数，所以分页拉清单（最多 5 页 = 500 条）后本地过滤；
- * 超出抓取窗口的记录以 more 计数节点呈现为尾巴行，不静默吞掉。
- * 检索场景下 meta 优先展示所在目录（跨目录找文件时目录比状态更有用）。
+ * 跨目录检索：走后端 `GET /myfiles/search` —— 与「我的空间」搜索框**同一个
+ * 端点、同一份服务层实现**（递归子树、匹配完整相对路径、排除噪音目录、
+ * 目录在前按名排序）。
+ *
+ * 之前是「分页拉资源清单 500 条 → 前端 substring 过滤」：同一功能第二套轮子，
+ * 语义还和搜索框分叉（只匹配文件名、抓取窗口外的文件永远搜不到）。
+ * 检索结果里的目录直接是 group 节点，hover 上去由 `loadMySpaceDir` 接住展开。
  */
-async function loadSearch(kw: string): Promise<CascadeNode[]> {
+async function loadSearch(kw: string, force = false): Promise<CascadeNode[]> {
   const ck = `search:${kw}`;
-  const cached = cache.get(ck);
-  if (cached) return cached;
-  const { rows, total } = await fetchResources();
-  const lower = kw.toLowerCase();
-  const seen = new Set<string>();
-  const nodes: CascadeNode[] = [];
-  for (const r of rows) {
-    const p = String(r.path ?? "");
-    if (!p || seen.has(p)) continue;
-    if (!p.toLowerCase().includes(lower)) continue;
-    seen.add(p);
-    nodes.push({
-      key: p,
-      name: String(r.title ?? basename(p)),
-      kind: "item",
-      usage: "reference",
-      meta: p.slice(0, p.lastIndexOf("/") >= 0 ? p.lastIndexOf("/") : p.length),
-      payload: { path: p, type: "file", size: Number(r.size_bytes ?? 0) },
-    });
+  if (!force) {
+    const cached = cache.get(ck);
+    if (cached) return cached;
   }
-  appendMore(nodes, ck, total, rows.length);
+  const data = (await api.get(
+    `/myfiles/search?keyword=${encodeURIComponent(kw)}`
+    + `&path=${encodeURIComponent("/")}&category=files`,
+  )) as ListItems;
+  const nodes: CascadeNode[] = [];
+  const seen = new Set<string>();
+  for (const it of data.items ?? []) {
+    const p = it.path;
+    if (!p || seen.has(p)) continue; // 去重兜底：同路径重复行会渲染成重复行
+    seen.add(p);
+    const dir = p.slice(0, p.lastIndexOf("/") >= 0 ? p.lastIndexOf("/") : p.length);
+    nodes.push(
+      it.type === "directory"
+        ? {
+            key: p,
+            name: it.name,
+            kind: "group",
+            usage: "working-path",
+            meta: dir,
+            payload: { path: p, type: "folder" },
+          }
+        : {
+            key: p,
+            name: it.name,
+            kind: "item",
+            usage: "reference",
+            meta: dir,
+            payload: { path: p, type: "file", size: it.size },
+          },
+    );
+  }
+  // total 是后端命中总数（不受单页上限影响）→ 尾巴行「还有 N 项」是准的
+  appendMore(nodes, ck, data.total ?? nodes.length, nodes.length);
   cache.set(ck, nodes);
   return nodes;
 }
 
-/** 单一分发入口：组件只需把节点交给它 */
+/** 单一分发入口：组件只需把节点交给它（force=true 时跳过缓存真读） */
 export async function cascadeLoad(
   node: CascadeNode,
   chatId?: string,
+  force = false,
 ): Promise<CascadeNode[]> {
   const key = node.key;
-  if (key === "session") return loadSession(chatId);
-  if (key.startsWith("files:")) return loadMySpaceDir(key.slice(6));
+  if (key === "session") return loadSession(chatId, force);
+  if (key.startsWith("files:")) return loadMySpaceDir(key.slice(6), force);
   // 我的空间里的子目录：节点 key 就是后端全路径（与勾选集合/selectedFiles 同源），
   // 必须在这里接住，否则 hover 进目录永远返回空列。
-  if (key.startsWith("/")) return loadMySpaceDir(key);
-  if (key === "kb") return loadKnowledgeBases();
-  if (key.startsWith("kb:")) return loadKnowledgeDocs(key.slice(3));
-  if (key.startsWith("search:")) return loadSearch(key.slice(7));
+  if (key.startsWith("/")) return loadMySpaceDir(key, force);
+  if (key === "kb") return loadKnowledgeBases(force);
+  if (key.startsWith("kb:")) return loadKnowledgeDocs(key.slice(3), force);
+  if (key.startsWith("search:")) return loadSearch(key.slice(7), force);
   return [];
 }
 
