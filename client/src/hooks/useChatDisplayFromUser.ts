@@ -5,7 +5,7 @@
  * 优先从 UserContext 读取，若无则回退到 localStorage。
  * 修改时同时更新 localStorage 和后端。
  */
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useUser } from '@/contexts/UserContext';
 import {
   ChatDisplayConfig,
@@ -15,24 +15,34 @@ import {
 } from '@/pages/Chat/types';
 
 /**
- * 将 UserPreferences 转换为 ChatDisplayConfig
+ * 将后端偏好响应转换为 ChatDisplayConfig
+ *
+ * 后端 GET /user/preferences 返回的是**嵌套**结构：
+ *   { chat_display: { hideToolCall, autoScroll, fontSize, codeTheme, ... } }
+ * 旧实现读的是扁平的 prefs.chat_hide_details，后端从不返回该字段，
+ * 于是恒为 false 并在挂载时覆盖 localStorage —— 持久化链断裂。
  */
-function prefsToChatDisplay(prefs: Partial<UserPreferences>): ChatDisplayConfig {
+function prefsToChatDisplay(prefs: UserPreferences): ChatDisplayConfig {
+  const cd = prefs.chat_display;
   return {
-    hideDetails: !!(prefs.chat_hide_details ?? DEFAULT_CHAT_DISPLAY_CONFIG.hideDetails),
-    autoScroll: !!(prefs.chat_auto_scroll ?? DEFAULT_CHAT_DISPLAY_CONFIG.autoScroll),
-    fontSize: (prefs.chat_font_size as 'small' | 'normal' | 'large') || DEFAULT_CHAT_DISPLAY_CONFIG.fontSize,
-    codeTheme: (prefs.chat_code_theme as 'light' | 'dark') || DEFAULT_CHAT_DISPLAY_CONFIG.codeTheme,
+    hideDetails: cd?.hideToolCall ?? DEFAULT_CHAT_DISPLAY_CONFIG.hideDetails,
+    autoScroll: cd?.autoScroll ?? DEFAULT_CHAT_DISPLAY_CONFIG.autoScroll,
+    fontSize: cd?.fontSize ?? DEFAULT_CHAT_DISPLAY_CONFIG.fontSize,
+    codeTheme: cd?.codeTheme ?? DEFAULT_CHAT_DISPLAY_CONFIG.codeTheme,
   };
 }
 
 /**
- * 将 ChatDisplayConfig 转换为用户偏好（用于持久化到后端）
+ * 将 ChatDisplayConfig 转换为后端可接受的扁平偏好（用于 PUT /user/preferences）
+ *
+ * 后端 FlatPreferencesUpdate 只认 chat_hide_tool_call / chat_auto_scroll /
+ * chat_font_size / chat_code_theme；旧实现发的 chat_hide_details 是未知键，
+ * 被 Pydantic 静默丢弃。
  */
 import type { UserPreferences } from '@/contexts/UserContext';
 function chatDisplayToPrefs(cfg: ChatDisplayConfig): Partial<UserPreferences> {
   return {
-    chat_hide_details: cfg.hideDetails ? 1 : 0,
+    chat_hide_tool_call: cfg.hideDetails ? 1 : 0,
     chat_auto_scroll: cfg.autoScroll ? 1 : 0,
     chat_font_size: cfg.fontSize,
     chat_code_theme: cfg.codeTheme,
@@ -45,18 +55,23 @@ export function useChatDisplayFromUser() {
     // 初始值从 localStorage 加载（UserContext 可能还没加载完）
     return loadChatDisplayConfig();
   });
+  // 后端只在「本机从未存过配置」时播种一次。
+  // 旧实现在每次 user/preferences 变化时都用后端快照回灌并写回 localStorage，
+  // 于是本地刚改的值会被旧快照冲掉（PUT 与读回存在竞态），表现为
+  // localStorage 与后端不一致、开关刷新后跳变。
+  const seededFromBackend = useRef(
+    localStorage.getItem('coapis_chat_display_config') !== null,
+  );
 
-  // 当 UserContext 加载完成后，从后端偏好同步到本地
   useEffect(() => {
-    if (user && preferences) {
-      const backendConfig = prefsToChatDisplay(preferences);
-      // 合并：后端值优先，但保留 localStorage 中的其他设置
-      setDisplayConfig((prev) => {
-        const merged = { ...prev, ...backendConfig };
-        saveChatDisplayConfig(merged);
-        return merged;
-      });
-    }
+    if (!user || !preferences || seededFromBackend.current) return;
+    seededFromBackend.current = true;
+    const backendConfig = prefsToChatDisplay(preferences);
+    setDisplayConfig((prev) => {
+      const merged = { ...prev, ...backendConfig };
+      saveChatDisplayConfig(merged);
+      return merged;
+    });
   }, [user, preferences]);
 
   const updateDisplayConfig = useCallback(

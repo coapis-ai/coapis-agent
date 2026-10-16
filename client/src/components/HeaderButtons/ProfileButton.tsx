@@ -11,10 +11,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../../contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
-import { useTheme } from '../../contexts/ThemeContext';
 import { useModelPrefs } from '@/lib/modelChoice';
 import { userModelPrefsApi } from '../../api/modules/user_model_prefs';
-import { languageApi } from '../../api/modules/language';
 
 const roleColorMap: Record<string, string> = {
   visitor: 'default',
@@ -24,11 +22,15 @@ const roleColorMap: Record<string, string> = {
   superadmin: 'red',
 };
 
-const ProfileButton: React.FC = () => {
+interface ProfileButtonProps {
+  /** 打开「个人设置」抽屉（由 Header 持有状态并渲染 SettingsDrawer） */
+  onOpenSettings?: () => void;
+}
+
+const ProfileButton: React.FC<ProfileButtonProps> = ({ onOpenSettings }) => {
   const { user, logout } = useUser();
   const navigate = useNavigate();
-  const { t, i18n } = useTranslation();
-  const { themeMode, setThemeMode } = useTheme();
+  const { t } = useTranslation();
   const { chat: chatSlot, setChat } = useModelPrefs();
   const [models, setModels] = useState<
     { id: string; name: string; providerId: string; provider?: string }[]
@@ -72,12 +74,6 @@ const ProfileButton: React.FC = () => {
       });
   }, [user, modelsLoaded]);
 
-  const changeLang = (lang: string) => {
-    i18n.changeLanguage(lang);
-    localStorage.setItem('language', lang);
-    languageApi.updateLanguage(lang).catch(() => {});
-  };
-
   if (!user) {
     return (
       <Button
@@ -90,7 +86,6 @@ const ProfileButton: React.FC = () => {
     );
   }
 
-  const curLang = i18n.resolvedLanguage || i18n.language || '';
 
   const isCurrent = (m: { providerId: string; id: string }) =>
     chatSlot.model === m.id && (chatSlot.providerId ?? '') === m.providerId;
@@ -126,39 +121,6 @@ const ProfileButton: React.FC = () => {
           }))),
   ];
 
-  const displayChildren = [
-    {
-      key: 'theme-light',
-      label: t('header.profile.themeLight'),
-      icon: themeMode === 'light' ? <CheckOutlined /> : undefined,
-      onClick: () => setThemeMode('light'),
-    },
-    {
-      key: 'theme-dark',
-      label: t('header.profile.themeDark'),
-      icon: themeMode === 'dark' ? <CheckOutlined /> : undefined,
-      onClick: () => setThemeMode('dark'),
-    },
-    {
-      key: 'theme-system',
-      label: t('header.profile.themeSystem'),
-      icon: themeMode === 'system' ? <CheckOutlined /> : undefined,
-      onClick: () => setThemeMode('system'),
-    },
-    { type: 'divider' as const },
-    {
-      key: 'lang-zh',
-      label: '简体中文',
-      icon: curLang.toLowerCase().startsWith('zh') ? <CheckOutlined /> : undefined,
-      onClick: () => changeLang('zh'),
-    },
-    {
-      key: 'lang-en',
-      label: 'English',
-      icon: curLang.toLowerCase().startsWith('en') ? <CheckOutlined /> : undefined,
-      onClick: () => changeLang('en'),
-    },
-  ];
 
   const items = [
     {
@@ -180,21 +142,16 @@ const ProfileButton: React.FC = () => {
       type: 'submenu' as const,
       children: modelChildren,
     },
-    // 设计 §2.4：显示设置（主题 + 语言）
+    // 显示设置（主题/语言/聊天显示）已并入「个人设置」抽屉
+    // 顶栏「语言」「设置」按钮迁入个人下拉（低频项收纳）
     {
-      key: 'display-settings',
+      key: 'personal-settings',
       icon: <SettingOutlined />,
-      label: t('header.profile.displaySettings'),
-      type: 'submenu' as const,
-      children: displayChildren,
+      label: t('header.profile.settings'),
+      onClick: () => onOpenSettings?.(),
     },
     { type: 'divider' as const },
-    {
-      key: 'admin-panel',
-      icon: <SettingOutlined />,
-      label: t('header.profile.adminPanel'),
-      onClick: () => navigate('/settings/users'),
-    },
+    // 「管理后台」入口移除：管理员入口保留在「个人设置 → 管理 → 用户管理」
     {
       key: 'logout',
       icon: <LogoutOutlined />,
@@ -205,13 +162,9 @@ const ProfileButton: React.FC = () => {
         navigate('/');
       },
     },
-  ].filter((item) => {
-    // 管理员面板仅对管理员显示
-    if (item.key === 'admin-panel') {
-      return ['admin', 'superadmin'].includes(user!.role);
-    }
-    return true;
-  });
+  ];
+  // 注：原 items.filter(item.key === 'admin-panel') 已随「管理后台」入口一并移除
+  // （管理入口在「个人设置 → 管理」与侧栏「设置」，下拉不再有 admin-panel 项）
 
   return (
     <Dropdown menu={{ items }} placement="bottomRight">

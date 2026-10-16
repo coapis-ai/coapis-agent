@@ -3,7 +3,7 @@
 // PyPI version check disabled: coapis is not published to PyPI
 // export const PYPI_URL = "https://pypi.org/pypi/coapis/json";
 
-export const GITHUB_URL = "https://github.com/coapis/coapis" as const;
+export const GITHUB_URL = "https://github.com/coapis-ai/coapis-agent" as const;
 
 // ── Timing ────────────────────────────────────────────────────────────────
 
@@ -84,18 +84,24 @@ export const KEY_TO_LABEL: Record<string, string> = {
 };
 
 // ── URL helpers ───────────────────────────────────────────────────────────
+// 说明：coapis.cn 文档站与 GitHub 均不提供 lang 参数，故以下 helper 保留
+// (lang) 签名以兼容既有调用点（HelpButton / Header 传 i18n.language），
+// 内部忽略该参数；将来站点支持多语言时直接在此扩展即可。
 
 export const getWebsiteLang = (lang: string): string =>
   lang.startsWith("zh") ? "zh" : "en";
 
-export const getDocsUrl = (lang: string): string =>
-  `https://coapis.dev/docs/intro?lang=${getWebsiteLang(lang)}`;
+/** 快速入门 */
+export const getDocsUrl = (_lang?: string): string =>
+  "https://coapis.cn/docs/#/help/guide";
 
-export const getFaqUrl = (lang: string): string =>
-  `https://coapis.dev/docs/faq?lang=${getWebsiteLang(lang)}`;
+/** 常见问题 */
+export const getFaqUrl = (_lang?: string): string =>
+  "https://coapis.cn/docs/#/help/faq";
 
-export const getReleaseNotesUrl = (lang: string): string =>
-  `https://coapis.dev/release-notes?lang=${getWebsiteLang(lang)}`;
+/** 更新日志（GitHub Releases 为唯一真源） */
+export const getReleaseNotesUrl = (_lang?: string): string =>
+  "https://github.com/coapis-ai/coapis-agent/releases";
 
 // ── Version helpers ────────────────────────────────────────────────────────
 

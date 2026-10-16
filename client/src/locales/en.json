@@ -50,7 +50,8 @@
     "clear": "Clear",
     "paste": "Paste",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "saveFailed": "Save failed"
   },
   "chunkError": {
     "title": "Failed to load page",
@@ -1793,7 +1794,7 @@
     "updateAvailable": "Update Available",
     "help": {
       "title": "Help",
-      "docs": "Documentation",
+      "docs": "Quick Start",
       "faq": "FAQ",
       "github": "GitHub",
       "release": "Changelog"
@@ -1821,7 +1822,9 @@
       "notifications": "Notifications",
       "emailNotifications": "Email Notifications",
       "pushNotifications": "Push Notifications",
-      "save": "Save Settings"
+      "save": "Save Settings",
+      "hideDetails": "Hide Details",
+      "hideDetailsDesc": "When enabled, thinking process, tool calls and message body are shown as a summary"
     },
     "profile": {
       "login": "Login",
@@ -1831,14 +1834,21 @@
       "roleAdmin": "Admin",
       "roleSuperadmin": "Super Admin",
       "viewProfile": "Profile",
-      "adminPanel": "Admin Panel",
       "logout": "Logout",
       "modelSelection": "Model",
       "auto": "Auto",
       "displaySettings": "Appearance",
       "themeLight": "Light",
       "themeDark": "Dark",
-      "themeSystem": "System"
+      "themeSystem": "System",
+      "settings": "Settings",
+      "sectionAppearance": "Appearance",
+      "sectionLanguage": "Language",
+      "sectionChatDisplay": "Chat Display",
+      "sectionAdmin": "Administration",
+      "chatHideDetails": "Hide Details",
+      "chatHideDetailsDesc": "Hide tool call details, file lists and plan execution progress",
+      "userManagement": "User Management"
     },
     "sessionsCenter": {
       "title": "Sessions"
@@ -2750,6 +2760,7 @@
   "cascade": {
     "filter": "Filter…",
     "empty": "Nothing here yet",
-    "more": "… {{n}} more not shown"
+    "more": "… {{n}} more not shown",
+    "refreshing": "Refreshing…"
   }
 }

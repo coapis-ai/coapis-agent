@@ -18,7 +18,23 @@ interface UserPreferences {
   theme?: string;
   language?: string;
   sidebar_collapsed?: number;
-  chat_hide_details?: number;
+  /** 后端 GET /user/preferences 实际返回的嵌套结构 */
+  chat_display?: {
+    hideToolCall?: boolean;
+    hideThinking?: boolean;
+    hideFooter?: boolean;
+    hideSystemMessages?: boolean;
+    showTimestamps?: boolean;
+    autoScroll?: boolean;
+    fontSize?: 'small' | 'normal' | 'large';
+    codeTheme?: 'light' | 'dark';
+  };
+  /** 后端 PUT 接受的扁平键（chat_display.* 的别名） */
+  chat_hide_tool_call?: number;
+  chat_hide_thinking?: number;
+  chat_hide_footer?: number;
+  chat_hide_system_messages?: number;
+  chat_show_timestamps?: number;
   chat_auto_scroll?: number;
   chat_font_size?: string;
   chat_code_theme?: string;

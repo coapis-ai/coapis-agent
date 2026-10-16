@@ -45,7 +45,8 @@
     "actions": "Действия",
     "total": "Всего {{count}}",
     "clear": "Очистить",
-    "paste": "Вставить"
+    "paste": "Вставить",
+    "saveFailed": "Не удалось сохранить"
   },
   "chunkError": {
     "title": "Не удалось загрузить страницу",
@@ -1353,8 +1354,40 @@
       "roleAdmin": "Администратор",
       "roleSuperadmin": "Суперадминистратор",
       "viewProfile": "Профиль",
-      "adminPanel": "Панель администратора",
-      "logout": "Выйти"
+      "logout": "Выйти",
+      "modelSelection": "Модель",
+      "auto": "Авто",
+      "displaySettings": "Внешний вид",
+      "themeLight": "Светлая",
+      "themeDark": "Тёмная",
+      "themeSystem": "Как в системе",
+      "settings": "Персональные настройки",
+      "sectionAppearance": "Внешний вид",
+      "sectionLanguage": "Язык",
+      "sectionChatDisplay": "Отображение чата",
+      "sectionAdmin": "Администрирование",
+      "chatHideDetails": "Скрыть подробности",
+      "chatHideDetailsDesc": "Скрывать детали вызовов инструментов, списки файлов и ход выполнения плана",
+      "userManagement": "Управление пользователями"
+    },
+    "help": {
+      "title": "Справка",
+      "docs": "Краткое руководство",
+      "faq": "FAQ",
+      "github": "GitHub",
+      "release": "Список изменений"
+    },
+    "language": {
+      "title": "Язык"
+    },
+    "settings": {
+      "title": "Персональные настройки",
+      "chat": "Отображение чата",
+      "hideDetails": "Скрывать подробности",
+      "hideDetailsDesc": "Если включено, процесс размышления, вызовы инструментов и текст сообщения показываются в виде сводки"
+    },
+    "sessionsCenter": {
+      "title": "Сессии"
     }
   },
   "theme": {
@@ -2051,7 +2084,8 @@
   "cascade": {
     "filter": "Фильтр…",
     "empty": "Здесь пусто",
-    "more": "…ещё {{n}}"
+    "more": "…ещё {{n}}",
+    "refreshing": "Обновление…"
   },
   "myspace": {
     "dimAll": "Все",

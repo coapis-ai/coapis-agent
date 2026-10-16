@@ -1,6 +1,6 @@
 
 import { Dropdown, Button } from 'antd';
-import { QuestionCircleOutlined, GlobalOutlined, GithubOutlined, BookOutlined } from '@ant-design/icons';
+import { QuestionCircleOutlined, HistoryOutlined, GithubOutlined, BookOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import {
   getDocsUrl,
@@ -50,7 +50,7 @@ export default function HelpButton({ onClick }: HelpButtonProps) {
     },
     {
       key: 'release',
-      icon: <GlobalOutlined />,
+      icon: <HistoryOutlined />,
       label: t('header.help.release'),
       onClick: () => handleNavClick(getReleaseNotesUrl(i18n.language)),
     },

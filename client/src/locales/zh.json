@@ -3,7 +3,7 @@
     "mySpace": "我的空间",
     "sessionFiles": "本会话文件",
     "upload": "上传文件",
-    "knowledge": "关联知识",
+    "knowledge": "知识库",
     "back": "返回",
     "uploadNew": "＋ 上传新文件",
     "history": "历史会话",
@@ -50,7 +50,8 @@
     "clear": "清除",
     "paste": "粘贴",
     "yes": "是",
-    "no": "否"
+    "no": "否",
+    "saveFailed": "保存失败"
   },
   "chunkError": {
     "title": "页面加载失败",
@@ -1659,7 +1660,7 @@
     "updateAvailable": "有可用更新",
     "help": {
       "title": "帮助",
-      "docs": "文档",
+      "docs": "快速入门",
       "faq": "常见问题",
       "github": "GitHub",
       "release": "更新日志"
@@ -1687,7 +1688,9 @@
       "notifications": "通知",
       "emailNotifications": "邮件通知",
       "pushNotifications": "推送通知",
-      "save": "保存设置"
+      "save": "保存设置",
+      "hideDetails": "隐藏细节",
+      "hideDetailsDesc": "开启后，思考过程、工具调用、正文内容将显示摘要"
     },
     "profile": {
       "login": "登录",
@@ -1697,14 +1700,21 @@
       "roleAdmin": "管理员",
       "roleSuperadmin": "超级管理员",
       "viewProfile": "个人资料",
-      "adminPanel": "管理后台",
       "logout": "退出登录",
       "modelSelection": "模型选择",
       "auto": "自动",
       "displaySettings": "显示设置",
       "themeLight": "浅色",
       "themeDark": "深色",
-      "themeSystem": "跟随系统"
+      "themeSystem": "跟随系统",
+      "settings": "个人设置",
+      "sectionAppearance": "外观",
+      "sectionLanguage": "语言",
+      "sectionChatDisplay": "聊天显示",
+      "sectionAdmin": "管理",
+      "chatHideDetails": "隐藏细节",
+      "chatHideDetailsDesc": "隐藏工具调用详情、文件列表和计划执行过程",
+      "userManagement": "用户管理"
     },
     "sessionsCenter": {
       "title": "会话中心"
@@ -2800,6 +2810,7 @@
   "cascade": {
     "filter": "过滤…",
     "empty": "这里还没有内容",
-    "more": "…还有 {{n}} 项未显示"
+    "more": "…还有 {{n}} 项未显示",
+    "refreshing": "刷新中…"
   }
 }

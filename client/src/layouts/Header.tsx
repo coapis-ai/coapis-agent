@@ -20,8 +20,7 @@ import MobileNavMenu from "./MobileNavMenu";
 
 // New Header button components
 import HelpButton from "../components/HeaderButtons/HelpButton";
-import LanguageButton from "../components/HeaderButtons/LanguageButton";
-import SettingsButton from "../components/HeaderButtons/SettingsButton";
+import SettingsDrawer from "../components/HeaderButtons/SettingsDrawer";
 import ProfileButton from "../components/HeaderButtons/ProfileButton";
 
 // External system badge (login source)
@@ -63,6 +62,8 @@ export default function Header() {
   const [updateMarkdown, setUpdateMarkdown] = useState<string>("");
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // 个人设置抽屉：入口收纳在 ProfileButton 下拉菜单中（顶栏不再放独立按钮）
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     api
@@ -197,9 +198,7 @@ export default function Header() {
         {isMobile ? null : (
           <Space size="middle" align="center">
             <HelpButton onClick={handleNavClick} />
-            <LanguageButton />
-            <SettingsButton />
-            <ProfileButton />
+            <ProfileButton onOpenSettings={() => setSettingsOpen(true)} />
           </Space>
         )}
       </AntHeader>
@@ -214,6 +213,12 @@ export default function Header() {
       >
         <MobileNavMenu onNavigate={() => setDrawerOpen(false)} />
       </Drawer>
+
+      {/* 个人设置抽屉（入口在 ProfileButton 下拉菜单） */}
+      <SettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
 
       <Modal
         title={null}

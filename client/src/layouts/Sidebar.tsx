@@ -4,21 +4,15 @@ import {
   Button,
   Tooltip,
   Select,
-  type MenuProps,
 } from "antd";
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  SparkAgentLine,
-  SparkModePlazaLine,
-  SparkBrowseLine,
-  SparkDataLine,
   SparkMenuExpandLine,
   SparkMenuFoldLine,
-  SparkSaveLine,
 } from "@agentscope-ai/icons";
-import { ThunderboltOutlined, CrownOutlined, SecurityScanOutlined } from "@ant-design/icons";
+import { AppstoreAddOutlined } from "@ant-design/icons";
 import { agentsApi } from "../api/modules/agents";
 import { permissionsApi } from "../api/modules/permissions";
 import { usePlugins } from "../plugins/PluginContext";
@@ -42,6 +36,9 @@ interface SidebarProps {
   selectedKey: string;
 }
 
+/** 插件分组的菜单 key（受控 openKeys / 高亮计算共用） */
+const PLUGINS_GROUP_KEY = "plugins-group";
+
 // ── Sidebar ───────────────────────────────────────────────────────────────
 
 export default function Sidebar({ selectedKey }: SidebarProps) {
@@ -50,8 +47,8 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   const currentPath = location.pathname;
   const { t } = useTranslation();
   const { isDark } = useTheme();
-  const { pluginRoutes } = usePlugins();
   const { selectedAgent, agents, setSelectedAgent, setAgents } = useAgentStore();
+  const { pluginRoutes } = usePlugins();
   const { user } = useUser();
   const [collapsed, setCollapsed] = useState(false);
   
@@ -177,7 +174,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   const collapsedNavItems = useMemo(() => {
     const menuSource = dynamicMenuItems.length > 0 ? dynamicMenuItems : FALLBACK_MENU_ITEMS;
     
-    return menuSource.map(item => {
+    const items: any[] = menuSource.map(item => {
       const menuItem: any = {
         key: item.key,
         icon: item.icon,
@@ -197,7 +194,45 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
 
       return menuItem;
     });
-  }, [t, dynamicMenuItems]);
+
+    // ── 插件分组 ──────────────────────────────────────────────────────────
+    // 插件通过 window.CoApis.registerRoutes 注册的路由，路由本身在 MainLayout
+    // 已挂上（可直接访问 URL），这里补的是侧栏入口。旧实现把插件项 push 进
+    // settingsMenuItems —— 那个数组从未被 render，所以插件页一直进不了菜单。
+    // 权限：插件 key 没有对应的权限模块登记，统一判定函数会放行它，
+    // 与 MainLayout 插件路由不做权限门控的现状保持一致。
+    if (pluginRoutes.length > 0) {
+      const seen = new Set<string>();
+      const children = [...pluginRoutes]
+        .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
+        .filter((r) => {
+          if (seen.has(r.path)) return false;
+          seen.add(r.path);
+          return true;
+        })
+        .map((r) => ({
+          key: r.path.replace(/^\//, ""),
+          label: r.label,
+          icon: r.icon ? (
+            <span style={{ fontSize: 16 }}>{r.icon}</span>
+          ) : undefined,
+          path: r.path,
+        }));
+
+      if (children.length > 0) {
+        items.push({
+          key: PLUGINS_GROUP_KEY,
+          label: t("nav.plugins", "插件"),
+          icon: <AppstoreAddOutlined />,
+          // 折叠态点分组图标时进第一个插件页（分组自身无落地页）
+          path: children[0].path,
+          children,
+        });
+      }
+    }
+
+    return items;
+  }, [t, dynamicMenuItems, pluginRoutes]);
 
   // 根据当前路径和菜单配置计算真正高亮的 key
   // 叶子菜单（含子菜单中的子项）优先匹配自身 key；
@@ -218,173 +253,17 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     return { activeMenuKey: selectedKey, activeTopKey: selectedKey };
   }, [collapsedNavItems, currentPath, selectedKey]);
 
-  // ── DEPRECATED: 旧菜单定义（已废弃，保留仅供参考）──────────────────────
-  // 按设计方案v4，现在统一使用 collapsedNavItems（5个一级菜单）
-  // 以下代码不再使用，将在未来版本删除
-  
-  /*
-  const agentMenuItems: MenuProps["items"] = [
-    {
-      key: "chat",
-      label: collapsed ? null : t("nav.chat"),
-      icon: <SparkChatTabFill size={16} />,
-    },
-    {
-      key: "control-group",
-      label: collapsed ? null : t("nav.control"),
-      children: [
-        {
-          key: "channels",
-          label: collapsed ? null : t("nav.channels"),
-          icon: <SparkWifiLine size={16} />,
-        },
-        {
-          key: "sessions",
-          label: collapsed ? null : t("nav.sessions"),
-          icon: <SparkUserGroupLine size={16} />,
-        },
-        {
-          key: "cron-jobs",
-          label: collapsed ? null : t("nav.cronJobs"),
-          icon: <SparkDateLine size={16} />,
-        },
-        {
-          key: "heartbeat",
-          label: collapsed ? null : t("nav.heartbeat"),
-          icon: <SparkVoiceChat01Line size={16} />,
-        },
-      ],
-    },
-    {
-      key: "agent-group",
-      label: collapsed ? null : t("nav.agent"),
-      children: [
-        // "文件"菜单已移至"我的空间"Tab中
-        // {
-        //   key: "workspace",
-        //   label: collapsed ? null : t("nav.workspace"),
-        //   icon: <SparkLocalFileLine size={16} />,
-        // },
-        {
-          key: "myspace",
-          label: collapsed ? null : t("nav.myspace"),
-          icon: <SparkLocalFileLine size={16} />,
-        },
-        {
-          key: "skills",
-          label: collapsed ? null : t("nav.skills"),
-          icon: <SparkMagicWandLine size={16} />,
-        },
-        {
-          key: "tools",
-          label: collapsed ? null : t("nav.tools"),
-          icon: <SparkToolLine size={16} />,
-        },
-        {
-          key: "mcp",
-          label: collapsed ? null : t("nav.mcp"),
-          icon: <SparkMcpMcpLine size={16} />,
-        },
-        // ACP 模块已隐藏 — 2026-06-28
-        // {
-        //   key: "acp",
-        //   label: collapsed ? null : t("nav.acp"),
-        //   icon: <SparkScanLine size={16} />,
-        // },
-        {
-          key: "agent-config",
-          label: collapsed ? null : t("nav.agentConfig"),
-          icon: <SparkModifyLine size={16} />,
-        },
-        {
-          key: "agent-stats",
-          label: collapsed ? null : t("nav.agentStats"),
-          icon: <SparkBarChartLine size={16} />,
-        },
-        {
-          key: "knowledge",
-          label: collapsed ? null : t("nav.knowledge", "知识库"),
-          icon: <BookOutlined />,
-        },
-      ],
-    },
-  ];
-  */
-
-  // ── Menu items — global settings ──────────────────────────────────────
-
-  const settingsMenuItems: MenuProps["items"] = [
-    {
-      key: "settings-group",
-      label: collapsed ? null : t("nav.settings"),
-      children: [
-        {
-          key: "agents",
-          label: collapsed ? null : t("nav.agents"),
-          icon: <SparkAgentLine size={16} />,
-        },
-        {
-          key: "models",
-          label: collapsed ? null : t("nav.models"),
-          icon: <SparkModePlazaLine size={16} />,
-        },
-        // {
-        //   key: "environments",
-        //   label: collapsed ? null : t("nav.environments"),
-        //   icon: <SparkInternetLine size={16} />,
-        // },
-        {
-          key: "security",
-          label: collapsed ? null : t("nav.security"),
-          icon: <SparkBrowseLine size={16} />,
-        },
-        {
-          key: "token-usage",
-          label: collapsed ? null : t("nav.tokenUsage"),
-          icon: <SparkDataLine size={16} />,
-        },
-        {
-          key: "backups",
-          label: collapsed ? null : t("nav.backups"),
-          icon: <SparkSaveLine size={16} />,
-        },
-        // 语音转写已取消，后续通过音频模型配置
-        // {
-        //   key: "voice-transcription",
-        //   label: collapsed ? null : t("nav.voiceTranscription"),
-        //   icon: <SparkMicLine size={16} />,
-        // },
-        {
-          key: "evolution",
-          label: collapsed ? null : t("nav.evolution", "进化"),
-          icon: <ThunderboltOutlined />,
-        },
-        {
-          key: "admin",
-          label: collapsed ? null : t("nav.adminPanel", "后台管理"),
-          icon: <CrownOutlined />,
-        },
-        {
-          key: "system-authorization",
-          label: collapsed ? null : t("nav.systemAuthorization", "系统授权管理"),
-          icon: <SecurityScanOutlined />,
-        },
-      ],
-    },
-  ];
-
-  // Append plugin menu items as a group (only when there are plugins)
-  if (pluginRoutes.length > 0) {
-    settingsMenuItems.push({
-      key: "plugins-group",
-      label: collapsed ? null : t("nav.plugins"),
-      children: pluginRoutes.map((route) => ({
-        key: route.path.replace(/^\//, ""),
-        label: collapsed ? null : route.label,
-        icon: <span style={{ fontSize: 16 }}>{route.icon}</span>,
-      })),
-    } as any);
-  }
+  // 当前页属于插件时展开插件分组（openKeys 是受控的，默认只展开设置组）
+  useEffect(() => {
+    if (pluginRoutes.length === 0) return;
+    const onPluginPage = pluginRoutes.some(
+      (r) => currentPath === r.path || currentPath.startsWith(`${r.path}/`),
+    );
+    if (!onPluginPage) return;
+    setOpenKeys((prev) =>
+      prev.includes(PLUGINS_GROUP_KEY) ? prev : [...prev, PLUGINS_GROUP_KEY],
+    );
+  }, [currentPath, pluginRoutes]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

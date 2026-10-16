@@ -45,7 +45,8 @@
     "actions": "操作",
     "total": "合計 {{count}} 件",
     "clear": "クリア",
-    "paste": "貼り付け"
+    "paste": "貼り付け",
+    "saveFailed": "保存に失敗しました"
   },
   "chunkError": {
     "title": "ページの読み込みに失敗しました",
@@ -1338,8 +1339,40 @@
       "roleAdmin": "管理者",
       "roleSuperadmin": "スーパー管理者",
       "viewProfile": "プロフィール",
-      "adminPanel": "管理パネル",
-      "logout": "ログアウト"
+      "logout": "ログアウト",
+      "modelSelection": "モデル",
+      "auto": "自動",
+      "displaySettings": "表示設定",
+      "themeLight": "ライト",
+      "themeDark": "ダーク",
+      "themeSystem": "システムに従う",
+      "settings": "個人設定",
+      "sectionAppearance": "外観",
+      "sectionLanguage": "言語",
+      "sectionChatDisplay": "チャット表示",
+      "sectionAdmin": "管理",
+      "chatHideDetails": "詳細を非表示",
+      "chatHideDetailsDesc": "ツール呼び出しの詳細、ファイル一覧、計画実行の過程を非表示にします",
+      "userManagement": "ユーザー管理"
+    },
+    "help": {
+      "title": "ヘルプ",
+      "docs": "クイックスタート",
+      "faq": "よくある質問",
+      "github": "GitHub",
+      "release": "変更履歴"
+    },
+    "language": {
+      "title": "言語"
+    },
+    "settings": {
+      "title": "個人設定",
+      "chat": "チャット表示",
+      "hideDetails": "詳細を非表示",
+      "hideDetailsDesc": "有効にすると、思考過程・ツール呼び出し・本文は要約表示になります"
+    },
+    "sessionsCenter": {
+      "title": "セッション"
     }
   },
   "theme": {
@@ -2036,7 +2069,8 @@
   "cascade": {
     "filter": "絞り込み…",
     "empty": "ここに項目はありません",
-    "more": "…他 {{n}} 件"
+    "more": "…他 {{n}} 件",
+    "refreshing": "更新中…"
   },
   "myspace": {
     "dimAll": "すべて",
