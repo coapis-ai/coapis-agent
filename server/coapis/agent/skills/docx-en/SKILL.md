@@ -3,7 +3,7 @@ name: docx
 description: "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files). Triggers include: any mention of \"Word doc\", \"word document\", \".docx\", or requests to produce professional documents with formatting like tables of contents, headings, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx files, inserting or replacing images in documents, performing find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a \"report\", \"memo\", \"letter\", \"template\", or similar deliverable as a Word or .docx file, use this skill. Do NOT use for PDFs, spreadsheets, Google Docs, or general coding tasks unrelated to document generation."
 license: Proprietary. LICENSE.txt has complete terms
 metadata:
-  builtin_skill_version: "1.1"
+  builtin_skill_version: "1.2"
 metadata:
   coapis:
     priority: on-demand
@@ -12,6 +12,27 @@ metadata:
 > **Important:** All `scripts/` paths are relative to this skill directory.
 > Run with: `cd {this_skill_dir} && python scripts/...`
 > Or use the `cwd` parameter of `execute_shell_command`.
+
+<!-- Reading protocol: added by base-capability governance, overrides every reading method below -->
+> **Reading protocol (highest priority)**
+>
+> 1. **Always read existing documents with `doc_reader`**:
+>    `doc_reader(action="read", file_path="<absolute path>")`.  The `pandoc` /
+>    `pdftotext` / `soffice` / unzip-XML methods below are **not installed in the
+>    image**, and the tool guard rejects `unzip` / `tar` / `cat` / `head` — do not
+>    try them, not even "just to peek".
+> 2. **Paths must be real absolute paths.** Use the "(绝对路径: /…)" the user message
+>    provides; otherwise locate the file with `glob_search(pattern="**", path="<absolute files dir>")`.
+>    **Never** pass relative paths, `file://xxx`, or `/xxx.docx`, and **never** guess a path.
+> 3. **When `doc_reader` returns `error`/`hint`**, retry with the candidate absolute
+>    paths listed in the hint. **Never** use `read_file` on `.docx/.pptx/.xlsx/.pdf`
+>    (they are ZIP/binary and yield garbage).
+> 4. Legacy `.doc` / `.xls` / `.ppt` are **not parseable**: ask the user to re-save
+>    them as `.docx/.xlsx/.pptx` and upload again; do not attempt CLI conversion.
+> 5. Scanned/image PDFs: use `view_image` with an absolute path.
+> 6. Creation/editing scripts under `scripts/` are unaffected; **reading content**
+>    always goes through `doc_reader`.
+
 
 # DOCX creation, editing, and analysis
 
@@ -32,7 +53,7 @@ A .docx file is a ZIP archive containing XML files.
 
 | Task | Approach |
 |------|----------|
-| Read/analyze content | `pandoc` or unpack for raw XML |
+| Read/analyze content | **`doc_reader`** (absolute path); pandoc/unpack is for XML surgery, not reading |
 | Create new document | Use `docx-js` - see Creating New Documents below |
 | Edit existing document | Unpack → edit XML → repack - see Editing Existing Documents below |
 

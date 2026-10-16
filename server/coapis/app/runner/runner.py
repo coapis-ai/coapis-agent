@@ -1659,7 +1659,40 @@ class AgentRunner(Runner):
                         )
 
                 if file_refs:
-                    file_list = ", ".join([f"{f.get('name', 'unknown')} (path: {f.get('path', 'unknown')})" for f in file_refs])
+                    # 文件引用必须给"真实存在的绝对路径"。旧写法只给
+                    # `(path: /x.docx)` 这种磁盘上不存在的路径，智能体只能猜
+                    # → read_file 读到 ZIP 二进制、doc_reader 报"文件不存在"。
+                    # 目录引用分支早已按绝对路径给，文件分支补齐同一标准。
+                    from ...agents.utils.message_processing import (
+                        _lookup_uploaded_file,
+                    )
+
+                    files_root = Path(self.workspace_dir or WORKING_DIR) / "files"
+                    _ref_desc: list[str] = []
+                    _lost_names: list[str] = []
+                    for _f in file_refs:
+                        _name = str(_f.get("name") or "unknown")
+                        _raw = str(_f.get("path") or "").strip("/")
+                        _abs = files_root / _raw if _raw else None
+                        if _abs is not None and _abs.is_file():
+                            _ref_desc.append(f"{_name} (绝对路径: {_abs})")
+                            continue
+                        _found = _lookup_uploaded_file(_name)
+                        if _found:
+                            _ref_desc.append(f"{_name} (绝对路径: {_found})")
+                        else:
+                            _ref_desc.append(f"{_name} (未找到文件: {_raw})")
+                            _lost_names.append(_name)
+                    file_list = ", ".join(_ref_desc)
+                    _lost_hint = ""
+                    if _lost_names:
+                        _lost_hint = (
+                            "其中 "
+                            + "、".join(_lost_names)
+                            + " 未找到，请用 glob_search(pattern=\"**\", path=\""
+                            + str(files_root)
+                            + "\") 列出候选后重试，禁止凭空猜路径。"
+                        )
 
                     # Detect file types for doc_reader hint
                     file_types = set()
@@ -1672,11 +1705,11 @@ class AgentRunner(Runner):
 
                     if file_types:
                         hint_parts.append(
-                            f"[用户选择了以下文件：{file_list}。请使用 doc_reader 工具读取这些 {', '.join(sorted(file_types))} 文件。文件路径已提供，无需搜索。]"
+                            f"[用户选择了以下文件：{file_list}。请使用 doc_reader 工具读取这些 {', '.join(sorted(file_types))} 文件。文件路径已提供，无需搜索。{_lost_hint}]"
                         )
                     else:
                         hint_parts.append(
-                            f"[用户选择了以下文件：{file_list}。文件路径已提供，无需搜索。]"
+                            f"[用户选择了以下文件：{file_list}。文件路径已提供，无需搜索。{_lost_hint}]"
                         )
 
                 hint_text = " ".join(hint_parts)

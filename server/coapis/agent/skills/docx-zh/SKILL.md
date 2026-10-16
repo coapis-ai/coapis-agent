@@ -3,7 +3,7 @@ name: docx
 description: "当用户需要创建、读取、编辑或处理 Word 文档（.docx）时，使用此技能。触发场景包括提到“Word 文档”、“.docx”，或要求生成带目录、标题、页码、信头等格式的专业文档；也包括提取或重组 .docx 内容、插入或替换图片、在 Word 文件中查找替换、处理修订或批注，以及将内容整理为正式 Word 文档。如果用户要求生成“报告”“备忘录”“信函”“模板”等 Word / .docx 交付物，也应使用此技能。不要用于 PDF、电子表格、Google Docs，或与文档生成无关的一般编程任务。"
 license: Proprietary. LICENSE.txt has complete terms
 metadata:
-  builtin_skill_version: "1.1"
+  builtin_skill_version: "1.2"
 metadata:
   coapis:
     priority: on-demand
@@ -12,6 +12,23 @@ metadata:
 > **重要:** 所有 `scripts/` 路径均相对于本技能目录。
 > 运行方式: `cd {this_skill_dir} && python scripts/...`
 > 或使用 `execute_shell_command` 的 `cwd` 参数。
+
+<!-- 读取协议：由基础能力治理加入，优先级高于下文所有读取方式 -->
+> **读取协议（最高优先级）**
+>
+> 1. **读取已有文档内容一律用 `doc_reader`**：`doc_reader(action="read", file_path="<绝对路径>")`。
+>    下文的 `pandoc` / `pdftotext` / `soffice` / 解压 XML 等读取方式**镜像里没有安装**，
+>    且护栏会拒绝 `unzip` / `tar` / `cat` / `head`——**不要尝试，也不要"先探一下"**。
+> 2. **路径必须是真实绝对路径**：优先使用用户消息里"（绝对路径: /…）"给出的路径；
+>    没有给出时先用 `glob_search(pattern="**", path="<工作区 files 目录的绝对路径>")` 定位。
+>    **禁止**传相对路径、`file://xxx`、`/xxx.docx` 这类磁盘上不存在的路径，**禁止**猜路径。
+> 3. **`doc_reader` 返回 `error`/`hint` 时**，按 hint 给出的候选绝对路径重试；
+>    **禁止**用 `read_file` 读 `.docx/.pptx/.xlsx/.pdf`（它们是 ZIP/二进制，只会得到乱码）。
+> 4. `.doc` / `.xls` / `.ppt` 旧格式**不支持解析**：请用户在 Office 里另存为
+>    `.docx/.xlsx/.pptx` 后重新上传，不要尝试用命令行转换。
+> 5. 扫描件/图片型 PDF 需要看画面时改用 `view_image`（传绝对路径）。
+> 6. 创建/编辑文档的脚本流程（`scripts/` 下的流程）不受此限；但**读取内容**一律走 `doc_reader`。
+
 
 # DOCX 创建、编辑与分析
 
@@ -32,7 +49,7 @@ metadata:
 
 | 任务 | 方法 |
 |------|------|
-| 读取/分析内容 | `pandoc` 或解压获取原始 XML |
+| 读取/分析内容 | **`doc_reader`**（传绝对路径）；pandoc/解压只用于改 XML 结构，不用于读正文 |
 | 创建新文档 | 使用 `docx-js` - 参见下方"创建新文档" |
 | 编辑现有文档 | 解压 → 编辑 XML → 重新打包 - 参见下方"编辑现有文档" |
 

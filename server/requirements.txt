@@ -123,14 +123,23 @@ tzdata>=2024.1
 # playwright==1.59.0  # 版本锁定，避免浏览器版本冲突（chromium-1217）
 # browser-use>=0.13.0
 
-# ── [documents] 文档解析（doc_reader 懒加载，缺失时对应格式不可读）──
-# python-pptx 在 dev 与生产运行环境里都缺失（openpyxl/python-docx 已由镜像或
-# shared_runtime 提供，无需重复声明）。技能目录自带 requirements.txt 声明依赖
-# （如 attribute-structure-processor），启动自检会校验并告警。
+# ── [documents] 文档解析（doc_reader 基础能力，镜像必须自带）──
+# 基础能力不能押在运行时 pip 上：运行时安装写进容器可写层，镜像重建即清零
+# （实测 pandas/xlrd 8-03 装过、今天已消失；python-docx 9-17 装过、今天缺失），
+# 且共享池 shared_runtime 不在 sys.path 上（装进去的包 import 不到）。
+# 与 pyproject.toml [documents] extras 全量对齐。
 python-pptx>=1.0.0
-# pymupdf4llm>=0.1.0
-# python-docx>=1.1.0
-# openpyxl>=3.1.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+pymupdf4llm>=0.0.17
+# markitdown 兜底解析。基础 extras 不含各格式转换器（缺 [docx] 时 docx 兜底返回
+# None、缺 [pdf] 时抛 MissingDependency），必须显式声明四种格式转换器。
+markitdown[docx,pptx,xlsx,pdf]>=0.1.0
+# PDF/XLS 补充能力（与 PLATFORM_OPTIONAL_DEPS 声明对齐，避免运行时自检长期告警）
+PyPDF2>=3.0.0
+pdfplumber>=0.11.0
+xlrd>=2.0.1
+xlwt>=1.3.0
 # reportlab>=4.0.0
 
 # ── [search] 搜索后端（web_search 懒加载，缺失时该后端不可用）──

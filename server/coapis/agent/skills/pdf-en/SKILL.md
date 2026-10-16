@@ -3,7 +3,7 @@ name: pdf
 description: Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, extracting images, and OCR on scanned PDFs to make them searchable. If the user mentions a .pdf file or asks to produce one, use this skill.
 license: Proprietary. LICENSE.txt has complete terms
 metadata:
-  builtin_skill_version: "1.1"
+  builtin_skill_version: "1.2"
 metadata:
   coapis:
     priority: on-demand
@@ -12,6 +12,27 @@ metadata:
 > **Important:** All `scripts/` paths are relative to this skill directory.
 > Run with: `cd {this_skill_dir} && python scripts/...`
 > Or use the `cwd` parameter of `execute_shell_command`.
+
+<!-- Reading protocol: added by base-capability governance, overrides every reading method below -->
+> **Reading protocol (highest priority)**
+>
+> 1. **Always read existing documents with `doc_reader`**:
+>    `doc_reader(action="read", file_path="<absolute path>")`.  The `pandoc` /
+>    `pdftotext` / `soffice` / unzip-XML methods below are **not installed in the
+>    image**, and the tool guard rejects `unzip` / `tar` / `cat` / `head` — do not
+>    try them, not even "just to peek".
+> 2. **Paths must be real absolute paths.** Use the "(绝对路径: /…)" the user message
+>    provides; otherwise locate the file with `glob_search(pattern="**", path="<absolute files dir>")`.
+>    **Never** pass relative paths, `file://xxx`, or `/xxx.docx`, and **never** guess a path.
+> 3. **When `doc_reader` returns `error`/`hint`**, retry with the candidate absolute
+>    paths listed in the hint. **Never** use `read_file` on `.docx/.pptx/.xlsx/.pdf`
+>    (they are ZIP/binary and yield garbage).
+> 4. Legacy `.doc` / `.xls` / `.ppt` are **not parseable**: ask the user to re-save
+>    them as `.docx/.xlsx/.pptx` and upload again; do not attempt CLI conversion.
+> 5. Scanned/image PDFs: use `view_image` with an absolute path.
+> 6. Creation/editing scripts under `scripts/` are unaffected; **reading content**
+>    always goes through `doc_reader`.
+
 
 # PDF Processing Guide
 
@@ -206,7 +227,7 @@ For canvas-drawn text (not Paragraph objects), manually adjust font the size and
 
 ## Command-Line Tools
 
-### pdftotext (poppler-utils)
+### pdftotext (poppler-utils) — not installed in the image; **use `doc_reader` to read PDFs**
 ```bash
 # Extract text
 pdftotext input.pdf output.txt

@@ -3,7 +3,7 @@ name: pdf
 description: 当用户需要对PDF文件进行任何操作时，请使用此技能。包括从 PDF 中读取或提取文本/表格、合并多个 PDF、拆分 PDF、旋转页面、添加水印、创建新PDF、填写PDF表单、加密/解密 PDF、提取图片，以及对扫描版 PDF 进行 OCR 使其可搜索。如果用户提到 .pdf 文件或要求生成 PDF，请使用此技能。
 license: Proprietary. LICENSE.txt has complete terms
 metadata:
-  builtin_skill_version: "1.1"
+  builtin_skill_version: "1.2"
 metadata:
   coapis:
     priority: on-demand
@@ -12,6 +12,23 @@ metadata:
 > **重要：** 所有 `scripts/` 路径均相对于此技能目录。
 > 运行方式：`cd {this_skill_dir} && python scripts/...`
 > 或使用 `execute_shell_command` 的 `cwd` 参数。
+
+<!-- 读取协议：由基础能力治理加入，优先级高于下文所有读取方式 -->
+> **读取协议（最高优先级）**
+>
+> 1. **读取已有文档内容一律用 `doc_reader`**：`doc_reader(action="read", file_path="<绝对路径>")`。
+>    下文的 `pandoc` / `pdftotext` / `soffice` / 解压 XML 等读取方式**镜像里没有安装**，
+>    且护栏会拒绝 `unzip` / `tar` / `cat` / `head`——**不要尝试，也不要"先探一下"**。
+> 2. **路径必须是真实绝对路径**：优先使用用户消息里"（绝对路径: /…）"给出的路径；
+>    没有给出时先用 `glob_search(pattern="**", path="<工作区 files 目录的绝对路径>")` 定位。
+>    **禁止**传相对路径、`file://xxx`、`/xxx.docx` 这类磁盘上不存在的路径，**禁止**猜路径。
+> 3. **`doc_reader` 返回 `error`/`hint` 时**，按 hint 给出的候选绝对路径重试；
+>    **禁止**用 `read_file` 读 `.docx/.pptx/.xlsx/.pdf`（它们是 ZIP/二进制，只会得到乱码）。
+> 4. `.doc` / `.xls` / `.ppt` 旧格式**不支持解析**：请用户在 Office 里另存为
+>    `.docx/.xlsx/.pptx` 后重新上传，不要尝试用命令行转换。
+> 5. 扫描件/图片型 PDF 需要看画面时改用 `view_image`（传绝对路径）。
+> 6. 创建/编辑文档的脚本流程（`scripts/` 下的流程）不受此限；但**读取内容**一律走 `doc_reader`。
+
 
 # PDF 处理指南
 
@@ -206,7 +223,7 @@ squared = Paragraph("x<super>2</super> + y<super>2</super>", styles['Normal'])
 
 ## 命令行工具
 
-### pdftotext (poppler-utils)
+### pdftotext (poppler-utils) — 镜像未安装，**读取 PDF 请用 `doc_reader`**
 ```bash
 # 提取文本
 pdftotext input.pdf output.txt

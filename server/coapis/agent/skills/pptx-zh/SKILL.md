@@ -3,7 +3,7 @@ name: pptx
 description: "当涉及到 .pptx 文件的任何操作时使用此技能——无论是作为输入、输出还是两者兼有。包括：创建幻灯片、演示文稿或路演材料；读取、解析或提取任何 .pptx 文件中的文本（即使提取的内容将用于其他地方，如邮件或摘要）；编辑、修改或更新现有演示文稿；合并或拆分幻灯片文件；处理模板、布局、演讲者备注或批注。当用户提到“演示文稿”、”幻灯片“、”PPT“或引用 .pptx 文件名时触发，无论他们之后打算如何使用内容。如果需要打开、创建或操作 .pptx 文件，就使用此技能。"
 license: Proprietary. LICENSE.txt has complete terms
 metadata:
-  builtin_skill_version: "1.1"
+  builtin_skill_version: "1.2"
 metadata:
   coapis:
     priority: on-demand
@@ -12,6 +12,23 @@ metadata:
 > **重要：** 所有 `scripts/` 路径都相对于此技能目录。
 > 运行方式：`cd {this_skill_dir} && python scripts/...`
 > 或使用 `execute_shell_command` 的 `cwd` 参数。
+
+<!-- 读取协议：由基础能力治理加入，优先级高于下文所有读取方式 -->
+> **读取协议（最高优先级）**
+>
+> 1. **读取已有文档内容一律用 `doc_reader`**：`doc_reader(action="read", file_path="<绝对路径>")`。
+>    下文的 `pandoc` / `pdftotext` / `soffice` / 解压 XML 等读取方式**镜像里没有安装**，
+>    且护栏会拒绝 `unzip` / `tar` / `cat` / `head`——**不要尝试，也不要"先探一下"**。
+> 2. **路径必须是真实绝对路径**：优先使用用户消息里"（绝对路径: /…）"给出的路径；
+>    没有给出时先用 `glob_search(pattern="**", path="<工作区 files 目录的绝对路径>")` 定位。
+>    **禁止**传相对路径、`file://xxx`、`/xxx.docx` 这类磁盘上不存在的路径，**禁止**猜路径。
+> 3. **`doc_reader` 返回 `error`/`hint` 时**，按 hint 给出的候选绝对路径重试；
+>    **禁止**用 `read_file` 读 `.docx/.pptx/.xlsx/.pdf`（它们是 ZIP/二进制，只会得到乱码）。
+> 4. `.doc` / `.xls` / `.ppt` 旧格式**不支持解析**：请用户在 Office 里另存为
+>    `.docx/.xlsx/.pptx` 后重新上传，不要尝试用命令行转换。
+> 5. 扫描件/图片型 PDF 需要看画面时改用 `view_image`（传绝对路径）。
+> 6. 创建/编辑文档的脚本流程（`scripts/` 下的流程）不受此限；但**读取内容**一律走 `doc_reader`。
+
 
 # PPTX 技能
 

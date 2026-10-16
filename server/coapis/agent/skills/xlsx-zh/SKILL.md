@@ -3,7 +3,7 @@ name: xlsx
 description: "当电子表格文件是主要输入或输出时使用此技能。这意味着用户想要：打开、读取、编辑或修复现有的 .xlsx、.xlsm、.csv 或 .tsv 文件（例如添加列、计算公式、格式化、制图、清理混乱数据）；从头创建新的电子表格或从其他数据源创建；或在表格文件格式之间进行转换。当用户通过名称或路径引用电子表格文件时特别触发——即使是随意提及（如\"我下载目录里的 xlsx\"）——并且想对其进行操作或从中生成内容。也适用于将混乱的表格数据文件（格式错误的行、错位的表头、垃圾数据）清理或重构为规范的电子表格。交付物必须是电子表格文件。当主要交付物是 Word 文档、HTML 报告、独立 Python 脚本、数据库管道或 Google Sheets API 集成时不触发，即使涉及表格数据也不触发。"
 license: Proprietary. LICENSE.txt has complete terms
 metadata:
-  builtin_skill_version: "1.1"
+  builtin_skill_version: "1.2"
 metadata:
   coapis:
     priority: on-demand
@@ -12,6 +12,23 @@ metadata:
 > **重要说明：** 所有 `scripts/` 路径均相对于此技能目录。
 > 运行方式：`cd {this_skill_dir} && python scripts/...`
 > 或使用 `execute_shell_command` 的 `cwd` 参数。
+
+<!-- 读取协议：由基础能力治理加入，优先级高于下文所有读取方式 -->
+> **读取协议（最高优先级）**
+>
+> 1. **读取已有文档内容一律用 `doc_reader`**：`doc_reader(action="read", file_path="<绝对路径>")`。
+>    下文的 `pandoc` / `pdftotext` / `soffice` / 解压 XML 等读取方式**镜像里没有安装**，
+>    且护栏会拒绝 `unzip` / `tar` / `cat` / `head`——**不要尝试，也不要"先探一下"**。
+> 2. **路径必须是真实绝对路径**：优先使用用户消息里"（绝对路径: /…）"给出的路径；
+>    没有给出时先用 `glob_search(pattern="**", path="<工作区 files 目录的绝对路径>")` 定位。
+>    **禁止**传相对路径、`file://xxx`、`/xxx.docx` 这类磁盘上不存在的路径，**禁止**猜路径。
+> 3. **`doc_reader` 返回 `error`/`hint` 时**，按 hint 给出的候选绝对路径重试；
+>    **禁止**用 `read_file` 读 `.docx/.pptx/.xlsx/.pdf`（它们是 ZIP/二进制，只会得到乱码）。
+> 4. `.doc` / `.xls` / `.ppt` 旧格式**不支持解析**：请用户在 Office 里另存为
+>    `.docx/.xlsx/.pptx` 后重新上传，不要尝试用命令行转换。
+> 5. 扫描件/图片型 PDF 需要看画面时改用 `view_image`（传绝对路径）。
+> 6. 创建/编辑文档的脚本流程（`scripts/` 下的流程）不受此限；但**读取内容**一律走 `doc_reader`。
+
 
 # 输出要求
 

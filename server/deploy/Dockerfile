@@ -167,10 +167,19 @@ RUN pip install --no-cache-dir "mcp==1.29.0" \
 
 # 懒加载功能依赖（对应 pyproject extras: documents / search / matrix）
 # 之前全仓库无声明，镜像里这些功能在运行时静默不可用
+# ⚠ 镜像依赖 = pyproject 核心依赖 + 这一段显式安装；server/requirements.txt
+#   只是声明镜像（自检/安装器对照用），补漏必须落在这里才会真正进镜像。
+# 文档解析是基础能力（doc_reader）：缺任何一个，"读文档"就会当场失败。
 RUN pip install --no-cache-dir \
     "pymupdf4llm>=0.1.0" \
     "python-pptx>=1.0.0" \
     "openpyxl>=3.1.0" \
+    "markitdown[docx,pptx,xlsx,pdf]>=0.1.0" \
+    "pdfplumber>=0.11.0" \
+    "PyPDF2>=3.0.0" \
+    "xlrd>=2.0.1" \
+    "xlwt>=1.3.0" \
+    "pandas>=2.0.0" \
     "duckduckgo_search>=8.0.0" \
     "tavily-python>=0.5.0" \
     "markdown-it-py>=3.0.0" \
