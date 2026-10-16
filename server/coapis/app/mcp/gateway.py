@@ -57,15 +57,25 @@ class MCPGateway:
             client_key = getattr(client, "name", None) or getattr(client, "client_key", None)
             if not client_key:
                 continue
-            try:
-                mcp_tools = await client.list_tools()
-            except Exception as exc:
-                logger.debug(
-                    "MCPGateway.list_gateway_tools: client=%s list_tools failed: %s",
-                    client_key,
-                    exc,
-                )
-                continue
+
+            # 如果客户端已连接，正常获取工具列表
+            if getattr(client, "is_connected", False):
+                try:
+                    mcp_tools = await client.list_tools()
+                except Exception as exc:
+                    logger.debug(
+                        "MCPGateway.list_gateway_tools: client=%s list_tools failed: %s",
+                        client_key,
+                        exc,
+                    )
+                    continue
+            else:
+                # 客户端处于 pending 状态（重连中），使用缓存的工具列表降级返回
+                cached = getattr(client, "_cached_tools", None)
+                if cached is None:
+                    # 没有缓存，跳过该 client
+                    continue
+                mcp_tools = cached
 
             for mcp_tool in mcp_tools:
                 tool_name = getattr(mcp_tool, "name", "")

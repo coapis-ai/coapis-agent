@@ -258,6 +258,19 @@ class StdIOStatefulClient(StatefulClientBase):
                         )
                         self._retry_count = 0
 
+                    # 新连接建立后，主动刷新工具缓存（确保列表最新）
+                    try:
+                        tools = await self.list_tools()
+                        logger.debug(
+                            f"MCP client '{self.name}' refreshed {len(tools)} tools "
+                            f"after reconnection.",
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"MCP client '{self.name}' failed to refresh tools "
+                            f"after reconnection: {e}",
+                        )
+
                     # Wait for reload or stop signal
                     while (
                         not self._reload_event.is_set()
@@ -268,7 +281,8 @@ class StdIOStatefulClient(StatefulClientBase):
                     # Clear state before exiting context
                     self.session = None
                     self.is_connected = False
-                    self._cached_tools = None
+                    # 保留 _cached_tools 缓存，供重连窗口期降级使用
+                    # self._cached_tools = None  ← 注释掉，不立即清空
                     if self._identity_registry is not None:
                         self._identity_registry.clear()
 
@@ -292,7 +306,8 @@ class StdIOStatefulClient(StatefulClientBase):
                     )
                 self.session = None
                 self.is_connected = False
-                self._cached_tools = None
+                # 保留 _cached_tools 缓存，供重连窗口期降级使用
+                # self._cached_tools = None  ← 注释掉，不立即清空
                 self._ready_event.clear()
                 delay = _next_retry_delay(self._retry_count)
                 if self._retry_count == _MAX_RETRIES + 1:
@@ -710,6 +725,19 @@ class HttpStatefulClient(StatefulClientBase):
                         )
                         self._retry_count = 0
 
+                    # 新连接建立后，主动刷新工具缓存（确保列表最新）
+                    try:
+                        tools = await self.list_tools()
+                        logger.debug(
+                            f"MCP client '{self.name}' refreshed {len(tools)} tools "
+                            f"after reconnection.",
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"MCP client '{self.name}' failed to refresh tools "
+                            f"after reconnection: {e}",
+                        )
+
                     # Wait for reload or stop signal
                     while (
                         not self._reload_event.is_set()
@@ -720,7 +748,8 @@ class HttpStatefulClient(StatefulClientBase):
                     # Clear state before exiting context
                     self.session = None
                     self.is_connected = False
-                    self._cached_tools = None
+                    # 保留 _cached_tools 缓存，供重连窗口期降级使用
+                    # self._cached_tools = None  ← 注释掉，不立即清空
                     if self._identity_registry is not None:
                         self._identity_registry.clear()
 
@@ -742,7 +771,8 @@ class HttpStatefulClient(StatefulClientBase):
                     )
                 self.session = None
                 self.is_connected = False
-                self._cached_tools = None
+                # 保留 _cached_tools 缓存，供重连窗口期降级使用
+                # self._cached_tools = None  ← 注释掉，不立即清空
                 self._ready_event.clear()
                 delay = _next_retry_delay(self._retry_count)
                 if self._retry_count == _MAX_RETRIES + 1:
