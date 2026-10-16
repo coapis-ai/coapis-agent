@@ -1,0 +1,38 @@
+{
+  "extension_id": "com.analytics.charts",
+  "name": "Analytics Charts Extension",
+  "version": "1.0.0-alpha",
+  "description": "C2A extension for rendering analytics charts (bar, line, pie charts) in C2A messages.",
+  "author": "CoApis Architecture Team",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "chart_type": {
+        "type": "string",
+        "enum": ["bar", "line", "pie"],
+        "description": "Type of chart to render"
+      },
+      "data": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "values": {
+            "type": "array",
+            "items": {"type": "number"}
+          }
+        },
+        "required": ["labels", "values"]
+      },
+      "title": {
+        "type": "string",
+        "description": "Chart title"
+      }
+    },
+    "required": ["chart_type", "data"]
+  },
+  "renderer_component": "@coapis/c2a-renderer-react/dist/components/Charts/AnalyticsChart.jsx",
+  "status": "experimental"
+}

@@ -1,0 +1,6 @@
+packages:
+  - 'typescript/*'
+  - 'python/*'
+  - 'examples/*'
+  - 'docs-site'
+  - '!**/test/**'

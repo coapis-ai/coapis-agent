@@ -1,0 +1,20 @@
+{
+  "name": "coapis-c2a-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CoApis Chat-to-Action (C2A) Protocol & SDK Monorepo",
+  "scripts": {
+    "build:ts": "pnpm --filter @coapis/c2a-core-types build && pnpm --filter @coapis/c2a-renderer-react build && pnpm --filter @coapis/c2a-renderer-vue build",
+    "type-check:ts": "pnpm --filter @coapis/c2a-core-types type-check && pnpm --filter @coapis/c2a-renderer-react type-check && pnpm --filter @coapis/c2a-renderer-vue type-check",
+    "build:python": "make build-python",
+    "dev:sandbox": "pnpm --filter @coapis/c2a-react-sandbox dev",
+    "docs:dev": "pnpm --filter @coapis/c2a-docs dev",
+    "build:all": "pnpm run build:ts && make build-python"
+  },
+  "workspaces": [
+    "typescript/*",
+    "examples/*",
+    "docs-site"
+  ],
+  "packageManager": "pnpm@8.15.0"
+}

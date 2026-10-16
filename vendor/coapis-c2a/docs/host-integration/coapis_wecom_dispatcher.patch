@@ -1,0 +1,22 @@
+diff --git a/server/coapis/app/channels/wecom/cards/dispatcher.py b/server/coapis/app/channels/wecom/cards/dispatcher.py
+index 0ba4c88..dcff93d 100755
+--- a/server/coapis/app/channels/wecom/cards/dispatcher.py
++++ b/server/coapis/app/channels/wecom/cards/dispatcher.py
+@@ -110,6 +110,17 @@ class WecomCardHandler:
+                 handle=tool_guard.handle,
+             )
+         )
++        
++        # Register C2A extension card
++        self.register(
++            CardKind(
++                name=c2a_extension.NAME,
++                message_type=c2a_extension.MESSAGE_TYPE,
++                task_id_prefix=c2a_extension.TASK_ID_PREFIX,
++                render=c2a_extension.render,
++                handle=c2a_extension.handle,
++            )
++        )
+ 
+     # ------------------------------------------------------------------
+     # Outbound: render a card for an event

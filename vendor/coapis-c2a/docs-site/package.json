@@ -1,0 +1,18 @@
+{
+  "name": "@coapis/c2a-docs",
+  "version": "1.0.0-alpha",
+  "description": "C2A Protocol Documentation Site - VitePress",
+  "private": true,
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "vitepress build docs",
+    "preview": "vitepress preview docs"
+  },
+  "dependencies": {
+    "@coapis/c2a-core-types": "workspace:*",
+    "@coapis/c2a-renderer-react": "workspace:*"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0-rc.45"
+  }
+}
