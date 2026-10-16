@@ -333,69 +333,6 @@ async def delete_a_user(request: Request, username: str):
     return {"message": f"用户 {username} 已删除"}
 
 
-@router.post("/seafile-token")
-async def get_seafile_token(request: Request):
-    """获取 Seafile SSO Token。
-    
-    用于前端 iframe 集成，将 CoApis 用户认证映射到 Seafile。
-    
-    Request Body:
-        username: CoApis 用户名
-    
-    Response:
-        token: Seafile auth token
-        service_url: Seafile 服务地址
-    """
-    user_info = get_current_user(request)
-    username = user_info["username"]
-    
-    # 获取用户密码（用于 Seafile 认证）
-    user_data = get_user_with_creds(username)
-    if not user_data:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    
-    # 使用 SeafileClient 获取 Token
-    try:
-        from ..services import SeafileClient, SeafileConfig
-        
-        # 从环境变量或配置加载 Seafile 配置
-        import os
-        seafile_config = SeafileConfig(
-            service_url=os.getenv("SEAFILE_SERVICE_URL", "http://localhost:9000"),
-            admin_username=os.getenv("SEAFILE_ADMIN_USER", "admin"),
-            admin_password=os.getenv("SEAFILE_ADMIN_PASSWORD", "CoApis2026!"),
-        )
-        
-        client = SeafileClient(seafile_config)
-        
-        # 使用用户凭据登录 Seafile
-        # Seafile 使用 email 作为用户名
-        email = f"{username}@coapis.local"
-        password = user_data.get("password_hash", "")
-        
-        # 注意：这里需要原始密码，但 user_store 只存储 hash
-        # 实际实现时需要同步原始密码或使用其他方式
-        # 暂时使用 admin token 为用户生成 token
-        admin_token = await client.login(seafile_config.admin_username, seafile_config.admin_password)
-        
-        # 为用户创建临时 token（简化实现）
-        # 生产环境应使用 Seafile 的 SSO 功能
-        return {
-            "token": admin_token,
-            "service_url": seafile_config.service_url,
-            "username": username,
-        }
-    except ImportError:
-        raise HTTPException(status_code=503, detail="Seafile 服务未配置")
-    except Exception as e:
-        logger.error(f"Failed to get Seafile token for {username}: {e}")
-        raise HTTPException(status_code=500, detail=f"获取 Seafile Token 失败: {str(e)}")
-
-
-# Import get_user_with_creds for the seafile-token endpoint
-from ..user_store import get_user_with_creds
-
-
 # ---------------------------------------------------------------------------
 # Onboarding endpoints
 # ---------------------------------------------------------------------------

@@ -1,13 +1,21 @@
 # -*- coding: utf-8 -*-
-"""External Identity Authentication Router - Community Version (JSON File Storage)
+"""External Identity Authentication Router — 模型A/模型B 入口（薄适配器）。
 
-Provides API endpoints for external system SSO callback, identity binding, and unbinding.
+入站登录业务（查绑定 → 死绑定自愈 → 匹配已有账号 → 建号 → 写绑定 → 发 token
+→ 审计）**只有一份**，在 :mod:`coapis.app.external_login_core`。本文件只负责
+各入口特有的**验签**与**响应形态**：
 
-模型A（SSO 跳转）完整链路：
-    登录页按钮 → GET /external/login-state（签发一次性 state + login_url）
-    → 浏览器 302 到外部系统登录页 → 外部系统签名回调
-    → 前端 /login/callback 落地页 → POST /external/login
-    → 验签 → 验 state（一次性）→ 查绑定 / 自动建用户 → 发真 token
+    模型A（SSO 跳转）
+        GET  /api/auth/external/login-state   签发一次性 state + login_url
+        POST /api/auth/external/login         state 校验 + 防重放 + 验签 → 核心
+    模型B（凭证直登）
+        POST /api/auth/external/credential-login   调外部登录 API 验凭证 → 核心
+    绑定管理
+        POST /api/auth/users/identity/bind | /unbind
+        POST /api/auth/external/auto-login          管理员代登
+
+旧契约入口 ``/api/external/login``（生产主路径）见 ``app/external_login.py``，
+同样调用本核心 —— 两个入口共用同一份登录业务，不再各写一套。
 
 安全要点：
     - state 一次性（防 CSRF），文件原子写，TTL 10 分钟
@@ -16,415 +24,38 @@ Provides API endpoints for external system SSO callback, identity binding, and u
     - secret 永不出现在 /systems 响应中
 """
 import json
-import hmac
-import hashlib
-import time
-import os
-import re
-import secrets
-import tempfile
-import shutil
-import threading
 import logging
-from fastapi import APIRouter, Request, HTTPException
-from typing import Dict, Any, List, Optional, Tuple
+import secrets
+import time
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException, Request
+
+from .. import external_login_core as core
+from ..external_login_core import (  # noqa: F401  (re-export：测试与旧调用方沿用)
+    DEFAULT_CALLBACK_TTL,
+    EXTERNAL_SSO_SECRET,
+    MAPPINGS_FILE,
+    STATE_FILE,
+    STATE_TTL,
+    _load_states,
+    _render_template,
+    _save_states,
+    _state_cache,
+    _state_lock,
+    _validate_redirect,
+    find_binding_by_external,
+    load_bindings,
+    resolve_secret,
+    save_bindings_atomic,
+    sign_hmac,
+    verify_signature,
+)
 
 logger = logging.getLogger(__name__)
 
-# Mapping file path and shared secret (from environment variable)
-from ...constant import SYSTEM_DIR
-
-# 与 users.json/auth.json 同一运行时数据目录（避免相对路径受 CWD 影响）
-MAPPINGS_FILE = str(SYSTEM_DIR / "external_identity_mappings.json")
-STATE_FILE = str(SYSTEM_DIR / "external_login_states.json")
-
-# 与 external_identity.py 出站断言同一个 secret：外部系统验签零新依赖
-EXTERNAL_SSO_SECRET = os.getenv("COAPIS_JWT_SECRET_KEY") or os.getenv("EXTERNAL_SSO_SECRET") or "default_secret_key_community"
-
-# state 有效期（秒）：10 分钟足够完成一次人工登录跳转
-STATE_TTL = 600
-# 回调 timestamp 默认防重放窗口（秒），可被系统配置 sso.callback.timestamp_ttl 覆盖
-DEFAULT_CALLBACK_TTL = 300
-
 # 注意：前缀用短形式 /auth —— 顶层 api_router 已带 /api 前缀，最终 URL 为 /api/auth/...
 router = APIRouter(prefix="/auth", tags=["external_auth"])
-
-# state 内存缓存（mtime 失效），避免高频登录时反复读文件
-_state_cache: Dict[str, Any] = {"mtime": -1.0, "data": {}}
-_state_lock = threading.RLock()  # 可重入：_load_states 在端点持锁区间内会被再次调用
-
-
-# ---------------------------------------------------------------------------
-# 文件 IO（原子写，防并发覆盖）
-# ---------------------------------------------------------------------------
-
-def _atomic_write_json(path: str, data: Dict[str, Any]) -> None:
-    """Atomically write a JSON file (temp file + rename)."""
-    dir_name = os.path.dirname(path) or "."
-    os.makedirs(dir_name, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=dir_name)
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        shutil.move(temp_path, path)
-    except Exception:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        raise
-
-
-def _get_ext_store():
-    """Return the enterprise external identity store, or None (community JSON)."""
-    try:
-        from ...foundation.repository_factory import RepositoryFactory
-        if RepositoryFactory.is_initialized():
-            return RepositoryFactory.get_external_identity_store()
-    except (RuntimeError, ImportError, Exception):
-        pass
-    return None
-
-
-def load_bindings() -> Dict[str, Any]:
-    """Safely read local JSON mapping file"""
-    store = _get_ext_store()
-    if store:
-        return {"bindings": store.load_bindings()}
-    if not os.path.exists(MAPPINGS_FILE):
-        return {"bindings": []}
-    with open(MAPPINGS_FILE, 'r', encoding='utf-8') as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return {"bindings": []}
-
-
-def save_bindings_atomic(mappings_data: Dict[str, Any]):
-    """Atomically write back JSON file to prevent concurrent overwrite"""
-    store = _get_ext_store()
-    if store:
-        store.save_bindings(mappings_data.get("bindings", []))
-        return
-    _atomic_write_json(MAPPINGS_FILE, mappings_data)
-
-
-def _load_states() -> Dict[str, Any]:
-    """Load login states (with mtime cache)."""
-    with _state_lock:
-        try:
-            mtime = os.path.getmtime(STATE_FILE)
-        except OSError:
-            return {}
-        if mtime != _state_cache["mtime"]:
-            try:
-                with open(STATE_FILE, 'r', encoding='utf-8') as f:
-                    _state_cache["data"] = json.load(f)
-                _state_cache["mtime"] = mtime
-            except (OSError, json.JSONDecodeError):
-                return {}
-        return _state_cache["data"]
-
-
-def _save_states(states: Dict[str, Any]) -> None:
-    """Persist states, dropping expired entries, atomically."""
-    now = time.time()
-    clean = {k: v for k, v in states.items()
-             if isinstance(v, dict) and v.get("exp", 0) > now}
-    _atomic_write_json(STATE_FILE, clean)
-
-
-def find_binding_by_external(mappings_data: Dict[str, Any], provider: str, external_id: str) -> Dict[str, Any]:
-    """Find matching binding record in memory"""
-    for b in mappings_data.get("bindings", []):
-        if (b.get("provider") == provider
-                and str(b.get("external_id")) == str(external_id)
-                and str(b.get("status", 1)) == "1"):
-            return b
-    return None
-
-
-# ---------------------------------------------------------------------------
-# 补全绑定关系：登录时先匹配已有本地用户（未绑定 → 不新建，而是补绑定）
-# ---------------------------------------------------------------------------
-
-def _find_local_user_by_username(candidates: List[str]) -> Optional[str]:
-    """大小写不敏感：在本地用户中查找用户名匹配任一 *candidates* 的用户。
-
-    返回匹配到的本地 username；无匹配返回 None。
-    """
-    from ..user_store import list_users
-
-    norm = {str(c).strip().lower() for c in candidates if c and str(c).strip()}
-    if not norm:
-        return None
-    for u in list_users():
-        key = u.get("username")
-        if key and str(key).strip().lower() in norm:
-            return str(u["username"])
-    return None
-
-
-def _try_match_existing_local_user(
-    um: Dict[str, Any],
-    external_id: str,
-    provider: str,
-) -> Optional[str]:
-    """自动建用户前，按确定性身份查找已有本地用户（大小写不敏感）。
-
-    A1 治本规则：外部身份的本地账号映射只认 **前缀_外部ID** 这一个确定性键
-    （与自动建用户命名同源：同一系统同一人恒得同账号）。
-    不再使用输入登录名/姓名做匹配——输入是易变值，用登录名匹配会让
-    同一外部身份在不同输入下落到不同本地账号（分身账号）。
-
-    um: 系统的 user_mapping 配置。
-    external_id: 外部系统用户ID。
-    provider: 外部系统 ID（未配置前缀时与 auto_create 路径一样回退用它）。
-
-    match_existing 默认 True（未配置 = 开）；False 时跳过匹配直接走自动建用户。
-    旧配置 match_by 已废弃（无论配什么都只按 前缀_外部ID 匹配）。
-    """
-    if um.get("match_existing", True) is False:
-        return None
-    # 与 auto_create 路径完全同源：未配置前缀时回退 provider，两条路径恒一致
-    prefix = (str(um.get("username_prefix") or "")).strip() or provider
-    ext = _sanitize_external_id(external_id)
-    if not prefix or not ext:
-        return None
-    return _find_local_user_by_username([f"{prefix}_{ext}"])
-
-
-def _norm_display_name(name: Any) -> str:
-    """显示名归一化：NFKC + 去首尾空白 + 小写 + 压缩内部空白。"""
-    import unicodedata
-
-    if not name:
-        return ""
-    s = unicodedata.normalize("NFKC", str(name)).strip().lower()
-    return " ".join(s.split())
-
-
-def _try_match_by_display_name(
-    um: Dict[str, Any],
-    external_name: str,
-) -> Tuple[Optional[str], bool]:
-    """自动建用户前，按"显示名"收养已有本地账号（治分身账号之根）。
-
-    external_name 必须由已认证的外部系统签发（SSO 回调直送 / 模型B 登录 API
-    返回值），可信方可收养；用户表单输入的登录名永不参与匹配。
-
-    严格防歧义规则：
-    - 只考虑**尚未绑定任何外部系统**的本地账号（绝不抢占已绑定账号）；
-    - 恰好 1 个命中 → 返回 ``(username, False)``，收养之；
-    - 0 个命中 → 返回 ``(None, False)``，照常走自动建用户；
-    - ≥2 个命中 → 返回 ``(None, True)``，调用方必须拒绝（403），绝不猜测。
-
-    ``um.match_display_name`` 可关（默认 True）；``match_existing=False`` 时
-    整个"建号前匹配"（含显示名收养）一并关闭，保持旧语义。
-    """
-    if um.get("match_existing", True) is False:
-        return None, False
-    if um.get("match_display_name", True) is False:
-        return None, False
-    target = _norm_display_name(external_name)
-    if not target:
-        return None, False
-
-    from ..user_store import list_users
-
-    bound_users = {
-        str(b.get("user_id"))
-        for b in load_bindings().get("bindings", [])
-        if str(b.get("status", 1)) == "1"
-    }
-    hits = [
-        str(u["username"])
-        for u in list_users()
-        if _norm_display_name(u.get("display_name")) == target
-        and str(u.get("username")) not in bound_users
-    ]
-    if len(hits) == 1:
-        return hits[0], False
-    if len(hits) > 1:
-        return None, True
-    return None, False
-
-
-def _bind_matched_existing_user(
-    username: str,
-    provider: str,
-    external_id: str,
-    external_name: str,
-    mappings: Dict[str, Any],
-    request: Any,
-) -> bool:
-    """匹配到已有本地用户：写绑定（source=auto_matched）+ 补工作区（best-effort）。
-
-    不重复建用户、不改密码；仅补全外部系统用户授权中的绑定数据。
-    返回 True 表示绑定成功。
-    """
-    from ..user_store import get_user as _get_user, update_user as _update_user
-
-    existing_user = _get_user(username)
-    if existing_user is None:
-        return False
-
-    now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    mappings.setdefault("bindings", []).append({
-        "user_id": username,
-        "provider": provider,
-        "external_id": external_id,
-        "external_name": external_name or None,
-        "source": "auto_matched",
-        "status": 1,
-        "created_at": now_str,
-        "last_login_at": now_str,
-        "login_count": 1,
-    })
-    save_bindings_atomic(mappings)
-
-    # display_name 还是默认值（=username）时，用外部姓名更新
-    if external_name and existing_user.get("display_name") in (None, "", username):
-        try:
-            _update_user(username, display_name=external_name)
-            logger.info("Auto-matched: updated display_name for %s to '%s'", username, external_name)
-        except Exception as e:
-            logger.warning("Auto-matched: failed to update display_name: %s", e)
-
-    # best-effort：补初始化工作区（防预建用户从未跑过初始化）
-    try:
-        from ..user_provisioning import init_user_workspace
-        init_user_workspace(
-            username,
-            display_name=external_name or existing_user.get("display_name"),
-            request=request,
-        )
-    except Exception as e:
-        logger.warning("Auto-matched: workspace init skipped for %s: %s", username, e)
-    return True
-
-
-def _provision_local_user(
-    username: str,
-    display_name: str,
-    role: str,
-    request: Any,
-) -> bool:
-    """死绑定自愈：本地用户丢失时自动重建（幂等）。
-
-    场景：绑定存在（binding.user_id → 本地用户名），但本地用户记录已不存在
-    （如历史命名迁移/清理时删了用户但没更新绑定）。此时不应让用户永远
-    登不进来，而是按原用户名重建账号，保证下次登录可用。
-
-    复用自动建用户的同一套逻辑：user_store.create_user + SQLite 同步
-    （best-effort）+ 工作区初始化（best-effort）。已存在则直接返回 True。
-
-    返回 True 表示操作后用户可用。
-    """
-    from ..user_store import get_user, create_user
-
-    if get_user(username) is not None:
-        return True
-
-    dn = display_name or username
-    random_password = secrets.token_urlsafe(16)
-    if not create_user(username, random_password,
-                       display_name=dn, role=role, password_set_by_user=False):
-        logger.error("Re-provision failed: create_user returned False for %s", username)
-        return False
-
-    # user_store.create_user 现在直接写 SQLite（coapis.db），无需再同步到 user_system。
-
-    # 初始化用户工作区（agent/skills）— best-effort
-    try:
-        from ..user_provisioning import init_user_workspace
-        init_user_workspace(username, display_name=dn, request=request)
-    except Exception as e:
-        logger.warning("Re-provision: workspace init skipped for %s: %s", username, e)
-
-    logger.info("Re-provisioned local user %s (dead binding self-heal, display_name=%s, role=%s)",
-                username, dn, role)
-    return get_user(username) is not None
-
-
-# ---------------------------------------------------------------------------
-# 签名 / state 工具
-# ---------------------------------------------------------------------------
-
-def _resolve_system_secret(system: Dict[str, Any]) -> str:
-    """Per-system secret if configured, else the global shared secret."""
-    if system.get("shared_secret"):
-        return system["shared_secret"]
-    return EXTERNAL_SSO_SECRET
-
-
-def _render_template(template: str, values: Dict[str, Any]) -> str:
-    """Fill ``{placeholder}`` tokens in *template* from *values*.
-
-    Unknown placeholders are left as-is (so misconfigured templates are
-    visible rather than silently emptied).
-    """
-    if not template:
-        return ""
-
-    def _sub(m):
-        key = m.group(1)
-        return str(values.get(key, m.group(0)))
-
-    return re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", _sub, template)
-
-
-def _validate_redirect(redirect: str) -> str:
-    """Redirect 白名单：仅站内 / 开头，禁协议相对 //（防开放重定向）。"""
-    if not redirect:
-        return "/chat"
-    if redirect.startswith("/") and not redirect.startswith("//"):
-        return redirect
-    return "/chat"
-
-
-def _sanitize_external_id(external_id):
-    """从外部 ID 提取可用作用户名片段的标识。
-
-    保留字母/数字/下划线/CJK/连字符，其余替换为 `_`。
-    不可用（清洗后为空）时返回 None → 调用方回退旧序号规则。
-
-    统一规则（v2）：SSO 回调与凭证直登两条建号路径都用"前缀 + 外部ID"命名，
-    保证同一外部系统同一人在任何入口进来都是同一个 AI 账号（binding 命中复用）。
-    """
-    import re
-    v = str(external_id or "").strip()
-    if not v:
-        return None
-    out = re.sub(r"[^\w-]", "_", v).strip("_")[:64].rstrip("_")
-    return out or None
-
-
-def _generate_username(prefix: str, padding: int, seq_start: int, external_id=None) -> str:
-    """Generate the next auto username.
-
-    优先（v2）：``{prefix}_{外部ID}`` —— 同一系统同一个人恒得同名；碰撞时尾部追加 _01/_02…直到唯一。
-    回退（无可用外部ID）：旧规则 ``<prefix>_<seq>``（零填充）。
-
-    序号 = 现有用户名中匹配 ``<prefix>_<数字>`` 的最大序号 + 1 —— 单一事实源，
-    永不漂移，无需计数器字段。碰撞时继续递增直到唯一。
-    """
-    from ..user_store import get_user
-
-    ext = _sanitize_external_id(external_id)
-    if prefix and ext:
-        base = f"{prefix}_{ext}"
-        candidate, n = base, 0
-        while get_user(candidate) is not None:
-            n += 1
-            candidate = f"{base}_{n:02d}"
-        return candidate
-
-    seq = max(seq_start, 1)
-    candidate = f"{prefix}_{seq:0{max(padding, 1)}d}"
-    while get_user(candidate) is not None:
-        seq += 1
-        candidate = f"{prefix}_{seq:0{max(padding, 1)}d}"
-    return candidate
-
 
 # ---------------------------------------------------------------------------
 # 端点：登录页可见的外部系统（公开，无 secret）
@@ -556,15 +187,14 @@ async def get_external_login_state(request: Request, provider: str = ""):
 
 @router.post("/external/login")
 async def external_login(request: Request):
-    """外部系统 SSO 回调登录（模型A 核心端点）。
+    """外部系统 SSO 回调登录（模型A 核心端点）—— 验签后交给入站登录核心。
 
     请求体：
         provider（可选，缺省时从 state 解析）, external_id, timestamp, signature, state,
         external_name（可选，用于显示名）, redirect（可选，站内路径）
 
-    流程：state 只读探测（解析 provider）→ 防重放 → 验签 → 消费 state
-    （一次性）→ 查绑定 →（未绑定 + auto_create → 自动建用户 + 写绑定）
-    → 发真 token（与账号密码登录完全兼容）。
+    本端点只做四件事：state 校验 → 防重放 → 验签 → 消费 state；
+    之后「查绑定/自愈/匹配/建号/写绑定/发 token/审计」全部由核心完成。
     """
     try:
         data = await request.json()
@@ -588,8 +218,6 @@ async def external_login(request: Request):
         )
 
     from ..external_identity import get_system_by_id
-    from ..user_store import get_user, create_user, touch_last_login
-    from ..auth import create_token
 
     # 1. state 只读探测：provider 可由 state 还原（外部系统 302 回来只带 query 参数）
     states = _load_states()
@@ -621,7 +249,7 @@ async def external_login(request: Request):
 
     # 3. 验签（签名串模板可配，默认固定格式保持旧配置兼容：
     #    provider=..&external_id=..&timestamp=..，HMAC-SHA256 hex）
-    secret = _resolve_system_secret(system)
+    secret = resolve_secret(system)
     sign_string = callback_cfg.get("sign_string") or ""
     if not sign_string:
         sign_string = f"provider={provider}&external_id={external_id}&timestamp={timestamp}"
@@ -631,179 +259,37 @@ async def external_login(request: Request):
             "external_id": external_id,
             "timestamp": str(timestamp),
         })
-    expected_signature = hmac.new(
-        secret.encode('utf-8'),
-        sign_string.encode('utf-8'),
-        hashlib.sha256,
-    ).hexdigest()
-    if not hmac.compare_digest(expected_signature, signature):
+    if not verify_signature(secret, sign_string, signature):
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     # 4. 消费 state（一次性，验签通过才消费）
     states.pop(state, None)
     _save_states(states)
 
-    # 5. 查绑定 / 自动建用户
-    external_name = str(data.get("external_name") or "").strip()
-    mappings = load_bindings()
-    binding = find_binding_by_external(mappings, provider, external_id)
-
-    auto_created = False
-    first_login = False
-
-    if binding:
-        username = binding["user_id"]
-        existing_user = get_user(username)
-        if existing_user is None:
-            # 死绑定自愈：绑定在但本地用户丢了 → 按原用户名重建（幂等）
-            if not _provision_local_user(username, external_name, "user", request):
-                raise HTTPException(
-                    status_code=500,
-                    detail="本地用户已丢失且自动恢复失败，请联系管理员检查用户数据",
-                )
-            existing_user = get_user(username)
-        # 首次登录判定必须在 touch_last_login 之前（与主登录一致）
-        first_login = existing_user.get("last_login") is None
-        # 记录本次登录（审计字段）
-        binding["last_login_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        binding["login_count"] = int(binding.get("login_count") or 0) + 1
-        if external_name and not binding.get("external_name"):
-            binding["external_name"] = external_name
-        save_bindings_atomic(mappings)
-        touch_last_login(username)
-    else:
-        um = system.get("user_mapping") or {}
-
-        # ── 补全绑定关系：自动建用户前匹配已有本地用户（默认开） ──
-        # A1 治本：① 确定性身份键（前缀_外部ID）；② 显示名收养（恰1个且未绑定）
-        # 歧义（同名≥2）→ 403 拒绝，绝不猜测 —— 保证后续账号无重复无歧义
-        # 信任边界：external_name 由已通过认证的外部系统签发（可信），
-        # 用户表单输入的登录名永不参与匹配。
-        ext_login = _sanitize_external_id(external_id)
-        matched = _try_match_existing_local_user(um, external_id, provider)
-        if matched is None:
-            matched, ambiguous = _try_match_by_display_name(um, external_name)
-            if ambiguous:
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        f"存在多个名为'{external_name}'的未绑定本地账号，"
-                        "无法安全自动绑定。请联系管理员手动绑定。"
-                    ),
-                )
-
-        if matched is not None and _bind_matched_existing_user(
-                matched, provider, external_id, external_name, mappings, request):
-            username = matched
-            existing_user = get_user(matched)
-            first_login = existing_user.get("last_login") is None
-            touch_last_login(matched)
-            logger.info(
-                "SSO: auto-matched external identity to existing user %s (provider=%s, external_id=%s)",
-                matched, provider, external_id,
-            )
-        elif not um.get("auto_create"):
-            raise HTTPException(
-                status_code=403,
-                detail="未绑定该外部系统账号，且系统未开启自动创建用户。请联系管理员绑定。",
-            )
-        else:
-            prefix = (str(um.get("username_prefix") or "")).strip() or provider
-            try:
-                padding = int(um.get("seq_padding") or 4)
-            except (TypeError, ValueError):
-                padding = 4
-            try:
-                seq_start = int(um.get("seq_start") or 1)
-            except (TypeError, ValueError):
-                seq_start = 1
-
-            username = _generate_username(prefix, padding, seq_start, ext_login)
-
-            # 显示名来源
-            source = um.get("display_name_source", "external_name")
-            if source == "external_name":
-                display_name = external_name or username
-            elif source == "external_id":
-                display_name = str(external_id)
-            else:
-                display_name = username
-
-            default_role = um.get("default_role") or "user"
-            random_password = secrets.token_urlsafe(16)
-
-            if not create_user(username, random_password,
-                               display_name=display_name, role=default_role, password_set_by_user=False):
-                raise HTTPException(status_code=500, detail="Failed to create user")
-
-            # user_store.create_user 现在直接写 SQLite（coapis.db），无需再同步到 user_system。
-
-            # 初始化用户工作区（agent/skills/workflows）— best-effort
-            default_agent_id = f"user:{username}"
-            try:
-                from ..user_provisioning import init_user_workspace
-                agent_id = init_user_workspace(username, display_name=display_name, request=request)
-                if agent_id:
-                    default_agent_id = agent_id
-            except Exception as e:
-                logger.error("Failed to init workspace for auto-created user %s: %s", username, e)
-
-            # 写绑定
-            now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            mappings.setdefault("bindings", []).append({
-                "user_id": username,
-                "provider": provider,
-                "external_id": external_id,
-                "external_name": external_name or None,
-                "source": "auto",
-                "status": 1,
-                "created_at": now_str,
-                "last_login_at": now_str,
-                "login_count": 1,
-            })
-            save_bindings_atomic(mappings)
-
-            touch_last_login(username)
-            auto_created = True
-            first_login = True
-            logger.info(
-                "Auto-created external user %s (provider=%s, external_id=%s, display_name=%s, role=%s)",
-                username, provider, external_id, display_name, default_role,
-            )
-
-    # 6. 发真 token（与账号密码登录完全兼容；ext_provider 记录登录来源外部系统）
-    user_info = get_user(username)
-    if user_info is None:
-        raise HTTPException(status_code=404, detail="Local user no longer exists")
-
-    token = create_token(username, ext_provider=provider)
-
-    # 审计
-    try:
-        from .audit import _append_audit_entry
-        _append_audit_entry({
-            "timestamp": time.time(),
-            "event_type": "auth",
-            "action": "login_success",
-            "user_id": username,
-            "source": f"external:{provider}",
-            "detail": f"外部系统登录成功 (auto_created={auto_created})",
-        })
-    except Exception:
-        pass
-
-    display_name = user_info.get("display_name") or username
-    default_agent_id = f"user:{username}"
+    # 5. 身份解析 + 发 token（唯一真源：external_login_core）
+    outcome = core.resolve_external_identity(
+        provider=provider,
+        system=system,
+        external_id=external_id,
+        external_name=str(data.get("external_name") or "").strip(),
+        request=request,
+    )
+    issued = core.finish_login(
+        username=outcome["username"],
+        provider=provider,
+        auto_created=outcome["auto_created"],
+        redirect=data.get("redirect") or "/chat",
+    )
 
     return {
         "success": True,
-        "token": token,
-        "username": username,
-        "display_name": display_name,
-        "first_login": first_login,
-        "default_agent_id": default_agent_id,
-        "auto_created": auto_created,
-        "redirect": _validate_redirect(data.get("redirect") or "/chat"),
+        "token": issued["token"],
+        "username": issued["username"],
+        "display_name": issued["display_name"],
+        "first_login": outcome["first_login"],
+        "default_agent_id": issued["default_agent_id"],
+        "auto_created": outcome["auto_created"],
+        "redirect": issued["redirect"],
     }
 
 
@@ -1037,133 +523,17 @@ async def credential_login(request: Request):
     external_name = api_result["external_name"]
     resp_data = api_result["resp_data"]
 
-    # 查绑定 / 自动建用户（逻辑与 SSO 登录一致）
-    mappings = load_bindings()
-    binding = find_binding_by_external(mappings, provider, external_id)
-
-    auto_created = False
-    first_login = False
-
-    if binding:
-        local_username = binding["user_id"]
-        existing_user = get_user(local_username)
-        if existing_user is None:
-            # 死绑定自愈：绑定在但本地用户丢了 → 按原用户名重建（幂等）
-            if not _provision_local_user(local_username, external_name, "user", request):
-                raise HTTPException(
-                    status_code=500,
-                    detail="本地用户已丢失且自动恢复失败，请联系管理员检查用户数据",
-                )
-            existing_user = get_user(local_username)
-        first_login = existing_user.get("last_login") is None
-        binding["last_login_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        binding["login_count"] = int(binding.get("login_count") or 0) + 1
-        if external_name and not binding.get("external_name"):
-            binding["external_name"] = external_name
-        save_bindings_atomic(mappings)
-        touch_last_login(local_username)
-        # 如果 display_name 还是自动设的（等于 username），用 external_name 更新
-        if external_name and existing_user.get("display_name") == local_username:
-            try:
-                from ..user_store import update_user
-                update_user(local_username, display_name=external_name)
-                logger.info("Credential login: updated display_name for %s to '%s'", local_username, external_name)
-            except Exception as e:
-                logger.warning("Credential login: failed to update display_name: %s", e)
-    else:
-        um = system.get("user_mapping") or {}
-
-        # ── 补全绑定关系：自动建用户前匹配已有本地用户（默认开） ──
-        # A1 治本：① 确定性身份键（前缀_外部ID）；② 显示名收养（恰1个且未绑定）
-        # 歧义（同名≥2）→ 403 拒绝，绝不猜测 —— 保证后续账号无重复无歧义
-        # 信任边界：external_name 来自外部系统登录 API 的返回值（已认证，可信）；
-        # 用户在表单里输入的 username/password 永不参与匹配（王静分身的教训）。
-        ext_login = _sanitize_external_id(external_id)
-        matched = _try_match_existing_local_user(um, external_id, provider)
-        if matched is None:
-            matched, ambiguous = _try_match_by_display_name(um, external_name)
-            if ambiguous:
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        f"存在多个名为'{external_name}'的未绑定本地账号，"
-                        "无法安全自动绑定。请联系管理员手动绑定。"
-                    ),
-                )
-
-        if matched is not None and _bind_matched_existing_user(
-                matched, provider, external_id, external_name, mappings, request):
-            local_username = matched
-            existing_user = get_user(matched)
-            first_login = existing_user.get("last_login") is None
-            touch_last_login(matched)
-            logger.info(
-                "Credential: auto-matched external identity to existing user %s (provider=%s, external_id=%s)",
-                matched, provider, external_id,
-            )
-        elif not um.get("auto_create"):
-            raise HTTPException(
-                status_code=403,
-                detail="未绑定该外部系统账号，且系统未开启自动创建用户。请联系管理员绑定。",
-            )
-        else:
-            prefix = (str(um.get("username_prefix") or "")).strip() or provider
-            try:
-                padding = int(um.get("seq_padding") or 4)
-            except (TypeError, ValueError):
-                padding = 4
-            try:
-                seq_start = int(um.get("seq_start") or 1)
-            except (TypeError, ValueError):
-                seq_start = 1
-
-            local_username = _generate_username(prefix, padding, seq_start, ext_login)
-
-            source = um.get("display_name_source", "external_name")
-            if source == "external_name":
-                display_name = external_name or local_username
-            elif source == "external_id":
-                display_name = external_id
-            else:
-                display_name = local_username
-
-            default_role = um.get("default_role") or "user"
-            random_password = secrets.token_urlsafe(16)
-
-            if not create_user(local_username, random_password,
-                               display_name=display_name, role=default_role, password_set_by_user=False):
-                raise HTTPException(status_code=500, detail="Failed to create user")
-
-            # user_store.create_user 现在直接写 SQLite（coapis.db），无需再同步到 user_system。
-
-            # 初始化用户工作区
-            try:
-                from ..user_provisioning import init_user_workspace
-                init_user_workspace(local_username, display_name=display_name, request=request)
-            except Exception as e:
-                logger.error("Failed to init workspace for auto-created user %s: %s", local_username, e)
-
-            now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            mappings.setdefault("bindings", []).append({
-                "user_id": local_username,
-                "provider": provider,
-                "external_id": external_id,
-                "external_name": external_name or None,
-                "source": "auto",
-                "status": 1,
-                "created_at": now_str,
-                "last_login_at": now_str,
-                "login_count": 1,
-            })
-            save_bindings_atomic(mappings)
-
-            touch_last_login(local_username)
-            auto_created = True
-            first_login = True
-            logger.info(
-                "Credential login: auto-created user %s (provider=%s, external_id=%s)",
-                local_username, provider, external_id,
-            )
+    # 身份解析（唯一真源：external_login_core）—— 与模型A/旧契约完全同一份逻辑
+    outcome = core.resolve_external_identity(
+        provider=provider,
+        system=system,
+        external_id=external_id,
+        external_name=external_name,
+        request=request,
+    )
+    local_username = outcome["username"]
+    auto_created = outcome["auto_created"]
+    first_login = outcome["first_login"]
 
     # 透传模式：把外部系统签发的 token 存进绑定记录（供出站透传）
     try:

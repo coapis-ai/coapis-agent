@@ -18,6 +18,7 @@ from starlette.testclient import TestClient
 
 from coapis.app import auth as auth_mod
 from coapis.app import external_identity
+from coapis.app import external_login_core
 from coapis.app import user_store
 from coapis.app.routers import external_auth
 from coapis.foundation.repository_factory import RepositoryFactory
@@ -66,8 +67,8 @@ def client(tmp_path, monkeypatch):
     systems_file.write_text(json.dumps({"systems": [system]}, ensure_ascii=False))
     mappings_file.write_text(json.dumps({"bindings": []}))
 
-    monkeypatch.setattr(external_auth, "MAPPINGS_FILE", str(mappings_file))
-    monkeypatch.setattr(external_auth, "STATE_FILE", str(state_file))
+    monkeypatch.setattr(external_login_core, "MAPPINGS_FILE", str(mappings_file))
+    monkeypatch.setattr(external_login_core, "STATE_FILE", str(state_file))
     monkeypatch.setattr(external_identity, "SYSTEMS_CONFIG_FILE", str(systems_file))
     # AUTH_FILE 仍是 JSON（JWT 黑名单），保持 Path 类型
     monkeypatch.setattr(auth_mod, "AUTH_FILE", auth_file)

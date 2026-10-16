@@ -26,8 +26,27 @@ from coapis.system.defaults import (
 BITS = ("read", "create", "update", "delete")
 
 REPO = Path(__file__).resolve().parents[3]
-PACK = REPO / "server/coapis/data/packs/base/auth/permissions.json"
-ROLES_PACK = REPO / "server/coapis/data/packs/base/auth/roles.json"
+# 两种运行布局：宿主机仓库（.../coapis-agent/server/tests/unit → 仓库根）
+# 与容器内（/app/tests/unit → /app，server 侧代码挂在 /app/coapis）。
+_PACK_CANDIDATES = [
+    REPO / "server/coapis/data/packs/base/auth/permissions.json",
+    Path(__file__).resolve().parents[2] / "coapis/data/packs/base/auth/permissions.json",
+]
+_ROLE_PACK_CANDIDATES = [
+    REPO / "server/coapis/data/packs/base/auth/roles.json",
+    Path(__file__).resolve().parents[2] / "coapis/data/packs/base/auth/roles.json",
+]
+
+
+def _first_existing(cands, label):
+    for p in cands:
+        if p.exists():
+            return p
+    pytest.skip(f"{label} 不在本环境（容器沙箱只挂载 server 侧源码）")
+
+
+PACK = _first_existing(_PACK_CANDIDATES, "权限出厂包")
+ROLES_PACK = _first_existing(_ROLE_PACK_CANDIDATES, "角色出厂包")
 MAPPING_TS = REPO / "client/src/config/permissionMapping.ts"
 SIDEBAR_TS = REPO / "client/src/layouts/Sidebar.tsx"
 SETTINGS_TSX = REPO / "client/src/pages/Settings/index.tsx"
