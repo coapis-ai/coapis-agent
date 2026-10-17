@@ -28,6 +28,13 @@ commands:
       exclude_patterns:
       - /\.coapis/workspaces/
       - /\.coapis/agents/
+      - /workspaces(/|$)
+      - /usr/share/fonts(/|$)
+      - /usr/local/share/fonts(/|$)
+      - /etc/fonts(/|$)
+      - /usr/share/doc(/|$)
+      - /usr/share/poppler(/|$)
+      - /coapis/agent/skills(/|$)
   cat:
     level: L0
     desc: 查看文件内容
@@ -274,6 +281,14 @@ commands:
       safe_paths:
       - /tmp
       - /var/tmp
+    - &id005b
+      id: builtin_skill_scripts
+      desc: 运行内置技能自带脚本（只读、随镜像发布、可信）
+      level: L0
+      action: allow
+      safe_paths:
+      - /coapis/agent/skills/
+      - /app/coapis/agent/skills/
     exceptions:
     - &id006
       id: inline_interpreter
@@ -297,6 +312,7 @@ commands:
     demotion_rules:
     - *id004
     - *id005
+    - *id005b
     exceptions:
     - *id006
     - *id006b
@@ -331,6 +347,7 @@ commands:
     demotion_rules:
     - *id004
     - *id005
+    - *id005b
     exceptions:
     - *id006
     - *id006b

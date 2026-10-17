@@ -531,14 +531,34 @@ class ToolGuardMixin:
                         "UnifiedToolGuardEngine: CONFIRM tool=%s level=%s reason=%s",
                         tool_name, _ue.get("level"), _ue.get("reason"),
                     )
-                    return _GuardAction(
-                        "needs_approval", tool_name, tool_input,
-                        guard_result=ToolGuardResult(
-                            tool_name=tool_name, params=tool_input,
-                            findings=_ue_findings,
-                            guardians_used=["unified_tool_guard_engine"],
-                        ),
-                    )
+                    # Smart mode (admin): a plain "confirm" from the
+                    # command-level policy is routine work (interpreters,
+                    # package managers, git ...).  Auto-allow it when the
+                    # rule is not high-risk (L0-L2) so document generation
+                    # and other scripted tasks are not dead-ended in
+                    # unattended chats.  L3/L4 keeps requiring approval.
+                    _ue_level = str(_ue.get("level") or "")
+                    if (
+                        exec_level.is_smart_mode()
+                        and user_role in ("admin", "superadmin")
+                        and _ue_level in ("L0", "L1", "L2", "")
+                    ):
+                        logger.info(
+                            "Tool guard: Admin smart-mode auto-allowing "
+                            "confirmed tool '%s' (level: %s, reason: %s)",
+                            tool_name, _ue_level or "-", _ue.get("reason"),
+                        )
+                        _ue["auto_allowed_by_smart_mode"] = True
+                        _ue_action = "allow"
+                    else:
+                        return _GuardAction(
+                            "needs_approval", tool_name, tool_input,
+                            guard_result=ToolGuardResult(
+                                tool_name=tool_name, params=tool_input,
+                                findings=_ue_findings,
+                                guardians_used=["unified_tool_guard_engine"],
+                            ),
+                        )
                 # audit / allow → carry the very same evaluation into the
                 # execution-level policy below (severity view).
                 if _ue_action == "audit" or _ue.get(
