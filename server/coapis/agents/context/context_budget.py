@@ -40,7 +40,11 @@ Three outcomes, and the third is loud
 - over the hard window: archive the oldest messages to ``dialog/``, purge
   them from working memory **and trim the same rows out of the prompt being
   sent** — pruning memory alone only shrinks the *next* step, so the call
-  that overflowed would still go out oversized.  If the fixed overhead alone
+  that overflowed would still go out oversized.  When the floor blocks the
+  deletion (one oversized tool result is a single row, and the floor refuses
+  to delete whole exchanges) the biggest rows are **truncated** head/tail in
+  the sent view: the transcript in ``dialog/`` keeps the full text, the
+  request keeps the information it can act on.  If the fixed overhead alone
   is over the window, raise :class:`ContextOverflowError`.  A request that
   cannot fit is refused with a number attached — not sent to the provider to
   fail as an opaque 400.
@@ -48,8 +52,9 @@ Three outcomes, and the third is loud
 
 from __future__ import annotations
 
+import copy
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable
 
 from .window_source import WindowInfo
@@ -65,6 +70,13 @@ class ContextOverflowError(RuntimeError):
 #: characters is roughly the last user turn plus one tool result — below it
 #: the next reasoning step has nothing to reason about.
 MIN_KEEP_CHARS = 2_000
+
+
+def _is_system_row(row: Any) -> bool:
+    """Is this prompt row the system prompt?"""
+    if isinstance(row, dict):
+        return row.get("role") == "system"
+    return getattr(row, "role", None) == "system"
 
 
 def affordable_floor(
@@ -94,6 +106,150 @@ def affordable_floor(
     if budget_chars - fixed_chars >= keep_chars_floor:
         return keep_chars_floor
     return min_keep_chars
+
+
+#: Absolute floor for a *single* row after truncation.  Below this the row
+#: carries no information — a truncated tool result shorter than this is
+#: noise the next step cannot act on.
+MIN_ROW_CHARS = 400
+
+#: Rows shrink the prompt by less than their content each round (the
+#: ``str(msg)`` wrapper adds role/name/quotes) and the truncation marker
+#: costs characters of its own, so the loop re-measures instead of computing
+#: the result exactly once.
+_ROW_OVERHEAD_CHARS = 96
+
+#: Rounds of "cut the biggest row" before the request is declared unfixable.
+MAX_TRUNCATE_ROUNDS = 3
+
+#: Floor per row when the row is *input to a summary request*.  A compaction
+#: prompt is hundreds of rows against half the window; the chat floor
+#: (:data:`MIN_ROW_CHARS`) leaves a 155k-char compaction request unfixable,
+#: and a stub row that says "this exchange happened" still beats a summary
+#: that never runs.
+_COMPACT_MIN_ROW_CHARS = 200
+
+#: The marker :func:`~coapis.governance.limits.truncate_head_tail` inserts.
+_TRUNCATION_MARKER = "\n\n[…truncated by context budget…]\n\n"
+
+
+def _cut_head_tail(text: str, room: int) -> str:
+    """Head+tail cut whose result is **exactly** *room* characters.
+
+    The governance helper keeps ``room`` characters of content *plus* its
+    marker, so a prompt trimmed with it lands slightly over budget and the
+    loop can never converge (the second pass computes the same length and
+    stops).  The last round uses this exact cut so the request fits by
+    construction.
+    """
+    if room <= len(_TRUNCATION_MARKER) + 2:
+        return text[:room]
+    keep = room - len(_TRUNCATION_MARKER)
+    head = keep // 2
+    tail = keep - head
+    return text[:head] + _TRUNCATION_MARKER + (text[-tail:] if tail else "")
+
+
+def _row_content(row: Any) -> str | None:
+    """The text a prompt row carries, for dict rows and ``Msg`` rows alike."""
+    if isinstance(row, dict):
+        content = row.get("content")
+    else:
+        content = getattr(row, "content", None)
+    return None if content is None else str(content)
+
+
+def _replace_row_content(messages: list, index: int, new: str) -> bool:
+    """Write truncated text into the **sent view** of a row, in place.
+
+    The row is replaced by a copy, never mutated: dict rows handed to
+    ``trim_messages_to_budget`` are the caller's own history rows, and
+    ``Msg`` rows can be the very objects the agent's memory holds.  The
+    contract of truncation is that the transcript keeps the full text — only
+    the copy that goes into this one request is shorter.
+    """
+    row = messages[index]
+    if isinstance(row, dict):
+        if "content" not in row:
+            return False
+        clone = dict(row)
+        clone["content"] = new
+        messages[index] = clone
+        return True
+    if hasattr(row, "content"):
+        try:
+            clone = copy.copy(row)
+            clone.content = new
+            messages[index] = clone
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def truncate_rows_to_fit(
+    messages: list,
+    start: int,
+    budget_chars: int,
+    min_row_chars: int = MIN_ROW_CHARS,
+) -> int:
+    """Cut the biggest history rows until the prompt fits the window.
+
+    The floor (:data:`MIN_KEEP_CHARS`) is a rule about *deleting whole
+    exchanges*: the tail whose exact wording the next step reuses must
+    survive.  It was never a rule about *lossy compression*, and the old code
+    treated it as one: a single 88,000-char tool result is one row, so the
+    delete loop refused to touch it, the loop exited with the prompt still
+    over budget, and the call was refused with "shorten the conversation" —
+    advice the user cannot act on, because the oversized thing is one reply
+    they already got.
+
+    Truncation is allowed to go deeper than the floor: the row stays in the
+    prompt, head and tail preserved with a marker, so the model knows the
+    exchange happened and roughly what it said.  Nothing is deleted, and
+    :data:`MIN_ROW_CHARS` is the hard floor per row.
+
+    Mutates *messages* in place (see :func:`_replace_row_content` for the
+    memory-safety rule).  Returns the characters reclaimed.
+    """
+    if not isinstance(messages, list) or len(messages) <= start:
+        return 0
+    from ...governance.limits import truncate_head_tail
+
+    reclaimed = 0
+    for round_index in range(MAX_TRUNCATE_ROUNDS):
+        total = sum(len(str(m)) for m in messages)
+        if total <= budget_chars:
+            break
+        candidates = [
+            i
+            for i in range(start, len(messages))
+            if len(str(messages[i])) > min_row_chars
+        ]
+        if not candidates:
+            break
+        index = max(candidates, key=lambda i: len(str(messages[i])))
+        content = _row_content(messages[index])
+        if content is None:
+            break
+        size = len(str(messages[index]))
+        room = budget_chars - (total - size) - _ROW_OVERHEAD_CHARS
+        if room < min_row_chars or len(content) <= room:
+            # The row's overhead is the wrapper, not its content: cutting
+            # the content would not buy the space we need.
+            break
+        # The exact cut, every round.  The governance helper keeps ``room``
+        # chars of content *plus* its marker, so each pass lands a little
+        # over budget and the loop spends a second and third round getting
+        # to the same place; and the marker is the only signal the model
+        # gets that this row is not the whole story.
+        shortened = _cut_head_tail(content, room)
+        if len(shortened) >= len(content):
+            break
+        if not _replace_row_content(messages, index, shortened):
+            break
+        reclaimed += len(content) - len(shortened)
+    return reclaimed
 
 
 @dataclass(frozen=True)
@@ -159,7 +315,13 @@ def measure_prompt(
     history_chars = sum(len(str(msg)) for msg in rows) - system_chars
     fixed_chars = system_chars + tools_chars
     total_chars = history_chars + fixed_chars
-    budget_chars = window.effective_tokens
+    # D1 (2026-10-17): the budget is measured in the unit upstream counts —
+    # formatted characters, not tokens.  ``react_agent._build_compression_config``
+    # computes ``char_threshold = window.to_chars(trigger_tokens)`` from the
+    # same window and the same ratio; using the raw token number here made the
+    # gate and the compactor disagree by a factor of ``chars_per_token``, which
+    # is why the gate fired 125 times while compaction fired 0 times.
+    budget_chars = window.to_chars(window.effective_tokens)
     trigger_chars = int(budget_chars * compact_threshold_ratio)
     return BudgetSnapshot(
         history_chars=history_chars,
@@ -169,6 +331,90 @@ def measure_prompt(
         trigger_chars=trigger_chars,
         budget_chars=budget_chars,
     )
+
+
+def fit_rows_to_window(
+    messages: list,
+    start: int,
+    row_budget: int,
+    floor: int,
+    min_row_chars: int = MIN_ROW_CHARS,
+) -> tuple[list, int]:
+    """Make the prompt rows fit: delete whole exchanges, truncate rows.
+
+    The two passes **feed each other**, which is why they alternate instead of
+    each running once.  The floor stops deletion at an oversized row (one
+    88,000-char tool result is a single row, and the floor refuses to delete
+    the tail it belongs to); truncating that row is precisely what makes the
+    rest of the tail deletable again.  Running deletion once and truncation
+    once — the shape this function replaces — stops with the prompt over
+    budget in exactly the case truncation exists to rescue: the dev incident
+    of 2026-10-17 measured 89,297 chars against a 72,089-char window with a
+    28,835-char floor, i.e. 17,208 chars of perfectly legal deletion left
+    unreachable because the floor had been computed against the un-truncated
+    giant row.
+
+    Mutates *messages* in place.  Returns ``(dropped_rows, truncated_chars)``.
+    """
+    dropped: list = []
+    truncated = 0
+    if not isinstance(messages, list) or len(messages) <= start:
+        return dropped, truncated
+    logger.info(
+        "context fit start: %d rows, %d chars, row_budget %d, floor %d, "
+        "start %d",
+        len(messages),
+        sum(len(str(m)) for m in messages),
+        row_budget,
+        floor,
+        start,
+    )
+
+    for _round_index in range(MAX_TRUNCATE_ROUNDS + 1):
+        total = sum(len(str(m)) for m in messages)
+        over = total - row_budget
+        if over <= 0:
+            break
+
+        remaining = sum(len(str(m)) for m in messages[start:])
+        index = start
+        deleted = 0
+        while index < len(messages):
+            size = len(str(messages[index]))
+            if remaining - size < floor:
+                break
+            dropped.append(messages.pop(index))
+            remaining -= size
+            over -= size
+            deleted += 1
+            if over <= 0:
+                break
+
+        cut = truncate_rows_to_fit(
+            messages,
+            start,
+            row_budget,
+            min_row_chars,
+        )
+        truncated += cut
+        after_total = sum(len(str(m)) for m in messages)
+        logger.info(
+            "context fit round %d: total %d -> %d (row_budget %d, floor %d, "
+            "deleted %d rows, cut %d chars, rows %d)",
+            _round_index,
+            total,
+            after_total,
+            row_budget,
+            floor,
+            deleted,
+            cut,
+            len(messages),
+        )
+        if over - cut <= 0:
+            break
+        if deleted == 0 and cut == 0:
+            break
+    return dropped, truncated
 
 
 def trim_messages_to_budget(
@@ -230,6 +476,24 @@ def trim_messages_to_budget(
         remaining -= size
 
     if not dropped:
+        # Nothing may be deleted, but a row may still be cut.  A single
+        # oversized tool result is the case this exists for.  The rows get
+        # the window minus the tool schemas: the schemas ride along in the
+        # same request and are not rows.
+        truncated = truncate_rows_to_fit(
+            rows,
+            start,
+            snapshot.budget_chars - snapshot.tools_chars,
+        )
+        after = measure_prompt(rows, tools, window, compact_threshold_ratio)
+        if after.total_chars <= after.budget_chars:
+            logger.warning(
+                "Context budget truncated prompt row(s) by %d chars; the "
+                "request fits a %d-char window with nothing to delete.",
+                truncated,
+                after.budget_chars,
+            )
+            return rows, [], after
         raise ContextOverflowError(
             f"Context overflow: {snapshot.total_chars} chars against a "
             f"{snapshot.budget_chars}-char window with nothing to prune "
@@ -239,6 +503,15 @@ def trim_messages_to_budget(
 
     kept = rows[:start] + rows[start + len(dropped):]
     after = measure_prompt(kept, tools, window, compact_threshold_ratio)
+    if after.total_chars > after.budget_chars:
+        # Deleting whole exchanges hit the floor; lossy truncation of the
+        # remaining rows is allowed to go deeper than the floor.
+        truncate_rows_to_fit(
+            kept,
+            start,
+            after.budget_chars - after.tools_chars,
+        )
+        after = measure_prompt(kept, tools, window, compact_threshold_ratio)
     if after.total_chars > after.budget_chars:
         raise ContextOverflowError(
             f"Context overflow after pruning {len(dropped)} message(s) "
@@ -290,45 +563,64 @@ def fit_prompt_to_budget(
         return messages
 
     snapshot = measure_prompt(rows, None, window, compact_threshold_ratio)
-    if snapshot.total_chars <= snapshot.budget_chars:
+    # The compaction request gets the *ratio* budget, not the whole window:
+    # budget_chars is the window, trigger_chars is window × ratio.  Reading
+    # budget_chars here made compaction_input_ratio a no-op (dev,
+    # 2026-10-17: a 155,775-char compaction prompt against a 72,089-char
+    # window, with the 0.5 ratio configured and never applied).
+    budget = snapshot.trigger_chars
+    if snapshot.total_chars <= budget:
         return rows
 
-    budget = snapshot.budget_chars
-    for _ in range(3):
-        # Biggest content row is the prompt; the rest is fixed overhead.
-        idx = max(
-            range(len(rows)),
-            key=lambda i: len(str(rows[i].get("content", ""))),
+    before = snapshot.total_chars
+    # A compaction request is the whole compressible prefix — hundreds of
+    # rows, not one prompt.  Truncating the single largest row of a 155,775
+    # char compaction prompt against a 36,044 char window reclaimed nothing
+    # and the call was skipped, which is compaction never running at all
+    # (dev, 2026-10-17).  So this uses the same two-pass fit as the chat
+    # gate: drop the oldest exchanges, then truncate what is left.  The
+    # floor is MIN_KEEP_CHARS, never the chat history floor: rows dropped
+    # here are rows upstream archives as part of the compression, and a
+    # summary of the newest part beats no summary.
+    start = 1 if _is_system_row(rows[0]) else 0
+    dropped, truncated = fit_rows_to_window(
+        rows,
+        start,
+        budget,
+        # A floor above the budget is a refusal, not a floor.
+        min(MIN_KEEP_CHARS, budget),
+        min_row_chars=_COMPACT_MIN_ROW_CHARS,
+    )
+    snapshot = measure_prompt(rows, None, window, compact_threshold_ratio)
+    if snapshot.total_chars <= budget:
+        logger.warning(
+            "Context budget for %s fitted %d -> %d chars (window budget %d: "
+            "%d row(s) dropped, %d chars truncated).",
+            source,
+            before,
+            snapshot.total_chars,
+            budget,
+            len(dropped),
+            truncated,
         )
-        content = str(rows[idx].get("content", ""))
-        overhead = snapshot.total_chars - len(content)
-        room = budget - overhead - 64
-        if room < 200:
-            logger.warning(
-                "Context budget for %s cannot fit the fixed overhead "
-                "(%d chars against a %d-char window); skipping the call.",
-                source,
-                overhead,
-                budget,
-            )
-            return []
-        head = int(room * 0.6)
-        tail = max(0, room - head)
-        marker = "\n…[truncated by context budget]…\n"
-        cut = content[:head] + marker + (content[-tail:] if tail else "")
-        rows[idx]["content"] = cut
-        snapshot = measure_prompt(rows, None, window, compact_threshold_ratio)
-        if snapshot.total_chars <= snapshot.budget_chars:
-            logger.warning(
-                "Context budget for %s truncated the prompt %d -> %d chars "
-                "(window budget %d chars).",
-                source,
-                len(content),
-                len(cut),
-                budget,
-            )
-            return rows
-    return rows
+        return rows
+    # Unfixable within the ratio: the untouchable part of the request (the
+    # system row plus the keep-recent floor) is over the budget, so the best
+    # fit we managed is sent as-is.  It is strictly smaller than the original,
+    # and the provider's answer to an oversized request is recoverable, while
+    # a compaction that never runs is not.
+    logger.warning(
+        "Context budget for %s fitted to %d chars, still %d over the %d-char "
+        "budget (%d row(s) dropped, %d chars truncated); sending the best "
+        "fit.",
+        source,
+        snapshot.total_chars,
+        max(0, snapshot.total_chars - budget),
+        budget,
+        len(dropped),
+        truncated,
+    )
+    return rows if rows else messages
 
 
 def budget_background_prompt(
@@ -359,6 +651,129 @@ def budget_background_prompt(
         return list(messages or [])
 
 
+# ── chunked (map-reduce) compaction ─────────────────────────────────
+# The compaction request is the whole uncompressed prefix.  Fitting it by
+# dropping the oldest rows means those rows are archived as COMPRESSED
+# without ever being summarized: the memory is gone and no summary holds it
+# (dev 2026-10-17: 280 rows dropped per compaction, coverage 0.16).  The
+# prefix does not fit in one request, so it is cut into chunks that each
+# fit, every chunk is summarized, and the partial summaries are merged.
+# Nothing is compressed that was not read.
+_COMPACT_MINI_SYS = (
+    "You compress conversation history into the structured summary the user "
+    "message specifies. Summarize only what the messages contain; never "
+    "continue the dialogue and never invent facts."
+)
+# Headroom for the JSON envelope and the measurement model's own overhead.
+_COMPACT_CHUNK_FILL = 0.85
+# Cost bound: a compaction is a background task, not a batch job.  When the
+# prefix needs more chunks than this, chunks grow instead of the call count.
+_COMPACT_MAX_CHUNKS = 12
+
+
+def _row_chars(row: Any) -> int:
+    return len(str(row))
+
+
+def _row_is_tool_pair(row: Any) -> bool:
+    """True for an assistant row that issues tool calls (pair head)."""
+    if not isinstance(row, dict):
+        return False
+    return bool(row.get("tool_calls"))
+
+
+def build_compaction_units(rows: list) -> list[list]:
+    """Group rows into units that must not be split.
+
+    An assistant row issuing ``tool_calls`` and the ``tool`` rows answering
+    those ids are one unit: a tool result summarized without the call that
+    produced it is a summary of a fragment.
+
+    Args:
+        rows: Formatted prompt rows (OpenAI-style dicts), history only.
+
+    Returns:
+        List of units, each a list of rows, in original order.
+    """
+    units: list[list] = []
+    i = 0
+    n = len(rows)
+    while i < n:
+        row = rows[i]
+        if _row_is_tool_pair(row):
+            ids = {
+                str(c.get("id"))
+                for c in (row.get("tool_calls") or [])
+                if isinstance(c, dict) and c.get("id")
+            }
+            unit = [row]
+            j = i + 1
+            while j < n:
+                nxt = rows[j]
+                if (
+                    isinstance(nxt, dict)
+                    and nxt.get("role") == "tool"
+                    and str(nxt.get("tool_call_id")) in ids
+                ):
+                    unit.append(nxt)
+                    j += 1
+                else:
+                    break
+            units.append(unit)
+            i = j
+        else:
+            units.append([row])
+            i += 1
+    return units
+
+
+def split_rows_for_compaction(
+    rows: list,
+    chunk_budget: int,
+    max_chunks: int = _COMPACT_MAX_CHUNKS,
+) -> list[list]:
+    """Cut history rows into chunks that each fit ``chunk_budget``.
+
+    Args:
+        rows: History rows (system row already removed).
+        chunk_budget: Characters a single map call may carry.
+        max_chunks: Cost bound.  When the rows need more chunks than this,
+            the budget is widened so the count stays bounded (bigger chunks
+            are truncated by the same fitter, which is strictly better than
+            dropping whole chunks).
+
+    Returns:
+        List of row-lists, oldest first.  Empty when *rows* is empty.
+    """
+    units = build_compaction_units(rows)
+    if not units:
+        return []
+    budget = max(2_000, int(chunk_budget * _COMPACT_CHUNK_FILL))
+    chunks: list[list] = []
+    current: list = []
+    size = 0
+    for unit in units:
+        usize = sum(_row_chars(r) for r in unit)
+        if current and size + usize > budget:
+            chunks.append(current)
+            current, size = [], 0
+        current.extend(unit)
+        size += usize
+    if current:
+        chunks.append(current)
+    if len(chunks) <= max_chunks:
+        return chunks
+    # Too many chunks: merge the tail into the last allowed chunk.  The
+    # merged chunk is over budget and gets truncated by fit_prompt_to_budget,
+    # which keeps the newest rows — the same trade the single-request path
+    # made for the whole prefix, now applied to one chunk instead of all.
+    head, tail = chunks[: max_chunks - 1], chunks[max_chunks - 1:]
+    merged: list = []
+    for chunk in tail:
+        merged.extend(chunk)
+    return head + [merged]
+
+
 class ContextBudgetGuard:
     """Model wrapper enforcing the resolved window at the call site.
 
@@ -374,6 +789,11 @@ class ContextBudgetGuard:
         memory_provider: Returns the agent's ``AgentContext`` (or None) so
             pruning can persist.  A callable, not an object, because the
             guard is built before memory is attached.
+        compaction_input_ratio: Budget fraction the **compaction request**
+            is fitted into.  Compaction used to be exempt from the gate
+            entirely ("the gate would make the cure overflow"), which let
+            the summary request go out bigger than the request that was
+            just refused.  It is now measured and fitted, never refused.
         agent_name: For logs.
     """
 
@@ -383,14 +803,18 @@ class ContextBudgetGuard:
         *,
         window: WindowInfo,
         compact_threshold_ratio: float = 0.8,
+        compaction_input_ratio: float = 0.5,
         keep_chars_floor: int = 12_000,
         memory_provider: Callable[[], Any] | None = None,
         agent_name: str = "",
         ledger: Any = None,
+        map_reduce: bool = True,
     ) -> None:
         self._inner = inner
         self.window = window
         self.compact_threshold_ratio = compact_threshold_ratio
+        self.compaction_input_ratio = max(0.2, min(0.9, compaction_input_ratio))
+        self.map_reduce = map_reduce
         self.keep_chars_floor = keep_chars_floor
         self._memory_provider = memory_provider
         self.agent_name = agent_name
@@ -497,13 +921,28 @@ class ContextBudgetGuard:
             remaining -= size
             reclaimed += size
             dropped += 1
-        if dropped:
+        truncated = 0
+        if reclaimed < over:
+            # The floor stopped the deletion.  Truncation is not bound by it:
+            # an oversized single row (one 88k tool result) is exactly the
+            # shape that used to make this raise "shorten the conversation".
+            # The target is the window **minus the tool schemas**, which are
+            # measured alongside the rows but are not rows themselves.
+            truncated = truncate_rows_to_fit(
+                messages,
+                start,
+                snapshot.budget_chars - snapshot.tools_chars,
+            )
+            reclaimed += truncated
+        if dropped or truncated:
             logger.warning(
                 "Context budget guard trimmed %d oldest prompt row(s) "
-                "(~%d chars) for agent %s so this call fits a %d-char "
-                "window (fixed overhead %d, floor applied %d).",
+                "(~%d chars) and truncated row content by %d chars for "
+                "agent %s so this call fits a %d-char window (fixed "
+                "overhead %d, floor applied %d).",
                 dropped,
-                reclaimed,
+                reclaimed - truncated,
+                truncated,
                 self.agent_name,
                 snapshot.budget_chars,
                 snapshot.fixed_chars,
@@ -601,6 +1040,32 @@ class ContextBudgetGuard:
         snapshot = self.measure(messages, tools)
         self.last_snapshot = snapshot
 
+        # One line per reasoning step (拍板 §3.5): the bill the fixed part of
+        # the request is paid in, in the unit the gate and the compactor both
+        # count.  Without this the only way to learn the ratio was to hit the
+        # overflow and read the error text.
+        logger.info(
+            "Context budget %s: fixed=%d (sys=%d tools=%d) history=%d "
+            "total=%d allowance=%d trigger=%d fixed_pct=%.1f%% "
+            "window=%d src=%s cpt=%.2f",
+            self.agent_name,
+            snapshot.fixed_chars,
+            snapshot.fixed_chars - snapshot.tools_chars,
+            snapshot.tools_chars,
+            snapshot.history_chars,
+            snapshot.total_chars,
+            snapshot.budget_chars,
+            snapshot.trigger_chars,
+            (
+                100.0 * snapshot.fixed_chars / snapshot.budget_chars
+                if snapshot.budget_chars
+                else 0.0
+            ),
+            self.window.effective_tokens,
+            self.window.source,
+            self.window.chars_per_token,
+        )
+
         if snapshot.total_chars <= snapshot.trigger_chars:
             return snapshot
 
@@ -659,21 +1124,250 @@ class ContextBudgetGuard:
         raise ContextOverflowError(message)
 
     # ── the call ────────────────────────────────────────────────────
+    def observe_refusal(self, exc: BaseException) -> None:
+        """Learn from a provider refusal that states the real window.
+
+        ``prompt (114974 tokens) leaves no room to answer in the context
+        (102400)`` — measured on dev, 2026-10-17 — is the provider
+        self-reporting its window under load.  Recording it caps the next
+        budget against the number the server actually enforces, and pairs our
+        own char measurement with the provider's token count, which is the
+        only way to know the real chars-per-token ratio.
+        """
+        try:
+            from .window_source import (
+                model_slot_of,
+                record_window_feedback,
+            )
+
+            provider_id, model_name = model_slot_of(self._inner)
+            snapshot = self.last_snapshot
+            record_window_feedback(
+                provider_id,
+                model_name,
+                str(exc),
+                snapshot.total_chars if snapshot else None,
+            )
+        except Exception:  # observation must never change the outcome
+            logger.debug("window feedback failed", exc_info=True)
+
+    # ── chunked compaction (map-reduce) ─────────────────────────────
+    async def _await_response(self, messages: Any, tools: Any, kwargs: Any):
+        """Call the real model, normalizing a stream to its final chunk."""
+        res = await self._inner(messages, tools=tools, **kwargs)
+        if getattr(self._inner, "stream", False) and hasattr(res, "__aiter__"):
+            last = None
+            async for chunk in res:
+                last = chunk
+            return last
+        return res
+
+    @staticmethod
+    def _partial_text(response: Any) -> str:
+        """Render one structured summary as text the merge step can read."""
+        meta = getattr(response, "metadata", None)
+        if not meta:
+            return ""
+        if isinstance(meta, dict):
+            parts = []
+            for key, value in meta.items():
+                if value in (None, "", [], {}):
+                    continue
+                if isinstance(value, (list, tuple)):
+                    value = "; ".join(str(v) for v in value)
+                parts.append(f"### {key}\n{value}")
+            return "\n".join(parts)
+        return str(meta)
+
+    async def _compact_map_reduce(
+        self,
+        messages: Any,
+        tools: Any,
+        kwargs: Any,
+    ):
+        """Summarize the whole prefix in budget-sized chunks, then merge.
+
+        Returns the merged structured response, or ``None`` when chunking
+        does not apply (the prefix already fits in one request, there is no
+        history to chunk, or a map call failed) — the caller then falls back
+        to the single fitted request it used before.
+
+        The agent's own system prompt is replaced by a one-line compaction
+        instruction: a summary request does not need the persona, the tool
+        catalogue or the skill index, and that fixed overhead is exactly what
+        left no room for the history (measured 22,200 chars of system prompt
+        in a 36,044-char compaction budget).
+        """
+        rows = [dict(m) for m in (messages or []) if isinstance(m, dict)]
+        if len(rows) < 3:
+            return None
+        head = 0
+        while head < len(rows) and rows[head].get("role") == "system":
+            head += 1
+        tail: list = []
+        stop = len(rows)
+        if rows[-1].get("role") == "user":
+            tail = [rows[-1]]
+            stop = len(rows) - 1
+        history = rows[head:stop]
+        if not history:
+            return None
+
+        mini_sys = {"role": "system", "content": _COMPACT_MINI_SYS}
+        budget_chars = self.window.to_chars(
+            int(self.window.effective_tokens * self.compaction_input_ratio),
+        )
+        overhead = (
+            _row_chars(mini_sys)
+            + sum(_row_chars(r) for r in tail)
+            + 2_000
+        )
+        chunk_budget = int(budget_chars * self.compact_threshold_ratio) - overhead
+        if chunk_budget < 4_000:
+            # No room for a chunk that carries anything: the single fitted
+            # request is the best this window can do.
+            return None
+
+        chunks = split_rows_for_compaction(history, chunk_budget)
+        if len(chunks) <= 1:
+            return None
+
+        partials: list[str] = []
+        total = len(chunks)
+        for idx, chunk in enumerate(chunks):
+            request = [mini_sys, *chunk, *tail]
+            request = fit_prompt_to_budget(
+                request,
+                self.window,
+                compact_threshold_ratio=self.compact_threshold_ratio,
+                source=f"compaction-map:{self.agent_name}:{idx + 1}/{total}",
+            )
+            try:
+                res = await self._await_response(request, tools, kwargs)
+            except Exception as exc:
+                logger.warning(
+                    "Compaction map chunk %d/%d failed (%s); merging %d "
+                    "partial summary(ies) without it.",
+                    idx + 1,
+                    total,
+                    exc,
+                    len(partials),
+                )
+                continue
+            text = self._partial_text(res)
+            if text:
+                partials.append(f"[部分 {idx + 1}/{total}]\n{text}")
+        if not partials:
+            return None
+        if len(partials) == 1:
+            merged_text = partials[0]
+        else:
+            merged_text = (
+                "以下是同一段对话按时间顺序分段生成的多份摘要。把它们合并为"
+                "一份完整摘要：去重、保留全部事实与未完成的待办、同一事实"
+                "取更新的那一份、保持结构化字段的语义。\n\n"
+                + "\n\n".join(partials)
+            )
+        merge_request = [
+            mini_sys,
+            {"role": "user", "content": merged_text},
+            *tail,
+        ]
+        merge_request = fit_prompt_to_budget(
+            merge_request,
+            self.window,
+            compact_threshold_ratio=self.compact_threshold_ratio,
+            source=f"compaction-reduce:{self.agent_name}",
+        )
+        try:
+            final = await self._await_response(merge_request, tools, kwargs)
+        except Exception as exc:
+            logger.warning(
+                "Compaction reduce failed (%s); falling back to the single "
+                "fitted request.",
+                exc,
+            )
+            return None
+        if not getattr(final, "metadata", None):
+            logger.warning(
+                "Compaction reduce produced no structured summary; falling "
+                "back to the single fitted request.",
+            )
+            return None
+        logger.info(
+            "Compaction map-reduce: %d row(s) in %d chunk(s) (budget %d "
+            "chars/chunk) merged into one summary of %d char(s) — no row "
+            "compressed without being read.",
+            len(history),
+            total,
+            chunk_budget,
+            len(self._partial_text(final)),
+        )
+        if self.stream:
+            return self._single_chunk_stream(final)
+        return final
+
+    async def _single_chunk_stream(self, response: Any):
+        """Present one finished response as the stream the caller expects."""
+        yield response
+
     async def __call__(
         self,
         messages: Any = None,
         tools: Any = None,
         **kwargs: Any,
     ) -> Any:
-        # Compaction itself sends the whole uncompressed prefix to a model;
-        # gating that would make the cure overflow.
+        # Compaction itself sends the whole uncompressed prefix to a model.
+        # It is measured and fitted — never refused (refusing the cure would
+        # guarantee the next step overflows too) — and never allowed to be
+        # bigger than the request the gate just pruned.  Its budget is the
+        # window scaled by ``compaction_input_ratio``, so the summary request
+        # leaves room for the compression prompt appended to it.
         if "structured_model" in kwargs:
+            if messages is not None:
+                if self.map_reduce:
+                    try:
+                        reduced = await self._compact_map_reduce(
+                            messages,
+                            tools,
+                            kwargs,
+                        )
+                    except Exception:  # never let the cure break the call
+                        logger.debug(
+                            "Chunked compaction skipped",
+                            exc_info=True,
+                        )
+                        reduced = None
+                    if reduced is not None:
+                        return reduced
+                fitted = fit_prompt_to_budget(
+                    messages,
+                    replace(
+                        self.window,
+                        effective_tokens=int(
+                            self.window.effective_tokens
+                            * self.compaction_input_ratio,
+                        ),
+                    ),
+                    compact_threshold_ratio=self.compact_threshold_ratio,
+                    source=f"compaction:{self.agent_name}",
+                )
+                # An empty fit means the fixed overhead alone cannot fit;
+                # send the prompt as-is rather than losing the compaction.
+                messages = fitted or messages
             return await self._inner(messages, tools=tools, **kwargs)
         snapshot: BudgetSnapshot | None = None
         if messages is not None:
             snapshot = await self.enforce(messages, tools)
         self._publish_to_governance(snapshot)
-        return await self._inner(messages, tools=tools, **kwargs)
+        try:
+            return await self._inner(messages, tools=tools, **kwargs)
+        except Exception as exc:
+            # The provider's refusal is a window report; the gate is the only
+            # place that has both the refusal text and our own measurement of
+            # the prompt that caused it.
+            self.observe_refusal(exc)
+            raise
 
     def _publish_to_governance(self, snapshot: BudgetSnapshot | None) -> None:
         """Report the measured prompt to the governance ledger, if any.
@@ -711,10 +1405,12 @@ def build_budget_guard(
     window: WindowInfo,
     *,
     compact_threshold_ratio: float = 0.8,
+    compaction_input_ratio: float = 0.5,
     keep_chars_floor: int = 12_000,
     memory_provider: Callable[[], Any] | None = None,
     agent_name: str = "",
     ledger: Any = None,
+    map_reduce: bool = True,
 ) -> Any:
     """Wrap *model* in the gate, or return it unchanged when unusable.
 
@@ -730,8 +1426,10 @@ def build_budget_guard(
         model,
         window=window,
         compact_threshold_ratio=compact_threshold_ratio,
+        compaction_input_ratio=compaction_input_ratio,
         keep_chars_floor=keep_chars_floor,
         memory_provider=memory_provider,
         agent_name=agent_name,
         ledger=ledger,
+        map_reduce=map_reduce,
     )

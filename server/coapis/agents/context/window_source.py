@@ -40,6 +40,7 @@ window.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -138,6 +139,15 @@ def resolve_for_model(
     """
     provider_id, model_name = model_slot_of(model)
     reported = reported_window_for(provider_id, model_name)
+    observed = window_feedback(provider_id, model_name)
+    if observed:
+        # A refusal is the most recent thing the provider has told us about
+        # this model, so it outranks a static /models number.
+        reported = (
+            observed["window_tokens"]
+            if reported is None
+            else min(reported, observed["window_tokens"])
+        )
 
     class _Stub:
         pass
@@ -153,6 +163,18 @@ def resolve_for_model(
             model_name,
             result.source,
         )
+        # Ask the provider for its own number in the background, so the
+        # next session budgets against the truth and not the typed value.
+        try:
+            from ...providers.provider_manager import ProviderManager
+
+            ProviderManager.get_instance().request_window_probe(provider_id)
+        except Exception:  # the probe is an optimisation, never fatal
+            logger.debug(
+                "context-window probe request failed for %s",
+                provider_id,
+                exc_info=True,
+            )
     return result
 
 
@@ -228,13 +250,13 @@ def resolve_window(
         safety_factor = getattr(
             running_config,
             "context_window_safety_factor",
-            0.5,
+            0.7,
         )
     if chars_per_token is None:
         chars_per_token = getattr(
             running_config,
             "formatted_chars_per_token",
-            1.1,
+            3.0,
         )
     # A factor of 0 (or a nonsense calibration) would silently disable
     # compaction, which is the failure mode this whole module exists to fix.
@@ -267,3 +289,132 @@ def resolve_window(
         source,
     )
     return info
+
+# Providers that publish no window in /models still tell us the number when
+# they refuse a request: "prompt (114974 tokens) leaves no room to answer in
+# the context (102400)" (measured on dev, 2026-10-17, local_vllm/Q3).  That
+# refusal is the model self-reporting its window under load, so we keep it:
+# the next resolution caps against it, and the observed chars/token ratio is
+# recorded next to the configured one.  This is how a fabricated
+# ``max_input_length`` stops being the number the whole system budgets
+# against.
+
+_FEEDBACK: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+_FEEDBACK_MAX = 64
+
+_WINDOW_PATTERNS: tuple[str, ...] = (
+    r"context \(\s*(\d+)\s*\)",
+    r"maximum context length(?: is|:)?\s*(\d+)",
+    r"context length of\s*(\d+)",
+    r"exceed(?:s)? (?:the )?context limit:?\s*\d+\s+and\s+\d+\s*>\s*(\d+)",
+    r">\s*(\d+)\s*(?:tokens?\s*)?maximum",
+    r"context[_ ]window(?: size)?(?: is|:)?\s*(\d+)",
+    r"max(?:imum)? (?:context )?tokens:?\s*(\d+)",
+)
+
+_PROMPT_PATTERNS: tuple[str, ...] = (
+    r"prompt \(\s*(\d+)(?:\s*tokens?)?\)",
+    r"prompt is too long:\s*(\d+)",
+    r"(\d+)\s*tokens?\s*>",
+    r"(\d+)\s+tokens? (?:in the messages|were sent|in prompt)",
+    r"prompt(?: tokens)?[:=]?\s*(\d+)\s*tokens?",
+    r"total tokens:\s*(\d+)",
+)
+
+
+def parse_window_feedback(message: str) -> dict[str, Any] | None:
+    """Pull ``(window_tokens, prompt_tokens)`` out of a refusal.
+
+    Returns None when the text carries no window number, so a plain 400
+    never becomes a "fact".
+    """
+    if not message:
+        return None
+    text = message.replace("\n", " ")
+    window = None
+    for pattern in _WINDOW_PATTERNS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                window = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if window >= _MIN_WINDOW_TOKENS:
+                break
+            window = None
+    if window is None:
+        return None
+    prompt = None
+    for pattern in _PROMPT_PATTERNS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                prompt = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            break
+    return {"window_tokens": window, "prompt_tokens": prompt}
+
+
+def record_window_feedback(
+    provider_id: str | None,
+    model_name: str | None,
+    message: str,
+    measured_chars: int | None = None,
+) -> dict[str, Any] | None:
+    """Remember what a refusal taught us about this model's window.
+
+    ``measured_chars`` is the gate's own measurement of the prompt that was
+    refused, which turns the provider's token count into the *observed*
+    chars-per-token ratio — the number the calibration constants are
+    supposed to approximate.
+    """
+    parsed = parse_window_feedback(message)
+    if parsed is None:
+        return None
+    entry: dict[str, Any] = {
+        "window_tokens": parsed["window_tokens"],
+        "prompt_tokens": parsed["prompt_tokens"],
+        "measured_chars": measured_chars,
+        "raw": (message or "")[:400],
+    }
+    if measured_chars and parsed["prompt_tokens"]:
+        entry["observed_chars_per_token"] = round(
+            measured_chars / parsed["prompt_tokens"],
+            3,
+        )
+    if len(_FEEDBACK) >= _FEEDBACK_MAX:
+        _FEEDBACK.pop(next(iter(_FEEDBACK)))
+    _FEEDBACK[(provider_id, model_name)] = entry
+    logger.warning(
+        "Provider refusal reports the window for %s/%s: %d tokens "
+        "(prompt %s tokens, our measurement %s chars%s). The context budget "
+        "caps against this number from now on.",
+        provider_id,
+        model_name,
+        entry["window_tokens"],
+        entry["prompt_tokens"],
+        measured_chars,
+        (
+            f", observed {entry['observed_chars_per_token']} chars/token"
+            if entry.get("observed_chars_per_token")
+            else ""
+        ),
+    )
+    return entry
+
+
+def window_feedback(
+    provider_id: str | None,
+    model_name: str | None,
+) -> dict[str, Any] | None:
+    """The last refusal-derived window we learned for this model slot."""
+    return _FEEDBACK.get((provider_id, model_name))
+
+
+def feedback_report() -> dict[str, dict[str, Any]]:
+    """All refusal-derived windows, keyed ``provider/model`` (diagnostics)."""
+    out: dict[str, dict[str, Any]] = {}
+    for (provider_id, model_name), entry in _FEEDBACK.items():
+        out[f"{provider_id}/{model_name}"] = dict(entry)
+    return out

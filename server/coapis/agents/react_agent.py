@@ -59,6 +59,7 @@ from .skills_manager import (
     get_workspace_skills_dir,
     resolve_effective_skills,
 )
+from ..skills.manager import SKILL_INDEX_HINT_CHARS
 from .tool_guard_mixin import ToolGuardMixin
 from ..security.skill_scanner import scan_skill_directory, SkillScanError
 from .utils.usage_tracker import record_tool_call, record_skill_trigger
@@ -90,6 +91,36 @@ NamesakeStrategy = Literal["override", "skip", "raise", "rename"]
 # (full SKILL.md injected into the prompt) per request. Beyond this cap the
 # remaining scene skills stay on-demand and trigger by keyword only.
 MAX_SCENE_CORE_SKILLS = 5
+
+
+# ── Compact skill index (S1, 2026-10-17) ──
+# Upstream's ``get_agent_skill_prompt`` emits one instruction block plus
+# ``name / description / absolute dir`` per skill: measured 335 + 72 chars of
+# scaffolding and ~202 chars per skill, so a 36-skill workspace pays ~7.6K
+# chars of system prompt on **every** turn of the session.  The skill body is
+# never read from the index — the model opens ``SKILL.md`` when it decides to
+# use a skill — so the index only has to say *what exists*.  Visibility stays
+# resident (the model cannot ask for a capability it has never heard of);
+# usage moves behind the SkillManager tool.
+_SKILL_INDEX_COMPACT_ZH = (
+    "# 可用技能（{n} 个）\n\n"
+    "{names}\n\n"
+    "技能正文不在系统提示词里。要用某个技能时，先调用 "
+    "`skill_manager(action=\"info\", skill_name=\"技能名\")` 读取它的用法"
+    "（`action=\"list\"` 可列出全部），不要凭名字猜测用法。"
+    "当你的请求命中某技能时，系统也会自动加载其说明。"
+)
+
+_SKILL_INDEX_COMPACT_EN = (
+    "# Available skills ({n})\n\n"
+    "{names}\n\n"
+    "Skill bodies are not in the system prompt. To use a skill, first call "
+    "`skill_manager(action=\"info\", skill_name=\"<name>\")` to read how it "
+    "works (`action=\"list\"` lists everything); do not guess a skill's usage "
+    "from its name. When your request matches a skill, the system loads its "
+    "instructions automatically."
+)
+
 
 
 def _wrap_tool_for_fault_tolerance(func, tool_name: str):
@@ -352,16 +383,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # 但 CoApisAgent 用最小化参数调 super().__init__()（不传 plan_notebook），
         # 所以必须在这里补注册，否则 create_plan 等工具不会出现在 toolkit 中。
         if self.plan_notebook is not None:
-            for tool_fn in self.plan_notebook.list_tools():
-                self.toolkit.register_tool_function(
-                    tool_fn,
-                    namesake_strategy=self._namesake_strategy,
-                )
-            logger.info(
-                "Registered %d plan tools for agent '%s'",
-                len(self.plan_notebook.list_tools()),
-                agent_config.id,
-            )
+            self._register_plan_tools(self.plan_notebook.list_tools())
 
         self.formatter = formatter
         self.max_iters = running_config.max_iters
@@ -430,6 +452,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             self.model,
             self.compression_window,
             compact_threshold_ratio=_ccc.compact_threshold_ratio,
+            compaction_input_ratio=_ccc.compaction_input_ratio,
             keep_chars_floor=int(
                 self.compression_window.to_chars(
                     self.compression_window.effective_tokens
@@ -439,6 +462,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             ),
             memory_provider=lambda: getattr(self, "memory", None),
             agent_name=agent_config.id,
+            map_reduce=getattr(_ccc, "compaction_map_reduce", True),
         )
         self.model = self.context_guard
 
@@ -671,6 +695,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         from .tools.registry import get_registered_tools
         from .tools.groups import (
             TOOL_GROUPS,
+            GROUP_META_DESCRIPTION,
             group_of,
             validate_against_registry,
         )
@@ -798,12 +823,101 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 toolkit.register_tool_function(
                     toolkit.reset_equipped_tools,
                     namesake_strategy=namesake_strategy,
+                    func_description=GROUP_META_DESCRIPTION,
                 )
                 logger.debug("Registered tool-group meta tool")
             except Exception as e:
                 logger.warning("Failed to register reset_equipped_tools: %s", e)
 
         return toolkit
+
+    #: Plan tools kept in the schema from step 1: enough to open a plan and
+    #: to close one.  The other six (subtask bookkeeping, revision, history)
+    #: are equipped by the plan-change hook the moment a plan exists.
+    #: Measured on dev: all eight cost **7,247 chars of function schema on
+    #: every turn**, including the chatty turns that never plan — 13% of the
+    #: fixed overhead for a capability most turns do not use.
+    PLAN_CORE_TOOLS: frozenset[str] = frozenset({"create_plan", "finish_plan"})
+
+    def _register_plan_tools(self, tool_fns: list[Any]) -> None:
+        """Register the plan toolset lazily: core two now, the rest on demand.
+
+        Registration is what puts a tool in the model's schema, so the eight
+        plan tools were paid for on every single reasoning step.  A plan can
+        only exist after ``create_plan`` ran, so the six bookkeeping tools
+        (``view_subtasks``, ``update_subtask_state``, ``finish_subtask``,
+        ``revise_current_plan``, ``view_historical_plans``,
+        ``recover_historical_plan``) are registered by the notebook's
+        plan-change hook, i.e. exactly when there is a plan to bookkeep.
+        A session restored with a plan already in place equips them at
+        startup — the lazy set is never withheld from a turn that has a plan.
+        """
+        core = [fn for fn in tool_fns if fn.__name__ in self.PLAN_CORE_TOOLS]
+        lazy = [fn for fn in tool_fns if fn.__name__ not in self.PLAN_CORE_TOOLS]
+
+        for fn in core:
+            self.toolkit.register_tool_function(
+                fn,
+                namesake_strategy=self._namesake_strategy,
+            )
+        self._plan_lazy_tools: list[Any] = lazy
+
+        if getattr(self.plan_notebook, "current_plan", None) is not None:
+            self._equip_lazy_plan_tools("restored plan")
+        elif lazy:
+            try:
+                self.plan_notebook.register_plan_change_hook(
+                    "coapis_lazy_plan_tools",
+                    self._on_plan_change_equip_tools,
+                )
+            except Exception:
+                logger.debug(
+                    "plan-change hook unavailable; registering all plan tools",
+                    exc_info=True,
+                )
+                self._equip_lazy_plan_tools("hook unavailable")
+
+        logger.info(
+            "Plan tools registered: %d core (+%d lazy on plan creation) for "
+            "agent '%s'",
+            len(core),
+            len(lazy),
+            self.agent_id if hasattr(self, "agent_id") else "?",
+        )
+
+    def _on_plan_change_equip_tools(self, _nb: Any, plan: Any) -> None:
+        """Plan-change hook: a plan means the bookkeeping tools are needed."""
+        if plan is not None and getattr(self, "_plan_lazy_tools", None):
+            self._equip_lazy_plan_tools("plan created")
+
+    def _equip_lazy_plan_tools(self, reason: str) -> None:
+        """Move the deferred plan tools into the toolkit (idempotent)."""
+        pending = list(getattr(self, "_plan_lazy_tools", []) or [])
+        if not pending:
+            return
+        self._plan_lazy_tools = []
+        for fn in pending:
+            try:
+                self.toolkit.register_tool_function(
+                    fn,
+                    namesake_strategy=self._namesake_strategy,
+                )
+            except Exception:
+                logger.warning(
+                    "Deferred plan tool %s failed to register",
+                    fn.__name__,
+                    exc_info=True,
+                )
+        try:
+            self.plan_notebook.remove_plan_change_hook("coapis_lazy_plan_tools")
+        except Exception:
+            logger.debug("plan-change hook removal skipped", exc_info=True)
+        logger.info(
+            "Plan tools equipped (%d) for agent '%s': %s",
+            len(pending),
+            getattr(self, "agent_id", "?"),
+            reason,
+        )
 
     def apply_query_preactivation(self, query: str) -> list[str]:
         """Pre-equip tool groups whose keywords match the incoming *query*.
@@ -995,6 +1109,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 self._core_skills[skill_name] = skill_dir
                 try:
                     toolkit.register_agent_skill(str(skill_dir))
+                    CoApisAgent._cap_skill_index(toolkit, skill_name)
                     logger.debug("Registered core skill: %s", skill_name)
                 except Exception as e:
                     logger.error(
@@ -1061,7 +1176,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         )
 
     @staticmethod
-    def _get_skill_summary(skill_dir: Path, max_len: int = 120) -> str:
+    def _get_skill_summary(skill_dir: Path, max_len: int = SKILL_INDEX_HINT_CHARS) -> str:
         """Extract short summary from SKILL.md for prompt preview."""
         try:
             md_file = skill_dir / "SKILL.md"
@@ -1089,6 +1204,49 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception:
             pass
         return ""
+
+    def _build_skill_index(self) -> str:
+        """Skill index for the system prompt (S1: manager-only by default).
+
+        With ``running.skill_index_compact`` (default True) the index is the
+        bare skill-name list plus the instruction to fetch usage through the
+        ``skill_manager`` tool — ~900 chars for 36 skills instead of ~7.6K.
+        Turning the flag off restores upstream's per-skill block verbatim.
+        """
+        compact = getattr(
+            self._agent_config.running, "skill_index_compact", True,
+        )
+        if not compact:
+            return self.toolkit.get_agent_skill_prompt() or ""
+        skills = getattr(self.toolkit, "skills", {}) or {}
+        if not skills:
+            return ""
+        names = ", ".join(f"`{n}`" for n in sorted(skills))
+        lang = str(getattr(self, "_language", "zh") or "zh").lower()
+        tpl = _SKILL_INDEX_COMPACT_EN if lang.startswith("en") else _SKILL_INDEX_COMPACT_ZH
+        return tpl.format(n=len(skills), names=names)
+
+    @staticmethod
+    def _cap_skill_index(toolkit: Any, skill_name: str) -> None:
+        """Cut a registered skill's index line to the summary length.
+
+        ``register_agent_skill`` drops the whole frontmatter description into
+        the system prompt, and that text is paid on **every** turn of the
+        session.  On-demand skills already went in as a summary; core skills
+        were the remaining fat (measured on dev: 17 skills = 3,983 chars of
+        system prompt).  The index has to say *when* to use the skill — the
+        body is read from ``dir`` when the model decides to.
+        """
+        entry = getattr(toolkit, "skills", {}).get(skill_name)
+        if not entry:
+            return
+        summary = CoApisAgent._get_skill_summary(
+            Path(entry.get("dir", "")),
+            SKILL_INDEX_HINT_CHARS,
+        )
+        current = entry.get("description", "") or ""
+        if summary and len(summary) < len(current):
+            entry["description"] = summary
 
     def _build_scene_skill_segment(self) -> str:
         """S4: Scene-priority skill segment, placed at the very front.
@@ -1458,6 +1616,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             for key in (skill_name, Path(skill_dir).name):
                 toolkit_skills.pop(key, None)
         self._toolkit.register_agent_skill(str(skill_dir))
+        CoApisAgent._cap_skill_index(self._toolkit, skill_name)
         trigger_id = tracker.record_trigger_event(
             skill_name=skill_name,
             trigger_method=trigger_method,
@@ -1879,10 +2038,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         user_ws_dir = None
         try:
             from .global_agent_utils import get_template_agents
-            # Skip inheritance for global agents (they ARE the source)
-            is_global = getattr(self._agent_config, 'is_global', False)
+            # Only global baseline agents (global_*) skip inheritance.
+            # Scene agents in agents/ are global in scope (shared by all users)
+            # but must inherit from global_default baseline.
+            is_global_baseline = agent_id.startswith("global_")
             agent_ws = str(self._workspace_dir) if self._workspace_dir else ""
-            if not is_global:
+            if not is_global_baseline:
                 for tpl_dir in get_template_agents():
                     if str(tpl_dir) not in agent_ws:
                         global_ws_dirs.append(tpl_dir)
@@ -2177,8 +2338,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             sys_prompt = sys_prompt + "\n\n" + self._env_context
 
         # Inject agent skill prompt — tells LLM which skills are available
+        # (S1: compact name list + SkillManager by default, so the index does
+        # not pay ~202 chars per skill on every turn of the session)
         try:
-            agent_skill_prompt = self.toolkit.get_agent_skill_prompt()
+            agent_skill_prompt = self._build_skill_index()
             if agent_skill_prompt:
                 sys_prompt = sys_prompt + "\n\n" + agent_skill_prompt
         except Exception as e:
@@ -3628,6 +3791,77 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         return total_stripped
 
     # pylint: disable=protected-access
+    # ── 长任务计划骨架 ────────────────────────────────────────────
+    _PLAN_SKELETON_HINT = (
+        "<plan-skeleton>\n"
+        "This request is multi-step. Before calling any tool, create the "
+        "plan with the plan tool: one goal line, 3-6 ordered subtasks, each "
+        "naming the concrete output it produces, plus the check that closes "
+        "the task. Then work one subtask at a time and update its state as "
+        "you finish it. Do not narrate steps you are not executing.\n"
+        "</plan-skeleton>"
+    )
+
+    @staticmethod
+    def _gate_text(msg: Msg | list[Msg] | None) -> str:
+        """Plain text of the incoming message, for the rule-based gate."""
+        if msg is None:
+            return ""
+        items = msg if isinstance(msg, list) else [msg]
+        parts: list[str] = []
+        for one in items:
+            content = getattr(one, "content", None)
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(str(block.get("text", "")))
+                    elif isinstance(getattr(block, "text", None), str):
+                        parts.append(block.text)
+        return "\n".join(parts).strip()
+
+    async def _maybe_arm_plan(self, msg: Msg | list[Msg] | None) -> None:
+        """Hand a multi-step task its skeleton before the loop starts.
+
+        Why: the complexity classifier was calibrated (20 cases, 80%
+        agreement) and never consumed - a ghost module.  A multi-step task
+        that is never written down runs as a stream of ad-hoc tool calls;
+        once compaction rolls the early turns away the agent cannot say
+        which subtasks are done, so the run drifts or repeats work.
+
+        Cost is deliberately zero: the rule layer only (no model call), and
+        only when the plan tools are registered and no plan is active.  This
+        injects the skeleton; the agent writes the plan itself.
+        """
+        notebook = getattr(self, "plan_notebook", None)
+        if notebook is None or getattr(notebook, "plan", None) is not None:
+            return
+        text = self._gate_text(msg)
+        if not text:
+            return
+        try:
+            from .plan_gate import COMPLEX, ComplexityClassifier
+
+            classifier = getattr(self, "_complexity_classifier", None)
+            if classifier is None:
+                classifier = ComplexityClassifier(judge_enabled=False)
+                self._complexity_classifier = classifier
+            level = classifier.classify(text)
+        except Exception:  # the gate must never break a reply
+            logger.debug("Plan gate skipped", exc_info=True)
+            return
+        if level != COMPLEX:
+            return
+        await self.memory.add(
+            Msg("user", self._PLAN_SKELETON_HINT, "user"),
+            marks=_MemoryMark.HINT,
+        )
+        logger.info(
+            "Plan skeleton armed for a multi-step task (%d chars).",
+            len(text),
+        )
+
     async def reply(
         self,
         msg: Msg | list[Msg] | None = None,
@@ -3707,6 +3941,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # Normal message processing
         logger.info("CoApisAgent.reply: max_iters=%s", self.max_iters)
+
+        # 长任务先给骨架：多步任务不落成计划，就会跑成一路顺手的工具调用；
+        # 早期轮次被压缩后连"做到哪了"都说不清。判级纯规则（零模型调用），
+        # 只在没有活动计划时注入一次，计划由智能体自己用计划工具写。
+        await self._maybe_arm_plan(msg)
 
         # Reset reasoning loop detector for new turn
         if hasattr(self, "_reasoning_loop_detector"):

@@ -30,6 +30,7 @@ from agentscope.message import Msg, TextBlock
 
 from .agent_context import AgentContext
 from .base_context_manager import BaseContextManager, context_registry
+from .fixed_overhead import enforce_fixed_overhead
 from .window_source import compute_keep_recent, resolve_for_model
 from ..model_factory import create_model_and_formatter
 from ..tools.utils import truncate_text_output, DEFAULT_MAX_BYTES
@@ -127,6 +128,111 @@ def _governance_floor_truncate(
 
 
 @context_registry.register("light")
+def _walk_compression_tail(
+    messages: list[Any],
+    keep_recent: int | None,
+) -> tuple[int, int]:
+    """Replica of upstream's keep-tail loop, verbatim.
+
+    ``ReActAgent._compress_memory_if_needed`` walks the messages from the
+    newest backwards, accumulating ``tool_result`` ids and retiring a
+    ``tool_use`` id once its result has been seen; a message closes a group
+    when no tool call is left unmatched.  It breaks the moment the group
+    count reaches ``keep_recent`` and compresses ``messages[:i]`` — so when
+    that break lands on index 0 the list it would compress is **empty** and
+    compression is skipped, no matter how many characters the prompt
+    measures.  Walking past the whole list without breaking compresses
+    everything.
+
+    Returns ``(prefix_upstream_would_compress, groups_closed_so_far)``.
+    With ``keep_recent=None`` the walk never breaks, so the second number is
+    the total group count of the list.
+    """
+    msgs = list(messages or [])
+    n_keep = 0
+    pending: set[str] = set()
+    for i in range(len(msgs) - 1, -1, -1):
+        msg = msgs[i]
+        getter = getattr(msg, "get_content_blocks", None)
+        if getter is not None:
+            try:
+                for block in getter("tool_result"):
+                    block_id = block.get("id")
+                    if block_id:
+                        pending.add(block_id)
+                for block in getter("tool_use"):
+                    block_id = block.get("id")
+                    if block_id in pending:
+                        pending.discard(block_id)
+            except Exception:  # malformed row: it still occupies a group
+                logger.debug("Group counting skipped a malformed message")
+        if not pending:
+            n_keep += 1
+        if keep_recent is not None and n_keep >= keep_recent:
+            return i, n_keep
+    return len(msgs), n_keep
+
+
+def count_message_groups(messages: list[Any]) -> int:
+    """How many *groups* upstream's compactor sees in this message list."""
+    return _walk_compression_tail(messages, None)[1]
+
+
+def compressible_prefix_count(messages: list[Any], keep_recent: int) -> int:
+    """How many messages upstream would compress at this ``keep_recent``.
+
+    ``0`` is the cliff: the session is over the trigger, there is plenty to
+    summarize, and upstream compresses nothing.
+    """
+    return _walk_compression_tail(messages, keep_recent)[0]
+
+
+#: Logged once per process: the reme summarizer is configured, the agent has a
+#: memory manager, and that manager has no summarize entry point.
+_SUMMARIZE_GAP_LOGGED = False
+
+
+def hand_to_long_term_memory(
+    memory_manager: Any,
+    messages: list[Any],
+    reason: str,
+) -> bool:
+    """Feed compacted/exchanged messages to the long-term memory pipeline.
+
+    The summarize entry point belongs to ``BaseMemoryManager`` (the reme
+    family).  The community agent runs with the file-based ``MemoryManager``,
+    which has no such method, so the call used to raise ``AttributeError`` on
+    **every** compaction — a WARNING per event, and the durable-memory
+    linkage silently doing nothing (dev, 2026-10-17:
+    ``'MemoryManager' object has no attribute 'add_summarize_task'``).
+
+    Returns whether the messages were accepted.  A missing entry point is a
+    configuration fact, not an exception, so it is reported once.
+    """
+    global _SUMMARIZE_GAP_LOGGED
+
+    add_task = getattr(memory_manager, "add_summarize_task", None)
+    if not callable(add_task):
+        if not _SUMMARIZE_GAP_LOGGED:
+            _SUMMARIZE_GAP_LOGGED = True
+            logger.info(
+                "Long-term memory linkage skipped: %s has no summarize entry "
+                "point (reme_light_memory_config.summarize_when_compact is on "
+                "but the agent runs the file-based MemoryManager).  Further "
+                "%s events will not be logged.",
+                type(memory_manager).__name__,
+                reason,
+            )
+        return False
+
+    try:
+        add_task(messages=messages)
+    except Exception as exc:  # never fail a reply for a memory side task
+        logger.warning("Long-term memory linkage failed: %s", exc)
+        return False
+    return True
+
+
 class LightContextManager(BaseContextManager):
     """Context manager for the community edition.
 
@@ -694,6 +800,34 @@ class LightContextManager(BaseContextManager):
             running,
             chars_per_token=ccc.formatted_chars_per_token,
         )
+
+        # Fixed-overhead guard (B0/D8): the ratio is a constraint with an
+        # action, not a reading.  Runs at step 1 only — shedding mid-task
+        # would take tools away from a run in progress, and a group the
+        # model still needs is one reset_equipped_tools call away from
+        # coming back.
+        try:
+            max_fixed_ratio = float(
+                getattr(ccc, "fixed_overhead_max_ratio", 0.0) or 0.0,
+            )
+            if max_fixed_ratio > 0 and getattr(agent, "cur_iter", 0) == 0:
+                enforce_fixed_overhead(
+                    agent,
+                    window.to_chars(window.effective_tokens),
+                    max_ratio=max_fixed_ratio,
+                    min_history_share=float(
+                        getattr(ccc, "min_history_share", 0.30) or 0.30,
+                    ),
+                )
+        except Exception:
+            # The guard is an optimisation, never a reason to lose the turn:
+            # a config-shape or measurement failure must not propagate into
+            # pre_reasoning, where an exception kills the reply.
+            logger.warning(
+                "fixed-overhead guard failed; continuing without it",
+                exc_info=True,
+            )
+
         budget_tokens = int(
             window.effective_tokens * ccc.compact_threshold_ratio * 0.5,
         )
@@ -704,6 +838,12 @@ class LightContextManager(BaseContextManager):
             keep_recent_min=ccc.keep_recent_min,
             keep_recent_max=ccc.keep_recent_max,
         )
+        keep_recent = await self._compressibility_floor(
+            agent,
+            memory,
+            keep_recent,
+            ccc,
+        )
         if keep_recent != compression_config.keep_recent:
             logger.debug(
                 "keep_recent adjusted %d -> %d for the current token budget.",
@@ -712,6 +852,69 @@ class LightContextManager(BaseContextManager):
             )
             compression_config.keep_recent = keep_recent
         return None
+
+    @staticmethod
+    async def _compressibility_floor(
+        agent: "CoApisAgent",
+        memory: Any,
+        keep_recent: int,
+        ccc: Any,
+    ) -> int:
+        """Make sure there is something upstream is allowed to compress.
+
+        Upstream's keep-tail loop breaks the moment the group count reaches
+        ``keep_recent`` and compresses the prefix before that point.  When
+        the session holds **exactly** ``keep_recent`` groups the break lands
+        on index 0, the prefix is empty, and ``if not to_compressed_msgs:
+        return`` skips compression entirely — no matter how many characters
+        the prompt measures.  A session whose group count happens to equal
+        the budget-derived ``keep_recent`` therefore never compresses, and
+        the gate refuses the next call: "compaction is enabled" is not a
+        fact, it is a function of ``keep_recent`` versus the group count.
+        The cliff is real and narrow, and it is exactly the shape of the dev
+        incident (3 groups, 88,000-char tool result, 0 compactions).
+
+        So when the gate has already measured a prompt over the trigger and
+        upstream would compress zero messages, ``keep_recent`` drops by one
+        and the prefix becomes compressible.  This is the one place that
+        deliberately bypasses ``keep_recent_min``: that floor bounds the tail
+        the *budget* can pay for, not whether the session is compressible at
+        all.  It fires only on the measured-over-trigger path; every other
+        path is untouched.
+        """
+        snapshot = getattr(
+            getattr(agent, "context_guard", None),
+            "last_snapshot",
+            None,
+        )
+        if snapshot is None or snapshot.total_chars <= snapshot.trigger_chars:
+            return keep_recent
+        try:
+            from agentscope.agent._react_agent import _MemoryMark
+
+            uncompressed = await memory.get_memory(
+                prepend_summary=False,
+                exclude_mark=_MemoryMark.COMPRESSED,
+            )
+        except Exception:
+            return keep_recent
+        prefix = compressible_prefix_count(uncompressed, keep_recent)
+        if prefix > 0 or len(uncompressed) <= 1:
+            return keep_recent
+        groups = count_message_groups(uncompressed)
+        logger.warning(
+            "keep_recent %d -> %d: %d message group(s) measured over the "
+            "compression trigger (%d > %d chars) and upstream would compress "
+            "zero messages at keep_recent == groups (keep_recent_min=%d "
+            "bypassed for compressibility).",
+            keep_recent,
+            keep_recent - 1,
+            groups,
+            snapshot.total_chars,
+            snapshot.trigger_chars,
+            ccc.keep_recent_min,
+        )
+        return max(0, keep_recent - 1)
 
     @staticmethod
     async def _compute_keep_recent(
@@ -773,10 +976,7 @@ class LightContextManager(BaseContextManager):
         rlmc = getattr(agent_config.running, "reme_light_memory_config", None)
         if rlmc is not None and rlmc.summarize_when_compact:
             if memory_manager is not None:
-                try:
-                    memory_manager.add_summarize_task(messages=archived)
-                except Exception as e:
-                    logger.warning("Long-term memory linkage failed: %s", e)
+                hand_to_long_term_memory(memory_manager, archived, "compaction")
             else:
                 logger.debug(
                     "Compacted %d message(s) but the agent has no memory "
@@ -877,7 +1077,11 @@ class LightContextManager(BaseContextManager):
                     msg for msg, _ in memory.content[start_index:]
                 ]
                 if recent_messages:
-                    memory_manager.add_summarize_task(messages=recent_messages)
+                    hand_to_long_term_memory(
+                        memory_manager,
+                        recent_messages,
+                        "auto-memory interval",
+                    )
         except Exception as e:
             logger.warning("post_reply hook failed: %s", e)
 

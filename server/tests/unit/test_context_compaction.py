@@ -285,9 +285,14 @@ class TestBackgroundPromptBudget:
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "x" * 20_000},
         ]
-        out = fit_prompt_to_budget(msgs, self._window(tokens=2000))
+        window = self._window(tokens=2000)
+        out = fit_prompt_to_budget(msgs, window)
         total = sum(len(str(m)) for m in out)
-        assert total <= 2000
+        # D1 (2026-10-17): the budget is the window expressed in formatted
+        # characters — the unit the provider counts — not the token number.
+        # Asserting ``total <= tokens`` here encoded the old unit, which is
+        # exactly the disagreement that made compaction never fire.
+        assert total <= window.to_chars(window.effective_tokens)
         body = out[1]["content"]
         assert "truncated by context budget" in body
         # Head and tail survive: the cut is in the middle.
@@ -302,7 +307,14 @@ class TestBackgroundPromptBudget:
             {"role": "system", "content": "s" * 5000},
             {"role": "user", "content": "x" * 5000},
         ]
-        assert fit_prompt_to_budget(msgs, self._window(tokens=100)) == []
+        # 6a-3 (2026-10-17): an unfixable request is sent as the best fit we
+        # managed, never as an empty prompt — an empty prompt is a compaction
+        # that silently never runs, which is the bug this batch exists to kill.
+        out = fit_prompt_to_budget(msgs, self._window(tokens=100))
+        assert out, "the fit must never return an empty prompt"
+        assert sum(len(str(m)) for m in out) <= sum(
+            len(str(m)) for m in msgs
+        )
 
     def test_wrapper_never_breaks_a_call(self):
         from coapis.agents.context.context_budget import (
