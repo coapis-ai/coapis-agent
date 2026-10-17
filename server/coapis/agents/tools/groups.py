@@ -35,6 +35,19 @@ logger = logging.getLogger(__name__)
 # so a host test venv without the integration must not read them as drift.
 OPTIONAL_INTEGRATION_TOOLS: frozenset[str] = frozenset({"c2a_render_card"})
 
+#: Compact replacement for upstream's 570-char ``reset_equipped_tools``
+#: docstring (B0-3, 2026-10-17).  Measured: the catalog tool costs 2,141
+#: chars, 700 of them the group descriptions above and 570 that text.  The
+#: absolute semantics are the one thing a model must not get wrong, so they
+#: are kept verbatim-in-substance and everything else is dropped.
+GROUP_META_DESCRIPTION = (
+    "Activate/deactivate tool groups. Each call sets the ABSOLUTE state of "
+    "ALL groups: any group not set true is deactivated. Activate only what "
+    "the current task needs and deactivate groups as soon as they are done "
+    "to save context. The reply contains the activated groups' notes, which "
+    "you MUST follow."
+)
+
 TOOL_GROUPS: dict[str, dict[str, Any]] = {
     # ── always active: capabilities every turn may need ──
     # ``basic`` is agentscope's built-in group: it is always active, excluded
@@ -48,19 +61,46 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
             "write_file",
             "edit_file",
             "append_file",
-            "grep_search",
-            "glob_search",
             "view_image",
-            "view_video",
             "send_file_to_user",
             "get_current_time",
             "set_user_timezone",
         },
-        "description": "File read/write/edit, file search, media viewing, sending files, time.",
+        "description": "File read/write/edit, media view, send file.",
         "keywords": set(),
         "always_active": True,
     },
     # ── on demand ──
+    # ``search`` was split out of the always-active core (2026-10-17): the
+    # two search tools cost 1,370 chars on **every** turn, which is 23% of the
+    # core group, while a plain "read this file" turn never touches them.
+    "search": {
+        "tools": {"grep_search", "glob_search"},
+        "description": "Grep contents, glob file names.",
+        "keywords": {
+            "搜索",
+            "查找",
+            "查找文件",
+            "检索",
+            " grep",
+            "grep",
+            "正则",
+            "关键词",
+            "文件内容",
+            "哪些文件",
+            "文件名",
+            "目录结构",
+            "代码",
+            "日志",
+            "定位",
+            "排查",
+            "引用",
+            "调用",
+            "grep_search",
+            "glob_search",
+        },
+        "always_active": False,
+    },
     "shell": {
         "tools": {
             "execute_shell_command",
@@ -68,7 +108,7 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
             "code_exec",
             "install_dependency",
         },
-        "description": "Run shell commands, git operations, execute code, install dependencies.",
+        "description": "Shell, git, code exec, dependencies.",
         "keywords": {
             "shell",
             "命令",
@@ -124,7 +164,7 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
     },
     "browser": {
         "tools": {"browser_use"},
-        "description": "Browser automation: open pages, click, type, fill forms, screenshot.",
+        "description": "Browser automation: pages, click, type.",
         "keywords": {
             "浏览器",
             "打开网页",
@@ -151,7 +191,7 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
             "spawn_subagent",
             "list_agents",
         },
-        "description": "Multi-agent work: list agents, delegate to agents, subagents, background tasks.",
+        "description": "Multi-agent: list, delegate, subagents.",
         "keywords": {
             "智能体",
             "多智能体",
@@ -167,7 +207,7 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
     },
     "schedule": {
         "tools": {"cron_scheduler", "todo_tool"},
-        "description": "Scheduled/cron tasks, reminders and todo lists.",
+        "description": "Cron tasks, reminders, todo lists.",
         "keywords": {
             "定时",
             "计划",
@@ -188,7 +228,7 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
     },
     "memory": {
         "tools": {"session_search", "record_daily_memory"},
-        "description": "Search past sessions and record daily notes.",
+        "description": "Search past sessions, write daily notes.",
         "keywords": {
             "记忆",
             "回忆",
@@ -203,8 +243,8 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
         "always_active": False,
     },
     "media": {
-        "tools": {"desktop_screenshot"},
-        "description": "Capture desktop screenshots.",
+        "tools": {"desktop_screenshot", "view_video"},
+        "description": "Desktop screenshots, view video files.",
         "keywords": {
             "截图",
             "屏幕",
@@ -212,12 +252,17 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
             "screenshot",
             "screen",
             "录屏",
+            "视频",
+            "影片",
+            "录像",
+            "video",
+            "看视频",
         },
         "always_active": False,
     },
     "docs": {
-        "tools": {"doc_reader", "resource_search"},
-        "description": "Read and parse documents (pdf, docx, xlsx, pptx) and search workspace resources.",
+        "tools": {"doc_reader", "resource_search", "convert_file"},
+        "description": "Read docs (big: mode=index then range), search, md->docx",
         "keywords": {
             "文档",
             "pdf",
@@ -233,12 +278,16 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
             "资源",
             "文件检索",
             "我的空间",
+            "转换",
+            "导出",
+            "生成文件",
+            "格式",
         },
         "always_active": False,
     },
     "skills": {
         "tools": {"skill_manager"},
-        "description": "Create, list and manage reusable skills.",
+        "description": "Create and manage reusable skills.",
         "keywords": {
             "技能",
             "skill",
@@ -251,7 +300,7 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
     },
     "governance": {
         "tools": {"tool_stats", "get_token_usage"},
-        "description": "Inspect tool usage statistics and token consumption.",
+        "description": "Tool usage stats, token consumption.",
         "keywords": {
             "工具统计",
             "工具使用",
@@ -265,7 +314,7 @@ TOOL_GROUPS: dict[str, dict[str, Any]] = {
     },
     "card": {
         "tools": {"c2a_render_card"},
-        "description": "Render rich UI cards (tables, charts, forms) into the chat.",
+        "description": "Render rich UI cards into the chat.",
         "keywords": {
             "卡片",
             "渲染",

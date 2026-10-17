@@ -583,14 +583,89 @@ def _legacy_format(file_path: str) -> Optional[str]:
         {"name": "markitdown", "manager": "pip", "required": False, "reason": "文档解析兜底"},
     ],
 )
+def _read_chars_budget() -> int:
+    """Per-call character allowance for one read (治理台账 READ_CHARS).
+
+    The cap used to be a literal ``100000`` inside the tool — 46% of a
+    calibrated 215,040-char session budget, and invisible to governance.  It
+    now comes from the ledger, with 20000 as the fallback when governance is
+    unavailable.
+    """
+    try:
+        from ...governance.limits import LimitKind, ledger_for_agent
+
+        limit = ledger_for_agent().limit(LimitKind.READ_CHARS)
+        if limit is not None and limit.budget > 0:
+            return int(limit.budget)
+    except Exception:  # governance is optional; never break a read
+        pass
+    return 20000
+
+
+#: A file this large (bytes) is read paginated, never whole.  Bytes are a
+#: cheap proxy: text-heavy OOXML/PDF of this size parses to ≥ 200K chars.
+_PAGINATE_SIZE_BYTES = 200_000
+
+
+async def _paginated_read(
+    fp: str,
+    fmt: str,
+    mode: str,
+    start: int,
+    end: int,
+    keywords: str,
+    max_chars: int,
+    start_char: int = -1,
+    end_char: int = -1,
+) -> dict[str, Any]:
+    """Serve one paginated read through the B3 base (parse once, cached)."""
+    from .doc_pages import read_document
+
+    try:
+        return await asyncio.to_thread(
+            read_document,
+            str(fp),
+            fmt,
+            mode,
+            None if start < 0 else start,
+            None if end < 0 else end,
+            keywords or None,
+            max_chars,
+            None,
+            None if start_char < 0 else start_char,
+            None if end_char < 0 else end_char,
+        )
+    except Exception as exc:  # pagination must never be the reason a read fails
+        logger.warning(
+            "paginated %s read failed for %s: %s",
+            mode,
+            fp,
+            exc,
+        )
+        return {
+            "error": (
+                f"分页读取（{mode}）失败：{type(exc).__name__}: {exc}。"
+                "可改用 mode=full 配合 max_chars 限量读取。"
+            ),
+            "file": fp,
+        }
+
+
 async def doc_reader(
     action: str = "read",
     file_path: str = "",
     content: str = "",
-    max_chars: int = 100000,
+    max_chars: int = 0,
     auto_detect: bool = True,
     pages: str = "",
     sheet: str = "",
+    mode: str = "full",
+    start: int = -1,
+    end: int = -1,
+    start_char: int = -1,
+    end_char: int = -1,
+    keywords: str = "",
+    goal: str = "",
 ) -> dict[str, Any]:
     """Parse a document into structured text.
 
@@ -598,16 +673,46 @@ async def doc_reader(
         action: "read" | "detect" | "formats"
         file_path: Absolute path, workspace-relative path, or ``/media/x.docx``.
         content: Raw text to process directly (skips file access).
-        max_chars: Hard cap on returned characters (protects the context window).
+        max_chars: Character cap for one read. ``0`` takes the governance
+            READ_CHARS budget (20000 when governance is off).
         auto_detect: Detect format from extension.
         pages: PDF page selection, e.g. ``"1-3"`` / ``"2 5"``.
         sheet: XLSX worksheet name (default: all sheets).
+        mode: How much of the document to take (B3 pagination).
+            ``"full"`` (default) is the document up to the cap;
+            ``"index"`` is the block map — headings / pages / sheets /
+            slides numbered ``[0..n]`` (read this first for big files, then
+            address blocks by that number); ``"range"`` is blocks
+            ``[start, end]`` inclusive; ``"search"`` locates ``keywords``
+            with ±200 characters each.  Paginated modes read from a parsed,
+            cached copy of the document, so a second read costs nothing.
+        start: mode="range" — first **block number** from ``index``.
+        end: mode="range" — last block number (inclusive; omit for the last).
+        start_char: mode="range" — slice by character offset instead of block
+            number (used by the ``full`` read cursor).  Never mix units.
+        end_char: mode="range" — end character offset (exclusive).
+        keywords: mode="search" — terms to locate (space-separated).
+        goal: mode="digest" — the question the document is being read for.
+            The digest walks the block index with the compaction model
+            (caps: 12 calls / 120000 input characters) and returns
+            sections, facts and pointers into the original — never the
+            original text.
 
     Returns:
-        Parse result. On a missing file the result carries ``candidates`` —
-        real paths found in the workspace — so the caller can retry with one
-        of them instead of guessing.
+        Parse result, with the read cursor (``read_to`` /
+        ``remaining_chars`` / ``next_start``) on paginated reads.  On a
+        missing file the result carries ``candidates`` — real paths found in
+        the workspace — so the caller can retry with one of them instead of
+        guessing.
     """
+    if max_chars <= 0:
+        max_chars = _read_chars_budget()
+    mode = (mode or "full").strip().lower()
+    if mode not in ("full", "index", "range", "search", "digest"):
+        return {
+            "error": "mode 无效。可用：full / index / range / search / digest",
+        }
+
     if action == "formats":
         return {
             "action": "formats",
@@ -685,6 +790,82 @@ async def doc_reader(
                 "file": fp,
                 "supported": sorted(SUPPORTED_FORMATS),
             }
+
+        # ── B3 pagination (2026-10-17) ──────────────────────────────
+        # index / range / search read a parsed, cached copy of the document
+        # and return a cursor, so "read the rest" is a position and a second
+        # read costs no parsing.  A whole-document read of a big file is the
+        # exact overflow this exists to stop (measured on dev: 100,000 chars
+        # on the first read, 241,000 on the second, against a 215,040-char
+        # session budget), so it hands over the map plus the first block.
+        if mode == "digest":
+            from .doc_digest import digest_document
+
+            try:
+                return await digest_document(str(fp), fmt, goal)
+            except Exception as exc:
+                return {
+                    "mode": "digest",
+                    "error": (
+                        f"摘要读取失败：{type(exc).__name__}: {exc}。"
+                        "可改用 mode=index / mode=range 分页读取。"
+                    ),
+                    "file": fp,
+                }
+        if mode in ("index", "range", "search"):
+            return await _paginated_read(
+                fp,
+                fmt,
+                mode,
+                start,
+                end,
+                keywords,
+                max_chars,
+                start_char,
+                end_char,
+            )
+        if mode == "full":
+            try:
+                size = Path(fp).stat().st_size
+            except OSError:
+                size = 0
+            if size >= _PAGINATE_SIZE_BYTES:
+                index = await _paginated_read(
+                    fp,
+                    fmt,
+                    "index",
+                    -1,
+                    -1,
+                    "",
+                    max_chars,
+                )
+                if "error" not in index:
+                    head = await _paginated_read(
+                        fp,
+                        fmt,
+                        "range",
+                        0,
+                        -1,
+                        "",
+                        max_chars,
+                    )
+                    return {
+                        "mode": "index+head",
+                        "format": fmt,
+                        "path": fp,
+                        "total_chars": index.get("total_chars"),
+                        "blocks": index.get("blocks"),
+                        "index": index.get("index"),
+                        "content": head.get("content", ""),
+                        "cursor": head.get("cursor"),
+                        "warning": (
+                            f"文档共 {index.get('total_chars')} 字符，过大，"
+                            "不整读。已返回结构索引 + 首块；请用 mode=range "
+                            "配 start/end 分页取用，或 mode=search 配 "
+                            "keywords 定位。"
+                        ),
+                    }
+
         if fmt == "pdf":
             result = await _read_pdf(fp, pages=pages or None)
         elif fmt == "docx":
@@ -705,11 +886,28 @@ async def doc_reader(
         content_text = content_text[:max_chars]
         truncated = True
 
-    return {
+    total = result.get("chars", len(content_text))
+    out = {
         "action": "read",
         "file": resolved_file,
         "chars": result.get("chars", 0),
         "format": result.get("format", "unknown"),
         "truncated": truncated,
+        "returned_chars": len(content_text),
         "content": content_text,
     }
+    if truncated:
+        # Say where it stopped: a silent cap is what made a document get
+        # re-read whole (measured on dev: 100,000 then 241,000 characters).
+        out["cursor"] = {
+            "read_to": len(content_text),
+            "total_chars": total,
+            "remaining_chars": max(0, total - len(content_text)),
+            "next_start": len(content_text),
+            "hint": (
+                f"本次返回 {len(content_text)}/{total} 字符（预算 {max_chars}）。"
+                f"继续请用 mode=range 配 start_char={len(content_text)}，"
+                "或 mode=index 先看结构。"
+            ),
+        }
+    return out
