@@ -663,17 +663,27 @@ _USE_SYNC_PLAYWRIGHT = sys.platform == "win32" and EnvVarLoader.get_bool(
     "COAPIS_RELOAD_MODE",
 )
 
-if _USE_SYNC_PLAYWRIGHT:
-    _executor: Optional[futures.ThreadPoolExecutor] = None
+# Module-level singleton executor.  It used to be defined *inside* the
+# ``if _USE_SYNC_PLAYWRIGHT`` block, but 17 call sites in 8 action functions
+# (_ensure_browser/_action_start/stop/open/navigate/click/type/snapshot/…)
+# reference it unconditionally, so on Windows — where the flag is True and
+# those branches actually run — every one of them was a latent NameError.
+# Keeping it module level means the name always resolves, flag or no flag.
+_executor: Optional[futures.ThreadPoolExecutor] = None
 
-    def _get_executor() -> futures.ThreadPoolExecutor:
-        global _executor
-        if _executor is None:
-            _executor = futures.ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix="playwright",
-            )
-        return _executor
+
+def _get_executor() -> futures.ThreadPoolExecutor:
+    """Return the shared single-worker thread pool for sync Playwright calls."""
+    global _executor
+    if _executor is None:
+        _executor = futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="playwright",
+        )
+    return _executor
+
+
+if _USE_SYNC_PLAYWRIGHT:
 
     async def _run_sync(func, *args, **kwargs):
         """Run a sync function in the thread pool and await the result."""
@@ -3843,212 +3853,110 @@ async def browser_use(  # pylint: disable=R0911,R0912
     url: str = "",
     page_id: str = "default",
     selector: str = "",
-    text: str = "",
-    code: str = "",
-    output_path: str = "",
-    wait: int = 0,
-    full_page: bool = False,
-    width: int = 0,
-    height: int = 0,
-    level: str = "info",
-    filename: str = "",
-    accept: bool = True,
-    prompt_text: str = "",
     ref: str = "",
     element: str = "",
-    paths_json: str = "",
-    fields_json: str = "",
+    text: str = "",
+    code: str = "",
     key: str = "",
-    submit: bool = False,
-    slowly: bool = False,
-    include_static: bool = False,
-    screenshot_type: str = "png",
-    snapshot_filename: str = "",
-    double_click: bool = False,
-    button: str = "left",
-    modifiers_json: str = "",
+    path: str = "",
     start_ref: str = "",
     end_ref: str = "",
-    start_selector: str = "",
-    end_selector: str = "",
-    start_element: str = "",
-    end_element: str = "",
     values_json: str = "",
+    fields_json: str = "",
+    actions_json: str = "",
+    paths_json: str = "",
     tab_action: str = "",
     index: int = -1,
+    wait: int = 0,
     wait_time: float = 0,
     text_gone: str = "",
+    full_page: bool = False,
+    double_click: bool = False,
+    button: str = "left",
+    submit: bool = False,
+    modifiers_json: str = "",
+    accept: bool = True,
+    prompt_text: str = "",
     frame_selector: str = "",
     headed: bool = False,
-    cdp_port: int = 0,
-    private_mode: bool = False,
     browser_args: str = "",
-    executable_path: str = "",
-    cdp_url: str = "",
-    port: int = 0,
-    port_min: int = 0,
-    port_max: int = 0,
-    file_path: str = "",
-    actions_json: str = "",
+    **kwargs,
 ) -> ToolResponse:
-    """Control browser (Playwright). Default is headless. Use headed=True with
-    action=start to open a visible browser window. Flow: start, open(url),
-    snapshot to get refs, then click/type etc. with ref or selector. Use
-    page_id for multiple tabs. Note: To enhance the experience, consider
-    reminding the user to enable browser-related skills in the agent config.
-    Once enabled, you will be able to proactively determine when to invoke the
-    browser tool and pass the appropriate arguments.
+    """浏览器自动化（Playwright，默认无头）。
+
+    流程：start → open(url) → snapshot 取 ref → click/type 用 ref。多标签页用 page_id。
+
+    action：start/stop/open/navigate/navigate_back/snapshot/screenshot/click/type/
+    press_key/select_option/drag/hover/fill_form/evaluate/tabs/wait_for/pdf/close，
+    以及 resize/console_messages/network_requests/handle_dialog/file_upload/
+    file_download/install/run_code/eval/cookies_get/cookies_set/cookies_clear/
+    connect_cdp/list_cdp_targets/clear_browser_cache/batch。
 
     Args:
-        action (str):
-            Required. Action type. Values: start, stop, open, navigate,
-            navigate_back, snapshot, screenshot, click, type, eval, evaluate,
-            resize, console_messages, network_requests, handle_dialog,
-            file_upload, file_download, fill_form, install, press_key, run_code,
-            drag, hover, select_option, tabs, wait_for, pdf, close, batch,
-            cookies_get, cookies_set, cookies_clear, connect_cdp, list_cdp_targets,
-            clear_browser_cache.
-            Commonly confused actions:
-            - start: start browser only; does not open a target URL by itself.
-            - open: create/open a page and go to URL; auto-starts browser if needed.
-            - navigate: navigate an existing page_id to URL; page must already exist.
-            - close: close one page/tab only; browser stays running if other tabs remain.
-            - stop: stop/disconnect the whole browser session and clear browser state.
-            - tabs with tab_action=close: close a tab by index; similar to close but
-              selected by tab list position instead of page_id.
-        url (str):
-            URL to open. Required for action=open or navigate. For
-            cookies_get, optional URL or JSON array of URLs to filter
-            cookies by domain.
-        page_id (str):
-            Page/tab identifier, default "default". Use different page_id for
-            multiple tabs.
-        selector (str):
-            CSS selector to locate element for click/type/hover etc. Prefer
-            ref when available.
-        text (str):
-            Text to type. Required for action=type.
-        code (str):
-            JavaScript code. Required for action=eval, evaluate, or run_code.
-        output_path (str):
-            File path for screenshot save or PDF export.
-        wait (int):
-            Milliseconds to wait after click. Used with action=click.
-        full_page (bool):
-            Whether to capture full page. Used with action=screenshot.
-        width (int):
-            Viewport width in pixels. Used with action=resize.
-        height (int):
-            Viewport height in pixels. Used with action=resize.
-        level (str):
-            Console log level filter, e.g. "info" or "error". Used with
-            action=console_messages.
-        filename (str):
-            Filename for saving logs or screenshot. Used with
-            console_messages, network_requests, screenshot.
-        accept (bool):
-            Whether to accept dialog (true) or dismiss (false). Used with
-            action=handle_dialog.
-        prompt_text (str):
-            Input for prompt dialog. Used with action=handle_dialog when
-            dialog is prompt.
-        ref (str):
-            Element ref from snapshot output; use for stable targeting. Prefer
-            ref for click/type/hover/screenshot/evaluate/select_option.
-        element (str):
-            Element description for evaluate etc. Prefer ref when available.
-        paths_json (str):
-            JSON array string of file paths. Used with action=file_upload.
-        fields_json (str):
-            JSON object string of form field name to value. Used with
-            action=fill_form. For cookies_set, JSON array of cookie objects
-            with keys: name, value, url (or domain+path), expires, httpOnly,
-            secure, sameSite.
-        key (str):
-            Key name, e.g. "Enter", "Control+a". Required for
-            action=press_key.
-        submit (bool):
-            Whether to submit (press Enter) after typing. Used with
-            action=type.
-        slowly (bool):
-            Whether to type character by character. Used with action=type.
-        include_static (bool):
-            Whether to include static resource requests. Used with
-            action=network_requests.
-        screenshot_type (str):
-            Screenshot format, "png" or "jpeg". Used with action=screenshot.
-        snapshot_filename (str):
-            File path to save snapshot output. Used with action=snapshot.
-        double_click (bool):
-            Whether to double-click. Used with action=click.
-        button (str):
-            Mouse button: "left", "right", or "middle". Used with
-            action=click.
-        modifiers_json (str):
-            JSON array of modifier keys, e.g. ["Shift","Control"]. Used with
-            action=click.
-        start_ref (str):
-            Drag start element ref. Used with action=drag.
-        end_ref (str):
-            Drag end element ref. Used with action=drag.
-        start_selector (str):
-            Drag start CSS selector. Used with action=drag.
-        end_selector (str):
-            Drag end CSS selector. Used with action=drag.
-        start_element (str):
-            Drag start element description. Used with action=drag.
-        end_element (str):
-            Drag end element description. Used with action=drag.
-        values_json (str):
-            JSON of option value(s) for select. Used with
-            action=select_option.
-        tab_action (str):
-            Tab action: list, new, close, or select. Required for
-            action=tabs.
-        index (int):
-            Tab index for tabs select, zero-based. Used with action=tabs.
-        wait_time (float):
-            Seconds to wait. Used with action=wait_for.
-        text_gone (str):
-            Wait until this text disappears from page. Used with
-            action=wait_for.
-        frame_selector (str):
-            iframe selector, e.g. "iframe#main". Set when operating inside
-            that iframe in snapshot/click/type etc.
-        headed (bool):
-            When True with action=start, launch a visible browser window
-            (non-headless). User can see the real browser. Default False.
-        cdp_port (int):
-            When > 0 with action=start, use the specified CDP port. When 0,
-            CoApis chooses a free local port automatically for managed CDP.
-        private_mode (bool):
-            When True with action=start, force direct Playwright management
-            instead of managed CDP. Use this when the user explicitly does not
-            want the browser to be connectable by other local tools/workspaces
-            via CDP. Default False. By default, CoApis prefers managed CDP for
-            both headless and headed starts.
-        browser_args (str):
-            Extra Chromium launch arguments, e.g. "--incognito" or
-            "--proxy-server=http://127.0.0.1:7890". Multiple args separated by
-            space. Applied to all launch paths (headless, headed, managed CDP).
-            Default empty string (no extra args).
-        executable_path (str):
-            Custom browser executable path, e.g.
-            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe".
-            When set, overrides the system default browser detection.
-            Default empty string (use system default).
-        cdp_url (str):
-            CDP base URL, e.g. "http://localhost:9222". Required for
-            action=connect_cdp.
-        port (int):
-            Scan a single specific port for action=list_cdp_targets.
-        port_min (int):
-            Lower bound of port range for action=list_cdp_targets.
-            Defaults to 9000 when not specified.
-        port_max (int):
-            Upper bound of port range for action=list_cdp_targets.
-            Defaults to 10000 when not specified.
+        action (str): 动作类型。必填。
+        url (str): open/navigate 地址。
+        page_id (str): 页签标识，默认 default。
+        selector (str): CSS 定位；有 ref 时优先 ref。
+        ref (str): snapshot 得到的元素引用。
+        element (str): evaluate 的元素描述。
+        text (str): type 的文本。
+        code (str): eval/evaluate/run_code 的 JS。
+        key (str): press_key 键名，如 Enter。
+        path (str): 截图/snapshot/pdf/下载的保存路径。
+        start_ref (str): drag 起点 ref。
+        end_ref (str): drag 终点 ref。
+        values_json (str): select_option 选项值 JSON。
+        fields_json (str): fill_form 字段 JSON；cookies_set 的 cookie 数组。
+        actions_json (str): batch 子动作 JSON 数组。
+        tab_action (str): tabs 动作 list/new/close/select。
+        index (int): tabs select 索引，0 起。
+        wait (int): click 后等待毫秒。
+        wait_time (float): wait_for 秒数（上限 60）。
+        text_gone (str): wait_for 等待消失的文本。
+        full_page (bool): 截图整页。
+        double_click (bool): 双击。
+        button (str): left/right/middle。
+        submit (bool): type 后回车。
+        modifiers_json (str): 修饰键 JSON 数组。
+        accept (bool): 弹窗接受与否。
+        prompt_text (str): prompt 弹窗输入。
+        frame_selector (str): iframe 选择器，如 iframe#main。
+        headed (bool): start 时打开可见窗口。
+        browser_args (str): 额外 Chromium 启动参数。
+
+    高级参数（width/height/level/include_static/screenshot_type/slowly/
+    start_selector/end_selector/start_element/end_element/cdp_port/cdp_url/
+    private_mode/executable_path/port/port_min/port_max）仍可用但不必每次携带，
+    详见 browser_use 技能说明。
     """
+    # ── 兼容层：低频参数移出 schema（省固定开销），旧调用方仍可直接传 ──
+    _legacy_path = (
+        path
+        or kwargs.get("output_path")
+        or kwargs.get("snapshot_filename")
+        or kwargs.get("file_path")
+        or kwargs.get("filename")
+        or ""
+    )
+    output_path = filename = snapshot_filename = file_path = _legacy_path
+    width = int(kwargs.get("width", 0) or 0)
+    height = int(kwargs.get("height", 0) or 0)
+    level = kwargs.get("level", "info") or "info"
+    include_static = bool(kwargs.get("include_static", False))
+    screenshot_type = kwargs.get("screenshot_type", "png") or "png"
+    slowly = bool(kwargs.get("slowly", False))
+    start_selector = kwargs.get("start_selector", "") or ""
+    end_selector = kwargs.get("end_selector", "") or ""
+    start_element = kwargs.get("start_element", "") or ""
+    end_element = kwargs.get("end_element", "") or ""
+    cdp_port = int(kwargs.get("cdp_port", 0) or 0)
+    private_mode = bool(kwargs.get("private_mode", False))
+    executable_path = kwargs.get("executable_path", "") or ""
+    cdp_url = kwargs.get("cdp_url", "") or ""
+    port = int(kwargs.get("port", 0) or 0)
+    port_min = int(kwargs.get("port_min", 0) or 0)
+    port_max = int(kwargs.get("port_max", 0) or 0)
+
     # Resolve per-workspace state using context var set by react_agent.py
     from ...config.context import get_current_workspace_dir as _get_cwd
 
