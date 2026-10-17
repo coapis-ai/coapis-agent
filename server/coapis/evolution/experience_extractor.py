@@ -31,6 +31,7 @@ Architecture:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -139,11 +140,22 @@ If no issues found, output: []
         max_extraction_per_session: int = 5,
         enable_deduplication: bool = True,
         existing_memory_content: str = "",
+        extract_chunk_chars: int = 24_000,
+        llm_retries: int = 3,
+        llm_backoff_seconds: float = 2.0,
     ):
         self.agent_core = agent_core
         self.min_confidence = min_confidence
         self.max_extraction_per_session = max_extraction_per_session
         self.enable_deduplication = enable_deduplication
+        # The extractor owns a raw provider client, so nothing gated its
+        # prompt: a long session (tool results included) went out whole and
+        # the provider answered "Context size has been exceeded" - 849
+        # extraction failures in one month on dev (2026-10-17).  Segments are
+        # sized to the budget, and transient refusals are retried.
+        self.extract_chunk_chars = max(4_000, extract_chunk_chars)
+        self.llm_retries = max(1, llm_retries)
+        self.llm_backoff_seconds = max(0.0, llm_backoff_seconds)
 
         # Cache for deduplication
         self._known_titles: set[str] = set()
@@ -361,20 +373,87 @@ If no issues found, output: []
         if not conversation.strip():
             return []
 
-        prompt = prompt_template + "\n\n--- Conversation ---\n" + conversation + "\n--- End ---"
+        # One session is not worth less than the provider's window: the
+        # conversation is cut into budget-sized segments and each is
+        # extracted on its own.  A segment that fails is logged and skipped;
+        # the other segments still yield experiences, and only when nothing
+        # came back does this fall back to the heuristic.
+        segments = self._split_conversation(conversation)
+        experiences: List[ExtractedExperience] = []
+        for index, segment in enumerate(segments):
+            prompt = (
+                prompt_template
+                + f"\n\n--- Conversation part {index + 1}/{len(segments)} "
+                + "---\n"
+                + segment
+                + "\n--- End ---"
+            )
+            try:
+                result = await self._call_llm(prompt)
+            except Exception as e:
+                logger.error(
+                    "LLM extraction failed for %s (part %d/%d): %s",
+                    exp_type,
+                    index + 1,
+                    len(segments),
+                    e,
+                )
+                continue
+            experiences.extend(
+                self._parse_extraction_result(
+                    result,
+                    exp_type,
+                    session_id,
+                    agent_id,
+                    user_id,
+                ),
+            )
+        if not experiences:
+            # Nothing survived: keep the previous safety net.
+            return self._heuristic_extract(
+                trajectory,
+                exp_type,
+                session_id,
+                agent_id,
+                user_id,
+            )
+        return experiences
 
-        try:
-            # Call LLM for extraction
-            result = await self._call_llm(prompt)
+    def _split_conversation(self, conversation: str) -> list[str]:
+        """Cut the conversation text into segments within the budget.
 
-            # Parse JSON response
-            experiences = self._parse_extraction_result(result, exp_type, session_id, agent_id, user_id)
-            return experiences
+        Splitting is line-based so a ``User:/Tools:/Assistant:`` exchange is
+        never cut in half; a single oversized line (one huge tool result) is
+        sliced by characters, which is what the provider's window cares
+        about.
 
-        except Exception as e:
-            logger.error("LLM extraction failed for %s: %s", exp_type, e)
-            # Fallback to heuristic extraction
-            return self._heuristic_extract(trajectory, exp_type, session_id, agent_id, user_id)
+        Args:
+            conversation: The formatted conversation text.
+
+        Returns:
+            Segments in original order; ``[conversation]`` when it fits.
+        """
+        limit = self.extract_chunk_chars
+        if len(conversation) <= limit:
+            return [conversation]
+        segments: list[str] = []
+        current: list[str] = []
+        size = 0
+        for line in conversation.split("\n"):
+            while len(line) > limit:
+                if current:
+                    segments.append("\n".join(current))
+                    current, size = [], 0
+                segments.append(line[:limit])
+                line = line[limit:]
+            if current and size + len(line) + 1 > limit:
+                segments.append("\n".join(current))
+                current, size = [], 0
+            current.append(line)
+            size += len(line) + 1
+        if current:
+            segments.append("\n".join(current))
+        return segments
 
     def _build_conversation_text(self, trajectory: List[TrajectoryEntry]) -> str:
         """Build formatted conversation text from trajectory entries."""
@@ -390,7 +469,36 @@ If no issues found, output: []
         return "\n".join(lines)
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call LLM for experience extraction."""
+        """Call LLM for experience extraction, retrying transient refusals.
+
+        429 / 500 / timeouts are momentary conditions on a shared key, and
+        the alternative to retrying is a heuristic extraction that records
+        nothing at all.  Backoff is exponential so a rate-limited key gets
+        room instead of a second of hammering.
+        """
+        attempts = self.llm_retries
+        last: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                return await self._call_llm_once(prompt)
+            except Exception as exc:
+                last = exc
+                if attempt + 1 < attempts:
+                    delay = self.llm_backoff_seconds * (2**attempt)
+                    logger.warning(
+                        "Extraction LLM call failed (%s); retry %d/%d in "
+                        "%.1fs",
+                        exc,
+                        attempt + 2,
+                        attempts,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+        assert last is not None
+        raise last
+
+    async def _call_llm_once(self, prompt: str) -> str:
+        """One provider call for experience extraction."""
         response = await self.agent_core.client.chat.completions.create(
             model=self.agent_core.model,
             messages=[
