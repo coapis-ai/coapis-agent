@@ -696,49 +696,58 @@ def format_multimodal_hint(model_info, _model_name: str) -> str:
 
 
 _FILE_OPERATION_DIRECTIVE_ZH = (
-    "\n\n---\n\n## [系统指令] 文件操作规范\n\n"
-    "当用户要求你保存、创建、写入任何文件时，**必须调用 `write_file` 工具实际执行写入**，不要只给出路径建议。\n\n"
-    "**默认保存路径：** `files/`（用户「我的空间」文件目录）。\n"
-    "- 用户未指定路径 → `files/{有意义的文件名}`\n"
-    "- 用户指定相对路径 → `files/{用户路径}`\n"
-    "- 用户指定绝对路径 → 按用户指定（须在 workspace 安全范围内）\n\n"
-    "**行为要求：**\n"
-    "- 不要问「要不要保存」，直接保存\n"
-    "- 保存后告知用户文件路径\n"
-    "- 完成复杂任务（分析报告、代码、文档）后，主动保存到 `files/`\n"
-    "- 深度工作过程中的阶段产物，保存到 `files/.temp/` 目录，完成后清理\n"
+    "\n\n---\n\n## [系统指令] 文件产出规范\n\n"
+    "决定产出文件时**必须调用 `write_file` 实际写入**，不要只给路径。\n\n"
+    "**何时产出**（按优先级，命中即产出）：\n"
+    "- T1 用户明确要求（生成文件/导出/发我一份/保存为…）→ 必产出，**不受长度限制**。\n"
+    "- T2 成文类任务（写作、报告、方案、清单、表格、邮件、总结、说明书）→ 产出。\n"
+    "- T3 单条回复 > __THRESHOLD__ 字且属成文 → 产出。\n"
+    "- T4 闲聊、问答、操作确认、代码片段、解释 → 直接回答，**不建文件**。\n\n"
+    "**格式**：过程与交付默认 md；仅当用户**明确指定**格式（docx/pdf/xlsx…）时在交付那一刻转换一次。\n\n"
+    "**落点**（`files/`=我的空间正式区，`files/.temp/`=临时区，自动清理）：默认写 `.temp/`；"
+    "用户要求保存/导出/指定路径、交付要发外部、需长期复用 → 写 `files/` 并告知路径。"
+    "**同名直接覆盖更新**，用户要求留版本才用 `_v2`。\n\n"
+    "**脚本**：优先内置工具与已装依赖；需额外依赖时脚本与产物都放 `files/.temp/`。\n"
 )
 
 _FILE_OPERATION_DIRECTIVE_EN = (
-    "\n\n---\n\n## [System Directive] File Operation Policy\n\n"
-    "When a user asks you to save, create, or write any file, "
-    "**you MUST call the `write_file` tool to actually write it**. "
-    "Do NOT just suggest a path.\n\n"
-    "**Default save path:** `files/` (the user's \"My Space\" file directory).\n"
-    "- User did not specify a path → `files/{meaningful_filename}`\n"
-    "- User specified a relative path → `files/{user_path}`\n"
-    "- User specified an absolute path → use as-is (must be within workspace)\n\n"
-    "**Behavior requirements:**\n"
-    "- Do NOT ask \"should I save?\" — just save it\n"
-    "- Always tell the user the file path after saving\n"
-    "- Proactively save after completing complex tasks (reports, code, documents) to `files/`\n"
-    "- Save intermediate work products during deep work to `files/.temp/`, clean up when done\n"
+    "\n\n---\n\n## [System Directive] File Output Policy\n\n"
+    "Producing a file means **calling `write_file`**, not suggesting a path.\n\n"
+    "**When** (first match wins): **T1** the user asks for a file (generate/export/send me/"
+    "save as…) → always, **no length limit**; **T2** document-shaped work (writing, report, "
+    "plan, checklist, table, email, summary) → file; **T3** a reply over __THRESHOLD__ "
+    "characters that is document-shaped → file; **T4** chat, Q&A, confirmations, code "
+    "snippets → inline, **no file**.\n\n"
+    "**Format**: `md` for process and deliverable; convert **once at delivery** only if the "
+    "user **explicitly** names a format (docx/pdf/xlsx…).\n\n"
+    "**Location** (`files/` = permanent My Space, `files/.temp/` = scratch, auto-cleaned): "
+    "default `.temp/`; use `files/` and state the path when the user asks to save/export/"
+    "download or names a path, the deliverable leaves for third parties, or it is for long-term "
+    "reuse. **Same name = overwrite**; `name_v2` only if the user wants versions kept.\n\n"
+    "**Scripts**: built-in tools and installed dependencies first; with extra dependencies, "
+    "script and outputs stay in `files/.temp/`.\n"
 )
 
 _FILE_OPERATION_DIRECTIVE_RU = (
-    "\n\n---\n\n## [Системная директива] Политика работы с файлами\n\n"
-    "Когда пользователь просит сохранить, создать или записать файл, "
-    "**обязательно вызовите инструмент `write_file`** для фактической записи. "
-    "Не просто предлагайте путь.\n\n"
-    "**Путь по умолчанию:** `files/` (каталог «Моё пространство»).\n"
-    "- Путь не указан → `files/{осмысленное_имя}`\n"
-    "- Относительный путь → `files/{путь_пользователя}`\n"
-    "- Абсолютный путь → как есть (в пределах рабочей области)\n\n"
-    "**Требования:**\n"
-    "- Не спрашивайте «сохранить?» — просто сохраните\n"
-    "- Сообщайте путь после сохранения\n"
-    "- Автоматически сохраняйте результаты сложных задач в `files/`\n"
-    "- Промежуточные результаты сохраняйте в `files/.temp/`, удаляйте при завершении\n"
+    "\n\n---\n\n## [Системная директива] Политика создания файлов\n\n"
+    "Если создаёте файл, **обязательно вызовите `write_file` для фактической записи**, "
+    "а не только предложите путь.\n\n"
+    "**Когда создавать** (по приоритету, первое совпадение решает):\n"
+    "- T1 Явная просьба (создай файл / экспортируй / пришли мне / сохрани как…) → файл обязателен, "
+    "**без ограничения длины**.\n"
+    "- T2 Документный результат (текст, отчёт, план, чек-лист, таблица, письмо, резюме, инструкция) "
+    "→ создайте файл.\n"
+    "- T3 Ответ длиннее __THRESHOLD__ символов и документный → создайте файл.\n"
+    "- T4 Болтовня, вопросы-ответы, подтверждение действий, фрагменты кода, пояснения → ответ в чате, "
+    "**файл не создавайте**.\n\n"
+    "**Формат**: `md` по умолчанию и для процесса, и для результата; конвертация **один раз при выдаче**, "
+    "только если пользователь **явно** запросил формат (docx/pdf/xlsx…).\n\n"
+    "**Расположение** (`files/` — постоянная зона «Моё пространство», `files/.temp/` — временная, автоочистка): "
+    "по умолчанию `.temp/`; в `files/` и с сообщением пути — если пользователь просит сохранить/экспортировать/"
+    "скачать или указал путь, если результат уходит вовне, либо нужно длительное переиспользование. "
+    "**Файл с тем же именем просто перезаписывается**; `имя_v2` — только по просьбе о версиях.\n\n"
+    "**Скрипты**: встроенные инструменты и установленные зависимости; при дополнительных зависимостях "
+    "скрипт и результаты — только в `files/.temp/`.\n"
 )
 
 
@@ -810,13 +819,30 @@ def build_bootstrap_guidance_v2(
     )
 
 
+def _file_output_min_chars() -> int:
+    """T3 volume-fallback threshold, from ``agents.defaults.file_output_min_chars``.
+
+    Read per call so config edits take effect without a restart. Falls back to
+    200 on any problem (missing field, unreadable config, non-positive value).
+    """
+    try:
+        from ..config import load_config
+
+        value = int(load_config().agents.defaults.file_output_min_chars)
+        return value if value > 0 else 200
+    except Exception:  # pylint: disable=broad-except
+        return 200
+
+
 def _get_file_operation_directive(language: str = "zh") -> str:
     """Return the system-level file operation directive for the given language."""
     if language == "ru":
-        return _FILE_OPERATION_DIRECTIVE_RU
-    if language == "en":
-        return _FILE_OPERATION_DIRECTIVE_EN
-    return _FILE_OPERATION_DIRECTIVE_ZH
+        text = _FILE_OPERATION_DIRECTIVE_RU
+    elif language == "en":
+        text = _FILE_OPERATION_DIRECTIVE_EN
+    else:
+        text = _FILE_OPERATION_DIRECTIVE_ZH
+    return text.replace("__THRESHOLD__", str(_file_output_min_chars()))
 
 
 __all__ = [

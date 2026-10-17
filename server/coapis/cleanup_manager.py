@@ -207,3 +207,65 @@ class CleanupManager:
                     self._stats["bytes_freed"] += size
 
         return self._stats
+
+
+def run_cleanup_all_workspaces() -> Dict[str, Any]:
+    """Run the cleanup rules over every agent workspace once.
+
+    ``CleanupManager`` is scoped to a single working dir, so each workspace
+    (``WORKSPACES_DIR/<user>``) gets its own instance. Aggregates the stats.
+    """
+    from .constant import WORKSPACES_DIR
+
+    total = {
+        "workspaces": 0,
+        "files_deleted": 0,
+        "files_archived": 0,
+        "bytes_freed": 0,
+        "errors": 0,
+    }
+    if not WORKSPACES_DIR.exists():
+        return total
+
+    for user_dir in WORKSPACES_DIR.iterdir():
+        if not user_dir.is_dir():
+            continue
+        try:
+            stats = CleanupManager(user_dir).run_cleanup()
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Cleanup failed for %s: %s", user_dir, exc)
+            total["errors"] += 1
+            continue
+        total["workspaces"] += 1
+        for key in ("files_deleted", "files_archived", "bytes_freed", "errors"):
+            total[key] += stats.get(key, 0)
+    return total
+
+
+async def start_scratch_cleanup_loop(interval_seconds: int = 3600) -> None:
+    """Periodic scratch cleanup for all workspaces (runs once, then on interval).
+
+    The agent is told to drop process files in ``files/.temp/``; that promise is
+    only true if something empties the directory. This is that something.
+    ``run_cleanup`` is synchronous, so it runs in a worker thread and never
+    blocks the event loop.
+    """
+    import asyncio
+
+    while True:
+        try:
+            stats = await asyncio.to_thread(run_cleanup_all_workspaces)
+            if stats["files_deleted"] or stats["files_archived"]:
+                logger.info(
+                    "Scratch cleanup: %d workspace(s), %d deleted, "
+                    "%d archived, %.2f MB freed",
+                    stats["workspaces"],
+                    stats["files_deleted"],
+                    stats["files_archived"],
+                    stats["bytes_freed"] / 1024 / 1024,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Scratch cleanup round failed: %s", exc)
+        await asyncio.sleep(interval_seconds)

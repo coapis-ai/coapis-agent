@@ -108,7 +108,7 @@ def build_agent_template(
         )
         return AgentTemplateBuildResult(
             agent_config=agent_config,
-            initial_skill_names=(),
+            initial_skill_names=("guidance",),
             md_template_id=get_workspace_md_template_id(template_id),
         )
 

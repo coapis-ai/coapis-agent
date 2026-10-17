@@ -53,6 +53,29 @@ class AnthropicProvider(Provider):
         )
 
     @staticmethod
+    def _extract_context_length(row: Any) -> int | None:
+        """The model's own window, as Anthropic publishes it.
+
+        ``GET /v1/models`` carries ``max_input_tokens`` per model, which is
+        the context window (B2, 2026-10-17).  Reading it here means the
+        context budget is computed from what the provider says instead of
+        from an operator-typed ``max_input_length``.
+        """
+        for key in ("max_input_tokens", "context_window", "context_length"):
+            value = (
+                row.get(key)
+                if isinstance(row, dict)
+                else getattr(row, key, None)
+            )
+            try:
+                tokens = int(value)
+            except (TypeError, ValueError):
+                continue
+            if tokens >= 512:
+                return tokens
+        return None
+
+    @staticmethod
     def _normalize_models_payload(payload: Any) -> List[ModelInfo]:
         if isinstance(payload, dict):
             rows = payload.get("data", [])
@@ -70,7 +93,15 @@ class AnthropicProvider(Provider):
 
             if not model_id:
                 continue
-            models.append(ModelInfo(id=model_id, name=model_name))
+            models.append(
+                ModelInfo(
+                    id=model_id,
+                    name=model_name,
+                    max_sequence_length=(
+                        AnthropicProvider._extract_context_length(row)
+                    ),
+                ),
+            )
 
         deduped: List[ModelInfo] = []
         seen: set[str] = set()

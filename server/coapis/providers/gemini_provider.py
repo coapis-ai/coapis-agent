@@ -52,6 +52,29 @@ class GeminiProvider(Provider):
         )
 
     @staticmethod
+    def _extract_context_length(row: Any) -> int | None:
+        """The model's own window, as Gemini publishes it.
+
+        ``GET /v1beta/models`` carries ``input_token_limit`` per model (B2,
+        2026-10-17), which is the context window the budget must be computed
+        against.  Accepting both spellings keeps this working whether the
+        SDK object or the raw REST payload is in hand.
+        """
+        for key in ("input_token_limit", "inputTokenLimit", "context_length"):
+            value = (
+                row.get(key)
+                if isinstance(row, dict)
+                else getattr(row, key, None)
+            )
+            try:
+                tokens = int(value)
+            except (TypeError, ValueError):
+                continue
+            if tokens >= 512:
+                return tokens
+        return None
+
+    @staticmethod
     def _normalize_models_payload(payload: Any) -> List[ModelInfo]:
         models: List[ModelInfo] = []
         for row in payload or []:
@@ -72,7 +95,15 @@ class GeminiProvider(Provider):
             if not display_name or display_name.startswith("models/"):
                 display_name = model_id
 
-            models.append(ModelInfo(id=model_id, name=display_name))
+            models.append(
+                ModelInfo(
+                    id=model_id,
+                    name=display_name,
+                    max_sequence_length=(
+                        GeminiProvider._extract_context_length(row)
+                    ),
+                ),
+            )
 
         deduped: List[ModelInfo] = []
         seen: set[str] = set()

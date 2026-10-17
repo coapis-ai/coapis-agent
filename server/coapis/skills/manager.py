@@ -28,6 +28,26 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+#: Hard cap for one skill's line in the system-prompt index (B0-4, 2026-10-17).
+#: Measured on dev: 17 skills × avg 234 chars of frontmatter description =
+#: **3,983 chars of system prompt on every turn**.  An index only has to say
+#: *when* the skill applies; the body is read on demand, so the description
+#: is not the place to pay for.  ``index_hint`` in the frontmatter is the
+#: author-written trigger line; without it the description is cut to this
+#: length, which keeps the whole index near 1.7K chars.
+SKILL_INDEX_HINT_CHARS = 60
+
+
+def skill_index_hint(skill: dict) -> str:
+    """One-line trigger text for the skill index (``index_hint`` if present)."""
+    text = (skill.get("index_hint") or "").strip() or (
+        skill.get("description") or ""
+    ).strip()
+    text = " ".join(text.split())
+    if len(text) <= SKILL_INDEX_HINT_CHARS:
+        return text
+    return text[: SKILL_INDEX_HINT_CHARS - 1].rstrip() + "…"
+
 
 class SkillManager:
     """Manages agent skills with discovery and hot-reload.
@@ -82,6 +102,7 @@ class SkillManager:
         # Parse SKILL.md frontmatter
         content = skill_md.read_text()
         name, description = self._parse_frontmatter(content)
+        index_hint = self._parse_index_hint(content)
 
         if not name:
             return None
@@ -97,11 +118,29 @@ class SkillManager:
         return {
             "name": name,
             "description": description or "",
+            "index_hint": index_hint,
             "path": str(skill_dir),
             "enabled": meta.get("enabled", True),
             "version": meta.get("version", "1.0.0"),
             "tags": meta.get("tags", []),
         }
+
+    @staticmethod
+    def _parse_index_hint(content: str) -> str:
+        """Read the optional ``index_hint:`` frontmatter key.
+
+        The index line the model sees every turn; authors who care about it
+        write it, everyone else gets a truncation of ``description``.
+        """
+        if not content.startswith("---"):
+            return ""
+        parts = content.split("---", 2)
+        if len(parts) < 2:
+            return ""
+        for line in parts[1].split("\n"):
+            if line.startswith("index_hint:"):
+                return line.split(":", 1)[1].strip().strip('"').strip("'")
+        return ""
 
     def _parse_frontmatter(self, content: str) -> tuple:
         """Parse YAML frontmatter from SKILL.md."""
@@ -476,7 +515,9 @@ class SkillManager:
             lines = ["Available Skills:"]
             for skill in matched_skills:
                 if skill.get("enabled", True):
-                    lines.append(f"- **{skill['name']}**: {skill['description']}")
+                    lines.append(
+                        f"- **{skill['name']}**: {skill_index_hint(skill)}",
+                    )
             result = "\n".join(lines)
 
         setattr(self, cache_key, result)

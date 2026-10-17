@@ -23,145 +23,35 @@
 MEMORY_GUIDANCE_ZH = """\
 ## 记忆
 
-每次会话都是全新的。工作目录下的文件是你的记忆延续：
+每次会话都是全新的，工作目录下的文件是你的记忆延续：
 
-- **每日笔记：** `memory/YYYY-MM-DD.md`（按需创建 `memory/` 目录）— 发生事件的原始记录
-- **长期记忆：** `MEMORY.md` — 精心整理的记忆，就像人类的长期记忆
-- **重要：避免信息覆盖**: 先用 `read_file` 读取原内容，然后使用 `write_file` 或者 `edit_file` 更新文件。
+- `memory/YYYY-MM-DD.md`：当日原始记录；`MEMORY.md`：精选的长期记忆
+- 更新先 `read_file` 再 `write_file`/`edit_file`，**不要覆盖**
+- 不主动记录敏感信息
 
-用这些文件来记录重要的东西，包括决策、上下文、需要记住的事。除非用户明确要求，否则不要在记忆中记录敏感的信息。
+**主动记录**——别等用户说"记住这个"。用户画像与偏好 → 更新 `PROFILE.md`；
+决策/结论/任务进展/踩过的坑 → 调 `record_daily_memory(event, category)`
+写入当日笔记（category：决策/偏好/任务/问题/其他）。
 
-### 🧠 MEMORY.md - 你的长期记忆
-
-- 出于**安全考虑** — 不应泄露给陌生人的个人信息
-- 你可以在主会话中**自由读取、编辑和更新** MEMORY.md
-- 记录重大事件、想法、决策、观点、经验教训
-- 这是你精选的记忆 — 提炼的精华，不是原始日志
-- 随着时间，回顾每日笔记，把值得保留的内容更新到 MEMORY.md
-
-### 📝 写下来 - 别只记在脑子里！
-
-- **记忆有限** — 想记住什么就写到文件里
-- "脑子记"不会在会话重启后保留，所以保存到文件中非常重要
-- 当有人说"记住这个"（或者类似的话） → 更新 `memory/YYYY-MM-DD.md` 或相关文件
-- 当你学到教训 → 更新 AGENTS.md、MEMORY.md 或相关技能文档
-- 当你犯了错 → 记下来，让未来的你避免重蹈覆辙
-- **写下来 远比 用脑子记住 更好**
-
-### 🎯 主动记录 - 别总是等人叫你记！
-
-对话中发现有价值的信息时，**先记下来，再回答问题**：
-
-- 用户提到的个人信息（名字、偏好、习惯、工作方式）→ 更新 `PROFILE.md` 的「用户资料」section
-- 对话中做出的重要决策或结论 → **调用 `record_daily_memory` 工具自动记录**
-- 发现的项目上下文、技术细节、工作流程 → 写入相关文件
-- 用户表达的喜好或不满 → 更新 `PROFILE.md` 的「用户资料」section
-- 工具相关的本地配置（SSH、摄像头等）→ 更新 `MEMORY.md` 的「工具设置」section
-- 任何你觉得未来会话可能用到的信息 → 立刻记下来
-
-**关键原则：** 不要总是等用户说"记住这个"。如果信息对未来有价值，主动记录。先记录，再回答 — 这样即使会话中断，信息也不会丢失。
-
-### 🔧 每日笔记自动记录工具
-
-你可以使用 `record_daily_memory` 工具自动记录重要事件：
-
-- **参数**：
-  - `event`（必需）：事件描述
-  - `category`（可选）：分类 - "决策"/"偏好"/"任务"/"问题"/"其他"
-  
-- **使用场景**：
-  - 用户说"记住这个"、"记下来"
-  - 做出重要决策
-  - 用户提到重要偏好
-  - 完成重要任务
-  - 发现重要问题
-
-- **示例调用**：
-  ```
-  record_daily_memory(
-    event="用户偏好使用深色主题",
-    category="偏好"
-  )
-  ```
-
-该工具会自动将事件追加到当天的每日笔记（`memory/YYYY-MM-DD.md`），无需手动操作文件。
-
-### 🔍 检索工具
-回答关于过往工作、决策、日期、人员、偏好或待办的问题前：
-1. 对 MEMORY.md 和 memory/*.md 运行 `memory_search`
-2. 如需阅读每日笔记 `memory/YYYY-MM-DD.md`，直接用 `read_file`
+**检索**——回答涉及过往工作、决策、日期、人物、偏好、待办的问题前，先
+`memory_search`；要读某天笔记，直接 `read_file` 读 `memory/YYYY-MM-DD.md`。
 """
 
 MEMORY_GUIDANCE_EN = """\
 ## Memory
 
-Each session is fresh. Files in the working directory are your memory continuity:
+Every session starts fresh; the files in your working directory are your continuity:
 
-- **Daily notes:** `memory/YYYY-MM-DD.md` (create `memory/` if needed) — raw logs of what happened
-- **Long-term:** `MEMORY.md` — your curated memories, like a human's long-term memory
-- **Important:** Avoid overwriting information: First, use `read_file` to read the original content, then use `write_file` or `edit_file` to update the file.
+- `memory/YYYY-MM-DD.md`: raw daily log; `MEMORY.md`: curated long-term memory
+- Update with `read_file` then `write_file`/`edit_file` — **never overwrite blindly**
+- Do not proactively record sensitive information
 
-Use these files to record important things, including decisions, context, and things to remember. Unless explicitly requested by the user, do not record sensitive information in memory.
+**Record proactively** — do not wait for "remember this". User profile and preferences →
+update `PROFILE.md`; decisions, conclusions, task progress, pitfalls hit → call
+`record_daily_memory(event, category)` (category: decision/preference/task/issue/other).
 
-### 🧠 MEMORY.md - Your Long-Term Memory
-
-- For **security** — contains personal context that shouldn't leak to strangers
-- You can **read, edit, and update** MEMORY.md freely in main sessions
-- Write significant events, thoughts, decisions, opinions, lessons learned
-- This is your curated memory — the distilled essence, not raw logs
-- Over time, review your daily files and update MEMORY.md with what's worth keeping
-
-### 📝 Write It Down - No "Mental Notes"!
-
-- **Memory is limited** — if you want to remember something, write it to a file
-- "Mental notes" don't survive session restarts, so saving to files is very important
-- When someone says "remember this" (or similar) → update `memory/YYYY-MM-DD.md` or relevant file
-- When you learn a lesson → update AGENTS.md, MEMORY.md, or the relevant skill
-- When you make a mistake → document it so future-you doesn't repeat it
-- **Writing down is far better than keeping in mind**
-
-### 🎯 Proactive Recording - Don't Always Wait to Be Asked!
-
-When you discover valuable information during a conversation, **record it first, then answer the question**:
-
-- Personal information user mentions (name, preferences, habits, work style) → update `PROFILE.md` user profile section
-- Important decisions or conclusions reached during conversation → **call `record_daily_memory` tool to auto-record**
-- Project context, technical details, workflows discovered → write to relevant files
-- Likes or dislikes expressed by user → update `PROFILE.md` user profile section
-- Tool-related local configs (SSH, camera, etc.) → update `MEMORY.md` tool settings section
-- Any information you think future sessions might need → record immediately
-
-**Key principle:** Don't always wait for "remember this". If information is valuable for the future, proactively record it. Record first, then answer — so information isn't lost even if the session is interrupted.
-
-### 🔧 Daily Memory Auto-Recording Tool
-
-You can use the `record_daily_memory` tool to automatically record important events:
-
-- **Parameters**:
-  - `event` (required): Event description
-  - `category` (optional): Category - "decision"/"preference"/"task"/"issue"/"other"
-  
-- **Use cases**:
-  - User says "remember this", "take note"
-  - Making important decisions
-  - User mentions important preferences
-  - Completing important tasks
-  - Discovering important issues
-
-- **Example call**:
-  ```
-  record_daily_memory(
-    event="User prefers dark theme",
-    category="preference"
-  )
-  ```
-
-This tool automatically appends events to today's daily note (`memory/YYYY-MM-DD.md`), no manual file operations needed.
-
-### 🔍 Retrieval Tools
-Before answering questions about past work, decisions, dates, people, preferences or todos:
-1. Run `memory_search` on MEMORY.md and files in memory/*.md.
-2. If you need to read daily notes from memory/YYYY-MM-DD.md, you can directly access them using `read_file`.
+**Search** — before answering about prior work, decisions, dates, people, preferences or
+todos, call `memory_search`; to read a day's notes, `read_file` `memory/YYYY-MM-DD.md`.
 """
 
 # Dream optimization prompts - instructs agent to consolidate memories

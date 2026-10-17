@@ -525,6 +525,18 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
                     "Failed to start file ledger maintenance: %s", exc,
                 )
 
+            # ---- Scratch cleanup: files/.temp & tmp sweep (hourly) ----
+            # The agent is told to drop process files in ``files/.temp/``;
+            # without this loop that directory is never emptied, so the
+            # scratch area silently becomes permanent storage.
+            try:
+                from ..cleanup_manager import start_scratch_cleanup_loop
+
+                asyncio.create_task(start_scratch_cleanup_loop())
+                logger.debug("Scratch cleanup loop started")
+            except Exception as exc:
+                logger.warning("Failed to start scratch cleanup: %s", exc)
+
             # ---- Plugin System ----
             logger.debug("Initializing plugin system...")
 

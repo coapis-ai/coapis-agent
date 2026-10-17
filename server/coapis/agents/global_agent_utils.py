@@ -10,13 +10,14 @@ logger = logging.getLogger(__name__)
 
 
 def get_template_agents() -> List[Path]:
-    """Return all enabled template-type global agent directories, sorted by priority.
+    """Return all enabled global baseline agent directories, sorted by priority.
 
-    Lower priority number = higher priority = used as the outermost base layer.
+    Global baseline agents (id starting with 'global_') are the base layer
+    that all other agents inherit from.  Lower priority number = outermost layer.
     Agents without a priority field default to 100.
 
     Returns:
-        Sorted list of Paths to global agent directories with role=template.
+        Sorted list of Paths to global agent directories (global_*).
     """
     from ..constant import AGENTS_DIR
 
@@ -27,6 +28,9 @@ def get_template_agents() -> List[Path]:
     for agent_dir in AGENTS_DIR.iterdir():
         if not agent_dir.is_dir():
             continue
+        # Only global baseline agents (global_*) serve as inheritance source
+        if not agent_dir.name.startswith("global_"):
+            continue
         agent_json = agent_dir / "agent.json"
         if not agent_json.exists():
             continue
@@ -36,7 +40,7 @@ def get_template_agents() -> List[Path]:
         except Exception:
             continue
 
-        if config.get("role") == "template" and config.get("enabled", True):
+        if config.get("enabled", True):
             priority = config.get("priority", 100)
             results.append((int(priority) if priority is not None else 100, agent_dir))
 

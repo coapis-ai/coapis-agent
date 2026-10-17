@@ -163,10 +163,9 @@ async def tool_stats(
     """工具使用追踪。
 
     Args:
-        action: 操作类型 (list/query/reset/record)
+        action: 操作类型 (list/query/reset)
         tool_name: 工具名称（query 时必填）
         limit: list 时最大返回数，默认 15
-        record: 调用记录（record 时使用）
 
     Returns:
         统计数据

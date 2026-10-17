@@ -134,12 +134,20 @@ class CronManagerRegistry:
         cron_path = user_cron_dir / "jobs.json"
 
         repo = JsonJobRepository(cron_path)
+        # 时区必须与 workspace 侧一致：此前不传 → 恒 UTC，于是 cron
+        # "0 23 * * *" 这类夜间任务实际跑在北京时间早 7 点。
+        from ...config import load_config
+        from ...config.timezone import normalize_tz
+
+        cfg = load_config()
+        tz = normalize_tz(getattr(cfg, "user_timezone", None) or "UTC") or "UTC"
         mgr = CronManager(
             repo=repo,
             runner=self._runner,
             channel_manager=None,
             agent_id=self._agent_id,
             owner_user_id=username,
+            timezone=tz,
         )
         self._managers[username] = mgr
         self._started[username] = False

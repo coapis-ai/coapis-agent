@@ -54,6 +54,57 @@ from ...config.context import (
 
 logger = logging.getLogger(__name__)
 
+
+def _text_of(res: Any) -> str:
+    """从 ChatResponse 取纯文本。
+
+    ``ChatResponse`` 是 ``DictMixin``（dict 子类）且**没有** ``get_text_content``
+    方法：``res.get_text_content()`` 会经 ``__getattr__`` 落到 ``dict.__getitem__``
+    抛 ``KeyError``，而 ``hasattr()`` 只吞 ``AttributeError``，所以连 ``hasattr``
+    都会炸。此前 reme_light 四处都这么写，于是记忆链路静默失效。
+    """
+    if res is None:
+        return ""
+    if isinstance(res, str):
+        return res
+    try:
+        content = res["content"] if isinstance(res, dict) else res.content
+    except (KeyError, AttributeError):
+        return ""
+    if isinstance(content, str):
+        return content
+    parts: list[str] = []
+    for blk in content or []:
+        if isinstance(blk, dict) and blk.get("type") == "text":
+            parts.append(blk.get("text") or "")
+        elif isinstance(blk, str):
+            parts.append(blk)
+    return "".join(parts)
+
+
+async def _call_llm(chat_model: Any, formatter: Any, msg: Any) -> str:
+    """统一的模型调用：formatter 先把 Msg 转成 messages 列表，再喂模型。
+
+    直传 Msg 会被 OpenAI 层拒绝（``messages`` 期望 list），此前四处直调
+    全部因此静默失败——记忆重排、记忆提取、dream 整合从未真正跑通。
+    流式模型（``stream=True``）返回 async generator，这里收敛成最后一个 chunk。
+    """
+    messages = await formatter.format([msg])
+    res = await chat_model(messages)
+    if getattr(chat_model, "stream", False):
+        last = None
+        async for chunk in res:
+            last = chunk
+        res = last
+    return _text_of(res)
+
+
+#: 生成每日笔记时最多读几个当日会话
+_NOTE_MAX_SESSIONS = 6
+#: 喂给摘要模型的会话原文总预算（字符）
+_NOTE_INPUT_CHARS = 12000
+
+
 # Maximum number of tokens from query splitting
 MAX_QUERY_TOKENS = 50
 
@@ -289,8 +340,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
         msg = Msg(role="user", name="reranker", content=prompt)
         try:
             set_current_workspace_dir(Path(self.working_dir))
-            response = await chat_model(msg, formatter=formatter)
-            text = response.get_text_content() or ""
+            text = await _call_llm(chat_model, formatter, msg)
 
             match = re.search(r'\[[\d\s,]+\]', text)
             if match:
@@ -509,8 +559,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                 )
 
             msg = Msg(role="user", name="memory_extractor", content=extract_prompt)
-            response = await chat_model(msg, formatter=formatter)
-            result_text = (response.get_text_content() or "").strip()
+            result_text = (await _call_llm(chat_model, formatter, msg)).strip()
 
             if not result_text or result_text == "无" or "无" in result_text[:5]:
                 logger.info("[MemoryExtract] Nothing worth saving")
@@ -833,6 +882,116 @@ class ReMeLightMemoryManager(BaseMemoryManager):
             )
             return RESULT_ERROR
 
+    async def _ensure_daily_note(
+        self,
+        target_dir: Path,
+        chat_model: Any,
+        formatter: Any,
+        language: str,
+        current_date: str,
+        label: str,
+    ) -> bool:
+        """无当日笔记时从会话记录生成一份——补上记忆闭环缺失的写入端。
+
+        每日笔记是 ``_dream_level`` 的唯一输入，此前没有任何代码写它，于是
+        夜间整合恒 ``RESULT_SKIPPED``、``MEMORY.md`` 永不更新。会话记录是
+        天然且已存在的数据源，所以由 dream 自己生成，闭环自给自足。
+
+        智能体已亲手写过当日笔记时原样尊重，不覆盖。
+
+        Returns:
+            True 表示当日笔记可用（已存在或本次写出），False 表示无米下锅。
+        """
+        memory_dir = target_dir / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        today = memory_dir / f"{current_date}.md"
+        try:
+            if today.exists() and today.read_text(encoding="utf-8").strip():
+                return True
+        except OSError:
+            pass
+
+        sess_dir = target_dir / "sessions"
+        if not sess_dir.is_dir():
+            return False
+
+        day_start = datetime.now().replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        ).timestamp()
+        files = sorted(
+            (
+                p
+                for p in sess_dir.rglob("*.json")
+                if p.stat().st_mtime >= day_start
+            ),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:_NOTE_MAX_SESSIONS]
+        if not files:
+            logger.info("[Dream] %sNo sessions today for a daily note", label)
+            return False
+
+        from .signal_extractor import collect_session_digest
+
+        blocks: list[str] = []
+        budget = _NOTE_INPUT_CHARS
+        for fp in files:
+            digest = collect_session_digest(fp)
+            if not digest:
+                continue
+            blocks.append(f"### {fp.name[:28]}\n{digest}")
+            budget -= len(digest)
+            if budget <= 0:
+                break
+        if not blocks:
+            logger.info("[Dream] %sSession digests empty, no note written", label)
+            return False
+
+        joined = "\n\n".join(blocks)[:_NOTE_INPUT_CHARS]
+        if language == "zh":
+            prompt = (
+                "请把以下当日会话记录整理成一份每日工作笔记（Markdown）。要求：\n"
+                "1. 按主题归并，同一主题只保留一条\n"
+                "2. 记录：做了什么、结论或决定、未完成事项、用户偏好\n"
+                "3. 丢弃闲聊与过程性细节，每条不超过 2 行\n"
+                "4. 只输出笔记正文，不要前言或说明\n\n"
+                f"会话记录：\n{joined}"
+            )
+        else:
+            prompt = (
+                "Turn today's session records below into a daily work note "
+                "(Markdown). Rules:\n"
+                "1. Merge by topic, one entry per topic\n"
+                "2. Record: what was done, conclusions/decisions, open items, "
+                "user preferences\n"
+                "3. Drop chatter and process noise; max 2 lines per entry\n"
+                "4. Output only the note body, no preamble\n\n"
+                f"Session records:\n{joined}"
+            )
+
+        try:
+            msg = Msg(role="user", name="dream", content=prompt)
+            note = (await _call_llm(chat_model, formatter, msg)).strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Dream] %sDaily note generation failed: %s", label, exc)
+            return False
+
+        if len(note) < 40:
+            logger.info("[Dream] %sDaily note too short, skipping", label)
+            return False
+
+        try:
+            today.write_text(note + "\n", encoding="utf-8")
+        except OSError as exc:
+            logger.warning("[Dream] %sDaily note write failed: %s", label, exc)
+            return False
+
+        logger.info(
+            "[Dream] %sDaily note generated: %s (%d chars, %d sessions)",
+            label, today.name, len(note), len(blocks),
+        )
+        return True
+
     async def _dream_level(
         self,
         target_dir: Path,
@@ -855,6 +1014,11 @@ class ReMeLightMemoryManager(BaseMemoryManager):
         logger.info("[Dream] %sProcessing: %s", label, target_dir)
 
         current_date = datetime.now().strftime("%Y-%m-%d")
+
+        # Step 0: 写入端接入——无当日笔记时从会话记录生成（闭环自给自足）
+        await self._ensure_daily_note(
+            target_dir, chat_model, formatter, language, current_date, label,
+        )
 
         # Step 1: Collect recent memory files (today + last 3 days)
         memory_dir = target_dir / "memory"
@@ -938,8 +1102,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
 
         try:
             msg = Msg(role="user", name="dream", content=prompt)
-            response = await chat_model(msg, formatter=formatter)
-            new_memory = (response.get_text_content() or "").strip()
+            new_memory = (await _call_llm(chat_model, formatter, msg)).strip()
 
             if not new_memory or len(new_memory) < 20:
                 logger.info("[Dream] %sLLM returned insufficient content, skipping", label)

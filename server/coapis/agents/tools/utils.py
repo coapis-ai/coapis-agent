@@ -38,6 +38,91 @@ MAX_FILE_READ_BYTES = 1024 * 1024 * 1024
 
 
 # pylint: disable=too-many-return-statements
+# Share of the byte budget given to the head when both ends are kept; the
+# rest goes to the tail.  65/35 keeps enough of "what ran" at the top while
+# preserving the part of a log that states how it ended.
+_TRUNC_HEAD_SHARE = 0.65
+
+
+def _truncate_tool_output(
+    text: str,
+    max_bytes: int,
+    encoding: str,
+) -> str:
+    """Cut tool output from the middle, keeping the head **and** the tail.
+
+    Why: a build/test/pytest log says what ran at the top and *how it ended*
+    at the bottom (``FAILED``, ``error:``, the exit line, the summary
+    count).  A head-only cut deleted exactly the part the agent needed, so
+    it re-ran the same command to see the end - a wasted turn every time,
+    and several on a long log.  Tool output has no source file to point back
+    to, so the only honest recovery hint is "narrow the command".
+
+    File reads do not use this path: reading a file in pages is the tool's
+    contract, and a stitched tail would be a page that is not a page.
+
+    Args:
+        text: The tool output to cut.
+        max_bytes: Byte budget for the kept text.
+        encoding: Encoding used for byte accounting.
+
+    Returns:
+        Head + omitted-count marker + tail + truncation notice.
+    """
+    lines = text.splitlines()
+
+    def _size(line: str) -> int:
+        return len(line.encode(encoding, errors="surrogatepass")) + 1
+
+    head_budget = int(max_bytes * _TRUNC_HEAD_SHARE)
+    tail_budget = max(max_bytes - head_budget, 0)
+
+    cut = len(lines)
+    head_bytes = 0
+    for i, line in enumerate(lines):
+        size = _size(line)
+        if head_bytes + size > head_budget:
+            cut = i
+            break
+        head_bytes += size
+    else:
+        # Every line fits inside the head budget: the text fits line-wise
+        # and the byte overshoot is newline accounting.
+        return text
+
+    head = lines[:cut]
+    tail: list[str] = []
+    tail_bytes = 0
+    taken = 0
+    for line in reversed(lines[cut:]):
+        size = _size(line)
+        if tail_bytes + size > tail_budget:
+            break
+        tail.append(line)
+        tail_bytes += size
+        taken += 1
+    tail.reverse()
+
+    dropped = len(lines) - cut - taken
+    out = "\n".join(head)
+    if tail:
+        out += (
+            f"\n\n... [{dropped} line(s) omitted from the middle] ...\n\n"
+            + "\n".join(tail)
+        )
+    out += (
+        TRUNCATION_NOTICE_MARKER
+        + f"\nThe output above was truncated: kept the first {cut} and the "
+        + f"last {len(tail)} line(s) of {len(lines)}."
+    )
+    if dropped > 0:
+        out += (
+            "\n(Re-run narrowed with tail/grep/head to see the omitted "
+            "middle.)"
+        )
+    return out
+
+
 def _truncate_fresh(
     text: str,
     start_line: int,
@@ -59,6 +144,12 @@ def _truncate_fresh(
     # Under the byte limit — return as-is without any modification.
     if len(text_bytes) <= max_bytes:
         return text
+
+    if not file_path:
+        # Tool output: there is no file to point back to, so keep both ends
+        # of the log.  A build/test log states how it ended at the bottom,
+        # and a head-only cut deleted exactly what the agent needed.
+        return _truncate_tool_output(text, max_bytes, encoding)
 
     # Slice at the byte boundary.
     # Assuming every single line is shorter than DEFAULT_MAX_BYTES, this cut always

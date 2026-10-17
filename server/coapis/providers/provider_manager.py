@@ -21,6 +21,7 @@ providers, adding/removing custom providers, and fetching provider details."""
 
 import asyncio
 import os
+import time
 from typing import Any, Dict, List
 import logging
 import json
@@ -968,7 +969,20 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                             else m.probe_source
                         )
                         m.embedding_dimension = old.embedding_dimension
-                        m.max_sequence_length = old.max_sequence_length
+                        # ``max_sequence_length`` is the one field discovery
+                        # is the *only* source of: a model added by hand
+                        # carries None, and copying the old None over the
+                        # freshly read ``meta.n_ctx`` is why the context
+                        # budget stayed on the configured fallback for every
+                        # session (measured on dev, 2026-10-17).  User-set
+                        # values still win; a hole gets filled.
+                        if old.max_sequence_length is None:
+                            m.max_sequence_length = (
+                                m.max_sequence_length
+                                or old.max_sequence_length
+                            )
+                        else:
+                            m.max_sequence_length = old.max_sequence_length
                         m.source = old.source
                     else:
                         m.model_type = infer_model_type(m.id, m.name)
@@ -1000,6 +1014,76 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 e,
             )
             return []
+
+    #: Minimum seconds between two background window probes of one provider.
+    _WINDOW_PROBE_MIN_INTERVAL = 1800.0
+    _window_probe_at: dict[str, float] = {}
+
+    def request_window_probe(self, provider_id: str) -> bool:
+        """Ask a provider for its models in the background (B2, 2026-10-17).
+
+        The context budget is computed from the model's *self-reported*
+        window; a provider whose model list was never discovered reports
+        nothing, and the budget silently falls back to the operator-typed
+        ``max_input_length`` — which is how a 131072-token fiction survived
+        for as long as it did.  When ``window_source`` sees that fallback it
+        calls this, so the next session gets the real number without anyone
+        pressing the "discover" button.
+
+        Fire-and-forget and throttled: a probe is a network call to a
+        third-party API, so it runs at most once per provider per
+        ``_WINDOW_PROBE_MIN_INTERVAL`` and never blocks the caller.
+        Returns True when a probe was scheduled.
+        """
+        provider_id = self._normalize_provider_id(provider_id)
+        if not provider_id or self.get_provider(provider_id) is None:
+            return False
+        now = time.monotonic()
+        last = self._window_probe_at.get(provider_id)
+        if last is not None and now - last < self._WINDOW_PROBE_MIN_INTERVAL:
+            return False
+        self._window_probe_at[provider_id] = now
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        loop.create_task(
+            self._window_probe_task(provider_id),
+            name=f"coapis-window-probe-{provider_id}",
+        )
+        return True
+
+    async def _window_probe_task(self, provider_id: str) -> None:
+        """Background discovery whose only purpose is the window numbers."""
+        try:
+            await self.fetch_provider_models(provider_id, save=True)
+            # Read the *stored* state, not the fetched list: the merge above
+            # is what the rest of the system (``reported_window_for``) reads.
+            provider = self.get_provider(provider_id)
+            windows = {
+                m.id: m.max_sequence_length
+                for m in (provider.models if provider else [])
+                if m.max_sequence_length
+            }
+            if windows:
+                logger.info(
+                    "Context-window probe for provider '%s': %s",
+                    provider_id,
+                    windows,
+                )
+            else:
+                logger.info(
+                    "Context-window probe for provider '%s' reported no "
+                    "window; the context budget keeps the configured "
+                    "max_input_length",
+                    provider_id,
+                )
+        except Exception as exc:  # never fatal: this is an optimisation
+            logger.debug(
+                "Context-window probe for provider '%s' failed: %s",
+                provider_id,
+                exc,
+            )
 
     def _resolve_custom_provider_id(self, provider_id: str) -> str:
         """Resolve provider ID conflicts for a custom provider."""

@@ -303,7 +303,7 @@ async def upload_file(
     file: UploadFile = File(...),
     path: str = Form("/"),
     category: str = Form("files"),
-    overwrite: str = Form("false"),
+    overwrite: str = Form("true"),
     relative_path: str = Form(""),  # 文件夹上传时的完整相对路径
     chat_id: str = Form(""),  # 聊天 UUID，用于"本会话文件"归属（D1）
     session_id: str = Form(""),  # 前端本地会话 id，新会话建号前上传时唯一可用标识
@@ -318,7 +318,11 @@ async def upload_file(
     if not file.filename:
         raise HTTPException(status_code=400, detail="缺少文件名")
 
-    # Handle overwrite as string from form data
+    # Handle overwrite as string from form data.
+    # Default is overwrite: the workspace is the user's own isolated space, so
+    # re-uploading the same name means "update this file". Keeping versions is
+    # the user's choice (save-as / _v2 names), not something the server decides
+    # by rejecting the upload with 409.
     overwrite = overwrite.lower() in ("true", "1", "yes")
 
     username = get_current_user(request)["username"]

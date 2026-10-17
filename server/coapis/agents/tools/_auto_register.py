@@ -10,6 +10,7 @@ from . import file_io
 from . import file_search
 from . import shell
 from . import send_file
+from . import file_convert  # md → docx 一次性交付转换（无 pandoc 依赖）
 from . import browser_control
 from . import desktop_screenshot
 from . import view_media

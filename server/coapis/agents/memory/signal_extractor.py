@@ -136,3 +136,45 @@ def extract_signals_from_session(path: Path) -> List[Dict[str, str]]:
             })
             per_type[stype] = per_type.get(stype, 0) + 1
     return out
+
+
+#: 每日笔记的单会话预算（字符）——控制夜间 LLM 摘要的输入体量
+DIGEST_MAX_CHARS = 2600
+#: 用户消息保留头部长度（诉求在前）
+_USER_KEEP = 220
+#: 助手消息保留尾部长度（结论/交付在后）
+_ASSIST_KEEP = 260
+
+
+def collect_session_digest(path: Path, max_chars: int = DIGEST_MAX_CHARS) -> str:
+    """抽取单个会话的要点原文，供 dream 生成每日笔记。
+
+    存在的理由：每日笔记是 dream 的唯一输入，但没有任何代码在写它，
+    于是夜间整合永远 SKIPPED、``MEMORY.md`` 永不更新。会话记录是天然
+    且已存在的数据源（``_iter_messages`` 已能解析），所以让 dream 自己
+    从会话生成笔记，闭环自给自足。
+
+    用户消息取头部（诉求在前），助手消息取尾部（结论在后）。纯 stdlib、
+    无 LLM —— 真正的摘要由调用方交给模型，夜间批量成本仍可控。
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+
+    lines: List[str] = []
+    total = 0
+    for role, text in _iter_messages(data):
+        if role not in ("user", "assistant"):
+            continue
+        text = " ".join(text.split())
+        if not text:
+            continue
+        if role == "user":
+            lines.append(f"- 用户：{text[:_USER_KEEP]}")
+        else:
+            lines.append(f"- 结论：{text[-_ASSIST_KEEP:]}")
+        total += len(lines[-1])
+        if total >= max_chars:
+            break
+    return "\n".join(lines)

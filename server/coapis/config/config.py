@@ -502,6 +502,16 @@ class HeartbeatConfig(BaseModel):
 
 class AgentsDefaultsConfig(BaseModel):
     heartbeat: Optional[HeartbeatConfig] = None
+    file_output_min_chars: int = Field(
+        default=200,
+        ge=1,
+        description=(
+            "T3 volume fallback for file output: a single assistant reply "
+            "longer than this many characters is written to a file. Explicit "
+            "user requests (T1) and document-shaped tasks (T2) always produce "
+            "a file regardless of this value."
+        ),
+    )
 
 
 class AutoMemorySearchConfig(BaseModel):
@@ -651,6 +661,79 @@ class ContextCompactConfig(BaseModel):
         ),
     )
 
+    compaction_input_ratio: float = Field(
+        default=0.7,
+        ge=0.2,
+        le=0.9,
+        description=(
+            "Budget fraction the *compaction request* is fitted into.  The "
+            "summary call sends the whole uncompressed prefix plus the "
+            "compression prompt; it is measured and truncated to this "
+            "fraction of the window instead of being exempt from the gate.  "
+            "Too high means the cure overflows the way the patient did; too "
+            "low means the summary sees less of the prefix it is summarizing.  "
+            "0.5 measured unfixable on dev 2026-10-17: the protected tail "
+            "(system row + ``keep_recent`` groups) alone was 89,863 chars "
+            "against a 86,016-char budget (0.5 × 172,032), so every real "
+            "compaction went out over its own budget.  0.7 = 120,422 chars, "
+            "which the same tail fits with 34% headroom."
+        ),
+    )
+
+    compaction_map_reduce: bool = Field(
+        default=True,
+        description=(
+            "Chunk the compaction request instead of truncating it.  The "
+            "summary call carries the whole uncompressed prefix, which "
+            "does not fit one request, so the fitted single request "
+            "dropped the oldest rows unsummarized (dev 2026-10-17: 280 "
+            "rows per compaction, 0.16 coverage - memory deleted with no "
+            "summary).  Enabled, the prefix is cut into budget-sized "
+            "chunks, every chunk is summarized and the partials are "
+            "merged, so nothing is marked compressed without having been "
+            "read.  Disable only to save the extra model calls."
+        ),
+    )
+
+    doc_read_max_chars: int = Field(
+        default=6000,
+        ge=200,
+        description=(
+            "Character cap for one document read (doc_reader). Governance "
+            "source of LimitKind.READ_CHARS (片4-6 拍板 §6-4): the cap is a "
+            "budget the ledger books, not a constant inside the tool — the "
+            "old literal 100000 was 46%% of a calibrated session budget and "
+            "was never counted."
+        ),
+    )
+    fixed_overhead_max_ratio: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=0.95,
+        description=(
+            "Maximum share of the character window the *fixed* part of a "
+            "request (system prompt + tool schemas) may take.  Above it the "
+            "fixed-overhead guard deactivates optional tool groups, drops "
+            "the deferred plan tools and shrinks the skill index, in that "
+            "order.  Measured on dev at 95%: a session had 5% of its window "
+            "left for the conversation.  0 disables the guard.  拍板 E1 = "
+            "0.35: below it a session keeps the majority of the window for "
+            "the conversation; 0.5 would be no constraint at all."
+        ),
+    )
+
+    min_history_share: float = Field(
+        default=0.45,
+        ge=0.0,
+        le=0.90,
+        description=(
+            "Share of the window that should stay available for conversation "
+            "history.  Reported with every fixed-overhead reading; the guard "
+            "pulls every lever it can when the fixed part is over cap and "
+            "logs what is left.  拍板 E1 = 0.45."
+        ),
+    )
+
     compact_with_thinking_block: bool = Field(
         default=True,
         description="Whether to include thinking blocks when compacting",
@@ -668,17 +751,21 @@ class ContextCompactConfig(BaseModel):
     # trigger fire earlier, which is the safe direction — a threshold that is
     # too high means compaction never fires and requests die with 400.
     formatted_chars_per_token: float = Field(
-        default=1.1,
+        default=3.0,
         ge=0.5,
         le=8.0,
         description=(
             "Formatted-chars-per-token factor used to convert the "
             "compaction threshold/reserve into the character budget that "
             "upstream actually counts.  Measured on the dev model: 4.68 "
-            "(2.04 Chinese, 3.35 code).  Default 1.1 is a deliberate "
-            "safety margin below the measurement: lower = compaction "
-            "fires earlier.  Raise toward the measured value only after "
-            "measuring real overflow rates."
+            "formatted / 2.05 raw bytes per token (2.04 Chinese, 3.35 "
+            "code).  拍板 D7 (2026-10-17) sets 3.0: it sits between the "
+            "two measurements, so a character budget is converted with a "
+            "ratio the real tokenizer also respects.  The old 1.1 was "
+            "calibrated against a *fabricated* 131072-token window; with "
+            "the real window as source it made the trigger unreachable "
+            "(0 compactions in 24h, 125 refusals).  Lower it only if "
+            "real overflow (400/422) rates rise."
         ),
     )
 
@@ -984,7 +1071,7 @@ class AgentsRunningConfig(BaseModel):
     )
 
     context_window_safety_factor: float = Field(
-        default=0.5,
+        default=0.7,
         ge=0.05,
         le=1.0,
         description=(
@@ -992,9 +1079,11 @@ class AgentsRunningConfig(BaseModel):
             "actually budgets against.  The model's number counts raw "
             "tokens and ignores the fixed overhead we inject (system "
             "prompt, tool schemas) plus the completion, so the effective "
-            "usable window is smaller than advertised.  0.5 is the "
-            "calibrated default; raise it only after measuring real "
-            "overflow rates."
+            "usable window is smaller than advertised.  拍板 D7 (2026-10-17) "
+            "calibrated 0.7 together with formatted_chars_per_token 3.0: "
+            "the pair is what makes the fixed overhead land at ~26% of the "
+            "character allowance instead of 97%.  Raise it only after "
+            "measuring real overflow rates."
         ),
     )
 
