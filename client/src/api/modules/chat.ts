@@ -28,6 +28,8 @@ export const chatApi = {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("path", "media");
+    // 同名即更新：用户空间内的重复上传是「更新这个文件」，不是冲突
+    formData.append("overwrite", "true");
     // 聊天 UUID：后端写入文件台账的 chat_id，"本会话文件"过滤依赖它
     if (chatId) formData.append("chat_id", chatId);
     // 本地会话 id：新会话建号前上传时 chat_id 为空，靠它事后补写

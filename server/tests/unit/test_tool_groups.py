@@ -18,7 +18,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pytest  # noqa: E402
 from agentscope.tool import Toolkit  # noqa: E402
@@ -133,8 +133,18 @@ def test_grouped_tools_hidden_until_activated():
 def test_core_tools_always_visible():
     toolkit = _build_toolkit()
     names = _tool_names(toolkit)
-    for tool in ("read_file", "write_file", "edit_file", "grep_search"):
+    for tool in ("read_file", "write_file", "edit_file", "view_image"):
         assert tool in names, f"{tool} must stay in the core group"
+    # ``grep_search``/``glob_search`` left the always-active core (T1,
+    # 2026-10-17): 1,370 chars paid on *every* turn for tools a plain
+    # read/write turn never touches.  They now arrive with the ``search``
+    # group, so the contract is "invisible at step 1, visible once equipped".
+    for tool in ("grep_search", "glob_search"):
+        assert tool not in names, f"{tool} must not be always-active"
+    toolkit.update_tool_groups(["search"], active=True)
+    names = _tool_names(toolkit)
+    for tool in ("grep_search", "glob_search"):
+        assert tool in names, f"{tool} must activate with the search group"
 
 
 def test_reset_equipped_tools_is_absolute():

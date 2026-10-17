@@ -9,7 +9,15 @@ import type { CascadeNode } from "@/components/CascadeMenu/CascadeMenu";
  *
  * - 本会话文件：GET /myfiles/resources?chat_id=<uuid>（资源契约，refs 表反查）
  * - 我的空间：  GET /myfiles/list?path=<dir>&category=files
- * - 关联知识：  GET /knowledge/bases → GET /knowledge/bases/{id}/documents
+ * - 关联知识：  GET /knowledge/bases → GET /knowledge/bases/{kb_id}/documents
+ *
+ * 契约要点（2026-10-17 逐条对过后端真实路由核过，别再凭想象写字段名）：
+ * - 列表统一返回 `{ total, items }`，**没有** `root` / `resources` / `results` /
+ *   `bases` / `documents` 这些键；旧代码按 `data.bases` 取数取到 undefined，
+ *   「+」菜单的「关联知识」子菜单因此恒为空。
+ * - 主键不叫 `id`：知识库是 `kb_id`、文档是 `document_id`（标题是 `title`）、
+ *   会话产物是 `path`。按 `b.id` 取会得到 undefined，节点 key 全部塌成
+ *   `kb:undefined` 互相顶掉，payload 也带不出真实 id。
  *
  * key 命名空间（组件不解析，仅作为唯一键与缓存键）：
  *   "session" / "files:<dir>" / "kb" / "kb:<id>" / "kbdoc:<id>"
@@ -198,24 +206,37 @@ async function loadKnowledgeBases(force = false): Promise<CascadeNode[]> {
   let bases: Array<Record<string, unknown>> = [];
   try {
     const data = (await api.get("/knowledge/bases")) as {
+      items?: Array<Record<string, unknown>>;
       bases?: Array<Record<string, unknown>>;
     };
-    bases = data.bases ?? [];
+    // 后端 `GET /knowledge/bases` 返回的是 `{ total, items }`，从来没有 `bases`
+    // 这个键 —— 旧代码只读 `data.bases`，取到 undefined → 恒为 [] → 「+」菜单
+    // 的「关联知识」子菜单永远显示「这里还没有内容」。
+    bases = data.items ?? data.bases ?? [];
   } catch (err) {
     // API 调用失败时返回空数组，但记录错误以便调试
     console.warn("加载知识库列表失败:", err);
     bases = [];
   }
-  
-  const nodes: CascadeNode[] = bases.map((b) => ({
-    key: `kb:${String(b.id)}`,
-    name: String(b.name ?? b.id),
-    kind: "group",
-    usage: "retrieval",
-    meta: b.chunk_count ? String(b.chunk_count) : undefined,
-    payload: { id: String(b.id), name: String(b.name ?? b.id) },
-  }));
-  
+
+  // 后端主键叫 `kb_id` 不叫 `id`（知识库管理页 2026-10 已按同一约定映射过）。
+  // 直接读 `b.id` 会得到 undefined：所有节点 key 塌成 `kb:undefined` 互相顶掉，
+  // payload.id 也是 undefined，勾选后 Chat 页拿不到真实知识库 id。
+  const nodes: CascadeNode[] = bases
+    .filter((b) => String(b.kb_id ?? b.id ?? "") !== "")
+    .map((b) => {
+      const id = String(b.kb_id ?? b.id);
+      const name = String(b.name ?? id);
+      return {
+        key: `kb:${id}`,
+        name,
+        kind: "group",
+        usage: "retrieval",
+        meta: b.chunk_count ? String(b.chunk_count) : undefined,
+        payload: { id, name },
+      };
+    });
+
   // 如果没有知识库，缓存一个空数组（避免重复请求）
   cache.set(ck, nodes);
   return nodes;
@@ -239,13 +260,23 @@ async function loadKnowledgeDocs(
   } catch {
     docs = [];
   }
-  const nodes: CascadeNode[] = docs.map((d) => ({
-    key: `kbdoc:${String(d.id ?? d.name)}`,
-    name: String(d.name ?? d.filename ?? d.id),
-    kind: "item",
-    // 文档级引用后端尚无消费者（消费契约是知识库列表），先只展示不可勾选
-    selectable: false,
-  }));
+  const nodes: CascadeNode[] = docs
+    .filter((d) => String(d.document_id ?? d.doc_id ?? d.id ?? "") !== "")
+    .map((d) => {
+      // 后端文档主键是 `document_id`、标题是 `title`（不是 `id` / `name`）。
+      // 旧代码读 `d.id ?? d.name` 全部取不到 → key 塌成 `kbdoc:undefined`、
+      // 行名直接渲染成 "undefined"。
+      const id = String(d.document_id ?? d.doc_id ?? d.id);
+      const name = String(d.title ?? d.name ?? d.filename ?? id);
+      return {
+        key: `kbdoc:${id}`,
+        name,
+        kind: "item",
+        // 文档级引用后端尚无消费者（消费契约是知识库列表），先只展示不可勾选
+        selectable: false,
+        meta: d.chunk_count ? String(d.chunk_count) : undefined,
+      };
+    });
   cache.set(ck, nodes);
   return nodes;
 }

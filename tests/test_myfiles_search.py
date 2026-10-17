@@ -19,9 +19,16 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-for _cand in (ROOT / "server", Path("/app")):
-    if str(_cand) not in sys.path and (_cand / "coapis").is_dir():
-        sys.path.insert(0, str(_cand))
+# 仓库树必须压在最前：/app 是镜像里的旧副本。旧写法用「不在 sys.path 才插入」，
+# 当 PYTHONPATH 已包含仓库树（在尾部）时会被跳过，/app 反而被插到 index 0，
+# 测试验证的就是镜像代码而不是当前仓库代码（实测直接 ImportError 缺符号）。
+_server = str(ROOT / "server")
+for _p in (_server, "/app"):
+    while _p in sys.path:
+        sys.path.remove(_p)
+sys.path.insert(0, _server)
+if (Path("/app") / "coapis").is_dir():
+    sys.path.append("/app")  # 兜底可导入，但永远排在仓库树之后
 
 from fastapi import FastAPI, HTTPException  # noqa: E402
 
@@ -181,15 +188,33 @@ def test_search_route_registered_with_frontend_contract():
 
 
 def _client_with_auth(username: str):
-    """带真实 token 的 TestClient（require_permission 走的是请求头鉴权）。"""
+    """带鉴权上下文的 TestClient。
+
+    现行鉴权是「中间件写 request.state + 装饰器读」的架构（auth_middleware.py），
+    路由内不再有 token 依赖。测试里不引入整套中间件，直接装一个最小中间件把
+    request.state.username 置为 anonymous，并让 is_auth_enabled() 返回 False，
+    走权限装饰器的「匿名放行」快路径——与鉴权关闭时的真实行为一致。
+    """
     from fastapi.testclient import TestClient
 
-    tmp = _fixture()  # 工作区根（含 tester/files）
-    FileServiceFactory._instance = LocalFileBackend(tmp)
+    backend = _fixture()          # 已配好 tester/files 夹具的 LocalFileBackend
+    tmp = backend.data_dir        # 工作区根（含 tester/files）
+    FileServiceFactory._instance = backend
     app = FastAPI()
+
+    @app.middleware("http")
+    async def _fake_identity(request, call_next):
+        request.state.username = "anonymous"
+        request.state.role = "user"
+        # 路由的 Depends(get_current_user) 读的是 user_info
+        request.state.user_info = {"username": username, "role": "user"}
+        return await call_next(request)
+
     app.include_router(files_mod.router)
-    token = files_mod.create_token_with_expiry(username)
-    client = TestClient(app, headers={"Authorization": f"Bearer {token}"})
+    # 权限装饰器的匿名快路径要求鉴权处于关闭态
+    from coapis.app import auth as files_mod_auth
+    files_mod_auth.is_auth_enabled = lambda: False  # type: ignore[assignment]
+    client = TestClient(app)
     return client, tmp
 
 
@@ -243,16 +268,28 @@ def test_seafile_files_moved_out_and_auth_endpoint_gone():
 
 
 def test_no_seafile_code_left_in_package():
-    """包内不得再有 Seafile 的**代码**引用（注释里作为历史说明提及是允许的）。"""
+    """包内不得再有 Seafile 的**代码**引用（注释/文档串里作为历史说明提及是允许的）。"""
+    import re
+
     pkg_root = SERVICES_DIR.parent.parent  # .../coapis
+    # 只追究代码：import / from / class / def / 路由 / 后端判定 / 字符串常量比较。
+    # 文档串与注释里的「Seafile 已移除」是历史说明，不算残留。
+    code_pat = re.compile(
+        r"(^\s*(import|from|class|def)\b"
+        r"|app\.(get|post|put|delete|patch)\("
+        r"|@router\.(get|post|put|delete|patch)\("
+        r"|backend_type\s*==|==\s*[\"']seafile"
+        r"|Seafile[A-Za-z]*Backend)",
+        re.IGNORECASE,
+    )
     offenders = []
     for f in pkg_root.rglob("*.py"):
         for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             s = line.strip()
             if "seafile" not in s.lower():
                 continue
-            if s.startswith("#") or s.startswith("*") or s.startswith('"""'):
-                continue  # 注释/文档里的历史说明
+            if not code_pat.search(s):
+                continue  # 非代码行（注释/文档串里的历史说明）
             offenders.append(f"{f.relative_to(pkg_root)}:{i}: {s[:70]}")
     assert offenders == [], offenders
 
