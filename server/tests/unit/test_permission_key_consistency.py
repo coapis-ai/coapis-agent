@@ -42,7 +42,10 @@ def _first_existing(cands, label):
     for p in cands:
         if p.exists():
             return p
-    pytest.skip(f"{label} 不在本环境（容器沙箱只挂载 server 侧源码）")
+    pytest.skip(
+        f"{label} 不在本环境（容器沙箱只挂载 server 侧源码）",
+        allow_module_level=True,
+    )
 
 
 PACK = _first_existing(_PACK_CANDIDATES, "权限出厂包")
