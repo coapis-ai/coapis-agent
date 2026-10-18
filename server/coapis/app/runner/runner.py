@@ -62,6 +62,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ── background compaction bookkeeping (拍板 D) ─────────────────────────────
+# Compaction runs after the reply is delivered, on the agent instance of the
+# turn that triggered it.  Two things can make that write unsafe, and both are
+# cheap to detect:
+#
+# * ``_CHAT_COMPACTION_TASKS`` -- one compaction per chat.  Agent instances are
+#   built per turn, so an instance-level guard cannot stop a session from
+#   queueing compaction after compaction while its endpoint is already busy.
+# * ``_CHAT_STATE_EPOCH`` -- how many times this chat's state has been written.
+#   The compacted memory belongs to the turn that was persisted; if the user
+#   sent another message meanwhile, that memory is stale and writing it would
+#   roll the newer turn back.  The compaction result is dropped instead, and
+#   the next turn re-runs it.
+_CHAT_COMPACTION_TASKS: dict[str, asyncio.Task] = {}
+_CHAT_STATE_EPOCH: dict[str, int] = {}
+
 # 知识库引用（citations）上下文：query_handler 内 enrich_chat_context 钩子
 # 收集到的引用列表，经 ContextVar 传给外层 stream_query，最终挂到响应事件
 # metadata.kb_citations，供前端展示。同一请求在同一任务内流转，ContextVar 安全。
@@ -633,6 +649,11 @@ class AgentRunner(Runner):
                 value=isolated_mem.state_dict(),
                 user_id=effective_user_id,
             )
+            # Every write invalidates any background compaction that captured
+            # an earlier state of this chat (see _CHAT_STATE_EPOCH).
+            _CHAT_STATE_EPOCH[user_chat.id] = (
+                _CHAT_STATE_EPOCH.get(user_chat.id, 0) + 1
+            )
 
             logger.info(
                 f"_persist_chat_messages: saved to session chat={user_chat.id} "
@@ -897,6 +918,84 @@ class AgentRunner(Runner):
                 yield _fallback
             except Exception:
                 pass
+
+    def _schedule_background_compaction(
+        self,
+        agent: Any,
+        chat_id: str,
+        session: Any,
+        effective_user_id: str,
+    ) -> None:
+        """Start the compaction this turn deferred, off the user's turn.
+
+        Called from **both** exits of a turn:
+
+        * the reply was delivered -- the normal case;
+        * the turn died with a context overflow -- the case that matters most.
+          A session whose history no longer fits refuses *every* next message
+          with the same 422, and nothing else in the system shrinks it: the
+          reasoning loop only marks compaction due, and the gate refuses
+          before the loop runs.  Without this the chat is bricked at the
+          first oversized message (measured on dev 2026-10-18: agent
+          user:admin, 323,773 chars against a 157,696-char window).
+
+        The persist callback carries the turn epoch: if the same chat's state
+        was written after this agent captured it (the user sent another
+        message), this memory is stale and the result is dropped instead of
+        rolling the newer turn back.
+        """
+        try:
+            from ...agents.react_agent import (
+                schedule_background_compaction,
+            )
+
+            running = _CHAT_COMPACTION_TASKS.get(chat_id)
+            if running is not None and not running.done():
+                logger.debug(
+                    "Background compaction for chat %s skipped: one is "
+                    "already running.",
+                    chat_id,
+                )
+                return
+
+            epoch = _CHAT_STATE_EPOCH.get(chat_id, 0)
+
+            async def _persist_compacted() -> None:
+                if _CHAT_STATE_EPOCH.get(chat_id, 0) != epoch:
+                    logger.info(
+                        "Background compaction result for chat %s dropped: "
+                        "the session moved on (epoch %d -> %d); it is "
+                        "retried next turn.",
+                        chat_id,
+                        epoch,
+                        _CHAT_STATE_EPOCH.get(chat_id, 0),
+                    )
+                    return
+                await session.update_session_state(
+                    session_id=chat_id,
+                    key="agent.memory",
+                    value=agent.memory.state_dict(),
+                    user_id=effective_user_id,
+                )
+                logger.info(
+                    "Background compaction persisted to session chat=%s "
+                    "user=%s",
+                    chat_id,
+                    effective_user_id,
+                )
+
+            task = schedule_background_compaction(agent, _persist_compacted)
+            if task is not None:
+                _CHAT_COMPACTION_TASKS[chat_id] = task
+                logger.info(
+                    "Background compaction scheduled for chat %s",
+                    chat_id,
+                )
+        except Exception:
+            logger.warning(
+                "Failed to schedule background compaction",
+                exc_info=True,
+            )
 
     async def query_handler(
         self,
@@ -2058,6 +2157,38 @@ class AgentRunner(Runner):
 
             converted = convert_model_exception(e, model_name)
 
+            # A context overflow is the one failure the system can cure by
+            # itself.  Nothing else shrinks an oversized history: the
+            # reasoning loop only marks compaction due, and the gate refuses
+            # before the loop ever runs -- so without this a chat whose
+            # history outgrew the window answers every later message with the
+            # same 422 forever.  Compact now, off the failed turn, so the
+            # next message has room.
+            try:
+                from ...agents.context.context_budget import (
+                    ContextOverflowError,
+                )
+
+                _code = getattr(converted, "code", None)
+                _code_text = str(getattr(_code, "value", _code) or "")
+                if agent is not None and (
+                    isinstance(e, ContextOverflowError)
+                    or "CONTEXT_LENGTH" in _code_text
+                ):
+                    agent._compaction_due = True
+                    if chat is not None:
+                        self._schedule_background_compaction(
+                            agent,
+                            chat.id,
+                            self.session,
+                            user_id,
+                        )
+            except Exception:
+                logger.debug(
+                    "Overflow compaction scheduling failed",
+                    exc_info=True,
+                )
+
             # Preserve all original error dump logic
             debug_dump_path = write_query_error_dump(
                 request=request,
@@ -2198,6 +2329,19 @@ class AgentRunner(Runner):
                         logger.info(f"Chat {chat.id} status updated to idle")
                 except Exception as e:
                     logger.warning(f"Failed to update chat status to idle: {e}")
+
+                # ── 压缩移出关键路径（拍板 D）──
+                # 推理循环里的压缩现在只登记不执行（CoApisAgent
+                # ._compress_memory_if_needed），这里在回复已交付、会话状态
+                # 已落盘之后跑它。dev 2026-10-18 实测：一次压缩 285 行历史
+                # 切 19 个分片，会话 running 18 分 40 秒、零日志。
+                if chat is not None:
+                    self._schedule_background_compaction(
+                        agent,
+                        chat.id,
+                        self.session,
+                        user_id,
+                    )
 
             # NOTE: save_session_state removed.
             # _persist_chat_messages already saves the complete session state
