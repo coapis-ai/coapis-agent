@@ -247,6 +247,59 @@ CONTEXT_COMPACTION_GLOBAL_TIMEOUT_SECONDS = EnvVarLoader.get_float(
     max_value=1800.0,
 )
 
+# How many experience extractions may run at once, server-wide.  Extraction is
+# background work (5 strategies x N segments per session end), so it is capped
+# the same way compaction is: a busy server finishes chats, it does not queue
+# LLM work behind them.
+EVOLUTION_EXTRACTION_SLOTS = EnvVarLoader.get_int(
+    "COAPIS_EVOLUTION_EXTRACTION_SLOTS",
+    2,
+    min_value=1,
+    max_value=8,
+)
+
+# One experience-extraction call, in seconds.  The extractor owns a raw
+# provider client, which inherits the SDK's 600 s default; extraction ran on
+# the path that closes the user's stream, so an endpoint that never answered
+# held a delivered answer open for minutes (dev, 2026-10-18: 199 s).
+EVOLUTION_EXTRACT_TIMEOUT_SECONDS = EnvVarLoader.get_float(
+    "COAPIS_EVOLUTION_EXTRACT_TIMEOUT_SECONDS",
+    45.0,
+    min_value=5.0,
+    max_value=300.0,
+)
+
+# One whole extraction round (5 strategies x every segment of the session), in
+# seconds.  The per-call timeout bounds a single request; a session with many
+# segments and a slow endpoint is bounded by the round, or the two extraction
+# slots can be occupied for the better part of an hour by one chat.
+EVOLUTION_EXTRACT_ROUND_TIMEOUT_SECONDS = EnvVarLoader.get_float(
+    "COAPIS_EVOLUTION_EXTRACT_ROUND_TIMEOUT_SECONDS",
+    300.0,
+    min_value=30.0,
+    max_value=1800.0,
+)
+
+# What a hard context prune archives in one go is dropped from working memory
+# with no summary at all, and the deferred compaction then finds the history
+# under its trigger and does nothing.  This is how many of those archived
+# batches stay queued for a summary, and how much text they may carry in
+# total; past the cap the oldest batch is dropped (the dialog/ archive on disk
+# still holds every line).
+CONTEXT_PRUNED_SUMMARY_MAX_BATCHES = EnvVarLoader.get_int(
+    "COAPIS_CONTEXT_PRUNED_SUMMARY_MAX_BATCHES",
+    3,
+    min_value=1,
+    max_value=16,
+)
+
+CONTEXT_PRUNED_SUMMARY_MAX_CHARS = EnvVarLoader.get_int(
+    "COAPIS_CONTEXT_PRUNED_SUMMARY_MAX_CHARS",
+    240_000,
+    min_value=8_000,
+    max_value=2_000_000,
+)
+
 
 # Builtin Q&A helper profile.  agent_id keeps "CoApis" prefix for existing
 # workspaces and agent.json; do not rename.

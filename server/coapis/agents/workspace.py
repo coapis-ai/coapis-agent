@@ -1327,11 +1327,11 @@ class Workspace:
                 # + adapt_agentscope_message_stream adapter.
 
                 # ── Evolution: on_session_end ──
+                # Scheduled, not awaited: extraction is background LLM work
+                # and this path is a stream -- awaiting it here held the
+                # stream open for as long as extraction took (dev, 2026-10-18).
                 if self.evolution_engine:
-                    try:
-                        await self.evolution_engine.on_session_end()
-                    except Exception as evo_err:
-                        logger.debug("Evolution on_session_end failed: %s", evo_err)
+                    self.evolution_engine.schedule_session_end()
 
             return _stream(request)
 

@@ -129,6 +129,95 @@ def reported_window_for(
     return None
 
 
+def provider_slots() -> list[tuple[str, Any]]:
+    """Every ``(provider_id, provider)`` the registry currently knows."""
+    try:
+        from ...providers.provider_manager import ProviderManager
+
+        manager = ProviderManager.get_instance()
+    except Exception as exc:  # registry unavailable -> caller falls back
+        logger.debug("Provider registry lookup failed: %s", exc)
+        return []
+    slots: list[tuple[str, Any]] = []
+    for provider_id, provider in (
+        list(manager.builtin_providers.items())
+        + list(manager.custom_providers.items())
+    ):
+        slots.append((provider_id, provider))
+    for provider_id, plugin in (manager.plugin_providers or {}).items():
+        info = plugin.get("info") if isinstance(plugin, dict) else None
+        if info is not None:
+            slots.append((provider_id, info))
+    return slots
+
+
+def reported_window_for_model_name(
+    model_name: str | None,
+    base_url: str | None = None,
+) -> tuple[str | None, int | None]:
+    """Find ``(provider_id, window)`` for a model named by string alone.
+
+    Callers holding a raw provider client -- the experience extractor builds
+    its own ``AsyncOpenAI`` client from ``AgentCore`` -- have a model *name*
+    and an endpoint, and no provider id, so :func:`reported_window_for`
+    cannot identify them.  Matching the name alone is unsafe (the same model
+    can be served twice with different windows), so when ``base_url`` is
+    known it must match: a wrong window is worse than no window.
+
+    Returns ``(None, None)`` when nothing matches, never raises.
+    """
+    if not model_name:
+        return None, None
+    name = str(model_name).strip()
+    wanted_url = _normalize_base_url(base_url)
+    for provider_id, provider in provider_slots():
+        if str(getattr(provider, "id", provider_id)).strip() != provider_id:
+            continue
+        if wanted_url:
+            provider_url = _normalize_base_url(
+                getattr(provider, "base_url", "") or "",
+            )
+            if provider_url and provider_url != wanted_url:
+                continue
+        for model_info in getattr(provider, "models", []) or []:
+            if getattr(model_info, "id", None) == name:
+                return provider_id, getattr(
+                    model_info,
+                    "max_sequence_length",
+                    None,
+                )
+    return None, None
+
+
+def _normalize_base_url(value: str | None) -> str:
+    """Compare two endpoints: scheme-insensitive, trailing-slash-insensitive."""
+    if not value:
+        return ""
+    url = str(value).strip().rstrip("/").lower()
+    for prefix in ("https://", "http://"):
+        if url.startswith(prefix):
+            url = url[len(prefix) :]
+    return url
+
+
+def merge_window_feedback(
+    provider_id: str | None,
+    model_name: str | None,
+    reported: int | None,
+) -> int | None:
+    """Rank a provider's refusal above its static ``/models`` number."""
+    observed = window_feedback(provider_id, model_name)
+    if not observed:
+        return reported
+    # A refusal is the most recent thing the provider has told us about
+    # this model, so it outranks a static /models number.
+    return (
+        observed["window_tokens"]
+        if reported is None
+        else min(reported, observed["window_tokens"])
+    )
+
+
 def resolve_for_model(
     model: Any,
     running_config: Any = None,
@@ -140,16 +229,11 @@ def resolve_for_model(
     model's self-reported window from the provider registry.  Never raises.
     """
     provider_id, model_name = model_slot_of(model)
-    reported = reported_window_for(provider_id, model_name)
-    observed = window_feedback(provider_id, model_name)
-    if observed:
-        # A refusal is the most recent thing the provider has told us about
-        # this model, so it outranks a static /models number.
-        reported = (
-            observed["window_tokens"]
-            if reported is None
-            else min(reported, observed["window_tokens"])
-        )
+    reported = merge_window_feedback(
+        provider_id,
+        model_name,
+        reported_window_for(provider_id, model_name),
+    )
 
     class _Stub:
         pass

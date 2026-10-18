@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -48,8 +49,21 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..utils.file_lock import safe_read_json, safe_write_json, safe_append_jsonl
+from ..constant import (
+    EVOLUTION_EXTRACTION_SLOTS,
+    EVOLUTION_EXTRACT_ROUND_TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
+
+# ── 经验提取后台任务登记 ──────────────────────────────────────────────────
+# ``schedule_session_end`` starts extraction as a background task.  Two
+# things are tracked: the tasks themselves (an unreferenced asyncio task can
+# be garbage-collected mid-flight, silently losing the extraction), and how
+# many run server-wide, capped by COAPIS_EVOLUTION_EXTRACTION_SLOTS so a busy
+# machine finishes chats instead of queueing LLM work behind them.
+_EXTRACTION_TASKS: set[asyncio.Task] = set()
+_EXTRACTION_IN_FLIGHT = 0
 
 
 # =========================================================================
@@ -218,6 +232,9 @@ class EvolutionEngine:
         self._current_agent_id: str = ""
         self._current_user_id: str = ""
         self._current_trajectory: list[TrajectoryEntry] = []
+
+        # 会话结束的后台提取任务（schedule_session_end 登记）
+        self._session_end_task: Optional[asyncio.Task] = None
         
         # 经验队列（待审核）
         self._pending_experiences: list[ExtractedExperience] = []
@@ -432,6 +449,142 @@ class EvolutionEngine:
             asyncio.create_task(self._trigger_dream_optimization())
 
         return experiences
+
+    # ------------------------------------------------------------------
+    # 会话结束的后台调度
+    # ------------------------------------------------------------------
+
+    def schedule_session_end(self) -> "asyncio.Task | None":
+        """Run session-end extraction off the caller's stream path.
+
+        Extraction is 5 strategies over N conversation segments, each with
+        retries.  Awaiting ``on_session_end`` on the path that closes a
+        stream therefore delays the close by the whole extraction: measured
+        on dev 2026-10-18, 199 s between the answer's last token and the SSE
+        stream ending -- for a job whose LLM calls all failed.
+
+        The answer is already produced and persisted when this is called, so
+        nothing about it needs to be synchronous.  One extraction per agent
+        at a time (``on_session_end`` holds its own lock, so overlapping runs
+        would only queue behind each other), and a server-wide ceiling so a
+        busy machine does not accumulate LLM work behind a pile of finished
+        chats.
+
+        Returns the started task, or ``None`` when one is already running for
+        this agent or the ceiling is reached.
+        """
+        global _EXTRACTION_IN_FLIGHT
+        current = self._session_end_task
+        if current is not None and not current.done():
+            logger.debug(
+                "Evolution extraction for agent %s skipped: one is running.",
+                self._current_agent_id,
+            )
+            return None
+        if _EXTRACTION_IN_FLIGHT >= EVOLUTION_EXTRACTION_SLOTS:
+            logger.info(
+                "Evolution extraction for agent %s deferred: all %d "
+                "extraction slots are busy; it runs at the next session end.",
+                self._current_agent_id,
+                EVOLUTION_EXTRACTION_SLOTS,
+            )
+            return None
+
+        _EXTRACTION_IN_FLIGHT += 1
+        task = asyncio.create_task(self._session_end_with_flows())
+        self._session_end_task = task
+        _EXTRACTION_TASKS.add(task)
+        task.add_done_callback(_EXTRACTION_TASKS.discard)
+        logger.info(
+            "Evolution extraction scheduled in background for agent %s",
+            self._current_agent_id,
+        )
+        return task
+
+    async def _session_end_with_flows(self) -> None:
+        """Session-end extraction plus the layers it feeds.  Never raises."""
+        global _EXTRACTION_IN_FLIGHT
+        started = time.monotonic()
+        try:
+            # The per-call timeout bounds one request; a session with many
+            # segments and a slow endpoint is bounded by the round, or the
+            # extraction slots stay occupied for the better part of an hour.
+            experiences = await asyncio.wait_for(
+                self.on_session_end(),
+                timeout=EVOLUTION_EXTRACT_ROUND_TIMEOUT_SECONDS,
+            )
+            if experiences:
+                logger.info(
+                    "EvolutionEngine: extracted %d experiences from session "
+                    "%s (%.1fs).",
+                    len(experiences),
+                    self._current_session_id,
+                    time.monotonic() - started,
+                )
+                await self._flow_experiences(experiences)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "EvolutionEngine: extraction round for session %s hit the "
+                "round deadline (%.0fs) and was cancelled; its experiences "
+                "are dropped.",
+                self._current_session_id,
+                EVOLUTION_EXTRACT_ROUND_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.warning(
+                "EvolutionEngine.on_session_end failed",
+                exc_info=True,
+            )
+        finally:
+            # Never below zero: the counter is the concurrency guard, and a
+            # round that ran without the scheduler's increment would
+            # otherwise leave permanent credit for extra rounds.
+            _EXTRACTION_IN_FLIGHT = max(0, _EXTRACTION_IN_FLIGHT - 1)
+
+    async def _flow_experiences(
+        self,
+        experiences: list[ExtractedExperience],
+    ) -> None:
+        """Feed the extracted experiences to the shared learning layers.
+
+        Two destinations, both best-effort: the cross-agent AB buckets (where
+        an experience from one user can become knowledge for another) and the
+        professional-layer flow.  A failure here must not lose the experience
+        -- it is already in the agent's own experience library.
+        """
+        user_id = self._current_user_id
+        agent_id = self._current_agent_id
+
+        cross_evo = self.cross_agent_evolution
+        if cross_evo is not None:
+            for exp in experiences:
+                try:
+                    await cross_evo.report_experience(
+                        content=exp.content,
+                        category=exp.category,
+                        source_user=exp.source_user,
+                        agent_level="user",
+                        confidence=exp.confidence,
+                    )
+                except Exception:
+                    logger.debug(
+                        "CrossAgentEvolution submit failed",
+                        exc_info=True,
+                    )
+
+        if self.knowledge_flow is not None:
+            for exp in experiences:
+                try:
+                    await self.knowledge_flow.evaluate_and_flow(
+                        exp,
+                        agent_id,
+                        user_id,
+                    )
+                except Exception:
+                    logger.debug(
+                        "KnowledgeFlow evaluate failed",
+                        exc_info=True,
+                    )
 
     # ------------------------------------------------------------------
     # 经验提取

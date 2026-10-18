@@ -35,13 +35,25 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
 from ..agents.core import AgentCore
+from ..constant import EnvVarLoader
 from .evolution_engine import TrajectoryEntry, ExtractedExperience
 
 logger = logging.getLogger(__name__)
+
+# Extraction is background work, so it budgets against the model's real window
+# like every other call does.  The share it may take, the room its JSON answer
+# needs, and the floor below which segmentation stops paying: a 24,000-char
+# segment against a 71,680-char window was refused every time (dev,
+# 2026-10-18: 8 segments, 8 "Context size has been exceeded").
+_EXTRACTION_WINDOW_RATIO = 0.5
+_EXTRACTION_OUTPUT_RESERVE_TOKENS = 2_000
+_EXTRACTION_ENVELOPE_CHARS = 400
+_EXTRACTION_MIN_SEGMENT_CHARS = 4_000
 
 
 @dataclass
@@ -141,8 +153,11 @@ If no issues found, output: []
         enable_deduplication: bool = True,
         existing_memory_content: str = "",
         extract_chunk_chars: int = 24_000,
+        extract_max_segments: int = 8,
+        extract_round_seconds: float = 240.0,
         llm_retries: int = 3,
         llm_backoff_seconds: float = 2.0,
+        llm_timeout_seconds: float | None = None,
     ):
         self.agent_core = agent_core
         self.min_confidence = min_confidence
@@ -154,8 +169,44 @@ If no issues found, output: []
         # extraction failures in one month on dev (2026-10-17).  Segments are
         # sized to the budget, and transient refusals are retried.
         self.extract_chunk_chars = max(4_000, extract_chunk_chars)
+        # Segment count is the cost driver, not segment size.  A 2.5M-char
+        # trajectory (dev, 2026-10-19) split into 81 parts per strategy, and
+        # five strategies ran them back to back for minutes, holding every
+        # slot of the shared LLM concurrency cap while the chat and the
+        # compaction waited behind them.  Segments are capped, and a round
+        # that runs out of time stops launching calls; the trajectory is
+        # archived either way, so a skipped tail costs learning, not data.
+        self.extract_max_segments = max(
+            1,
+            EnvVarLoader.get_int(
+                "COAPIS_EVOLUTION_MAX_SEGMENTS",
+                extract_max_segments,
+                min_value=1,
+            ),
+        )
+        self.extract_round_seconds = float(
+            EnvVarLoader.get_int(
+                "COAPIS_EVOLUTION_ROUND_SECONDS",
+                int(extract_round_seconds),
+                min_value=30,
+            ),
+        )
         self.llm_retries = max(1, llm_retries)
         self.llm_backoff_seconds = max(0.0, llm_backoff_seconds)
+        # A raw client with no timeout inherits the SDK default (600 s), and
+        # extraction runs on the turn's closing path: 5 strategies x N segments
+        # x 3 retries of a call that never answers is how a delivered answer
+        # kept its SSE stream open for 199 s after the last token (dev,
+        # 2026-10-18).  One bounded call per segment is the difference between
+        # a slow background job and a chat that never closes.
+        if llm_timeout_seconds is None:
+            from ..constant import EVOLUTION_EXTRACT_TIMEOUT_SECONDS
+
+            llm_timeout_seconds = EVOLUTION_EXTRACT_TIMEOUT_SECONDS
+        self.llm_timeout_seconds = max(5.0, llm_timeout_seconds)
+        # Window of the model this extractor actually calls, resolved once.
+        self._window: Any = None
+        self._window_resolved = False
 
         # Cache for deduplication
         self._known_titles: set[str] = set()
@@ -378,9 +429,29 @@ If no issues found, output: []
         # extracted on its own.  A segment that fails is logged and skipped;
         # the other segments still yield experiences, and only when nothing
         # came back does this fall back to the heuristic.
-        segments = self._split_conversation(conversation)
+        segments = self._split_conversation(
+            conversation,
+            len(prompt_template),
+            self.extract_max_segments,
+        )
         experiences: List[ExtractedExperience] = []
+        # A segment is a call, and calls are the cost.  Past the round's
+        # time budget the remaining segments are skipped rather than queued:
+        # five strategies each grinding through a long trajectory is what
+        # starves the chat and the compaction of the shared LLM slots.
+        deadline = time.monotonic() + self.extract_round_seconds
         for index, segment in enumerate(segments):
+            if time.monotonic() > deadline:
+                logger.warning(
+                    "Extraction of %s stopped after part %d/%d: the round's "
+                    "%.0fs budget is spent (%d segment(s) skipped).",
+                    exp_type,
+                    index,
+                    len(segments),
+                    self.extract_round_seconds,
+                    len(segments) - index,
+                )
+                break
             prompt = (
                 prompt_template
                 + f"\n\n--- Conversation part {index + 1}/{len(segments)} "
@@ -419,7 +490,87 @@ If no issues found, output: []
             )
         return experiences
 
-    def _split_conversation(self, conversation: str) -> list[str]:
+    def _resolve_window(self) -> Any:
+        """The real context window of the model this extractor calls.
+
+        The extractor talks to a raw provider client built from ``AgentCore``,
+        so it has a model *name* and an endpoint and no provider id -- the
+        same window the chat path resolved is the only number that makes a
+        segment request fit.  Resolved once per extractor; ``None`` means the
+        registry knows nothing and the configured cap is all we have.
+        """
+        if self._window_resolved:
+            return self._window
+        self._window_resolved = True
+        try:
+            from ..agents.context.window_source import (
+                merge_window_feedback,
+                reported_window_for_model_name,
+                resolve_window,
+            )
+
+            model_name = getattr(self.agent_core, "model", None)
+            provider_id, reported = reported_window_for_model_name(
+                model_name,
+                getattr(self.agent_core, "base_url", None),
+            )
+            reported = merge_window_feedback(
+                provider_id,
+                model_name,
+                reported,
+            )
+
+            class _Stub:
+                pass
+
+            stub = _Stub()
+            stub.max_sequence_length = reported
+            running = None
+            try:
+                from ..config.config import load_agent_config
+
+                running = load_agent_config("default").running
+            except Exception:
+                running = None
+            self._window = resolve_window(stub, running)
+        except Exception as exc:  # budgeting is an optimisation, never fatal
+            logger.debug("Extraction window resolution failed: %s", exc)
+            self._window = None
+        return self._window
+
+    def _segment_limit(self, template_chars: int) -> int:
+        """Conversation characters one extraction request can carry.
+
+        The request is ``system + template + envelope + segment`` and the
+        model needs room left for the JSON it is asked to write, so the
+        segment is what remains of the window -- not a constant invented
+        beside it.  The configured cap still applies (a huge window does not
+        make one session worth a 200K-char prompt), and the floor keeps
+        segmentation meaningful on a tiny window.
+        """
+        window = self._resolve_window()
+        if window is None:
+            return self.extract_chunk_chars
+        reserve_tokens = min(
+            _EXTRACTION_OUTPUT_RESERVE_TOKENS,
+            int(getattr(self.agent_core, "max_tokens", 2000) or 2000),
+        )
+        budget_chars = window.to_chars(
+            int(window.effective_tokens * _EXTRACTION_WINDOW_RATIO)
+            - reserve_tokens,
+        )
+        overhead = template_chars + _EXTRACTION_ENVELOPE_CHARS
+        return max(
+            _EXTRACTION_MIN_SEGMENT_CHARS,
+            min(self.extract_chunk_chars, budget_chars - overhead),
+        )
+
+    def _split_conversation(
+        self,
+        conversation: str,
+        template_chars: int = 0,
+        max_segments: int = 0,
+    ) -> list[str]:
         """Cut the conversation text into segments within the budget.
 
         Splitting is line-based so a ``User:/Tools:/Assistant:`` exchange is
@@ -427,13 +578,23 @@ If no issues found, output: []
         sliced by characters, which is what the provider's window cares
         about.
 
+        ``max_segments`` (0 = no cap) bounds how many calls one strategy may
+        make.  Widening segments past the window to stay under the cap is the
+        bug this path was built to remove, so when a conversation needs more
+        segments than the cap, the cap wins and the tail is dropped -- with a
+        log saying exactly how much.  The trajectory is archived either way.
+
         Args:
             conversation: The formatted conversation text.
+            template_chars: Size of the prompt template the segment is sent
+                inside, so the limit is the room the segment has and not the
+                room the request has.
+            max_segments: Cap on the returned segment count.
 
         Returns:
             Segments in original order; ``[conversation]`` when it fits.
         """
-        limit = self.extract_chunk_chars
+        limit = self._segment_limit(template_chars)
         if len(conversation) <= limit:
             return [conversation]
         segments: list[str] = []
@@ -453,6 +614,18 @@ If no issues found, output: []
             size += len(line) + 1
         if current:
             segments.append("\n".join(current))
+        if max_segments and len(segments) > max_segments:
+            dropped = sum(len(seg) for seg in segments[max_segments:])
+            logger.warning(
+                "Extraction segments capped at %d: dropping %d chars of the "
+                "tail (%d of %d segment(s) dropped). The trajectory is "
+                "archived; the cap bounds the calls, not the record.",
+                max_segments,
+                dropped,
+                len(segments) - max_segments,
+                len(segments),
+            )
+            segments = segments[:max_segments]
         return segments
 
     def _build_conversation_text(self, trajectory: List[TrajectoryEntry]) -> str:
@@ -498,23 +671,36 @@ If no issues found, output: []
         raise last
 
     async def _call_llm_once(self, prompt: str) -> str:
-        """One provider call for experience extraction."""
-        response = await self.agent_core.client.chat.completions.create(
-            model=self.agent_core.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an experience extraction assistant. "
-                        "Analyze conversations and extract valuable insights. "
-                        "Output ONLY valid JSON arrays."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=min(2000, self.agent_core.max_tokens),
-            temperature=0.5,
-        )
+        """One provider call for experience extraction, on a deadline.
+
+        The raw client has no timeout of its own, so an unresponsive endpoint
+        holds the call for the SDK default (600 s) -- five times, once per
+        extraction strategy, on the path that closes the user's stream.
+        """
+        try:
+            response = await asyncio.wait_for(
+                self.agent_core.client.chat.completions.create(
+                    model=self.agent_core.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are an experience extraction assistant. "
+                                "Analyze conversations and extract valuable "
+                                "insights. Output ONLY valid JSON arrays."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=min(2000, self.agent_core.max_tokens),
+                    temperature=0.5,
+                ),
+                timeout=self.llm_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"extraction call exceeded {self.llm_timeout_seconds:.0f}s",
+            ) from exc
         return response.choices[0].message.content or ""
 
     def _parse_extraction_result(
