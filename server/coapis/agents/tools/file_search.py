@@ -108,6 +108,18 @@ _SKIP_DIRS = frozenset(
         "build",
         ".next",
         ".nuxt",
+        # Runtime state directories.  An agent searching its own workspace
+        # must never surface its live session transcripts: grepping a
+        # session file re-injects the whole running conversation as a
+        # "search result", which doubles the context on every turn and
+        # reliably blows the model window.  Same for the other runtime
+        # stores (chat/dialog mirrors, tool-result caches, backups).
+        "sessions",
+        "chat",
+        "dialog",
+        "tool_results",
+        "backups",
+        "crons",
     },
 )
 
