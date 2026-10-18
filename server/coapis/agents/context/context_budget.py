@@ -54,12 +54,17 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import logging
 import time
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable
 
-from coapis.constant import EnvVarLoader
+from coapis.constant import (
+    CONTEXT_PRUNED_SUMMARY_MAX_BATCHES,
+    CONTEXT_PRUNED_SUMMARY_MAX_CHARS,
+    EnvVarLoader,
+)
 
 from .window_source import WindowInfo
 
@@ -697,6 +702,10 @@ _COMPACT_MINI_SYS = (
 )
 # Headroom for the JSON envelope and the measurement model's own overhead.
 _COMPACT_CHUNK_FILL = 0.85
+# Per-block cap when a pruned message is rendered for its summary.  Tool
+# results are the bulk of a pruned history and the queue is bounded in chars;
+# one 200K tool output must not be what the whole queue measures.
+_RENDER_BLOCK_CAP_CHARS = 4_000
 # Minimum seconds a map chunk (or the merge) needs left of the global deadline
 # to be worth starting.  Launching a call with 2 seconds of budget guarantees it
 # times out and burns the slot; below this the work is skipped and the merge
@@ -721,9 +730,10 @@ _COMPACT_CHUNK_CEILING = EnvVarLoader.get_int(
     min_value=4,
     max_value=400,
 )
-# Cost bound: a compaction is a background task, not a batch job.  When the
-# prefix needs more chunks than this, chunks grow instead of the call count.
-_COMPACT_MAX_CHUNKS = 12
+# NOTE: ``_COMPACT_MAX_CHUNKS`` is declared once, above, from the environment.
+# It used to be declared a second time as a bare ``= 12`` below, which shadowed
+# the configurable value and made COAPIS_CONTEXT_COMPACTION_MAX_CHUNKS a dead
+# knob (the constant was read at import time, before the override never existed).
 
 
 def _row_chars(row: Any) -> int:
@@ -852,6 +862,11 @@ class ContextBudgetGuard:
         agent_name: For logs.
     """
 
+    # Bound on the queue of hard-pruned rows owed a summary (batches and
+    # characters), both configurable -- see :meth:`_queue_pruned_for_summary`.
+    _PRUNED_MAX_BATCHES = CONTEXT_PRUNED_SUMMARY_MAX_BATCHES
+    _PRUNED_MAX_CHARS = CONTEXT_PRUNED_SUMMARY_MAX_CHARS
+
     def __init__(
         self,
         inner: Any,
@@ -902,6 +917,14 @@ class ContextBudgetGuard:
         )
         self.last_snapshot: BudgetSnapshot | None = None
         self.pruned_events = 0
+        # What each hard prune dropped, queued for the summary it never got.
+        # ``_prune_to_budget`` archives rows and removes them from working
+        # memory in one motion; the deferred compaction then finds a history
+        # under its trigger and does nothing (dev, 2026-10-18: compaction
+        # "finished in 0.0s" right after prunes).  Archiving is not
+        # summarising -- see :meth:`pop_pruned_for_summary`.
+        self.pruned_pending: list[Any] = []
+        self.pruned_pending_chars = 0
         self.overflow_events = 0
 
     @staticmethod
@@ -1081,6 +1104,439 @@ class ContextBudgetGuard:
             )
         return reclaimed
 
+    def _queue_pruned_for_summary(self, archived: list[Any]) -> None:
+        """Remember what a hard prune dropped: it is owed a summary.
+
+        Bounded on purpose.  The rows are not lost when the queue overflows
+        -- every archived line is already in ``dialog/*.jsonl`` and marked
+        compressed in the session state; the queue decides how much of that
+        history gets folded into the working summary.  Keeping the newest
+        batches is the useful bias: they are the ones the next request is
+        about to lose.
+        """
+        if not archived:
+            return
+        self.pruned_pending.append(list(archived))
+        self.pruned_pending_chars += sum(
+            _row_chars(self._row_of(message)) for message in archived
+        )
+        while len(self.pruned_pending) > self._PRUNED_MAX_BATCHES:
+            dropped = self.pruned_pending.pop(0)
+            self.pruned_pending_chars -= sum(
+                _row_chars(self._row_of(message))
+                for message in dropped
+            )
+        while (
+            self.pruned_pending_chars > self._PRUNED_MAX_CHARS
+            and len(self.pruned_pending) > 1
+        ):
+            dropped = self.pruned_pending.pop(0)
+            self.pruned_pending_chars -= sum(
+                _row_chars(self._row_of(message))
+                for message in dropped
+            )
+        logger.info(
+            "context-budget: %d rows archived by hard pruning are queued for "
+            "a summary (%d batches, %d chars)",
+            len(archived),
+            len(self.pruned_pending),
+            self.pruned_pending_chars,
+        )
+
+    def pop_pruned_for_summary(self) -> list[Any]:
+        """Take everything hard pruning has archived without summarising.
+
+        Drains the queue, oldest batch first, so a summary built from the
+        result reads in conversation order.  The caller (the deferred
+        compaction round) folds it into the memory's running summary; when
+        nothing is queued this returns an empty list and costs nothing.
+        """
+        if not self.pruned_pending:
+            return []
+        rows = [
+            message
+            for batch in self.pruned_pending
+            for message in batch
+        ]
+        self.pruned_pending = []
+        self.pruned_pending_chars = 0
+        return rows
+
+    def _row_of(self, message: Any) -> dict[str, Any]:
+        """A message as a formatter row, for measuring and summarising."""
+        content = getattr(message, "content", "")
+        if content is None:
+            content = ""
+        return {
+            "role": getattr(message, "role", "user") or "user",
+            "content": content
+            if isinstance(content, str)
+            else self._render_blocks(content),
+        }
+
+    @staticmethod
+    def _render_blocks(blocks: Any) -> str:
+        """Every block of a message as text, the way the formatter sends them.
+
+        :meth:`_blocks_text` keeps only ``text`` blocks, which is the right
+        thing for a summary *response*; for history being summarised it is the
+        tool calls and their results that carry the content.  Measured on dev
+        2026-10-19: hard pruning dropped 177,912 chars and queued 8,079 for a
+        summary, because every tool block was silently dropped from the rows
+        the summary call sees -- the fold would have summarised 4% of what it
+        archived.  Each block is capped so one huge tool output cannot eat the
+        whole queue.
+        """
+        if isinstance(blocks, str):
+            return blocks.strip()
+        if not blocks:
+            return ""
+        out: list = []
+        for block in blocks:
+            if isinstance(block, dict):
+                kind = block.get("type")
+            else:
+                kind = getattr(block, "type", None)
+            get = (
+                block.get
+                if isinstance(block, dict)
+                else lambda key, _b=block: getattr(_b, key, None)
+            )
+            if kind == "text":
+                piece = str(get("text") or "")
+            elif kind == "thinking":
+                piece = f"思考：{get('thinking') or ''}"
+            elif kind == "tool_use":
+                args = get("input") or get("arguments") or ""
+                try:
+                    args = json.dumps(args, ensure_ascii=False)
+                except Exception:
+                    args = str(args)
+                piece = f"调用工具 {get('name') or '?'}：{args}"
+            elif kind == "tool_result":
+                # agentscope's ToolResultBlock carries the payload under
+                # ``output``; ``content`` is what a provider's wire format
+                # calls the same thing.  Reading only one of the two is how
+                # a 12,697-char tool result rendered as 5 chars on dev.
+                inner = get("output")
+                if inner in (None, "", [], {}):
+                    inner = get("content")
+                piece = (
+                    ContextBudgetGuard._render_blocks(inner)
+                    if isinstance(inner, (list, tuple))
+                    else str(inner or "")
+                )
+                piece = f"工具结果 {get('name') or ''}：{piece}".strip()
+            elif kind == "image":
+                piece = "[图片]"
+            elif kind == "audio":
+                piece = "[语音]"
+            elif kind == "video":
+                piece = "[视频]"
+            elif kind in ("file", "document"):
+                piece = f"[{kind} {get('filename') or get('name') or ''}]"
+            else:
+                piece = str(block)
+            piece = piece.strip()
+            if not piece:
+                continue
+            if len(piece) > _RENDER_BLOCK_CAP_CHARS:
+                piece = piece[:_RENDER_BLOCK_CAP_CHARS] + "…(截断)"
+            out.append(piece)
+        return "\n".join(out).strip()
+
+    @staticmethod
+    def _summary_ask_row() -> dict:
+        """The instruction for a pruned-history summary call.
+
+        Plain text, not the compaction's JSON contract: this summary is
+        appended to the running summary as text, so there is no template to
+        fill and no schema for a model to fail against.
+        """
+        return {
+            "role": "user",
+            "content": (
+                "把上面的对话片段压缩成一份中文摘要，按时间顺序保留：事实与"
+                "结论、涉及的文件路径与命令、数字与标识、未完成的事项。"
+                "不要续写对话，不要编造，不要评论，只输出摘要正文。"
+            ),
+        }
+
+    async def _summarize_rows(self, rows: list) -> str:
+        """Summarize archived rows with the compaction's own map-reduce.
+
+        Same machinery as :meth:`_compact_map_reduce` (budget-sized chunks,
+        concurrent map calls, one shared deadline, merge at the end), because
+        the failure modes are identical: a chunk that never answers, a
+        deadline that expires mid-map, a model that answers in prose.  The
+        difference is the output — plain text appended to the running summary,
+        not a structured payload a template has to format.
+
+        Returns the summary text, or ``""`` when the window has no room for a
+        chunk worth sending.
+        """
+        rows = [r for r in rows if isinstance(r, dict)]
+        if not rows:
+            return ""
+
+        mini_sys = {"role": "system", "content": _COMPACT_MINI_SYS}
+        ask = self._summary_ask_row()
+        budget_chars = self.window.to_chars(
+            int(self.window.effective_tokens * self.compaction_input_ratio),
+        )
+        overhead = _row_chars(mini_sys) + _row_chars(ask) + 2_000
+        chunk_budget = int(budget_chars * self.compact_threshold_ratio) - overhead
+        chunk_budget = min(chunk_budget, self.map_chunk_max_chars)
+        if chunk_budget < 4_000:
+            logger.info(
+                "Pruned-summary %s: no room for a chunk (%d chars/chunk after "
+                "%d chars of fixed overhead in a %d-char compaction budget).",
+                self.agent_name or "?",
+                chunk_budget,
+                overhead,
+                budget_chars,
+            )
+            return ""
+
+        history_chars = sum(_row_chars(r) for r in rows)
+        needed_chunks = max(
+            1,
+            -(-history_chars // max(1, int(chunk_budget * _COMPACT_CHUNK_FILL))),
+        )
+        max_chunks = min(
+            _COMPACT_CHUNK_CEILING,
+            max(_COMPACT_MAX_CHUNKS, needed_chunks),
+        )
+        chunks = split_rows_for_compaction(
+            rows,
+            chunk_budget,
+            max_chunks=max_chunks,
+        )
+        if not chunks:
+            return ""
+
+        started = time.monotonic()
+        deadline_at = started + self.compaction_global_timeout
+        total = len(chunks)
+        logger.info(
+            "Pruned-summary start %s: %d row(s) (%d chars) -> %d chunk(s) "
+            "of %d chars, %.0fs deadline.",
+            self.agent_name or "?",
+            len(rows),
+            history_chars,
+            total,
+            chunk_budget,
+            self.compaction_global_timeout,
+        )
+
+        semaphore = asyncio.Semaphore(self.map_concurrency)
+
+        async def _map_one(
+            idx: int,
+            chunk: list,
+        ) -> tuple[str, int] | None:
+            remaining = deadline_at - time.monotonic()
+            if remaining <= _MIN_CHUNK_WINDOW_SECONDS:
+                logger.warning(
+                    "Pruned-summary chunk %d/%d skipped: deadline spent "
+                    "(%.1fs elapsed).",
+                    idx + 1,
+                    total,
+                    time.monotonic() - started,
+                )
+                return None
+            request = fit_prompt_to_budget(
+                [mini_sys, *chunk, ask],
+                self.window,
+                compact_threshold_ratio=self.compact_threshold_ratio,
+                source=f"pruned-summary:{self.agent_name}:{idx + 1}/{total}",
+            )
+            chunk_chars = sum(_row_chars(r) for r in (request or chunk))
+            async with semaphore:
+                remaining = deadline_at - time.monotonic()
+                if remaining <= _MIN_CHUNK_WINDOW_SECONDS:
+                    return None
+                chunk_started = time.monotonic()
+                try:
+                    res = await self._await_response(
+                        request or chunk,
+                        None,
+                        {},
+                        timeout=remaining,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Pruned-summary chunk %d/%d failed after %.1fs "
+                        "(%d chars in): %s",
+                        idx + 1,
+                        total,
+                        time.monotonic() - chunk_started,
+                        chunk_chars,
+                        exc,
+                    )
+                    return None
+            text = self._partial_text(res)
+            if not text:
+                return None
+            logger.info(
+                "Pruned-summary chunk %d/%d: %.1fs, %d chars in -> %d chars "
+                "of summary.",
+                idx + 1,
+                total,
+                time.monotonic() - chunk_started,
+                chunk_chars,
+                len(text),
+            )
+            return (text, chunk_chars)
+
+        results = await asyncio.gather(
+            *(_map_one(idx, chunk) for idx, chunk in enumerate(chunks)),
+        )
+        texts = [item[0] for item in results if item]
+        if not texts:
+            return ""
+        if len(texts) == 1:
+            return texts[0]
+
+        remaining = deadline_at - time.monotonic()
+        if remaining <= _MIN_CHUNK_WINDOW_SECONDS:
+            # No time for the merge.  Concatenating the partials that answered
+            # keeps every row that was read; returning "" here would leave the
+            # queue full and the history unsummarised for another round.
+            logger.warning(
+                "Pruned-summary reduce skipped: deadline spent after %d/%d "
+                "chunk(s); the summary is the concatenation of the partials.",
+                len(texts),
+                total,
+            )
+            return "\n\n".join(texts)
+
+        merge_request = [
+            mini_sys,
+            {
+                "role": "user",
+                "content": (
+                    "以下是同一段对话按时间顺序分段生成的多份摘要。把它们合并"
+                    "为一份完整摘要：去重、保留全部事实与未完成的待办、同一"
+                    "事实取更新的那一份。\n\n" + "\n\n".join(texts)
+                ),
+            },
+        ]
+        merge_request = fit_prompt_to_budget(
+            merge_request,
+            self.window,
+            compact_threshold_ratio=self.compact_threshold_ratio,
+            source=f"pruned-summary-reduce:{self.agent_name}",
+        )
+        try:
+            res = await self._await_response(
+                merge_request,
+                None,
+                {},
+                timeout=remaining,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Pruned-summary reduce failed (%s); using the concatenation "
+                "of the %d partial(s).",
+                exc,
+                len(texts),
+            )
+            return "\n\n".join(texts)
+        merged = self._partial_text(res)
+        logger.info(
+            "Pruned-summary %s: %d chunk(s) merged into %d chars in %.1fs.",
+            self.agent_name or "?",
+            len(texts),
+            len(merged or ""),
+            time.monotonic() - started,
+        )
+        return merged or "\n\n".join(texts)
+
+    async def summarize_pruned_history(self) -> int:
+        """Fold what hard pruning dropped into the memory's running summary.
+
+        Hard pruning archives rows and removes them from working memory in one
+        motion, and the upstream compactor only reads rows **not** marked
+        compressed — so pruned history never reaches a summary at all (dev,
+        2026-10-18: prunes followed by a compaction that "finished in 0.0s").
+        Archiving is persistence, not memory: the rows are on disk and the
+        agent no longer knows them.  This is the half that makes them part of
+        what it still knows.
+
+        Returns the number of rows folded in.  The queue is drained only when a
+        summary was actually produced, so a failed round keeps the rows for the
+        next one.
+        """
+        if not self.pruned_pending:
+            return 0
+        memory = self._memory()
+        if memory is None:
+            logger.info(
+                "Pruned-summary %s: no memory attached, %d queued row(s) stay "
+                "queued.",
+                self.agent_name or "?",
+                self.pruned_pending_chars,
+            )
+            return 0
+
+        row_count = sum(len(batch) for batch in self.pruned_pending)
+        rows = [
+            self._row_of(message)
+            for batch in self.pruned_pending
+            for message in batch
+        ]
+        history_chars = sum(_row_chars(row) for row in rows)
+        try:
+            text = await self._summarize_rows(rows)
+        except Exception:
+            logger.warning(
+                "Pruned-summary for agent %s failed; the %d queued row(s) stay "
+                "queued.",
+                self.agent_name or "?",
+                row_count,
+                exc_info=True,
+            )
+            return 0
+        if not text:
+            logger.info(
+                "Pruned-summary for agent %s produced nothing; %d row(s) stay "
+                "queued.",
+                self.agent_name or "?",
+                row_count,
+            )
+            return 0
+
+        try:
+            previous = memory.get_compressed_summary() or ""
+        except Exception:
+            previous = ""
+        block = f"### 硬修剪归档摘要\n{text}"
+        merged = f"{previous}\n\n{block}" if previous else block
+        try:
+            await memory.update_compressed_summary(merged)
+        except Exception:
+            logger.warning(
+                "Pruned-summary for agent %s could not be written to memory; "
+                "%d row(s) stay queued.",
+                self.agent_name or "?",
+                row_count,
+                exc_info=True,
+            )
+            return 0
+
+        self.pruned_pending = []
+        self.pruned_pending_chars = 0
+        logger.info(
+            "Pruned-summary for agent %s: %d row(s) (%d chars) folded into the "
+            "running summary (%d chars of summary).",
+            self.agent_name or "?",
+            row_count,
+            history_chars,
+            len(text),
+        )
+        return row_count
+
     async def _prune_to_budget(self, snapshot: BudgetSnapshot) -> int:
         """Archive the oldest history out of working memory.
 
@@ -1143,6 +1599,10 @@ class ContextBudgetGuard:
         except Exception as exc:
             logger.warning("Context pruning could not purge memory: %s", exc)
             return 0
+        # The rows are on disk and out of working memory; nobody else will
+        # ever read them (the upstream compactor skips rows marked compressed),
+        # so the summary is owed here or never happens.
+        self._queue_pruned_for_summary(archived)
         self.pruned_events += 1
         logger.warning(
             "Context budget guard pruned %d message(s) (~%d chars) for "

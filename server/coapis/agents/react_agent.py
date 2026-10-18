@@ -146,6 +146,41 @@ def schedule_background_compaction(
     return task
 
 
+def _read_compressed_summary(agent: Any) -> str:
+    """The memory's running summary, or "" when there is none."""
+    memory = getattr(agent, "memory", None)
+    if memory is None:
+        return ""
+    try:
+        return memory.get_compressed_summary() or ""
+    except Exception:
+        return ""
+
+
+async def fold_pruned_history(agent: Any) -> int:
+    """Give hard-pruned rows the summary pruning never gave them.
+
+    The gate archives pruned rows and drops them from working memory; the
+    upstream compactor skips rows marked compressed, so that history is on
+    disk and absent from the agent's knowledge, with nothing summarising it
+    (dev 2026-10-18: prunes followed by a compaction that "finished in 0.0s").
+    Returns the number of rows folded, 0 when the gate has nothing queued.
+    """
+    guard = getattr(agent, "context_guard", None)
+    fold = getattr(guard, "summarize_pruned_history", None)
+    if fold is None:
+        return 0
+    try:
+        return int(await fold())
+    except Exception:
+        logger.warning(
+            "Pruned-history fold failed for %s",
+            getattr(agent, "name", "?"),
+            exc_info=True,
+        )
+        return 0
+
+
 async def _run_background_compaction(
     agent: Any,
     persist: Callable[[], Awaitable[None]] | None,
@@ -157,16 +192,38 @@ async def _run_background_compaction(
     budget = compaction_budget_seconds(agent)
     agent._compaction_due = False
     try:
+        before = _read_compressed_summary(agent)
         await asyncio.wait_for(
             ReActAgent._compress_memory_if_needed(agent),
             timeout=budget,
         )
+        after = _read_compressed_summary(agent)
+        if before and after != before and before not in after:
+            # Upstream replaces the running summary with a summary of the rows
+            # it just compressed, so everything earlier rounds already
+            # summarized disappears (the "compression = amnesia" failure, seen
+            # as 280 rows dropped per compaction on dev).  Re-prepending keeps
+            # the session's accumulated memory instead of a rolling snapshot.
+            try:
+                await agent.memory.update_compressed_summary(
+                    f"{before}\n\n{after}",
+                )
+            except Exception:
+                logger.warning(
+                    "Background compaction for %s could not preserve the "
+                    "earlier summary.",
+                    name,
+                    exc_info=True,
+                )
+        folded = await fold_pruned_history(agent)
         elapsed = time.monotonic() - started
         logger.info(
-            "Background compaction for %s finished in %.1fs (budget %.0fs).",
+            "Background compaction for %s finished in %.1fs (budget %.0fs), "
+            "%d hard-pruned row(s) folded into the summary.",
             name,
             elapsed,
             budget,
+            folded,
         )
         if persist is not None:
             await persist()
@@ -189,7 +246,10 @@ async def _run_background_compaction(
             exc_info=True,
         )
     finally:
-        _COMPACTION_IN_FLIGHT -= 1
+        # Never below zero: the counter is a concurrency guard, and a round
+        # that ran without the scheduler's increment (tests, direct calls)
+        # would otherwise leave permanent credit for extra rounds.
+        _COMPACTION_IN_FLIGHT = max(0, _COMPACTION_IN_FLIGHT - 1)
 
 
 def compaction_budget_seconds(agent: Any) -> float:
