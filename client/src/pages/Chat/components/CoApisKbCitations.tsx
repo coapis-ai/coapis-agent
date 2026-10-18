@@ -20,6 +20,7 @@ interface Citation {
   snippet?: string;
   score?: number;
   chunk_id?: string;
+  meta?: { low_relevance?: boolean };
 }
 
 interface CardData {
@@ -55,8 +56,14 @@ const CoApisKbCitations: React.FC<{ data: CardData }> = ({ data }) => {
                   {c.doc_title || c.document_id || '未命名文档'}
                 </span>
                 {c.kb_name && <span className="kb-citation-kb">{c.kb_name}</span>}
-                {typeof c.score === 'number' && (
-                  <span className="kb-citation-score">{c.score.toFixed(2)}</span>
+                {c.meta?.low_relevance ? (
+                  <span className="kb-citation-score kb-citation-score-low">相关度低</span>
+                ) : (
+                  typeof c.score === 'number' && (
+                    <span className="kb-citation-score">
+                      相关度 {Math.round(c.score * 100)}%
+                    </span>
+                  )
                 )}
               </div>
               {c.snippet && <div className="kb-citation-snippet">{c.snippet}</div>}

@@ -881,7 +881,37 @@ class AgentRunner(Runner):
 
         created_at = int(datetime.now(timezone.utc).timestamp())
         completed_response_yielded = False
+        from .kb_hint_guard import (
+            KB_HINT_TOKEN as _KB_HINT_TOKEN,
+            StreamLeakFilter as _KBLeakFilter,
+            strip_kb_hint_leak as _strip_kb_hint_leak,
+        )
+        _kb_filter = _KBLeakFilter()
+        _kb_leak_seen = False
         async for event in super().stream_query(request, **kwargs):
+            # 知识库引用材料「复述泄漏」兜底：模型把注入材料原样吐进可见
+            # 输出时，流式逐行抑制 + 完成态整段清理，用户看不到内部提示语。
+            try:
+                _txt = getattr(event, "text", None)
+                if isinstance(_txt, str) and _txt:
+                    if (not _kb_leak_seen) and (
+                        _KB_HINT_TOKEN in _txt or "来源知识库" in _txt
+                    ):
+                        _kb_leak_seen = True
+                    if _kb_leak_seen:
+                        event.text = _kb_filter.feed(_txt)
+                        if not event.text and getattr(event, "delta", False):
+                            continue
+                elif getattr(event, "object", None) == "message":
+                    _blocks = getattr(event, "content", None) or []
+                    for _blk in _blocks:
+                        if isinstance(_blk, dict) and _blk.get("type") == "text":
+                            _raw = _blk.get("text") or ""
+                            if _KB_HINT_TOKEN in _raw or "来源知识库" in _raw:
+                                _kb_leak_seen = True
+                                _blk["text"] = _strip_kb_hint_leak(_raw)
+            except Exception:
+                pass
             if getattr(event, "object", None) == "response":
                 event.created_at = created_at
                 if getattr(event, "status", None) in ("completed", "failed", "canceled"):
@@ -895,6 +925,22 @@ class AgentRunner(Runner):
                     except LookupError:
                         pass
             yield event
+
+        # 流式过滤器收尾：吐出缓冲区里最后一行（无换行结尾的残留）
+        try:
+            _tail = _kb_filter.flush()
+            if _tail:
+                from agentscope_runtime.engine.schemas.agent_schemas import (
+                    TextContent as _TextContent,
+                )
+                yield _TextContent(
+                    object="content",
+                    type="text",
+                    delta=False,
+                    text=_tail,
+                )
+        except Exception:
+            pass
 
         # 兼容：若底层未显式产出 completed/failed/canceled 的 response，
         # 这里补发一个完成事件，避免前端 loading 不结束。
@@ -2351,51 +2397,12 @@ class AgentRunner(Runner):
             # ------------------------------------------------
 
             # --- Evolution: session end → experience extraction ---
-            try:
-                if engine is not None:
-                    experiences = await engine.on_session_end()
-                    if experiences:
-                        logger.info(
-                            "EvolutionEngine: extracted %d experiences "
-                            "from session %s",
-                            len(experiences), session_id,
-                        )
-                        # Flow to CrossAgentEvolution (AB buckets)
-                        ws = self._workspace
-                        cross_evo = getattr(ws, "cross_agent_evolution", None)
-                        if cross_evo is not None:
-                            for exp in experiences:
-                                try:
-                                    await cross_evo.report_experience(
-                                        content=exp.content,
-                                        category=exp.category,
-                                        source_user=exp.source_user,
-                                        agent_level="user",
-                                        confidence=exp.confidence,
-                                    )
-                                except Exception:
-                                    logger.debug(
-                                        "CrossAgentEvolution submit failed",
-                                        exc_info=True,
-                                    )
-                        # Flow to KnowledgeFlow (professional layer)
-                        kflow = getattr(ws, "knowledge_flow", None)
-                        if kflow is not None:
-                            for exp in experiences:
-                                try:
-                                    await kflow.evaluate_and_flow(
-                                        exp, self.agent_id, user_id,
-                                    )
-                                except Exception:
-                                    logger.debug(
-                                        "KnowledgeFlow evaluate failed",
-                                        exc_info=True,
-                                    )
-            except Exception:
-                logger.warning(
-                    "EvolutionEngine.on_session_end failed",
-                    exc_info=True,
-                )
+            # Scheduled on the engine, not awaited here: the answer is
+            # already delivered and persisted, and extraction is 5 strategies
+            # x N segments of LLM work.  Awaiting it on this path is what kept
+            # the stream open 199 s after the last token (dev, 2026-10-18).
+            if engine is not None:
+                engine.schedule_session_end()
             # -------------------------------------------------------
 
     async def init_handler(self, *args, **kwargs):
