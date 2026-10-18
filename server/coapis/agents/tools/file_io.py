@@ -107,7 +107,17 @@ def _resolve_write_path(file_path: str) -> str:
     workspace_dir = Path(workspace_dir)
     files_dir = workspace_dir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
-    return str(files_dir / file_path)
+    # Reads report paths under the "files/" prefix, so the model habitually
+    # echoes that prefix back when writing ("files/notes.md").  Joining it
+    # verbatim yields "files/files/notes.md", which fails for a new file and
+    # silently targets the wrong place for an existing one.  Drop the
+    # redundant leading segment.
+    rel = Path(file_path)
+    if rel.parts[:1] == ("files",):
+        rel = Path(*rel.parts[1:]) if len(rel.parts) > 1 else Path(".")
+    target = files_dir / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return str(target)
 
 
 def _get_encoding_for_file(file_path: str) -> str:
