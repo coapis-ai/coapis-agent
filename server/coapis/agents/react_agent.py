@@ -26,8 +26,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
-from typing import Any, List, Literal, Optional, Type, TYPE_CHECKING
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    List,
+    Literal,
+    Optional,
+    Type,
+    TYPE_CHECKING,
+)
 
 from agentscope.agent import ReActAgent
 from agentscope.agent._react_agent import _MemoryMark
@@ -83,6 +93,119 @@ if TYPE_CHECKING:
     from .context import AgentContext
 
 logger = logging.getLogger(__name__)
+
+# ── background compaction (拍板 D) ─────────────────────────────────────────
+# Upstream runs ``ReActAgent._compress_memory_if_needed`` at the top of every
+# reasoning iteration, i.e. between the user's message and the answer.  The
+# measured cost of that placement (dev 2026-10-18, chat 12f1111f): 285 history
+# rows -> 19 chunks of 14,233 chars, 18 min 40 s of ``running``, zero log
+# lines.  Compaction has no ordering requirement with the answer, so Coapis
+# defers it: the loop marks it due, the runner starts it once the reply is
+# out, and the next turn budgets against the summary.
+#
+# One slot globally (拍板 D2): compaction is background work competing for the
+# same endpoint the chat is waiting on; letting every busy session compact at
+# once is how a fleet turns into a queue.
+_COMPACTION_SLOTS = 1
+_COMPACTION_IN_FLIGHT = 0
+_COMPACTION_TASKS: set[asyncio.Task] = set()
+
+
+def schedule_background_compaction(
+    agent: Any,
+    persist: Callable[[], Awaitable[None]] | None = None,
+) -> asyncio.Task | None:
+    """Run the compaction the reasoning loop deferred, off the user's turn.
+
+    Returns the started task, or None when there is nothing to do (no compaction
+    due, one already running for this agent, or the single slot is busy).
+    ``persist`` is the caller's way to save the compacted memory: the runner
+    writes the session file after the reply, so a compaction that finishes
+    afterwards is invisible to storage unless it writes itself.
+    """
+    global _COMPACTION_IN_FLIGHT
+    if agent is None or not getattr(agent, "_compaction_due", False):
+        return None
+    current = getattr(agent, "_compaction_task", None)
+    if current is not None and not current.done():
+        return None
+    if _COMPACTION_IN_FLIGHT >= _COMPACTION_SLOTS:
+        # Keep the flag set: the next turn gets the compaction.
+        logger.info(
+            "Background compaction for %s deferred: the single compaction "
+            "slot is busy.",
+            getattr(agent, "name", "?"),
+        )
+        return None
+
+    _COMPACTION_IN_FLIGHT += 1
+    task = asyncio.create_task(_run_background_compaction(agent, persist))
+    agent._compaction_task = task
+    _COMPACTION_TASKS.add(task)
+    task.add_done_callback(_COMPACTION_TASKS.discard)
+    return task
+
+
+async def _run_background_compaction(
+    agent: Any,
+    persist: Callable[[], Awaitable[None]] | None,
+) -> None:
+    """The deferred compaction itself; never raises into the caller."""
+    global _COMPACTION_IN_FLIGHT
+    name = getattr(agent, "name", "?")
+    started = time.monotonic()
+    budget = compaction_budget_seconds(agent)
+    agent._compaction_due = False
+    try:
+        await asyncio.wait_for(
+            ReActAgent._compress_memory_if_needed(agent),
+            timeout=budget,
+        )
+        elapsed = time.monotonic() - started
+        logger.info(
+            "Background compaction for %s finished in %.1fs (budget %.0fs).",
+            name,
+            elapsed,
+            budget,
+        )
+        if persist is not None:
+            await persist()
+    except asyncio.TimeoutError:
+        agent._compaction_due = True
+        logger.warning(
+            "Background compaction for %s hit its %.0fs ceiling after %.1fs; "
+            "the history stays as it is and compaction is retried after the "
+            "next turn.",
+            name,
+            budget,
+            time.monotonic() - started,
+        )
+    except Exception:
+        agent._compaction_due = True
+        logger.warning(
+            "Background compaction for %s failed after %.1fs.",
+            name,
+            time.monotonic() - started,
+            exc_info=True,
+        )
+    finally:
+        _COMPACTION_IN_FLIGHT -= 1
+
+
+def compaction_budget_seconds(agent: Any) -> float:
+    """Wall-clock ceiling for one deferred compaction, from agent config."""
+    try:
+        running = agent._agent_config.running
+        cfg = running.light_context_config.context_compact_config
+        value = float(
+            getattr(cfg, "compaction_global_timeout_seconds", 180.0),
+        )
+    except Exception:  # pragma: no cover - config shape we do not own
+        value = 180.0
+    # The gate enforces its own deadline inside the compaction and merges
+    # from the chunks that answered; this outer ceiling is the last resort for
+    # a call that ignores it, so it sits above the gate's, not below.
+    return max(30.0, value + 30.0)
 
 # Valid namesake strategies for tool registration
 NamesakeStrategy = Literal["override", "skip", "raise", "rename"]
@@ -463,8 +586,25 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             memory_provider=lambda: getattr(self, "memory", None),
             agent_name=agent_config.id,
             map_reduce=getattr(_ccc, "compaction_map_reduce", True),
+            compaction_timeout=getattr(
+                _ccc,
+                "compaction_timeout_seconds",
+                None,
+            ),
+            compaction_global_timeout=getattr(
+                _ccc,
+                "compaction_global_timeout_seconds",
+                None,
+            ),
         )
         self.model = self.context_guard
+
+        # Compaction is deferred off the user's turn (拍板 D): the upstream
+        # call site is the top of the reasoning loop, so these two fields
+        # carry "the history is over budget" from that loop to the runner,
+        # which runs it after the reply is delivered.
+        self._compaction_due = False
+        self._compaction_task: asyncio.Task | None = None
 
         # Setup command handler
         self.command_handler = CommandHandler(
@@ -3861,6 +4001,21 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             "Plan skeleton armed for a multi-step task (%d chars).",
             len(text),
         )
+
+    async def _compress_memory_if_needed(self) -> None:
+        """Record that compaction is due; do not run it here (拍板 D).
+
+        Upstream calls this at the top of every reasoning iteration, so every
+        compaction lands between the user's message and the answer.  The
+        threshold decision stays upstream -- this only moves *when* it runs:
+        ``schedule_background_compaction`` calls the upstream implementation
+        after the reply, and the gate's own budget logic is untouched.
+
+        A turn that arrives while a compaction is still running is answered on
+        the uncompressed history (拍板 D4); the gate's pruning keeps that
+        request inside the window, which is the cheaper failure.
+        """
+        self._compaction_due = True
 
     async def reply(
         self,

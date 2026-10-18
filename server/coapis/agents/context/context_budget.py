@@ -52,14 +52,29 @@ Three outcomes, and the third is loud
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
+import time
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable
+
+from coapis.constant import EnvVarLoader
 
 from .window_source import WindowInfo
 
 logger = logging.getLogger(__name__)
+
+
+class CompactionTimeoutError(RuntimeError):
+    """A compaction call the model did not answer within its budget.
+
+    Raised as an ordinary failure so every existing degradation path applies
+    unchanged: a map chunk that times out is skipped and the merge runs on
+    the chunks that answered; a merge that times out falls back to the single
+    fitted request.  Before this existed a stalled compaction request held
+    the chat's critical path for the SDK's default 600 s and logged nothing.
+    """
 
 
 class ContextOverflowError(RuntimeError):
@@ -112,6 +127,11 @@ def affordable_floor(
 #: carries no information — a truncated tool result shorter than this is
 #: noise the next step cannot act on.
 MIN_ROW_CHARS = 400
+
+# How many prune/trim rounds ``enforce`` may spend before it refuses.  Each
+# round re-measures, so the target is always the size the prompt actually has
+# after the previous round -- which is the point, since a prune changes it.
+_ENFORCE_MAX_ROUNDS = 4
 
 #: Rows shrink the prompt by less than their content each round (the
 #: ``str(msg)`` wrapper adds role/name/quotes) and the truncation marker
@@ -215,6 +235,17 @@ def truncate_rows_to_fit(
     if not isinstance(messages, list) or len(messages) <= start:
         return 0
     from ...governance.limits import truncate_head_tail
+
+    # Callers hand in the window the rows may occupy (the window minus the
+    # tool schemas, which ride in the same request and are not rows).  The
+    # head rows -- the system prompt, which is never pruned -- occupy it too,
+    # and they are not in the range this function cuts.  Subtracting them is
+    # what makes the target the real allowance: measured on dev 2026-10-18,
+    # agent user:admin, rows 137,009 chars against a target of 150,216 that
+    # ignored the 18,057-char system row, so nothing was truncated and the
+    # call was refused by 4,850 chars.
+    head_chars = sum(len(str(m)) for m in messages[:start])
+    budget_chars = max(0, budget_chars - head_chars)
 
     reclaimed = 0
     for round_index in range(MAX_TRUNCATE_ROUNDS):
@@ -666,6 +697,30 @@ _COMPACT_MINI_SYS = (
 )
 # Headroom for the JSON envelope and the measurement model's own overhead.
 _COMPACT_CHUNK_FILL = 0.85
+# Minimum seconds a map chunk (or the merge) needs left of the global deadline
+# to be worth starting.  Launching a call with 2 seconds of budget guarantees it
+# times out and burns the slot; below this the work is skipped and the merge
+# runs on what already answered.
+_MIN_CHUNK_WINDOW_SECONDS = 10.0
+# Chunk-count bound.  It used to be the only cost brake, and it silently
+# widened chunks to stay under it -- a 16K char cap with 12 chunks is a 16K
+# cap only until the history needs 13 of them.  With the map calls running
+# concurrently, the count is no longer the cost driver; the char cap is.
+_COMPACT_MAX_CHUNKS = EnvVarLoader.get_int(
+    "COAPIS_CONTEXT_COMPACTION_MAX_CHUNKS",
+    24,
+    min_value=2,
+    max_value=200,
+)
+# Absolute ceiling on the chunk count, so a pathological history cannot make
+# compaction unbounded.  Above it the tail chunk is widened (and truncated
+# by the fitter), which is logged.
+_COMPACT_CHUNK_CEILING = EnvVarLoader.get_int(
+    "COAPIS_CONTEXT_COMPACTION_CHUNK_CEILING",
+    40,
+    min_value=4,
+    max_value=400,
+)
 # Cost bound: a compaction is a background task, not a batch job.  When the
 # prefix needs more chunks than this, chunks grow instead of the call count.
 _COMPACT_MAX_CHUNKS = 12
@@ -809,6 +864,10 @@ class ContextBudgetGuard:
         agent_name: str = "",
         ledger: Any = None,
         map_reduce: bool = True,
+        compaction_timeout: float | None = None,
+        map_chunk_max_chars: int | None = None,
+        map_concurrency: int | None = None,
+        compaction_global_timeout: float | None = None,
     ) -> None:
         self._inner = inner
         self.window = window
@@ -819,9 +878,81 @@ class ContextBudgetGuard:
         self._memory_provider = memory_provider
         self.agent_name = agent_name
         self.ledger = ledger
+        self.compaction_timeout = self._resolve_compaction_timeout(
+            compaction_timeout,
+        )
+        self.map_chunk_max_chars = self._resolve_positive(
+            map_chunk_max_chars,
+            "CONTEXT_COMPACTION_CHUNK_MAX_CHARS",
+            16_000,
+        )
+        self.map_concurrency = self._resolve_positive(
+            map_concurrency,
+            "CONTEXT_COMPACTION_MAP_CONCURRENCY",
+            3,
+        )
+        # Ceiling for one whole compaction (all map chunks + the merge), not
+        # for one call.  Five chunks at the per-call ceiling still cost the
+        # chat seven minutes, and a compaction that never finishes holds a
+        # session open indefinitely.
+        self.compaction_global_timeout = self._resolve_positive(
+            compaction_global_timeout,
+            "CONTEXT_COMPACTION_GLOBAL_TIMEOUT_SECONDS",
+            180,
+        )
         self.last_snapshot: BudgetSnapshot | None = None
         self.pruned_events = 0
         self.overflow_events = 0
+
+    @staticmethod
+    def _resolve_compaction_timeout(value: float | None) -> float:
+        """Per-compaction-call ceiling, env-configurable.
+
+        Read lazily through the constant module so tests can monkeypatch the
+        value and a deployment can raise it for a slow endpoint without
+        touching code.  Any unusable value falls back to the default: a
+        compaction path that cannot decide its own deadline is the bug this
+        parameter exists to fix, so it must never be None or zero.
+        """
+        from coapis.constant import CONTEXT_COMPACTION_TIMEOUT_SECONDS
+
+        if value is not None:
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                parsed = 0.0
+            if parsed > 0:
+                return parsed
+        try:
+            default = float(CONTEXT_COMPACTION_TIMEOUT_SECONDS)
+        except (TypeError, ValueError):
+            default = 90.0
+        return default if default > 0 else 90.0
+
+    @staticmethod
+    def _resolve_positive(value: Any, constant_name: str, fallback: int) -> int:
+        """Resolve a positive integer knob from config, env, or the fallback.
+
+        Same rule as the compaction timeout: a compaction parameter that
+        resolves to zero or None silently disables the behaviour it exists to
+        provide, so unusable values always land on the documented default.
+        """
+        import os
+
+        for candidate in (value, os.getenv(f"COAPIS_{constant_name}")):
+            try:
+                parsed = int(candidate)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            if parsed > 0:
+                return parsed
+        try:
+            from coapis import constant as _c
+
+            default = int(getattr(_c, constant_name, fallback))
+        except Exception:  # pragma: no cover - import guard
+            default = fallback
+        return default if default > 0 else fallback
 
     # ── transparency ────────────────────────────────────────────────
     def __getattr__(self, name: str) -> Any:  # pragma: no cover - trivial
@@ -1082,12 +1213,36 @@ class ContextBudgetGuard:
             )
             return snapshot
 
-        reclaimed = await self._prune_to_budget(snapshot)
-        reclaimed += self._trim_prompt(messages, snapshot)
-        after = self.measure(messages, tools)
-        self.last_snapshot = after
-        if after.total_chars <= after.budget_chars:
-            return after
+        # Pruning and trimming **change what there is to reclaim**: archiving
+        # the head inserts the summary row the compactor leaves behind, and
+        # trimming the prompt list deletes rows the memory prune has already
+        # marked.  A single pass sized by the pre-prune snapshot therefore
+        # stops at a target that no longer exists -- measured on dev
+        # 2026-10-18, console chat of agent user:admin: 323,773 chars against
+        # a 157,696-char window, 321,000 chars reclaimed, and the prompt came
+        # out at 162,546, i.e. a refusal on a session that had just been
+        # shrunk by 20%.  Re-measure and re-target each round; the loop is
+        # bounded so a pathological memory cannot spin here.
+        reclaimed = 0
+        after = snapshot
+        for round_no in range(1, _ENFORCE_MAX_ROUNDS + 1):
+            reclaimed += await self._prune_to_budget(after)
+            reclaimed += self._trim_prompt(messages, after)
+            after = self.measure(messages, tools)
+            self.last_snapshot = after
+            if after.total_chars <= after.budget_chars:
+                logger.info(
+                    "Context budget guard fits agent %s in %d round(s): "
+                    "%d -> %d chars against a %d-char window (%d chars "
+                    "reclaimed).",
+                    self.agent_name,
+                    round_no,
+                    snapshot.total_chars,
+                    after.total_chars,
+                    after.budget_chars,
+                    reclaimed,
+                )
+                return after
 
         self.overflow_events += 1
         floor = affordable_floor(
@@ -1147,20 +1302,89 @@ class ContextBudgetGuard:
                 model_name,
                 str(exc),
                 snapshot.total_chars if snapshot else None,
+                self.window.chars_per_token,
             )
         except Exception:  # observation must never change the outcome
             logger.debug("window feedback failed", exc_info=True)
 
     # ── chunked compaction (map-reduce) ─────────────────────────────
-    async def _await_response(self, messages: Any, tools: Any, kwargs: Any):
-        """Call the real model, normalizing a stream to its final chunk."""
-        res = await self._inner(messages, tools=tools, **kwargs)
-        if getattr(self._inner, "stream", False) and hasattr(res, "__aiter__"):
-            last = None
-            async for chunk in res:
-                last = chunk
-            return last
-        return res
+    async def _await_response(
+        self,
+        messages: Any,
+        tools: Any,
+        kwargs: Any,
+        timeout: float | None = None,
+    ):
+        """Call the real model, normalizing a stream to its final chunk.
+
+        Both halves are bounded: the request that never gets answered **and**
+        the stream that stops producing chunks.  Bounding only the call is the
+        usual half-measure -- under streaming the call returns an async
+        generator at once, so a stalled stream would keep sitting on the
+        chat's critical path for as long as it liked.
+
+        *timeout* overrides the per-call ceiling for one caller; the map-reduce
+        path passes the time its global deadline has left, so the last chunks
+        cannot spend a full per-call budget after the deadline has passed.
+        """
+        deadline = (
+            self.compaction_timeout
+            if timeout is None or timeout <= 0
+            else min(self.compaction_timeout, timeout)
+        )
+        started = time.monotonic()
+        try:
+            res = await asyncio.wait_for(
+                self._inner(messages, tools=tools, **kwargs),
+                timeout=deadline,
+            )
+        except asyncio.TimeoutError as exc:
+            raise CompactionTimeoutError(
+                f"model did not answer within {deadline:.0f}s "
+                f"(agent {self.agent_name or '?'})",
+            ) from exc
+
+        if not (
+            getattr(self._inner, "stream", False)
+            and hasattr(res, "__aiter__")
+        ):
+            return res
+
+        last = None
+        iterator = res.__aiter__()
+        while True:
+            remaining = deadline - (time.monotonic() - started)
+            if remaining <= 0:
+                await self._close_stream(res)
+                raise CompactionTimeoutError(
+                    f"stream stalled past its {deadline:.0f}s budget "
+                    f"(agent {self.agent_name or '?'})",
+                )
+            try:
+                chunk = await asyncio.wait_for(
+                    iterator.__anext__(),
+                    timeout=remaining,
+                )
+            except StopAsyncIteration:
+                return last
+            except asyncio.TimeoutError as exc:
+                await self._close_stream(res)
+                raise CompactionTimeoutError(
+                    f"stream produced no chunk for {remaining:.0f}s "
+                    f"(agent {self.agent_name or '?'})",
+                ) from exc
+            last = chunk
+
+    @staticmethod
+    async def _close_stream(stream: Any) -> None:
+        """Close a abandoned stream; a dead stream must not add noise."""
+        aclose = getattr(stream, "aclose", None)
+        if aclose is None:
+            return
+        try:
+            await aclose()
+        except Exception:  # pragma: no cover - cleanup path
+            logger.debug("stream close failed", exc_info=True)
 
     @staticmethod
     def _has_metadata(response: Any) -> bool:
@@ -1318,18 +1542,90 @@ class ContextBudgetGuard:
             + 2_000
         )
         chunk_budget = int(budget_chars * self.compact_threshold_ratio) - overhead
+        # Fitting the window is not the same as answering in time.  Chunks
+        # sized to the window measured 70-90K chars on dev 2026-10-18 and the
+        # model needed ~90 s for each one, so a 305-row compaction cost the
+        # user 7+ minutes of a single turn.  The cap is the knob that makes a
+        # chunk answer in seconds; more, smaller chunks are cheaper overall.
+        chunk_budget = min(chunk_budget, self.map_chunk_max_chars)
         if chunk_budget < 4_000:
             # No room for a chunk that carries anything: the single fitted
             # request is the best this window can do.
             return None
 
-        chunks = split_rows_for_compaction(history, chunk_budget)
+        history_chars = sum(_row_chars(r) for r in history)
+        needed_chunks = max(
+            2,
+            -(-history_chars // max(1, int(chunk_budget * _COMPACT_CHUNK_FILL))),
+        )
+        max_chunks = min(
+            _COMPACT_CHUNK_CEILING,
+            max(_COMPACT_MAX_CHUNKS, needed_chunks),
+        )
+        if needed_chunks > max_chunks:
+            logger.warning(
+                "Compaction %s: %d chars need %d chunk(s) at %d chars/chunk "
+                "but the ceiling is %d; the tail chunk gets widened and the "
+                "fitter truncates it.",
+                self.agent_name or "?",
+                history_chars,
+                needed_chunks,
+                chunk_budget,
+                max_chunks,
+            )
+        chunks = split_rows_for_compaction(
+            history,
+            chunk_budget,
+            max_chunks=max_chunks,
+        )
         if len(chunks) <= 1:
             return None
 
-        partials: list[str] = []
+        # Compaction used to be invisible: it ran on a background task, and a
+        # chat that died inside it left no trace at all (dev, 2026-10-18: 18
+        # min 40 s of ``running``, zero log lines).  This is the line that
+        # says the summariser started, in what shape, and the per-chunk lines
+        # below say how each one went.
+        started = time.monotonic()
+        logger.info(
+            "Compaction start %s: %d history rows -> %d chunk(s) "
+            "(chunk budget %d chars, compaction window %d chars, "
+            "ratio %.2f, map_reduce=%s)",
+            self.agent_name or "?",
+            len(history),
+            len(chunks),
+            chunk_budget,
+            budget_chars,
+            self.compact_threshold_ratio,
+            self.map_reduce,
+        )
+
         total = len(chunks)
-        for idx, chunk in enumerate(chunks):
+        semaphore = asyncio.Semaphore(self.map_concurrency)
+        collected: list[str] = []
+        # One wall-clock ceiling for the whole compaction, shared by every
+        # chunk and the merge.  Per-call timeouts bound a single request, and
+        # five of them at the ceiling still cost the user seven minutes;
+        # dev 2026-10-18 measured 19 chunks and 18 min 40 s of ``running``
+        # with zero log lines.  Past the deadline the chunks that answered get
+        # merged and the rest are dropped.
+        deadline_at = started + self.compaction_global_timeout
+
+        def _time_left() -> float:
+            return deadline_at - time.monotonic()
+
+        async def _map_one(idx: int, chunk: list) -> tuple[str, Any] | None:
+            remaining = _time_left()
+            if remaining <= _MIN_CHUNK_WINDOW_SECONDS:
+                logger.warning(
+                    "Compaction map chunk %d/%d skipped: the %.0fs compaction "
+                    "deadline is spent (%.1fs elapsed).",
+                    idx + 1,
+                    total,
+                    self.compaction_global_timeout,
+                    time.monotonic() - started,
+                )
+                return None
             request = [mini_sys, *chunk, *tail, self._json_contract_row(kwargs)]
             request = fit_prompt_to_budget(
                 request,
@@ -1337,25 +1633,70 @@ class ContextBudgetGuard:
                 compact_threshold_ratio=self.compact_threshold_ratio,
                 source=f"compaction-map:{self.agent_name}:{idx + 1}/{total}",
             )
-            try:
-                res = await self._await_response(
-                    request,
-                    None,
-                    self._no_tool_kwargs(kwargs),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Compaction map chunk %d/%d failed (%s); merging %d "
-                    "partial summary(ies) without it.",
+            chunk_chars = sum(_row_chars(r) for r in request)
+            async with semaphore:
+                # The semaphore is where the queueing happens, so the time the
+                # chunk spent waiting is deducted here, not at entry.
+                remaining = _time_left()
+                if remaining <= _MIN_CHUNK_WINDOW_SECONDS:
+                    logger.warning(
+                        "Compaction map chunk %d/%d skipped: %.1fs left of the "
+                        "%.0fs compaction deadline.",
+                        idx + 1,
+                        total,
+                        remaining,
+                        self.compaction_global_timeout,
+                    )
+                    return None
+                chunk_started = time.monotonic()
+                try:
+                    res = await self._await_response(
+                        request,
+                        None,
+                        self._no_tool_kwargs(kwargs),
+                        timeout=remaining,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Compaction map chunk %d/%d failed after %.1fs "
+                        "(%d chars in) (%s); merging %d partial summary(ies) "
+                        "without it.",
+                        idx + 1,
+                        total,
+                        time.monotonic() - chunk_started,
+                        chunk_chars,
+                        exc,
+                        len(collected),
+                    )
+                    return None
+                text = self._partial_text(res)
+                logger.info(
+                    "Compaction map chunk %d/%d: %.1fs, %d chars in -> %d "
+                    "chars of summary (%.0fs of the deadline left).",
                     idx + 1,
                     total,
-                    exc,
-                    len(partials),
+                    time.monotonic() - chunk_started,
+                    chunk_chars,
+                    len(text or ""),
+                    _time_left(),
                 )
+                return (text, res) if text else None
+
+        # Chunks are independent by construction, so they go in flight
+        # together.  Serialized at ~90 s each, five of them cost the user a
+        # seven-minute turn for work with no ordering requirement at all.
+        results = await asyncio.gather(
+            *(_map_one(idx, chunk) for idx, chunk in enumerate(chunks)),
+        )
+        partials: list[str] = []
+        responses: list[Any] = []
+        for idx, item in enumerate(results):
+            if not item:
                 continue
-            text = self._partial_text(res)
-            if text:
-                partials.append(f"[部分 {idx + 1}/{total}]\n{text}")
+            text, res = item
+            collected.append(text)
+            partials.append(f"[部分 {idx + 1}/{total}]\n{text}")
+            responses.append(res)
         if not partials:
             return None
         if len(partials) == 1:
@@ -1367,31 +1708,59 @@ class ContextBudgetGuard:
                 "取更新的那一份、保持结构化字段的语义。\n\n"
                 + "\n\n".join(partials)
             )
-        merge_request = [
-            mini_sys,
-            {"role": "user", "content": merged_text},
-            self._json_contract_row(kwargs),
-            *tail,
-        ]
-        merge_request = fit_prompt_to_budget(
-            merge_request,
-            self.window,
-            compact_threshold_ratio=self.compact_threshold_ratio,
-            source=f"compaction-reduce:{self.agent_name}",
-        )
-        try:
-            final = await self._await_response(
-                merge_request,
-                None,
-                self._no_tool_kwargs(kwargs),
-            )
-        except Exception as exc:
+        remaining = _time_left()
+        if remaining <= _MIN_CHUNK_WINDOW_SECONDS and len(partials) > 1:
+            # No time for the merge call.  Returning None here would send the
+            # whole history out as one fitted request, which drops the oldest
+            # rows unsummarized; concatenating the partials that *were* read
+            # keeps every row's content in the summary.
             logger.warning(
-                "Compaction reduce failed (%s); falling back to the single "
-                "fitted request.",
-                exc,
+                "Compaction reduce skipped: the %.0fs deadline is spent after "
+                "%d/%d chunk(s); the summary is the concatenation of the "
+                "partials that answered.",
+                self.compaction_global_timeout,
+                len(partials),
+                total,
             )
-            return None
+            final = self._concat_partials(responses, collected)
+            if final is None:
+                return None
+        else:
+            merge_request = [
+                mini_sys,
+                {"role": "user", "content": merged_text},
+                self._json_contract_row(kwargs),
+                *tail,
+            ]
+            merge_request = fit_prompt_to_budget(
+                merge_request,
+                self.window,
+                compact_threshold_ratio=self.compact_threshold_ratio,
+                source=f"compaction-reduce:{self.agent_name}",
+            )
+            merge_started = time.monotonic()
+            try:
+                final = await self._await_response(
+                    merge_request,
+                    None,
+                    self._no_tool_kwargs(kwargs),
+                    timeout=max(_MIN_CHUNK_WINDOW_SECONDS, remaining),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Compaction reduce failed after %.1fs (%s); falling back to "
+                    "the single fitted request.",
+                    time.monotonic() - merge_started,
+                    exc,
+                )
+                return None
+            logger.info(
+                "Compaction merged %d/%d chunk(s) in %.1fs (reduce %.1fs).",
+                len(partials),
+                total,
+                time.monotonic() - started,
+                time.monotonic() - merge_started,
+            )
         if not self._has_metadata(final):
             # The merge step is the one call that *must* be structured: the
             # downstream template formats ``metadata`` keys.  Ask once more
@@ -1416,6 +1785,42 @@ class ContextBudgetGuard:
         if self.stream:
             return self._single_chunk_stream(final)
         return final
+
+    def _concat_partials(self, responses: list[Any], texts: list[str]) -> Any:
+        """Merge partial summaries **without** a model call.
+
+        The fallback when the compaction deadline is spent.  Returning ``None``
+        there would hand the whole history to the single fitted request, which
+        drops the oldest rows unsummarized -- the exact failure map-reduce
+        exists to remove.  Concatenating the partials keeps the content of
+        every row that was read; it is a rougher summary, not a lost one.
+
+        Returns a response carrying the first structured summary, with the
+        remaining partial texts appended to its longest text field, or ``None``
+        when no chunk produced structured output.
+        """
+        base = next((r for r in responses if self._has_metadata(r)), None)
+        if base is None:
+            return None
+        try:
+            metadata = dict(base.metadata)
+        except Exception:  # pragma: no cover - defensive
+            return None
+        keys = [k for k, v in metadata.items() if isinstance(v, str)]
+        if not keys:
+            return None
+        key = max(keys, key=lambda k: len(metadata[k]))
+        extra = "\n\n".join(texts[1:])
+        if extra:
+            metadata[key] = f"{metadata[key]}\n\n{extra}"
+        try:
+            from dataclasses import is_dataclass, replace
+
+            if is_dataclass(base):
+                return replace(base, metadata=metadata)
+        except Exception:  # pragma: no cover - response shape we do not own
+            logger.debug("partial-summary concat copy failed", exc_info=True)
+        return None
 
     async def _reduce_json_retry(self, merge_request: Any, kwargs: Any) -> Any:
         """Ask the merge step once more, spelling the JSON contract out.
@@ -1546,12 +1951,23 @@ def build_budget_guard(
     agent_name: str = "",
     ledger: Any = None,
     map_reduce: bool = True,
+    compaction_timeout: float | None = None,
+    map_chunk_max_chars: int | None = None,
+    map_concurrency: int | None = None,
+    compaction_global_timeout: float | None = None,
 ) -> Any:
     """Wrap *model* in the gate, or return it unchanged when unusable.
 
     A gate that cannot measure (no window) must not swallow calls, so the
     fallback is the untouched model — the same behaviour as compaction being
     disabled by configuration.
+
+    Every keyword the guard accepts has to be forwarded here: the agent builds
+    the gate through this function and nothing else, and a parameter accepted
+    by ``ContextBudgetGuard`` but missing from this signature is a
+    ``TypeError`` on the first chat of the process (measured on dev
+    2026-10-18: ``compaction_global_timeout`` made every request fail with
+    ``MODEL_TIMEOUT`` before a single token was produced).
     """
     if model is None or isinstance(model, ContextBudgetGuard):
         return model
@@ -1567,4 +1983,8 @@ def build_budget_guard(
         agent_name=agent_name,
         ledger=ledger,
         map_reduce=map_reduce,
+        compaction_timeout=compaction_timeout,
+        map_chunk_max_chars=map_chunk_max_chars,
+        map_concurrency=map_concurrency,
+        compaction_global_timeout=compaction_global_timeout,
     )
