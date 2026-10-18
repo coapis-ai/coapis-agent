@@ -744,28 +744,33 @@ class ContextCompactConfig(BaseModel):
     # compactor is agentscope's ReActAgent._compress_memory_if_needed, which
     # counts tokens with CharTokenCounter over the *formatted* prompt.  The
     # thresholds below are therefore expressed in formatted characters.
-    # Measured on the dev session state (qwen3-30b-a3b, real tokenizer vs.
-    # byte heuristics): 4.68 formatted chars/token, 2.05 raw bytes/token.
-    # The policy constant below is deliberately *below* the measured value
-    # (拍板 D2, 2026-10-15): counting fewer characters per token makes the
-    # trigger fire earlier, which is the safe direction — a threshold that is
-    # too high means compaction never fires and requests die with 400.
+    # Re-measured 2026-10-18 on the live dev model (coapis router / auto),
+    # formatter output chars vs. the provider's own ``prompt_tokens``:
+    #   3,115 chars / 1,199 tok = 2.60,  7,171 / 3,015 = 2.38,
+    #   13,363 / 5,847 = 2.29  ->  fit: chars = 2.204*tokens + 472,
+    # i.e. the asymptotic ratio at the sizes where compaction fires is 2.20.
+    # The policy constant must sit *at or below* that: counting fewer
+    # characters per token makes the trigger fire earlier, which is the safe
+    # direction — a threshold that is too high means compaction never fires
+    # and requests die with 400/413.
     formatted_chars_per_token: float = Field(
-        default=3.0,
+        default=2.2,
         ge=0.5,
         le=8.0,
         description=(
             "Formatted-chars-per-token factor used to convert the "
             "compaction threshold/reserve into the character budget that "
-            "upstream actually counts.  Measured on the dev model: 4.68 "
-            "formatted / 2.05 raw bytes per token (2.04 Chinese, 3.35 "
-            "code).  拍板 D7 (2026-10-17) sets 3.0: it sits between the "
-            "two measurements, so a character budget is converted with a "
-            "ratio the real tokenizer also respects.  The old 1.1 was "
-            "calibrated against a *fabricated* 131072-token window; with "
-            "the real window as source it made the trigger unreachable "
-            "(0 compactions in 24h, 125 refusals).  Lower it only if "
-            "real overflow (400/422) rates rise."
+            "upstream actually counts.  Measured 2026-10-18 on the live dev "
+            "endpoint: 2.20 formatted chars per prompt token at compaction "
+            "sizes (2.60 at 3.1K chars, converging to 2.20 as the prompt "
+            "grows).  The previous 3.0 was a compromise between an older "
+            "4.68 measurement and a 2.05 byte heuristic; against the current "
+            "model it put the trigger at 172,032 chars when the window only "
+            "holds 157,696 — compaction could not fire before the provider "
+            "refused.  The old 1.1 was calibrated against a *fabricated* "
+            "131072-token window and made the trigger unreachable (0 "
+            "compactions in 24h, 125 refusals).  Lower it only if real "
+            "overflow (400/413) rates rise."
         ),
     )
 

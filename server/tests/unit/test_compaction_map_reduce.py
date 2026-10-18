@@ -298,3 +298,156 @@ class TestMapReduceCompaction:
         from coapis.config.config import ContextCompactConfig
 
         assert ContextCompactConfig().compaction_map_reduce is True
+# the summary request by calling tools, and the structured ``format`` field
+# was ignored.  _FakeModel above always returns valid metadata, which is
+# exactly the assumption that hid the failure.  These tests drop it.
+
+class _RecordingModel:
+    """Records tools/kwargs per call; configurable structured/text answers."""
+
+    def __init__(self, structured_calls: set[int] | None = None,
+                 text: str = "散文摘要：用户要求 X，已完成 Y。"):
+        self.stream = False
+        self.calls: list[dict] = []
+        self.structured_calls = structured_calls
+        self.text = text
+
+    async def __call__(self, messages, tools=None, **kwargs):
+        self.calls.append({
+            "messages": list(messages),
+            "tools": tools,
+            "kwargs": dict(kwargs),
+        })
+        idx = len(self.calls)
+        want = (
+            self.structured_calls is None or idx in self.structured_calls
+        )
+        meta = {
+            "task_overview": f"merged {idx}",
+            "current_state": "done",
+            "important_discoveries": "d",
+            "next_steps": "n",
+            "context_to_preserve": "c",
+        } if want else None
+        return ChatResponse(
+            content=[{"type": "text", "text": self.text}],
+            metadata=meta,
+        )
+
+
+def _classify(model: _RecordingModel):
+    """Split recorded calls into summarization calls vs. the real fallback.
+
+    The single fitted request is the agent's own compaction call and carries
+    the full 22K system row plus the tool catalogue — that is correct
+    behaviour.  The map/reduce summarization requests are the ones that must
+    be tool-free, and they are identifiable by their one-line system row.
+    """
+    summ, fallback = [], []
+    for i, call in enumerate(model.calls, 1):
+        sys_rows = [m for m in call["messages"] if str(m.get("role")) == "system"]
+        big = any(len(str(m)) > 5_000 for m in sys_rows)
+        (fallback if big else summ).append((i, call))
+    return summ, fallback
+
+
+class TestSummarizationCallsCarryNoTools:
+    def test_map_and_reduce_requests_are_tool_free(self):
+        model = _RecordingModel()
+        guard = _guard(model)
+        asyncio.run(guard(_rows(40), tools=[{"name": "execute_shell_command"}],
+                          structured_model=object()))
+        summ, fallback = _classify(model)
+        assert summ, "expected map/reduce summarization calls"
+        for i, call in summ:
+            assert call["tools"] is None, f"summarization call {i} carries tools"
+            for banned in ("tool_choice", "parallel_tool_calls"):
+                assert banned not in call["kwargs"], (
+                    f"summarization call {i} kwargs still has {banned}"
+                )
+
+    def test_only_the_real_request_may_carry_tools(self):
+        model = _RecordingModel()
+        guard = _guard(model)
+        asyncio.run(guard(_rows(40), tools=[{"name": "execute_shell_command"}],
+                          structured_model=object()))
+        summ, fallback = _classify(model)
+        for i, call in summ:
+            assert call["tools"] is None, f"summarization call {i} carries tools"
+
+    def test_structured_model_survives_the_strip(self):
+        model = _RecordingModel()
+        guard = _guard(model)
+        asyncio.run(guard(_rows(40), tools=[{"name": "x"}],
+                          structured_model=object()))
+        summ, _ = _classify(model)
+        assert summ
+        assert all("structured_model" in c["kwargs"] for _, c in summ)
+
+    def test_every_summarization_call_states_the_json_contract(self):
+        # ``response_format`` is not honoured by every endpoint: measured on
+        # dev, the live model answered the compaction request by echoing the
+        # dialogue.  The contract has to be readable in the prompt itself.
+        model = _RecordingModel()
+        guard = _guard(model)
+        asyncio.run(guard(_rows(40), tools=[{"name": "x"}],
+                          structured_model=object()))
+        summ, _ = _classify(model)
+        assert summ
+        for i, call in summ:
+            assert any(
+                "ONLY a JSON object" in str(m) for m in call["messages"]
+            ), f"summarization call {i} relies on response_format alone"
+
+
+class TestProseFallback:
+    def test_prose_everywhere_never_raises(self):
+        model = _RecordingModel(structured_calls=set())
+        guard = _guard(model)
+        out = asyncio.run(guard(_rows(40), tools=None,
+                                structured_model=object()))
+        # Nothing structured anywhere -> the guard must fall back to the
+        # plain fitted request and return it, never raise.
+        assert out is not None
+
+    def test_partial_text_falls_back_to_text_content(self):
+        resp = ChatResponse(
+            content=[{"type": "text", "text": "纯文本摘要，没有结构化字段。"}],
+            metadata=None,
+        )
+        text = ContextBudgetGuard._partial_text(resp)
+        assert "纯文本摘要" in text
+
+    def test_reduce_retries_once_when_metadata_missing(self):
+        model = _RecordingModel(structured_calls=set())
+        guard = _guard(model)
+        asyncio.run(guard(_rows(40), tools=None, structured_model=object()))
+        reduce_at = [
+            i
+            for i, call in enumerate(model.calls, 1)
+            if any("分段生成的多份摘要" in str(m) for m in call["messages"])
+        ]
+        assert reduce_at, "reduce request not found"
+        r = reduce_at[0]
+        assert len(model.calls) > r, "reduce must be followed by a retry"
+        retry = model.calls[r]  # 0-based: the call right after the reduce
+        assert any("ONLY a JSON object" in str(m) for m in retry["messages"]), (
+            "the retry must spell out the JSON contract"
+        )
+        assert retry["tools"] is None, "the retry must not carry tools"
+        # reduce -> retry -> single fitted request (the degradation path),
+        # so exactly two calls follow the reduce and no more.
+        assert len(model.calls) == r + 2, (
+            "exactly one retry then the fallback: "
+            f"{len(model.calls)} calls, reduce at {r}"
+        )
+
+    def test_summarization_calls_never_carry_tools_when_prose(self):
+        model = _RecordingModel(structured_calls=set())
+        guard = _guard(model)
+        asyncio.run(guard(_rows(40), tools=[{"name": "browser_use"}],
+                          structured_model=object()))
+        summ, fallback = _classify(model)
+        assert summ
+        for i, call in summ:
+            assert call["tools"] is None, f"summarization call {i} carries tools"

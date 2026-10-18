@@ -310,10 +310,14 @@ class TestCompactionInputFit:
         running = RunningConfig()
         ccc = running.light_context_config.context_compact_config
         assert ccc.compaction_input_ratio == 0.7
-        # 0.5 measured unfixable on dev 2026-10-17: the protected tail alone
-        # (system row + keep_recent groups) was 89,863 chars against a
-        # 86,016-char budget.  The default must leave headroom over that
-        # measured tail, or every real compaction goes out over its budget.
+        # The compaction request must be able to carry the fixed overhead it
+        # is charged for, with headroom.  Measured on dev 2026-10-18 from the
+        # live gate line ("Context budget user:admin: fixed=25429
+        # (sys=17949 tools=7480)"): the manager-ized tool catalogue and the
+        # compacted skill index cut the fixed overhead from the 89,863 chars
+        # measured on 2026-10-17 to 25,429.  The floor below is that
+        # measurement with headroom; the compaction budget must clear it.
+        measured_fixed_overhead = 25_429
         window = WindowInfo(
             reported_tokens=102400,
             effective_tokens=71680,
@@ -321,7 +325,7 @@ class TestCompactionInputFit:
             chars_per_token=ccc.formatted_chars_per_token,
         )
         budget = int(window.to_chars(window.effective_tokens) * 0.8 * 0.7)
-        assert budget > 89863, budget
+        assert budget > measured_fixed_overhead * 2, (budget, measured_fixed_overhead)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1163,11 +1163,90 @@ class ContextBudgetGuard:
         return res
 
     @staticmethod
+    def _has_metadata(response: Any) -> bool:
+        """``metadata`` check that survives dict-backed responses.
+
+        ``ChatResponse.__getattr__`` raises ``KeyError`` (not ``AttributeError``)
+        for an absent key, so the usual ``getattr(obj, "metadata", None)``
+        idiom does not protect this call site.
+        """
+        try:
+            return bool(getattr(response, "metadata", None))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _json_contract_row(kwargs: Any) -> dict:
+        """A user row spelling out the JSON contract for a summary call.
+
+        The compaction requests ask for structured output through the
+        provider's ``response_format``/``format`` field alone.  Measured on
+        dev 2026-10-18 against the live OpenAI-compatible endpoint: the model
+        answered with prose echoing the last dialogue row
+        (``Invalid JSON ... input_value='第149轮 助手：已…'``), the provider's
+        tool-call fallback then failed too, and the whole compaction degraded
+        to the single fitted request that drops 508 of 841 rows.  Not every
+        endpoint honours ``response_format``, so the contract has to be in
+        the prompt where the model will actually read it.
+        """
+        schema = kwargs.get("structured_model") if isinstance(kwargs, dict) else None
+        keys: list = []
+        try:
+            keys = list(schema.model_json_schema().get("properties", {}))
+        except Exception:
+            keys = []
+        ask = (
+            "Respond with ONLY a JSON object — no prose, no code fences, "
+            "no commentary, and never continue the dialogue."
+        )
+        if keys:
+            ask += " It must have exactly these keys: " + ", ".join(
+                f'"{k}"' for k in keys
+            ) + "."
+        return {"role": "user", "content": ask}
+
+    @staticmethod
+    def _no_tool_kwargs(kwargs: Any) -> dict:
+        """kwargs for a summarization call: tool-calling must be switched off.
+
+        The map/reduce calls inherit the agent's own request kwargs, which
+        carry the whole tool catalogue.  Ollama then answers with tool calls
+        (``finish_reason=tool_calls``) instead of the JSON its ``format``
+        field asked for, and every chunk summary fails — measured on dev:
+        3 of 4 chunks died that way, so map-reduce silently degraded back to
+        the single fitted request it was supposed to replace.
+        """
+        if not isinstance(kwargs, dict):
+            return {}
+        return {
+            k: v
+            for k, v in kwargs.items()
+            if k not in ("tools", "tool_choice", "parallel_tool_calls")
+        }
+
+    @staticmethod
     def _partial_text(response: Any) -> str:
-        """Render one structured summary as text the merge step can read."""
-        meta = getattr(response, "metadata", None)
+        """Render one chunk summary as text the merge step can read.
+
+        Prefers the structured metadata; falls back to the plain text the
+        model produced, because a prose summary is worth far more to the
+        merge step than the empty string that used to discard the chunk.
+        """
+        # ``ChatResponse.__getattr__`` delegates to a dict and raises
+        # ``KeyError`` for absent keys, so ``getattr(obj, name, default)``
+        # does *not* swallow the miss — every access needs its own guard.
+        # It also has no ``get_text_content`` (that lives on ``Msg``), so
+        # the text has to come out of the content blocks by hand.
+        try:
+            meta = getattr(response, "metadata", None)
+        except Exception:
+            meta = None
         if not meta:
-            return ""
+            try:
+                blocks = getattr(response, "content", None)
+            except Exception:
+                blocks = None
+            return ContextBudgetGuard._blocks_text(blocks)
         if isinstance(meta, dict):
             parts = []
             for key, value in meta.items():
@@ -1178,6 +1257,22 @@ class ContextBudgetGuard:
                 parts.append(f"### {key}\n{value}")
             return "\n".join(parts)
         return str(meta)
+
+    @staticmethod
+    def _blocks_text(blocks: Any) -> str:
+        """Concatenate the text blocks of a model response."""
+        if isinstance(blocks, str):
+            return blocks.strip()
+        if not blocks:
+            return ""
+        out: list = []
+        for block in blocks:
+            if isinstance(block, dict):
+                if block.get("type") == "text" and block.get("text"):
+                    out.append(str(block["text"]))
+            elif getattr(block, "type", None) == "text":
+                out.append(str(getattr(block, "text", "") or ""))
+        return "\n".join(out).strip()
 
     async def _compact_map_reduce(
         self,
@@ -1235,7 +1330,7 @@ class ContextBudgetGuard:
         partials: list[str] = []
         total = len(chunks)
         for idx, chunk in enumerate(chunks):
-            request = [mini_sys, *chunk, *tail]
+            request = [mini_sys, *chunk, *tail, self._json_contract_row(kwargs)]
             request = fit_prompt_to_budget(
                 request,
                 self.window,
@@ -1243,7 +1338,11 @@ class ContextBudgetGuard:
                 source=f"compaction-map:{self.agent_name}:{idx + 1}/{total}",
             )
             try:
-                res = await self._await_response(request, tools, kwargs)
+                res = await self._await_response(
+                    request,
+                    None,
+                    self._no_tool_kwargs(kwargs),
+                )
             except Exception as exc:
                 logger.warning(
                     "Compaction map chunk %d/%d failed (%s); merging %d "
@@ -1271,6 +1370,7 @@ class ContextBudgetGuard:
         merge_request = [
             mini_sys,
             {"role": "user", "content": merged_text},
+            self._json_contract_row(kwargs),
             *tail,
         ]
         merge_request = fit_prompt_to_budget(
@@ -1280,7 +1380,11 @@ class ContextBudgetGuard:
             source=f"compaction-reduce:{self.agent_name}",
         )
         try:
-            final = await self._await_response(merge_request, tools, kwargs)
+            final = await self._await_response(
+                merge_request,
+                None,
+                self._no_tool_kwargs(kwargs),
+            )
         except Exception as exc:
             logger.warning(
                 "Compaction reduce failed (%s); falling back to the single "
@@ -1288,7 +1392,13 @@ class ContextBudgetGuard:
                 exc,
             )
             return None
-        if not getattr(final, "metadata", None):
+        if not self._has_metadata(final):
+            # The merge step is the one call that *must* be structured: the
+            # downstream template formats ``metadata`` keys.  Ask once more
+            # with the schema spelled out in the prompt — a model that
+            # answered in prose usually complies when told plainly.
+            final = await self._reduce_json_retry(merge_request, kwargs)
+        if not self._has_metadata(final):
             logger.warning(
                 "Compaction reduce produced no structured summary; falling "
                 "back to the single fitted request.",
@@ -1306,6 +1416,31 @@ class ContextBudgetGuard:
         if self.stream:
             return self._single_chunk_stream(final)
         return final
+
+    async def _reduce_json_retry(self, merge_request: Any, kwargs: Any) -> Any:
+        """Ask the merge step once more, spelling the JSON contract out.
+
+        Returns the retry response, or ``None`` when the retry itself
+        failed; the caller re-checks ``metadata`` and falls back to the
+        single fitted request either way, so this can only improve the
+        outcome.
+        """
+        retry = [*merge_request, self._json_contract_row(kwargs)]
+        fitted = fit_prompt_to_budget(
+            retry,
+            self.window,
+            compact_threshold_ratio=self.compact_threshold_ratio,
+            source=f"compaction-reduce-retry:{self.agent_name}",
+        )
+        try:
+            return await self._await_response(
+                fitted or retry,
+                None,
+                self._no_tool_kwargs(kwargs),
+            )
+        except Exception as exc:
+            logger.warning("Compaction reduce retry failed (%s).", exc)
+            return None
 
     async def _single_chunk_stream(self, response: Any):
         """Present one finished response as the stream the caller expects."""
