@@ -97,10 +97,10 @@ class CleanupManager:
             清理统计结果
         """
         if not self.config.get("enabled", True):
-            logger.info("Cleanup is disabled")
+            logger.debug("Cleanup is disabled")
             return self._stats
 
-        logger.info("Starting cleanup...")
+        logger.debug("Starting cleanup...")
         self._stats = {
             "files_deleted": 0,
             "files_archived": 0,
@@ -129,12 +129,24 @@ class CleanupManager:
                 logger.error(f"Error cleaning {rule.get('path')}: {e}")
                 self._stats["errors"] += 1
 
-        logger.info(
+        summary = (
             f"Cleanup complete: {self._stats['files_deleted']} deleted, "
             f"{self._stats['files_archived']} archived, "
             f"{self._stats['bytes_freed'] / 1024 / 1024:.2f} MB freed, "
             f"{self._stats['errors']} errors"
         )
+        # The sweep runs on a timer and is a no-op almost every time; logging
+        # it at INFO produced one 3-line record per cycle in the daemon log.
+        # Only a run that actually removed something (or hit errors) is worth
+        # an INFO line.
+        if (
+            self._stats["files_deleted"]
+            or self._stats["files_archived"]
+            or self._stats["errors"]
+        ):
+            logger.info(summary)
+        else:
+            logger.debug(summary)
         return self._stats
 
     def _delete_old_files(self, path: Path, retention_days: int) -> None:

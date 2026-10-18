@@ -26,8 +26,10 @@ from pathlib import Path
 from ..constant import PROJECT_NAME, WORKING_DIR
 
 # Rotating file handler limits (idempotent add avoids duplicate handlers)
-_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB
-_LOG_BACKUP_COUNT = 3
+# 50 MiB x (1 live + 5 backups) = 300 MiB hard ceiling per instance.
+# A plain FileHandler here once grew the dev log to 8.66 GiB over ~110 days.
+_LOG_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB
+_LOG_BACKUP_COUNT = 5
 
 
 _LEVEL_MAP = {
@@ -186,8 +188,16 @@ def setup_logger(level: int | str = logging.INFO):
 def add_project_file_handler(log_path: Path) -> None:
     """Add a file handler to the project logger for daemon logs.
 
-    Windows/Linux: Uses simple FileHandler to avoid file locking issues.
-    macOS: Uses RotatingFileHandler with automatic log rotation.
+    All platforms: RotatingFileHandler, so the daemon log has a hard size
+    ceiling.  A plain FileHandler used to be chosen on Windows/Linux "to
+    avoid file locking issues", which is how the dev instance accumulated
+    8.66 GiB of coapis.log with no rotation.  ``delay=True`` opens the
+    file on the first emit, so importing this module never creates or
+    touches the file.
+
+    Rotation is safe for the deployed topology: the container runs a
+    single uvicorn process (no ``--workers``), and RotatingFileHandler is
+    only multiprocess-unsafe when several processes write the same file.
 
     Idempotent: if the logger already has a file handler for the same path,
     no new handler is added (avoids duplicate lines and leaked descriptors
@@ -204,20 +214,13 @@ def add_project_file_handler(log_path: Path) -> None:
         if base is not None and Path(base).resolve() == log_path:
             return
 
-    is_windows_or_linux = platform.system() in ("Windows", "Linux")
-    if is_windows_or_linux:
-        file_handler = logging.FileHandler(
-            log_path,
-            encoding="utf-8",
-            mode="a",
-        )
-    else:
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_path,
-            encoding="utf-8",
-            maxBytes=_LOG_MAX_BYTES,
-            backupCount=_LOG_BACKUP_COUNT,
-        )
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_path,
+        encoding="utf-8",
+        maxBytes=_LOG_MAX_BYTES,
+        backupCount=_LOG_BACKUP_COUNT,
+        delay=True,
+    )
 
     file_handler.setLevel(logger.level or logging.INFO)
 

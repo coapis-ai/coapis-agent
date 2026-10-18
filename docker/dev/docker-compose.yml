@@ -35,6 +35,8 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app
+      # 日志时间戳用本地时区：容器默认 UTC，运维读日志要自己 +8
+      - TZ=Asia/Shanghai
       - COAPIS_VERSION=1.1.0
       - COAPIS_WORKING_DIR=/apps/ai/coapis
       - COAPIS_WORKSPACES_DIR=/apps/ai/coapis/workspaces
@@ -76,6 +78,7 @@ services:
       - ../../client/dist:/usr/share/nginx/html:ro
     entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]
     environment:
+      - TZ=Asia/Shanghai
       - COAPIS_UPLOAD_MAX_BODY_SIZE=${COAPIS_UPLOAD_MAX_FILE_SIZE_MB:-20}
     depends_on:
       server:

@@ -162,7 +162,7 @@ def _perform_permission_check(request: Request, permission: str) -> None:
 
     # ── Ownership fast track (tightened: user-scoped prefixes only) ──
     if _is_user_workspace_resource(request, username, permission):
-        logger.info(
+        logger.debug(
             f"[PERM] fast-track user={username} permission={permission} "
             f"path={request.url.path} → ALLOW"
         )

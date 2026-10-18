@@ -147,7 +147,10 @@ def install_auth_middleware(app):
                     "email": getattr(us_user, "email", ""),
                     "display_name": getattr(us_user, "display_name", us_user.username),
                 }
-                logger.info(f"Resolved user {username} from user_system (role={us_user.role})")
+                logger.debug(
+                    f"Resolved user {username} from user_system "
+                    f"(role={us_user.role})"
+                )
         except (ImportError, Exception) as e:
             logger.warning(f"user_system lookup failed: {e}")
 
@@ -155,7 +158,10 @@ def install_auth_middleware(app):
         if user_info is None:
             user_info = get_user(username)
             if user_info:
-                logger.info(f"Resolved user {username} from JSON user_store (role={user_info.get('role')})")
+                logger.debug(
+                    f"Resolved user {username} from JSON user_store "
+                    f"(role={user_info.get('role')})"
+                )
 
         if user_info is None:
             return JSONResponse(
