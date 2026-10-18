@@ -356,5 +356,6 @@ class OpenRouterProvider(Provider):
             client_kwargs={
                 "base_url": self.base_url,
                 "default_headers": self._DEFAULT_HEADERS,
+                **self.client_timeout_kwargs(),
             },
         )

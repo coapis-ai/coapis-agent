@@ -40,7 +40,9 @@ window.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -302,6 +304,39 @@ def resolve_window(
 _FEEDBACK: dict[tuple[str | None, str | None], dict[str, Any]] = {}
 _FEEDBACK_MAX = 64
 
+# How long a refusal-derived window stays authoritative.  A refusal is a fact
+# about the server *as it was loaded that minute*; keeping it forever would let
+# one bad peak define the budget for the life of the process.  24 h (拍板 D1).
+_FEEDBACK_TTL_SECONDS: float = float(
+    os.getenv("COAPIS_CONTEXT_FEEDBACK_TTL_SECONDS", "86400"),
+)
+
+# Refusals that say "too big" and give no number.  "Context size has been
+# exceeded" (dev provider a3, measured 2026-10-18) is the whole response body:
+# no digits, so ``parse_window_feedback`` finds nothing and the fabricated
+# self-reported window keeps defining every budget.  These markers let the
+# refusal still mean something: the prompt we measured did **not** fit, so the
+# real window is below that measurement.
+_CONTEXT_REFUSAL_MARKERS: tuple[str, ...] = (
+    "context size has been exceeded",
+    "context size exceeded",
+    "context length exceeded",
+    "context window exceeded",
+    "context limit exceeded",
+    "maximum context",
+    "prompt is too long",
+    "no room to answer",
+    "insufficient space for the prompt",
+    "context overflow",
+)
+
+# The refused prompt is an upper bound, not the window: the server refused
+# *at least* that much, so the cap sits a margin below it.
+_INFERRED_CAP_MARGIN = 0.9
+# A second numberless refusal of a prompt that already fits under the current
+# cap means the cap is still too generous: shrink it, never grow it.
+_INFERRED_SHRINK_STEP = 0.75
+
 _WINDOW_PATTERNS: tuple[str, ...] = (
     r"context \(\s*(\d+)\s*\)",
     r"maximum context length(?: is|:)?\s*(\d+)",
@@ -356,11 +391,47 @@ def parse_window_feedback(message: str) -> dict[str, Any] | None:
     return {"window_tokens": window, "prompt_tokens": prompt}
 
 
+def is_context_refusal(message: str | None) -> bool:
+    """True when this response body says "too big", with or without numbers."""
+    text = (message or "").lower()
+    return any(marker in text for marker in _CONTEXT_REFUSAL_MARKERS)
+
+
+def _inferred_window_from_refusal(
+    provider_id: str | None,
+    model_name: str | None,
+    message: str,
+    measured_chars: int | None,
+    chars_per_token: float | None,
+) -> int | None:
+    """Upper bound on the window from a refusal that names no number.
+
+    ``measured_chars`` is our own measurement of the prompt that got refused,
+    so the bound is "strictly less than what we just sent".  Repeated refusals
+    ratchet the cap down; nothing here ever raises a window.
+    """
+    if not is_context_refusal(message):
+        return None
+    if not measured_chars or measured_chars <= 0:
+        return None
+    ratio = (
+        chars_per_token
+        if chars_per_token and chars_per_token > 0
+        else _FALLBACK_CHARS_PER_TOKEN
+    )
+    cap = int(measured_chars / ratio * _INFERRED_CAP_MARGIN)
+    previous = _FEEDBACK.get((provider_id, model_name))
+    if previous and previous.get("inferred"):
+        cap = min(cap, int(previous["window_tokens"] * _INFERRED_SHRINK_STEP))
+    return max(_MIN_WINDOW_TOKENS, cap)
+
+
 def record_window_feedback(
     provider_id: str | None,
     model_name: str | None,
     message: str,
     measured_chars: int | None = None,
+    chars_per_token: float | None = None,
 ) -> dict[str, Any] | None:
     """Remember what a refusal taught us about this model's window.
 
@@ -368,14 +439,32 @@ def record_window_feedback(
     refused, which turns the provider's token count into the *observed*
     chars-per-token ratio — the number the calibration constants are
     supposed to approximate.
+
+    A refusal with no number in it is still a refusal: when we have our own
+    measurement of the prompt that failed, it becomes an inferred cap on the
+    window (see :func:`_inferred_window_from_refusal`).  Plain 400s with no
+    context wording and no number still record nothing.
     """
     parsed = parse_window_feedback(message)
+    inferred = False
     if parsed is None:
-        return None
+        window = _inferred_window_from_refusal(
+            provider_id,
+            model_name,
+            message,
+            measured_chars,
+            chars_per_token,
+        )
+        if window is None:
+            return None
+        parsed = {"window_tokens": window, "prompt_tokens": None}
+        inferred = True
     entry: dict[str, Any] = {
         "window_tokens": parsed["window_tokens"],
         "prompt_tokens": parsed["prompt_tokens"],
         "measured_chars": measured_chars,
+        "inferred": inferred,
+        "recorded_at": time.monotonic(),
         "raw": (message or "")[:400],
     }
     if measured_chars and parsed["prompt_tokens"]:
@@ -387,12 +476,15 @@ def record_window_feedback(
         _FEEDBACK.pop(next(iter(_FEEDBACK)))
     _FEEDBACK[(provider_id, model_name)] = entry
     logger.warning(
-        "Provider refusal reports the window for %s/%s: %d tokens "
-        "(prompt %s tokens, our measurement %s chars%s). The context budget "
-        "caps against this number from now on.",
+        "Provider refusal caps the window for %s/%s at %d tokens (%s; "
+        "prompt %s tokens, our measurement %s chars%s). The context budget "
+        "uses this from now on, for %.0f h.",
         provider_id,
         model_name,
         entry["window_tokens"],
+        "inferred from our own measurement"
+        if inferred
+        else "the provider stated it",
         entry["prompt_tokens"],
         measured_chars,
         (
@@ -400,6 +492,7 @@ def record_window_feedback(
             if entry.get("observed_chars_per_token")
             else ""
         ),
+        _FEEDBACK_TTL_SECONDS / 3600,
     )
     return entry
 
@@ -408,8 +501,29 @@ def window_feedback(
     provider_id: str | None,
     model_name: str | None,
 ) -> dict[str, Any] | None:
-    """The last refusal-derived window we learned for this model slot."""
-    return _FEEDBACK.get((provider_id, model_name))
+    """The last refusal-derived window we learned for this model slot.
+
+    Returns None once the entry is older than ``_FEEDBACK_TTL_SECONDS`` and
+    drops it, so a stale peak stops defining the budget and the next refusal
+    re-measures the server as it is now.
+    """
+    key = (provider_id, model_name)
+    entry = _FEEDBACK.get(key)
+    if entry is None:
+        return None
+    age = time.monotonic() - entry.get("recorded_at", 0.0)
+    if age > _FEEDBACK_TTL_SECONDS:
+        _FEEDBACK.pop(key, None)
+        logger.info(
+            "Refusal-derived window for %s/%s expired after %.1f h; "
+            "the budget goes back to the provider's self-report until the "
+            "next refusal.",
+            provider_id,
+            model_name,
+            age / 3600,
+        )
+        return None
+    return entry
 
 
 def feedback_report() -> dict[str, dict[str, Any]]:

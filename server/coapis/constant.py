@@ -187,6 +187,66 @@ JOBS_FILE = EnvVarLoader.get_str("COAPIS_JOBS_FILE", "jobs.json")
 
 CHATS_FILE = EnvVarLoader.get_str("COAPIS_CHATS_FILE", "chats.json")
 
+# Ceiling for one model request, in seconds.  Measured on dev 2026-10-18: a
+# chat whose upstream stalled sat in ``running`` for 18 min 40 s and produced
+# **zero** log lines, because model clients were built with the SDK default of
+# 600 s per request.  This is a per-read timeout, so a healthy stream that
+# keeps producing chunks is unaffected -- only a stalled request dies, and
+# ``RetryChatModel`` then retries it with backoff and says so in the log.
+LLM_REQUEST_TIMEOUT_SECONDS = EnvVarLoader.get_float(
+    "COAPIS_LLM_REQUEST_TIMEOUT_SECONDS",
+    120.0,
+    min_value=10.0,
+    max_value=900.0,
+)
+
+# Ceiling for one **compaction** call, in seconds.  Compaction sits on the
+# critical path of the next reasoning step, so it gets a tighter budget than
+# a chat turn: a chunk that the server never answers is skipped and the
+# summary merges from the chunks that did answer, which is a shorter summary
+# instead of a chat that never answers.
+CONTEXT_COMPACTION_TIMEOUT_SECONDS = EnvVarLoader.get_float(
+    "COAPIS_CONTEXT_COMPACTION_TIMEOUT_SECONDS",
+    90.0,
+    min_value=10.0,
+    max_value=600.0,
+)
+
+# Character cap for one compaction **map** request.  Fitting the window is not
+# the same as answering in time: measured on dev 2026-10-18, chunks sized to
+# the window came out at 70-90K chars and the model needed ~90 s for each, so
+# a 305-row compaction burned 7+ minutes of the user's turn before the answer
+# (5 chunks in series).  A chunk this size answers in seconds instead.
+CONTEXT_COMPACTION_CHUNK_MAX_CHARS = EnvVarLoader.get_int(
+    "COAPIS_CONTEXT_COMPACTION_CHUNK_MAX_CHARS",
+    16_000,
+    min_value=4_000,
+    max_value=200_000,
+)
+
+# How many compaction map requests may be in flight at once.  Chunks are
+# independent by construction, so serializing them buys nothing but latency.
+CONTEXT_COMPACTION_MAP_CONCURRENCY = EnvVarLoader.get_int(
+    "COAPIS_CONTEXT_COMPACTION_MAP_CONCURRENCY",
+    3,
+    min_value=1,
+    max_value=8,
+)
+
+# Wall-clock ceiling for **one whole compaction**: every map chunk plus the
+# merge.  The per-chunk timeout bounds a single call, which is not the same as
+# bounding the work: measured on dev 2026-10-18, a 285-row compaction split
+# into 19 chunks of 14,233 chars and the session sat in ``running`` for
+# 18 min 40 s producing zero log lines.  Past this deadline the chunks that
+# answered are merged and the rest are dropped -- a summary covering part of
+# the history beats a compaction that never ends.
+CONTEXT_COMPACTION_GLOBAL_TIMEOUT_SECONDS = EnvVarLoader.get_float(
+    "COAPIS_CONTEXT_COMPACTION_GLOBAL_TIMEOUT_SECONDS",
+    180.0,
+    min_value=15.0,
+    max_value=1800.0,
+)
+
 
 # Builtin Q&A helper profile.  agent_id keeps "CoApis" prefix for existing
 # workspaces and agent.json; do not rename.

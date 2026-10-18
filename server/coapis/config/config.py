@@ -695,6 +695,22 @@ class ContextCompactConfig(BaseModel):
         ),
     )
 
+    compaction_global_timeout_seconds: float = Field(
+        default=180.0,
+        ge=15.0,
+        le=1800.0,
+        description=(
+            "Wall-clock ceiling for one whole compaction: every map chunk "
+            "plus the merge, not one call.  The per-chunk timeout bounds "
+            "a single request, and five of them at that ceiling still "
+            "cost the chat seven minutes (dev 2026-10-18: 19 chunks of "
+            "14,233 chars, 18 min 40 s of 'running', zero log lines).  "
+            "Past the deadline the chunks that answered are merged and "
+            "the rest are dropped: a summary covering part of the "
+            "history beats a compaction that never ends."
+        ),
+    )
+
     doc_read_max_chars: int = Field(
         default=6000,
         ge=200,

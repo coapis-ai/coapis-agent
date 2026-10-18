@@ -217,6 +217,7 @@ class OpenAIProvider(Provider):
         from .openai_chat_model_compat import OpenAIChatModelCompat
 
         client_kwargs = {"base_url": self.base_url}
+        client_kwargs.update(self.client_timeout_kwargs())
 
         if self.base_url == DASHSCOPE_BASE_URL:
             client_kwargs["default_headers"] = {

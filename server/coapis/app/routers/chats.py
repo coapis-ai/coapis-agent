@@ -424,9 +424,19 @@ async def list_chats(
             # TaskTracker doesn't have this task, but status shows "running"
             # This means the task was lost (backend restart), fix the status
             entry["generating"] = False
+            # WARNING, not INFO: a chat sitting in "running" with no task
+            # behind it is exactly the state a stalled model call leaves
+            # behind, and it was invisible in the log (dev 2026-10-18: 18 min
+            # 40 s of "running" with zero lines).  The age is the number that
+            # tells a stall from a restart.
+            logger.warning(
+                "Self-healing stale 'running' status for chat %s "
+                "(last update %s): no task behind it.",
+                entry["id"],
+                entry.get("updated_at") or "unknown",
+            )
             try:
                 await cm.patch_chat(entry["id"], ChatUpdate(status="idle"))
-                logger.info(f"Fixed stale running status for chat {entry['id']}")
             except Exception as e:
                 logger.warning(f"Failed to fix stale status: {e}")
         else:

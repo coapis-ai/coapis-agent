@@ -399,6 +399,34 @@ class Provider(ProviderInfo, ABC):
             model.id == model_id for model in self.models
         )
 
+    @staticmethod
+    def client_timeout_kwargs() -> dict:
+        """``client_kwargs`` capping how long one model request may hang.
+
+        Measured on dev 2026-10-18: a chat whose upstream stalled stayed
+        ``running`` for 18 minutes 40 seconds and logged **nothing**, because
+        the client was built with the SDK default of 600 s per request and the
+        SDK retried it in silence.  ``timeout`` is a per-read timeout, so a
+        stream that keeps producing chunks is unaffected; only a stalled
+        request dies, and it dies loudly.
+
+        ``max_retries=0`` leaves retrying to ``RetryChatModel``, the one place
+        that knows about quota, backoff and rate limits.  Left at the SDK
+        default of 2, the worst case was 3 SDK attempts nested in 3 of our
+        own -- nine requests per step, each allowed 600 s.
+        """
+        import httpx
+
+        from coapis.constant import LLM_REQUEST_TIMEOUT_SECONDS
+
+        return {
+            "timeout": httpx.Timeout(
+                LLM_REQUEST_TIMEOUT_SECONDS,
+                connect=10.0,
+            ),
+            "max_retries": 0,
+        }
+
     @abstractmethod
     def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
         """Return an instance of the chat model associated with this
