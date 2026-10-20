@@ -37,12 +37,14 @@ export default function CascadePickerModal(props: CascadePickerModalProps) {
           key: `search:${k}`,
           name: t("resourcePicker.searchResults", "搜索结果"),
           kind: "group" as const,
+          // 根节点是导航容器，勾选它没有可引用对象（见 ResourcePlusMenu 同注释）
+          selectable: false,
         },
       ];
     }
     return mode === "knowledge"
-      ? [{ key: KB_ROOT_KEY, name: t("resourceMenu.knowledge"), kind: "group" as const }]
-      : [{ key: SPACE_ROOT_KEY, name: t("resourceMenu.mySpace"), kind: "group" as const }];
+      ? [{ key: KB_ROOT_KEY, name: t("resourceMenu.knowledge"), kind: "group" as const, selectable: false }]
+      : [{ key: SPACE_ROOT_KEY, name: t("resourceMenu.mySpace"), kind: "group" as const, selectable: false }];
   }, [kw, mode, t]);
 
   const load = useMemo(

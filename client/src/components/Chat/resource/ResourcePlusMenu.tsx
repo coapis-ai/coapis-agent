@@ -76,12 +76,16 @@ export default function ResourcePlusMenu(props: ResourcePlusMenuProps) {
         key: SESSION_ROOT_KEY,
         name: t("resourceMenu.sessionFiles"),
         kind: "group",
+        // 根节点只是导航容器：勾选它没有可引用的对象（key 不带 kb:/ 前缀，
+        // 下游会误判成文件）。置灰勾选框，用户只能展开后勾选具体条目。
+        selectable: false,
         meta: props.sessionCount ? String(props.sessionCount) : undefined,
       },
       {
         key: SPACE_ROOT_KEY,
         name: t("resourceMenu.mySpace"),
         kind: "group",
+        selectable: false,
       },
     ];
     if (showKnowledge) {
@@ -89,6 +93,7 @@ export default function ResourcePlusMenu(props: ResourcePlusMenuProps) {
         key: KB_ROOT_KEY,
         name: t("resourceMenu.knowledge"),
         kind: "group",
+        selectable: false,
       });
     }
     rows.push({ key: "divider", name: "", kind: "divider" });

@@ -286,7 +286,21 @@ export default function CascadeMenu(props: CascadeMenuProps) {
       if (!node) return;
       e.stopPropagation();
       if (node.kind === "action") node.onAction?.();
-      else if (onToggle) onToggle(node);
+      else if (node.kind === "group") {
+        // 导航容器（有子级）：回车展开子列，不勾选容器本身
+        const b = colRefs.current[level]?.getBoundingClientRect();
+        openAt(
+          level,
+          node,
+          b
+            ? { left: b.left, top: b.top + focus.index * 28, right: b.right }
+            : undefined,
+        );
+        setFocus({ level: level + 1, index: 0 });
+      }
+      // 键盘路径必须与鼠标路径一致：selectable:false 的节点（导航根节点）
+      // 不允许勾选，否则会把容器本身当成引用对象传给后端
+      else if (onToggle && node.selectable !== false) onToggle(node);
     }
   };
 
