@@ -39,8 +39,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: Characters per block before it is split (拍板 §6: 6000).
-BLOCK_CHARS = 6000
+#: Characters per block before it is split (拍板 §6: 6000 → 4000 for faster parse).
+BLOCK_CHARS = 4000
 #: Rows per xlsx sub-block when a sheet is bigger than BLOCK_CHARS.
 XLSX_ROWS_PER_BLOCK = 200
 #: Characters of context around a search hit.
@@ -50,7 +50,7 @@ SEARCH_MAX_HITS = 20
 #: Cache entries kept before the oldest are pruned.
 CACHE_MAX_ENTRIES = 100
 #: Documents above this size must be read paginated (拍板 §6).
-FULL_READ_MAX_CHARS = 200_000
+FULL_READ_MAX_CHARS = 32_768  # 32K chars ≈ 8K tokens, safe within window
 
 CACHE_DIRNAME = ".doccache"
 

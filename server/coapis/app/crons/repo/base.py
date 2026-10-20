@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Optional
 
 from ..models import CronJobSpec, JobsFile
@@ -25,6 +26,19 @@ from ..models import CronJobSpec, JobsFile
 
 class BaseJobRepository(ABC):
     """Abstract repository for cron job specs persistence."""
+
+    def scheduler_lock_path(self) -> Optional[Path]:
+        """Path used to elect a single scheduler owner for this job store.
+
+        同一份任务库被多个进程同时加载时（uvicorn --reload 的重启窗口、
+        多 worker、多容器共享挂载目录），每个进程都会把同一批任务各自注册
+        一遍，导致同一任务被重复触发。文件锁把「谁来调度」定成单点：抢不到
+        锁的进程只提供接口，不注册任何 job。
+
+        返回 None 表示不参与选举（例如跨主机共享的数据库型仓储，本地文件锁
+        无法覆盖其并发范围，由上层自行保证单调度器）。
+        """
+        return None
 
     @abstractmethod
     async def load(self) -> JobsFile:

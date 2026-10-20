@@ -31,6 +31,11 @@ This service handles:
 from __future__ import annotations
 
 import json
+
+# 场景必载技能上限：这些技能每次对话都强制加载、常驻上下文。
+# 不设上限会让提示词无限膨胀（上下文成本上升 + 注意力稀释），
+# 因此在写入处拒绝超限配置。
+MAX_REQUIRED_SKILLS = 5
 import logging
 import os
 from datetime import datetime, timezone
@@ -136,6 +141,13 @@ class SceneAgentService:
         names = [s for s in skills if s and s.strip()]
         if len(names) != len(skills):
             raise ValueError("场景技能列表含空值")
+        # 必载技能上限：这些技能每次对话都强制加载、常驻上下文。不设上限会让
+        # 提示词无限膨胀（上下文成本上升 + 注意力稀释），因此在写入处直接拒绝。
+        if len(names) > MAX_REQUIRED_SKILLS:
+            raise ValueError(
+                f"场景必载技能最多 {MAX_REQUIRED_SKILLS} 个，当前 {len(names)} 个："
+                f"请保留最核心的技能，其余改为按需加载"
+            )
         from ..agents.skills_manager import get_skill_pool_dir
         pool = get_skill_pool_dir()
         ghosts = [s for s in names if not (pool / s).is_dir()]

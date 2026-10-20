@@ -42,6 +42,16 @@ AUDIT_FILE = AUDIT_DIR / "audit.jsonl"
 _audit_entries: List[Dict[str, Any]] = []
 _MAX_AUDIT_ENTRIES = 10000
 
+# 审计镜像写入器（企业版注入）：签名 writer(entry: dict) -> None。
+# 社区版单独运行时保持 None，审计只落本地文件，行为与从前一致。
+_audit_mirror_writer = None
+
+
+def set_audit_mirror_writer(writer) -> None:
+    """注入审计镜像写入器，把每条审计同时镜像到企业版 PostgreSQL 审计表。"""
+    global _audit_mirror_writer
+    _audit_mirror_writer = writer
+
 
 def _load_audit_entries():
     """Load audit entries from file."""
@@ -82,6 +92,16 @@ def _append_audit_entry(entry: Dict[str, Any]):
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.warning(f"Failed to write audit entry: {e}")
+
+    # 审计镜像钩子：企业版在启动时注入写入器，把同一条审计同时落到
+    # PostgreSQL 审计表（同代码换存储的既有模式）。未注入时行为不变。
+    # 镜像失败只记日志，绝不影响主流程与本地审计文件。
+    writer = _audit_mirror_writer
+    if writer is not None:
+        try:
+            writer(entry)
+        except Exception as e:
+            logger.warning(f"Audit mirror writer failed: {e}")
 
 
 # Load entries on startup

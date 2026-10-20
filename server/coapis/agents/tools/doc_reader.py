@@ -33,6 +33,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import time
 import urllib.parse
 from pathlib import Path
 from typing import Any, Optional
@@ -343,20 +344,29 @@ def _docx_text(filepath: str) -> dict[str, Any]:
 
 
 async def _read_docx(filepath: str) -> dict[str, Any]:
+    logger.info("[doc_parse] docx start file=%s", Path(filepath).name)
+    t0 = time.monotonic()
     try:
-        return _docx_text(filepath)
+        result = _docx_text(filepath)
+        logger.info("[doc_parse] docx done %.1fs chars=%d file=%s",
+                     time.monotonic() - t0, result.get("chars", 0), Path(filepath).name)
+        return result
     except ImportError:
         logger.debug("python-docx unavailable, falling back to markitdown")
     except Exception as exc:
-        logger.warning("python-docx failed for %s: %s", filepath, exc)
+        logger.warning("[doc_parse] docx fail %.1fs file=%s: %s",
+                       time.monotonic() - t0, Path(filepath).name, exc)
     fallback = await _read_with_markitdown(filepath)
     if fallback:
+        logger.info("[doc_parse] docx markitdown done %.1fs chars=%d file=%s",
+                     time.monotonic() - t0, fallback.get("chars", 0), Path(filepath).name)
         return fallback
     return {
         "error": (
             "DOCX 解析失败：python-docx 与 markitdown 均不可用。"
             "请安装 python-docx 或 markitdown（install_dependency），"
             "不要改用 shell/CLI 解压（护栏会拒），也不要用 read_file 读二进制。"
+            "建议用 mode=index 分页读取，或 mode=search 配 keywords 定位关键段落。"
         ),
     }
 
@@ -414,19 +424,28 @@ def _pptx_text(filepath: str) -> dict[str, Any]:
 
 
 async def _read_pptx(filepath: str) -> dict[str, Any]:
+    logger.info("[doc_parse] pptx start file=%s", Path(filepath).name)
+    t0 = time.monotonic()
     try:
-        return _pptx_text(filepath)
+        result = _pptx_text(filepath)
+        logger.info("[doc_parse] pptx done %.1fs chars=%d file=%s",
+                     time.monotonic() - t0, result.get("chars", 0), Path(filepath).name)
+        return result
     except ImportError:
         logger.debug("python-pptx unavailable, falling back to markitdown")
     except Exception as exc:
-        logger.warning("python-pptx failed for %s: %s", filepath, exc)
+        logger.warning("[doc_parse] pptx fail %.1fs file=%s: %s",
+                       time.monotonic() - t0, Path(filepath).name, exc)
     fallback = await _read_with_markitdown(filepath)
     if fallback:
+        logger.info("[doc_parse] pptx markitdown done %.1fs chars=%d file=%s",
+                     time.monotonic() - t0, fallback.get("chars", 0), Path(filepath).name)
         return fallback
     return {
         "error": (
             "PPTX 解析失败：python-pptx 与 markitdown 均不可用。"
             "请安装 python-pptx 或 markitdown（install_dependency）。"
+            "建议用 mode=index 分页读取，或 mode=search 配 keywords 定位关键段落。"
         ),
     }
 
@@ -490,19 +509,28 @@ def _xlsx_text(
 
 
 async def _read_xlsx(filepath: str, sheet: Optional[str] = None) -> dict[str, Any]:
+    logger.info("[doc_parse] xlsx start file=%s", Path(filepath).name)
+    t0 = time.monotonic()
     try:
-        return _xlsx_text(filepath, sheet=sheet)
+        result = _xlsx_text(filepath, sheet=sheet)
+        logger.info("[doc_parse] xlsx done %.1fs chars=%d file=%s",
+                     time.monotonic() - t0, result.get("chars", 0), Path(filepath).name)
+        return result
     except ImportError:
         logger.debug("openpyxl unavailable, falling back to markitdown")
     except Exception as exc:
-        logger.warning("openpyxl failed for %s: %s", filepath, exc)
+        logger.warning("[doc_parse] xlsx fail %.1fs file=%s: %s",
+                       time.monotonic() - t0, Path(filepath).name, exc)
     fallback = await _read_with_markitdown(filepath)
     if fallback:
+        logger.info("[doc_parse] xlsx markitdown done %.1fs chars=%d file=%s",
+                     time.monotonic() - t0, fallback.get("chars", 0), Path(filepath).name)
         return fallback
     return {
         "error": (
             "XLSX 解析失败：openpyxl 与 markitdown 均不可用。"
             "请安装 openpyxl 或 markitdown（install_dependency）。"
+            "建议用 mode=index 查看工作表结构，再用 mode=range 按行读取。"
         ),
     }
 
@@ -511,6 +539,8 @@ async def _read_xlsx(filepath: str, sheet: Optional[str] = None) -> dict[str, An
 # PDF
 # --------------------------------------------------------------------------
 async def _read_pdf(filepath: str, pages: Optional[str] = None) -> dict[str, Any]:
+    logger.info("[doc_parse] pdf start file=%s", Path(filepath).name)
+    t0 = time.monotonic()
     page_list: Optional[list[int]] = None
     if pages:
         try:
@@ -529,20 +559,26 @@ async def _read_pdf(filepath: str, pages: Optional[str] = None) -> dict[str, Any
             md = pymupdf4llm.to_markdown(filepath, pages=page_list)
         else:
             md = pymupdf4llm.to_markdown(filepath)
+        logger.info("[doc_parse] pdf done %.1fs chars=%d file=%s",
+                     time.monotonic() - t0, len(md), Path(filepath).name)
         return {"content": md, "chars": len(md), "format": "pymupdf4llm"}
     except ImportError:
         logger.debug("pymupdf4llm unavailable, falling back to markitdown")
     except Exception as exc:
-        logger.warning("pymupdf4llm failed for %s: %s", filepath, exc)
+        logger.warning("[doc_parse] pdf fail %.1fs file=%s: %s",
+                       time.monotonic() - t0, Path(filepath).name, exc)
 
     fallback = await _read_with_markitdown(filepath)
     if fallback:
+        logger.info("[doc_parse] pdf markitdown done %.1fs chars=%d file=%s",
+                     time.monotonic() - t0, fallback.get("chars", 0), Path(filepath).name)
         return fallback
     return {
         "error": (
             "PDF 解析失败：pymupdf4llm 与 markitdown 均不可用。"
             "请安装 pymupdf4llm 或 markitdown（install_dependency），"
             "扫描版 PDF 需要 OCR，请改用 view_image 查看页面。"
+            "建议用 mode=index 查看页结构，再用 mode=range 按页读取。"
         ),
     }
 
@@ -587,7 +623,11 @@ def _read_chars_budget() -> int:
 
 #: A file this large (bytes) is read paginated, never whole.  Bytes are a
 #: cheap proxy: text-heavy OOXML/PDF of this size parses to ≥ 200K chars.
-_PAGINATE_SIZE_BYTES = 200_000
+_PAGINATE_SIZE_BYTES = 65_536  # 64KB: above this, force paginated read
+
+
+#: Maximum seconds a single paginated parse may take before aborting.
+PARSE_TIMEOUT_SECONDS = 120
 
 
 async def _paginated_read(
@@ -604,31 +644,66 @@ async def _paginated_read(
     """Serve one paginated read through the B3 base (parse once, cached)."""
     from .doc_pages import read_document
 
+    # F3: progress log — file, format, mode, size (no content)
     try:
-        return await asyncio.to_thread(
-            read_document,
-            str(fp),
-            fmt,
-            mode,
-            None if start < 0 else start,
-            None if end < 0 else end,
-            keywords or None,
-            max_chars,
-            None,
-            None if start_char < 0 else start_char,
-            None if end_char < 0 else end_char,
+        fsize = Path(fp).stat().st_size
+    except OSError:
+        fsize = 0
+    logger.info(
+        "[doc_parse] start mode=%s fmt=%s size=%dKB file=%s",
+        mode, fmt, fsize // 1024, Path(fp).name,
+    )
+    t0 = time.monotonic()
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                read_document,
+                str(fp),
+                fmt,
+                mode,
+                None if start < 0 else start,
+                None if end < 0 else end,
+                keywords or None,
+                max_chars,
+                None,
+                None if start_char < 0 else start_char,
+                None if end_char < 0 else end_char,
+            ),
+            timeout=PARSE_TIMEOUT_SECONDS,
         )
-    except Exception as exc:  # pagination must never be the reason a read fails
+        elapsed = time.monotonic() - t0
+        chars = len(result.get("content", "")) if isinstance(result, dict) else 0
+        logger.info(
+            "[doc_parse] done mode=%s elapsed=%.1fs chars=%d file=%s",
+            mode, elapsed, chars, Path(fp).name,
+        )
+        return result
+    except asyncio.TimeoutError:
+        elapsed = time.monotonic() - t0
         logger.warning(
-            "paginated %s read failed for %s: %s",
-            mode,
-            fp,
-            exc,
+            "[doc_parse] TIMEOUT %.0fs mode=%s fmt=%s size=%dKB file=%s",
+            PARSE_TIMEOUT_SECONDS, mode, fmt, fsize // 1024, Path(fp).name,
+        )
+        return {
+            "error": (
+                f"解析超时（{elapsed:.0f}s > {PARSE_TIMEOUT_SECONDS}s）。"
+                "文件过大，请用 mode=index 先看结构，再用 mode=range 配 start/end 分段读取，"
+                "或用 mode=search 配 keywords 定位关键段落。"
+            ),
+            "file": fp,
+        }
+    except Exception as exc:  # pagination must never be the reason a read fails
+        elapsed = time.monotonic() - t0
+        logger.warning(
+            "[doc_parse] FAIL %.1fs mode=%s fmt=%s file=%s: %s",
+            elapsed, mode, fmt, Path(fp).name, exc,
         )
         return {
             "error": (
                 f"分页读取（{mode}）失败：{type(exc).__name__}: {exc}。"
-                "可改用 mode=full 配合 max_chars 限量读取。"
+                "建议用 mode=index 查看文档结构，再用 mode=range 分段读取，"
+                "或用 mode=search 配 keywords 定位关键段落。"
             ),
             "file": fp,
         }
@@ -712,6 +787,10 @@ async def doc_reader(
         return {
             "error": "mode 无效。可用：full / index / range / search / digest",
         }
+
+    # F3: entry log — file, format, mode (no content)
+    if file_path.strip():
+        logger.info("[doc_parse] entry mode=%s file=%s", mode, Path(file_path.strip()).name)
 
     if action == "formats":
         return {

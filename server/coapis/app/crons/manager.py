@@ -18,6 +18,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from typing import Any
+
+try:  # POSIX 文件锁；非 POSIX 平台退化为「无选举」
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX
+    fcntl = None  # type: ignore
 import logging
 import time
 from collections import deque
@@ -80,6 +87,8 @@ class CronManager:
         # Per-job execution history (bounded deque, max 50 per job)
         self._history: Dict[str, deque] = {}
         self._history_max = 50
+        # 调度器选举锁句柄（POSIX flock），随进程退出由系统释放
+        self._scheduler_lock: Any = None
 
     def _load_heartbeat_config(self) -> Dict[str, Any]:
         """Load heartbeat config from heartbeat.json for this agent."""
@@ -87,10 +96,55 @@ class CronManager:
         key = f"{self._owner_user_id}:{self._agent_id}" if self._owner_user_id else self._agent_id or ""
         return get_heartbeat_repo().get(key)
 
+    def _acquire_scheduler_lock(self) -> bool:
+        """Elect exactly one scheduler owner for this job store via a file lock.
+
+        Returns True when this process may register jobs — either the lock was
+        acquired, or the repository opted out of election (database-backed
+        stores that share state across hosts). Returns False when another live
+        process already holds the lock.
+        """
+        if fcntl is None:
+            return True
+        try:
+            lock_path = self._repo.scheduler_lock_path()
+        except Exception:  # pylint: disable=broad-except
+            return True
+        if lock_path is None:
+            return True
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(lock_path, "a+", encoding="utf-8")
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            handle.seek(0)
+            handle.truncate(0)
+            handle.write(str(os.getpid()))
+            handle.flush()
+            self._scheduler_lock = handle
+            return True
+        except OSError:
+            return False
+
     async def start(self) -> None:
         async with self._lock:
             if self._started:
                 return
+
+            # 单调度器选举：同一份任务库只允许一个进程持有调度注册权。
+            # 抢锁失败说明已有存活进程在调度这批任务——本进程照常提供接口，
+            # 但不再注册任何 job，从根上杜绝同一任务被多进程重复触发
+            # （uvicorn --reload 的重启窗口、多 worker、共享挂载目录的多容器
+            # 都会踩到这个坑）。锁由操作系统随进程退出自动释放。
+            if not self._acquire_scheduler_lock():
+                logger.warning(
+                    "CronManager: scheduling owned by another process for "
+                    "agent_id=%s user_id=%s; serving API only, no jobs registered",
+                    self._agent_id,
+                    self._owner_user_id,
+                )
+                self._started = True
+                return
+
             jobs_file = await self._repo.load()
 
             self._scheduler.start()
@@ -191,7 +245,13 @@ class CronManager:
         async with self._lock:
             if not self._started:
                 return
-            self._scheduler.shutdown(wait=False)
+            # 抢锁失败的进程只提供接口，调度器从未 start；此时调用 shutdown
+            # 会抛 SchedulerNotRunningError，必须跳过。
+            if getattr(self._scheduler, "running", False):
+                try:
+                    self._scheduler.shutdown(wait=False)
+                except Exception:  # pylint: disable=broad-except
+                    logger.debug("CronManager: scheduler shutdown skipped", exc_info=True)
             self._started = False
 
     # ----- read/state -----

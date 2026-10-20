@@ -22,6 +22,7 @@ import MobileNavMenu from "./MobileNavMenu";
 import HelpButton from "../components/HeaderButtons/HelpButton";
 import SettingsDrawer from "../components/HeaderButtons/SettingsDrawer";
 import ProfileButton from "../components/HeaderButtons/ProfileButton";
+import NotificationBell from "../components/HeaderButtons/NotificationBell";
 
 // External system badge (login source)
 import { AuthStorage } from "../utils/authStorage";
@@ -197,6 +198,7 @@ export default function Header() {
         )}
         {isMobile ? null : (
           <Space size="middle" align="center">
+            <NotificationBell />
             <HelpButton onClick={handleNavClick} />
             <ProfileButton onOpenSettings={() => setSettingsOpen(true)} />
           </Space>

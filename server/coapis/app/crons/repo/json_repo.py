@@ -45,6 +45,14 @@ class JsonJobRepository(BaseJobRepository):
     def path(self) -> Path:
         return self._path
 
+    def scheduler_lock_path(self) -> Path:
+        """任务文件同目录的调度器选举锁（与 jobs.json 同生共死）。
+
+        同一份任务库被多个进程加载时，抢不到锁的进程不注册 job，
+        从根上杜绝同一任务被多进程重复触发。
+        """
+        return self._path.parent / "scheduler.lock"
+
     async def load(self) -> JobsFile:
         if not self._path.exists():
             return JobsFile(version=1, jobs=[])
