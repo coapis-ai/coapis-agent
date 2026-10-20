@@ -12,10 +12,8 @@ import {
   SparkMenuExpandLine,
   SparkMenuFoldLine,
 } from "@agentscope-ai/icons";
-import { AppstoreAddOutlined } from "@ant-design/icons";
 import { agentsApi } from "../api/modules/agents";
 import { permissionsApi } from "../api/modules/permissions";
-import { usePlugins } from "../plugins/PluginContext";
 import { useAgentStore } from "../stores/agentStore";
 import { useUser } from "../contexts/UserContext";
 import styles from "./index.module.less";
@@ -36,9 +34,6 @@ interface SidebarProps {
   selectedKey: string;
 }
 
-/** 插件分组的菜单 key（受控 openKeys / 高亮计算共用） */
-const PLUGINS_GROUP_KEY = "plugins-group";
-
 // ── Sidebar ───────────────────────────────────────────────────────────────
 
 export default function Sidebar({ selectedKey }: SidebarProps) {
@@ -48,7 +43,6 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   const { t } = useTranslation();
   const { isDark } = useTheme();
   const { selectedAgent, agents, setSelectedAgent, setAgents } = useAgentStore();
-  const { pluginRoutes } = usePlugins();
   const { user } = useUser();
   const [collapsed, setCollapsed] = useState(false);
   
@@ -195,44 +189,12 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       return menuItem;
     });
 
-    // ── 插件分组 ──────────────────────────────────────────────────────────
-    // 插件通过 window.CoApis.registerRoutes 注册的路由，路由本身在 MainLayout
-    // 已挂上（可直接访问 URL），这里补的是侧栏入口。旧实现把插件项 push 进
-    // settingsMenuItems —— 那个数组从未被 render，所以插件页一直进不了菜单。
-    // 权限：插件 key 没有对应的权限模块登记，统一判定函数会放行它，
-    // 与 MainLayout 插件路由不做权限门控的现状保持一致。
-    if (pluginRoutes.length > 0) {
-      const seen = new Set<string>();
-      const children = [...pluginRoutes]
-        .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
-        .filter((r) => {
-          if (seen.has(r.path)) return false;
-          seen.add(r.path);
-          return true;
-        })
-        .map((r) => ({
-          key: r.path.replace(/^\//, ""),
-          label: r.label,
-          icon: r.icon ? (
-            <span style={{ fontSize: 16 }}>{r.icon}</span>
-          ) : undefined,
-          path: r.path,
-        }));
-
-      if (children.length > 0) {
-        items.push({
-          key: PLUGINS_GROUP_KEY,
-          label: t("nav.plugins", "插件"),
-          icon: <AppstoreAddOutlined />,
-          // 折叠态点分组图标时进第一个插件页（分组自身无落地页）
-          path: children[0].path,
-          children,
-        });
-      }
-    }
+    // 插件路由不在侧栏建分组入口：企业版扩展功能（知识库等）已在各自业务模块的
+    // 菜单项中提供，侧栏再挂一个「插件」分组属于重复入口。路由本身仍由 MainLayout
+    // 挂载，直接访问 URL 依旧可用。
 
     return items;
-  }, [t, dynamicMenuItems, pluginRoutes]);
+  }, [t, dynamicMenuItems]);
 
   // 根据当前路径和菜单配置计算真正高亮的 key
   // 叶子菜单（含子菜单中的子项）优先匹配自身 key；
@@ -252,18 +214,6 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     }
     return { activeMenuKey: selectedKey, activeTopKey: selectedKey };
   }, [collapsedNavItems, currentPath, selectedKey]);
-
-  // 当前页属于插件时展开插件分组（openKeys 是受控的，默认只展开设置组）
-  useEffect(() => {
-    if (pluginRoutes.length === 0) return;
-    const onPluginPage = pluginRoutes.some(
-      (r) => currentPath === r.path || currentPath.startsWith(`${r.path}/`),
-    );
-    if (!onPluginPage) return;
-    setOpenKeys((prev) =>
-      prev.includes(PLUGINS_GROUP_KEY) ? prev : [...prev, PLUGINS_GROUP_KEY],
-    );
-  }, [currentPath, pluginRoutes]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

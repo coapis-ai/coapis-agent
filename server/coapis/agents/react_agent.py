@@ -1008,6 +1008,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 group_name=(
                     group_of(tool_name) if groups_enabled else "basic"
                 ),
+                # The registry's name is the single authority.  Upstream
+                # defaults the tool name to ``func.__name__``, so a decorator
+                # bound to the wrong helper silently renamed the tool (the
+                # doc_reader incident: the model saw ``_read_chars_budget``
+                # with zero parameters and had no document reader at all).
+                func_name=tool_name,
                 func_description=func_descriptions.get(tool_name) or None,
                 namesake_strategy=namesake_strategy,
                 async_execution=async_exec,

@@ -566,23 +566,6 @@ def _legacy_format(file_path: str) -> Optional[str]:
     return LEGACY_FORMATS.get(ext)
 
 
-@register_tool(
-    name="doc_reader",
-    description=(
-        "多格式文档解析：PDF/DOCX/PPTX/XLSX/CSV/文本 → 结构化文本。"
-        "路径可用绝对路径、files/ 相对路径或 /media/ 形式；"
-        "老格式 .doc/.xls/.ppt 不支持，请先转成 .docx/.xlsx/.pptx。"
-    ),
-    category="builtin",
-    tags=["file", "reader", "document", "office"],
-    dependencies=[
-        {"name": "python-docx", "manager": "pip", "required": False, "reason": "DOCX 解析"},
-        {"name": "python-pptx", "manager": "pip", "required": False, "reason": "PPTX 解析"},
-        {"name": "openpyxl", "manager": "pip", "required": False, "reason": "XLSX 解析"},
-        {"name": "pymupdf4llm", "manager": "pip", "required": False, "reason": "PDF 解析"},
-        {"name": "markitdown", "manager": "pip", "required": False, "reason": "文档解析兜底"},
-    ],
-)
 def _read_chars_budget() -> int:
     """Per-call character allowance for one read (治理台账 READ_CHARS).
 
@@ -651,6 +634,23 @@ async def _paginated_read(
         }
 
 
+@register_tool(
+    name="doc_reader",
+    description=(
+        "多格式文档解析：PDF/DOCX/PPTX/XLSX/CSV/文本 → 结构化文本。"
+        "路径可用绝对路径、files/ 相对路径或 /media/ 形式；"
+        "老格式 .doc/.xls/.ppt 不支持，请先转成 .docx/.xlsx/.pptx。"
+    ),
+    category="builtin",
+    tags=["file", "reader", "document", "office"],
+    dependencies=[
+        {"name": "python-docx", "manager": "pip", "required": False, "reason": "DOCX 解析"},
+        {"name": "python-pptx", "manager": "pip", "required": False, "reason": "PPTX 解析"},
+        {"name": "openpyxl", "manager": "pip", "required": False, "reason": "XLSX 解析"},
+        {"name": "pymupdf4llm", "manager": "pip", "required": False, "reason": "PDF 解析"},
+        {"name": "markitdown", "manager": "pip", "required": False, "reason": "文档解析兜底"},
+    ],
+)
 async def doc_reader(
     action: str = "read",
     file_path: str = "",
