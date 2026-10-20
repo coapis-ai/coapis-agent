@@ -145,15 +145,19 @@ class Workspace:
         elif username and not is_global:
             # User-level workspace (unified under workspaces/{username}/)
             from ..config.config import derive_workspace_dir
-            user_workspace = _get_user_workspace_dir(username)
+            from ..constant import agent_data_key
             if agent_id.startswith("user:"):
                 # Default user agent: workspace = workspaces/{username}/
                 self.workspace_dir = derive_workspace_dir(agent_id, username)
             else:
                 # Sub-agent: workspace = workspaces/{username}/agents/{agent_id}/
                 self.workspace_dir = _get_user_agents_dir(username) / agent_id
-            self.data_dir = self.workspace_dir / "agents" / agent_id
-            self.skills_dir = _get_user_skills_dir(username) / agent_id
+            # Data/skills keys must be filesystem-safe.  Using the raw
+            # semantic id here created ``workspaces/admin/agents/user:admin``
+            # — the id-namespace separator leaked into a directory name.
+            data_key = agent_data_key(agent_id)
+            self.data_dir = self.workspace_dir / "agents" / data_key
+            self.skills_dir = _get_user_skills_dir(username) / data_key
         else:
             # Global workspace: runtime data in agents/{id}/data/, never in system/
             self.data_dir = AGENTS_DIR / agent_id / "data"

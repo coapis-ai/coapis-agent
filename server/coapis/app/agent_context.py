@@ -172,7 +172,19 @@ async def get_agent_for_request(
                     agent_meta["owner"] = caller  # auto-infer from workspace
     # 2. Check user sub-agent: workspaces/{caller}/agents/{agent_id}/agent.json
     if not agent_found and caller:
-        sub_json = WORKSPACES_DIR / caller / "agents" / target_agent_id / "agent.json"
+        from pathlib import Path
+
+        from ..constant import sub_agent_key
+
+        try:
+            sub_key = sub_agent_key(target_agent_id)
+        except ValueError:
+            sub_key = None
+        sub_json = (
+            WORKSPACES_DIR / caller / "agents" / sub_key / "agent.json"
+            if sub_key
+            else Path("/dev/null")
+        )
         if sub_json.exists():
             agent_meta = json.loads(sub_json.read_text(encoding="utf-8"))
             agent_found = True

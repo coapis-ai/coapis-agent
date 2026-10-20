@@ -47,7 +47,9 @@ async def get_agent_stats(
 
 @router.get("/agent-stats/context-overhead")
 @require_permission("admin:admin")
-async def get_context_overhead() -> Dict[str, Any]:
+async def get_context_overhead(
+    request: Request,
+) -> Dict[str, Any]:
     """What the fixed part of a request costs, per agent (last reading).
 
     The numbers behind the context budget: system prompt, tool schemas (with

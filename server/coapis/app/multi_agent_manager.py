@@ -45,11 +45,28 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from ..agents.workspace import Workspace
-from ..config import load_config
-from ..constant import AGENTS_DIR, WORKSPACES_DIR
-from ..app.user_store import get_user_agents_dir, get_user_workspace_dir
+from ..constant import (
+    AGENTS_DIR,
+    USER_AGENT_ID_PREFIX,
+    WORKSPACES_DIR,
+    is_agents_dir_scoped,
+)
+from ..app.user_store import get_user_agents_dir
 
 logger = logging.getLogger(__name__)
+
+
+def owner_of(agent_id: str) -> str | None:
+    """The owner a ``user:`` semantic id carries, or None for a global id.
+
+    ``user:alice`` names its owner inside the id, so a call site that passes
+    the id and omits ``username`` is not ambiguous — the owner is ``alice``.
+    Both ``create_agent`` and ``get_agent`` use this to refuse the global
+    branch for such ids (see the guards there).
+    """
+    if agent_id.startswith(USER_AGENT_ID_PREFIX):
+        return agent_id[len(USER_AGENT_ID_PREFIX):]
+    return None
 
 
 class MultiAgentManager:
@@ -146,6 +163,18 @@ class MultiAgentManager:
             Workspace instance (not yet started)
         """
         # Composite key for user isolation
+        # A ``user:`` id always names its owner.  Call sites that pass such an
+        # id and omit ``username`` (proactive loops, POST /api/messages) used to
+        # fall into the global branch: ``is_global=True`` with no username
+        # routed the Workspace to ``AGENTS_DIR/{agent_id}`` — a *second*
+        # instance of an agent that already runs under
+        # ``workspaces/{owner}``, and the colon-named directory behind it.
+        # Take the owner from the id and treat the agent as a user agent.
+        if not username:
+            _owner = owner_of(agent_id)
+            if _owner:
+                username = _owner
+                is_global = False
         cache_key = f"{username}:{agent_id}" if username else f"global:{agent_id}"
 
         async with self._lock:
@@ -493,8 +522,6 @@ class MultiAgentManager:
         2. User default agents: WORKSPACES_DIR/*/agent.json
         3. User sub-agents: WORKSPACES_DIR/*/agents/*/agent.json
         """
-        from ..config.config import load_user_config, derive_workspace_dir
-
         seen_cache_keys: set[str] = set()
 
         # ── 1. Global agents (AGENTS_DIR) ──
@@ -506,6 +533,25 @@ class MultiAgentManager:
                 if not agent_json.exists():
                     continue
                 agent_id = agent_dir.name
+                # A directory name in AGENTS_DIR *is* the agent id, so only
+                # the global/scene namespaces belong here.  A colon-named one
+                # ("user:admin") is leftover data from the retired dual
+                # naming; a bare user-shaped one ("user_9b8541", "admin") is
+                # the skeleton a call site built when it omitted ``username``.
+                # Registering either hands that agent a second, *global*
+                # identity ("global:user_9b8541") next to the real one
+                # ("admin:user_9b8541") — two instances, two directories, and
+                # the skeleton gets re-created on every boot.
+                if not is_agents_dir_scoped(agent_id):
+                    logger.warning(
+                        "Skipping %s: %s/ holds global agents ('global_*') "
+                        "and scene agents ('scene-*') only; this directory is "
+                        "leftover data from the retired dual naming. Run "
+                        "scripts/migrate_agent_naming.py.",
+                        agent_dir,
+                        AGENTS_DIR,
+                    )
+                    continue
                 cache_key = f"global:{agent_id}"
                 if cache_key in self._workspaces:
                     seen_cache_keys.add(cache_key)
@@ -523,13 +569,35 @@ class MultiAgentManager:
                 agent_json = user_dir / "agent.json"
                 if not agent_json.exists():
                     continue
-                # Read agent_id from agent.json (fallback to convention)
+                # Read the canonical id from agent.json (fallback to convention)
                 try:
                     with open(agent_json, encoding="utf-8") as f:
                         meta = json.load(f)
-                    agent_id = meta.get("id", f"user:{username}")
+                    agent_id = meta.get("id") or f"user:{username}"
                 except Exception:
+                    meta = {}
                     agent_id = f"user:{username}"
+
+                # Guard: never key a workspace by an id derive_workspace_dir()
+                # cannot route.  A legacy "agent:{n}" (or any unrouteable id)
+                # used to register under a key that get_agent("user:xxx")
+                # would miss, so a second Workspace for the same directory got
+                # built on first request.  Normalise and say so loudly.
+                from ..constant import legacy_internal_agent_id
+
+                if legacy_internal_agent_id(agent_id) or meta.get("agent_id"):
+                    canonical = f"user:{username}"
+                    logger.warning(
+                        "Discovery: %s/agent.json carries the retired dual "
+                        "identity (id=%r, agent_id=%r); registering as %r. "
+                        "Run scripts/migrate_agent_naming.py to normalise "
+                        "the file.",
+                        username,
+                        agent_id,
+                        meta.get("agent_id"),
+                        canonical,
+                    )
+                    agent_id = canonical
                 cache_key = f"{username}:{agent_id}"
                 if cache_key in self._workspaces:
                     seen_cache_keys.add(cache_key)
@@ -552,6 +620,18 @@ class MultiAgentManager:
                         if not sub_agent_json.exists():
                             continue
                         sub_agent_id = agent_dir.name
+                        # Same reason as the global branch: a colon in the
+                        # directory name is leftover dual-naming data, and
+                        # "user:x" under workspaces/x/agents/ is the *same*
+                        # agent as the user's default, not a sub-agent.
+                        if ":" in sub_agent_id:
+                            logger.warning(
+                                "Skipping %s: directory name carries the "
+                                "namespace separator; run "
+                                "scripts/migrate_agent_naming.py.",
+                                agent_dir,
+                            )
+                            continue
                         sub_cache_key = f"{username}:{sub_agent_id}"
                         if sub_cache_key in self._workspaces:
                             seen_cache_keys.add(sub_cache_key)
@@ -598,10 +678,17 @@ class MultiAgentManager:
             ConfigurationException: If agent ID not found in configuration
         """
         # Composite key for user isolation: "{username}:{agent_id}" or "global:{agent_id}"
+        # Same guard as create_agent: a ``user:`` id carries its owner, so an
+        # omitted ``username`` must not downgrade the agent to a global
+        # workspace (that is what built the duplicate under AGENTS_DIR).
+        if not username:
+            _owner = owner_of(agent_id)
+            if _owner:
+                username = _owner
         cache_key = f"{username}:{agent_id}" if username else f"global:{agent_id}"
 
         # ── Strict ownership check via disk (no profiles dependency) ──
-        from ..config.config import derive_workspace_dir, load_user_config
+        from ..config.config import derive_workspace_dir
         workspace_dir = derive_workspace_dir(agent_id, username)
         agent_json_path = workspace_dir / "agent.json"
         if not agent_json_path.exists():
@@ -813,10 +900,11 @@ class MultiAgentManager:
         return None
 
     async def start_all_configured_agents(self) -> dict[str, bool]:
-        """Start all enabled agents defined in configuration concurrently.
+        """Start every agent the discovery pass registered, in parallel.
 
-        Only agents with enabled=True will be started.
-        Disabled agents are skipped to save resources.
+        Discovery is the filter: a directory it refuses to register (leftover
+        dual-naming data, a disabled agent) is in ``_workspaces`` by nobody and
+        so is started by nobody — it appears in neither count here.
 
         Agents are started truly in parallel: get_agent() only holds the
         manager lock briefly for dict checks, releasing it during the slow
@@ -825,8 +913,6 @@ class MultiAgentManager:
         Returns:
             dict[str, bool]: Mapping of agent_id to success status
         """
-        config = load_config()
-
         # Discover enabled agents from disk (no profiles dependency)
         agent_ids = []
         for cache_key, ws in self._workspaces.items():
@@ -836,7 +922,6 @@ class MultiAgentManager:
             logger.warning("No agents discovered on disk")
             return {}
 
-        total_agents = len(agent_ids)
         logger.debug(f"Starting {len(agent_ids)} discovered agent(s)")
 
         async def start_single_agent(agent_id: str) -> tuple[str, bool]:
@@ -880,7 +965,7 @@ class MultiAgentManager:
         success_count = sum(1 for success in result_map.values() if success)
         logger.info(
             f"Agent startup complete: {success_count}/{len(agent_ids)} "
-            f"agents started successfully, {disabled_count} disabled",
+            f"agents started successfully",
         )
 
         return result_map

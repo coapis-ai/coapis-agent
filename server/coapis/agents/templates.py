@@ -81,22 +81,27 @@ def build_agent_template(
     semantic_agent_id: str | None = None,
 ) -> AgentTemplateBuildResult:
     """Build a builtin template into a concrete agent configuration.
-    
+
     Args:
-        agent_id: ASCII-safe internal agent ID (e.g., "agent:20")
-        semantic_agent_id: Optional semantic ID for display (e.g., "user:张三")
+        agent_id: Canonical agent id. For a user's default agent this must be
+            the semantic id ``user:{username}`` — the same value the registry
+            and ``derive_workspace_dir`` use.
+        semantic_agent_id: Deprecated alias accepted for one release: when
+            given it wins over ``agent_id`` so callers still on the old
+            two-id signature land on the canonical id.  Removed after the
+            naming migration ships.
     """
     resolved_language = language or fallback_language or "zh"
-    
-    # Use semantic_agent_id for display, agent_id for runtime
+
+    # ONE identity. ``semantic_agent_id`` is only a transitional alias for the
+    # same value, never a second, different one.
     display_id = semantic_agent_id or agent_id
 
     if template_id == DEFAULT_AGENT_TEMPLATE:
         if name is None:
             raise ValueError("Default template requires a name")
         agent_config = AgentProfileConfig(
-            id=display_id,  # Semantic ID for display
-            agent_id=agent_id,  # ASCII-safe internal ID
+            id=display_id,  # canonical agent id - the only identity field
             name=name,
             description=description or "",
             workspace_dir=str(workspace_dir),
@@ -114,8 +119,7 @@ def build_agent_template(
 
     if template_id == LOCAL_AGENT_TEMPLATE:
         agent_config = AgentProfileConfig(
-            id=display_id,  # Semantic ID for display
-            agent_id=agent_id,  # ASCII-safe internal ID
+            id=display_id,  # canonical agent id - the only identity field
             name=name or "Local Agent",
             description=(
                 description or "An agent running on local deployed models."
@@ -135,8 +139,7 @@ def build_agent_template(
 
     if template_id == QA_AGENT_TEMPLATE:
         agent_config = AgentProfileConfig(
-            id=display_id,  # Semantic ID for display
-            agent_id=agent_id,  # ASCII-safe internal ID
+            id=display_id,  # canonical agent id - the only identity field
             name=name or BUILTIN_QA_AGENT_NAME,
             description=description or QA_TEMPLATE_DESCRIPTION,
             workspace_dir=str(workspace_dir),

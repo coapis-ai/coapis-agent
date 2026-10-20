@@ -155,6 +155,188 @@ def _get_user_workspace_dir(username: str) -> Path:
     """
     return WORKSPACES_DIR / username
 
+
+# ---------------------------------------------------------------------------
+# Canonical agent naming (single source of truth — kills the dual-track)
+# ---------------------------------------------------------------------------
+#
+# There is exactly ONE identity per agent: the semantic agent id.
+#
+#   user default agent : "user:{username}"      -> workspaces/{username}/
+#   user sub-agent     : "{agent_key}" + owner  -> workspaces/{owner}/agents/{agent_key}/
+#   global agent       : "global_*"              -> agents/{agent_id}/
+#
+# Display names (e.g. "王小伟") live ONLY in the ``name`` field and MUST
+# NEVER take part in building an id or a directory name.  Legacy builds did
+# ``f"{username}({display_name})"`` and produced dirs like
+# ``workspaces/zrsz_153(王小伟)`` — that is what this module makes impossible.
+
+USER_AGENT_ID_PREFIX = "user:"
+
+#: Prefixes allowed to occupy ``AGENTS_DIR``.  ``global_*`` is the shared
+#: baseline agent, ``scene-*`` is the scene agent directory written by
+#: SceneAgentService (``agents/scene-{scene_id}/``).  Anything else sitting in
+#: ``AGENTS_DIR`` is leftover data from the retired dual naming — most often a
+#: *user* agent that a call site routed there by omitting ``username``.
+GLOBAL_AGENT_ID_PREFIX = "global_"
+SCENE_AGENT_ID_PREFIX = "scene-"
+AGENTS_DIR_ID_PREFIXES = (GLOBAL_AGENT_ID_PREFIX, SCENE_AGENT_ID_PREFIX)
+
+
+def is_agents_dir_scoped(agent_id: str) -> bool:
+    """True when *agent_id* is allowed to live in ``AGENTS_DIR``.
+
+    ``AGENTS_DIR`` is the global/scene namespace.  Registering a directory
+    there that does not carry one of :data:`AGENTS_DIR_ID_PREFIXES` would
+    hand a user's agent a second, *global* identity — the exact dual-track
+    this module exists to remove.
+    """
+    return isinstance(agent_id, str) and agent_id.startswith(
+        AGENTS_DIR_ID_PREFIXES,
+    )
+
+
+#: Max length of a username / agent key (filesystem + header friendly).
+AGENT_KEY_MAX_LEN = 64
+
+#: Characters that must never appear in a username or agent key.  Covers path
+#: separators, the id namespace separator ``:``, bracket/quote forms used by
+#: legacy display-name pollution, and anything a shell/URL/JSON layer would
+#: have to quote.
+_FORBIDDEN_KEY_CHARS = frozenset(
+    '/\\:()[]{}|<>\'"`'
+    " \t\n\r\v\f"
+    "?*;&=%#~!@$^,"
+)
+
+#: Control characters (0x00-0x1F, 0x7F) — never allowed.
+_CONTROL_CHARS = frozenset(chr(c) for c in range(0x20)) | {chr(0x7F)}
+
+
+def is_valid_agent_key(key: str) -> bool:
+    """True when *key* is safe to use as a username / agent key / dir name.
+
+    Allowed: ASCII letters+digits, ``_``, ``-``, ``.``, and CJK (production
+    has Chinese usernames, so ASCII-only would be a regression).
+    Rejected: empty, over-long, leading ``.``, path traversal, and any
+    character in :data:`_FORBIDDEN_KEY_CHARS` / :data:`_CONTROL_CHARS`.
+    """
+    if not isinstance(key, str) or not key:
+        return False
+    if len(key) > AGENT_KEY_MAX_LEN:
+        return False
+    if key.startswith(".") or ".." in key:
+        return False
+    for ch in key:
+        if ch in _CONTROL_CHARS or ch in _FORBIDDEN_KEY_CHARS:
+            return False
+    return True
+
+
+def normalize_agent_key(raw: str, *, kind: str = "username") -> str:
+    """Validate *raw* as an agent key / username and return it.
+
+    This is the single gate every call site that builds a workspace
+    directory or an agent id MUST go through.  It never silently mutates the
+    value: an unsafe key raises, so a bad name can never reach the disk.
+
+    Raises:
+        ValueError: when *raw* is empty, too long, or contains a forbidden
+            character (message names the offending character).
+    """
+    if not isinstance(raw, str):
+        raise ValueError(f"{kind} must be a string, got {type(raw).__name__}")
+    key = raw.strip()
+    if not key:
+        raise ValueError(f"{kind} is empty")
+    if len(key) > AGENT_KEY_MAX_LEN:
+        raise ValueError(
+            f"{kind} too long: {len(key)} > {AGENT_KEY_MAX_LEN}"
+        )
+    if key.startswith(".") or ".." in key:
+        raise ValueError(f"{kind} must not contain path traversal: {raw!r}")
+    for ch in key:
+        if ch in _CONTROL_CHARS:
+            raise ValueError(f"{kind} contains control character: {raw!r}")
+        if ch in _FORBIDDEN_KEY_CHARS:
+            raise ValueError(
+                f"{kind} contains forbidden character {ch!r}: {raw!r} "
+                f"(display names belong in the 'name' field, never in an id)"
+            )
+    return key
+
+
+def user_agent_id(username: str) -> str:
+    """Canonical id of a user's default agent: ``user:{username}``."""
+    return f"{USER_AGENT_ID_PREFIX}{normalize_agent_key(username)}"
+
+
+def is_user_agent_id(agent_id: str) -> bool:
+    """True when *agent_id* is a user default-agent id."""
+    return isinstance(agent_id, str) and agent_id.startswith(USER_AGENT_ID_PREFIX)
+
+
+def username_from_user_agent_id(agent_id: str) -> str:
+    """Extract the username out of ``user:{username}``."""
+    if not is_user_agent_id(agent_id):
+        raise ValueError(f"not a user agent id: {agent_id!r}")
+    return agent_id[len(USER_AGENT_ID_PREFIX):]
+
+
+def legacy_internal_agent_id(agent_id: str) -> bool:
+    """True for the retired ``agent:{numeric}`` form (dual-track leftover).
+
+    Kept around only so migration/compat code can recognise it; nothing in
+    the runtime should produce it any more.
+    """
+    return isinstance(agent_id, str) and agent_id.startswith("agent:")
+
+
+def agent_data_key(agent_id: str) -> str:
+    """Filesystem-safe key for an agent's *runtime data* sub-directory.
+
+    Runtime data lives at ``workspaces/{username}/agents/{key}/``.  The key
+    must never be the full semantic id: ``agents/user:admin`` was created
+    exactly that way, putting the id-namespace separator ``:`` into a
+    directory name, where tooling, shells and URL encoding all choke on it.
+
+    ``user:admin`` -> ``admin``; a bare sub-agent key passes through
+    unchanged (and validated).
+
+    Raises:
+        ValueError: legacy ``agent:{n}`` id, or a key with unsafe characters.
+    """
+    if legacy_internal_agent_id(agent_id):
+        raise ValueError(
+            f"agent_data_key: legacy internal id {agent_id!r} has no data "
+            "directory; normalise the workspace to 'user:{username}' first"
+        )
+    if is_user_agent_id(agent_id):
+        return normalize_agent_key(username_from_user_agent_id(agent_id))
+    return normalize_agent_key(agent_id, kind="agent key")
+
+
+def sub_agent_key(agent_id: str) -> str:
+    """Validate a sub-agent id coming from an API caller.
+
+    Several routers build ``workspaces/{username}/agents/{agent_id}`` straight
+    from the request body.  Without a gate, ``user:admin`` or
+    ``zrsz_153(王小伟)`` becomes a directory name there — which is precisely
+    how the colon-named and display-name-polluted workspaces appeared.
+
+    Raises:
+        ValueError: a user default-agent id (``user:*`` is not a sub-agent),
+            a legacy ``agent:{n}`` id, or any unsafe key.
+    """
+    if is_user_agent_id(agent_id):
+        raise ValueError(
+            f"sub-agent id must not be a user default-agent id: {agent_id!r} "
+            "(the 'user:' prefix is reserved for a user's default agent)"
+        )
+    if legacy_internal_agent_id(agent_id):
+        raise ValueError(f"sub-agent id {agent_id!r} is the retired form")
+    return normalize_agent_key(agent_id, kind="agent key")
+
 # System-level file paths
 CONFIG_JSON = SYSTEM_DIR / "config.json"
 USERS_JSON = SYSTEM_DIR / "users.json"

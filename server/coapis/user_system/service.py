@@ -118,20 +118,26 @@ def _create_default_workspace(username: str) -> None:
     """
     import json
     from pathlib import Path
-    from ..constant import WORKSPACES_DIR
+    from ..constant import WORKSPACES_DIR, normalize_agent_key, user_agent_id
+
+    # Single gate for every directory/id built from a username.  A username
+    # that is unsafe for a path raises here instead of landing on disk as
+    # e.g. ``workspaces/zrsz_153(王小伟)``.
+    username = normalize_agent_key(username)
 
     ws_dir = WORKSPACES_DIR / username
     ws_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get user.id for generating ASCII-safe agent_id
-    user = get_user_by_username(username)
-    internal_agent_id = f"agent:{user.id}" if user else f"agent:{username}"
-    semantic_agent_id = f"user:{username}"
+    # ONE identity only: the semantic agent id.  The retired ``agent:{user.id}``
+    # internal id is gone — it was the second track of the naming dual-track
+    # (manager keyed by it, registry/derive keyed by the semantic id), which
+    # let the same agent exist twice in memory and made ``derive_workspace_dir``
+    # silently mis-route.
+    canonical_agent_id = user_agent_id(username)
 
-    # Create minimal agent.json with both semantic ID and ASCII-safe agent_id
+    # Create minimal agent.json (single identity field)
     agent_config = {
-        "id": semantic_agent_id,  # Semantic ID for display
-        "agent_id": internal_agent_id,  # ASCII-safe internal ID for HTTP headers
+        "id": canonical_agent_id,
         "name": f"User:{username}",
         "description": "",
         "workspace_dir": ".",

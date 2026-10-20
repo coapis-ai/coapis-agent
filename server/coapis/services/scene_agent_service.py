@@ -686,6 +686,13 @@ class SceneAgentService:
             Created SceneAgentConfig
         """
         agent_id = f"scene-{scene_config.id}"
+        # The scene id is caller-supplied and becomes a directory name here.
+        from ..constant import normalize_agent_key
+
+        try:
+            normalize_agent_key(agent_id, kind="scene agent key")
+        except ValueError as exc:
+            raise ValueError(f"scene id produces an unsafe agent directory: {exc}") from exc
         agent_dir = self.agents_dir / agent_id
         agent_dir.mkdir(parents=True, exist_ok=True)
         

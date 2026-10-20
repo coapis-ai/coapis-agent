@@ -132,9 +132,36 @@ async def send_message(
     # Get multi-agent manager from app state (via request)
     multi_agent_manager = _get_multi_agent_manager(http_request)
 
+    # ── Identity binding (naming unification) ─────────────────────────
+    # ``X-Agent-Id`` is caller-supplied and a ``user:`` id names its owner, so
+    # this endpoint used to hand *any* named agent to the caller: with no
+    # ``username`` passed, ``user:alice`` resolved to alice's own workspace and
+    # the send ran inside it.  Bind the request to the authenticated caller:
+    # "default" is the caller's own default agent, an id naming somebody else
+    # is refused, and the caller is passed through so get_agent()'s ownership
+    # check actually runs.
+    from ..multi_agent_manager import owner_of
+    from ...constant import user_agent_id
+
+    caller = getattr(http_request.state, "username", None)
+    if agent_id == "default" and caller:
+        agent_id = user_agent_id(caller)
+    owner = owner_of(agent_id)
+    if owner and caller and owner != caller:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Agent '{agent_id}' belongs to '{owner}', "
+                f"not to caller '{caller}'"
+            ),
+        )
+
     # Get workspace for the agent
     try:
-        workspace = await multi_agent_manager.get_agent(agent_id)
+        workspace = await multi_agent_manager.get_agent(
+            agent_id,
+            username=caller if owner else None,
+        )
     except (ValueError, AppBaseException) as e:
         logger.error("Agent not found: %s", e)
         raise HTTPException(

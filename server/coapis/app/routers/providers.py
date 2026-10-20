@@ -242,6 +242,39 @@ def _validate_model_slot(
         )
 
 
+def _enforce_window_gate(
+    manager: ProviderManager,
+    provider_id: str,
+    model_id: str,
+) -> None:
+    """Refuse to activate a model whose window cannot host a CoApis request.
+
+    B1 (2026-10-19).  A model whose whole context is smaller than the fixed
+    part of a request (system prompt + skill index + tool catalogue) fails on
+    its **first** message: the gate measures, finds fixed ≥ budget, and the
+    turn dies with 422.  Prod measured 12 of those in 24 hours.  The number is
+    known when the user picks the model, so say it there -- one toast, not a
+    dead conversation.
+    """
+    from ...agents.context.window_source import check_model_window
+
+    provider = manager.get_provider(provider_id)
+    verdict = check_model_window(provider_id, model_id, provider)
+    if verdict.get("usable"):
+        return
+    logger.warning(
+        "Window gate refused activation of %s/%s: %s",
+        provider_id,
+        model_id,
+        verdict.get("reason"),
+    )
+    raise HTTPException(
+        status_code=400,
+        detail=verdict.get("reason")
+        or "Model context window is too small for CoApis.",
+    )
+
+
 async def _load_agent_model(
     request: Request,
     agent_id: str,
@@ -861,6 +894,8 @@ async def set_active_model(
                 status_code=503,
                 detail="Permission system unavailable.",
             )
+        # B1: refuse a model whose window cannot host a CoApis request.
+        _enforce_window_gate(manager, body.provider_id, body.model)
         try:
             await manager.activate_model(body.provider_id, body.model)
         except (
@@ -883,6 +918,11 @@ async def set_active_model(
         )
 
     _validate_model_slot(manager, body.provider_id, body.model)
+    # B1: refuse a model whose window cannot host a CoApis request.  A model
+    # with a window smaller than the fixed part of a request fails on its
+    # first message (12 such 422s measured on prod in 24h); the number is
+    # known here, so say it here.
+    _enforce_window_gate(manager, body.provider_id, body.model)
 
     try:
         workspace = await get_agent_for_request(

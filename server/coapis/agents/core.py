@@ -163,7 +163,7 @@ class AgentCore:
                 from ..config.config import load_agent_config
 
                 running = load_agent_config(
-                    self.config.get("agent_id") or "default",
+                    self.config.get("id") or "default",
                 ).running
             except Exception:
                 running = None
@@ -197,7 +197,7 @@ class AgentCore:
 
             ratio = (
                 load_agent_config(
-                    self.config.get("agent_id") or "default",
+                    self.config.get("id") or "default",
                 ).running.light_context_config.context_compact_config
                 .compact_threshold_ratio
             )
@@ -825,14 +825,23 @@ class AgentCore:
         # Get workspace_dir from agent.json
         workspace_dir = None
         try:
-            agent_id = self.config.get("agent_id", self.config.get("id", ""))
+            # Canonical id only.  The retired "agent_id" key used to win here,
+            # and ``agent_id.split(':')[-1]`` then turned "agent:20" into a
+            # directory named "20" — a silent miss that made workspace MD
+            # files load from the wrong (or no) workspace.
+            agent_id = self.config.get("id", "")
             logger.info("Workspace MD loader: agent_id=%s, config_keys=%s", agent_id, list(self.config.keys())[:15])
             # Try common workspace paths
             from ..constant import AGENTS_DIR, WORKSPACES_DIR
-            possible_paths = [
-                AGENTS_DIR / agent_id.split(':')[-1],
+            from ..config.config import derive_workspace_dir
+
+            possible_paths = []
+            try:
+                possible_paths.append(derive_workspace_dir(agent_id))
+            except (ValueError, Exception):  # noqa: BLE001 - fall through to legacy probes
+                pass
+            possible_paths += [
                 AGENTS_DIR / "global_default",
-                WORKSPACES_DIR / agent_id.split(':')[-1],
                 WORKSPACES_DIR / "global_default",
             ]
             for p in possible_paths:

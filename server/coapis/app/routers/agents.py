@@ -447,7 +447,15 @@ async def create_agent(
                 )
         else:
             # Auto-generate: workspaces/{username}/agents/{agent_id}
-            workspace_dir = str(WORKSPACES_DIR / username / "agents" / agent_id)
+            # The id arrives from the request body and becomes a directory
+            # name here, so it goes through the naming gate.
+            from ...constant import sub_agent_key
+
+            try:
+                safe_key = sub_agent_key(agent_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            workspace_dir = str(WORKSPACES_DIR / username / "agents" / safe_key)
             config["workspace_dir"] = workspace_dir
     elif is_global:
         # Global agent: allow custom path or auto-generate under agents/
@@ -696,7 +704,7 @@ async def delete_agent(
         # └──────────────────────────────────────────────────────────────┘
         if not success:
             import shutil
-            from ...constant import WORKSPACES_DIR, AGENTS_DIR
+            from ...constant import AGENTS_DIR, WORKSPACES_DIR, sub_agent_key
 
             cleaned = False
             # Try user-level directory first
@@ -708,8 +716,15 @@ async def delete_agent(
                         if d.is_dir() and d.name not in search_usernames:
                             search_usernames.append(d.name)
 
+            # Gated: agent_id is caller-supplied and feeds shutil.rmtree().
+            try:
+                safe_key = sub_agent_key(agent_id)
+            except ValueError:
+                safe_key = None
             for uname in search_usernames:
-                agent_dir = WORKSPACES_DIR / uname / "agents" / agent_id
+                if safe_key is None:
+                    break
+                agent_dir = WORKSPACES_DIR / uname / "agents" / safe_key
                 if agent_dir.exists():
                     shutil.rmtree(agent_dir)
                     logger.info(f"Cleaned up orphan agent directory: {agent_dir}")

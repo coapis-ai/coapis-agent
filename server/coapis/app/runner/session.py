@@ -25,6 +25,8 @@ are sanitized before being used as filenames.
 import os
 import re
 import json
+import uuid
+import inspect
 import logging
 
 from typing import Any, Dict, Union, Sequence
@@ -190,6 +192,45 @@ def _ensure_content_block_types(state_dict: dict) -> dict:
     return state_dict
 
 
+def _load_state_tolerant(state_module: Any, saved: Any) -> list[str]:
+    """Restore one state module, skipping keys the module does not declare.
+
+    ``StateModule.load_state_dict(strict=True)`` raises ``KeyError`` for every
+    module the agent registers that the saved file does not contain, and a
+    session file written before a module existed is the normal case, not an
+    error: measured on dev 2026-10-19, 10 occurrences of
+    ``Key 'toolkit' not found in state_dict`` in 24 hours -- one per chat
+    **start** -- and the runner's handler threw the whole saved history away
+    ("will save fresh state on completion to recover file").
+
+    ``strict=False`` is the documented switch for exactly this: it skips
+    missing keys and restores everything the file does carry.  Modules that
+    predate the ``strict`` keyword keep the old behaviour, and the skipped
+    keys are returned so a "the file was recovered" claim is checkable in the
+    log instead of being asserted.
+    """
+    keys = set(saved) if isinstance(saved, dict) else set()
+    try:
+        declared = set(getattr(state_module, "_module_dict", {}) or {})
+        declared |= set(getattr(state_module, "_attribute_dict", {}) or {})
+    except Exception:  # pragma: no cover - exotic modules
+        declared = set()
+    missing = sorted(declared - keys)
+
+    try:
+        accepts_strict = "strict" in inspect.signature(
+            state_module.load_state_dict,
+        ).parameters
+    except (TypeError, ValueError):
+        accepts_strict = False
+
+    if accepts_strict:
+        state_module.load_state_dict(saved, strict=False)
+    else:
+        state_module.load_state_dict(saved)
+    return missing
+
+
 class SafeJSONSession(SessionBase):
     """SessionBase subclass with filename sanitization and async file I/O.
 
@@ -242,12 +283,17 @@ class SafeJSONSession(SessionBase):
         # Ensure content blocks always have 'type' for proper history rendering
         _ensure_content_block_types(state_dicts)
         session_save_path = self._get_save_path(session_id, user_id=user_id)
-        tmp_path = session_save_path + ".tmp"
+        # ⚠ 并发安全：tmp 路径必须唯一。旧写法固定用 `save_path + ".tmp"`，
+        # 同一会话并发保存（多消息/多渠道同时落盘）时两个协程会写同一个 tmp
+        # 文件，短内容覆盖长内容后残留尾部字节 → 状态文件出现非法 UTF-8 尾巴，
+        # 下次加载直接 UnicodeDecodeError，整条聊天 failed。
+        tmp_path = f"{session_save_path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        payload = json.dumps(state_dicts, ensure_ascii=False)
         try:
             async with aiofiles.open(
-                tmp_path, "w", encoding="utf-8",
+                tmp_path, "wb",
             ) as f:
-                await f.write(json.dumps(state_dicts, ensure_ascii=False))
+                await f.write(payload.encode("utf-8", errors="replace"))
                 await f.flush()
                 # Force flush to disk before rename
                 try:
@@ -273,6 +319,35 @@ class SafeJSONSession(SessionBase):
                 pass
             raise
 
+    @staticmethod
+    def _decode_state_bytes(raw: bytes, path: str) -> str:
+        """Decode a session state file, never raising on invalid bytes.
+
+        Falls back from strict UTF-8 (surrogatepass, needed for agent state
+        round-tripping) to a lossy decode, and finally to truncating at the
+        last complete JSON object so a corrupted tail cannot kill a session.
+        """
+        try:
+            return raw.decode("utf-8", errors="surrogatepass")
+        except UnicodeDecodeError:
+            pass
+        text = raw.decode("utf-8", errors="replace")
+        # 尾部脏字节通常落在合法 JSON 之后：截到最后一个完整闭合的顶层对象。
+        end = text.rfind("}")
+        if end != -1:
+            candidate = text[: end + 1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                pass
+        logger.warning(
+            "session state file %s contains invalid bytes; "
+            "decoded lossily (session history may be partially lost)",
+            path,
+        )
+        return text
+
     async def load_session_state(
         self,
         session_id: str,
@@ -283,20 +358,27 @@ class SafeJSONSession(SessionBase):
         """Load state modules from a JSON file using async I/O."""
         session_save_path = self._get_save_path(session_id, user_id=user_id)
         if os.path.exists(session_save_path):
-            async with aiofiles.open(
-                session_save_path,
-                "r",
-                encoding="utf-8",
-                errors="surrogatepass",
-            ) as f:
-                content = await f.read()
-                states = _safe_json_loads(content, session_save_path)
+            # ⚠ 容错解码：旧写法用 errors="surrogatepass"，它对任意非法字节
+            # （如 0x94）直接抛 UnicodeDecodeError，导致整条聊天 response=failed。
+            # 状态文件是缓存而非唯一真相，绝不能因为尾部脏字节让会话彻底不可用。
+            async with aiofiles.open(session_save_path, "rb") as f:
+                raw = await f.read()
+            content = self._decode_state_bytes(raw, session_save_path)
+            states = _safe_json_loads(content, session_save_path)
 
             for name, state_module in state_modules_mapping.items():
                 if name in states:
                     # Patch old records missing 'type' in content blocks
                     _ensure_content_block_types(states)
-                    state_module.load_state_dict(states[name])
+                    missing = _load_state_tolerant(state_module, states[name])
+                    if missing:
+                        logger.info(
+                            "Session state for '%s' restored with %d module(s) "
+                            "the file did not carry (%s); the rest was loaded.",
+                            name,
+                            len(missing),
+                            ", ".join(missing),
+                        )
             logger.info(
                 "Load session state from %s successfully.",
                 session_save_path,

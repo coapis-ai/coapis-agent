@@ -89,8 +89,13 @@ def _resolve_agent_workspace(request: Request) -> Optional[Path]:
             if meta.get("id") == agent_id:
                 return default_ws
         # Sub-agent
-        sub_ws = WORKSPACES_DIR / username / "agents" / agent_id
-        if (sub_ws / "agent.json").exists():
+        from ...constant import sub_agent_key
+
+        try:
+            sub_ws = WORKSPACES_DIR / username / "agents" / sub_agent_key(agent_id)
+        except ValueError:
+            sub_ws = None
+        if sub_ws is not None and (sub_ws / "agent.json").exists():
             return sub_ws
         # Global agent
         global_ws = AGENTS_DIR / agent_id

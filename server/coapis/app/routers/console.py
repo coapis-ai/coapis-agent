@@ -146,6 +146,14 @@ async def get_push_messages(
                 "tool_params": tool_input,
                 "created_at": p.created_at,
                 "timeout_seconds": p.timeout_seconds,
+                # Server-authoritative countdown. The frontend used to compute
+                # ``timeout - (Date.now()/1000 - created_at)``, i.e. it mixed
+                # the browser clock with the server clock; a browser running a
+                # few seconds ahead made cards expire on mount.
+                "remaining_seconds": max(
+                    0.0,
+                    p.timeout_seconds - (time.time() - p.created_at),
+                ),
             })
         
         if pending_approvals:

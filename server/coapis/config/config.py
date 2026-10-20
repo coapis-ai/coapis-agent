@@ -1411,10 +1411,16 @@ class AgentProfileConfig(BaseModel):
     Each agent has its own configuration file with all settings.
     """
 
-    id: str = Field(..., description="Unique agent ID (semantic, may contain non-ASCII for display)")
-    agent_id: Optional[str] = Field(
-        default=None,
-        description="Internal agent ID (ASCII-safe, used in HTTP headers and runtime). Auto-generated from user.id.",
+    id: str = Field(
+        ...,
+        description=(
+            "The agent's one and only identity.  User default agents use "
+            "'user:{username}', user sub-agents use a bare key (with 'owner' "
+            "set), global agents use 'global_*'.  Must be accepted verbatim "
+            "by derive_workspace_dir().  Legacy agent.json files may still "
+            "carry a second 'agent_id' key; it is ignored (extra='ignore') "
+            "and removed by scripts/migrate_agent_naming.py."
+        ),
     )
     name: str = Field(..., description="Human-readable agent name")
     description: str = Field(default="", description="Agent description")
@@ -2034,23 +2040,61 @@ def derive_workspace_dir(agent_id: str, username: str = None) -> Path:
     Replaces the old pattern of reading hardcoded absolute paths from
     config.json agents.profiles[*].workspace_dir.
 
-    Rules:
-      - User default agent (agent_id starts with "user:"):
+    Rules (exhaustive — every accepted form maps to exactly one directory):
+      - User default agent (agent_id == "user:{username}"):
           WORKSPACES_DIR / {username}
       - User sub-agent (username provided, no "user:" prefix):
           WORKSPACES_DIR / {username} / "agents" / {agent_id}
       - Global agent (no username):
           AGENTS_DIR / {agent_id}
-    """
-    from ..constant import AGENTS_DIR, WORKSPACES_DIR
 
-    if agent_id.startswith("user:"):
-        uname = agent_id.split(":", 1)[1]
-        return WORKSPACES_DIR / uname
-    elif username:
-        return WORKSPACES_DIR / username / "agents" / agent_id
-    else:
-        return AGENTS_DIR / agent_id
+    Strict by design: an id we cannot route raises instead of silently
+    landing on a non-existent directory.  The old behaviour mapped the
+    retired ``agent:{n}`` form to ``AGENTS_DIR/agent:{n}``, which made a
+    user's real agent fall back to a synthetic profile with no error — the
+    single hardest class of bug to trace.
+
+    Raises:
+        ValueError: empty id, legacy ``agent:{n}`` id, or a key containing
+            characters unsafe for a directory name.
+    """
+    from ..constant import (
+        AGENTS_DIR,
+        WORKSPACES_DIR,
+        legacy_internal_agent_id,
+        is_user_agent_id,
+        normalize_agent_key,
+        username_from_user_agent_id,
+    )
+
+    if not agent_id or not isinstance(agent_id, str):
+        raise ValueError(f"derive_workspace_dir: empty agent_id {agent_id!r}")
+
+    if legacy_internal_agent_id(agent_id):
+        raise ValueError(
+            f"derive_workspace_dir: legacy internal id {agent_id!r} is not "
+            "routable; expected 'user:{username}'. Run the naming migration "
+            "(scripts/migrate_agent_naming.py) to normalise this workspace."
+        )
+
+    if is_user_agent_id(agent_id):
+        uname = username_from_user_agent_id(agent_id)
+        if username and username != uname:
+            raise ValueError(
+                f"derive_workspace_dir: agent_id {agent_id!r} names user "
+                f"{uname!r} but was resolved for owner {username!r}"
+            )
+        return WORKSPACES_DIR / normalize_agent_key(uname)
+
+    key = normalize_agent_key(agent_id, kind="agent key")
+    if username:
+        return (
+            WORKSPACES_DIR
+            / normalize_agent_key(username)
+            / "agents"
+            / key
+        )
+    return AGENTS_DIR / key
 
 
 def build_fallback_agent_profile_config(
@@ -2261,6 +2305,19 @@ def save_agent_config(
     # Remove any stale global-inherited fields from existing data
     for field in _AGENT_GLOBAL_INHERITED_FIELDS:
         merged_data.pop(field, None)
+
+    # Drop the retired dual-track identity key.  ``merged_data`` starts from
+    # the file on disk, so without this an old "agent_id" ("agent:20") would
+    # survive every rewrite forever and keep re-seeding the ambiguity.
+    if "agent_id" in merged_data:
+        legacy = merged_data.pop("agent_id")
+        if legacy != merged_data.get("id"):
+            logger.info(
+                "agent.json: dropped legacy identity key agent_id=%r in "
+                "favour of id=%r",
+                legacy,
+                merged_data.get("id"),
+            )
 
     # Sync active_model <-> model/provider for compatibility:
     # workspace.py reads model/provider, PUT /models/active writes active_model.

@@ -657,6 +657,13 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
                     get_approval_service().set_channel_manager(
                         default_agent.channel_manager,
                     )
+
+                # Expiry must be time-driven, not creation-driven: a session
+                # that asked for one approval and went quiet used to keep the
+                # dead record alive for 30 minutes.
+                from .approvals import get_approval_service
+
+                get_approval_service().start_maintenance(interval_seconds=60.0)
             except Exception as e:
                 logger.warning(f"Approval service setup skipped: {e}")
 

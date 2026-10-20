@@ -166,6 +166,31 @@ from ...agents.stream_utils import (
 )
 
 
+def _drop_ephemeral_messages(mem: Any) -> int:
+    """Remove messages flagged ``metadata["ephemeral"]`` from an in-memory
+    message list.
+
+    Ephemeral messages (e.g. the per-turn knowledge-base context injected by
+    the enterprise plugin) must be visible to the model for the current turn
+    only; they are stripped both when loading a persisted session and when
+    saving it, so they never leak into later conversations.
+
+    Returns the number of removed messages.
+    """
+    content = getattr(mem, "content", None)
+    if not isinstance(content, list) or not content:
+        return 0
+    keep = [
+        item
+        for item in content
+        if not (getattr(item[0], "metadata", None) or {}).get("ephemeral")
+    ]
+    removed = len(content) - len(keep)
+    if removed:
+        mem.content = keep
+    return removed
+
+
 class AgentRunner(Runner):
     def __init__(
         self,
@@ -453,6 +478,15 @@ class AgentRunner(Runner):
             isolated_mem = InMemoryMemory()
             if memory_state:
                 isolated_mem.load_state_dict(memory_state, strict=False)
+            # Strip previously persisted ephemeral messages (e.g. knowledge-base
+            # context from earlier turns) so they never reach a new turn.
+            _stale = _drop_ephemeral_messages(isolated_mem)
+            if _stale:
+                logger.info(
+                    "_persist_chat_messages: dropped %d stale ephemeral "
+                    "message(s) from session memory",
+                    _stale,
+                )
             logger.info(
                 "_persist_chat_messages: isolated_mem loaded with %d messages",
                 len(isolated_mem.content),
@@ -640,6 +674,16 @@ class AgentRunner(Runner):
                 logger.info(
                     "  [%d] role=%s, blocks=%s, marks=%s",
                     idx, getattr(m, "role", "?"), block_types, marks,
+                )
+
+            # Ephemeral messages (knowledge-base context, per-turn hints) are
+            # used for this turn only and must not be persisted.
+            _eph = _drop_ephemeral_messages(isolated_mem)
+            if _eph:
+                logger.info(
+                    "_persist_chat_messages: excluded %d ephemeral message(s) "
+                    "from persisted memory",
+                    _eph,
                 )
 
             # Save updated memory state back to session using chat_id as key
@@ -1707,9 +1751,15 @@ class AgentRunner(Runner):
                         agent=agent,
                     )
                 except KeyError as e:
+                    # ``SafeJSONSession`` loads with ``strict=False``, so a
+                    # KeyError here means the file carries a *value* the module
+                    # cannot restore -- not a module the file omits.  Logging it
+                    # as "state schema mismatch" made a routine old-file load
+                    # look like data loss and hid the real cause.
                     logger.warning(
-                        "load_session_state skipped (state schema mismatch): %s; "
-                        "will save fresh state on completion to recover file",
+                        "load_session_state skipped (unrestorable state "
+                        "value): %s; the session starts from a fresh context "
+                        "and saves on completion",
                         e,
                     )
             session_state_loaded = True
@@ -1898,7 +1948,14 @@ class AgentRunner(Runner):
                             _hint = _enrich_res.get("hint")
                             if _hint and agent.memory:
                                 await agent.memory.add(
-                                    Msg(name="system", content=str(_hint), role="system")
+                                    Msg(
+                                        name="system",
+                                        content=str(_hint),
+                                        role="system",
+                                        # Per-turn knowledge-base context: this
+                                        # turn only, never persisted.
+                                        metadata={"ephemeral": True},
+                                    )
                                 )
                                 # Adjust snapshot length to include the hint
                                 _memory_snapshot_len = len(agent.memory.content)
@@ -2212,14 +2269,23 @@ class AgentRunner(Runner):
             # next message has room.
             try:
                 from ...agents.context.context_budget import (
+                    CompactionTimeoutError,
                     ContextOverflowError,
                 )
 
                 _code = getattr(converted, "code", None)
                 _code_text = str(getattr(_code, "value", _code) or "")
+                # B2: a compaction that ran out of time is the same family of
+                # failure -- the history is over the window and the cure did
+                # not finish.  It used to fall into the generic branch, so the
+                # remediation never ran for it and the next message hit the
+                # same wall.
+                _is_overflow = isinstance(
+                    e,
+                    (ContextOverflowError, CompactionTimeoutError),
+                )
                 if agent is not None and (
-                    isinstance(e, ContextOverflowError)
-                    or "CONTEXT_LENGTH" in _code_text
+                    _is_overflow or "CONTEXT_LENGTH" in _code_text
                 ):
                     agent._compaction_due = True
                     if chat is not None:
@@ -2246,21 +2312,13 @@ class AgentRunner(Runner):
             )
             logger.exception(f"Error in query handler: {converted}{path_hint}")
             if debug_dump_path:
+                # The dump is a server-side artefact: its path names the
+                # workspace, the user id and the session id.  It travels as a
+                # structured attribute (``debug_dump_path``) so a "view
+                # details" affordance can show it deliberately -- never pasted
+                # into the message the user reads, which used to render
+                # ``/app/workspaces/user_xxx/sessions/…`` in the chat bubble.
                 setattr(converted, "debug_dump_path", debug_dump_path)
-                if hasattr(converted, "add_note"):
-                    converted.add_note(
-                        f"(Details:  {debug_dump_path})",
-                    )
-                suffix = f"\n(Details:  {debug_dump_path})"
-                if hasattr(converted, "message") and isinstance(
-                    converted.message,
-                    str,
-                ):
-                    converted.message += suffix
-                elif converted.args:
-                    converted.args = (
-                        f"{converted.args[0]}{suffix}",
-                    ) + converted.args[1:]
             raise converted from e
         finally:
             # --- Flush memory manager on interrupt/cancel ---

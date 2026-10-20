@@ -166,6 +166,32 @@ async def update_model_prefs(
             detail=f"模型 {mid} 不在 provider {pid} 的模型列表中，无法设为偏好",
         )
 
+    # B1（2026-10-19）：窗口门槛前移到选择时。窗口小于一次请求固定开销
+    # （系统提示词 + 技能索引 + 工具清单）的模型，第一条消息就会 422 ——
+    # 生产 24 小时内 12 次，全是这个形状。选择模型时这个数是已知的，
+    # 就在这里告诉用户，而不是让他烧掉一整轮对话去发现。
+    if pid and mid:
+        from ...agents.context.window_source import check_model_window
+
+        try:
+            manager = request.app.state.provider_manager
+            provider = manager.get_provider(pid) if manager else None
+        except Exception:  # pragma: no cover - manager always present
+            provider = None
+        verdict = check_model_window(pid, mid, provider)
+        if not verdict.get("usable"):
+            # 回滚本次改动：偏好不落库，用户界面保持原状。
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"模型 {mid} 的可用上下文仅 {verdict.get('effective_tokens')} "
+                    f"tokens，低于 CoApis 一次请求固定开销所需的 "
+                    f"{verdict.get('threshold')} tokens（系统提示词 + 技能索引 + "
+                    "工具清单）。选它后第一条消息就会失败。请调大该模型的上下文"
+                    "窗口、减少启用的工具，或改选上下文更大的模型。"
+                ),
+            )
+
     _save_user_prefs(username, prefs)
 
     # 聊天模型变更后热生效：模型在 agent 构造时绑定，实例被缓存，

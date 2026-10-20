@@ -420,8 +420,15 @@ async def delete_my_agent(
     # └──────────────────────────────────────────────────────────────┘
     if not workspace:
         import shutil
-        from ....constant import WORKSPACES_DIR
-        agent_dir = WORKSPACES_DIR / username / "agents" / agent_id
+        from ....constant import WORKSPACES_DIR, sub_agent_key
+        # agent_id arrives from the request body and is about to be
+        # interpolated into an rmtree() path: gate it, or ".." in the
+        # payload deletes outside the user's workspace.
+        try:
+            safe_key = sub_agent_key(agent_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        agent_dir = WORKSPACES_DIR / username / "agents" / safe_key
         if agent_dir.exists():
             shutil.rmtree(agent_dir)
             logger.info(f"Cleaned up orphan agent directory: {agent_dir}")
@@ -441,8 +448,15 @@ async def delete_my_agent(
     if not success:
         # Fallback: direct disk cleanup
         import shutil
-        from ....constant import WORKSPACES_DIR
-        agent_dir = WORKSPACES_DIR / username / "agents" / agent_id
+        from ....constant import WORKSPACES_DIR, sub_agent_key
+        # agent_id arrives from the request body and is about to be
+        # interpolated into an rmtree() path: gate it, or ".." in the
+        # payload deletes outside the user's workspace.
+        try:
+            safe_key = sub_agent_key(agent_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        agent_dir = WORKSPACES_DIR / username / "agents" / safe_key
         if agent_dir.exists():
             shutil.rmtree(agent_dir)
             logger.info(f"Cleaned up agent directory after destroy failure: {agent_dir}")

@@ -27,6 +27,7 @@ import asyncio
 import logging
 import os
 import time
+import weakref
 from pathlib import Path
 from typing import (
     Any,
@@ -103,12 +104,40 @@ logger = logging.getLogger(__name__)
 # defers it: the loop marks it due, the runner starts it once the reply is
 # out, and the next turn budgets against the summary.
 #
-# One slot globally (拍板 D2): compaction is background work competing for the
-# same endpoint the chat is waiting on; letting every busy session compact at
-# once is how a fleet turns into a queue.
-_COMPACTION_SLOTS = 1
+# One slot globally was 拍板 D2: compaction is background work competing for
+# the same endpoint the chat is waiting on; letting every busy session compact
+# at once is how a fleet turns into a queue.  Measured on prod 2026-10-19,
+# though, a fixed 1 is a **throughput ceiling**: 11 background compactions
+# were deferred with "the single compaction slot is busy", i.e. history kept
+# growing while the queue drained one session at a time.
+#
+# B5 makes the ceiling follow the load: slots = clamp(1, 4, sessions_due // 4).
+# A single busy session keeps the old guarantee (1 slot, no fleet racing the
+# chat endpoint); a loaded server gets up to 4.  The count is live agents with
+# a compaction due, tracked in a WeakSet, so an idle deployment is 1 slot and
+# nobody has to configure the number.
+_COMPACTION_SLOTS_MIN = 1
+_COMPACTION_SLOTS_MAX = 4
+_COMPACTION_SESSION_DIVISOR = 4
 _COMPACTION_IN_FLIGHT = 0
 _COMPACTION_TASKS: set[asyncio.Task] = set()
+#: Live agents, so the slot count can see how many sessions are queued.
+_LIVE_AGENTS: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def compaction_slots() -> int:
+    """How many compactions may run at once, from the current queue."""
+    due = 0
+    for agent in list(_LIVE_AGENTS):
+        if getattr(agent, "_compaction_due", False):
+            due += 1
+    return min(
+        _COMPACTION_SLOTS_MAX,
+        max(
+            _COMPACTION_SLOTS_MIN,
+            due // _COMPACTION_SESSION_DIVISOR,
+        ),
+    )
 
 
 def schedule_background_compaction(
@@ -118,7 +147,7 @@ def schedule_background_compaction(
     """Run the compaction the reasoning loop deferred, off the user's turn.
 
     Returns the started task, or None when there is nothing to do (no compaction
-    due, one already running for this agent, or the single slot is busy).
+    due, one already running for this agent, or the slot budget is spent).
     ``persist`` is the caller's way to save the compacted memory: the runner
     writes the session file after the reply, so a compaction that finishes
     afterwards is invisible to storage unless it writes itself.
@@ -129,12 +158,15 @@ def schedule_background_compaction(
     current = getattr(agent, "_compaction_task", None)
     if current is not None and not current.done():
         return None
-    if _COMPACTION_IN_FLIGHT >= _COMPACTION_SLOTS:
+    slots = compaction_slots()
+    if _COMPACTION_IN_FLIGHT >= slots:
         # Keep the flag set: the next turn gets the compaction.
         logger.info(
-            "Background compaction for %s deferred: the single compaction "
-            "slot is busy.",
+            "Background compaction for %s deferred: %d/%d compaction slots "
+            "busy.",
             getattr(agent, "name", "?"),
+            _COMPACTION_IN_FLIGHT,
+            slots,
         )
         return None
 
@@ -665,6 +697,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # which runs it after the reply is delivered.
         self._compaction_due = False
         self._compaction_task: asyncio.Task | None = None
+        # B5: the compaction slot budget is derived from how many live
+        # sessions have a compaction queued, so the agents have to be
+        # countable.  WeakSet: an agent that is garbage collected stops
+        # consuming slots.
+        _LIVE_AGENTS.add(self)
 
         # Setup command handler
         self.command_handler = CommandHandler(
