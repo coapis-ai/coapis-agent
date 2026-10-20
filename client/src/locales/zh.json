@@ -2003,7 +2003,8 @@
       },
       "plan": {
         "description": "创建结构化计划，将任务分解为多个子任务"
-      }
+      },
+      "stop": "终止当前正在执行的任务"
     },
     "attachments": {
       "tooltip": "支持文档、图片、视频、音频等多种格式，单文件不超过 {{limit}}MB",
@@ -2597,7 +2598,13 @@
     "denied": "已拒绝工具调用",
     "approveFailed": "批准失败",
     "cancelTask": "取消任务",
-    "denyFailed": "拒绝失败"
+    "denyFailed": "拒绝失败",
+    "expiredTitle": "审批已失效",
+    "expiredHint": "该审批已超时失效，工具未执行。",
+    "expiredDesc": "请重新发起该操作，并在新的审批卡出现后立即批准。",
+    "close": "关闭",
+    "arrivedHint": "请在右下角审批卡中批准或拒绝，超时后审批将失效。",
+    "requested": "工具 {{tool}} 需要审批（{{count}} 条）"
   },
   "plan": {
     "title": "计划",

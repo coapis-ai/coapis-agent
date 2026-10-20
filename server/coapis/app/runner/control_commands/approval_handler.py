@@ -81,17 +81,34 @@ class ApprovalCommandHandler(BaseControlCommandHandler):
         if not request_id:
             pending = await svc.get_pending_by_session(context.session_id)
             if pending is None:
-                return "❌ **无待审批工具**\n\n" "当前会话没有需要审批的工具调用。"
+                return (
+                    "❌ **无待审批工具**\n\n"
+                    "当前会话没有需要审批的工具调用（审批超时后不会保留待审批）。"
+                )
             request_id = pending.request_id
 
         # Get pending by request_id (supports cross-session)
         pending = await svc.get_request(request_id)
         if pending is None:
-            return (
-                f"❌ **审批请求不存在**\n\n"
-                f"请求 ID: `{request_id[:16]}`\n\n"
-                f"可能已被处理或已超时。"
-            )
+            # Accept an id *prefix* — the UI only ever shows the first 8
+            # characters, so requiring the full UUID made
+            # ``/approve 1eb5d110`` unusable in practice.
+            cand, matches = await svc.find_live_by_prefix(request_id)
+            if matches == 1 and cand is not None:
+                pending = cand
+                request_id = cand.request_id
+            elif matches > 1:
+                return (
+                    f"⚠️ **编号前缀不唯一**\n\n"
+                    f"前缀 `{request_id}` 匹配到 {matches} 条待审批，"
+                    "请写更完整的编号（/approval list 可查看全部）。"
+                )
+            else:
+                return (
+                    f"❌ **审批请求不存在**\n\n"
+                    f"请求 ID: `{request_id[:16]}`\n\n"
+                    f"可能已被处理或已超时。输入 /approval list 查看当前待审批。"
+                )
 
         # Permission check: can only approve own agent's requests
         if pending.agent_id != context.agent_id:
@@ -102,11 +119,23 @@ class ApprovalCommandHandler(BaseControlCommandHandler):
                 f"- 当前Agent: `{context.agent_id}`"
             )
 
-        # Resolve the Future to unblock waiting agent
-        resolved = await svc.resolve_request(
+        # Resolve the Future to unblock waiting agent — only if it is waiting.
+        # Approving a record whose Future is already closed used to answer
+        # "✅ 工具已批准 … 状态: 正在执行..." while no agent coroutine was
+        # blocked on it any more: the chat just went quiet. That is symptom 3.
+        resolved, state = await svc.resolve_live(
             request_id,
             ApprovalDecision.APPROVED,
         )
+        if state != "ok":
+            return (
+                f"⚠️ **审批已失效，不会执行**\n\n"
+                f"- 工具: `{pending.tool_name}`\n"
+                f"- 请求 ID: `{request_id[:16]}`\n"
+                f"- 原因: 等待方已超时放弃（状态 "
+                f"{pending.status}），批准无法让工具执行。\n\n"
+                "请重新发起该操作，出现新的审批卡后立即批准。"
+            )
 
         # Show cross-session hint if applicable
         cross_session_hint = ""
@@ -139,17 +168,31 @@ class ApprovalCommandHandler(BaseControlCommandHandler):
         if not request_id:
             pending = await svc.get_pending_by_session(context.session_id)
             if pending is None:
-                return "❌ **无待审批工具**\n\n" "当前会话没有需要审批的工具调用。"
+                return (
+                    "❌ **无待审批工具**\n\n"
+                    "当前会话没有需要审批的工具调用（审批超时后不会保留待审批）。"
+                )
             request_id = pending.request_id
 
         # Get pending by request_id (supports cross-session)
         pending = await svc.get_request(request_id)
         if pending is None:
-            return (
-                f"❌ **审批请求不存在**\n\n"
-                f"请求 ID: `{request_id[:16]}`\n\n"
-                f"可能已被处理或已超时。"
-            )
+            cand, matches = await svc.find_live_by_prefix(request_id)
+            if matches == 1 and cand is not None:
+                pending = cand
+                request_id = cand.request_id
+            elif matches > 1:
+                return (
+                    f"⚠️ **编号前缀不唯一**\n\n"
+                    f"前缀 `{request_id}` 匹配到 {matches} 条待审批，"
+                    "请写更完整的编号（/approval list 可查看全部）。"
+                )
+            else:
+                return (
+                    f"❌ **审批请求不存在**\n\n"
+                    f"请求 ID: `{request_id[:16]}`\n\n"
+                    f"可能已被处理或已超时。输入 /approval list 查看当前待审批。"
+                )
 
         # Permission check: can only deny own agent's requests
         if pending.agent_id != context.agent_id:
@@ -160,11 +203,20 @@ class ApprovalCommandHandler(BaseControlCommandHandler):
                 f"- 当前Agent: `{context.agent_id}`"
             )
 
-        # Resolve the Future to unblock waiting agent
-        resolved = await svc.resolve_request(
+        # Resolve the Future to unblock waiting agent — only if it is waiting.
+        resolved, state = await svc.resolve_live(
             request_id,
             ApprovalDecision.DENIED,
         )
+        if state != "ok":
+            return (
+                f"✅ **审批已失效，无需拒绝**\n\n"
+                f"- 工具: `{pending.tool_name}`\n"
+                f"- 请求 ID: `{request_id[:16]}`\n"
+                f"- 原因: 等待方已超时放弃（状态 {pending.status}），"
+                "该操作不会执行。\n\n"
+                "如需执行，请重新发起该操作。"
+            )
 
         # Show cross-session hint if applicable
         cross_session_hint = ""
@@ -325,11 +377,20 @@ class ApproveCommandHandler(BaseControlCommandHandler):
         Returns:
             Response text from approval handler
         """
-        # Transform args: set action to approve
-        context.args = {
-            **context.args,
-            "action": "approve",
-        }
+        # Transform args: set action to approve, and carry the target id.
+        # ``/approve 1eb5d110`` used to drop the id on the floor (only
+        # ``action`` was set), so it silently approved the FIFO head —
+        # i.e. the *oldest dead* approval in the queue.
+        raw_args = context.args.get("_raw_args", "").strip()
+        parts = raw_args.split(maxsplit=1)
+
+        new_args = {**context.args, "action": "approve"}
+        if parts and parts[0].lower() not in ("approve", "all", "list", "status"):
+            new_args["request_id"] = parts[0]
+        if len(parts) > 1:
+            new_args["reason"] = parts[1]
+
+        context.args = new_args
 
         # Delegate to approval handler
         return await self._approval_handler._handle_approve(context)

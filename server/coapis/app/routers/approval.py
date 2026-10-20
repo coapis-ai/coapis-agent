@@ -97,11 +97,20 @@ async def post_approval_approve(
             detail=f"Approval request not found: {body.request_id[:16]}",
         )
 
-    if pending.root_session_id != body.session_id:
+    # Accept either the root session or the agent-side session id: the
+    # frontend resolves the chat identity from several sources (URL chatId →
+    # per-approval rootSessionId → global window fallback) and used to be
+    # rejected with 403 whenever it landed on the agent session id.
+    if body.session_id and body.session_id not in (
+        pending.root_session_id,
+        pending.session_id,
+    ):
         logger.warning(
-            "Root session mismatch: request %s (root: %s) not in session %s",
+            "Root session mismatch: request %s (root: %s, session: %s) "
+            "not in session %s",
             body.request_id[:16],
             pending.root_session_id,
+            pending.session_id,
             body.session_id,
         )
         raise HTTPException(
@@ -109,12 +118,30 @@ async def post_approval_approve(
             detail="Root session mismatch: cannot approve other session trees",
         )
 
-    # Resolve the Future
-    resolved = await svc.resolve_request(
+    # Resolve the Future — only when an agent is still waiting on it.
+    resolved, state = await svc.resolve_live(
         body.request_id,
         ApprovalDecision.APPROVED,
     )
 
+    if state == "stale":
+        # The waiting agent already gave up (timeout / cancelled). Promising
+        # "approved, executing..." here is the symptom-3 lie: the card says
+        # 批准 and nothing runs.
+        logger.warning(
+            "Approval approve on stale record: request_id=%s status=%s",
+            body.request_id[:16],
+            pending.status,
+        )
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "该审批已超时失效，批准不会执行工具。"
+                "请重新发起该操作，出现新审批卡后立即批准。"
+            ),
+        )
+
+    assert resolved is not None
     logger.info(
         "Approval approved: request_id=%s session=%s tool=%s",
         body.request_id[:16],
@@ -167,11 +194,16 @@ async def post_approval_deny(
             detail=f"Approval request not found: {body.request_id[:16]}",
         )
 
-    if pending.root_session_id != body.session_id:
+    if body.session_id and body.session_id not in (
+        pending.root_session_id,
+        pending.session_id,
+    ):
         logger.warning(
-            "Root session mismatch: request %s (root: %s) not in session %s",
+            "Root session mismatch: request %s (root: %s, session: %s) "
+            "not in session %s",
             body.request_id[:16],
             pending.root_session_id,
+            pending.session_id,
             body.session_id,
         )
         raise HTTPException(
@@ -179,12 +211,30 @@ async def post_approval_deny(
             detail="Root session mismatch: cannot approve other session trees",
         )
 
-    # Resolve the Future
-    resolved = await svc.resolve_request(
+    # Resolve the Future — only when an agent is still waiting on it.
+    resolved, state = await svc.resolve_live(
         body.request_id,
         ApprovalDecision.DENIED,
     )
 
+    if state == "stale":
+        # Denying a record nobody waits on is harmless; report it honestly.
+        logger.info(
+            "Approval deny on stale record: request_id=%s status=%s",
+            body.request_id[:16],
+            pending.status,
+        )
+        return ApprovalActionResponse(
+            success=True,
+            message=(
+                f"Tool '{pending.tool_name}' 已超时失效，"
+                "该操作不会执行（无需拒绝）。"
+            ),
+            tool_name=pending.tool_name,
+            request_id=body.request_id,
+        )
+
+    assert resolved is not None
     logger.info(
         "Approval denied: request_id=%s session=%s tool=%s",
         body.request_id[:16],

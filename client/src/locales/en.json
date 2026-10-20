@@ -2102,7 +2102,8 @@
       },
       "plan": {
         "description": "Create a structured plan to decompose the task into subtasks"
-      }
+      },
+      "stop": "Stop the task currently running"
     },
     "attachments": {
       "tooltip": "Supports documents, images, videos, audio and more formats, single file up to {{limit}}MB",
@@ -2546,7 +2547,13 @@
     "denied": "Tool call denied",
     "approveFailed": "Failed to approve",
     "cancelTask": "Cancel Task",
-    "denyFailed": "Failed to deny"
+    "denyFailed": "Failed to deny",
+    "expiredTitle": "Approval expired",
+    "expiredHint": "This approval timed out. The tool was not executed.",
+    "expiredDesc": "Ask for the same operation again and approve the new card right away.",
+    "close": "Close",
+    "arrivedHint": "Approve or deny it on the card at the bottom right; it expires on timeout.",
+    "requested": "Tool {{tool}} needs approval ({{count}} pending)"
   },
   "plan": {
     "title": "Plan",

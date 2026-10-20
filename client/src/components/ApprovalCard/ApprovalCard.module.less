@@ -33,6 +33,36 @@
   animation: fadeOutSlideDown 0.3s cubic-bezier(0.4, 0, 0.6, 1) forwards;
 }
 
+/* Terminal (dead) approval: expired, or the backend refused to resolve it.
+   Deliberately muted + no exit animation — it must stay until dismissed. */
+.cardExpired {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  animation: none;
+
+  &:hover {
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
+  }
+}
+
+/* Severity accents (referenced as styles[severity.toLowerCase()]). */
+.low {
+  border-left: 3px solid #22c55e;
+}
+
+.medium {
+  border-left: 3px solid #f59e0b;
+}
+
+.high {
+  border-left: 3px solid #ef4444;
+}
+
+.critical {
+  border-left: 3px solid #b91c1c;
+  background: #fef2f2;
+}
+
 @keyframes fadeOutSlideDown {
   from {
     opacity: 1;

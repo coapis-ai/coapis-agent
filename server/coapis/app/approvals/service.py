@@ -87,10 +87,98 @@ class ApprovalService:
         self._lock = asyncio.Lock()
         self._pending: dict[str, PendingApproval] = {}
         self._channel_manager: Any | None = None
+        self._gc_task: asyncio.Task[None] | None = None
 
     def set_channel_manager(self, channel_manager: Any) -> None:
         """Store a reference to the channel manager for push notifications."""
         self._channel_manager = channel_manager
+
+    # ------------------------------------------------------------------
+    # Expiry helpers
+    # ------------------------------------------------------------------
+
+    def _expire_stale_locked(self, now: float) -> int:
+        """Mark expired pending records as ``timeout`` and resolve futures.
+
+        Caller must hold ``_lock``.  A record is expired once
+        ``now - created_at > timeout_seconds``.  Resolving the future is
+        essential: the waiting agent coroutine has usually already given up,
+        and leaving the record ``pending`` makes every downstream reader
+        (``/console/push-messages``, ``/approve``) hand out a *dead*
+        approval — which is what produced the "card appears for 0 ms" and
+        "approved but nothing ran" symptoms.
+
+        Returns the number of records expired by this call.
+        """
+        expired = [
+            k
+            for k, v in self._pending.items()
+            if v.status == "pending"
+            and now - v.created_at > v.timeout_seconds
+        ]
+        for k in expired:
+            pending = self._pending[k]
+            if not pending.future.done():
+                pending.future.set_result(ApprovalDecision.TIMEOUT)
+            pending.status = "timeout"
+            pending.resolved_at = now
+            logger.info(
+                "Approval %s auto-timed out (age=%.0fs, timeout=%.0fs, tool=%s)",
+                k[:8],
+                now - pending.created_at,
+                pending.timeout_seconds,
+                pending.tool_name,
+            )
+        return len(expired)
+
+    def start_maintenance(self, interval_seconds: float = 60.0) -> None:
+        """Start the periodic expiry/GC loop (idempotent).
+
+        Expiry used to be evaluated only when a *new* approval was created
+        (``_gc_pending_locked``) or when a reader happened to call
+        ``list_pending_by_session``.  A session that produced one approval
+        and then went quiet kept its dead record alive for the full
+        ``_GC_PENDING_MAX_AGE_SECONDS`` (30 min), so the frontend kept
+        being handed corpses.  This loop makes expiry time-based.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("Approval maintenance: no running loop, skip")
+            return
+
+        if self._gc_task is not None and not self._gc_task.done():
+            return
+
+        async def _loop() -> None:
+            logger.info(
+                "Approval maintenance loop started (interval=%.0fs)",
+                interval_seconds,
+            )
+            while True:
+                try:
+                    await asyncio.sleep(interval_seconds)
+                    async with self._lock:
+                        expired = self._expire_stale_locked(time.time())
+                        self._gc_pending_locked()
+                    if expired:
+                        logger.info(
+                            "Approval maintenance: expired %d stale record(s)",
+                            expired,
+                        )
+                except asyncio.CancelledError:
+                    logger.debug("Approval maintenance loop cancelled")
+                    raise
+                except Exception:  # pragma: no cover - defensive
+                    logger.warning("Approval maintenance tick failed", exc_info=True)
+
+        self._gc_task = loop.create_task(_loop())
+
+    def stop_maintenance(self) -> None:
+        """Stop the periodic maintenance loop (used by tests/shutdown)."""
+        if self._gc_task is not None and not self._gc_task.done():
+            self._gc_task.cancel()
+        self._gc_task = None
 
     # ------------------------------------------------------------------
     # Core approval lifecycle
@@ -185,16 +273,47 @@ class ApprovalService:
         async with self._lock:
             return self._pending.get(request_id)
 
+    async def resolve_live(
+        self,
+        request_id: str,
+        decision: ApprovalDecision,
+    ) -> tuple[PendingApproval | None, str]:
+        """Resolve *request_id* only if an agent is still waiting on it.
+
+        Returns ``(pending, state)`` where ``state`` is one of:
+
+        ``ok``        — record was live, decision delivered, tool will run.
+        ``not_found`` — no such record (never existed / already GC'd).
+        ``stale``     — record exists but its Future is closed: the waiting
+                        agent gave up long ago. Approving it would only
+                        produce a "✅ 已批准，正在执行" message that nothing
+                        backs up — which is exactly symptom 3.
+        """
+        async with self._lock:
+            self._expire_stale_locked(time.time())
+            pending = self._pending.get(request_id)
+            if pending is None:
+                return None, "not_found"
+            if pending.status != "pending" or pending.future.done():
+                return pending, "stale"
+
+        resolved = await self.resolve_request(request_id, decision)
+        return resolved, "ok"
+
     async def get_pending_by_session(
         self,
         session_id: str,
     ) -> PendingApproval | None:
-        """Return the next pending approval for *session_id* (FIFO).
+        """Return the next *live* pending approval for *session_id* (FIFO).
 
         Pending approvals are consumed in creation order, so repeated
-        ``/approve`` inputs walk the queue from oldest to newest.
+        ``/approve`` inputs walk the queue from oldest to newest.  Expired
+        records are marked ``timeout`` and skipped — approving a dead record
+        is what made ``/approve`` answer "✅ 工具已批准 … 正在执行" while no
+        agent coroutine was waiting on the Future any more.
         """
         async with self._lock:
+            self._expire_stale_locked(time.time())
             for pending in self._pending.values():
                 if (
                     pending.session_id == session_id
@@ -207,12 +326,14 @@ class ApprovalService:
         self,
         session_id: str | None,
     ) -> list[PendingApproval]:
-        """Return pending approvals, optionally filtered by session_id.
+        """Return *live* pending approvals, optionally filtered by session_id.
 
-        When *session_id* is None, returns ALL pending approvals across
+        When *session_id* is None, returns ALL live pending approvals across
         all sessions (used by ConsolePollService which polls globally).
+        Expired records are marked ``timeout`` and excluded.
         """
         async with self._lock:
+            self._expire_stale_locked(time.time())
             if session_id is None:
                 return [
                     p for p in self._pending.values()
@@ -228,7 +349,7 @@ class ApprovalService:
         session_id: str,
         include_subagents: bool = True,  # pylint: disable=unused-argument
     ) -> list[PendingApproval]:
-        """List all pending approvals for a session (FIFO order).
+        """List all live pending approvals for a session (FIFO order).
 
         Args:
             session_id: Session ID to filter
@@ -236,34 +357,23 @@ class ApprovalService:
 
         Returns:
             List of pending approvals sorted by creation time.
-            Expired approvals (past timeout) are automatically filtered out
-            and marked as timeout.
+            Expired approvals (past timeout) are marked ``timeout``, their
+            Future resolved, and filtered out.
         """
         now = time.time()
         async with self._lock:
-            result = []
-            for p in self._pending.values():
-                if p.session_id == session_id and p.status == "pending":
-                    # Check if approval has expired
-                    if now - p.created_at > p.timeout_seconds:
-                        # Auto-timeout: mark as timeout and resolve future
-                        if not p.future.done():
-                            p.future.set_result(ApprovalDecision.TIMEOUT)
-                        p.status = "timeout"
-                        p.resolved_at = now
-                        logger.info(
-                            "Approval %s auto-timed out (age=%.0fs, timeout=%.0fs)",
-                            p.request_id[:8], now - p.created_at, p.timeout_seconds,
-                        )
-                        continue
-                    result.append(p)
+            self._expire_stale_locked(now)
+            result = [
+                p for p in self._pending.values()
+                if p.session_id == session_id and p.status == "pending"
+            ]
             return sorted(result, key=lambda p: p.created_at)
 
     async def get_pending_by_root_session(
         self,
         root_session_id: str,
     ) -> list[PendingApproval]:
-        """Get all pending approvals for root session and its children.
+        """Get all *live* pending approvals for root session and its children.
 
         Args:
             root_session_id: Root session ID
@@ -272,6 +382,7 @@ class ApprovalService:
             List of pending approvals sorted by creation time (FIFO)
         """
         async with self._lock:
+            self._expire_stale_locked(time.time())
             result = [
                 p
                 for p in self._pending.values()
@@ -284,7 +395,7 @@ class ApprovalService:
         self,
         agent_id: str,
     ) -> list[PendingApproval]:
-        """Get all pending approvals for an agent (across all sessions).
+        """Get all *live* pending approvals for an agent (across all sessions).
 
         Used by /approval list --all command.
 
@@ -295,6 +406,7 @@ class ApprovalService:
             List of pending approvals sorted by creation time (FIFO)
         """
         async with self._lock:
+            self._expire_stale_locked(time.time())
             result = [
                 p
                 for p in self._pending.values()
@@ -306,7 +418,7 @@ class ApprovalService:
         self,
         user_id: str,
     ) -> list[PendingApproval]:
-        """Get all pending approvals for a user (across all sessions and agents).
+        """Get all *live* pending approvals for a user.
 
         Used by /console/push-messages to ensure user-level isolation.
         Only returns approvals belonging to the specified user.
@@ -318,12 +430,60 @@ class ApprovalService:
             List of pending approvals sorted by creation time (FIFO)
         """
         async with self._lock:
+            self._expire_stale_locked(time.time())
             result = [
                 p
                 for p in self._pending.values()
                 if p.user_id == user_id and p.status == "pending"
             ]
             return sorted(result, key=lambda p: p.created_at)
+
+    async def find_live_by_prefix(
+        self,
+        request_id_prefix: str,
+        *,
+        session_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> tuple[PendingApproval | None, int]:
+        """Resolve a request id prefix to one *live* approval.
+
+        Lets ``/approve 1eb5d110`` target a specific approval.  Returns
+        ``(pending, matches)``: ``matches`` is how many live records share
+        the prefix, so the caller can complain about ambiguity instead of
+        silently approving the wrong tool.
+        """
+        if not request_id_prefix:
+            return None, 0
+        async with self._lock:
+            self._expire_stale_locked(time.time())
+            hits = [
+                p
+                for p in self._pending.values()
+                if p.status == "pending"
+                and p.request_id.startswith(request_id_prefix)
+                and (session_id is None or p.session_id == session_id)
+                and (agent_id is None or p.agent_id == agent_id)
+            ]
+        hits.sort(key=lambda p: p.created_at)
+        if len(hits) == 1:
+            return hits[0], 1
+        return None, len(hits)
+
+    async def live_remaining_seconds(self, request_id: str) -> float | None:
+        """Server-authoritative countdown for one approval, or None if gone.
+
+        The frontend used to derive the countdown from ``Date.now()`` minus
+        the server's ``created_at`` — two clocks that are not guaranteed to
+        agree.  A browser running a few seconds ahead made cards expire the
+        instant they mounted.
+        """
+        async with self._lock:
+            pending = self._pending.get(request_id)
+            if pending is None or pending.status != "pending":
+                return None
+            left = pending.timeout_seconds - (time.time() - pending.created_at)
+            return max(0.0, left)
+
 
     async def wait_for_approval(
         self,
@@ -453,6 +613,9 @@ class ApprovalService:
         Caller must hold ``_lock``.
         """
         now = time.time()
+        # Per-approval timeout first (the authoritative rule), then the
+        # coarse age/size caps.
+        self._expire_stale_locked(now)
         expired = [
             k
             for k, v in self._pending.items()

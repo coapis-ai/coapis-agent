@@ -4,7 +4,7 @@ import {
   type IAgentScopeRuntimeWebUIRef,
 } from "@agentscope-ai/chat";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, Result, Tooltip } from "antd";
+import { Button, Modal, Result, Tooltip, notification } from "antd";
 import { useAppMessage } from "../../hooks/useAppMessage";
 import {
   ExclamationCircleOutlined,
@@ -76,6 +76,16 @@ interface ApprovalMessageData {
   toolParams: Record<string, unknown>;
   createdAt: number;
   timeoutSeconds: number;
+  /** Server-authoritative countdown; preferred over createdAt math. */
+  remainingSeconds?: number;
+}
+
+/** A dead approval kept on screen so the user learns why nothing ran. */
+interface TerminalApproval {
+  requestId: string;
+  toolName: string;
+  title: string;
+  message: string;
 }
 
 import {
@@ -798,6 +808,17 @@ export default function ChatPage() {
   const [approvalRequests, setApprovalRequests] = useState<
     Map<string, ApprovalMessageData>
   >(new Map());
+  // Dead approvals (expired / refused by the backend). Kept rendered until
+  // the user dismisses them: a card that silently disappears teaches the
+  // user nothing about why the tool never ran.
+  const [terminalApprovals, setTerminalApprovals] = useState<
+    TerminalApproval[]
+  >([]);
+  // Mirror of approvalRequests for change detection inside the poll effect
+  // (reading state in a callback would capture a stale map).
+  const approvalRequestsRef = useRef<Map<string, ApprovalMessageData>>(
+    new Map(),
+  );
   const [planEnabled, setPlanEnabled] = useState(false);
 
   // Onboarding state
@@ -832,6 +853,12 @@ export default function ChatPage() {
   // D4：勾选即生效 —— 点一下加入会话引用，再点一下移出。
   const toggleCascadeNode = useCallback(
     (node: CascadeNode) => {
+      // 导航容器不是可引用对象：知识库/会话文件/我的空间/搜索结果的根节点
+      // key 是 "kb"/"session"/"files:/"/"search:x"，既不带 kb: 前缀也不以 / 开头，
+      // 落到下面的分支会被当成一个 id="kb" 的「文件」发给后端 —— 用户看到
+      // 「已选 1 项 知识库」，实际知识库引用为空，检索退化成全库聚合。
+      // 注意顺序：具体知识库节点 kind 也是 group（key = kb:<uuid>），
+      // 必须先放行 kb: 前缀，再拦截其余导航容器。
       if (node.key.startsWith("kb:")) {
         const id = node.key.slice(3);
         setSelectedKnowledge((prev) =>
@@ -841,6 +868,9 @@ export default function ChatPage() {
         );
         return;
       }
+      // 其余 group 都是导航容器（会话文件/我的空间/搜索结果根节点），
+      // 勾选它们没有可引用对象；真正的目录引用 key 一定以 / 开头。
+      if (node.kind === "group" && !node.key.startsWith("/")) return;
       const payload = node.payload as
         | { path?: string; size?: number }
         | undefined;
@@ -989,11 +1019,54 @@ export default function ChatPage() {
         toolParams: approval.tool_params,
         createdAt: approval.created_at,
         timeoutSeconds: approval.timeout_seconds,
+        remainingSeconds: approval.remaining_seconds,
+      });
+    }
+
+    // Visible arrival hint: a new approval id in *this* session gets a toast
+    // naming the tool. The floating card alone is easy to miss (it renders
+    // bottom-right and can be covered), which is how "提示要审批但没有审批
+    // 窗口" reads from the user's side.
+    const freshIds: string[] = [];
+    for (const id of newMap.keys()) {
+      if (!approvalRequestsRef.current.has(id)) freshIds.push(id);
+    }
+    approvalRequestsRef.current = newMap;
+    if (freshIds.length > 0) {
+      const newest = newMap.get(freshIds[0])!;
+      notification.info({
+        key: "approval-request",
+        message: t(
+          "approval.requested",
+          `工具 ${newest.toolName} 需要审批（${newMap.size} 条）`,
+          { tool: newest.toolName, count: newMap.size },
+        ),
+        description: t(
+          "approval.arrivedHint",
+          "请在右下角审批卡中批准或拒绝，超时后审批将失效。",
+        ),
+        duration: 6,
       });
     }
 
     setApprovalRequests(newMap);
-  }, [approvals, chatId]);
+  }, [approvals, chatId, t]);
+
+  const moveApprovalToTerminal = useCallback(
+    (requestId: string, toolName: string, title: string, detail: string) => {
+      setApprovalRequests((prev) => {
+        if (!prev.has(requestId)) return prev;
+        const next = new Map(prev);
+        next.delete(requestId);
+        return next;
+      });
+      setTerminalApprovals((prev) => {
+        if (prev.some((item) => item.requestId === requestId)) return prev;
+        return [...prev, { requestId, toolName, title, message: detail }];
+      });
+    },
+    [],
+  );
 
   const handleApprove = useCallback(
     async (requestId: string) => {
@@ -1046,11 +1119,24 @@ export default function ChatPage() {
           });
         }, 300); // Match animation duration
       } catch (error) {
-        message.error(t("approval.approveFailed"));
         console.error("[Approval] Failed to approve:", error);
+        // 410 = the waiting agent already gave up: approving cannot make the
+        // tool run. Show a terminal card with the server's reason instead of
+        // a generic "批准失败" toast that leaves a live-looking card behind.
+        const detail =
+          (error as { response?: { data?: { detail?: string } } })?.response
+            ?.data?.detail ||
+          (error as Error)?.message ||
+          "";
+        moveApprovalToTerminal(
+          requestId,
+          request.toolName,
+          t("approval.expiredTitle", "Approval expired"),
+          detail || t("approval.approveFailed"),
+        );
       }
     },
-    [approvalRequests, chatId, t, message],
+    [approvalRequests, chatId, t, message, moveApprovalToTerminal],
   );
 
   const handleDeny = useCallback(
@@ -1085,11 +1171,21 @@ export default function ChatPage() {
           });
         }, 300); // Match animation duration
       } catch (error) {
-        message.error(t("approval.denyFailed"));
         console.error("Failed to deny:", error);
+        const detail =
+          (error as { response?: { data?: { detail?: string } } })?.response
+            ?.data?.detail ||
+          (error as Error)?.message ||
+          "";
+        moveApprovalToTerminal(
+          requestId,
+          request.toolName,
+          t("approval.expiredTitle", "Approval expired"),
+          detail || t("approval.denyFailed"),
+        );
       }
     },
-    [approvalRequests, chatId, t, message],
+    [approvalRequests, chatId, t, message, moveApprovalToTerminal],
   );
 
   // Use custom hooks for better separation of concerns
@@ -1721,6 +1817,39 @@ export default function ChatPage() {
       },
     ];
 
+    // 审批类快捷指令此前只注册在后端，前端下拉里一条都没有，用户只能手输 ——
+    // 这正是「/approve 在输入下拉选项中没有」的成因。仅在存在待审批时出现，
+    // 避免菜单噪音；/approve 带尾空格，方便直接续写编号前缀。
+    if (approvalRequests.size > 0) {
+      commandSuggestions.push(
+        {
+          command: "/approve",
+          value: "approve ",
+          description: t(
+            "chat.commands.approve.description",
+            "批准待审批的工具（可加编号前缀精确指定）",
+          ),
+        },
+        {
+          command: "/deny",
+          value: "deny",
+          description: t(
+            "chat.commands.deny.description",
+            "拒绝当前待审批的工具",
+          ),
+        },
+      );
+    }
+
+    commandSuggestions.push({
+      command: "/stop",
+      value: "stop",
+      description: t(
+        "chat.commands.stop.description",
+        "终止当前正在执行的任务",
+      ),
+    });
+
     // /skills: all users (read-only listing)
     commandSuggestions.push({
       command: "/skills",
@@ -1951,26 +2080,18 @@ export default function ChatPage() {
             // 解决方案：使用 JSON 序列化/反序列化创建全新的对象
             const thawedOutput = JSON.parse(JSON.stringify(builderOutput));
 
-            // ⭐ 知识库引用卡片：后端 enrich_chat_context 把 citations 挂到
-            // completed 响应事件，这里注入最后一条助手消息的 cards，
-            // 由 KbCitations 卡片渲染「来源」折叠列表。
+            // ⭐ 知识库引用：后端 enrich_chat_context 把 citations 挂到 completed
+            // 响应事件。SDK 的响应气泡只按消息 type 渲染，不读消息级 cards，
+            // 所以引用必须挂在响应对象顶层，由 response.append 插槽消费。
             const _kbCites = (payload as any).citations;
-            if (Array.isArray(_kbCites) && _kbCites.length > 0) {
-              let _lastAssistant = -1;
-              for (let i = thawedOutput.length - 1; i >= 0; i--) {
-                if (thawedOutput[i]?.role === "assistant") { _lastAssistant = i; break; }
-              }
-              if (_lastAssistant >= 0) {
-                const _msg = thawedOutput[_lastAssistant];
-                _msg.cards = Array.isArray(_msg.cards) ? _msg.cards : [];
-                _msg.cards.push({ code: "KbCitations", data: { citations: _kbCites } });
-              }
-            }
 
             return {
               object: "response",
               status: payload.status || "completed",
               output: thawedOutput,
+              ...(Array.isArray(_kbCites) && _kbCites.length > 0
+                ? { citations: _kbCites }
+                : {}),
             } as any;
           }
 
@@ -2040,6 +2161,18 @@ export default function ChatPage() {
 
           return response;
         },
+      },
+      response: {
+        // 知识库引用来源：挂在响应气泡末尾（Actions 之前），默认折叠
+        append: [
+          {
+            id: "kb-citations",
+            order: 10,
+            render: ({ data }: { data: any }) => (
+              <CoApisKbCitations data={{ citations: data?.citations }} />
+            ),
+          },
+        ],
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
@@ -2193,16 +2326,37 @@ export default function ChatPage() {
             toolParams={request.toolParams}
             createdAt={request.createdAt}
             timeoutSeconds={request.timeoutSeconds}
+            remainingSeconds={request.remainingSeconds}
             sessionId={request.sessionId}
             rootSessionId={request.rootSessionId}
             onApprove={handleApprove}
             onDeny={handleDeny}
             onTimeout={(requestId) => {
-              console.log("[Chat] Approval timed out, removing:", requestId);
+              // Do NOT silently drop the card: move it to the terminal list
+              // so the user sees that the approval died and what to do next.
+              const dead = approvalRequests.get(requestId);
               setApprovalRequests((prev) => {
+                if (!prev.has(requestId)) return prev;
                 const next = new Map(prev);
                 next.delete(requestId);
                 return next;
+              });
+              setTerminalApprovals((prev) => {
+                if (prev.some((item) => item.requestId === requestId)) {
+                  return prev;
+                }
+                return [
+                  ...prev,
+                  {
+                    requestId,
+                    toolName: dead?.toolName || "",
+                    title: t("approval.expiredTitle", "Approval expired"),
+                    message: t(
+                      "approval.expiredHint",
+                      "This approval timed out. The tool was not executed.",
+                    ),
+                  },
+                ];
               });
             }}
             onCancel={() => {
@@ -2241,6 +2395,40 @@ export default function ChatPage() {
                 console.warn("[Chat] No chat_id resolved, cannot cancel task");
               }
             }}
+          />
+        </div>
+      ))}
+
+      {/* Dead approvals: expired / refused by the backend. Stay until the
+          user dismisses them — a card that vanishes teaches nothing. */}
+      {terminalApprovals.map((dead) => (
+        <div
+          key={`terminal-${dead.requestId}`}
+          style={{
+            position: "fixed",
+            bottom: 80,
+            right: 24,
+            width: "min(420px, calc(100vw - 48px))",
+            zIndex: 1000,
+          }}
+        >
+          <ApprovalCard
+            requestId={dead.requestId}
+            toolName={dead.toolName}
+            severity="LOW"
+            findingsCount={0}
+            findingsSummary=""
+            toolParams={{}}
+            createdAt={0}
+            timeoutSeconds={0}
+            onApprove={async () => {}}
+            onDeny={async () => {}}
+            terminal={{ title: dead.title, message: dead.message }}
+            onClose={() =>
+              setTerminalApprovals((prev) =>
+                prev.filter((item) => item.requestId !== dead.requestId),
+              )
+            }
           />
         </div>
       ))}

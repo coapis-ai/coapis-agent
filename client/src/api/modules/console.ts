@@ -17,6 +17,8 @@ export interface PendingApproval {
   tool_params: Record<string, unknown>;
   created_at: number;
   timeout_seconds: number;
+  /** Server-authoritative countdown (seconds); preferred over createdAt math. */
+  remaining_seconds?: number;
 }
 
 export const consoleApi = {
