@@ -489,11 +489,17 @@ class TestAffordableFloor:
             sum(len(str(m)) for m in msgs[1:]) == snapshot.history_chars
         )
 
-    def test_fixed_overhead_alone_overflow_names_the_cause(self):
-        """No history size fits: the message must name fixed overhead."""
+    def test_unaffordable_fixed_overhead_sheds_the_tool_catalogue(self):
+        """B1: fixed overhead over the window degrades; it does not kill the turn.
+
+        The old contract raised "the fixed overhead alone ... is at or over the
+        window, so no history size can fit" and the turn died.  The tool
+        catalogue is the biggest fixed cost and the one a model can answer
+        without, so the gate now sheds it (and cuts the system prompt if that
+        is still not enough) and produces an answer.
+        """
         from coapis.agents.context.context_budget import (
             ContextBudgetGuard,
-            ContextOverflowError,
         )
 
         guard = ContextBudgetGuard(
@@ -506,6 +512,32 @@ class TestAffordableFloor:
         tools = _heavy_tools(20, 1000)
         msgs = [{"role": "system", "content": "s" * 500}] + [
             {"role": "user", "content": "u" * 1000} for _ in range(5)
+        ]
+        snapshot = asyncio.run(guard.enforce(msgs, tools))
+
+        assert snapshot.total_chars <= snapshot.budget_chars
+        assert guard.degrade_mode == "no_tools"
+        assert guard.degrade_events[0]["mode"] == "no_tools"
+        assert guard.overflow_events == 1
+
+    def test_no_room_for_the_message_at_all_names_the_cause(self):
+        """The honest 422: not even a tool-less, system-cut request fits."""
+        from coapis.agents.context.context_budget import (
+            ContextBudgetGuard,
+            ContextOverflowError,
+        )
+
+        guard = ContextBudgetGuard(
+            None,
+            window=_window(1),
+            keep_chars_floor=12000,
+            memory_provider=lambda: None,
+            agent_name="heavy",
+        )
+        tools = _heavy_tools(20, 1000)
+        msgs = [
+            {"role": "system", "content": "s" * 4000},
+            {"role": "user", "content": "u" * 4000},
         ]
         with pytest.raises(ContextOverflowError) as excinfo:
             asyncio.run(guard.enforce(msgs, tools))

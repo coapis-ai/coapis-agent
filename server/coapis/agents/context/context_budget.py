@@ -44,8 +44,12 @@ Three outcomes, and the third is loud
   deletion (one oversized tool result is a single row, and the floor refuses
   to delete whole exchanges) the biggest rows are **truncated** head/tail in
   the sent view: the transcript in ``dialog/`` keeps the full text, the
-  request keeps the information it can act on.  If the fixed overhead alone
-  is over the window, raise :class:`ContextOverflowError`.  A request that
+  request keeps the information it can act on.  When even that cannot fit
+  the gate **degrades the request** (B1: shed the tool catalogue, cut the
+  system prompt to the window) and answers without tools, because a small
+  answer is an answer and a 422 is not.  :class:`ContextOverflowError` is
+  raised only when a tool-less, system-cut request still cannot fit -- i.e.
+  the window has no room for the user's own message at all.  A request that
   cannot fit is refused with a number attached — not sent to the provider to
   fail as an opaque 400.
 """
@@ -137,6 +141,36 @@ MIN_ROW_CHARS = 400
 # round re-measures, so the target is always the size the prompt actually has
 # after the previous round -- which is the point, since a prune changes it.
 _ENFORCE_MAX_ROUNDS = 4
+
+#: Wall-clock ceiling for **one gate pass** (B3, 2026-10-19).  The round count
+#: is not a time bound: 4 rounds x a compaction that is allowed to spend its
+#: whole global deadline is 12 minutes, and the per-chunk timeout is not a
+#: deadline either.  Measured on dev 2026-10-18: a 285-row history sat in
+#: ``running`` for 18 min 40 s producing zero log lines.  Past this ceiling the
+#: gate stops trying to make the history *nice* and makes it *fit*: prune and
+#: trim only, send the answer, compact on the next turn.
+CONTEXT_GATE_WALL_CLOCK_SECONDS = EnvVarLoader.get_float(
+    "COAPIS_CONTEXT_GATE_WALL_CLOCK_SECONDS",
+    240.0,
+    min_value=15.0,
+    max_value=1800.0,
+)
+
+#: Share of the **history budget** the keep-floor protects (B4, 2026-10-19).
+#: The floor used to be "half the compaction threshold" -- a number about the
+#: compactor, not about the conversation.  On a 11800-token window the fixed
+#: part takes 10.5K of 11.8K tokens, so a floor computed that way leaves
+#: 1.7K chars of history: the gate deletes everything it can and then
+#: truncates every surviving row, which is the "agent forgets everything and
+#: every line is cut" failure.  30% of what is actually left for history is
+#: the promise the gate makes: prune whole rows into the summary queue first,
+#: truncate only when even that cannot fit.
+CONTEXT_KEEP_FLOOR_HISTORY_RATIO = EnvVarLoader.get_float(
+    "COAPIS_CONTEXT_KEEP_FLOOR_HISTORY_RATIO",
+    0.30,
+    min_value=0.05,
+    max_value=0.90,
+)
 
 #: Rows shrink the prompt by less than their content each round (the
 #: ``str(msg)`` wrapper adds role/name/quotes) and the truncation marker
@@ -927,6 +961,52 @@ class ContextBudgetGuard:
         self.pruned_pending_chars = 0
         self.overflow_events = 0
 
+        # B3: one gate pass is bounded by wall clock, not only by rounds.
+        self.gate_wall_clock = self._resolve_positive_float(
+            "COAPIS_CONTEXT_GATE_WALL_CLOCK_SECONDS",
+            CONTEXT_GATE_WALL_CLOCK_SECONDS,
+            15.0,
+        )
+        self._gate_started: float | None = None
+
+        # B4: the keep-floor is a share of the *history* budget, so a fat
+        # fixed part shrinks it instead of forcing row-by-row truncation.
+        self.keep_floor_ratio = self._resolve_positive_float(
+            "COAPIS_CONTEXT_KEEP_FLOOR_HISTORY_RATIO",
+            CONTEXT_KEEP_FLOOR_HISTORY_RATIO,
+            0.05,
+        )
+
+        # B1: set when the gate had to degrade a request to answer at all
+        # ("no_tools" / "no_tools_sys_cut"); :meth:`__call__` sheds the tool
+        # catalogue accordingly.  ``degrade_events`` is the audit trail.
+        self.degrade_mode: str | None = None
+        self.degrade_events: list[dict[str, Any]] = []
+
+    @staticmethod
+    def _resolve_positive_float(
+        env_name: str,
+        fallback: float,
+        minimum: float,
+    ) -> float:
+        """Read a float knob from the environment, never zero or negative."""
+        try:
+            from coapis.constant import EnvVarLoader
+
+            value = EnvVarLoader.get_float(
+                env_name,
+                fallback,
+                min_value=minimum,
+                max_value=fallback * 20,
+            )
+        except Exception:  # pragma: no cover - constant module is importable
+            return float(fallback)
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return float(fallback)
+        return value if value >= minimum else float(fallback)
+
     @staticmethod
     def _resolve_compaction_timeout(value: float | None) -> float:
         """Per-compaction-call ceiling, env-configurable.
@@ -1025,6 +1105,118 @@ class ContextBudgetGuard:
     def _memory(self) -> Any:
         return self._memory_provider() if self._memory_provider else None
 
+    # ── gate clock (B3) ─────────────────────────────────────────────
+    def start_gate_clock(self) -> None:
+        """Begin the wall-clock bound for one gate pass."""
+        self._gate_started = time.monotonic()
+
+    def gate_time_left(self) -> float:
+        """Seconds this gate pass has left; the full budget if unstarted."""
+        if self._gate_started is None:
+            return self.gate_wall_clock
+        return self.gate_wall_clock - (time.monotonic() - self._gate_started)
+
+    def gate_expired(self) -> bool:
+        return self.gate_time_left() <= 0
+
+    def keep_floor(self, snapshot: BudgetSnapshot) -> int:
+        """How much history the gate promises to keep, for *this* request.
+
+        B4.  The configured ``keep_chars_floor`` is a number about the
+        compactor ("half the compaction threshold"); on a small window the
+        fixed part eats most of the budget and that floor leaves a history
+        smaller than the prompt, so the gate deletes every row it may and then
+        truncates every row that survives.  The floor is therefore capped at a
+        share of what is genuinely left for history, and never below
+        :data:`MIN_KEEP_CHARS`.
+        """
+        history_budget = max(0, snapshot.budget_chars - snapshot.fixed_chars)
+        ratio_floor = int(history_budget * self.keep_floor_ratio)
+        return max(MIN_KEEP_CHARS, min(self.keep_chars_floor, ratio_floor))
+
+    def _note_degrade(self, mode: str, snapshot: BudgetSnapshot) -> None:
+        """Record a degraded answer: it must be visible, not a silent success."""
+        self.degrade_mode = mode
+        self.degrade_events.append(
+            {
+                "mode": mode,
+                "agent": self.agent_name,
+                "total_chars": snapshot.total_chars,
+                "fixed_chars": snapshot.fixed_chars,
+                "budget_chars": snapshot.budget_chars,
+                "window": self.window.effective_tokens,
+            },
+        )
+        if len(self.degrade_events) > 20:
+            del self.degrade_events[:-20]
+        logger.warning(
+            "Context gate degraded the request for agent %s (%s): window %s "
+            "tokens, fixed %d chars, budget %d chars. The answer is being "
+            "produced without the tool catalogue.",
+            self.agent_name or "?",
+            mode,
+            self.window.effective_tokens,
+            snapshot.fixed_chars,
+            snapshot.budget_chars,
+        )
+
+    def _emergency_fit(
+        self,
+        messages: Any,
+        snapshot: BudgetSnapshot,
+    ) -> str | None:
+        """Make an unaffordable request affordable by degrading it (B1).
+
+        L2 sheds the tool catalogue -- the biggest fixed cost, and the one a
+        model can answer without.  L3 then cuts the system prompt to whatever
+        the window has left.  Both act on the **sent view** only; the agent's
+        own prompt and the transcript in ``dialog/`` are untouched.
+
+        Returns the degradation mode, or None when even a tool-less,
+        system-cut request cannot fit the user's own message.
+        """
+        budget = snapshot.budget_chars
+        bare = self.measure(messages, None)
+        if bare.total_chars <= budget:
+            self._note_degrade("no_tools", bare)
+            return "no_tools"
+
+        sys_index = next(
+            (i for i, row in enumerate(messages) if _is_system_row(row)),
+            None,
+        )
+        if sys_index is None:
+            return None
+        if not _row_content(messages[sys_index]):
+            return None
+        # Cut the system prompt to what the window has left after everything
+        # else.  The row is measured as its serialized form (``{"role":
+        # "system", "content": …}``), so the content budget is the total
+        # budget minus everything else *plus* the wrapper the content travels
+        # inside.  Re-measure after each cut: the formatter adds its own
+        # overhead, so the first cut is always a little generous.
+        current = bare
+        for _ in range(4):
+            content = _row_content(messages[sys_index])
+            if not content:
+                return None
+            room = budget - current.total_chars + len(content)
+            if room < MIN_ROW_CHARS:
+                return None
+            if room >= len(content):
+                return None  # the cut converged without fitting
+            if not _replace_row_content(
+                messages,
+                sys_index,
+                _cut_head_tail(content, room),
+            ):
+                return None
+            current = self.measure(messages, None)
+            if current.total_chars <= budget:
+                self._note_degrade("no_tools_sys_cut", current)
+                return "no_tools_sys_cut"
+        return None
+
     # ── enforcement ─────────────────────────────────────────────────
     def _trim_prompt(self, messages: Any, snapshot: BudgetSnapshot) -> int:
         """Drop the oldest history rows from the prompt being sent.
@@ -1045,11 +1237,7 @@ class ContextBudgetGuard:
         over = snapshot.total_chars - snapshot.budget_chars
         if over <= 0:
             return 0
-        floor = affordable_floor(
-            snapshot.budget_chars,
-            snapshot.fixed_chars,
-            self.keep_chars_floor,
-        )
+        floor = self.keep_floor(snapshot)
         # The system row is fixed overhead and stays at the head.
         start = 0
         if messages:
@@ -1075,6 +1263,23 @@ class ContextBudgetGuard:
             remaining -= size
             reclaimed += size
             dropped += 1
+        if reclaimed < over:
+            # B4: prefer losing whole rows over cutting every row.  Deleting
+            # a whole row archives it -- it lands in ``dialog/`` and is queued
+            # for the summary, so the agent can recall it.  Truncating every
+            # surviving row mutilates all of them at once and is not
+            # recoverable.  So the gate keeps dropping oldest rows down to the
+            # absolute floor before it reaches for the knife.
+            while index < len(messages):
+                if reclaimed >= over:
+                    break
+                size = len(str(messages[index]))
+                if remaining - size < MIN_KEEP_CHARS:
+                    break
+                messages.pop(index)
+                remaining -= size
+                reclaimed += size
+                dropped += 1
         truncated = 0
         if reclaimed < over:
             # The floor stopped the deletion.  Truncation is not bound by it:
@@ -1630,6 +1835,8 @@ class ContextBudgetGuard:
         """
         snapshot = self.measure(messages, tools)
         self.last_snapshot = snapshot
+        self.start_gate_clock()
+        self.degrade_mode = None
 
         # One line per reasoning step (拍板 §3.5): the bill the fixed part of
         # the request is paid in, in the unit the gate and the compactor both
@@ -1703,21 +1910,51 @@ class ContextBudgetGuard:
                     reclaimed,
                 )
                 return after
+            if self.gate_expired():
+                # B3: the round budget is not a time budget.  Past the wall
+                # clock the gate stops polishing and goes straight to the
+                # emergency fit: the user gets an answer now, the history
+                # gets compacted on the next turn.
+                logger.warning(
+                    "Context gate for agent %s ran out of its %.0fs wall "
+                    "clock after %d round(s) (%d -> %d chars); skipping "
+                    "further polishing.",
+                    self.agent_name,
+                    self.gate_wall_clock,
+                    round_no,
+                    snapshot.total_chars,
+                    after.total_chars,
+                )
+                break
 
         self.overflow_events += 1
-        floor = affordable_floor(
-            after.budget_chars,
-            after.fixed_chars,
-            self.keep_chars_floor,
-        )
+        mode = self._emergency_fit(messages, after)
+        if mode:
+            after = self.measure(messages, None)
+            self.last_snapshot = after
+            self._publish_to_governance(after)
+            logger.warning(
+                "Context gate answered agent %s in degraded mode '%s': "
+                "%d -> %d chars against a %d-char window. The tool "
+                "catalogue is off for this call; the transcript keeps "
+                "the full text.",
+                self.agent_name,
+                mode,
+                snapshot.total_chars,
+                after.total_chars,
+                after.budget_chars,
+            )
+            return after
+
+        floor = self.keep_floor(after)
         if after.fixed_chars >= after.budget_chars:
             cause = (
                 "the fixed overhead alone — system prompt, skills and tool "
                 f"schemas, {after.fixed_chars} chars, of which "
                 f"{after.tools_chars} are tool schemas — is at or over the "
-                f"{after.budget_chars}-char window, so no history size can "
-                "fit. Reduce the enabled tools, shorten the system prompt, "
-                "or raise the model's context window."
+                f"{after.budget_chars}-char window even with the tool "
+                "catalogue shed and the system prompt cut, so no history "
+                "size can fit. Raise the model's context window."
             )
         else:
             cause = (
@@ -2069,7 +2306,15 @@ class ContextBudgetGuard:
         # dev 2026-10-18 measured 19 chunks and 18 min 40 s of ``running``
         # with zero log lines.  Past the deadline the chunks that answered get
         # merged and the rest are dropped.
-        deadline_at = started + self.compaction_global_timeout
+        #
+        # B3: the ceiling is also clamped by the gate's own wall clock, so a
+        # compaction can never be the reason a turn runs past the ceiling the
+        # operator set.  The clamp keeps a usable floor — a summary request
+        # that gets 30s is worth far more than one that never runs.
+        deadline_at = started + min(
+            self.compaction_global_timeout,
+            max(30.0, self.gate_time_left() - 30.0),
+        )
 
         def _time_left() -> float:
             return deadline_at - time.monotonic()
@@ -2332,6 +2577,18 @@ class ContextBudgetGuard:
                             tools,
                             kwargs,
                         )
+                    except CompactionTimeoutError as exc:
+                        # B2: the cure ran out of time.  It must not be the
+                        # reason the turn dies — fall back to the single
+                        # fitted summary request and say so loudly.
+                        logger.warning(
+                            "Chunked compaction for agent %s timed out (%s); "
+                            "falling back to a single fitted summary request. "
+                            "The turn continues.",
+                            self.agent_name,
+                            exc,
+                        )
+                        reduced = None
                     except Exception:  # never let the cure break the call
                         logger.debug(
                             "Chunked compaction skipped",
@@ -2359,6 +2616,12 @@ class ContextBudgetGuard:
         snapshot: BudgetSnapshot | None = None
         if messages is not None:
             snapshot = await self.enforce(messages, tools)
+            # B1: the gate degraded this request (shed the tool catalogue to
+            # fit a small window).  The measurement said "without tools";
+            # the request must go out that way, not with the catalogue still
+            # attached.
+            if self.degrade_mode and tools:
+                tools = None
         self._publish_to_governance(snapshot)
         try:
             return await self._inner(messages, tools=tools, **kwargs)

@@ -194,8 +194,15 @@ class TestGiantRowTruncation:
         assert guard.overflow_events == 0
 
     @pytest.mark.asyncio
-    async def test_fixed_overhead_alone_still_raises(self):
-        """Truncation covers history, not an unaffordable fixed overhead."""
+    async def test_unaffordable_fixed_overhead_degrades_instead_of_dying(self):
+        """B1: an unaffordable fixed overhead answers, it does not 422.
+
+        The old contract was "truncation covers history, not an unaffordable
+        fixed overhead" — so a 500-token window with a 4000-char system prompt
+        raised, and the user's first message in a brand-new chat failed.  The
+        gate now sheds the tool catalogue and cuts the system prompt to the
+        window: a small answer is an answer.
+        """
         window = _window(tokens=500, cpt=1.1)
         guard = ContextBudgetGuard(
             _FakeModel(),
@@ -204,6 +211,39 @@ class TestGiantRowTruncation:
             agent_name="test",
         )
         messages = [_sys("s" * 4_000), _row("user", "hi")]
+        snapshot = await guard.enforce(messages, "t" * 4_000)
+
+        assert snapshot.total_chars <= snapshot.budget_chars
+        assert guard.degrade_mode in ("no_tools", "no_tools_sys_cut")
+        assert guard.degrade_events, "the degradation must be recorded"
+
+    async def test_degraded_answer_still_fits_after_the_tool_catalogue_is_off(
+        self,
+    ):
+        """The measurement that justified degrading is the one that gets sent."""
+        window = _window(tokens=900, cpt=1.1)
+        guard = ContextBudgetGuard(
+            _FakeModel(),
+            window=window,
+            compact_threshold_ratio=0.8,
+            agent_name="test",
+        )
+        messages = [_sys("s" * 1_500), _row("user", "hi")]
+        snapshot = await guard.enforce(messages, "t" * 4_000)
+        assert guard.degrade_mode in ("no_tools", "no_tools_sys_cut")
+        assert snapshot.total_chars <= snapshot.budget_chars
+        assert guard.measure(messages, None).total_chars <= snapshot.budget_chars
+
+    async def test_no_room_for_the_users_own_message_still_raises(self):
+        """The one case a 422 is honest: the message itself cannot fit."""
+        window = _window(tokens=1, cpt=1.0)
+        guard = ContextBudgetGuard(
+            _FakeModel(),
+            window=window,
+            compact_threshold_ratio=0.9,
+            agent_name="test",
+        )
+        messages = [_sys("s" * 4_000), _row("user", "x" * 4_000)]
         with pytest.raises(ContextOverflowError):
             await guard.enforce(messages, "t" * 4_000)
 

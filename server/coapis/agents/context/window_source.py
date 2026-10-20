@@ -616,3 +616,104 @@ def feedback_report() -> dict[str, dict[str, Any]]:
     for (provider_id, model_name), entry in _FEEDBACK.items():
         out[f"{provider_id}/{model_name}"] = dict(entry)
     return out
+
+
+# ── selection-time window gate (B1, 2026-10-19) ─────────────────────
+#: Smallest context window an agent may be pointed at.
+#:
+#: Measured on prod 2026-10-19: 12 ``ContextOverflowError`` in 24 hours, all of
+#: them the same shape -- a model whose whole window is smaller than the fixed
+#: part of a CoApis request (system prompt + skill index + tool catalogue ≈
+#: 10.5K tokens at the calibrated 2.0 chars/token).  Such a model cannot answer
+#: **any** message, not even "你好": the gate measures, finds fixed ≥ budget,
+#: and the turn dies with 422.
+#:
+#: The gate used to discover this at the first message of a chat.  Choosing the
+#: model is where the number is knowable, and where telling the user costs one
+#: toast instead of a dead conversation.
+MIN_USABLE_WINDOW_TOKENS = 12000
+
+
+def min_usable_window_tokens() -> int:
+    """The gate threshold, overridable for unusually lean tool sets."""
+    try:
+        from ...constant import EnvVarLoader
+
+        value = EnvVarLoader.get_int(
+            "COAPIS_MIN_USABLE_WINDOW_TOKENS",
+            MIN_USABLE_WINDOW_TOKENS,
+            min_value=4000,
+            max_value=1000000,
+        )
+    except Exception:  # pragma: no cover - constant module is importable
+        return MIN_USABLE_WINDOW_TOKENS
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return MIN_USABLE_WINDOW_TOKENS
+    return value if value >= 4000 else MIN_USABLE_WINDOW_TOKENS
+
+
+def window_usability(effective_tokens: int | None) -> dict[str, Any]:
+    """Judge a resolved window for running an agent on it.
+
+    ``None`` (the provider reported nothing) is **usable**: an unknown number
+    is not evidence of a small model, and refusing a model because we failed to
+    read its metadata would be refusing it for our own blindness.
+    """
+    threshold = min_usable_window_tokens()
+    try:
+        tokens: int | None = int(effective_tokens) if effective_tokens else None
+    except (TypeError, ValueError):
+        tokens = None
+    if tokens is None:
+        return {
+            "usable": True,
+            "effective_tokens": None,
+            "threshold": threshold,
+            "reason": "unknown",
+        }
+    if tokens < threshold:
+        return {
+            "usable": False,
+            "effective_tokens": tokens,
+            "threshold": threshold,
+            "reason": (
+                f"this model's usable context is {tokens} tokens, below the "
+                f"{threshold}-token floor CoApis needs for the fixed part of a "
+                "request (system prompt, skill index and tool catalogue). A "
+                "chat on it fails on its first message. Raise the model's "
+                "context window, enable fewer tools, or choose a model with a "
+                "larger window."
+            ),
+        }
+    return {
+        "usable": True,
+        "effective_tokens": tokens,
+        "threshold": threshold,
+        "reason": "ok",
+    }
+
+
+def check_model_window(
+    provider_id: str | None,
+    model_name: str | None,
+    provider_obj: Any = None,
+) -> dict[str, Any]:
+    """Resolve a model's declared window and judge it, for the activation gate.
+
+    Declared metadata only, no network: this runs when a user saves a model
+    chip, and a probe that hangs would be worse than the 422 it prevents.
+    """
+    tokens = reported_window_for(provider_id, model_name)
+    if tokens is None and provider_obj is not None:
+        declared = getattr(provider_obj, "max_input_tokens", None)
+        try:
+            tokens = int(declared) if declared else None
+        except (TypeError, ValueError):
+            tokens = None
+    if tokens is not None and tokens < _MIN_WINDOW_TOKENS:
+        # A number below the sanity floor is a mis-declaration, not a window;
+        # judging on it would refuse a model we simply cannot trust.
+        tokens = None
+    return window_usability(tokens)
