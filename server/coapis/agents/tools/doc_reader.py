@@ -741,6 +741,7 @@ async def doc_reader(
     end_char: int = -1,
     keywords: str = "",
     goal: str = "",
+    context: str = "",
 ) -> dict[str, Any]:
     """Parse a document into structured text.
 
@@ -772,6 +773,9 @@ async def doc_reader(
             (caps: 12 calls / 120000 input characters) and returns
             sections, facts and pointers into the original — never the
             original text.
+        context: P4 多文件全局上下文 — 当前任务描述。当模型需要跨多个
+            文件完成同一任务时（如"对比分析这 3 个文件"），传入任务描述
+            让每次读取都携带全局上下文，保持主题一致性。
 
     Returns:
         Parse result, with the read cursor (``read_to`` /
@@ -975,6 +979,13 @@ async def doc_reader(
         "returned_chars": len(content_text),
         "content": content_text,
     }
+    # P4 多文件上下文：注入全局任务提示，让模型在读取每个文件时
+    # 知道当前任务是什么，保持跨文件的一致性
+    if context:
+        out["context_hint"] = (
+            f"当前任务：{context[:300]}。"
+            "本文件是任务的一部分，请结合任务目标理解内容。"
+        )
     if truncated:
         # Say where it stopped: a silent cap is what made a document get
         # re-read whole (measured on dev: 100,000 then 241,000 characters).

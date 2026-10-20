@@ -47,6 +47,16 @@ _INSTRUCTION = (
     "没有内容的字段给一个短说明（如「无」），不要编造，不要复述原文长句。"
 )
 
+# P2 滚动综合：每块携带前文摘要，模型输出与全局综合后的结果。
+# 前文摘要的字符上限按块数自适应：块越多，每块携带的前文越短。
+_ROLLING_CAP_BASE = 2000   # 基础上限（单块时）
+_ROLLING_CAP_MIN = 400     # 最低下限（块数很多时）
+
+
+def _rolling_cap(total_chunks: int) -> int:
+    """Adaptive cap for the rolling summary carried into each chunk."""
+    return max(_ROLLING_CAP_MIN, _ROLLING_CAP_BASE // max(1, total_chunks))
+
 
 def _digest_path(key: str, cache_dir: Path) -> Path:
     return cache_dir / f"{key}.digest.json"
@@ -217,6 +227,9 @@ async def read_doc_digest(
     calls = 0
     input_chars = 0
     last_error = ""
+    # P2 滚动综合：前文摘要随块推进，每块携带前文要点做综合
+    rolling_summary = ""
+    rolling_cap = _rolling_cap(len(chunks))
 
     for chunk in chunks:
         if calls >= max_calls or input_chars >= max_input_chars:
@@ -236,26 +249,43 @@ async def read_doc_digest(
         calls += 1
         span = chunk["ranges"][0]
         try:
+            # P2：构建带前文摘要的 prompt
+            user_content = (
+                f"目标：{goal}\n\n"
+                f"片段位置：{span[0]}-{chunk['ranges'][-1][1]}"
+                f"（{chunk['titles'][0]} 起）\n\n"
+            )
+            if rolling_summary:
+                user_content += (
+                    f"前文综合摘要（已处理 {calls - 1} 段）：\n"
+                    f"{rolling_summary[:rolling_cap]}\n\n"
+                )
+            user_content += text
             prompt = await formatter.format(
                 [
                     Msg("system", _INSTRUCTION, "system"),
-                    Msg(
-                        "user",
-                        f"目标：{goal}\n\n片段位置：{span[0]}-{chunk['ranges'][-1][1]}"
-                        f"（{chunk['titles'][0]} 起）\n\n{text}",
-                        "user",
-                    ),
+                    Msg("user", user_content, "user"),
                 ],
             )
             res = await model(prompt)
             body = res.get_text_content() if hasattr(res, "get_text_content") else ""
             meta = getattr(res, "metadata", None) or {}
-            sections.extend(_split_lines(meta.get("sections") or ""))
-            facts.extend(_split_lines(meta.get("facts") or ""))
-            pointers.extend(_split_lines(meta.get("pointers") or ""))
-            if not (sections or facts) and body:
+            chunk_sections = _split_lines(meta.get("sections") or "")
+            chunk_facts = _split_lines(meta.get("facts") or "")
+            chunk_pointers = _split_lines(meta.get("pointers") or "")
+            sections.extend(chunk_sections)
+            facts.extend(chunk_facts)
+            pointers.extend(chunk_pointers)
+            if not (chunk_sections or chunk_facts) and body:
                 # Structured output unavailable: keep what the model said.
-                sections.extend(_split_lines(body)[:8])
+                chunk_sections = _split_lines(body)[:8]
+                sections.extend(chunk_sections)
+            # P2：更新滚动摘要（综合前文 + 本段要点）
+            new_lines = chunk_sections[:5] + chunk_facts[:5]
+            if new_lines:
+                rolling_summary = (
+                    rolling_summary[:rolling_cap] + "\n" + "\n".join(new_lines)
+                )[:rolling_cap * 2]  # 滚动窗口，允许适度增长
             covered.extend(chunk["ranges"])
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"

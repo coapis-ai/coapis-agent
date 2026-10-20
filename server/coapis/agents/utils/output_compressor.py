@@ -19,9 +19,14 @@
 Provides tiered truncation for tool outputs to reduce context bloat
 in the ReAct reasoning loop. Each tool can use the appropriate
 compressor for its output type.
+
+P3 智能压缩：超长输出不再简单 head+tail 截断，而是提取语义关键行
+（ERROR/WARN/统计/结论）+ 头尾，让模型看到最有信息量的部分。
 """
 
 from __future__ import annotations
+
+import re
 
 
 # ── Default thresholds ──
@@ -32,14 +37,51 @@ _GREP_MAX_LINES = 200         # grep_search result max lines
 _GREP_MAX_CHARS = 8000        # grep_search result max chars
 _GENERIC_MAX_CHARS = 3000     # Generic tool output max chars
 
+# P3: 语义关键行模式（可扩展正则）
+_KEY_LINE_PATTERNS = re.compile(
+    r"(?:^|\n)"
+    r"("
+    r"(?:ERROR|FATAL|CRITICAL|SEVERE|error|fatal|critical)"
+    r"|(?:WARNING|WARN|warning|warn)"
+    r"|(?:FAILED|failed|FAILURE|failure|FAIL|fail)"
+    r"|(?:Traceback|Exception|exception)"
+    r"|(?:\d+\s*(?:error|warning|fail)\w*)"
+    r"|(?:passed|failed|skipped)\s+\d+"
+    r"|(?:Total|Summary|Result|result:)"
+    r"|(?:Build|Test|Compile|Deploy)\s+(?:success|failed|complete|finished)"
+    r")",
+    re.IGNORECASE,
+)
+_KEY_LINE_MAX = 1500       # chars of extracted key lines
+_KEY_LINE_MAX_LINES = 30   # max key lines to extract
+
+
+def _extract_key_lines(text: str) -> str:
+    """P3: Extract semantically important lines from long output.
+
+    Scans for ERROR/WARN/FAIL/Traceback/statistics/conclusion lines
+    so the model sees the most informative content, not just head+tail.
+    """
+    lines = text.split("\n")
+    key_lines: list[str] = []
+    for line in lines:
+        if _KEY_LINE_PATTERNS.search(line):
+            key_lines.append(line.strip())
+            if len(key_lines) >= _KEY_LINE_MAX_LINES:
+                break
+    if not key_lines:
+        return ""
+    result = "\n".join(key_lines)
+    return result[:_KEY_LINE_MAX]
+
 
 def compress_shell_output(text: str, max_chars: int = _SHELL_MAX_CHARS) -> str:
-    """Compress shell command output with head+tail preservation.
+    """Compress shell command output with key-line extraction + head+tail.
 
-    Strategy:
+    Strategy (P3 智能压缩):
     - Short output (<= max_chars): return as-is
-    - Long output: keep head (most recent/relevant) + tail (conclusion)
-      with an omission notice showing how many chars were skipped.
+    - Long output: extract key lines (ERROR/WARN/stats/conclusions)
+      + head + tail, with omission notice.
 
     Args:
         text: Raw shell output string.
@@ -51,15 +93,26 @@ def compress_shell_output(text: str, max_chars: int = _SHELL_MAX_CHARS) -> str:
     if not text or len(text) <= max_chars:
         return text
 
-    head = text[:_SHELL_HEAD_CHARS]
-    tail = text[-(max_chars - _SHELL_HEAD_CHARS):]
-    skipped = len(text) - max_chars
+    # P3: 提取语义关键行
+    key_lines = _extract_key_lines(text)
 
-    return (
-        f"{head}\n\n"
-        f"[...省略 {skipped} 字符，原始长度 {len(text)} 字符...]\n\n"
-        f"{tail}"
+    # 分配预算：关键行 + 头 + 尾
+    key_budget = len(key_lines) + 1 if key_lines else 0
+    remaining = max_chars - key_budget
+    head_budget = max(500, int(remaining * 0.65))
+    tail_budget = max(200, remaining - head_budget)
+
+    head = text[:head_budget]
+    tail = text[-tail_budget:]
+    skipped = len(text) - head_budget - tail_budget
+
+    parts = [head]
+    if key_lines:
+        parts.append(f"\n\n[关键行]\n{key_lines}\n")
+    parts.append(
+        f"\n[...省略 {skipped} 字符，原始长度 {len(text)} 字符...]\n\n{tail}"
     )
+    return "".join(parts)
 
 
 def compress_file_content(

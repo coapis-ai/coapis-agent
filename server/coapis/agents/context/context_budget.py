@@ -769,6 +769,63 @@ _COMPACT_CHUNK_CEILING = EnvVarLoader.get_int(
 # the configurable value and made COAPIS_CONTEXT_COMPACTION_MAX_CHUNKS a dead
 # knob (the constant was read at import time, before the override never existed).
 
+# ── context anchor for chunked compaction ────────────────────────────
+# When a long history is split into chunks, each chunk is summarized in
+# isolation.  Without a global context anchor the model summarizing chunk 3
+# does not know the user's task goal, the constraints, or what chunk 1
+# established.  The anchor is a lightweight (≤500 char) system message
+# injected into every map request and the reduce request so every call
+# shares the same topic, requirements, and prior findings.
+_ANCHOR_MAX_CHARS = 500
+_ANCHOR_TASK_CAP = 200   # chars of the first user message (task definition)
+_ANCHOR_TAIL_CAP = 200   # chars of the tail user message (latest requirement)
+_ANCHOR_PRIOR_CAP = 100  # chars of the prior partial summary (rolling context)
+
+
+def _extract_task_anchor(history: list, tail: list) -> str:
+    """Build a lightweight context anchor from the conversation.
+
+    Extracts the task definition (first user message) and the latest
+    requirement (tail user message) so every chunk summary knows what
+    the conversation is *about* and what the user *needs*.
+
+    Returns an empty string when no user messages are found (degrades
+    to the existing generic mini_sys behavior).
+    """
+    parts: list[str] = []
+    # Task definition: first user message in history
+    for row in history:
+        if isinstance(row, dict) and row.get("role") == "user":
+            content = str(row.get("content", "")).strip()
+            if content:
+                parts.append(f"任务定义：{content[:_ANCHOR_TASK_CAP]}")
+                break
+    # Latest requirement: tail user message
+    for row in tail:
+        if isinstance(row, dict) and row.get("role") == "user":
+            content = str(row.get("content", "")).strip()
+            if content:
+                parts.append(f"最新要求：{content[:_ANCHOR_TAIL_CAP]}")
+                break
+    if not parts:
+        return ""
+    anchor = "\n".join(parts)
+    return anchor[:_ANCHOR_MAX_CHARS]
+
+
+def _build_anchor_row(task_anchor: str, idx: int, total: int,
+                      prior_summary: str = "") -> dict:
+    """Build the context anchor system row for a map/reduce request."""
+    lines = [
+        f"你正在处理长对话的第 {idx + 1}/{total} 段摘要。"
+        "保持与任务主题和要求的一致性，不要偏离。"
+    ]
+    if task_anchor:
+        lines.append(task_anchor)
+    if prior_summary:
+        lines.append(f"前文要点：{prior_summary[:_ANCHOR_PRIOR_CAP]}")
+    return {"role": "system", "content": "\n".join(lines)}
+
 
 def _row_chars(row: Any) -> int:
     return len(str(row))
@@ -2230,6 +2287,9 @@ class ContextBudgetGuard:
             return None
 
         mini_sys = {"role": "system", "content": _COMPACT_MINI_SYS}
+        # Context anchor: extract task goal + latest requirement so every
+        # chunk summary knows what the conversation is about (P1 锚定).
+        task_anchor = _extract_task_anchor(history, tail)
         budget_chars = self.window.to_chars(
             int(self.window.effective_tokens * self.compaction_input_ratio),
         )
@@ -2332,6 +2392,11 @@ class ContextBudgetGuard:
                 )
                 return None
             request = [mini_sys, *chunk, *tail, self._json_contract_row(kwargs)]
+            # P1 锚定：注入任务上下文锚点，让每块摘要知道全局主题和要求
+            if task_anchor:
+                anchor_row = _build_anchor_row(task_anchor, idx, total)
+                request = [mini_sys, anchor_row, *chunk, *tail,
+                           self._json_contract_row(kwargs)]
             request = fit_prompt_to_budget(
                 request,
                 self.window,
@@ -2431,8 +2496,14 @@ class ContextBudgetGuard:
             if final is None:
                 return None
         else:
+            # P1 锚定：reduce 步骤也携带任务锚点，合并时保持主题一致性
+            reduce_anchor = _build_anchor_row(
+                task_anchor, total, total,
+                prior_summary=collected[-1] if collected else "",
+            ) if task_anchor else None
             merge_request = [
                 mini_sys,
+                *([reduce_anchor] if reduce_anchor else []),
                 {"role": "user", "content": merged_text},
                 self._json_contract_row(kwargs),
                 *tail,
