@@ -1,5 +1,6 @@
 import { api } from "@/api";
 import type { CascadeNode } from "@/components/CascadeMenu/CascadeMenu";
+import { mediaTypeFromFilename } from "../mediaType";
 
 /**
  * 级联菜单的数据适配器 —— 领域知识只写在这里。
@@ -83,7 +84,7 @@ async function loadMySpaceDir(dir: string, force = false): Promise<CascadeNode[]
           kind: "item",
           usage: "reference",
           meta: sizeLabel(it.size ?? 0),
-          payload: { path: it.path, type: "file", size: it.size },
+          payload: { path: it.path, type: mediaTypeFromFilename(it.name), size: it.size },
         },
   );
   // 后端 page_size=200 会截断，total 是截断前的总数。把差额作为「more」计数节点
@@ -151,7 +152,11 @@ function resourceNode(r: Record<string, unknown>): CascadeNode {
     kind: "item",
     usage: "reference",
     meta: parts.join(" · "),
-    payload: { path: p, type: "file", size: Number(r.size_bytes ?? 0) },
+    payload: {
+      path: p,
+      type: mediaTypeFromFilename(String(r.title ?? basename(p))),
+      size: Number(r.size_bytes ?? 0),
+    },
   };
 }
 
@@ -323,7 +328,7 @@ async function loadSearch(kw: string, force = false): Promise<CascadeNode[]> {
             kind: "item",
             usage: "reference",
             meta: dir,
-            payload: { path: p, type: "file", size: it.size },
+            payload: { path: p, type: mediaTypeFromFilename(it.name), size: it.size },
           },
     );
   }

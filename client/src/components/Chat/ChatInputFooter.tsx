@@ -9,6 +9,9 @@ import {
   FileOutlined,
   BookOutlined,
   FolderOpenOutlined,
+  PictureOutlined,
+  VideoCameraOutlined,
+  AudioOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { FileInfo, KnowledgeInfo } from './types';
@@ -23,11 +26,16 @@ interface ChatInputFooterProps {
   onClearAll?: () => void;
 }
 
-type ChipKind = 'folder' | 'file' | 'knowledge';
+type ChipKind = 'folder' | 'file' | 'image' | 'video' | 'audio' | 'knowledge';
 
 const CHIP_ICON: Record<ChipKind, React.ReactNode> = {
   folder: <FolderOpenOutlined />,
   file: <FileOutlined />,
+  // 媒体芯片用媒体图标：用户勾选一张图时，看到的应该是「图」而不是「文件」，
+  // 与发送后气泡里的缩略图语义对上。
+  image: <PictureOutlined />,
+  video: <VideoCameraOutlined />,
+  audio: <AudioOutlined />,
   knowledge: <BookOutlined />,
 };
 
@@ -53,7 +61,14 @@ export function ChatInputFooter({
       .map((f) => ({ kind: 'folder' as const, name: f.name, id: f.id })),
     ...files
       .filter((f) => f.type !== 'folder')
-      .map((f) => ({ kind: 'file' as const, name: f.name, id: f.id })),
+      .map((f) => ({
+        // 媒体类型直接透传（image/video/audio），非媒体落 'file'
+        kind: (f.type === 'image' || f.type === 'video' || f.type === 'audio'
+          ? f.type
+          : 'file') as ChipKind,
+        name: f.name,
+        id: f.id,
+      })),
     ...knowledge.map((k) => ({ kind: 'knowledge' as const, name: k.name, id: k.id })),
   ];
 
@@ -74,6 +89,9 @@ export function ChatInputFooter({
     switch (kind) {
       case 'folder':
       case 'file':
+      case 'image':
+      case 'video':
+      case 'audio':
         onRemoveFile(id);
         break;
       case 'knowledge':

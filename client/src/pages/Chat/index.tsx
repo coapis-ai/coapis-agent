@@ -98,6 +98,8 @@ import {
   setTextareaValue,
   loadSceneNames,
   parseSceneId,
+  mediaTypeFromFilename,
+  type ChatMediaType,
   type CopyableResponse,
   type RuntimeLoadingBridgeApi,
 } from "./utils";
@@ -887,7 +889,9 @@ export default function ChatPage() {
                 id: path,
                 name: node.name,
                 path,
-                type: isDir ? "folder" : "file",
+                // 媒体按扩展名给出真实类型：发送时它决定内容块类型，
+                // 图片写成 "file" 会让模型只收到一句文本占位符（看不到图）。
+                type: isDir ? "folder" : mediaTypeFromFilename(node.name || path),
                 size: payload?.size,
               },
             ],
@@ -1570,8 +1574,19 @@ export default function ChatPage() {
       // 注意：文件提示信息通过 biz_params 传递，不直接添加到 content 中
       // 这样可以保持用户消息的原始内容，避免污染聊天历史
       if (selectedFiles.length > 0) {
-        // 添加文件引用（file:// URL）供后端工具处理
-        // 后端返回的 path 已经是相对于 workspace/files/ 的路径
+        // 添加文件/媒体引用供后端处理。
+        //
+        // ⭐ 关键：块类型必须与原生上传通道（@agentscope-ai/chat Request/
+        // Builder.js）同构。后端只对 image/video/audio 块送真正的媒体数据；
+        // type:"file" 会被 formatter 压成一句
+        // "File 'x.png' is available at: /path" 纯文本 —— 模型收不到像素，
+        // 只能自己去调 view_image，于是出现「提示说 Image loaded 但看不到图」。
+        // 前端气泡同理：Images 卡片只认 type:"image" + image_url，写成
+        // file 就只剩一个文件名 chip，没有缩略图。
+        //
+        // URL 形态：先发浏览器可取的预览 URL（缩略图/下载链接直接用它），
+        // 再经 normalizeContentUrls 折回后端认的 "/media/x" 形态。顺序不能反，
+        // 卡片渲染读的就是发出去的这份 content。
         selectedFiles.forEach(file => {
           // 目录引用只走 biz_params.file_refs（后端注入目录提示词），
           // 不能当成 file:// 附件传给模型——目录不是文件
@@ -1580,16 +1595,42 @@ export default function ChatPage() {
           const filePath = file.path.startsWith('/') 
             ? file.path.slice(1) 
             : file.path;
-          
-          rewrittenContent.push({
-            type: "file",
-            // 与上传附件同构：后端 _resolve_media_url 认 "/media/x" 与 "/x"
-            // 两种形态并解析成磁盘绝对路径。旧写法 `file://{name}` 把文件名
-            // 放在 netloc 位，url2pathname 解析为空，整条文件链路直接崩成
-            // "[Error: Unknown file source type or empty data]"。
-            source: { type: "url", url: `/${filePath}` },
-            filename: file.name,
-          });
+          const previewUrl = chatApi.filePreviewUrl(`/${filePath}`);
+          const kind: ChatMediaType =
+            file.type === "image" ||
+            file.type === "video" ||
+            file.type === "audio"
+              ? file.type
+              : mediaTypeFromFilename(file.name || filePath);
+
+          let block: any;
+          if (kind === "image") {
+            block = { type: "image", image_url: previewUrl };
+          } else if (kind === "video") {
+            block = { type: "video", video_url: previewUrl };
+          } else if (kind === "audio") {
+            // 后端 _extract_source_and_filename 里 audio 的 `data` 字段是
+            // **base64**（钉钉语音通道），塞 URL 会被当 base64 解码成乱码。
+            // 所以这里给 source.url（走 _resolve_media_url），audio_url
+            // 只供前端播放器读（Audios 卡片取 audio_url || data）。
+            block = {
+              type: "audio",
+              audio_url: previewUrl,
+              source: { type: "url", url: `/${filePath}` },
+            };
+          } else {
+            block = {
+              type: "file",
+              // 与上传附件同构：后端 _resolve_media_url 认 "/media/x" 与 "/x"
+              // 两种形态并解析成磁盘绝对路径。旧写法 `file://{name}` 把文件名
+              // 放在 netloc 位，url2pathname 解析为空，整条文件链路直接崩成
+              // "[Error: Unknown file source type or empty data]"。
+              file_url: previewUrl,
+              file_name: file.name,
+              file_size: file.size,
+            };
+          }
+          rewrittenContent.push(normalizeContentUrls(block));
         });
       }
       

@@ -186,6 +186,16 @@ export function toDisplayUrl(url: string | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Media type detection (会话引用 → 内容块类型)
+// ---------------------------------------------------------------------------
+
+// 判定逻辑的唯一权威在 components/Chat/mediaType.ts（组件层与页面层共用，
+// 依赖方向保持 页面 → 组件，避免组件反向 import 页面）。
+export { mediaTypeFromFilename } from "../../components/Chat/mediaType";
+export type { ChatMediaType } from "../../components/Chat/mediaType";
+
+
+// ---------------------------------------------------------------------------
 // DOM utilities
 // ---------------------------------------------------------------------------
 
