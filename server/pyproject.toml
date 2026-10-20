@@ -161,6 +161,9 @@ documents = [
     "python-pptx>=1.0.0",
     "openpyxl>=3.1.0",
     "python-docx>=1.1.0",
+    # convert_file 的 pdf 输出（md_to_pdf）。缺失时 pdf 转换不可用，
+    # 且智能体会退回 python3 -c 内联脚本 —— 那条路径要审批。
+    "reportlab>=4.0.0",
 ]
 search = [
     # web_search 懒加载后端：缺失时该后端不可用（默认后端 browser 不受影响）

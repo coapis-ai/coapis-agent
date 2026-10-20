@@ -1096,6 +1096,24 @@ class ToolGuardMixin:
                         timeout_seconds,
                     )
                     wait_task.cancel()
+                    # Persist the timeout on the record.  Without this the
+                    # record stays ``pending`` forever, and every reader
+                    # (push-messages poll, /approve) keeps handing the user a
+                    # dead approval — the root of both "no card appears" and
+                    # "/approve says approved but nothing happens".
+                    try:
+                        svc = self._tool_guard_approval_service
+                        await svc.resolve_request(
+                            request_id,
+                            ApprovalDecision.TIMEOUT,
+                        )
+                    except Exception:  # pragma: no cover - defensive
+                        logger.debug(
+                            "[APPROVAL WAIT] Failed to persist timeout for "
+                            "request_id=%s",
+                            request_id[:8],
+                            exc_info=True,
+                        )
                     return ApprovalDecision.TIMEOUT
 
                 chunk = min(heartbeat_interval, remaining)

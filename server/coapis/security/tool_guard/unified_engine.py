@@ -255,6 +255,48 @@ def _extract_sub_command(command_str: str, cmd_name: str | None) -> str | None:
     return None
 
 
+#: URLs are not filesystem targets — strip them before scanning for paths.
+_URL_RE = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"|;&)]*")
+#: Absolute path-like tokens *anywhere* in the command string, including
+#: inside a quoted payload (``python3 -c "open('/root/x','w')"``).
+_ABS_PATH_RE = re.compile(r"(?<![\w./~-])/(?:[\w.@\-]+/)*[\w.@\-]+")
+#: Benign device redirects — not filesystem targets.
+_BENIGN_DEVICE_PATHS = frozenset(
+    {
+        "/dev/null",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/stdin",
+        "/dev/tty",
+        "/dev/zero",
+        "/dev/random",
+        "/dev/urandom",
+    }
+)
+
+
+def _extract_abs_paths_from_text(command_str: str) -> list[str]:
+    """Absolute paths anywhere in *command_str*, quoted payloads included.
+
+    ``_extract_paths_from_command`` works on shlex tokens, so an inline
+    payload comes back as one opaque token that does not start with ``/`` and
+    is dropped.  ``scope: workspace`` / ``safe_paths`` then see *no* paths and
+    happily demote.  Measured on dev 2026-10-19 with the batch-5B rules
+    active: ``python3 -c "open('/root/x','wb')"`` — and the same for another
+    agent's directory or a foreign mount path — rated **L2**, i.e. auto-
+    allowed in admin smart mode.  Scope has to see the payload to mean
+    anything.
+    """
+    scrubbed = _URL_RE.sub(" ", command_str)
+    out: list[str] = []
+    for match in _ABS_PATH_RE.finditer(scrubbed):
+        path = match.group()
+        if path in _BENIGN_DEVICE_PATHS:
+            continue
+        out.append(path)
+    return out
+
+
 def _extract_paths_from_command(command_str: str) -> list[str]:
     """Extract file/directory paths from a command string.
 
@@ -290,7 +332,30 @@ def _extract_paths_from_command(command_str: str) -> list[str]:
         if "/" not in tok and "." not in tok and not tok.startswith("."):
             continue
         paths.append(tok)
+
+    # Device redirects are not filesystem targets (``> /dev/null``).
+    paths = [p for p in paths if p not in _BENIGN_DEVICE_PATHS]
+
+    # Absolute paths hidden inside quoted payloads count as filesystem
+    # targets too — shlex hands a `-c "..."` payload back as one opaque
+    # token, so the token loop above cannot see them.
+    for p in _extract_abs_paths_from_text(command_str):
+        if p not in paths:
+            paths.append(p)
     return paths
+
+
+def _scrub_benign_device_paths(command_str: str) -> str:
+    """Neutralise ``> /dev/null``-style redirects before pattern matching.
+
+    The inline hardening list excludes ``/(…|dev|…)``; a bare redirect to a
+    null device is not a filesystem target, so it must not cancel a workspace
+    demotion.  Real device paths (``/dev/sda``) are untouched.
+    """
+    out = command_str
+    for dev in sorted(_BENIGN_DEVICE_PATHS, key=len, reverse=True):
+        out = out.replace(dev, "__benign_device__")
+    return out
 
 
 def _match_rule(
@@ -326,11 +391,12 @@ def _match_rule(
                 return False
 
     # 3. patterns (OR: at least one must match)
+    probe = _scrub_benign_device_paths(command_str)
     if rule.patterns:
         pat_matched = False
         for pat in rule.patterns:
             try:
-                if re.search(pat, command_str, re.IGNORECASE):
+                if re.search(pat, probe, re.IGNORECASE):
                     pat_matched = True
                     break
             except re.error:
@@ -342,7 +408,7 @@ def _match_rule(
     if rule.exclude_patterns:
         for ep in rule.exclude_patterns:
             try:
-                if re.search(ep, command_str, re.IGNORECASE):
+                if re.search(ep, probe, re.IGNORECASE):
                     return False
             except re.error:
                 continue

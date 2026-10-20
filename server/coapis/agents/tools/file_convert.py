@@ -45,12 +45,15 @@ def _text(msg: str) -> ToolResponse:
 @register_tool(
     name="convert_file",
     description=(
-        "把已写好的 markdown 文件转换成用户明确要求的格式（当前支持 docx）。"
-        "必需参数：path（源文件）、target_format（目标格式，如 docx）。"
+        "把已写好的 markdown 文件转换成用户明确要求的格式"
+        "（当前支持 docx 与 pdf，中文可直接渲染）。"
+        "必需参数：path（源文件）、target_format（目标格式，docx/pdf）。"
         "仅在用户明确指定格式时使用；过程中不要调用。"
+        "生成 docx/pdf 一律用本工具，不要用 python3 -c 内联脚本"
+        "（内联解释器需要审批）。"
     ),
     category="builtin",
-    tags=["file", "convert", "docx"],
+    tags=["file", "convert", "docx", "pdf"],
 )
 async def convert_file(
     path: str,
@@ -61,7 +64,7 @@ async def convert_file(
 
     Args:
         path: 源 markdown 文件路径（相对路径从 workspace/files/ 解析）。
-        target_format: 目标格式，默认 docx。当前仅支持 docx。
+        target_format: 目标格式，默认 docx。支持 docx / pdf。
         out_path: 输出路径（可选）。默认与源文件同目录、同名换扩展名。
 
     Returns:

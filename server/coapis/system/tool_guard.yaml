@@ -290,6 +290,79 @@ commands:
       - /coapis/agent/skills/
       - /app/coapis/agent/skills/
     exceptions:
+    # ── 内联解释器降档（批5B）──────────────────────────────────────────
+    # 智能体用 `python3 -c` 生成 pdf/docx、跑自家工作区里的小脚本是日常动作，
+    # 此前一律 L3 → 每次都要人工审批（"生成 PDF 为什么要审批"的成因）。
+    # 降为 L2 的前提：只碰自家 workspace / 临时目录，且载荷里没有命令替换、
+    # 管道进解释器、编码载荷、解释器逃逸原语、敏感路径。
+    # L2 = admin 智能模式自动放行，普通用户仍需确认；命中 exclude 的
+    # 落回 inline_encoded_payload(L4)/inline_interpreter(L3)，全局规则照旧兜底。
+    - &id006a
+      id: inline_interpreter_workspace
+      desc: 解释器内联执行且仅访问自家 workspace
+      level: L2
+      action: confirm
+      scope: workspace
+      patterns: &inline_flags
+      - \b(python|python3|node|ruby|perl)\s+(?:[^\s-]*\s)*-(c|e|E|i|I)\b
+      - \b(python|python3|node|ruby|perl)\s+(?:[^\s-]*\s)*--(command|eval|execute|interactive)
+      exclude_patterns: &inline_hardening
+      - \$\(
+      - "`"
+      - \|\s*(bash|sh|zsh|python3?|node|ruby|perl)\b
+      - \bbase64\b
+      - \bcurl\b
+      - \bwget\b
+      - \bnc\b
+      - \btelnet\b
+      - \bos\.(system|popen|execv|execve|spawn)\b
+      - \bsubprocess\b
+      - \bexec\s*\(
+      - \beval\s*\(
+      - __import__
+      - \bpty\b
+      - shutil\.rmtree
+      - \bsocket\b
+      - \burllib\b
+      - \brequests\b
+      - http\.client
+      - \bsmtplib\b
+      - \bctypes\b
+      - \bmultiprocessing\b
+      - /(etc|usr|proc|sys|bin|sbin|home|mnt|media|dev|lib)/
+      - \.ssh\b
+      - \.env\b
+      - credential
+      - secret
+      - password
+      - \btoken\b
+      - \.pem\b
+      - id_rsa
+      - auth\.json
+      - \brm\s+-[rf]
+      - \bmkfs\b
+      - \bdd\s+if=
+      - \bchmod\b
+      - \bchown\b
+    - &id006c
+      id: inline_interpreter_tmp
+      desc: 解释器内联执行且仅访问临时目录
+      level: L2
+      action: confirm
+      safe_paths:
+      - /tmp
+      - /var/tmp
+      patterns: *inline_flags
+      exclude_patterns: *inline_hardening
+    # L4 必须排在 L3 之前：exceptions 是首条命中即返回，此前 L3 在前，
+    # `-c "$(curl …)"` 这类编码/命令替换载荷永远走不到 L4 block。
+    - &id006b
+      id: inline_encoded_payload
+      desc: 内联解释器执行命令替换/编码载荷
+      level: L4
+      action: block
+      patterns:
+      - \b(python|python3|node|ruby|perl|bash|sh|zsh)\s+(?:[^\s-]*\s)*-[ce]\s+["']?\$\(|\bbase64\s+(?:-d|--decode)\b.*\|\s*(?:bash|sh|zsh|python3?|node)\b
     - &id006
       id: inline_interpreter
       desc: 解释器内联执行标志
@@ -298,13 +371,6 @@ commands:
       patterns:
       - \b(python|python3|node|ruby|perl)\s+(?:[^\s-]*\s)*-(c|e|E|i|I)\b
       - \b(python|python3|node|ruby|perl)\s+(?:[^\s-]*\s)*--(command|eval|execute|interactive)
-    - &id006b
-      id: inline_encoded_payload
-      desc: 内联解释器执行命令替换/编码载荷
-      level: L4
-      action: block
-      patterns:
-      - \b(python|python3|node|ruby|perl|bash|sh|zsh)\s+(?:[^\s-]*\s)*-[ce]\s+["']?\$\(|\bbase64\s+(?:-d|--decode)\b.*\|\s*(?:bash|sh|zsh|python3?|node)\b
   python3:
     level: L2
     desc: Python3 解释器
@@ -314,8 +380,10 @@ commands:
     - *id005
     - *id005b
     exceptions:
-    - *id006
+    - *id006a
+    - *id006c
     - *id006b
+    - *id006
   pip:
     level: L2
     desc: Python 包管理
@@ -349,8 +417,10 @@ commands:
     - *id005
     - *id005b
     exceptions:
-    - *id006
+    - *id006a
+    - *id006c
     - *id006b
+    - *id006
   npm:
     level: L2
     desc: Node 包管理
@@ -418,8 +488,10 @@ commands:
     demotion_rules:
     - *id003
     exceptions:
-    - *id006
+    - *id006a
+    - *id006c
     - *id006b
+    - *id006
   perl:
     level: L2
     desc: Perl 解释器
@@ -427,8 +499,10 @@ commands:
     demotion_rules:
     - *id003
     exceptions:
-    - *id006
+    - *id006a
+    - *id006c
     - *id006b
+    - *id006
   php:
     level: L2
     desc: PHP 解释器
@@ -930,7 +1004,7 @@ global_rules:
   category: code_execution
   severity: CRITICAL
   patterns:
-  - \b(curl|wget)\b\s+.*\|.*\b(bash|sh|zsh|ash|dash)\b
+  - \b(curl|wget)\b\s+.*\|.*\b(bash|sh|zsh|ash|dash|python3?|node|ruby|perl|php)\b
   exclude_patterns: []
   description: Detects 'curl | bash' patterns used to download and immediately execute remote payloads
   remediation: Confirm with user. Agents should inspect scripts before executing them.
@@ -1033,7 +1107,7 @@ global_rules:
   category: code_execution
   severity: HIGH
   patterns:
-  - \bbase64\s+(-d|--decode)\s*\|\s*\b(bash|sh|zsh)\b
+  - \bbase64\s+(-d|--decode)\s*\|\s*\b(bash|sh|zsh|python3?|node|ruby|perl)\b
   exclude_patterns: []
   description: Detects execution of base64 encoded strings passed directly to a shell interpreter
   remediation: Block execution. Agents should use plain text commands.
