@@ -24,7 +24,7 @@ import json
 import logging
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,57 @@ def skill_index_hint(skill: dict) -> str:
     if len(text) <= SKILL_INDEX_HINT_CHARS:
         return text
     return text[: SKILL_INDEX_HINT_CHARS - 1].rstrip() + "…"
+
+
+#: Phrases that turn a skill's index line into a **trigger** the model can
+#: match a user request against, instead of a description of what the file
+#: contains.  B8 (2026-10-19): 18 of 21 skill references were "ghosts" -- the
+#: index listed skills, nothing in the runtime ever matched a request to them,
+#: and the reason is that a description like "Tools for PDF work" gives the
+#: model nothing to match "帮我把这个 PDF 转成 Word" against.
+_TRIGGER_MARKERS = (
+    "use this skill when",
+    "use when",
+    "use this when",
+    "when the user",
+    "when you need",
+    "when asked",
+    "triggers when",
+    "asks to",
+    "asks for",
+    "phrases like",
+    "触发",
+    "使用场景",
+    "当用户",
+    "当用户",
+    "适用于",
+    "用于用户",
+    "需要时",
+)
+
+
+def has_trigger_sentence(skill: dict) -> bool:
+    """True when the skill carries a sentence a request can be matched to.
+
+    Checks the author-written ``index_hint`` first, then the description.
+    """
+    for text in (
+        skill.get("index_hint") or "",
+        skill.get("description") or "",
+    ):
+        low = str(text).lower()
+        if any(marker in low for marker in _TRIGGER_MARKERS):
+            return True
+    return False
+
+
+def missing_trigger_skills(skills: Iterable[dict]) -> list[str]:
+    """Names of skills whose index line is a description, not a trigger."""
+    return [
+        str(skill.get("name") or "?")
+        for skill in skills
+        if not has_trigger_sentence(skill)
+    ]
 
 
 class SkillManager:
@@ -88,6 +139,24 @@ class SkillManager:
 
         logger.info(f"Discovered {len(self._skills)} skills")
 
+        # B8: a skill whose index line describes the file instead of naming
+        # the situation it applies to is a skill the model cannot select.  It
+        # is listed in the system prompt, costs the prompt its characters, and
+        # never fires -- 18 of 21 references measured on dev 2026-10-17 were
+        # exactly that.  Say it at discovery, where the author can still fix
+        # it, instead of leaving it as a runtime mystery.
+        silent = missing_trigger_skills(self._skills.values())
+        if silent:
+            logger.warning(
+                "%d of %d skills have no trigger sentence (no index_hint and "
+                "no 'Use this skill when…' in the description), so the model "
+                "has nothing to match a user request against: %s. Add an "
+                "`index_hint:` line to each SKILL.md frontmatter.",
+                len(silent),
+                len(self._skills),
+                ", ".join(sorted(silent)),
+            )
+
         # Apply skill descriptions from data pack (language-aware override)
         try:
             self.apply_descriptions_from_pack("zh")
@@ -123,6 +192,9 @@ class SkillManager:
             "enabled": meta.get("enabled", True),
             "version": meta.get("version", "1.0.0"),
             "tags": meta.get("tags", []),
+            "has_trigger": has_trigger_sentence(
+                {"index_hint": index_hint, "description": description or ""},
+            ),
         }
 
     @staticmethod
@@ -192,46 +264,6 @@ class SkillManager:
     def list_skills(self) -> List[dict]:
         """List all discovered skills."""
         return list(self._skills.values())
-
-    def get_index_prompt(self, compact: bool = False) -> str:
-        """Generate skills index for system prompt (cached).
-
-        Args:
-            compact: If True, generate ultra-compact index (name only, no descriptions).
-                    Reduces tokens from ~2138 to ~180 (91% reduction).
-
-        Returns:
-            Skills index string
-        """
-        cache_key = '_index_prompt_cache_compact' if compact else '_index_prompt_cache'
-
-        # Use cached version if available
-        if hasattr(self, cache_key):
-            cached = getattr(self, cache_key)
-            if cached is not None:
-                return cached
-
-        if not self._skills:
-            setattr(self, cache_key, "")
-            return ""
-
-        if compact:
-            # Ultra-compact: just skill names, one per line
-            # Model can still identify skills by name when needed
-            names = [s['name'] for s in self._skills.values() if s.get("enabled", True)]
-            result = ", ".join(sorted(names))
-            setattr(self, cache_key, result)
-            return result
-        else:
-            # Full format with descriptions
-            lines = ["Available Skills:"]
-            for skill in self._skills.values():
-                if skill.get("enabled", True):
-                    lines.append(f"- **{skill['name']}**: {skill['description']}")
-
-            result = "\n".join(lines)
-            setattr(self, cache_key, result)
-            return result
 
     def invalidate_index_cache(self) -> None:
         """Invalidate cached index prompt (call after skill changes)."""
