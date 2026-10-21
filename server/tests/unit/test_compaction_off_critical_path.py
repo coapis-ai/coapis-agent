@@ -215,9 +215,16 @@ class _SlowModel:
 
     async def __call__(self, messages, tools=None, **kwargs):
         # The merge request is the one whose payload is the partial summaries
-        # themselves; map requests carry history rows there.
-        payload = str(messages[1].get("content")) if len(messages) > 1 else ""
-        if payload.startswith("[部分") or "合并为" in payload:
+        # themselves; map requests carry history rows there.  Scan **every**
+        # row: the task-anchor row sits at index 1 when anchoring is on, and
+        # the budget fitter can drop rows, so a fixed index is not a reliable
+        # merge marker (it silently counted the merge as a map call).
+        payload = " ".join(
+            str(m.get("content"))
+            for m in (messages or [])
+            if isinstance(m, dict)
+        )
+        if "[部分" in payload or "合并为" in payload:
             self.merge_calls += 1
             if self.merge_seconds:
                 await asyncio.sleep(self.merge_seconds)
