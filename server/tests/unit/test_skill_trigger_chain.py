@@ -34,7 +34,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from coapis.agents.utils.skill_selector import SkillSelector  # noqa: E402
-from coapis.skills.manager import SkillManager  # noqa: E402
+from coapis.skills.manager import SkillManager, has_trigger_sentence  # noqa: E402
 
 sys.path.insert(
     0,
@@ -302,6 +302,20 @@ def test_build_index_clears_patterns(tmp_path):
 
 
 # ------------------------------------------- B6: index_hint authoring script
+
+
+def test_house_style_hint_is_a_trigger():
+    """Authored hints are written "当…做X时使用。" (26 of them in
+    scripts/apply_skill_index_hints.py), so the marker list has to accept that
+    phrasing and not only "当用户…": dev flagged co-agent as silent on
+    2026-10-21 because "当任务需要其他智能体帮忙时使用" matched no marker."""
+    assert has_trigger_sentence(
+        {"index_hint": "当任务需要其他智能体帮忙、咨询、协作、委托时使用。"},
+    )
+    assert has_trigger_sentence(
+        {"description": "抓取网页数据。当页面需要登录时使用。"},
+    )
+    assert not has_trigger_sentence({"description": "Tools for PDF work."})
 
 
 def test_apply_hint_inserts_and_is_idempotent(tmp_path):

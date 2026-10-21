@@ -71,10 +71,14 @@ _TRIGGER_MARKERS = (
     "触发",
     "使用场景",
     "当用户",
-    "当用户",
     "适用于",
     "用于用户",
     "需要时",
+    # The house style for an authored hint is "当…做X时使用。"
+    # (scripts/apply_skill_index_hints.py writes 26 of them that way), and
+    # "当任务需要其他智能体帮忙时使用" is a perfectly good trigger the older
+    # markers missed -- dev flagged co-agent as silent on 2026-10-21.
+    "时使用",
 )
 
 

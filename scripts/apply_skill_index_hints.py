@@ -86,6 +86,37 @@ INDEX_HINTS: dict[str, str] = {
     "plan-writing-assistant": "当用户要撰写全域土地综合整治实施方案、项目策划文档初稿时使用。",
     "test--ad-default": "当用户要求代码审查、定位 bug 或报错、代码走读、架构评审、修复问题时使用。",
     "markdown-clean-body": "当用户要清洗 markdown 正文，去除网页头部、导航、广告、友情链接时使用。",
+    # --- 2026-10-21: the rest of the pools.  Measured on dev, 56 loaded skills
+    # had no authored trigger line at all (index lines came from truncated
+    # descriptions, 9 of them empty because ``description: >`` was never
+    # parsed), so the model had a name and nothing to match a request against.
+    "QA_source_index": "当用户询问 CoApis 功能的实现位置、配置项或源码索引时使用。",
+    "aux-agent-growing": "当用户要求智能体自我成长、复盘沉淀经验、优化自身能力时使用。",
+    "axu-code-checked": "当用户要求代码审查、排查报错、定位问题根因、评审重构方案时使用。",
+    "axu-data-analysis": "当用户要求整理数据、统计分析、做图表、分析数据趋势时使用。",
+    "axu-policy-interpretation": "当用户要求解读政策文件、法规合规要求、提炼政策落地要点时使用。",
+    "axu-report-writing": "当用户要求写报告、汇报材料、工作总结、调研分析报告时使用。",
+    "axu-requirements-analysis": "当用户要求分析需求、拆解问题、梳理痛点、编写需求文档时使用。",
+    "axu-solution-design": "当用户要求出方案、架构设计、规划实施路径、可行性评估时使用。",
+    "axu-text-polishing": "当用户要求润色文字、改写措辞、调整语气、去除 AI 味时使用。",
+    "browser_use": "当用户要打开网页、点击填表、截图抓取、做浏览器自动化时使用。",
+    "browser-use": "当用户要打开网页、点击填表、截图抓取、做浏览器自动化时使用。",
+    "browser_cdp": "当用户要求连接本机 Chrome、接管已有浏览器、使用 CDP 调试时使用。",
+    "browser_visible": "当用户要求打开可见浏览器窗口、有头模式演示、界面录制时使用。",
+    "chat_with_agent": "当用户点名要某个智能体参与，或需要咨询其他智能体、寻求帮助时使用。",
+    "coapis_source_index": "当用户询问 CoApis 功能、配置、架构、源码位置需要快速定位文档时使用。",
+    "dingtalk_channel_connect": "当用户要求接入钉钉、配置钉钉机器人、处理钉钉渠道消息时使用。",
+    "env_manager": "当用户要求部署、重建容器、重启服务、更新开发或生产环境时使用。",
+    "humanizer-academic-zh": "当用户要求把中文文本改得自然、降低 AI 味、降低 AIGC 检测率时使用。",
+    "long-running-agent-harness": "当任务需要长时间运行、多阶段推进、断点续跑、生成执行报告时使用。",
+    "make-skill": "当用户要求把当前流程、方法、经验固化成可复用技能时使用。",
+    "markitdown": "当用户要求把本地文档（docx、pdf、xlsx、pptx）转成 Markdown 时使用。",
+    "multi_agent_collaboration": "当用户要求多智能体协作，或需要其他智能体的专长、上下文时使用。",
+    "self-improvement": "当用户要求总结经验教训、改进智能体工作方式、沉淀长期改进项时使用。",
+    "skill-creator": "当用户要求创建、改进、评测一个技能包时使用。",
+    "skill-vetter": "当用户要求安装或引入第三方技能时，先用本技能做安全审查。",
+    "superpowers-factory-bridge": "当用户发起较大开发任务，需要 TDD、工厂流程编排时使用。",
+    "using-superpowers": "当用户询问技能如何调用、有哪些技能可用、如何组合技能工作时使用。",
 }
 
 
