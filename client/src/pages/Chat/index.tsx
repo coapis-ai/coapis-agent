@@ -103,7 +103,6 @@ import {
   loadSceneNames,
   parseSceneId,
   mediaTypeFromFilename,
-  mySpaceDisplayUrl,
   type ChatMediaType,
   type CopyableResponse,
   type RuntimeLoadingBridgeApi,
@@ -1638,13 +1637,10 @@ export default function ChatPage() {
             ? file.path.slice(1) 
             : file.path;
           const previewUrl = chatApi.filePreviewUrl(`/${filePath}`);
-          // 展示 URL 与发送 URL 必须分开（本轮实测出来的分岔）：
-          //  previewUrl  → 经 normalizeContentUrls 折回 "/x.png" 给后端，
-          //                后端 _resolve_media_url 按工作区解析（链路已验证）
-          //  displayUrl  → 浏览器直读（/api/myfiles/download），气泡缩略图与
-          //                下载链接用它。filePreviewUrl 那条路对「我的空间」
-          //                相对路径必 404（它按绝对磁盘路径取文件）。
-          const displayUrl = mySpaceDisplayUrl(filePath);
+          // 发给后端的块用 previewUrl 形态：经 normalizeContentUrls 折回
+          // "/x.png"，后端 _resolve_media_url 按工作区解析（链路已验证）。
+          // 气泡用的展示形态不在这里定，统一在循环后从 rewrittenContent
+          // 派生（见下面的 ⭐ 段）—— 两条通道走同一个换算口径。
           const kind: ChatMediaType =
             file.type === "image" ||
             file.type === "video" ||
@@ -1685,14 +1681,32 @@ export default function ChatPage() {
 
           const block = buildBlock(previewUrl);
           rewrittenContent.push(normalizeContentUrls(block));
-          // 气泡要的是**浏览器可直读**的 URL（previewUrl 那条路 404），
-          // 所以补一份 displayUrl 形态的副本。file 类型不进气泡媒体块
-          // （Images 卡片不认 file）。
-          if (kind === "image" || kind === "video" || kind === "audio") {
-            bubbleMediaBlocks.push(buildBlock(displayUrl));
-          }
         });
       }
+
+      // ⭐ 气泡缩略图统一在这里派生（两条通道一起覆盖）：
+      //  - 「+ 资源菜单」通道：selectedFiles → 上面的 block
+      //  - 原生上传通道：SDK 用 fileList 自己建的块（已在 rewrittenContent 里，
+      //    image_url 是后端 /api/myfiles/upload 返回的 `/x.png`）
+      // 两条通道的 image_url 都是**后端路径形态**，浏览器直接取必 404，
+      // 所以统一过 toDisplayUrl 换成可直读形态再进气泡。
+      bubbleMediaBlocks.push(
+        ...rewrittenContent
+          .filter(
+            (b: any) =>
+              b && (b.type === "image" || b.type === "video" || b.type === "audio"),
+          )
+          .map((b: any) => {
+            const key =
+              b.type === "image"
+                ? "image_url"
+                : b.type === "video"
+                ? "video_url"
+                : "audio_url";
+            const display = toDisplayUrl(b[key] || b.source?.url);
+            return { ...b, [key]: display };
+          }),
+      );
       
       // 添加知识库引用（在 biz_params 中传递）
       const knowledgeRefs = selectedKnowledge.length > 0 

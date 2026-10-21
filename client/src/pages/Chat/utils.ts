@@ -279,23 +279,37 @@ export function normalizeContentUrls(part: any): any {
 
 /** Turn a backend content URL (path or full URL) into a full URL for display.
  *
- *  两条取文件的路，按路径形态分流（本轮实测定的口径）：
- *   - **绝对路径** → /api/files/preview/{绝对路径}：file_preview.py 按
- *     `Path("/"+p).resolve()` 取文件，只认绝对路径（实测 200）。
- *     后端持久化的媒体块就是 `file:///apps/ai/coapis/workspaces/...` 绝对形态，
- *     走这条。
- *   - **相对路径**（我的空间相对路径 / `media/x.png`）→ /api/myfiles/download
- *     ?path=&category=files：用户作用域 + 权限门控（实测 200 image/png）。
- *     相对形态喂给 preview 端点必 404（它当绝对路径解析）。
+ *  三条路，按形态分流（本轮实测定的口径，每条都实测过 200）：
+ *   1. 已是 http(s) / 已是 /api/ 开头的 API URL → 原样用。
+ *   2. **真实绝对路径**（含 /workspaces/，后端持久化的媒体块就是
+ *      `file:///apps/ai/coapis/workspaces/<user>/files/...` 形态）
+ *      → /api/files/preview/{绝对路径}。file_preview.py 按
+ *      `Path("/"+p).resolve()` 取文件，**只认绝对路径**。
+ *   3. **工作区相对形态**（`/upload_test.png`、`media/x.png`）
+ *      → /api/myfiles/download?path=&category=files（用户作用域 + 权限门控）。
+ *      这类路径喂给 preview 端点必 404 —— 它当绝对磁盘路径解析，
+ *      `/upload_test.png` 变成根目录下的 `/upload_test.png`。
+ *
+ *  第 3 条是原生上传通道的缩略图修复：后端 /api/myfiles/upload 返回的
+ *  `url` 是 `/upload_test.png`（相对工作区），SDK 直接拿它当 `<img src>`
+ *  （Request/Builder.js buildImageContent: `image_url: file.response.url`），
+ *  浏览器取 `/upload_test.png` → 404 → 气泡里图片是空 src。
+ *
+ *  注意 `/workspaces/` 这个判据：dev/生产的挂载点不同
+ *  （host /apps/ai/coapis-dev → 容器 /apps/ai/coapis），但两侧路径里
+ *  `workspaces` 这一段都在，判据不依赖具体前缀。
  */
 export function toDisplayUrl(url: string | undefined): string {
   if (!url) return "";
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   if (url.startsWith("file://")) url = url.replace("file://", "");
-  // 绝对路径：preview 端点能直接取到
-  if (url.startsWith("/")) return chatApi.filePreviewUrl(url);
-  // 相对路径：走我的空间下载端点（preview 端点这条路必 404）
-  return mySpaceDisplayUrl(url);
+  if (url.startsWith("/api/")) return getApiUrl(url.slice(3));
+  // 真实绝对路径：preview 端点能直接取到
+  if (url.startsWith("/") && url.includes("/workspaces/")) {
+    return chatApi.filePreviewUrl(url);
+  }
+  // 工作区相对形态：走我的空间下载端点
+  return mySpaceDisplayUrl(url.replace(/^\/+/, ""));
 }
 
 /**
