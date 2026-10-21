@@ -26,6 +26,8 @@ import json
 import logging
 import os
 import resource
+
+from coapis.security.resource_limiter import sandbox_mem_bytes
 import tempfile
 import time
 from pathlib import Path
@@ -38,11 +40,13 @@ def _set_child_resource_limits() -> None:
     """Set resource limits for child processes (preexec_fn)."""
     try:
         resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
-        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+        mem_bytes = sandbox_mem_bytes()
+        resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
         resource.setrlimit(resource.RLIMIT_FSIZE, (200 * 1024 * 1024, 200 * 1024 * 1024))
         resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
         resource.setrlimit(resource.RLIMIT_NPROC, (100, 100))
-    except (ValueError, OSError):
+    except Exception:  # noqa: BLE001 - limits are best-effort;
+        # a failure here must never break child-process creation.
         pass
 
 logger = logging.getLogger(__name__)

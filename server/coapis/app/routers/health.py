@@ -89,6 +89,30 @@ async def readiness_check() -> Dict[str, Any]:
     }
 
 
+@router.get("/health/tools")
+async def toolchain_health(refresh: bool = False) -> Dict[str, Any]:
+    """Self-check for the sandboxed tool chain (node / npm / pptxgenjs).
+
+    Runs node under the *same* RLIMIT_AS the real sandbox tools install, so it
+    catches "node is installed but cannot start" - the failure mode that made
+    the pptx skill report an unsupported node environment while node v22 and
+    pptxgenjs were both present.
+
+    Query params:
+        refresh=true   force a fresh probe (default: cached for 60s)
+    """
+    import asyncio
+
+    from ...security.toolchain_probe import get_toolchain_status, probe_toolchain
+
+    if not refresh:
+        cached = get_toolchain_status()
+        if cached.get("status") != "unknown":
+            return cached
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, probe_toolchain, refresh)
+
+
 @router.get("/info")
 async def system_info() -> Dict[str, Any]:
     """Get system information."""

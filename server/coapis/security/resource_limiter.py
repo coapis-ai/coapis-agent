@@ -4,6 +4,7 @@ Uses Python's resource module on Linux/macOS, with psutil fallback on Windows.
 Pure Python, zero external dependencies (psutil optional on Windows only).
 """
 
+import os
 import sys
 import logging
 import asyncio
@@ -14,6 +15,45 @@ from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def sandbox_mem_mb() -> int:
+    """RLIMIT_AS (virtual address space) cap for sandboxed children, in MB.
+
+    Read from env ``COAPIS_SANDBOX_MEM_MB``; ``0`` (the default) means
+    **unlimited** (``RLIM_INFINITY``).
+
+    Why configurable instead of one fixed number: RLIMIT_AS bounds *virtual
+    address space*, and V8 (node) reserves far more virtual space than it
+    ever touches. A tight cap makes node die at startup with "Cannot
+    allocate a 536870912 byte reservation" even when the host has gigabytes
+    free - the old 512 MB cap reproduced exactly that. Any fixed cap is a
+    landmine for node workloads, so the default is unlimited and the real
+    safety net is expected to live at container level (docker --memory /
+    cgroup v2 memory.max), which bounds *resident* memory and is kind to V8.
+    """
+    raw = (os.environ.get("COAPIS_SANDBOX_MEM_MB") or "").strip()
+    if not raw:
+        return 0
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("COAPIS_SANDBOX_MEM_MB=%r is not an integer; using unlimited", raw)
+        return 0
+    return value if value > 0 else 0
+
+
+def sandbox_mem_bytes() -> int:
+    """Sandbox RLIMIT_AS value in bytes; RLIM_INFINITY when unlimited.
+
+    Falls back to a very large number when the ``resource`` module is
+    unavailable (Windows); callers guard the setrlimit calls with try/except.
+    """
+    mb = sandbox_mem_mb()
+    if mb > 0:
+        return mb * 1024 * 1024
+    return getattr(resource, "RLIM_INFINITY", (1 << 62) - 1)
+
 
 # Try to import resource module (Linux/macOS only)
 try:
@@ -34,7 +74,7 @@ except ImportError:
 class ResourceLimits:
     """Resource limits configuration."""
     cpu_seconds: int = 10          # Max CPU time in seconds
-    memory_mb: int = 256           # Max memory in MB
+    memory_mb: int = sandbox_mem_mb()  # Max memory in MB; 0 = unlimited
     file_size_mb: int = 10         # Max file size in MB
     max_processes: int = 50        # Max child processes
     max_open_files: int = 64       # Max open file descriptors
@@ -79,8 +119,12 @@ class ResourceLimiter:
             (self.limits.cpu_seconds, self.limits.cpu_seconds),
         )
 
-        # Memory limit (virtual address space)
-        mem_bytes = self.limits.memory_mb * 1024 * 1024
+        # Memory limit (virtual address space); 0 means unlimited
+        mem_bytes = (
+            resource.RLIM_INFINITY
+            if self.limits.memory_mb <= 0
+            else self.limits.memory_mb * 1024 * 1024
+        )
         resource.setrlimit(
             resource.RLIMIT_AS,
             (mem_bytes, mem_bytes),

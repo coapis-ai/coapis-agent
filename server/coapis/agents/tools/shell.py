@@ -30,6 +30,8 @@ import asyncio
 import locale
 import os
 import resource
+
+from coapis.security.resource_limiter import sandbox_mem_bytes
 import signal
 import subprocess
 import sys
@@ -66,16 +68,18 @@ def _set_child_resource_limits() -> None:
         # CPU time: 60 seconds soft/hard
         resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
         # Address space / RSS: 512 MB
-        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+        mem_bytes = sandbox_mem_bytes()
+        resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
         # File size: 200 MB
         resource.setrlimit(resource.RLIMIT_FSIZE, (200 * 1024 * 1024, 200 * 1024 * 1024))
         # Open file descriptors: 256
         resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
         # Child processes: 100
         resource.setrlimit(resource.RLIMIT_NPROC, (100, 100))
-    except (ValueError, OSError):
-        # Some limits may not be settable (e.g., raised above hard limit).
-        # Silently ignore — best-effort enforcement.
+    except Exception:  # noqa: BLE001
+        # Limits are best-effort. A failure here must never break
+        # child-process creation, so swallow everything, not just
+        # ValueError/OSError.
         pass
 
 
