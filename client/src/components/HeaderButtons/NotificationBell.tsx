@@ -22,10 +22,10 @@ export function NotificationBell() {
 
   const refresh = useCallback(async () => {
     try {
+      // /api/ent/messages/stats 直接返回 MessageStats 本体（无 success/data 信封）。
+      // 之前按信封读 → 恒 undefined → 角标永远是 0，且 tsc 直接编译失败。
       const res = await messageService.getStats();
-      if (res?.success) {
-        setUnread(Number(res.data?.unread_count ?? 0) || 0);
-      }
+      setUnread(Number(res?.unread_count ?? 0) || 0);
     } catch {
       // 静默：通知角标属于锦上添花，不能影响主界面
     }

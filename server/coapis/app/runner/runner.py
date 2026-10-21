@@ -191,6 +191,46 @@ def _drop_ephemeral_messages(mem: Any) -> int:
     return removed
 
 
+# 落库时要保留的用户媒体块类型。
+# 与 server/coapis/agents/react_agent.py 的 _MEDIA_BLOCK_TYPES 同集合。
+_USER_MEDIA_BLOCK_TYPES = ("image", "video", "audio")
+
+
+def _rebuild_user_content_with_media(
+    user_text: str,
+    original_content: Any,
+) -> Any:
+    """把用户消息还原成「原文 + 媒体块」，别让媒体在落库时蒸发。
+
+    背景：``_persist_chat_messages`` 过去把整条 content 压成一个纯字符串
+    （``_first_msg.content = user_text``）。文本是干净了，媒体块也一起没了
+    —— 于是刷新/重载历史后，用户那条消息只剩文字，图片缩略图无处渲染
+    （前端读历史时拿不到任何 image 块）。
+
+    为什么现在能留：入内存前 ``process_file_and_media_blocks_in_message`` 已把
+    块归一成 ``source: {type:"url", url:"file://<abs>"}``，正是
+    ``agentscope_msg_to_message`` 认的形态；前端 ``resolveContentItemUrl`` 会把
+    ``file://…/files/media/x.png`` 折成预览 URL。
+
+    非多模态模型不用担心多出来的块：``react_agent._reasoning`` 在送模型前会按
+    capability 主动剥离（``_strip_media_blocks_from_memory`` / formatter 剥离），
+    落库形态与送模形态本来就是两条路。
+
+    无媒体时**原样返回字符串**，保持既有行为（绝大多数纯文本轮次零变化）。
+    """
+    if not isinstance(original_content, list):
+        return user_text
+    media_blocks = [
+        block
+        for block in original_content
+        if isinstance(block, dict)
+        and block.get("type") in _USER_MEDIA_BLOCK_TYPES
+    ]
+    if not media_blocks:
+        return user_text
+    return [{"type": "text", "text": user_text}, *media_blocks]
+
+
 class AgentRunner(Runner):
     def __init__(
         self,
@@ -514,10 +554,17 @@ class AgentRunner(Runner):
                         # Replace the first user message content with original user text
                         # Use string format (simplest) or dict format with 'type' field
                         # TextBlock() creates {'text': '...'} without 'type', which breaks get_text_content()
-                        _first_msg.content = user_text  # Simple string format
+                        # 媒体块要留住，否则刷新后历史里图片蒸发（见 helper 注释）
+                        _first_msg.content = _rebuild_user_content_with_media(
+                            user_text, _first_msg.content,
+                        )  # 无媒体 → 纯字符串；有媒体 → [text, image/video/audio...]
                         logger.info(
                             "_persist_chat_messages: replaced user message content "
-                            "with original text (%d chars)", len(user_text),
+                            "with original text (%d chars, %d media block(s) kept)",
+                            len(user_text),
+                            len(_first_msg.content) - 1
+                            if isinstance(_first_msg.content, list)
+                            else 0,
                         )
 
                 # Dedup: skip if first new message is already the last in session

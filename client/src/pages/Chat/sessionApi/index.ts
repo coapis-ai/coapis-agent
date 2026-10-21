@@ -130,36 +130,49 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/** Normalize absolute filesystem paths to relative paths for file preview.
- *  e.g. "/apps/ai/coapis/workspaces/admin/files/media/xxx.ppm" → "/media/xxx.ppm"
- *  If the path is already relative, return as-is. */
+/** Normalize a backend file URL to the form the preview endpoint can serve.
+ *
+ *  权威：server/coapis/app/routers/file_preview.py 的 preview_file ——
+ *  它把传入路径 `Path("/" + normalized).resolve()`，然后 `if not path.is_file(): 404`。
+ *  也就是说**只认绝对路径**（实测：绝对路径 200；`/media/x.png`、
+ *  `media/x.png` 这类相对形态全部 404）。
+ *
+ *  旧实现在这里把绝对路径**折成相对**（docstring 说 `/media/xxx.ppm` 可用，
+ *  实测不可用），等于把唯一能取到文件的形态改成了取不到文件的形态 ——
+ *  刷新历史后图片 404、缩略图变破图，根子就在这。
+ *  现在只做一件事：剥 `file://`，绝对路径原样交给预览端点。
+ *
+ *  相对形态（后端只给了 `media/x.png`、没有绝对路径可还原时）由
+ *  toDisplayUrl 走 /api/myfiles/download 那条用户作用域的路。
+ */
 function normalizeFileUrl(url: string | undefined): string {
   if (!url) return "";
-  // Already a relative path (starts with /media/ or similar)
-  if (url.startsWith("/media/") || url.startsWith("media/")) return url;
-  // Absolute path containing /files/ — extract relative part after /files/
-  const filesIdx = url.indexOf("/files/");
-  if (filesIdx >= 0) {
-    return url.slice(filesIdx + "/files/".length);
-  }
-  // file:// URI — strip scheme
-  if (url.startsWith("file://")) {
-    const stripped = url.slice("file://".length);
-    const idx = stripped.indexOf("/files/");
-    if (idx >= 0) return stripped.slice(idx + "/files/".length);
-  }
+  if (url.startsWith("file://")) return url.slice("file://".length);
   return url;
 }
 
+/** 后端持久化的媒体块是 source 形态：{type:"image", source:{type:"url", url}}。
+ *  SDK 的卡片只读 image_url / video_url / audio_url（Request/Card.js、
+ *  Response/Message.js 都是这个口径），source 形态它一律看不见。
+ *  后果：发送那一刻靠本地回显（带 image_url）有缩略图，刷新/重载历史后
+ *  图片就只剩文件名 —— 必须在读历史这一步补齐字段。 */
+function sourceUrlOf(c: ContentItem): string | undefined {
+  const s = c.source as { type?: string; url?: string } | undefined;
+  if (s && s.type === "url" && typeof s.url === "string" && s.url) return s.url;
+  return undefined;
+}
+
 function resolveContentItemUrl(c: ContentItem): ContentItem {
-  if (c.type === "image" && c.image_url) {
-    return { ...c, image_url: toDisplayUrl(c.image_url as string) };
+  if (c.type === "image") {
+    const raw = (c.image_url as string) || sourceUrlOf(c);
+    if (raw) return { ...c, image_url: toDisplayUrl(normalizeFileUrl(raw)) };
   }
   if (c.type === "audio" && c.data) {
     return { ...c, data: toDisplayUrl(c.data as string) };
   }
-  if (c.type === "video" && c.video_url) {
-    return { ...c, video_url: toDisplayUrl(c.video_url as string) };
+  if (c.type === "video") {
+    const raw = (c.video_url as string) || sourceUrlOf(c);
+    if (raw) return { ...c, video_url: toDisplayUrl(normalizeFileUrl(raw)) };
   }
   if (c.type === "file" && (c.file_url || c.file_id)) {
     const raw = (c.file_url as string) || (c.file_id as string) || "";

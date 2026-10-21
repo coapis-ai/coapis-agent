@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 import api from "@/api";
 import { chatApi } from "../../api/modules/chat";
+import { getApiToken, getApiUrl } from "../../api/config";
 export type CopyableContent = {
   type?: string;
   text?: string;
@@ -22,6 +23,105 @@ export type RuntimeLoadingBridgeApi = {
   getLoading?: () => boolean | string;
   setLoading?: (loading: boolean | string) => void;
 };
+
+// ---------------------------------------------------------------------------
+// 用户气泡补媒体块（「+ 资源菜单」通道）
+// ---------------------------------------------------------------------------
+//
+// 为什么需要它：SDK 的用户气泡**不读**我们发出去的 content，它读的是
+// {query, fileList} —— 见 @agentscope-ai/chat 的
+// AgentScopeRuntimeWebUI/core/Chat/hooks/useChatMessageHandler.js:
+//   createRequestMessage(data) → cards[0].data = RequestBuilder().handle(data)
+// RequestBuilder 只认 data.fileList（原生上传）。而「+ 菜单」选的文件走的是
+// 组件 state（selectedFiles → biz_params.selected_files + 我们重写的 content），
+// 从不进 fileList。结果：模型收得到图（content 里有 image 块），气泡里只有
+// 一个文件名 chip，没有缩略图。
+//
+// 修法：请求发出后（SDK 已 flushSync 建好这条用户消息），把同样的媒体块
+// 补写进气泡卡片读的 data.input[0].content。Request/Card.js 认
+// type:"image"+image_url / "video"+video_url / "audio"+audio_url，
+// 补进去就有 Images/Videos/Audios 卡片。
+//
+// 注意三处口径：
+//  1. 这里写的是**预览 URL**（浏览器取得到的），不是发给后端的 stored name
+//     （normalizeContentUrls 会把 URL 折成 /media/x，那是给后端的路径形态）。
+//  2. 必须整体新建对象：updateMessage 是浅合并，原地改数组 React 看不见。
+//  3. 只补不重复补：按 URL 去重，重试/连发都不会叠加。
+
+export type ChatMessagesBridgeApi = {
+  getMessages: () => any[];
+  updateMessage: (message: { id: string } & Record<string, any>) => void;
+};
+
+const REQUEST_CARD_CODE = "AgentScopeRuntimeRequestCard";
+
+/** 找出气泡里已存在的媒体块 URL，用于去重（不重复补同一张图）。 */
+function existingMediaUrls(content: any[]): Set<string> {
+  const urls = new Set<string>();
+  for (const c of content) {
+    if (!c || typeof c !== "object") continue;
+    const u = c.image_url || c.video_url || c.audio_url || c.source?.url;
+    if (typeof u === "string") urls.add(u);
+  }
+  return urls;
+}
+
+/**
+ * 把媒体块补进**最后一条**用户气泡。
+ *
+ * blocks 为展示形态的内容块（type 为 image/video/audio，带预览 URL）。
+ * 找不到消息/卡片结构不合预期时静默跳过 —— 补缩略图是锦上添花，
+ * 绝不能把发送流程带崩。
+ */
+export function appendMediaToUserBubble(
+  bridge: ChatMessagesBridgeApi | null,
+  blocks: any[],
+): void {
+  if (!bridge || blocks.length === 0) return;
+  try {
+    const messages = bridge.getMessages() || [];
+    let target: any = null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.role === "user") {
+        target = messages[i];
+        break;
+      }
+    }
+    if (!target) return;
+
+    const cards: any[] = target.cards || [];
+    const cardIdx = cards.findIndex(
+      (c) => c?.code === REQUEST_CARD_CODE && Array.isArray(c?.data?.input?.[0]?.content),
+    );
+    if (cardIdx < 0) return;
+
+    const card = cards[cardIdx];
+    const oldContent: any[] = card.data.input[0].content;
+    const have = existingMediaUrls(oldContent);
+    const fresh = blocks.filter((b) => {
+      const u = b?.image_url || b?.video_url || b?.audio_url;
+      return u && !have.has(u);
+    });
+    if (fresh.length === 0) return;
+
+    const nextCards = [...cards];
+    nextCards[cardIdx] = {
+      ...card,
+      data: {
+        ...card.data,
+        input: [
+          ...card.data.input.slice(0, 1),
+          ...card.data.input.slice(1),
+        ].map((inp: any, idx: number) =>
+          idx === 0 ? { ...inp, content: [...oldContent, ...fresh] } : inp,
+        ),
+      },
+    };
+    bridge.updateMessage({ id: target.id, cards: nextCards });
+  } catch (error) {
+    console.warn("[Chat] attach media to user bubble failed:", error);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Text extraction utilities
@@ -177,13 +277,62 @@ export function normalizeContentUrls(part: any): any {
   return p;
 }
 
-/** Turn a backend content URL (path or full URL) into a full URL for display. */
+/** Turn a backend content URL (path or full URL) into a full URL for display.
+ *
+ *  两条取文件的路，按路径形态分流（本轮实测定的口径）：
+ *   - **绝对路径** → /api/files/preview/{绝对路径}：file_preview.py 按
+ *     `Path("/"+p).resolve()` 取文件，只认绝对路径（实测 200）。
+ *     后端持久化的媒体块就是 `file:///apps/ai/coapis/workspaces/...` 绝对形态，
+ *     走这条。
+ *   - **相对路径**（我的空间相对路径 / `media/x.png`）→ /api/myfiles/download
+ *     ?path=&category=files：用户作用域 + 权限门控（实测 200 image/png）。
+ *     相对形态喂给 preview 端点必 404（它当绝对路径解析）。
+ */
 export function toDisplayUrl(url: string | undefined): string {
   if (!url) return "";
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   if (url.startsWith("file://")) url = url.replace("file://", "");
-  return chatApi.filePreviewUrl(url.startsWith("/") ? url : `/${url}`);
+  // 绝对路径：preview 端点能直接取到
+  if (url.startsWith("/")) return chatApi.filePreviewUrl(url);
+  // 相对路径：走我的空间下载端点（preview 端点这条路必 404）
+  return mySpaceDisplayUrl(url);
 }
+
+/**
+ * 「+ 资源菜单」选中的**我的空间**文件 → 浏览器可直读的展示 URL。
+ *
+ * 为什么不能用 chatApi.filePreviewUrl（这是本轮实测出来的坑）：
+ * 它拼的是 `/api/files/preview/<路径>`，而那个端点（server/coapis/app/
+ * routers/file_preview.py）把传入路径当**绝对磁盘路径**用 ——
+ * `Path("/" + normalized).resolve()`。喂我的空间相对路径 `e2e_red_box.png`
+ * 得到 `/e2e_red_box.png`，必 404（实测 404）。原生上传通道之所以能显示，
+ * 是因为它带的是 media/ 下的完整形态，不是同一条路。
+ *
+ * 我的空间文件的取文件端点是 `/api/myfiles/download?path=<相对>&category=files`
+ * —— 用户作用域 + 权限门控，实测 200 / image/png，`<img>` 可直读
+ * （Content-Disposition: attachment 对图片子资源不生效，浏览器照渲染）。
+ *
+ * 只用于**展示**。发给后端的块保持原路径形态（`/x.png`），那边由
+ * `_resolve_media_url` 按工作区解析，链路已验证可用 —— 两边不要混用。
+ */
+export function mySpaceDisplayUrl(
+  relPath: string,
+  category = "files",
+): string {
+  if (!relPath) return "";
+  if (relPath.startsWith("http://") || relPath.startsWith("https://")) {
+    return relPath;
+  }
+  const cleaned = relPath.replace(/^\/+/, "");
+  const url = getApiUrl(
+    `/myfiles/download?path=${encodeURIComponent(cleaned)}&category=${encodeURIComponent(
+      category,
+    )}`,
+  );
+  const token = getApiToken();
+  return token ? `${url}&token=${encodeURIComponent(token)}` : url;
+}
+
 
 // ---------------------------------------------------------------------------
 // Media type detection (会话引用 → 内容块类型)

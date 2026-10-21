@@ -28,6 +28,10 @@ import { useUser } from "../../contexts/UserContext";
 import { useAgentStore } from "../../stores/agentStore";
 import { getChatGlobals } from "../../lib/chatGlobals";
 import { useChatAnywhereInput, useChatAnywhereSessionsState } from "@agentscope-ai/chat";
+// 深路径导入：SDK 的 index 没导出 messages 上下文（只导出了 input/sessions），
+// 而补用户气泡媒体块必须用它。包内无 "exports" 字段，深路径可用（已核实）。
+// 权威：node_modules/@agentscope-ai/chat/lib/AgentScopeRuntimeWebUI/core/Context/ChatAnywhereMessagesContext.d.ts
+import { useChatAnywhereMessages } from "@agentscope-ai/chat/lib/AgentScopeRuntimeWebUI/core/Context/ChatAnywhereMessagesContext";
 import styles from "./index.module.less";
 import ChatSessionInitializer from "./components/ChatSessionInitializer";
 import ChatSessionHeader from "./components/ChatSessionHeader";
@@ -99,9 +103,12 @@ import {
   loadSceneNames,
   parseSceneId,
   mediaTypeFromFilename,
+  mySpaceDisplayUrl,
   type ChatMediaType,
   type CopyableResponse,
   type RuntimeLoadingBridgeApi,
+  type ChatMessagesBridgeApi,
+  appendMediaToUserBubble,
 } from "./utils";
 
 const CHAT_ATTACHMENT_MAX_MB = 10;
@@ -623,6 +630,37 @@ function RuntimeLoadingBridge({
   return null;
 }
 
+/**
+ * 把 SDK 的 messages 上下文（getMessages/updateMessage）递到页面层。
+ *
+ * 为什么要走桥：`useChatAnywhereMessages` 是 context selector，必须在
+ * ChatAnywhere 的 Provider 树**内部**才拿得到值。页面层的 customFetch 在树外，
+ * 直接调会拿到默认空实现。所以照 RuntimeLoadingBridge 的现成套路：在树内
+ * （rightHeader）渲染一个返回 null 的组件，把 API 挂到 ref 上给外面用。
+ */
+function ChatMessagesBridge({
+  bridgeRef,
+}: {
+  bridgeRef: { current: ChatMessagesBridgeApi | null };
+}) {
+  const { getMessages, updateMessage } = useChatAnywhereMessages();
+
+  useEffect(() => {
+    if (!getMessages || !updateMessage) {
+      bridgeRef.current = null;
+      return;
+    }
+    bridgeRef.current = { getMessages, updateMessage };
+    return () => {
+      if (bridgeRef.current?.updateMessage === updateMessage) {
+        bridgeRef.current = null;
+      }
+    };
+  }, [getMessages, updateMessage, bridgeRef]);
+
+  return null;
+}
+
 export default function ChatPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -697,6 +735,8 @@ export default function ChatPage() {
   const { toolRenderConfig } = usePlugins();
   const [refreshKey, setRefreshKey] = useState(0);
   const runtimeLoadingBridgeRef = useRef<RuntimeLoadingBridgeApi | null>(null);
+  // 「+ 菜单」通道补缩略图用（见 ChatMessagesBridge / appendMediaToUserBubble）
+  const chatMessagesBridgeRef = useRef<ChatMessagesBridgeApi | null>(null);
   const { message } = useAppMessage();
 
   // ─── M4 资源整合：+ 菜单与资源浮层 ─────────────────────────────
@@ -1573,6 +1613,8 @@ export default function ChatPage() {
       // 添加文件引用（供后端处理）
       // 注意：文件提示信息通过 biz_params 传递，不直接添加到 content 中
       // 这样可以保持用户消息的原始内容，避免污染聊天历史
+      // 气泡展示用的媒体块（预览 URL 形态）—— 见 appendMediaToUserBubble
+      const bubbleMediaBlocks: any[] = [];
       if (selectedFiles.length > 0) {
         // 添加文件/媒体引用供后端处理。
         //
@@ -1596,6 +1638,13 @@ export default function ChatPage() {
             ? file.path.slice(1) 
             : file.path;
           const previewUrl = chatApi.filePreviewUrl(`/${filePath}`);
+          // 展示 URL 与发送 URL 必须分开（本轮实测出来的分岔）：
+          //  previewUrl  → 经 normalizeContentUrls 折回 "/x.png" 给后端，
+          //                后端 _resolve_media_url 按工作区解析（链路已验证）
+          //  displayUrl  → 浏览器直读（/api/myfiles/download），气泡缩略图与
+          //                下载链接用它。filePreviewUrl 那条路对「我的空间」
+          //                相对路径必 404（它按绝对磁盘路径取文件）。
+          const displayUrl = mySpaceDisplayUrl(filePath);
           const kind: ChatMediaType =
             file.type === "image" ||
             file.type === "video" ||
@@ -1603,34 +1652,45 @@ export default function ChatPage() {
               ? file.type
               : mediaTypeFromFilename(file.name || filePath);
 
-          let block: any;
-          if (kind === "image") {
-            block = { type: "image", image_url: previewUrl };
-          } else if (kind === "video") {
-            block = { type: "video", video_url: previewUrl };
-          } else if (kind === "audio") {
-            // 后端 _extract_source_and_filename 里 audio 的 `data` 字段是
-            // **base64**（钉钉语音通道），塞 URL 会被当 base64 解码成乱码。
-            // 所以这里给 source.url（走 _resolve_media_url），audio_url
-            // 只供前端播放器读（Audios 卡片取 audio_url || data）。
-            block = {
-              type: "audio",
-              audio_url: previewUrl,
-              source: { type: "url", url: `/${filePath}` },
-            };
-          } else {
-            block = {
+          // 同一份块，两种 URL：urlFor 决定塞哪个
+          const buildBlock = (url: string): any => {
+            if (kind === "image") {
+              return { type: "image", image_url: url };
+            }
+            if (kind === "video") {
+              return { type: "video", video_url: url };
+            }
+            if (kind === "audio") {
+              // 后端 _extract_source_and_filename 里 audio 的 `data` 字段是
+              // **base64**（钉钉语音通道），塞 URL 会被当 base64 解码成乱码。
+              // 所以这里给 source.url（走 _resolve_media_url），audio_url
+              // 只供前端播放器读（Audios 卡片取 audio_url || data）。
+              return {
+                type: "audio",
+                audio_url: url,
+                source: { type: "url", url: `/${filePath}` },
+              };
+            }
+            return {
               type: "file",
               // 与上传附件同构：后端 _resolve_media_url 认 "/media/x" 与 "/x"
               // 两种形态并解析成磁盘绝对路径。旧写法 `file://{name}` 把文件名
               // 放在 netloc 位，url2pathname 解析为空，整条文件链路直接崩成
               // "[Error: Unknown file source type or empty data]"。
-              file_url: previewUrl,
+              file_url: url,
               file_name: file.name,
               file_size: file.size,
             };
-          }
+          };
+
+          const block = buildBlock(previewUrl);
           rewrittenContent.push(normalizeContentUrls(block));
+          // 气泡要的是**浏览器可直读**的 URL（previewUrl 那条路 404），
+          // 所以补一份 displayUrl 形态的副本。file 类型不进气泡媒体块
+          // （Images 卡片不认 file）。
+          if (kind === "image" || kind === "video" || kind === "audio") {
+            bubbleMediaBlocks.push(buildBlock(displayUrl));
+          }
         });
       }
       
@@ -1707,6 +1767,16 @@ export default function ChatPage() {
       const requestId = `req_${++requestIdRef.current}_${Date.now()}`;
       activeRequestIdRef.current = requestId;
       console.log("[Request] Starting:", requestId, "session:", currentSessionId);
+
+      // ⭐ 补缩略图：SDK 的用户气泡只读 {query, fileList}（Request/Builder.js），
+      // 「+ 菜单」选的文件走的是组件 state，从不进 fileList → 气泡只有文件名
+      // chip，没有图。此刻 SDK 已 flushSync 建好这条用户消息
+      // （useChatController: createRequestMessage → sleep(100) → request），
+      // 把同样的媒体块补进气泡卡片读的 data.input[0].content 就有图。
+      // 只影响本地气泡显示，不动 requestBody，发给后端的东西一字未改。
+      if (bubbleMediaBlocks.length > 0) {
+        appendMediaToUserBubble(chatMessagesBridgeRef.current, bubbleMediaBlocks);
+      }
 
       const response = await fetch(getApiUrl("/console/chat"), {
         method: "POST",
@@ -1941,6 +2011,7 @@ export default function ChatPage() {
           <>
             <ChatSessionInitializer skipNextSessionSelectedRef={skipNextSessionSelectedRef} />
             <RuntimeLoadingBridge bridgeRef={runtimeLoadingBridgeRef} />
+            <ChatMessagesBridge bridgeRef={chatMessagesBridgeRef} />
           </>
         ),
       },
