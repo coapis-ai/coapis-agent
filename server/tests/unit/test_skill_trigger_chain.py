@@ -1,0 +1,340 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026 蜜蜂 & CoApis Contributors
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""Skill trigger chain: index cache, Chinese matching, regex patterns.
+
+Covers the 2026-10-21 repair of the skill trigger chain.  The measured
+baseline on dev was: 19 skills discovered, **index length 0 chars** on every
+turn after the first, Chinese queries falling back to the full catalogue, and
+every ``triggers.patterns`` declaration unable to fire because it was compared
+as a literal substring.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from coapis.agents.utils.skill_selector import SkillSelector  # noqa: E402
+from coapis.skills.manager import SkillManager  # noqa: E402
+
+sys.path.insert(
+    0,
+    str(Path(__file__).resolve().parents[2].parent / "scripts"),
+)
+
+from apply_skill_index_hints import apply_hint  # noqa: E402
+
+
+def write_skill(
+    root: Path,
+    name: str,
+    *,
+    description: str = "A skill.",
+    frontmatter: str = "",
+    body: str = "Do the thing.",
+) -> Path:
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n{frontmatter}---\n{body}\n",
+        encoding="utf-8",
+    )
+    return skill_dir
+
+
+def manager_with(root: Path) -> SkillManager:
+    mgr = SkillManager(root)
+    asyncio.run(mgr.discover())
+    return mgr
+
+
+# ---------------------------------------------------------------- B1: cache
+
+
+def test_compact_index_is_not_empty_after_discover(tmp_path):
+    """The regression: discover() ends with apply_descriptions_from_pack(),
+    which calls invalidate_index_cache(); the "" sentinel it wrote counted as
+    a valid cached value, so the compact index stayed empty forever."""
+    write_skill(tmp_path, "alpha", description="处理表格数据。")
+    write_skill(tmp_path, "beta", description="读取邮件内容。")
+    mgr = manager_with(tmp_path)
+
+    compact = mgr.get_index_prompt(compact=True)
+    assert compact, "compact index must not be empty with skills present"
+    assert "alpha" in compact and "beta" in compact
+
+
+def test_index_rebuilds_after_invalidate(tmp_path):
+    """Invalidation must mean *no cache*, not *cached empty*."""
+    write_skill(tmp_path, "alpha", description="处理表格数据。")
+    mgr = manager_with(tmp_path)
+    assert mgr.get_index_prompt()
+    mgr.invalidate_index_cache()
+    assert mgr._index_prompt_cache is None
+    assert mgr._index_prompt_cache_compact is None
+    assert mgr.get_index_prompt()
+    assert mgr.get_index_prompt(compact=True)
+
+
+def test_empty_skill_dir_yields_empty_index(tmp_path):
+    mgr = manager_with(tmp_path)
+    assert mgr.get_index_prompt() == ""
+    assert mgr.get_index_prompt(compact=True) == ""
+    # An empty result is a legitimate cached value; it must not poison the
+    # non-empty path of the other mode.
+    assert mgr.get_index_prompt(compact=True) == ""
+
+
+def test_query_cache_key_is_full_query_not_a_hash(tmp_path):
+    """Keys used to be ``hash(query) % 10000``: one session could serve
+    another session's skill set on a collision."""
+    write_skill(tmp_path, "xlsx", description="电子表格。")
+    write_skill(tmp_path, "pdf", description="PDF 文档。")
+    mgr = manager_with(tmp_path)
+
+    a = mgr.get_index_prompt(query="做个表格")
+    b = mgr.get_index_prompt(query="合并PDF")
+    assert a != b
+    assert "xlsx" in a and "pdf" not in a
+    assert "pdf" in b and "xlsx" not in b
+    # Distinct queries must coexist as distinct keys.
+    assert len(mgr._query_index_cache) == 2
+
+
+def test_query_cache_is_bounded_lru(tmp_path):
+    write_skill(tmp_path, "xlsx", description="电子表格。")
+    mgr = manager_with(tmp_path)
+    for i in range(SkillManager.QUERY_CACHE_CAP + 25):
+        mgr.get_index_prompt(query=f"查询 {i}")
+    assert len(mgr._query_index_cache) <= SkillManager.QUERY_CACHE_CAP
+
+
+def test_broad_query_match_degrades_to_names_only(tmp_path):
+    """A match that catches everything must not re-inflate the index."""
+    for i in range(SkillManager.INDEX_DETAIL_CAP + 3):
+        write_skill(tmp_path, f"skill{i}", description="通用技能 数据 分析")
+    mgr = manager_with(tmp_path)
+    index = mgr.get_index_prompt(query="数据分析")
+    assert len(mgr.match_skills_by_query("数据分析")) > SkillManager.INDEX_DETAIL_CAP
+    assert index.startswith("skill0")  # comma-joined names, no "- **name**"
+    assert "Available Skills:" not in index
+
+
+def test_full_index_keeps_trigger_lines(tmp_path):
+    """First-turn index is where the model learns *when* to use a skill; it
+    must not collapse to bare names."""
+    for i in range(SkillManager.INDEX_DETAIL_CAP + 3):
+        write_skill(tmp_path, f"skill{i}", description="通用技能 数据 分析")
+    mgr = manager_with(tmp_path)
+    full = mgr.get_index_prompt()
+    assert "Available Skills:" in full
+    assert "- **skill0**" in full
+
+
+# ------------------------------------------------- B2: declared trigger words
+
+
+def test_parse_trigger_keywords_reads_all_declarations(tmp_path):
+    md = tmp_path / "SKILL.md"
+    md.write_text(
+        "---\n"
+        "name: demo\n"
+        "description: d\n"
+        "trigger_keywords:\n"
+        "  - 表格\n"
+        "triggers:\n"
+        "  keywords: [电子表格]\n"
+        "  intent_hints: [做报表]\n"
+        "  patterns: ['^导出.*csv$']\n"
+        "trigger: 创建表格，统计\n"
+        "---\n"
+        "body\n",
+        encoding="utf-8",
+    )
+    words = SkillManager._parse_trigger_keywords(md.read_text(encoding="utf-8"))
+    assert "表格" in words
+    assert "电子表格" in words
+    assert "做报表" in words
+    assert "创建表格" in words
+    assert "统计" in words
+    # Regexes must not leak into the literal channel.
+    assert not any("^导出" in w for w in words)
+
+
+def test_declared_keywords_drive_matching_without_trigger_map(tmp_path):
+    """The prompt layer used to consult only the hard-coded English
+    _TRIGGER_MAP, so Chinese declarations had no effect there."""
+    write_skill(
+        tmp_path,
+        "myxlsx",
+        description="电子表格处理。",
+        frontmatter="trigger_keywords:\n  - 做报表\n  - 数据透视\n",
+    )
+    mgr = manager_with(tmp_path)
+    assert mgr.match_skills_by_query("帮我做报表") == ["myxlsx"]
+    assert mgr.match_skills_by_query("数据透视分析") == ["myxlsx"]
+
+
+def test_trigger_keywords_survive_load_and_hot_reload(tmp_path):
+    write_skill(
+        tmp_path,
+        "alpha",
+        description="表格。",
+        frontmatter="trigger_keywords:\n  - 报表\n",
+    )
+    mgr = manager_with(tmp_path)
+    assert "报表" in mgr.get_skill("alpha")["trigger_keywords"]
+
+
+# ------------------------------------------------------- B3: Chinese matching
+
+
+def test_query_tokens_produces_cjk_bigrams():
+    tokens = SkillManager._query_tokens("读取文档")
+    assert "读取" in tokens
+    assert "文档" in tokens
+    assert "读取文档" in tokens
+    latin = SkillManager._query_tokens("merge the PDF file")
+    assert "merge" in latin and "pdf" in latin
+
+
+def test_chinese_query_matches_by_description(tmp_path):
+    write_skill(tmp_path, "pdf", description="PDF 文件的读取、合并、拆分。")
+    write_skill(tmp_path, "news", description="查找最新新闻并摘要。")
+    mgr = manager_with(tmp_path)
+    assert mgr.match_skills_by_query("读取文档") == ["pdf"]
+    assert mgr.match_skills_by_query("最新新闻") == ["news"]
+
+
+def test_no_match_fallback_is_not_the_full_catalogue(tmp_path):
+    """Fallback used to return every enabled skill, which made the
+    query-filtered index as big as the unfiltered one."""
+    for i in range(SkillManager.FALLBACK_SKILL_CAP + 6):
+        write_skill(tmp_path, f"zzskill{i}", description="专有领域技能")
+    mgr = manager_with(tmp_path)
+    matched = mgr.match_skills_by_query("完全无关的火星话")
+    assert matched, "fallback must still offer something"
+    assert len(matched) <= SkillManager.FALLBACK_SKILL_CAP
+    assert len(matched) < len(mgr.list_skills())
+
+
+def test_empty_query_uses_fallback_not_everything(tmp_path):
+    for i in range(SkillManager.FALLBACK_SKILL_CAP + 6):
+        write_skill(tmp_path, f"zzskill{i}", description="专有领域技能")
+    mgr = manager_with(tmp_path)
+    assert 0 < len(mgr.match_skills_by_query("")) < len(mgr.list_skills())
+
+
+# ------------------------------------------------- B5: regex pattern channel
+
+
+def test_patterns_are_collected_as_regexes_not_keywords(tmp_path):
+    skill_dir = write_skill(
+        tmp_path,
+        "cron",
+        description="定时任务。",
+        frontmatter="triggers:\n  patterns:\n    - '^定时.*任务$'\n    - '每周.*提醒'\n",
+    )
+    sel = SkillSelector()
+    sel.build_index([{"name": "cron", "dir": str(skill_dir), "description": "定时任务。"}])
+    assert sel.skill_patterns["cron"] == ["^定时.*任务$", "每周.*提醒"]
+    # And they are gone from the literal keyword weights.
+    weights = sel._kw_weight["cron"]
+    assert not any("^" in k for k in weights)
+
+
+def test_pattern_regex_channel_scores(tmp_path):
+    skill_dir = write_skill(
+        tmp_path,
+        "cron",
+        description="定时任务。",
+        frontmatter="triggers:\n  patterns:\n    - '每周.*提醒'\n",
+    )
+    sel = SkillSelector()
+    sel.build_index([{"name": "cron", "dir": str(skill_dir), "description": "定时任务。"}])
+    # Only the regex can produce this match: no literal keyword is present.
+    assert sel._score_skill("每周给我一次提醒", "cron") > 0
+    assert sel._score_skill("完全无关的句子", "cron") == 0
+
+
+def test_invalid_pattern_is_dropped_not_fatal(tmp_path):
+    skill_dir = write_skill(
+        tmp_path,
+        "broken",
+        description="x",
+        frontmatter="triggers:\n  patterns:\n    - '[unclosed'\n    - '正常模式'\n",
+    )
+    sel = SkillSelector()
+    sel.build_index([{"name": "broken", "dir": str(skill_dir), "description": "x"}])
+    assert sel.skill_patterns["broken"] == ["正常模式"]
+
+
+def test_build_index_clears_patterns(tmp_path):
+    skill_dir = write_skill(
+        tmp_path,
+        "cron",
+        description="定时任务。",
+        frontmatter="triggers:\n  patterns:\n    - '提醒'\n",
+    )
+    sel = SkillSelector()
+    sel.build_index([{"name": "cron", "dir": str(skill_dir), "description": "定时任务。"}])
+    assert sel.skill_patterns
+    sel.build_index([])
+    assert sel.skill_patterns == {}
+
+
+# ------------------------------------------- B6: index_hint authoring script
+
+
+def test_apply_hint_inserts_and_is_idempotent(tmp_path):
+    md = tmp_path / "SKILL.md"
+    md.write_text("---\nname: x\ndescription: d\n---\nbody\n", encoding="utf-8")
+    assert apply_hint(md, "当用户要测试时使用。") == "applied"
+    content = md.read_text(encoding="utf-8")
+    assert 'index_hint: "当用户要测试时使用。"' in content
+    assert content.startswith("---\n") and "\n---\nbody" in content
+    # Second run must not add a second hint.
+    assert apply_hint(md, "当用户要测试时使用。") == "skipped"
+    assert content.count("index_hint:") == 1
+
+
+def test_apply_hint_rejects_files_without_frontmatter(tmp_path):
+    md = tmp_path / "SKILL.md"
+    md.write_text("no frontmatter here\n", encoding="utf-8")
+    assert apply_hint(md, "x") == "no-frontmatter"
+
+
+def test_authored_hint_wins_in_index(tmp_path):
+    write_skill(
+        tmp_path,
+        "alpha",
+        description="很长的描述" * 20,
+        frontmatter='index_hint: "当用户要甲事时使用。"\n',
+    )
+    mgr = manager_with(tmp_path)
+    index = mgr.get_index_prompt()
+    assert "当用户要甲事时使用。" in index
+    assert "很长的描述" * 20 not in index
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-q"]))

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,9 @@ class SkillSelector:
         self.skill_keywords: dict[str, list[str]] = {}
         # skill_name → full metadata dict
         self.skill_meta: dict[str, dict] = {}
+        #: ``triggers.patterns`` per skill, kept as regexes (see
+        #: _extract_frontmatter_patterns) and matched in _score_skill.
+        self.skill_patterns: dict[str, list[str]] = {}
         # always-load skill names
         self.always_load_skills: list[str] = []
         # Scene priority skills, ordered by scene config order (= priority).
@@ -54,9 +58,11 @@ class SkillSelector:
         Reads, in priority order:
           - top-level ``trigger_keywords``
           - ``triggers.keywords``
-          - ``triggers.patterns``
           - ``triggers.intent_hints``
           - top-level ``trigger`` (free text, split on separators)
+
+        ``triggers.patterns`` is handled by _extract_frontmatter_patterns and
+        the regex channel in _score_skill, not here.
         """
         import os
         import yaml
@@ -82,7 +88,11 @@ class SkillSelector:
 
             triggers = meta.get("triggers", {})
             if isinstance(triggers, dict):
-                for key in ("keywords", "patterns", "intent_hints"):
+                # ``patterns`` is NOT collected here: they are regexes, and a
+                # regex string compared as a literal substring can never match
+                # a user message.  They go to the regex channel instead
+                # (see _extract_frontmatter_patterns / _score_skill).
+                for key in ("keywords", "intent_hints"):
                     vals = triggers.get(key, [])
                     if isinstance(vals, list):
                         collected.extend(str(v) for v in vals if v)
@@ -138,6 +148,7 @@ class SkillSelector:
         self.keyword_index.clear()
         self.skill_keywords.clear()
         self.skill_meta.clear()
+        self.skill_patterns.clear()
         self.always_load_skills.clear()
 
         for skill in skills:
@@ -162,6 +173,10 @@ class SkillSelector:
                     low = kw.lower()
                     if weights.get(low, 0) < 2:
                         weights[low] = 2
+            # triggers.patterns → regex channel (never literal keywords)
+            self.skill_patterns[name] = self._extract_frontmatter_patterns(
+                skill.get("dir", ""),
+            )
             # Description text is NOT a keyword source: splitting free-form
             # prose floods the index with generic verbs (进行/加密/表格/创建…)
             # that fire on unrelated messages. Only explicit, high-precision
@@ -293,6 +308,60 @@ class SkillSelector:
 
         return deduped
 
+    def _extract_frontmatter_patterns(self, skill_dir: str) -> list[str]:
+        """Read ``triggers.patterns`` as **regexes** for the regex channel.
+
+        These were previously fed through the literal-keyword path, where a
+        pattern like ``^上传.*文件`` is a string no user message contains —
+        so every skill that expressed its triggers as patterns (cron,
+        make-skill, pdf, xlsx, …) had declarations that could never fire.
+        Invalid regexes are dropped with a warning rather than killing the
+        selector.
+        """
+        import os
+
+        if not skill_dir:
+            return []
+        skill_md = os.path.join(skill_dir, "SKILL.md")
+        if not os.path.exists(skill_md):
+            return []
+        try:
+            content = open(skill_md, encoding="utf-8", errors="replace").read()
+        except OSError:
+            return []
+        if not content.startswith("---"):
+            return []
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return []
+        try:
+            import yaml
+
+            meta = yaml.safe_load(parts[1])
+        except Exception:
+            return []
+        if not isinstance(meta, dict):
+            return []
+
+        raw: list[str] = []
+        triggers = meta.get("triggers", {})
+        if isinstance(triggers, dict):
+            vals = triggers.get("patterns", {})
+            if isinstance(vals, list):
+                raw.extend(str(v) for v in vals if v)
+        out: list[str] = []
+        for pat in raw:
+            try:
+                re.compile(pat)
+            except re.error as exc:
+                logger.warning(
+                    "Skill %s: invalid trigger pattern %r (%s) — skipped",
+                    os.path.basename(str(skill_dir)), pat, exc,
+                )
+                continue
+            out.append(pat)
+        return out
+
     @staticmethod
     def _extract_suffixes(description: str) -> list[str]:
         """Extract explicit file-suffix signals from a description.
@@ -319,7 +388,9 @@ class SkillSelector:
         """Weighted keyword score for one skill.
 
         Frontmatter-declared triggers count double (S5); description-derived
-        keywords count once.
+        keywords count once.  ``triggers.patterns`` are matched as regexes
+        here — the channel they were always meant to have; as literal
+        keywords they could never fire.
         """
         message_lower = message.lower()
         weights = self._kw_weight.get(skill_name, {})
@@ -327,6 +398,12 @@ class SkillSelector:
         for kw, w in weights.items():
             if kw in message_lower:
                 score += w
+        for pat in self.skill_patterns.get(skill_name, ()):
+            try:
+                if re.search(pat, message, re.IGNORECASE):
+                    score += 2
+            except re.error:
+                continue
         return score
 
     def keyword_match_weighted(

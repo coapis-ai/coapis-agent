@@ -23,6 +23,7 @@ Skills are directories with SKILL.md, scripts, and metadata.
 import json
 import logging
 import asyncio
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -119,6 +120,15 @@ class SkillManager:
         self.skills_dir = skills_dir
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self._skills: Dict[str, dict] = {}
+        # Cache sentinels MUST be None, never "".  get_index_prompt() treats a
+        # cached value as valid when it "is not None"; seeding them with "" (as
+        # invalidate_index_cache used to) made the very first compact call
+        # return an empty skill index — the model then saw no skills at all on
+        # every turn after the first.  Measured on dev 2026-10-21: 19 skills
+        # discovered, index length 0 chars.
+        self._index_prompt_cache: Optional[str] = None
+        self._index_prompt_cache_compact: Optional[str] = None
+        self._query_index_cache: "OrderedDict[str, str]" = OrderedDict()
 
     async def discover(self):
         """Discover all skills in skills directory."""
@@ -188,6 +198,7 @@ class SkillManager:
             "name": name,
             "description": description or "",
             "index_hint": index_hint,
+            "trigger_keywords": self._parse_trigger_keywords(content),
             "path": str(skill_dir),
             "enabled": meta.get("enabled", True),
             "version": meta.get("version", "1.0.0"),
@@ -196,6 +207,66 @@ class SkillManager:
                 {"index_hint": index_hint, "description": description or ""},
             ),
         }
+
+    @staticmethod
+    def _parse_trigger_keywords(content: str) -> List[str]:
+        """Collect the trigger words a skill declares in its frontmatter.
+
+        Reads, in priority order: top-level ``trigger_keywords``,
+        ``triggers.keywords``, ``triggers.intent_hints``, top-level ``trigger``.
+        ``triggers.patterns`` is deliberately **excluded** — those are regexes
+        and belong to the regex channel (see SkillSelector), not to literal
+        keyword matching, where they could never fire.
+
+        Why this exists: the prompt layer used to match queries against a
+        hard-coded English ``_TRIGGER_MAP`` only, so the Chinese trigger words
+        skill authors declare in SKILL.md had no effect on what the model was
+        shown, while the load layer (SkillSelector) did read them — the two
+        layers answered the same request with different skill sets.
+        """
+        out: List[str] = []
+        if not content.startswith("---"):
+            return out
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return out
+        try:
+            import yaml
+
+            meta = yaml.safe_load(parts[1])
+        except Exception:
+            return out
+        if not isinstance(meta, dict):
+            return out
+
+        top = meta.get("trigger_keywords", [])
+        if isinstance(top, list):
+            out.extend(str(k) for k in top if k)
+
+        triggers = meta.get("triggers", {})
+        if isinstance(triggers, dict):
+            for key in ("keywords", "intent_hints"):
+                vals = triggers.get(key, [])
+                if isinstance(vals, list):
+                    out.extend(str(v) for v in vals if v)
+        elif isinstance(triggers, list):
+            out.extend(str(v) for v in triggers if v)
+
+        trigger_str = meta.get("trigger", "")
+        if isinstance(trigger_str, str) and trigger_str:
+            for piece in trigger_str.replace("；", ",").replace("，", ",").split(","):
+                piece = piece.strip()
+                if piece:
+                    out.append(piece)
+
+        seen: set = set()
+        ordered: List[str] = []
+        for kw in out:
+            low = kw.lower()
+            if low not in seen:
+                seen.add(low)
+                ordered.append(kw)
+        return ordered
 
     @staticmethod
     def _parse_index_hint(content: str) -> str:
@@ -266,9 +337,16 @@ class SkillManager:
         return list(self._skills.values())
 
     def invalidate_index_cache(self) -> None:
-        """Invalidate cached index prompt (call after skill changes)."""
-        self._index_prompt_cache = ""
-        self._index_prompt_cache_compact = ""
+        """Invalidate cached index prompt (call after skill changes).
+
+        Uses ``None`` as the "no cache" sentinel: ``get_index_prompt`` accepts
+        any non-None cached value as a hit, so writing ``""`` here silently
+        disabled the compact index forever (an empty index is a *valid* cached
+        value, so it was never rebuilt).
+        """
+        self._index_prompt_cache = None
+        self._index_prompt_cache_compact = None
+        self._query_index_cache.clear()
 
     async def hot_reload(self, skill_name: str):
         """Hot-reload a specific skill."""
@@ -330,6 +408,11 @@ class SkillManager:
 
     # Keyword-to-skill mapping: extracted from SKILL.md trigger words
     # Maps common query keywords to skill names for fast matching
+    #: How many skills the no-match fallback may list.  Chosen so the index
+    #: stays well under the full catalogue (19 skills on dev measured 2.1K
+    #: chars of index) while still giving the model something to pick from.
+    FALLBACK_SKILL_CAP = 8
+
     _TRIGGER_MAP: Dict[str, List[str]] = {
         # Browser automation
         "browser": ["browser_use", "browser_cdp", "browser_visible"],
@@ -453,49 +536,118 @@ class SkillManager:
 
         raise ValueError(f"Unknown tool: {tool_name}")
 
-    def match_skills_by_query(self, query: str) -> List[str]:
-        """Match relevant skill names based on query keywords.
+    @staticmethod
+    def _query_tokens(text: str) -> List[str]:
+        """Split a query into matchable tokens, CJK-aware.
 
-        Uses a keyword-to-skiname mapping for fast, zero-LLM-cost matching.
-        Falls back to description keyword matching if no trigger match found.
-
-        Args:
-            query: User's input query text
-
-        Returns:
-            List of matched skill names (sorted by relevance)
+        ``text.split()`` is useless on Chinese: "读取文档" is a single token,
+        so the old fallback compared a whole sentence against a skill
+        description and matched nothing, which dropped every Chinese request
+        into the "return all skills" branch.  Here Chinese runs become
+        character bigrams ("读取文档" → 读取/取文/文档) and Latin words stay
+        words, so matching works in both languages.
         """
-        query_lower = query.lower()
-        matched = set()
+        import re
 
-        # 1. Trigger map matching (fast, deterministic)
+        low = text.lower()
+        tokens: List[str] = []
+        for word in re.findall(r"[a-z0-9][a-z0-9._-]{1,}", low):
+            tokens.append(word)
+        for run in re.findall(r"[\u4e00-\u9fff]+", low):
+            if len(run) == 1:
+                continue
+            for i in range(len(run) - 1):
+                tokens.append(run[i : i + 2])
+            if len(run) >= 3:
+                tokens.append(run)
+        return tokens
+
+    def match_skills_by_query(self, query: str) -> List[str]:
+        """Match relevant skill names to a query, zero LLM cost.
+
+        Tier 1 — the skill's own declared trigger words (SKILL.md
+        ``trigger_keywords`` / ``triggers.*``).  This is the channel skill
+        authors actually maintain, and it is mostly Chinese; the prompt layer
+        used to ignore it entirely.
+        Tier 2 — the hard-coded ``_TRIGGER_MAP`` alias table (English
+        synonyms, file suffixes, product names).  Kept as a supplement, not
+        the authority.
+        Tier 3 — CJK bigram / Latin word matching against the index hint,
+        description and skill name.
+        Fallback — never "all skills": that flooded the index and cancelled
+        the point of on-demand loading.  We return the always-load skills
+        plus the closest few by name relevance.
+        """
+        query_lower = (query or "").lower()
+        if not query_lower.strip():
+            return self._fallback_skills()
+
+        scores: Dict[str, int] = {}
+
+        def _bump(name: str, points: int) -> None:
+            scores[name] = scores.get(name, 0) + points
+
+        # Tier 1: declared trigger words (highest precision).
+        for name, skill in self._skills.items():
+            if not skill.get("enabled", True):
+                continue
+            for kw in skill.get("trigger_keywords") or []:
+                kw_low = str(kw).lower().strip()
+                if len(kw_low) >= 2 and kw_low in query_lower:
+                    _bump(name, 4)
+
+        # Tier 2: hard-coded alias table.
         for keyword, skill_names in self._TRIGGER_MAP.items():
             if keyword in query_lower:
                 for sn in skill_names:
-                    # Normalize: skill names may use underscores or hyphens
-                    normalized = sn.replace("-", "_")
-                    # Check if this skill actually exists
-                    if self._find_skill_by_normalized_name(normalized):
-                        matched.add(normalized)
+                    found = self._find_skill_by_normalized_name(sn.replace("-", "_"))
+                    if found:
+                        _bump(found, 3)
 
-        # 2. Description keyword matching (fallback for unmatched queries)
-        if not matched:
+        if scores:
+            return sorted(scores, key=lambda n: (-scores[n], n))
+
+        # Tier 3: token matching against the trigger-facing text only.
+        tokens = [t for t in self._query_tokens(query_lower) if len(t) >= 2]
+        if tokens:
             for name, skill in self._skills.items():
                 if not skill.get("enabled", True):
                     continue
-                desc_lower = (skill.get("description", "") + " " + name).lower()
-                # Check if any word from query appears in description
-                query_words = set(query_lower.split())
-                for word in query_words:
-                    if len(word) >= 3 and word in desc_lower:
-                        matched.add(name)
-                        break
+                hay = " ".join(
+                    [
+                        str(skill.get("index_hint", "")),
+                        str(skill.get("description", "")),
+                        name,
+                        " ".join(str(k) for k in skill.get("trigger_keywords") or []),
+                    ]
+                ).lower().replace("-", "_")
+                hits = sum(1 for t in tokens if t in hay)
+                if hits:
+                    scores[name] = hits
 
-        # 3. If still no match, return all enabled skills (safe fallback)
-        if not matched:
-            return [n for n, s in self._skills.items() if s.get("enabled", True)]
+        if scores:
+            return sorted(scores, key=lambda n: (-scores[n], n))
 
-        return sorted(matched)
+        return self._fallback_skills()
+
+    def _fallback_skills(self) -> List[str]:
+        """Skills to show when a query matches nothing.
+
+        The old behaviour returned *every* enabled skill, which made the
+        query-filtered index the same size as the full one.  Always-load
+        skills plus a small, name-relevance-ordered set keeps the index
+        useful without paying for the whole catalogue.
+        """
+        enabled = [n for n, s in self._skills.items() if s.get("enabled", True)]
+        if not enabled:
+            return []
+        always = [n for n in enabled if self._skills[n].get("always_load")]
+        rest = [n for n in enabled if n not in always]
+        # Prefer skills whose index line states *when* to use them: a skill
+        # with no trigger sentence is one the model cannot select anyway.
+        rest.sort(key=lambda n: (not self._skills[n].get("has_trigger"), len(n)))
+        picked = always + rest[: self.FALLBACK_SKILL_CAP]
+        return picked or enabled[: self.FALLBACK_SKILL_CAP]
 
     def _find_skill_by_normalized_name(self, normalized: str) -> Optional[str]:
         """Find actual skill name from normalized version (handles - vs _)."""
@@ -503,6 +655,16 @@ class SkillManager:
             if name.replace("-", "_") == normalized:
                 return name
         return None
+
+    #: Above this many matched skills, the per-skill trigger lines stop paying
+    #: for themselves and the index degrades to a name list.  Guards against
+    #: a broad match re-inflating the index to full-catalogue size.
+    INDEX_DETAIL_CAP = 10
+    #: LRU ceiling for the per-query index cache.  Keys used to be
+    #: ``hash(query) % 10000``: with ~120 distinct queries a collision became
+    #: the coin flip, and because the manager is a per-workspace instance one
+    #: session could serve another session's skill set.
+    QUERY_CACHE_CAP = 64
 
     def get_index_prompt(self, compact: bool = False, query: str = None) -> str:
         """Generate skills index for system prompt (cached).
@@ -519,28 +681,52 @@ class SkillManager:
         # Determine which skills to include
         if query:
             matched_names = self.match_skills_by_query(query)
-            cache_key = f'_index_prompt_cache_query_{hash(query) % 10000}'
+            cache_key = query
+            cached = self._query_index_cache.get(cache_key)
+            if cached is not None:
+                self._query_index_cache.move_to_end(cache_key)
+                return cached
         elif compact:
             matched_names = [n for n, s in self._skills.items() if s.get("enabled", True)]
-            cache_key = '_index_prompt_cache_compact'
+            cache_key = "compact"
+            cached = self._index_prompt_cache_compact
+            if cached is not None:
+                return cached
         else:
             matched_names = [n for n, s in self._skills.items() if s.get("enabled", True)]
-            cache_key = '_index_prompt_cache'
-
-        # Use cached version if available
-        if hasattr(self, cache_key):
-            cached = getattr(self, cache_key)
+            cache_key = "full"
+            cached = self._index_prompt_cache
             if cached is not None:
                 return cached
 
+        def _store(value: str) -> str:
+            if query:
+                self._query_index_cache[cache_key] = value
+                self._query_index_cache.move_to_end(cache_key)
+                while len(self._query_index_cache) > self.QUERY_CACHE_CAP:
+                    self._query_index_cache.popitem(last=False)
+            elif compact:
+                self._index_prompt_cache_compact = value
+            else:
+                self._index_prompt_cache = value
+            return value
+
         if not matched_names:
-            setattr(self, cache_key, "")
-            return ""
+            return _store("")
 
         # Build index from matched skills only
         matched_skills = [self._skills[n] for n in matched_names if n in self._skills]
 
-        if compact:
+        # Many matches → names only; few matches → the trigger line is worth
+        # it.  Applies to the query path only: the unfiltered first-turn index
+        # is exactly where the model needs the "when to use" line, and
+        # collapsing it to bare names would cost skill discovery to save
+        # ~1.1K chars.
+        use_compact = compact or (
+            bool(query) and len(matched_skills) > self.INDEX_DETAIL_CAP
+        )
+
+        if use_compact:
             names = [s['name'] for s in matched_skills if s.get("enabled", True)]
             result = ", ".join(sorted(names))
         else:
@@ -552,5 +738,4 @@ class SkillManager:
                     )
             result = "\n".join(lines)
 
-        setattr(self, cache_key, result)
-        return result
+        return _store(result)

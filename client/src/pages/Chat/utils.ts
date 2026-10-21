@@ -55,15 +55,33 @@ export type ChatMessagesBridgeApi = {
 
 const REQUEST_CARD_CODE = "AgentScopeRuntimeRequestCard";
 
-/** 找出气泡里已存在的媒体块 URL，用于去重（不重复补同一张图）。 */
+/** 从URL中提取文件名（去掉路径前缀），用于跨形态去重。 */
+function extractFilename(url: string): string {
+  try {
+    // /api/myfiles/download?path=media%2Fxxx.png&category=files → xxx.png
+    if (url.includes("path=")) {
+      const m = url.match(/path=([^&]+)/);
+      if (m) return decodeURIComponent(m[1]).split("/").pop() || m[1];
+    }
+    // /media/xxx.png 或 /api/files/preview/.../xxx.png → xxx.png
+    const path = url.split("?")[0].split("#")[0];
+    return path.split("/").pop() || path;
+  } catch {
+    return url;
+  }
+}
+
+/** 找出气泡里已存在的媒体块**文件名**，用于去重（不重复补同一张图）。
+ *  按文件名而非完整URL去重：原生通道存的是 /media/x.png，补进的是
+ *  /api/myfiles/download?path=... 形态，两者URL不同但文件名相同。 */
 function existingMediaUrls(content: any[]): Set<string> {
-  const urls = new Set<string>();
+  const names = new Set<string>();
   for (const c of content) {
     if (!c || typeof c !== "object") continue;
     const u = c.image_url || c.video_url || c.audio_url || c.source?.url;
-    if (typeof u === "string") urls.add(u);
+    if (typeof u === "string") names.add(extractFilename(u));
   }
-  return urls;
+  return names;
 }
 
 /**
@@ -97,12 +115,47 @@ export function appendMediaToUserBubble(
 
     const card = cards[cardIdx];
     const oldContent: any[] = card.data.input[0].content;
-    const have = existingMediaUrls(oldContent);
+
+    // 对 oldContent 中的媒体块做 URL 转换：原生通道存的是 /media/x.png，
+    // 浏览器直接取必 404，统一过 toDisplayUrl 换成可直读形态。
+    const fixedOldContent = oldContent.map((c: any) => {
+      if (!c || typeof c !== "object") return c;
+      const key =
+        c.type === "image" ? "image_url"
+        : c.type === "video" ? "video_url"
+        : c.type === "audio" ? "audio_url"
+        : null;
+      if (!key) return c;
+      const raw = c[key] || c.source?.url;
+      if (typeof raw !== "string") return c;
+      // 已是可直读形态（http/api/preview）则跳过
+      if (raw.startsWith("http") || raw.startsWith("/api/")) return c;
+      return { ...c, [key]: toDisplayUrl(raw) };
+    });
+
+    const have = existingMediaUrls(fixedOldContent);
     const fresh = blocks.filter((b) => {
       const u = b?.image_url || b?.video_url || b?.audio_url;
-      return u && !have.has(u);
+      return u && !have.has(extractFilename(u));
     });
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) {
+      // 即使没有新块要补，也要把 oldContent 里的 404 URL 修掉
+      if (fixedOldContent.some((c: any, i: number) => c !== oldContent[i])) {
+        const nextCards = [...cards];
+        nextCards[cardIdx] = {
+          ...card,
+          data: {
+            ...card.data,
+            input: [
+              { ...card.data.input[0], content: fixedOldContent },
+              ...card.data.input.slice(1),
+            ],
+          },
+        };
+        bridge.updateMessage({ id: target.id, cards: nextCards });
+      }
+      return;
+    }
 
     const nextCards = [...cards];
     nextCards[cardIdx] = {
@@ -110,11 +163,9 @@ export function appendMediaToUserBubble(
       data: {
         ...card.data,
         input: [
-          ...card.data.input.slice(0, 1),
+          { ...card.data.input[0], content: [...fixedOldContent, ...fresh] },
           ...card.data.input.slice(1),
-        ].map((inp: any, idx: number) =>
-          idx === 0 ? { ...inp, content: [...oldContent, ...fresh] } : inp,
-        ),
+        ],
       },
     };
     bridge.updateMessage({ id: target.id, cards: nextCards });
