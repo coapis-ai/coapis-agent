@@ -288,24 +288,32 @@ class SkillManager:
         return ordered
 
     @staticmethod
-    def _parse_index_hint(content: str) -> str:
-        """Read the optional ``index_hint:`` frontmatter key.
+    def _frontmatter_meta(content: str) -> dict:
+        """SKILL.md frontmatter as a dict, YAML semantics included.
 
-        The index line the model sees every turn; authors who care about it
-        write it, everyone else gets a truncation of ``description``.
+        ``description: >`` and ``description: |`` are YAML block scalars --
+        the value is on the indented lines *below* the key, not after the
+        colon.  A line scanner reads them as an empty string, and an empty
+        description means the skill has **no index line at all**: the model
+        is shown a bare name with nothing to match a request against
+        (measured 9 of 56 skills on dev 2026-10-21).
         """
         if not content.startswith("---"):
-            return ""
+            return {}
         parts = content.split("---", 2)
-        if len(parts) < 2:
-            return ""
-        for line in parts[1].split("\n"):
-            if line.startswith("index_hint:"):
-                return line.split(":", 1)[1].strip().strip('"').strip("'")
-        return ""
+        if len(parts) < 3:
+            return {}
+        try:
+            import yaml
 
-    def _parse_frontmatter(self, content: str) -> tuple:
-        """Parse YAML frontmatter from SKILL.md."""
+            meta = yaml.safe_load(parts[1])
+        except Exception:
+            return {}
+        return meta if isinstance(meta, dict) else {}
+
+    @staticmethod
+    def _scan_frontmatter_lines(content: str) -> tuple:
+        """Line-scan fallback for frontmatter the YAML parser rejected."""
         name = ""
         description = ""
 
@@ -320,6 +328,39 @@ class SkillManager:
                         description = line.split(":", 1)[1].strip().strip('"').strip("'")
 
         return name, description
+
+    @classmethod
+    def _parse_index_hint(cls, content: str) -> str:
+        """Read the optional ``index_hint:`` frontmatter key.
+
+        The index line the model sees every turn; authors who care about it
+        write it, everyone else gets a truncation of ``description``.
+        """
+        hint = cls._frontmatter_meta(content).get("index_hint")
+        if isinstance(hint, str) and hint.strip():
+            return hint.strip()
+        # YAML rejected the block: keep the plain-key line scan working.
+        if not content.startswith("---"):
+            return ""
+        parts = content.split("---", 2)
+        if len(parts) < 2:
+            return ""
+        for line in parts[1].split("\n"):
+            if line.startswith("index_hint:"):
+                return line.split(":", 1)[1].strip().strip('"').strip("'")
+        return ""
+
+    def _parse_frontmatter(self, content: str) -> tuple:
+        """Parse YAML frontmatter from SKILL.md."""
+        meta = self._frontmatter_meta(content)
+        if meta:
+            name = meta.get("name")
+            desc = meta.get("description")
+            name = name.strip() if isinstance(name, str) else ""
+            desc = desc.strip() if isinstance(desc, str) else ""
+            if name or desc:
+                return name, desc
+        return self._scan_frontmatter_lines(content)
 
     def apply_descriptions_from_pack(self, language: str = "zh") -> int:
         """从数据包加载技能描述并覆盖 YAML frontmatter 中的描述.

@@ -420,5 +420,95 @@ def test_skills_service_runs_discover_on_startup():
     assert "extra_dirs=_skill_scan_extra_dirs(ws)" in src
 
 
+# ------------------------------------------- B8: YAML frontmatter semantics
+
+
+def _write_raw(root: Path, name: str, frontmatter: str) -> Path:
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\n{frontmatter}---\nbody\n", encoding="utf-8"
+    )
+    return skill_dir
+
+
+def test_folded_description_reaches_the_index(tmp_path):
+    """``description: >`` is a YAML block scalar: the value is on the lines
+    *below* the key.  The line scanner read it as an empty string, so 9 of 56
+    real skills had **no index line at all** -- the model saw a bare name."""
+    _write_raw(
+        tmp_path,
+        "demo-report",
+        "name: demo-report\n"
+        "description: >\n"
+        "  撰写工作汇报与分析材料。\n"
+        "  当用户需要整理材料成文时使用。\n",
+    )
+    mgr = manager_with(tmp_path)
+    skill = mgr.get_skill("demo-report")
+    assert skill is not None
+    assert "撰写工作汇报" in skill["description"]
+    assert skill["has_trigger"] is True
+    index = mgr.get_index_prompt()
+    assert "撰写工作汇报" in index
+
+
+def test_literal_description_is_parsed(tmp_path):
+    _write_raw(
+        tmp_path,
+        "factory",
+        "name: factory\n"
+        "description: |\n"
+        "  第一行\n"
+        "  第二行\n",
+    )
+    mgr = manager_with(tmp_path)
+    desc = mgr.get_skill("factory")["description"]
+    assert "第一行" in desc and "第二行" in desc
+
+
+def test_block_scalar_index_hint_is_parsed(tmp_path):
+    _write_raw(
+        tmp_path,
+        "alpha",
+        "name: alpha\n"
+        "description: 描述。\n"
+        "index_hint: >\n"
+        "  当用户要编排开发流程时使用。\n",
+    )
+    mgr = manager_with(tmp_path)
+    assert mgr.get_skill("alpha")["index_hint"] == "当用户要编排开发流程时使用。"
+    assert "当用户要编排开发流程时使用。" in mgr.get_index_prompt()
+
+
+def test_broken_yaml_falls_back_to_the_line_scan(tmp_path):
+    """A frontmatter the YAML parser rejects must not delete the skill: the
+    old line scan is kept as the fallback path."""
+    _write_raw(
+        tmp_path,
+        "demo",
+        'name: demo\ndescription: "unclosed quote\n',
+    )
+    mgr = manager_with(tmp_path)
+    skill = mgr.get_skill("demo")
+    assert skill is not None
+    assert skill["name"] == "demo"
+
+
+def test_non_string_description_does_not_leak_yaml_structure(tmp_path):
+    """``description:`` with nested keys parses to a dict; str() of it would
+    put ``{'zh': ...}`` into the system prompt."""
+    _write_raw(
+        tmp_path,
+        "demo",
+        "name: demo\ndescription:\n  zh: 中文描述\n  en: english\n",
+    )
+    mgr = manager_with(tmp_path)
+    skill = mgr.get_skill("demo")
+    assert skill["name"] == "demo"
+    assert skill["description"] == ""
+    assert "zh:" not in mgr.get_index_prompt()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
