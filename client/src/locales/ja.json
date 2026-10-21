@@ -1463,6 +1463,31 @@
       "tipChat": "チャットモデルを選択（すべてのエージェントとシーンに適用）",
       "noModels": "利用可能なモデルがありません。まず設定で構成してください",
       "saveFailed": "モデル設定の保存に失敗しました"
+    },
+    "preview": {
+      "download": "ダウンロード",
+      "open": "新しいタブで開く",
+      "tooLarge": "ファイルが大きすぎてプレビューできません。ダウンロードしてください",
+      "truncated": "内容が長いため末尾 {{n}} 行を省略しました",
+      "unsupported": "この形式はプレビューに対応していません。ダウンロードしてください",
+      "convert": "形式変換",
+      "convertDone": "変換完了。クリックでダウンロード",
+      "convertFailed": "変換に失敗しました"
+    },
+    "resources": {
+      "barTitle": "セッションのリソース",
+      "expand": "表示",
+      "collapse": "閉じる",
+      "refresh": "更新",
+      "produced": "生成",
+      "missing": "削除済み",
+      "producedFiles": "このセッションで生成したファイル",
+      "usedResources": "このセッションで参照したリソース",
+      "preview": "プレビュー",
+      "download": "ダウンロード",
+      "downloadFile": "ファイルをダウンロード",
+      "previewUnsupported": "この形式（{{type}}）はプレビューに対応していません",
+      "unknownType": "不明"
     }
   },
   "security": {
@@ -2080,6 +2105,7 @@
     "refreshing": "更新中…"
   },
   "myspace": {
+    "preview": "プレビュー",
     "dimAll": "すべて",
     "dimUploaded": "自分のアップロード",
     "dimAI": "AI生成",

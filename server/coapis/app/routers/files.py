@@ -561,6 +561,98 @@ async def preview_file(path: str, category: str = "files", request: Request = No
     return response
 
 
+_MD_SOURCE_SUFFIXES = {".md", ".markdown"}
+_CONVERT_TARGETS = ("docx", "pdf")
+
+
+@router.post("/convert")
+@require_permission("chat:read")
+async def convert_file_format(
+    path: str = Query(..., description="工作区相对路径，如 files/报告.md"),
+    target: str = Query("docx", description="目标格式：docx | pdf"),
+    category: str = Query("files"),
+    chat_id: str = Query("", description="归属会话（进台账用，可空）"),
+    request: Request = None,
+):
+    """把会话产出的 md 转成 docx/pdf（B5 转格式入口）。
+
+    为什么开这条端点：格式契约里「交付那一刻转换一次」原本只有智能体能做
+    （`convert_file` 工具），用户在预览抽屉里点「转成 docx」没有入口，只能
+    回去让智能体再做一遍。这里复用同一份转换实现（``utils/md_converter``），
+    走**用户作用域**：路径解析与 download/preview 完全同一套防穿越逻辑，
+    只能转自己工作区里的 md。
+
+    产物落在源文件同目录同名（`files/报告.docx`），并登记进文件台账，所以
+    「我的空间」和会话资源条都能看到它。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+
+    target = (target or "").strip().lstrip(".").lower()
+    if target not in _CONVERT_TARGETS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"暂不支持转换为 {target}（可用：{'、'.join(_CONVERT_TARGETS)}）",
+        )
+
+    # 台账/write_file 给的是**工作区**相对路径（files/x.md），而 myfiles 的
+    # path 是**分类目录内**的相对路径（x.md）。前端传的是前者，这里统一换算，
+    # 否则会解析成 <user>/files/files/x.md 必 404。
+    rel_in = (path or "").strip().strip("/")
+    if rel_in.startswith("files/"):
+        category, rel_in = "files", rel_in[len("files/") :]
+    elif rel_in.startswith("media/"):
+        category, rel_in = "media", rel_in[len("media/") :]
+
+    file_service = FileServiceFactory.get_service()
+    user_dir = file_service._get_user_dir(username, category)
+    src = file_service._resolve_path(user_dir, rel_in)
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="源文件不存在")
+    if src.suffix.lower() not in _MD_SOURCE_SUFFIXES:
+        raise HTTPException(
+            status_code=400, detail="只有 md 文件支持在线转换（docx/pdf 已是成品）"
+        )
+
+    dest = src.with_suffix(f".{target}")
+    try:
+        from ...utils.md_converter import convert_file as _md_convert, MdConversionError
+
+        _md_convert(src, target, dest)
+    except MdConversionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("convert %s → %s failed: %s", path, target, exc)
+        raise HTTPException(status_code=500, detail=f"转换失败：{exc}") from exc
+
+    # 台账登记（fire-and-forget）：让产物在「我的空间」与会话资源里可见。
+    try:
+        from ...foundation.file_ledger import record_file_event
+
+        record_file_event(
+            username,
+            str(dest),
+            chat_id=chat_id or None,
+            source="convert",
+            title=dest.stem or None,
+        )
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+    # 对外统一用**工作区**相对路径（files/plan.docx）——与 write_file 返回体、
+    # 文件台账、会话资源条同一套口径，前端不需要再猜一次。
+    rel = f"{category}/{dest.relative_to(user_dir).as_posix()}"
+    return {
+        "success": True,
+        "path": rel,
+        "name": dest.name,
+        "size": dest.stat().st_size if dest.is_file() else 0,
+        "target": target,
+    }
+
+
 @router.put("/rename")
 @require_permission("chat:read")
 async def rename_file(

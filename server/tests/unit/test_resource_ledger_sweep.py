@@ -133,10 +133,12 @@ def test_backfill_registers_legacy_files_once(env):
     rep = svc.sweep(full=True, backfill=True)
     assert rep["backfilled"] == 3
     rows = _rows("alice")
-    assert {r.path for r in rows} == {"a.md", "docs/b.pdf"}
+    # 台账统一口径 = 工作区相对路径：巡检补扫登记的是 files 根相对路径，
+    # 入库时换算成 ``files/...``，与采集器/前端同一口径。
+    assert {r.path for r in rows} == {"files/a.md", "files/docs/b.pdf"}
     assert all(r.source == "backfill" for r in rows)
     assert all(r.fs_present == 1 for r in rows)
-    assert next(r for r in rows if r.path == "a.md").size_bytes == 4
+    assert next(r for r in rows if r.path == "files/a.md").size_bytes == 4
 
     # 幂等：第二轮不该再产生新行
     rep2 = svc.sweep(full=True, backfill=True)

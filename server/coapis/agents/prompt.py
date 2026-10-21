@@ -707,6 +707,9 @@ _FILE_OPERATION_DIRECTIVE_ZH = (
     "**落点**（`files/`=我的空间正式区，`files/.temp/`=临时区，自动清理）：默认写 `.temp/`；"
     "用户要求保存/导出/指定路径、交付要发外部、需长期复用 → 写 `files/` 并告知路径。"
     "**同名直接覆盖更新**，用户要求留版本才用 `_v2`。\n\n"
+    "**引用产出文件**：回答里提到刚写的文件，就用 `write_file` 返回给你的那个**相对路径**"
+    "（形如 `files/报告.md`），**绝不写服务器绝对路径**；预览与下载链接由系统自动挂在"
+    "回答下方，**不要自己拼 URL**，也不要让用户去目录里手动找。\n\n"
     "**脚本**：优先内置工具与已装依赖；需额外依赖时脚本与产物都放 `files/.temp/`。\n"
 )
 
@@ -724,6 +727,10 @@ _FILE_OPERATION_DIRECTIVE_EN = (
     "default `.temp/`; use `files/` and state the path when the user asks to save/export/"
     "download or names a path, the deliverable leaves for third parties, or it is for long-term "
     "reuse. **Same name = overwrite**; `name_v2` only if the user wants versions kept.\n\n"
+    "**Referencing a produced file**: in your reply use the **relative path** `write_file` "
+    "returned (shaped like `files/report.md`) and **never a server absolute path**; preview "
+    "and download links are attached to the answer by the system, so **do not build URLs "
+    "yourself** and do not tell the user to go look in the folder.\n\n"
     "**Scripts**: built-in tools and installed dependencies first; with extra dependencies, "
     "script and outputs stay in `files/.temp/`.\n"
 )
@@ -746,6 +753,10 @@ _FILE_OPERATION_DIRECTIVE_RU = (
     "по умолчанию `.temp/`; в `files/` и с сообщением пути — если пользователь просит сохранить/экспортировать/"
     "скачать или указал путь, если результат уходит вовне, либо нужно длительное переиспользование. "
     "**Файл с тем же именем просто перезаписывается**; `имя_v2` — только по просьбе о версиях.\n\n"
+    "**Ссылка на созданный файл**: в ответе используйте **относительный путь**, возвращённый "
+    "`write_file` (вида `files/report.md`), и **никогда — абсолютный путь сервера**; ссылки "
+    "просмотра и загрузки система добавляет к ответу сама, поэтому **не составляйте URL "
+    "вручную** и не отправляйте пользователя искать файл в папке.\n\n"
     "**Скрипты**: встроенные инструменты и установленные зависимости; при дополнительных зависимостях "
     "скрипт и результаты — только в `files/.temp/`.\n"
 )

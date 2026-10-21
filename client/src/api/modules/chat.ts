@@ -18,7 +18,39 @@ export interface ChatUploadResponse {
 
 const FILES_PREVIEW = "/files/preview";
 
+/** 会话资源条目（B2 读接口 GET /chats/{id}/resources 的元素）。 */
+export interface ChatResourceItem {
+  resource_key?: string;
+  kind: "file" | "web" | "kb" | "mcp" | "db";
+  /** file → 工作区相对路径（files/x.md）；web → URL */
+  path: string;
+  title: string;
+  role: "producer" | "reference" | "attachment" | "export";
+  ref_count?: number;
+  status?: string;
+  updated_at?: number | string;
+  size?: number | null;
+  exists?: boolean;
+}
+
+export interface ChatResourceList {
+  items: ChatResourceItem[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export const chatApi = {
+  /** 会话资源清单（权威源=资源台账，刷新后仍可还原）。 */
+  listChatResources: (
+    chatId: string,
+    limit = 200,
+    offset = 0,
+  ): Promise<ChatResourceList> =>
+    request<ChatResourceList>(
+      `/chats/${encodeURIComponent(chatId)}/resources?limit=${limit}&offset=${offset}`,
+    ),
+
   /** Upload a file for chat attachment. Returns URL path for content. */
   uploadFile: async (
     file: File,

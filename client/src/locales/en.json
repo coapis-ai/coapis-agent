@@ -2215,6 +2215,31 @@
       "tipChat": "Choose chat model (applies to all your agents and scenes)",
       "noModels": "No models available, configure them in Settings first",
       "saveFailed": "Failed to save model preference"
+    },
+    "preview": {
+      "download": "Download",
+      "open": "Open in new tab",
+      "tooLarge": "File too large to preview inline — please download it",
+      "truncated": "Content too long — the last {{n}} lines are omitted",
+      "unsupported": "This file type can't be previewed inline — please download it",
+      "convert": "Convert format",
+      "convertDone": "Converted — click to download",
+      "convertFailed": "Conversion failed"
+    },
+    "resources": {
+      "barTitle": "Session resources",
+      "expand": "Show",
+      "collapse": "Hide",
+      "refresh": "Refresh",
+      "produced": "Generated",
+      "missing": "Deleted",
+      "producedFiles": "Files generated in this chat",
+      "usedResources": "Resources used in this chat",
+      "preview": "Preview",
+      "download": "Download",
+      "downloadFile": "Download file",
+      "previewUnsupported": "This file type ({{type}}) can't be previewed",
+      "unknownType": "unknown"
     }
   },
   "security": {

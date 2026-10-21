@@ -998,6 +998,40 @@ class LightContextManager(BaseContextManager):
             logger.debug("Could not show the compaction status line.", exc_info=True)
         return None
 
+    async def _last_tool_result(self, agent: "CoApisAgent", tool_call: Any) -> Any:
+        """Find the tool_result block matching *tool_call* in memory's tail.
+
+        `_acting` appends the result message in its ``finally`` block and
+        returns None for ordinary tools, so the tail of memory is the only
+        place the raw output exists.  Scan a few messages, match by call id,
+        fall back to the newest tool_result block.
+        """
+        try:
+            call_id = ""
+            call_name = ""
+            if isinstance(tool_call, dict):
+                call_id = str(tool_call.get("id", ""))
+                call_name = str(tool_call.get("name", ""))
+            else:
+                call_id = str(getattr(tool_call, "id", "") or "")
+                call_name = str(getattr(tool_call, "name", "") or "")
+            messages = await agent.memory.get_memory(prepend_summary=False)
+            newest = None
+            for msg in reversed(messages[-6:]):
+                for block in msg.get_content_blocks("tool_result"):
+                    if block.get("type") != "tool_result":
+                        continue
+                    if newest is None:
+                        newest = block
+                    if call_id and block.get("id") == call_id:
+                        return block
+                    if call_name and block.get("name") == call_name:
+                        return block
+            return newest
+        except Exception:
+            logger.debug("Could not locate tool result in memory.", exc_info=True)
+            return None
+
     async def post_acting(
         self,
         agent: "CoApisAgent",
@@ -1005,6 +1039,30 @@ class LightContextManager(BaseContextManager):
         output: Any,
     ) -> Msg | None:
         """Truncate oversized tool-call results after each acting step."""
+        # 会话资源采集（B1）：把这一步读到的网页 / 写到工作区的文件登记进
+        # 台账 + 本轮上下文。放在裁剪之前 —— 裁剪会把大输出 offload 掉，采集
+        # 读的是原始文本。纯代码解析、零 LLM、自吞异常，坏了不影响消息链路。
+        #
+        # 注意：agentscope 的 `_acting` 只在 generate_response 时返回 dict，
+        # 普通工具调用的结果只写进 memory，钩子拿到的 output 是 None。所以
+        # 结果要从 memory 尾部的 tool_result 块里取，否则采集恒为空。
+        try:
+            from .reference_collector import collect_from_tool_call
+            from ...config.context import get_current_username
+
+            tool_call = kwargs.get("tool_call")
+            result = output
+            if result is None and tool_call is not None:
+                result = await self._last_tool_result(agent, tool_call)
+            if result is not None:
+                collect_from_tool_call(
+                    tool_call,
+                    result,
+                    username=get_current_username() or self.agent_id,
+                )
+        except Exception:
+            logger.debug("resource collection hook skipped", exc_info=True)
+
         try:
             agent_config = load_agent_config(self.agent_id)
             lcc = agent_config.running.light_context_config

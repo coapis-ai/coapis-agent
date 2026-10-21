@@ -84,6 +84,85 @@ _CHAT_STATE_EPOCH: dict[str, int] = {}
 _enrich_citations_ctx: ContextVar[list] = ContextVar("enrich_citations", default=[])
 
 
+def _begin_turn_resources(chat_id: str, username: str) -> None:
+    """Start the per-turn resource collector (会话引用与产出资源 · B1).
+
+    Fire-and-forget: a broken collector must never break the reply.
+    """
+    try:
+        from ...agents.context.reference_collector import begin_turn
+
+        begin_turn(chat_id=chat_id, username=username)
+    except Exception:
+        logger.debug("turn resource collector not started", exc_info=True)
+
+
+def _take_turn_resources() -> list:
+    try:
+        from ...agents.context.reference_collector import take_turn_resources
+
+        return take_turn_resources()
+    except Exception:
+        return []
+
+
+def _turn_resources_from_ledger(chat_id: str, username: str) -> list:
+    """完成事件里的资源清单改从台账取（B2 兜底）。
+
+    采集器把本轮条目也塞进 ContextVar，但采集发生在 agent 侧、事件在
+    Runner 侧，两侧不保证同一个 asyncio 上下文 —— ContextVar 传过去是
+    碰运气（实测恒空，资源条刷新后拿不到实时清单）。台账是权威源，
+    采集写入是同步的，按 chat_id 查一定拿得到；形状与 completed 事件
+    的 ``resources`` 保持一致。
+    """
+    if not chat_id:
+        return []
+    try:
+        from ...foundation.resource_ledger import get_resource_ledger
+
+        rl = get_resource_ledger()
+        rows = rl.list_resources_for_chat(
+            owner_scope="user",
+            owner_id=username or "",
+            chat_id=chat_id,
+            limit=60,
+            offset=0,
+        )
+    except Exception:
+        logger.debug("turn resources skipped for chat %s", chat_id[:16], exc_info=True)
+        return []
+
+    items = []
+    for row in rows:
+        kind = str(row.get("kind") or "")
+        # 前端按首段分桶决定预览/下载走哪个分类，口径必须与
+        # /chats/{id}/resources 完全一致。
+        path = str(row.get("path") or "")
+        if kind == "file":
+            try:
+                from ...constant import WORKSPACES_DIR
+                from ...foundation.resource_ledger import workspace_relative_path
+                from pathlib import Path
+
+                path = workspace_relative_path(
+                    path,
+                    Path(WORKSPACES_DIR) / str(row.get("owner_id") or username),
+                )
+            except Exception:  # pragma: no cover - defensive
+                pass
+        items.append(
+            {
+                "kind": kind,
+                "path": path,
+                "title": row.get("title")
+                or (path.rsplit("/", 1)[-1] if kind == "file" else path),
+                "role": str(row.get("role") or "reference"),
+            }
+        )
+    return items
+
+
+
 
 
 # ------------------------------------------------------------------
@@ -229,6 +308,23 @@ def _rebuild_user_content_with_media(
     if not media_blocks:
         return user_text
     return [{"type": "text", "text": user_text}, *media_blocks]
+
+
+def _resolve_turn_identity(request) -> tuple:
+    """本轮的 (chat_id, username)：session 上下文优先，request 兜底。"""
+    try:
+        from ...config.session_context import get_current_chat_id
+
+        cid = get_current_chat_id() or getattr(request, "chat_id", None) or ""
+    except Exception:
+        cid = getattr(request, "chat_id", None) or ""
+    try:
+        from ...config.context import get_current_username
+
+        uname = get_current_username() or ""
+    except Exception:
+        uname = ""
+    return str(cid or ""), str(uname or "")
 
 
 class AgentRunner(Runner):
@@ -1015,6 +1111,15 @@ class AgentRunner(Runner):
                             event.citations = _kb_cites
                     except LookupError:
                         pass
+                    # 会话资源透出（B1/B2）：本轮读到的网页 / 写到工作区的
+                    # 文件，挂到 completed 响应事件，前端渲染「产出卡 + 资源条」。
+                    try:
+                        _cid, _uname = _resolve_turn_identity(request)
+                        _turn_res = _turn_resources_from_ledger(_cid, _uname) or _take_turn_resources()
+                        if _turn_res:
+                            event.resources = _turn_res
+                    except Exception:
+                        pass
             yield event
 
         # 流式过滤器收尾：吐出缓冲区里最后一行（无换行结尾的残留）
@@ -1051,6 +1156,13 @@ class AgentRunner(Runner):
                     if _kb_cites:
                         _fallback.citations = _kb_cites
                 except LookupError:
+                    pass
+                try:
+                    _cid, _uname = _resolve_turn_identity(request)
+                    _turn_res = _turn_resources_from_ledger(_cid, _uname) or _take_turn_resources()
+                    if _turn_res:
+                        _fallback.resources = _turn_res
+                except Exception:
                     pass
                 yield _fallback
             except Exception:
@@ -1214,6 +1326,19 @@ class AgentRunner(Runner):
             if user_id:
                 from ..external_identity import set_identity_username
                 set_identity_username(user_id)
+
+            # 会话资源采集（B1）：本轮 chat_id + 用户身份注入采集器；
+            # post_acting 钩子逐步登记台账，completed 响应事件透出给前端。
+            from ...config.session_context import get_current_chat_id as _get_ctx_chat_id
+
+            _begin_turn_resources(
+                str(
+                    getattr(request, "chat_id", None)
+                    or _get_ctx_chat_id()
+                    or ""
+                ),
+                user_id,
+            )
 
             # M2 文件台账：把 username + 用户工作区目录写入会话上下文，
             # 让工具钩子（文件台账、媒体 URL 解析、workspace 守卫）能正确

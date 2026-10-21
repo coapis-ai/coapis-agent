@@ -43,11 +43,15 @@ import {
   CloseCircleOutlined,
   MinusCircleOutlined,
   LinkOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { api, getApiUrl } from '@/api';
 import { buildAuthHeaders } from '@/api/authHeaders';
 import AgentIdentityPanel from './AgentIdentityPanel';
+// 会话侧的预览抽屉（B4）在这里复用：我的空间预览弹窗 2026-06-28 被移除后，
+// 文件只能下载不能看，产出文件的体验断在「我的空间」这一头。
+import CoApisPreviewDrawer, { type PreviewTarget } from '../Chat/components/CoApisPreviewDrawer';
 
 const FILES_API = '/myfiles';
 
@@ -153,6 +157,18 @@ const MySpacePage: React.FC = () => {
 
   // 判断当前类别是否只读
   const isReadOnly = activeCategory !== 'files';
+
+  // 预览抽屉目标（B4 恢复「我的空间」预览）
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
+
+  const handlePreview = (item: any) => {
+    setPreviewTarget({
+      path: item.path,
+      title: item.name,
+      size: item.size,
+      category: activeCategory,
+    });
+  };
 
   // 构建当前类别的根路径
   const getCategoryRootPath = (_cat: string) => '/';
@@ -275,7 +291,7 @@ const MySpacePage: React.FC = () => {
     if (item.type === 'directory') {
       navigateTo(item.path);
     } else if (item.type === 'file') {
-      handleDownload(item);
+      handlePreview(item);
     }
   };
 
@@ -954,6 +970,11 @@ const MySpacePage: React.FC = () => {
                   style={item.type === 'group' ? { background: 'rgba(115,109,255,0.06)', padding: '6px 12px' } : undefined}
                   actions={item.type === 'group' ? [] : [
                     item.type === 'file' && (
+                      <Tooltip key="preview" title={t('myspace.preview', '预览')}>
+                        <Button type="text" icon={<EyeOutlined />} onClick={() => handlePreview(item)} />
+                      </Tooltip>
+                    ),
+                    item.type === 'file' && (
                       <Tooltip key="download" title={t('myspace.download')}>
                         <Button type="text" icon={<DownloadOutlined />} onClick={() => handleDownload(item)} />
                       </Tooltip>
@@ -1069,6 +1090,11 @@ const MySpacePage: React.FC = () => {
                     cursor: 'pointer',
                   }}>
                     <div style={{ display: 'flex', gap: 4 }}>
+                      {item.type === 'file' && (
+                        <Button size="small" type="text" icon={<EyeOutlined style={{ fontSize: 16 }} />}
+                          style={{ color: '#fff' }}
+                          onClick={(e) => { e.stopPropagation(); handlePreview(item); }} />
+                      )}
                       {item.type === 'file' && (
                         <Button size="small" type="text" icon={<DownloadOutlined style={{ fontSize: 16 }} />}
                           style={{ color: '#fff' }}
@@ -1356,7 +1382,11 @@ const MySpacePage: React.FC = () => {
         </div>
       </Modal>
 
-      {/* 预览弹窗已移除 — 2026-06-28 */}
+      {/* 预览抽屉（B4 恢复）：md/文本/图片/pdf 内联，其余给下载 */}
+      <CoApisPreviewDrawer
+        target={previewTarget}
+        onClose={() => setPreviewTarget(null)}
+      />
     </div>
   );
 };

@@ -2630,7 +2630,44 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             "如果自动安装失败，再向用户报告缺失的包名和手动安装命令。"
         )
 
+        # ── 本轮资源清单（B1 的 agent 侧消费）：追问时能直接引用上一轮读过的
+        # 网页 / 生成的文件，不必重新搜索。只读快照，不影响 completed 事件。──
+        try:
+            from .context.reference_collector import take_turn_resources
+
+            res_block = self._build_turn_resources_block(take_turn_resources())
+            if res_block:
+                sys_prompt = sys_prompt + "\n\n" + res_block
+                logger.debug("Injected turn resources block")
+        except Exception:
+            logger.debug("Turn resources block injection skipped", exc_info=True)
+
         return sys_prompt
+
+    def _build_turn_resources_block(self, items: list) -> str:
+        """把本轮采集到的资源渲染成提示词片段（无资源返回空串）。"""
+        if not items:
+            return ""
+        lines = []
+        for it in items[:15]:
+            kind = str(it.get("kind") or "")
+            title = str(it.get("title") or "")
+            # 采集器本轮快照：网页用 ref，文件用 path；台账端点统一用 path
+            path = str(it.get("path") or it.get("ref") or "")
+            role = str(it.get("role") or "reference")
+            if kind == "web" and path:
+                lines.append(f"- 网页：{title} → {path}")
+            elif kind == "file" and path:
+                tag = "产出" if role == "producer" else "引用"
+                lines.append(f"- 文件（{tag}）：{path}")
+        if not lines:
+            return ""
+        return (
+            "## 本轮资源\n\n"
+            "以下是本轮已登记的网页与文件（台账为准）。追问时优先直接引用这些"
+            "链接/路径，不要重新搜索；生成新文件时继续写入工作区（如 files/ 下），"
+            "系统会自动登记为产出并直链给用户。\n\n" + "\n".join(lines)
+        )
 
     def _register_hooks(self) -> None:
         """Register pre-reasoning and pre-acting hooks."""

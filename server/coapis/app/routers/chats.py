@@ -645,6 +645,98 @@ async def get_chat(
     }
 
 
+@router.get("/chats/{chat_id}/resources")
+@require_permission("chat:history")
+async def list_chat_resources(
+    request: Request,
+    chat_id: str,
+    limit: int = Query(200, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> Dict[str, Any]:
+    """会话资源清单（B2）：本会话引用/产出的文件与网页。
+
+    权威源是资源台账（``resource_refs`` 按 chat 过滤），所以刷新页面、
+    会话压缩、台账清扫之后清单都能还原——这正是「资源条」刷新后不丢的
+    依据。实时那一轮走 completed 事件上的 ``resources``，历史轮走这里。
+
+    返回：``{items, total, offset, limit}``；``items`` 里
+      - ``kind``  file | web | kb | mcp | db
+      - ``path``  file → 工作区相对路径；web → URL
+      - ``title`` 显示标题（文件名 / 网页标题）
+      - ``role``  producer（本会话产出）| reference（本会话引用）
+      - ``ref_count`` / ``updated_at`` / ``size``（file 侧现 stat）
+    """
+    username, is_admin = _get_current_user(request)
+
+    # 归属校验：非管理员只能读自己会话的资源。
+    cm = await _get_chat_manager(request, agent_id=request.headers.get("X-Agent-Id", ""))
+    spec = await cm.get_chat(chat_id) if cm is not None else None
+    owner = str(getattr(spec, "user_id", "") or "") if spec is not None else ""
+    if spec is not None and not is_admin and owner and owner != username:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    try:
+        from ...foundation.resource_ledger import get_resource_ledger
+
+        rl = get_resource_ledger()
+        rows = rl.list_resources_for_chat(
+            owner_scope="user",
+            owner_id=owner or username,
+            chat_id=chat_id,
+            limit=limit,
+            offset=offset,
+        )
+        total = rl.count_resources_for_chat(
+            owner_scope="user",
+            owner_id=owner or username,
+            chat_id=chat_id,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("chat %s resources skipped: %s", chat_id[:16], exc)
+        rows, total = [], 0
+
+    # 角色按 ref 归属：本会话是 producer 就是产出，否则是引用。
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        kind = str(row.get("kind") or "")
+        path = str(row.get("path") or "")
+        role = str(row.get("role") or "reference")
+        item = {
+            "resource_key": row.get("resource_key"),
+            "kind": kind,
+            "path": path,
+            "title": row.get("title") or (path.rsplit("/", 1)[-1] if kind == "file" else path),
+            "role": role,
+            "ref_count": row.get("ref_count", 0),
+            "status": row.get("status"),
+            "updated_at": row.get("last_seen_at") or row.get("updated_at"),
+            "size": None,
+            "exists": True,
+        }
+        if kind == "file":
+            try:
+                from ...constant import WORKSPACES_DIR
+                from ...foundation.resource_ledger import workspace_relative_path
+                from pathlib import Path
+
+                # 台账存工作区相对路径；存量裸路径（files 根相对的历史行）在这里
+                # 兜底补 ``files/`` 前缀——前端按首段分桶，裸路径会被当成 media。
+                owner_dir = Path(WORKSPACES_DIR) / (owner or username)
+                item["path"] = workspace_relative_path(path, owner_dir)
+                # 存在性/大小与台账同一口径解析，避免真实文件显示成「已删除」。
+                abs_p = rl.resolve_file_path(owner or username, path)
+                st = abs_p.stat() if abs_p is not None else None
+                if st is not None:
+                    item["size"] = int(st.st_size)
+                    item["updated_at"] = st.st_mtime
+                item["exists"] = st is not None
+            except Exception:  # pragma: no cover - defensive
+                pass
+        items.append(item)
+
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
 @router.get("/chats/{chat_id}/archived")
 @require_permission("chat:history")
 async def get_archived_messages(

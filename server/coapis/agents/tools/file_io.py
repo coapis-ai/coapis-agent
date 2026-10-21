@@ -144,6 +144,20 @@ def _get_encoding_for_file(file_path: str) -> str:
     return "utf-8"
 
 
+def _display_path_for_model(abs_path: str) -> str:
+    """给模型看的路径：工作区内 → 相对路径（``files/x.md``），工作区外 → 原样。
+
+    答案侧的预览/下载链接由系统注入（采集器 + 会话资源读接口），模型只需要
+    说出文件名。把服务器绝对路径抄进回答有两个害处：泄漏服务器目录结构，
+    且前端正文链接没有 token，用户点了必 401。
+    """
+    try:
+        workspace_dir = Path(get_current_workspace_dir() or WORKING_DIR)
+        return Path(abs_path).relative_to(workspace_dir).as_posix()
+    except Exception:
+        return abs_path
+
+
 def _ledger_record(abs_path: str, source: str) -> None:
     """Fire-and-forget file-ledger hook (never raises).
 
@@ -392,11 +406,18 @@ async def write_file(
 
         _ledger_record(file_path, "write_file")
 
+        _shown = _display_path_for_model(file_path)
+        _hint = (
+            "（回答里引用该文件请用这个相对路径，不要写绝对路径；"
+            "预览与下载链接由系统提供）"
+            if _shown != file_path
+            else ""
+        )
         return ToolResponse(
             content=[
                 TextBlock(
                     type="text",
-                    text=f"Wrote {len(content)} bytes to {file_path}.",
+                    text=f"Wrote {len(content)} bytes to {_shown}.{_hint}",
                 ),
             ],
         )

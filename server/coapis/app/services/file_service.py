@@ -543,14 +543,24 @@ class LocalFileBackend(FileService):
             raise HTTPException(status_code=404, detail="File not found")
         
         mime_type, _ = mimetypes.guess_type(target.name)
-        
-        # Text files: return content
-        if mime_type and mime_type.startswith("text/"):
+
+        # Text files: return content.  mimetypes 认不出 .md/.markdown（不在标准
+        # 表里），而答案侧产出卡默认就是 Markdown —— 预览抽屉要渲染正文，所以
+        # 按扩展名补一层，不能只信 mime_type。
+        _TEXT_SUFFIXES = {
+            ".md", ".markdown", ".txt", ".text", ".log", ".json", ".jsonl",
+            ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".csv", ".tsv",
+            ".py", ".js", ".ts", ".tsx", ".jsx", ".css", ".sql", ".sh", ".bash",
+            ".xml", ".rst",
+        }
+        if (mime_type and mime_type.startswith("text/")) or (
+            target.suffix.lower() in _TEXT_SUFFIXES
+        ):
             content = target.read_text(encoding="utf-8", errors="replace")
             return {
                 "type": "text",
                 "content": content,
-                "mime_type": mime_type
+                "mime_type": mime_type or "text/plain",
             }
         
         # Images: return base64 or URL

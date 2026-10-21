@@ -50,6 +50,17 @@ import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
 import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import CoApisKbCitations from "./components/CoApisKbCitations";
+import CoApisChatResources from "./components/CoApisChatResources";
+import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
+import CoApisPreviewDrawer, {
+  type PreviewTarget,
+} from "./components/CoApisPreviewDrawer";
+import {
+  isPreviewablePath,
+  linkifyMessageOutput,
+  toMyfilesParams,
+  toWorkspaceRel,
+} from "./workspaceLinks";
 import OnboardingModal from "../../components/OnboardingModal";
 import { useRecommendations } from "../../components/Recommendation";
 import {
@@ -108,6 +119,7 @@ import {
   type RuntimeLoadingBridgeApi,
   type ChatMessagesBridgeApi,
   appendMediaToUserBubble,
+  mySpaceDisplayUrl,
 } from "./utils";
 
 const CHAT_ATTACHMENT_MAX_MB = 10;
@@ -729,6 +741,10 @@ export default function ChatPage() {
     const match = location.pathname.match(/^\/chat\/(.+)$/);
     return match?.[1];
   }, [isEmbeddedMode, sceneSessionId, location.pathname]);
+  // 会话资源（B3/B4）：资源条刷新信号（completed 事件后自增）+ 预览抽屉目标。
+  // 抽屉是页面级单例，气泡里的产出卡与资源条共用它。
+  const [resourceRefresh, setResourceRefresh] = useState(0);
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
   const [showModelPrompt, setShowModelPrompt] = useState(false);
   const { selectedAgent } = useAgentStore();
   const { toolRenderConfig } = usePlugins();
@@ -781,6 +797,47 @@ export default function ChatPage() {
       ro.disconnect();
     };
   }, [historyDrawerOpen]);
+
+  // ---------------------------------------------------------------------
+  // 正文文件链接接管（B4/B5）
+  //
+  // 回答里的 `<a>` 指向工作区文件时，浏览器自己拼出来的 URL 必挂：相对路径
+  // 落到站点根（404），绝对路径落到 `/api/files/preview/<绝对路径>`（B0 闸门
+  // 403），而且 `<a>` 带不上 Authorization 头。所以正文里的本地路径链接统一
+  // 由这里接管：可预览的进右侧抽屉（带 token 的 myfiles 端点），其余走带
+  // token 的下载。http(s)/mailto/锚点不接管，保持浏览器默认行为。
+  // ---------------------------------------------------------------------
+  useEffect(() => {
+    const root = mainAreaRef.current;
+    if (!root) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // 显式新标签
+      const el = (e.target as HTMLElement | null)?.closest?.("a");
+      if (!el) return;
+      const raw = el.getAttribute("href");
+      if (!raw) return;
+      if (/^(https?:|mailto:|tel:|data:|javascript:|#|blob:)/i.test(raw.trim())) return;
+      const rel = toWorkspaceRel(raw);
+      if (!rel) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const name = rel.split("/").pop() || rel;
+      if (isPreviewablePath(rel)) {
+        setPreviewTarget({ path: rel, title: name });
+      } else {
+        const { category, path: myRel } = toMyfilesParams(rel);
+        window.open(
+          mySpaceDisplayUrl(myRel, category),
+          "_blank",
+          "noopener,noreferrer",
+        );
+      }
+    };
+    root.addEventListener("click", onClick, true);
+    return () => root.removeEventListener("click", onClick, true);
+  }, []);
+
   const { openChat } = useChatWindow();
 
   // 切换场景：浮窗模式下更新全局场景（FloatingChatWindow 自动重新进入）；
@@ -2210,13 +2267,26 @@ export default function ChatPage() {
             // 响应事件。SDK 的响应气泡只按消息 type 渲染，不读消息级 cards，
             // 所以引用必须挂在响应对象顶层，由 response.append 插槽消费。
             const _kbCites = (payload as any).citations;
+            // ⭐ 会话资源（B1/B2）：本轮读到的网页 / 写到工作区的文件，同样
+            // 挂顶层，由 response.append 的 CoApisChatResources 消费。
+            const _turnRes = (payload as any).resources;
+            if (Array.isArray(_turnRes) && _turnRes.length > 0) {
+              // 台账是权威底账：本轮结束后刷一次会话资源条，让清单与
+              // 气泡里的增量对齐（fire-and-forget，失败不影响消息）。
+              setResourceRefresh((n) => n + 1);
+            }
 
             return {
               object: "response",
               status: payload.status || "completed",
-              output: thawedOutput,
+              // 正文兜底（B5）：把裸的工作区路径收成 markdown 链接，交给下面的
+              // 点击拦截器接管。模型不照提示词写时，用户照样能点到文件。
+              output: linkifyMessageOutput(thawedOutput),
               ...(Array.isArray(_kbCites) && _kbCites.length > 0
                 ? { citations: _kbCites }
+                : {}),
+              ...(Array.isArray(_turnRes) && _turnRes.length > 0
+                ? { resources: _turnRes }
                 : {}),
             } as any;
           }
@@ -2296,6 +2366,17 @@ export default function ChatPage() {
             order: 10,
             render: ({ data }: { data: any }) => (
               <CoApisKbCitations data={{ citations: data?.citations }} />
+            ),
+          },
+          {
+            // 本轮产出卡 + 引用资源（B1 采集 → completed 事件顶层 resources）
+            id: "chat-resources",
+            order: 11,
+            render: ({ data }: { data: any }) => (
+              <CoApisChatResources
+                resources={data?.resources}
+                onPreview={(target) => setPreviewTarget(target)}
+              />
             ),
           },
         ],
@@ -2419,7 +2500,32 @@ export default function ChatPage() {
             </ChatErrorBoundary>
           </div>
         </div>
+        {/* 会话资源条（B3）：悬浮聊天区左下、输入框上方；权威源是资源台账，
+            刷新页面/切会话后清单仍在。无资源时组件自身返回 null，不占位。 */}
+        {chatId && (
+          <div
+            style={{
+              position: "absolute",
+              left: 12,
+              bottom: 104,
+              zIndex: 25,
+              maxWidth: "min(520px, 70%)",
+            }}
+          >
+            <CoApisChatResourceBar
+              chatId={chatId}
+              refreshSignal={resourceRefresh}
+              onPreview={(target) => setPreviewTarget(target)}
+            />
+          </div>
+        )}
         </div>
+
+        {/* 文件预览抽屉（B4）：产出卡/资源条点「预览」统一进这里 */}
+        <CoApisPreviewDrawer
+          target={previewTarget}
+          onClose={() => setPreviewTarget(null)}
+        />
 
         {/* Chat display settings modal */}
         <ChatDisplaySettings

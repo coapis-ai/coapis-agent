@@ -68,6 +68,50 @@ NON_USER_WORKSPACE_DIRS = frozenset({"system"})
 BACKFILL_CAP = 5000
 
 
+def canonical_file_path(path: str, *, form: str = "workspace") -> str:
+    """``kind=file`` 的规范路径：**相对用户工作区根**（``workspaces/{user}``）。
+
+    台账历史上只有一条写入路径（文件台账钩子 + 巡检补扫），口径是 **files 根**
+    相对路径（``report.md``、``media/x.png``）；会话资源采集器（B1）按对外契约
+    写的是 **工作区**相对（``files/report.md``）。两种口径算出两个 key，同一个
+    文件在台账里分裂成两行——前端资源条出现「同一文件两条、其中一条显示已删除」。
+    统一以工作区相对为准（它同时是前端与回答正文链接的口径），旧口径在唯一的
+    写入口换算，采集器与钩子从此同键。
+    """
+    p = str(path or "").replace("\\", "/").strip().strip("/")
+    if not p:
+        return ""
+    if form == "files_root":
+        return p if p.startswith("files/") else f"files/{p}"
+    return p
+
+
+#: 已带工作区分类前缀的路径。
+WS_TOP_DIRS = ("files/", "media/", "output/", "downloads/", "uploads/")
+
+
+def workspace_relative_path(path: str, owner_dir: Optional[Path] = None) -> str:
+    """台账存储口径 → 对外契约口径（工作区相对）。
+
+    规范口径本身就是工作区相对，这里主要给**存量裸路径**（files 根相对的历史行）
+    兜底：文件真实落在 ``files/`` 下时补前缀。前端 ``toMyfilesParams`` 按首段决定
+    走哪个分类，裸路径 ``report.md`` 会被当成 media 而 404。
+    """
+    p = str(path or "").replace("\\", "/").strip().strip("/")
+    if not p:
+        return ""
+    if p.startswith(WS_TOP_DIRS):
+        return p
+    if owner_dir is not None:
+        try:
+            if (owner_dir / p).is_file():
+                return p
+        except OSError:  # pragma: no cover - defensive
+            pass
+        return f"files/{p}"
+    return f"files/{p}"
+
+
 class ResourceLedger:
     def __init__(self, workspaces_dir: Optional[Path] = None) -> None:
         self._ws = Path(workspaces_dir) if workspaces_dir else WORKSPACES_DIR
@@ -82,10 +126,37 @@ class ResourceLedger:
         """
         return self._ws / owner_id / "files"
 
+    def _resolve_file_path(self, owner_id: str, path: str) -> Path:
+        """台账里的 file 路径 → 绝对路径（两种历史口径都能解析）。
+
+        规范口径是工作区相对；存量数据里还有 files 根相对的裸路径（``x.md``），
+        按存在性回退，避免把真实存在的文件误判成「已删除」。
+        """
+        cand = self._ws / owner_id / path
+        if cand.is_file():
+            return cand
+        alt = self._files_root(owner_id) / path
+        if alt.is_file():
+            return alt
+        return cand
+
     def _abs_path(self, res: Resource) -> Optional[Path]:
         if res.kind != "file" or res.owner_scope != "user":
             return None
-        return self._files_root(res.owner_id) / res.path
+        return self._resolve_file_path(res.owner_id, res.path)
+
+    def resolve_file_path(self, owner_id: str, path: str) -> Optional[Path]:
+        """台账路径 → 存在的绝对路径；不存在返回 ``None``。
+
+        给「会话资源列表」这类出口用：存在性判断必须与台账同一口径，
+        否则前端会把真实存在的文件显示成「已删除」。
+        """
+        owner_id = str(owner_id or "").strip()
+        path = str(path or "").strip()
+        if not owner_id or not path:
+            return None
+        resolved = self._resolve_file_path(owner_id, path)
+        return resolved if resolved.is_file() else None
 
     def _count_refs(self, s, resource_key: str) -> int:
         return s.execute(
@@ -105,18 +176,28 @@ class ResourceLedger:
         path: str,
         title: Optional[str] = None,
         source: str = "hook",
+        path_form: str = "files_root",
     ) -> str:
         """Register (or re-see) a resource; returns ``resource_key``.
 
         Idempotent: re-registering the same owner/kind/path refreshes
         ``last_seen_at`` / ``size_bytes`` and never creates a second row.
         Never raises — returns ``""`` on failure.
+
+        ``path_form`` 声明调用方用的是哪种口径：文件台账钩子/巡检补扫传
+        ``"files_root"``（相对 ``workspaces/{user}/files``），会话资源采集器传
+        ``"workspace"``（相对 ``workspaces/{user}``）。两者都换算成工作区相对后
+        才参与 key 计算，同一文件只会有一行。
         """
         try:
             if owner_scope not in VALID_OWNER_SCOPES or kind not in VALID_KINDS:
                 return ""
             owner_id = (owner_id or "").strip()
             path = (path or "").strip()
+            if kind == "file":
+                # 统一口径后再算 key：采集器的 ``files/x`` 与钩子的 ``x`` 必须
+                # 落到同一行，否则同一文件在台账里分裂成两条记录。
+                path = canonical_file_path(path, form=path_form)
             if not owner_id or not path:
                 return ""
             key = make_resource_key(owner_scope, owner_id, kind, path)
@@ -163,7 +244,7 @@ class ResourceLedger:
 
     def _abs_path_kind(self, kind: str, owner_id: str, path: str) -> Optional[Path]:
         if kind == "file" and owner_id:
-            return self._files_root(owner_id) / path
+            return self._resolve_file_path(owner_id, path)
         return None
 
     def attach_ref(
@@ -202,6 +283,10 @@ class ResourceLedger:
                             created_at=time.time(),
                         )
                     )
+                elif role == "producer" and existing.role != "producer":
+                    # 口径只升不降：同一文件先被引用、后被本会话写出时，
+                    # 这条引用就是「产出」。降口径会把已交付的产物说成引用。
+                    existing.role = "producer"
                 # orphan → draft on re-reference (frozen lifecycle).
                 if res.status == "orphan":
                     res.status = "draft"
@@ -386,6 +471,12 @@ class ResourceLedger:
                         if not root.exists():
                             continue
                         known = seen.get(owner_id, set())
+                        # 台账统一口径是工作区相对（``files/x``），巡检扫的是 files 根
+                        # （``x``）。比对必须先换算，否则每轮巡检都把已登记的文件当成
+                        # 未入账、重复走一遍补登记。
+                        known = {
+                            canonical_file_path(k, form="workspace") for k in known
+                        }
                         # users 表读不到时 users=None，退回旧口径（全部算 unledgered），
                         # 不能因为查不到用户就把真用户的文件划成无主。
                         unowned_owner = users is not None and owner_id not in users
@@ -398,7 +489,13 @@ class ResourceLedger:
                             ):
                                 report["noise_skipped"] += 1
                                 continue
-                            if rel in known:
+                            # 台账存量行有两种口径：规范的工作区相对
+                            # （``files/x.md``）与历史的 files 根相对裸路径
+                            # （``x.md``）。判"已登记"必须两种都认，否则补扫
+                            # 每轮都把同一批老文件重新登记一遍。
+                            if rel in known or canonical_file_path(
+                                rel, form="files_root"
+                            ) in known:
                                 continue
                             if unowned_owner:
                                 report["unowned"] += 1
@@ -426,6 +523,8 @@ class ResourceLedger:
                         path=rel,
                         title=Path(rel).name,
                         source="backfill",
+                        # 巡检扫的是 files 根，口径与钩子一致。
+                        path_form="files_root",
                     )
                     if key:
                         report["backfilled"] += 1
@@ -514,6 +613,140 @@ class ResourceLedger:
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("resource ledger list failed (ignored): %s", exc)
             return []
+
+    def count_resources_for_chat(
+        self,
+        *,
+        owner_scope: str,
+        owner_id: str,
+        chat_id: str,
+    ) -> int:
+        """Count of **distinct resources** referenced by one chat.
+
+        与 ``list_resources_for_chat`` 同一份合并口径 —— 计数与清单必须同源，
+        否则前端资源条会出现「折叠行写 17、展开只有 12 条」。
+        """
+        return len(
+            self._chat_resource_rows(
+                owner_scope=owner_scope,
+                owner_id=owner_id,
+                chat_id=chat_id,
+            )
+        )
+
+    #: 同一资源多条引用时取哪个角色显示（越靠前越"强"：产出 > 附件 > 导出 > 引用）
+    _CHAT_ROLE_PRIORITY = {"producer": 0, "attachment": 1, "export": 2, "reference": 3}
+
+    def _chat_resource_rows(
+        self,
+        *,
+        owner_scope: str,
+        owner_id: str,
+        chat_id: str,
+        fetch_cap: int = 2000,
+    ) -> list[dict]:
+        """本会话引用的资源，**已按 (kind, 规范路径) 合并成一行**。
+
+        合并是必须的，不是锦上添花：台账历史上存在两种路径口径（文件钩子写
+        files 根相对 ``x.md``，采集器写工作区相对 ``files/x.md``），同一文件
+        算出两个 key、留下两行。写入口已统一换算，**存量行**还在库里，读侧不
+        合并就会在资源条里出现「同一文件两条、其中一条显示已删除」。合并规则：
+          - 键：``(kind, canonical_file_path(path, form="workspace"))``
+          - 角色：取最强（producer 优先）
+          - ``ref_count``：各 key 的引用数求和
+          - 时间：取最新
+        ``fetch_cap`` 是防御性上限（合并需要全量行，不能先分页再合并）。
+
+        Never raises (returns []).
+        """
+        if not chat_id:
+            return []
+        try:
+            with get_session() as s:
+                stmt = (
+                    select(Resource, ResourceRef.role)
+                    .join(ResourceRef, ResourceRef.resource_key == Resource.resource_key)
+                    .where(Resource.owner_scope == owner_scope)
+                    .where(Resource.owner_id == owner_id)
+                    .where(Resource.deleted_at.is_(None))
+                    .where(ResourceRef.referrer_kind == "chat")
+                    .where(ResourceRef.referrer_id == chat_id)
+                    .limit(fetch_cap)
+                )
+                owner_dir = self._ws / owner_id
+                merged: dict[tuple[str, str], dict] = {}
+                for r, role in s.execute(stmt).all():
+                    d = r.to_dict()
+                    kind = str(d.get("kind") or "")
+                    raw = str(d.get("path") or "")
+                    # 合并键必须与端点对外给的口径一致：workspace_relative_path
+                    # 会把存量裸路径补成 ``files/…``，采集器写的本来就是 ``files/…``
+                    # —— 同一口径才合得起来（canonical_file_path 补不出 media/ 前缀）。
+                    norm = (
+                        workspace_relative_path(raw, owner_dir)
+                        if kind == "file"
+                        else raw
+                    )
+                    d["path"] = norm
+                    key = (kind, norm)
+                    prev = merged.get(key)
+                    if prev is None:
+                        d["ref_count"] = self._count_refs(s, r.resource_key)
+                        d["role"] = role
+                        merged[key] = d
+                        continue
+                    # 同资源另一行：角色取强、引用数求和、时间取新
+                    if self._CHAT_ROLE_PRIORITY.get(
+                        role, 9
+                    ) < self._CHAT_ROLE_PRIORITY.get(prev["role"], 9):
+                        prev["role"] = role
+                    prev["ref_count"] = int(prev.get("ref_count") or 0) + self._count_refs(
+                        s, r.resource_key
+                    )
+                    for field in ("last_seen_at", "updated_at", "first_seen_at"):
+                        newer, older = d.get(field), prev.get(field)
+                        if field == "first_seen_at":
+                            if newer and (not older or newer < older):
+                                prev[field] = newer
+                        elif newer and (not older or newer > older):
+                            prev[field] = newer
+                rows = list(merged.values())
+                rows.sort(key=lambda x: (x.get("last_seen_at") or 0), reverse=True)
+                return rows
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("chat resource list failed (ignored): %s", exc)
+            return []
+
+    def list_resources_for_chat(
+        self,
+        *,
+        owner_scope: str,
+        owner_id: str,
+        chat_id: str,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Resources referenced by one chat, **with that chat's ref role**.
+
+        ``role`` (producer / reference) is a property of the *reference*, not
+        of the resource — the same file produced by chat A is merely cited by
+        chat B. ``list_resources`` cannot express that (it returns resource
+        rows), so the chat resource panel uses this join instead: one row per
+        **resource**（同资源多口径的存量行已合并），carrying the strongest role
+        this chat has on it.
+
+        Never raises (returns []).
+        """
+        rows = self._chat_resource_rows(
+            owner_scope=owner_scope,
+            owner_id=owner_id,
+            chat_id=chat_id,
+        )
+        if offset:
+            rows = rows[offset:]
+        if limit:
+            rows = rows[:limit]
+        return rows
 
     def count_resources(
         self,

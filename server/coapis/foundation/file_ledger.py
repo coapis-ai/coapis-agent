@@ -38,8 +38,20 @@ logger = logging.getLogger(__name__)
 
 #: Recognized write sources (anything else is stored as ``other``).
 VALID_SOURCES = frozenset(
-    {"upload", "write_file", "edit_file", "append_file", "reconcile"}
+    {"upload", "write_file", "edit_file", "append_file", "convert", "reconcile"}
 )
+
+#: 台账口径：哪些写入来源算「这个会话产出了它」（producer），其余算引用。
+#: ``upload`` 是用户传进来的，不是会话产物 → reference；``convert`` 是
+#: 交付那一刻由系统生成的产物 → producer。
+PRODUCER_SOURCES = frozenset(
+    {"write_file", "edit_file", "append_file", "convert"}
+)
+
+
+def role_for_source(source: str) -> str:
+    """Map a ledger write source to the resource-ref role."""
+    return "producer" if source in PRODUCER_SOURCES else "reference"
 
 #: Deliverables-ledger status states (approved plan C1, three-state machine).
 VALID_STATUSES = frozenset({"draft", "delivered", "archived"})
@@ -76,6 +88,7 @@ class FileLedgerService:
         chat_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         status: Optional[str] = None,
+        source: str = "other",
     ) -> None:
         """Append-only wiring to the resource ledger (R1).
 
@@ -98,17 +111,20 @@ class FileLedgerService:
             )
             if not key:
                 return
+            _role = role_for_source(source)
             if session_id:
                 rl.attach_ref(
                     resource_key=key,
                     referrer_kind="session",
                     referrer_id=session_id,
+                    role=_role,
                 )
             if chat_id:
                 rl.attach_ref(
                     resource_key=key,
                     referrer_kind="chat",
                     referrer_id=chat_id,
+                    role=_role,
                 )
             if agent_id:
                 rl.attach_ref(
@@ -176,6 +192,7 @@ class FileLedgerService:
                 session_id=session_id,
                 chat_id=chat_id,
                 agent_id=agent_id,
+                source=source if source in VALID_SOURCES else "other",
             )
             return True
         except Exception as exc:  # pragma: no cover - defensive
