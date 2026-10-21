@@ -119,6 +119,56 @@ INDEX_HINTS: dict[str, str] = {
     "using-superpowers": "当用户询问技能如何调用、有哪些技能可用、如何组合技能工作时使用。",
 }
 
+#: Skill → declared ``trigger_keywords`` for skills that declare **none**.
+#:
+#: Why: ``SkillSelector`` deliberately refuses to derive keywords from
+#: description prose (free-form prose floods the index with generic verbs like
+#: 进行/加密/表格/创建 that fire on unrelated messages), so a skill with no
+#: declared triggers is reachable only by its own name and file suffixes.
+#: Measured on dev 2026-10-21: 8 of admin's 24 effective skills had no
+#: declared keywords, and 4 of them failed every Chinese query written in their
+#: own index line ("从Excel属性结构表创建FileGDB数据" → xlsx, not
+#: gdb-creator-from-excel).  The index line still lets the model load them by
+#: name; this map restores the keyword channel.
+#:
+#: Keep these high-precision: multi-character, domain-specific terms only.
+#: Generic verbs (创建/分析/整理) belong to no skill and belong to every
+#: message, so they are not admitted here.
+TRIGGER_KEYWORDS: dict[str, list[str]] = {
+    "official-document-writing": [
+        "公文", "党政机关公文", "请示", "通知", "纪要", "函",
+        "公文写作", "公文格式", "红头文件",
+    ],
+    "rural-land-market-scheme": [
+        "入市", "入市方案", "集体经营性建设用地", "农村集体建设用地",
+        "土地入市", "地块方案",
+    ],
+    "expense-reimbursement-assistant": [
+        "报销", "发票", "出差报销", "费用报销", "报销单", "支付记录",
+    ],
+    "plan-writing-assistant": [
+        "实施方案", "全域土地综合整治", "项目策划", "策划文档", "方案初稿",
+    ],
+    "attribute-structure-processor": [
+        "属性结构", "属性表", "属性结构表", "GIS属性", "图层解析",
+    ],
+    "gdb-creator-from-excel": [
+        "FileGDB", "GDB", "Shapefile", "要素类", "坐标系", "GIS数据",
+    ],
+    "multi_source_research_workflow": [
+        "多源", "资料收集", "文献", "调研", "综述", "综合分析",
+    ],
+    "axu-code-checked": [
+        "代码走读", "架构评审", "代码审查", "根因", "排查", "重构方案",
+    ],
+    # dev 2026-10-21: the directory is ``test--ad-default`` while its
+    # frontmatter declares ``name: axu-code-checked`` — the lookup key here is
+    # the directory name, the skill the model sees is the frontmatter name.
+    "test--ad-default": [
+        "代码走读", "架构评审", "代码审查", "根因", "排查", "重构方案",
+    ],
+}
+
 
 def _split_frontmatter(content: str) -> tuple[str, str, str] | None:
     """Return (head, frontmatter, tail) for a SKILL.md, or None if it has no
@@ -145,6 +195,39 @@ def apply_hint(md_file: Path, hint: str) -> str:
         if line.startswith("index_hint:"):
             return "skipped"
     new_front = front.rstrip("\n") + f'\nindex_hint: "{hint}"\n'
+    md_file.write_text("---" + new_front + "---" + tail, encoding="utf-8")
+    return "applied"
+
+
+def has_frontmatter_key(content: str, key: str) -> bool:
+    """True when the frontmatter declares ``key`` (top level or nested)."""
+    split = _split_frontmatter(content)
+    if split is None:
+        return False
+    return any(
+        line.startswith(f"{key}:") for line in split[1].split("\n")
+    )
+
+
+def apply_keywords(md_file: Path, keywords: list[str]) -> str:
+    """Declare ``trigger_keywords`` on a skill that declares none.
+
+    Returns ``"applied"``, ``"skipped"`` (already declared — the author's own
+    list always wins) or ``"no-frontmatter"``.  A YAML list is written so
+    ``SkillManager._parse_trigger_keywords`` (yaml.safe_load) reads it.
+    """
+    content = md_file.read_text(encoding="utf-8", errors="replace")
+    split = _split_frontmatter(content)
+    if split is None:
+        return "no-frontmatter"
+    _head, front, tail = split
+    for line in front.split("\n"):
+        if line.startswith("trigger_keywords:"):
+            return "skipped"
+    block = "trigger_keywords:\n" + "".join(
+        f"  - {kw}\n" for kw in keywords
+    )
+    new_front = front.rstrip("\n") + "\n" + block
     md_file.write_text("---" + new_front + "---" + tail, encoding="utf-8")
     return "applied"
 
@@ -197,6 +280,27 @@ def main(argv: list[str] | None = None) -> int:
         "missing={missing}".format(**counts),
     )
 
+    # --- declared trigger keywords (keyword channel) ------------------------
+    kcounts = {"applied": 0, "skipped": 0, "no-frontmatter": 0, "missing": 0}
+    for name, keywords in sorted(TRIGGER_KEYWORDS.items()):
+        md_file = pool / name / "SKILL.md"
+        if not md_file.exists():
+            kcounts["missing"] += 1
+            continue
+        if args.dry_run:
+            content = md_file.read_text(encoding="utf-8", errors="replace")
+            has = has_frontmatter_key(content, "trigger_keywords")
+            print(f"  {'HAS ' if has else 'KWD '}  {name}: {len(keywords)} keywords")
+            kcounts["skipped" if has else "applied"] += 1
+            continue
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(md_file, backup_dir / f"{name}.SKILL.md")
+        kcounts[apply_keywords(md_file, keywords)] += 1
+    print(
+        "keywords: applied={applied} skipped={skipped} "
+        "no-frontmatter={no-frontmatter} missing={missing}".format(**kcounts),
+    )
+
     # Report every skill the pool contains that the index will render from a
     # truncated description, so the gap is visible instead of silent.
     uncovered = []
@@ -215,6 +319,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no index_hint ({len(uncovered)}): {', '.join(uncovered)}")
     else:
         print("no index_hint: none — every skill in this pool has a trigger line")
+
+    # Same visibility for the keyword channel: a skill with no declared
+    # trigger_keywords can only be reached by its own name.
+    no_kw = []
+    for skill_dir in sorted(p for p in pool.iterdir() if p.is_dir()):
+        md_file = skill_dir / "SKILL.md"
+        if not md_file.exists():
+            continue
+        content = md_file.read_text(encoding="utf-8", errors="replace")
+        if not has_frontmatter_key(content, "trigger_keywords"):
+            no_kw.append(skill_dir.name)
+    if no_kw:
+        print(f"no trigger_keywords ({len(no_kw)}): {', '.join(no_kw)}")
+    else:
+        print("no trigger_keywords: none — every skill declares keywords")
 
     if not args.dry_run and counts["applied"]:
         print(f"backup: {backup_dir}")

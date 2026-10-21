@@ -41,7 +41,7 @@ sys.path.insert(
     str(Path(__file__).resolve().parents[2].parent / "scripts"),
 )
 
-from apply_skill_index_hints import apply_hint  # noqa: E402
+from apply_skill_index_hints import apply_hint, apply_keywords  # noqa: E402
 
 
 def write_skill(
@@ -334,6 +334,45 @@ def test_apply_hint_rejects_files_without_frontmatter(tmp_path):
     md = tmp_path / "SKILL.md"
     md.write_text("no frontmatter here\n", encoding="utf-8")
     assert apply_hint(md, "x") == "no-frontmatter"
+
+
+def test_apply_keywords_declares_and_is_idempotent(tmp_path):
+    """A skill with no declared triggers is reachable only by its own name
+    (the selector refuses description prose), so the authoring script has to
+    be able to declare the keyword channel — once, and never over an author's
+    own list."""
+    md = tmp_path / "SKILL.md"
+    md.write_text("---\nname: x\ndescription: d\n---\nbody\n", encoding="utf-8")
+    assert apply_keywords(md, ["公文", "请示"]) == "applied"
+    content = md.read_text(encoding="utf-8")
+    assert "trigger_keywords:" in content and "  - 公文" in content
+    assert content.startswith("---\n") and "\n---\nbody" in content
+    assert apply_keywords(md, ["公文", "请示"]) == "skipped"
+    assert content.count("trigger_keywords:") == 1
+
+
+def test_declared_keywords_reach_the_selector(tmp_path):
+    """End-to-end through the real parser: the YAML list the script writes
+    must land in ``trigger_keywords`` and make a Chinese query hit the skill.
+    Dev measured 8/24 skills with no declared keywords, and 4 of them missed
+    every query phrased in their own index line."""
+    write_skill(
+        tmp_path,
+        "gdb-creator-from-excel",
+        description="从 Excel 属性结构表创建 GIS 数据。",
+        frontmatter='index_hint: "当用户要从 Excel 属性结构表创建 GIS 数据时使用。"\n',
+    )
+    md = tmp_path / "gdb-creator-from-excel" / "SKILL.md"
+    assert apply_keywords(md, ["FileGDB", "要素类", "坐标系"]) == "applied"
+
+    mgr = manager_with(tmp_path)
+    assert set(mgr.list_skills()[0]["trigger_keywords"]) >= {"FileGDB", "要素类"}
+
+    sel = SkillSelector()
+    sel.build_index(mgr.list_skills())
+    assert sel.select("从Excel属性结构表创建FileGDB数据") == [
+        "gdb-creator-from-excel",
+    ]
 
 
 def test_authored_hint_wins_in_index(tmp_path):
