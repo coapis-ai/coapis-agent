@@ -21,6 +21,7 @@ Skills are directories with SKILL.md, scripts, and metadata.
 """
 
 import json
+import hashlib
 import logging
 import asyncio
 from collections import OrderedDict
@@ -116,38 +117,56 @@ class SkillManager:
     ```
     """
 
-    def __init__(self, skills_dir: Path):
+    def __init__(self, skills_dir: Path, extra_dirs: Optional[Iterable[Path]] = None):
         self.skills_dir = skills_dir
         self.skills_dir.mkdir(parents=True, exist_ok=True)
+        # The loader resolves skills from the pool *and* the user/agent
+        # manifests (resolve_effective_skills searches agent dir, user skills
+        # dir and the skill pool).  This manager used to scan skills_dir only,
+        # so the index the model read was a subset of what it could load —
+        # measured on dev: 5 skills in the index, 21 loadable.  extra_dirs
+        # brings the catalogue in; skills_dir is scanned last so a skill the
+        # workspace owns overrides the pool copy.
+        self.extra_dirs = [Path(p) for p in (extra_dirs or []) if p]
         self._skills: Dict[str, dict] = {}
-        # Cache sentinels MUST be None, never "".  get_index_prompt() treats a
-        # cached value as valid when it "is not None"; seeding them with "" (as
+        # Cache sentinel MUST be None, never "".  get_index_prompt() treats a
+        # cached value as valid when it "is not None"; seeding it with "" (as
         # invalidate_index_cache used to) made the very first compact call
         # return an empty skill index — the model then saw no skills at all on
         # every turn after the first.  Measured on dev 2026-10-21: 19 skills
         # discovered, index length 0 chars.
-        self._index_prompt_cache: Optional[str] = None
-        self._index_prompt_cache_compact: Optional[str] = None
+        # One LRU keyed by filter+mode+query; see get_index_prompt().
         self._query_index_cache: "OrderedDict[str, str]" = OrderedDict()
 
     async def discover(self):
         """Discover all skills in skills directory."""
         logger.info(f"Discovering skills in {self.skills_dir}")
 
-        for skill_dir in self.skills_dir.iterdir():
-            if not skill_dir.is_dir():
+        # skills_dir is scanned last so a skill the workspace owns overrides
+        # the pool copy of the same name.
+        scan_dirs = [*self.extra_dirs, self.skills_dir]
+        entries = 0
+        for base in scan_dirs:
+            if not base.exists():
                 continue
+            for skill_dir in base.iterdir():
+                if not skill_dir.is_dir():
+                    continue
 
-            skill_md = skill_dir / "SKILL.md"
-            if not skill_md.exists():
-                continue
+                skill_md = skill_dir / "SKILL.md"
+                if not skill_md.exists():
+                    continue
 
-            skill = self._load_skill(skill_dir)
-            if skill:
-                self._skills[skill["name"]] = skill
-                logger.debug(f"Discovered skill: {skill['name']}")
+                skill = self._load_skill(skill_dir)
+                if skill:
+                    self._skills[skill["name"]] = skill
+                    entries += 1
+                    logger.debug(f"Discovered skill: {skill['name']}")
 
-        logger.info(f"Discovered {len(self._skills)} skills")
+        logger.info(
+            f"Discovered {len(self._skills)} skills from "
+            f"{len(scan_dirs)} director{'y' if len(scan_dirs) == 1 else 'ies'}",
+        )
 
         # B8: a skill whose index line describes the file instead of naming
         # the situation it applies to is a skill the model cannot select.  It
@@ -344,8 +363,6 @@ class SkillManager:
         disabled the compact index forever (an empty index is a *valid* cached
         value, so it was never rebuilt).
         """
-        self._index_prompt_cache = None
-        self._index_prompt_cache_compact = None
         self._query_index_cache.clear()
 
     async def hot_reload(self, skill_name: str):
@@ -666,7 +683,7 @@ class SkillManager:
     #: session could serve another session's skill set.
     QUERY_CACHE_CAP = 64
 
-    def get_index_prompt(self, compact: bool = False, query: str = None) -> str:
+    def get_index_prompt(self, compact: bool = False, query: str = None, only=None) -> str:
         """Generate skills index for system prompt (cached).
 
         Args:
@@ -674,41 +691,52 @@ class SkillManager:
                     Reduces tokens from ~2138 to ~180 (91% reduction).
             query: If provided, only include skills matching the query (on-demand loading).
                   Further reduces tokens by filtering irrelevant skills.
+            only: Optional iterable of skill names the agent can actually use.  The
+                  loader resolves skills from the pool *and* the user/agent manifests
+                  (``resolve_effective_skills``), while this manager scans only
+                  ``skills_dir``; without the filter the index showed 5 workspace
+                  skills while 21 were loadable, so the model never saw most of
+                  what it could use.  Passing ``toolkit.skills`` aligns the two.
 
         Returns:
             Skills index string
         """
+        allowed = set(only) if only is not None else None
+        # Cache keys must carry the filter: one manager instance is reused
+        # across turns, and a turn with a different skill set must not serve a
+        # cached index built for another one.
+        filter_fp = ""
+        if allowed is not None:
+            digest = hashlib.sha1("|".join(sorted(allowed)).encode("utf-8"))
+            filter_fp = digest.hexdigest()[:12] + "|"
+
         # Determine which skills to include
         if query:
             matched_names = self.match_skills_by_query(query)
-            cache_key = query
-            cached = self._query_index_cache.get(cache_key)
-            if cached is not None:
-                self._query_index_cache.move_to_end(cache_key)
-                return cached
+            cache_key = f"{filter_fp}{query}"
         elif compact:
             matched_names = [n for n, s in self._skills.items() if s.get("enabled", True)]
-            cache_key = "compact"
-            cached = self._index_prompt_cache_compact
-            if cached is not None:
-                return cached
+            cache_key = f"{filter_fp}compact"
         else:
             matched_names = [n for n, s in self._skills.items() if s.get("enabled", True)]
-            cache_key = "full"
-            cached = self._index_prompt_cache
-            if cached is not None:
-                return cached
+            cache_key = f"{filter_fp}full"
+
+        # All three modes share one LRU keyed by filter+mode+query.  Keeping
+        # compact/full in single fields would let one turn's loadable set serve
+        # another turn's cached index.
+        cached = self._query_index_cache.get(cache_key)
+        if cached is not None:
+            self._query_index_cache.move_to_end(cache_key)
+            return cached
+
+        if allowed is not None:
+            matched_names = [n for n in matched_names if n in allowed]
 
         def _store(value: str) -> str:
-            if query:
-                self._query_index_cache[cache_key] = value
-                self._query_index_cache.move_to_end(cache_key)
-                while len(self._query_index_cache) > self.QUERY_CACHE_CAP:
-                    self._query_index_cache.popitem(last=False)
-            elif compact:
-                self._index_prompt_cache_compact = value
-            else:
-                self._index_prompt_cache = value
+            self._query_index_cache[cache_key] = value
+            self._query_index_cache.move_to_end(cache_key)
+            while len(self._query_index_cache) > self.QUERY_CACHE_CAP:
+                self._query_index_cache.popitem(last=False)
             return value
 
         if not matched_names:

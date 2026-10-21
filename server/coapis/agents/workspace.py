@@ -76,6 +76,36 @@ def _get_user_skills_dir(username: str) -> Path:
     """Get user's skills directory."""
     return _get_user_workspace_dir(username) / "skills"
 
+
+def _skill_scan_extra_dirs(ws) -> list:
+    """Extra directories SkillManager should read skill metadata from.
+
+    Mirrors where ``resolve_effective_skills`` searches (agent dir, user
+    skills dir, skill pool).  Reading only ``skills_dir`` made the prompt
+    index a subset of the loadable set — on dev the index listed 5 skills
+    while 21 were loadable, so pool skills such as xlsx never appeared in the
+    index even though the loader could inject them.  The prompt layer filters
+    the result against ``toolkit.skills``, so listing a directory here cannot
+    surface a skill the agent is not allowed to use.
+    """
+    dirs: list = []
+    try:
+        from .skills_manager import get_skill_pool_dir
+
+        pool = get_skill_pool_dir()
+        if pool and Path(pool) != ws.skills_dir:
+            dirs.append(Path(pool))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("skill pool dir unavailable for index: %s", exc)
+    try:
+        user_dir = _get_user_skills_dir(ws.username)
+        if user_dir and user_dir != ws.skills_dir:
+            dirs.append(user_dir)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("user skills dir unavailable for index: %s", exc)
+    return dirs
+
+
 from .core import AgentCore
 from .memory_manager import MemoryManager
 from .growth import GrowthSystem
@@ -874,9 +904,17 @@ class Workspace:
         # SkillManager (priority=30)
         self._service_mgr.register(ServiceDescriptor(
             name="skills",
-            factory=lambda ws: SkillManager(ws.skills_dir),
+            factory=lambda ws: SkillManager(
+                ws.skills_dir,
+                extra_dirs=_skill_scan_extra_dirs(ws),
+            ),
             priority=30,
             attr_name="skills",
+            # discover() had no call site anywhere in the repo, so _skills
+            # stayed empty and the [AVAILABLE SKILLS] block was empty on every
+            # turn — the model never saw any skill.  post_init may return a
+            # coroutine; the manager awaits it.
+            post_init=lambda ws, mgr: mgr.discover(),
         ))
 
         # GrowthSystem (priority=40, 依赖 memory + skills)

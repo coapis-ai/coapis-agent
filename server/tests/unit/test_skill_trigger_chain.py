@@ -89,8 +89,7 @@ def test_index_rebuilds_after_invalidate(tmp_path):
     mgr = manager_with(tmp_path)
     assert mgr.get_index_prompt()
     mgr.invalidate_index_cache()
-    assert mgr._index_prompt_cache is None
-    assert mgr._index_prompt_cache_compact is None
+    assert not mgr._query_index_cache
     assert mgr.get_index_prompt()
     assert mgr.get_index_prompt(compact=True)
 
@@ -334,6 +333,91 @@ def test_authored_hint_wins_in_index(tmp_path):
     index = mgr.get_index_prompt()
     assert "当用户要甲事时使用。" in index
     assert "很长的描述" * 20 not in index
+
+
+# ------------------------------------------------- B7: index vs loadable set
+
+
+def test_extra_dirs_bring_pool_skills_into_the_index(tmp_path):
+    """The loader resolves skills from pool + user + agent manifests, while
+    SkillManager scanned skills_dir only: 5 skills in the index, 21 loadable."""
+    ws = tmp_path / "ws"
+    pool = tmp_path / "pool"
+    write_skill(ws, "own_skill", description="本地技能。")
+    write_skill(pool, "xlsx", description="电子表格。")
+    write_skill(pool, "pdf", description="PDF 文档。")
+    mgr = SkillManager(ws, extra_dirs=[pool])
+    asyncio.run(mgr.discover())
+    names = {s["name"] for s in mgr.list_skills()}
+    assert names == {"own_skill", "xlsx", "pdf"}
+
+
+def test_workspace_skill_overrides_pool_copy(tmp_path):
+    ws = tmp_path / "ws"
+    pool = tmp_path / "pool"
+    write_skill(ws, "xlsx", description="工作区版本描述。")
+    write_skill(pool, "xlsx", description="技能池版本描述。")
+    mgr = SkillManager(ws, extra_dirs=[pool])
+    asyncio.run(mgr.discover())
+    # skills_dir is scanned last, so the workspace copy wins.  Compare path,
+    # not description: apply_descriptions_from_pack() rewrites descriptions by
+    # skill name as part of discover().
+    assert Path(mgr.get_skill("xlsx")["path"]) == ws / "xlsx"
+
+
+def test_only_filter_restricts_index_to_loadable_skills(tmp_path):
+    ws = tmp_path / "ws"
+    pool = tmp_path / "pool"
+    write_skill(ws, "own_skill", description="本地技能。")
+    write_skill(pool, "xlsx", description="电子表格。")
+    mgr = SkillManager(ws, extra_dirs=[pool])
+    asyncio.run(mgr.discover())
+
+    index = mgr.get_index_prompt(only={"own_skill"})
+    assert "own_skill" in index
+    assert "xlsx" not in index
+
+
+def test_only_filter_changes_are_not_served_from_cache(tmp_path):
+    """One manager instance is reused across turns; a turn whose loadable set
+    changed must not get the previous set's cached index."""
+    ws = tmp_path / "ws"
+    pool = tmp_path / "pool"
+    write_skill(ws, "own_skill", description="本地技能。")
+    write_skill(pool, "xlsx", description="电子表格。")
+    mgr = SkillManager(ws, extra_dirs=[pool])
+    asyncio.run(mgr.discover())
+
+    assert "xlsx" not in mgr.get_index_prompt(only={"own_skill"})
+    assert "xlsx" in mgr.get_index_prompt(only={"own_skill", "xlsx"})
+
+
+def test_missing_extra_dir_is_ignored(tmp_path):
+    ws = tmp_path / "ws"
+    write_skill(ws, "own_skill", description="本地技能。")
+    mgr = SkillManager(ws, extra_dirs=[tmp_path / "nope"])
+    asyncio.run(mgr.discover())
+    assert {s["name"] for s in mgr.list_skills()} == {"own_skill"}
+
+
+def test_core_passes_loadable_set_to_the_index():
+    """Guard the wiring: the prompt layer must filter by toolkit.skills."""
+    src = (
+        Path(__file__).resolve().parents[2] / "coapis" / "agents" / "core.py"
+    ).read_text(encoding="utf-8")
+    assert "toolkit.skills.keys()" in src
+    assert "only=loadable" in src
+
+
+def test_skills_service_runs_discover_on_startup():
+    """``discover()`` had no call site in the whole repo, so _skills stayed
+    empty and [AVAILABLE SKILLS] was empty on every turn.  Guard the
+    post_init wiring so it cannot silently regress."""
+    src = (
+        Path(__file__).resolve().parents[2] / "coapis" / "agents" / "workspace.py"
+    ).read_text(encoding="utf-8")
+    assert "post_init=lambda ws, mgr: mgr.discover()" in src
+    assert "extra_dirs=_skill_scan_extra_dirs(ws)" in src
 
 
 if __name__ == "__main__":

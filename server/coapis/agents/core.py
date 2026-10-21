@@ -906,11 +906,17 @@ class AgentCore:
 
         # Skills index — on-demand loading based on query
         if skills:
+            # ``toolkit.skills`` is the set the agent can actually load
+            # (pool + user + agent manifests, see resolve_effective_skills);
+            # SkillManager scans skills_dir alone, so without this filter the
+            # index listed 5 workspace skills while 21 were loadable and the
+            # model never saw most of what it could use.
+            loadable = set(toolkit.skills.keys()) if getattr(toolkit, "skills", None) else None
             # Use query-based matching for initial requests, compact for subsequent
             if is_initial and query:
-                skill_index = skills.get_index_prompt(compact=False, query=query)
+                skill_index = skills.get_index_prompt(compact=False, query=query, only=loadable)
             else:
-                skill_index = skills.get_index_prompt(compact=not is_initial)
+                skill_index = skills.get_index_prompt(compact=not is_initial, only=loadable)
             if skill_index:
                 parts.append(f"\n[AVAILABLE SKILLS]\n{skill_index}")
 
