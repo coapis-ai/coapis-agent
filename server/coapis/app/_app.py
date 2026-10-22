@@ -730,15 +730,29 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
             # ---- 会话目录巡检（只报告，不删除）----
             # 目录由系统创建（files/月/日期_任务/），建了没写东西会留下空壳。
             # 删除需要可靠的"曾有文件"依据，而台账依据有已知噪声 → 先观察量。
+            # 临时区不受此限：名为 .temp 的目录按定义就是可弃的，直接兑现
+            # 提示词里"默认写 .temp、自动清理"的承诺（cleanup 规则只认
+            # files/.temp，历史上被重排进会话目录的 .temp 扫不到）。
             try:
-                from ..agents.context.session_dir import sweep_report
+                from ..agents.context.session_dir import (
+                    sweep_report,
+                    sweep_scratch_dirs,
+                )
 
                 _sweep = sweep_report()
+                _scratch = 0
+                try:
+                    for _ws in (p for p in Path(WORKSPACES_DIR).iterdir() if p.is_dir()):
+                        _scratch += sweep_scratch_dirs(_ws / "files")
+                except OSError:
+                    pass
                 logger.info(
-                    "[session_dir] 空会话目录巡检：用户 %d 个，空目录 %d 个 %s",
+                    "[session_dir] 空会话目录巡检：用户 %d 个，空目录 %d 个 %s；"
+                    "清理过期临时文件 %d 个",
                     _sweep["users"],
                     _sweep["total"],
                     _sweep["empty_dirs"],
+                    _scratch,
                 )
             except Exception as e:
                 logger.debug(f"[session_dir] 巡检失败（忽略）: {e}")

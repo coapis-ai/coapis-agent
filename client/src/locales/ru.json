@@ -15,7 +15,8 @@
     "clearAll": "Очистить",
     "workingPath": "Рабочая папка",
     "workingPathHint": "Рабочая папка: агент может обращаться к файлам в этой папке",
-    "moreRefs": "Ещё {{n}} не показано"
+    "moreRefs": "Ещё {{n}} не показано",
+    "sessionDir": "Папка этого чата"
   },
   "common": {
     "save": "Сохранить",
@@ -2105,7 +2106,9 @@
   "resourcePicker": {
     "noModels": "Нет доступных моделей",
     "searchResults": "Результаты поиска",
-    "searchPlaceholder": "Поиск всех файлов (имя/путь)…"
+    "searchPlaceholder": "Поиск всех файлов (имя/путь)…",
+    "sessionDirEmpty": "У этого чата пока нет папки с файлами",
+    "sessionDirFailed": "Не удалось найти папку чата"
   },
   "tasks": {
     "title": "Задачи",
@@ -2134,6 +2137,8 @@
     "sessionGroup": "Сессия",
     "noSession": "Без сессии",
     "undated": "Без даты",
-    "dirGroup": "Папки"
+    "dirGroup": "Папки",
+    "monthDir": "{{y}}.{{m}}",
+    "dateDir": "Файлы {{d}}"
   }
 }

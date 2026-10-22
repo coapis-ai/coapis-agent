@@ -12,15 +12,21 @@ from pathlib import Path
 import pytest
 
 from coapis.agents.context.session_dir import (
+    BINDING_FILE,
     MIN_NEW_FILES,
     SESSION_DIR_WINDOW_DAYS,
+    bind_session_dir,
     flatten_rel_path,
     is_session_dir,
+    load_bindings,
+    lookup_bound_dir,
     resolve_session_dir,
     sanitize_task_name,
+    scratch_dir_target,
     session_write_dir,
     sweep_empty_session_dirs,
     sweep_report,
+    system_dir_target,
 )
 
 TODAY = date(2026, 10, 22)
@@ -46,8 +52,9 @@ def _mk(root: Path, name: str, files: int = 0) -> Path:
 
 
 def test_sanitize_strips_path_separators():
-    assert sanitize_task_name("a/b\\c:d?e") == "a b c d e"
-    assert sanitize_task_name("季度报告 v2") == "季度报告 v2"
+    # 空格变 `_`：目录名要进 URL（空格→%20）、进 shell、进面包屑
+    assert sanitize_task_name("a/b\\c:d?e") == "a_b_c_d_e"
+    assert sanitize_task_name("季度报告 v2") == "季度报告_v2"
 
 
 def test_sanitize_rejects_empty_and_hidden():
@@ -58,23 +65,62 @@ def test_sanitize_rejects_empty_and_hidden():
     assert sanitize_task_name(".git") == "git"
 
 
+def test_sanitize_rejects_junk_titles():
+    """新会话默认名/纯 ID/纯日期当目录名等于没名字 → 降级为纯日期目录。"""
+    for raw in (
+        "New Chat",
+        "new conversation",
+        "新聊天",
+        "新建对话",
+        "新建会话",
+        "未命名会话",
+        "Новый чат",
+        "chat-2f9c1a3b",
+        "2f9c1a3b5d6e",
+        "2026-10-22",
+        "2026/10/22 09:30",
+    ):
+        assert sanitize_task_name(raw) == "", raw
+
+
 def test_sanitize_caps_length():
     from coapis.agents.context.session_dir import MAX_SLUG_LEN
 
     assert len(sanitize_task_name("长" * 200)) <= MAX_SLUG_LEN
 
 
+def test_sanitize_truncates_at_word_boundary():
+    """拉丁文标题不能截在词中间（实测目录名结尾是半个单词）。"""
+    got = sanitize_task_name("please write the quarterly business report for Q3")
+    assert len(got) <= 24
+    assert not got.endswith("quarter"), got
+    assert "_" in got  # 空格已换成 `_`
+
+
 def test_sanitize_shortens_sentence_titles():
     """会话标题经常就是用户第一句话，整句当目录名没法看。"""
     assert sanitize_task_name(
         "请直接写一个文件 e2e目录验证.md，内容写一句话即可。不要问我",
-    ) == "直接写一个文件 e2e目录验证"
+    ) == "直接写一个文件_e2e目录验证"
     assert sanitize_task_name("2026年Q3营收分析，含图表") == "2026年Q3营收分析"
     assert sanitize_task_name("写个报告。") == "写个报告"
     # 子句太短不切，避免"好，写个报告"切成"好"
     assert sanitize_task_name("好，写个报告") == "好，写个报告"
     # 纯指令前缀切完没东西 → 用原文兜底
     assert sanitize_task_name("请") == "请"
+
+
+def test_params_are_env_configurable(monkeypatch):
+    """阈值必须 env 可配（生产数据长什么样没人能提前知道），且坏值不能崩。"""
+    from coapis.agents.context.session_dir import _env_int
+
+    monkeypatch.setenv("X_OK", "42")
+    monkeypatch.setenv("X_BAD", "abc")
+    monkeypatch.setenv("X_ZERO", "0")
+    assert _env_int("X_OK", 15) == 42
+    assert _env_int("X_BAD", 15) == 15
+    assert _env_int("X_ZERO", 15) == 15
+    assert _env_int("X_MISSING", 15) == 15
 
 
 def test_is_session_dir():
@@ -177,7 +223,7 @@ async def test_session_write_dir_uses_chat_title(root, monkeypatch):
 
     sd._TITLE_CACHE.clear()
     got = await session_write_dir(root, "chat-9", "alice", today=TODAY)
-    assert got == root / MONTH / "2026-10-22_OA 报销流程"
+    assert got == root / MONTH / "2026-10-22_OA_报销流程"
     sd._TITLE_CACHE.clear()
 
 

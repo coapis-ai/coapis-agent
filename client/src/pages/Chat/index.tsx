@@ -760,6 +760,8 @@ export default function ChatPage() {
   // 浮层只承担跨目录检索与知识库选择（D3：检索需要搜索框，菜单层做不好）。
   type PickerMode = "files" | "knowledge";
   const [pickerMode, setPickerMode] = useState<PickerMode | null>(null);
+  // 浮层展开根（D-8/4d）：null=我的空间根；「本会话目录」入口传后端给的会话目录
+  const [pickerRoot, setPickerRoot] = useState<string | null>(null);
   // 本会话文件：按 chat_id 过滤的台账行（D1）。旧数据 chat_id=NULL，
   // 所以「本会话」只覆盖新产生的文件（D2，接受的现状）。
   const [sessionFiles, setSessionFiles] = useState<SessionFile[]>([]);
@@ -870,9 +872,33 @@ export default function ChatPage() {
     }
   }, []);
 
-  const openPicker = useCallback((mode: PickerMode) => {
+  const openPicker = useCallback((mode: PickerMode, rootPath?: string) => {
+    setPickerRoot(rootPath ?? null);
     setPickerMode(mode);
   }, []);
+
+  // 本会话目录直达（D-8/4d）：目录由系统按会话绑定，没产出过文件就没有目录
+  // —— 给提示，而不是跳进一个空目录。
+  const openSessionDir = useCallback(async () => {
+    if (!chatId) {
+      message.info(t("resourcePicker.sessionDirEmpty", "本会话还没有产出目录"));
+      return;
+    }
+    try {
+      const resp = (await api.get(
+        `/myfiles/session-dir?chat_id=${encodeURIComponent(chatId)}`,
+      )) as { path?: string | null; exists?: boolean };
+      if (!resp?.exists || !resp.path) {
+        message.info(t("resourcePicker.sessionDirEmpty", "本会话还没有产出目录"));
+        return;
+      }
+      setPickerRoot(resp.path);
+      setPickerMode("files");
+    } catch (err) {
+      console.error("[Chat] 会话目录查询失败:", err);
+      message.error(t("resourcePicker.sessionDirFailed", "会话目录查询失败"));
+    }
+  }, [chatId, message, t]);
 
   // 本会话文件：按 chat_id 拉台账（D1）。菜单打开时刷新，保证新上传/新生成的文件即时出现。
   const refreshSessionFiles = useCallback(async () => {
@@ -1966,6 +1992,7 @@ export default function ChatPage() {
             // 打开原生文件选择（保留 Sender 原生上传流程）
           }}
           onOpenModal={openPicker}
+          onOpenSessionDir={openSessionDir}
           checked={checkedKeys}
           onToggle={toggleCascadeNode}
           chatId={chatId}
@@ -2728,7 +2755,11 @@ export default function ChatPage() {
     <CascadePickerModal
       open={pickerMode !== null}
       mode={pickerMode ?? "files"}
-      onClose={() => setPickerMode(null)}
+      rootPath={pickerRoot}
+      onClose={() => {
+        setPickerMode(null);
+        setPickerRoot(null);
+      }}
       checked={checkedKeys}
       onToggle={toggleCascadeNode}
     />

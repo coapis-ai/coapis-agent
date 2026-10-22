@@ -57,6 +57,50 @@ const FILES_API = '/myfiles';
 
 const { Text } = Typography;
 
+// 目录名是给系统用的（进 URL、直链、台账），面包屑是给人看的。这里只翻译
+// 显示文字，**不改真实路径**：`2026-10` → 「2026年10月」，
+// `2026-10-22_季度报告` → 「季度报告 · 10-22」。
+const MONTH_DIR_RE = /^(\d{4})-(\d{2})$/;
+const SESSION_DIR_RE = /^(\d{4})-(\d{2})-(\d{2})(?:_(.+))?$/;
+
+function dirDisplayName(
+  name: string,
+  t: (k: string, o?: any) => string,
+): string {
+  const m = MONTH_DIR_RE.exec(name);
+  if (m) {
+    return t('myspace.monthDir', {
+      defaultValue: '{{y}}年{{m}}月',
+      y: m[1],
+      m: String(Number(m[2])),
+    });
+  }
+  const s = SESSION_DIR_RE.exec(name);
+  if (s) {
+    const datePart = `${s[2]}-${s[3]}`;
+    if (s[4]) return `${s[4]} · ${datePart}`;
+    return t('myspace.dateDir', { defaultValue: '{{d}} 产出', d: datePart });
+  }
+  return name;
+}
+
+// 会话目录绑定表是系统状态，不是用户产出 —— 列出来只会让人以为多了两个
+// 看不懂的隐藏文件。
+const SYSTEM_FILE_NAMES = new Set(['.session_dirs.json', '.session_dirs.lock']);
+
+// 列表数据的统一入口：过滤系统文件 + 给目录加「显示名」。
+// 显示名只影响渲染，`name`/`path` 保持真实值，重命名/下载/直链都不受影响。
+function decorateFileItems(
+  items: any[],
+  t: (k: string, o?: any) => string,
+): any[] {
+  return (items || [])
+    .filter((it: any) => !SYSTEM_FILE_NAMES.has(it?.name))
+    .map((it: any) => (it?.type === 'directory'
+      ? { ...it, displayName: dirDisplayName(it.name, t) }
+      : it));
+}
+
 // MySpace 类别定义（技能已有独立菜单，不在此重复）
 const CATEGORIES = [
   { key: 'files', label: '文件', icon: <FolderOutlined /> },
@@ -196,7 +240,7 @@ const MySpacePage: React.FC = () => {
       const url = `${FILES_API}/list?${query}`;
       const res: any = await api.get(url);
       setCurrentPath(res.path);
-      setItems(res.items);
+      setItems(decorateFileItems(res.items, t));
       setSearchResults([]);
       setIsSearching(false);
     } catch (e: any) {
@@ -270,7 +314,7 @@ const MySpacePage: React.FC = () => {
     try {
       const url = `${FILES_API}/search?keyword=${encodeURIComponent(searchKeyword)}&path=${encodeURIComponent(currentPath)}&category=${activeCategory}`;
       const res: any = await api.get(url);
-      setSearchResults(res.items || []);
+      setSearchResults(decorateFileItems(res.items || [], t));
     } catch (e: any) {
       message.error(e?.message || t('myspace.searchFailed'));
       setSearchResults([]);
@@ -698,7 +742,7 @@ const MySpacePage: React.FC = () => {
   const breadcrumbItems = currentPath.split('/').filter(Boolean).reduce((acc: any[], _, index) => {
     const path = '/' + currentPath.split('/').slice(1, index + 1).join('/');
     const name = currentPath.split('/')[index + 1] || activeCategory;
-    acc.push({ title: name, key: path, href: '#', onClick: (e: React.MouseEvent) => { e.preventDefault(); navigateTo(path); } });
+    acc.push({ title: dirDisplayName(name, t), key: path, href: '#', onClick: (e: React.MouseEvent) => { e.preventDefault(); navigateTo(path); } });
     return acc;
   }, [{ title: <HomeOutlined />, key: getCategoryRootPath(activeCategory), href: '#', onClick: (e: React.MouseEvent) => { e.preventDefault(); navigateTo(getCategoryRootPath(activeCategory)); } }]);
 
@@ -1024,7 +1068,7 @@ const MySpacePage: React.FC = () => {
                       <>
                         {getFileIcon(item)}
                         <Text strong style={{ flex: 1 }}>
-                          {item.name}
+                          {item.displayName ?? item.name}
                           {isAI(item) && (
                             <Tooltip title={t('myspace.aiGenerated', 'AI 生成')}>
                               <span style={{ marginLeft: 4, color: '#736dff' }}>✨</span>
@@ -1083,7 +1127,7 @@ const MySpacePage: React.FC = () => {
                 >
                   <div style={{ fontSize: 36, marginBottom: 8 }}>{getFileIcon(item)}</div>
                   <Text ellipsis style={{ display: 'block', fontSize: 13 }}>
-                    {item.name}
+                    {item.displayName ?? item.name}
                     {isAI(item) && (
                       <Tooltip title={t('myspace.aiGenerated', 'AI 生成')}>
                         <span style={{ marginLeft: 4, color: '#736dff' }}>✨</span>

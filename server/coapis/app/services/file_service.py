@@ -57,6 +57,11 @@ logger = logging.getLogger(__name__)
 # （``GET /myfiles/search`` 与 ``GET /myfiles/list?search=``）都走它，
 # 因此这些上限对两条路径同时生效，不会各定一套。
 SEARCH_LIMIT = 200        # 单次最多返回多少条命中
+
+# 会话目录绑定表是系统状态文件（chat_id → 目录），不是用户产出。列进文件列表
+# 会让人以为空间里凭空多了两个看不懂的隐藏文件，列表与搜索都把它摘掉。
+from ...agents.context.session_dir import BINDING_FILE as _SESSION_BINDING_FILE, BINDING_LOCK_FILE as _SESSION_BINDING_LOCK
+HIDDEN_ENTRY_NAMES = frozenset({_SESSION_BINDING_FILE, _SESSION_BINDING_LOCK})
 SEARCH_MAX_DEPTH = 12     # 相对搜索起点的最大递归深度
 SEARCH_MAX_SCAN = 20000   # 单次最多遍历多少个条目（防超大树把请求卡死）
 
@@ -432,6 +437,8 @@ class LocalFileBackend(FileService):
         
         files = []
         for item in target.iterdir():
+            if item.name in HIDDEN_ENTRY_NAMES:
+                continue
             # Skip broken symlinks (target doesn't exist)
             if item.is_symlink() and not item.exists():
                 logger.warning(f"Skipping broken symlink: {item}")
@@ -714,6 +721,8 @@ class LocalFileBackend(FileService):
                 dirnames[:] = [d for d in dirnames if d not in NOISE_DIR_PARTS]
 
             for name in sorted(dirnames) + sorted(filenames):
+                if name in HIDDEN_ENTRY_NAMES:
+                    continue
                 scanned += 1
                 if scanned > SEARCH_MAX_SCAN:
                     capped = True

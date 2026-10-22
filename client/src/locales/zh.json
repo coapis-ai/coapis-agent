@@ -15,7 +15,8 @@
     "clearAll": "清空",
     "workingPath": "工作路径",
     "workingPathHint": "工作路径：智能体可访问该目录下的文件",
-    "moreRefs": "还有 {{n}} 项未显示"
+    "moreRefs": "还有 {{n}} 项未显示",
+    "sessionDir": "本会话目录"
   },
   "externalNav": {
     "bindingRequired": "您尚未绑定该外部系统账号，暂无法访问，请先完成账号绑定。"
@@ -2739,7 +2740,9 @@
     "sessionGroup": "会话",
     "noSession": "无会话归属",
     "undated": "未记录日期",
-    "dirGroup": "目录"
+    "dirGroup": "目录",
+    "monthDir": "{{y}}年{{m}}月",
+    "dateDir": "{{d}} 产出"
   },
   "monitoring": {
     "title": "系统监控",
@@ -2832,7 +2835,9 @@
   "resourcePicker": {
     "noModels": "暂无可用模型",
     "searchResults": "搜索结果",
-    "searchPlaceholder": "搜索全部文件（按文件名/路径）…"
+    "searchPlaceholder": "搜索全部文件（按文件名/路径）…",
+    "sessionDirEmpty": "本会话还没有产出目录",
+    "sessionDirFailed": "会话目录查询失败"
   },
   "tasks": {
     "title": "任务",

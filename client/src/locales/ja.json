@@ -15,7 +15,8 @@
     "clearAll": "クリア",
     "workingPath": "作業パス",
     "workingPathHint": "作業パス：エージェントはこのディレクトリ内のファイルにアクセスできます",
-    "moreRefs": "他 {{n}} 件表示されず"
+    "moreRefs": "他 {{n}} 件表示されず",
+    "sessionDir": "このチャットのフォルダ"
   },
   "common": {
     "save": "保存",
@@ -2090,7 +2091,9 @@
   "resourcePicker": {
     "noModels": "選択可能なモデルはありません",
     "searchResults": "検索結果",
-    "searchPlaceholder": "全ファイルを検索（名前/パス）…"
+    "searchPlaceholder": "全ファイルを検索（名前/パス）…",
+    "sessionDirEmpty": "このチャットに出力フォルダはありません",
+    "sessionDirFailed": "チャットフォルダの取得に失敗しました"
   },
   "tasks": {
     "title": "タスク",
@@ -2119,6 +2122,8 @@
     "sessionGroup": "会話",
     "noSession": "セッションなし",
     "undated": "日付なし",
-    "dirGroup": "フォルダー"
+    "dirGroup": "フォルダー",
+    "monthDir": "{{y}}年{{m}}月",
+    "dateDir": "{{d}} の出力"
   }
 }

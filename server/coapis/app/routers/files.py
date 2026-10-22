@@ -843,6 +843,32 @@ async def get_usage(request: Request = None):
     }
 
 
+@router.get("/session-dir")
+@require_permission("chat:read")
+async def session_dir(
+    chat_id: str = Query(..., min_length=1, description="会话 ID"),
+    request: Request = None,
+):
+    """本会话的产出目录（相对 files 根），给聊天页「本会话目录」入口用。
+
+    目录由系统按会话绑定（``files/.session_dirs.json``），这里**只读绑定表**、
+    不创建目录：会话还没产出过文件时没有目录 → ``exists=false``，前端置灰，
+    而不是跳进一个空目录。绑定表按用户工作区隔离，别人的 chat_id 在这里查不到。
+    """
+    username = get_current_user(request)["username"]
+    files_root = Path(WORKSPACES_DIR) / username / "files"
+    from ...agents.context.session_dir import session_dir_rel
+
+    rel = session_dir_rel(files_root, chat_id)
+    if not rel:
+        return {"path": None, "name": None, "exists": False}
+    return {
+        "path": f"/{rel}",
+        "name": Path(rel).name,
+        "exists": (files_root / rel).is_dir(),
+    }
+
+
 # ═══════════════════════════════════════════════════════════
 # 资源清单面（R1）：resources / resource_refs 的读面与巡检
 # ═══════════════════════════════════════════════════════════

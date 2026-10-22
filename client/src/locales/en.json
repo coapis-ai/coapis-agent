@@ -15,7 +15,8 @@
     "clearAll": "Clear",
     "workingPath": "Working path",
     "workingPathHint": "Working path: the agent can access files in this directory",
-    "moreRefs": "{{n}} more not shown"
+    "moreRefs": "{{n}} more not shown",
+    "sessionDir": "This chat's folder"
   },
   "externalNav": {
     "bindingRequired": "You have not linked an account for this external system. Access is blocked until you complete the binding."
@@ -2688,7 +2689,9 @@
     "sessionGroup": "Session",
     "noSession": "No session",
     "undated": "Undated",
-    "dirGroup": "Folders"
+    "dirGroup": "Folders",
+    "monthDir": "{{y}}-{{m}}",
+    "dateDir": "{{d}} outputs"
   },
   "monitoring": {
     "title": "System Monitoring",
@@ -2782,7 +2785,9 @@
   "resourcePicker": {
     "noModels": "No models available",
     "searchResults": "Search results",
-    "searchPlaceholder": "Search all files (name / path)…"
+    "searchPlaceholder": "Search all files (name / path)…",
+    "sessionDirEmpty": "This chat has no output folder yet",
+    "sessionDirFailed": "Failed to look up the chat folder"
   },
   "tasks": {
     "title": "Tasks",

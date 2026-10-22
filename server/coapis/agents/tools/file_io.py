@@ -79,7 +79,25 @@ def _resolve_file_path(file_path: str) -> str:
             rel_in = (
                 Path(*rel_in.parts[1:]) if len(rel_in.parts) > 1 else Path(".")
             )
-        return str(files_dir / rel_in)
+        target = files_dir / rel_in
+        # 读写口径对称：写侧把裸文件名重排进 files/{月}/{日期}_{任务}/ 并回报
+        # 完整相对路径，模型经常只抄回裸文件名。精确路径不存在时按
+        # "本会话目录 → 当月 → files 根"兜底，否则"刚写的文件读不到"。
+        if not target.exists() and len(rel_in.parts) == 1 and rel_in.name:
+            try:
+                from ..context.session_dir import find_loose_file
+                from ...config.session_context import get_current_chat_id
+
+                hit = find_loose_file(
+                    files_dir,
+                    rel_in.name,
+                    chat_id=get_current_chat_id(),
+                )
+            except Exception:  # noqa: BLE001 - 兜底失败就按原路径报错
+                hit = None
+            if hit is not None:
+                return str(hit)
+        return str(target)
 
 
 async def _resolve_write_path(file_path: str) -> str:
@@ -127,17 +145,37 @@ async def _resolve_write_path(file_path: str) -> str:
     if rel.parts[:1] == ("files",):
         rel = Path(*rel.parts[1:]) if len(rel.parts) > 1 else Path(".")
 
-    # 系统目录不重排：memory/ 是每日笔记等系统写入的固定落点
-    if rel.parts[:1] == ("memory",):
-        target = workspace_dir / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        return str(target)
-
-    from ..context.session_dir import flatten_rel_path, session_write_dir
+    from ..context.session_dir import (
+        flatten_rel_path,
+        scratch_dir_target,
+        session_write_dir,
+        system_dir_target,
+    )
     from ...config.session_context import (
         get_current_chat_id,
         get_current_username,
     )
+
+    # 系统/治理目录：落在工作区根，绝不进 files/、更不进会话目录。
+    # 依据：治理模块本来就写 {workspace}/tool_results，技能/记忆/会话状态
+    # 同理；混进会话目录会把系统缓存当成"我的空间"里的用户产出。
+    sys_target = system_dir_target(rel, workspace_dir)
+    if sys_target is not None:
+        sys_target.parent.mkdir(parents=True, exist_ok=True)
+        return str(sys_target)
+
+    # 临时区固定 files/.temp —— cleanup_manager 的清理规则只认这个路径
+    # （保留 1 天、每小时扫）。落进会话目录的 .temp 清理扫不到，提示词里
+    # "默认写 .temp、自动清理"的承诺就落空了。
+    scratch = scratch_dir_target(rel, files_dir)
+    if scratch is not None:
+        scratch.parent.mkdir(parents=True, exist_ok=True)
+        return str(scratch)
+
+    # 用户自建目录引用（files/季度报告/x.md）：目录已存在就尊重原路径，
+    # 不重排进会话目录 —— 用户建的主题目录是显式分类，系统不覆盖。
+    if len(rel.parts) >= 2 and (files_dir / rel.parts[0]).is_dir():
+        return str(files_dir / rel)
 
     try:
         session_dir = await session_write_dir(

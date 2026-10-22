@@ -30,6 +30,7 @@ from coapis.config.context import (
     set_current_folder_ref,
     set_current_workspace_dir,
 )
+from coapis.config.session_context import set_current_chat_id, set_current_username
 
 MONTH = date.today().strftime("%Y-%m")
 
@@ -181,3 +182,60 @@ async def test_folder_ref_write_is_readable_by_bare_name(ws):
         assert "内容 A" in _text(r)
     finally:
         set_current_folder_ref(None)
+
+
+async def test_bare_name_read_falls_back_to_session_dir(ws, monkeypatch):
+    """写侧把裸文件名重排进会话目录，模型抄回裸文件名时读侧要能找到。
+
+    这是目录重排带来的读写口径不对称：写回报的是完整相对路径，模型经常
+    只抄文件名。精确路径不存在时按 会话目录→当月→files 根 兜底。
+    """
+
+    class _Chat:
+        id, user_id, username = "chat-read", "alice", "alice"
+        # session_dir 取的是 chat.name（不是 title）
+        name = "季度报告"
+
+    class _CM:
+        async def get_chat(self, chat_id):
+            return _Chat()
+
+    class _Mgr:
+        def get_user_chat_manager(self, username):
+            return _CM()
+
+    import coapis.app.multi_agent_manager as mam
+
+    monkeypatch.setattr(mam, "get_multi_agent_manager", lambda: _Mgr())
+    from coapis.agents.context import session_dir as sd
+
+    sd._TITLE_CACHE.clear()
+    set_current_chat_id("chat-read")
+    set_current_username("alice")
+    try:
+        w = await fi.write_file(file_path="报告.md", content="会话里的内容")
+        assert "Wrote" in _text(w)
+        today = date.today()
+        target = (
+            ws
+            / "files"
+            / today.strftime("%Y-%m")
+            / f"{today:%Y-%m-%d}_季度报告"
+            / "报告.md"
+        )
+        assert target.is_file()
+
+        r = await fi.read_file(file_path="报告.md")
+        assert "会话里的内容" in _text(r)
+        # 日期层里的文件同样能找到
+        day = target.parent / f"{today:%Y-%m-%d}"
+        day.mkdir(parents=True, exist_ok=True)
+        (day / "尾巴.md").write_text("尾巴内容", encoding="utf-8")
+        assert "尾巴内容" in _text(await fi.read_file(file_path="尾巴.md"))
+        # 真不存在的文件仍按原路径报"不存在"
+        miss = await fi.read_file(file_path="没有这个文件.md")
+        assert "does not exist" in _text(miss)
+        assert str(ws / "files" / "没有这个文件.md") in _text(miss)
+    finally:
+        set_current_chat_id(None)
+        set_current_username(None)

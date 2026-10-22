@@ -33,8 +33,10 @@ export interface SessionFile {
 export interface ResourcePlusMenuProps {
   /** 上传文件（点击隐藏的原始上传 trigger） */
   onUploadClick: () => void;
-  /** 打开浮层（跨目录搜索 / 知识库选择） */
-  onOpenModal: (mode: "files" | "knowledge") => void;
+  /** 打开浮层（跨目录搜索 / 知识库选择）；rootPath 指定时浮层从该目录展开 */
+  onOpenModal: (mode: "files" | "knowledge", rootPath?: string) => void;
+  /** 直达本会话目录（D-8/4d）。未提供时菜单不出现该行。 */
+  onOpenSessionDir?: () => void;
   /** 勾选集合：文件用后端全路径，知识库用 `kb:<id>` */
   checked: Set<string>;
   /** 勾选/取消勾选（D4：点一下即生效，无确认按钮） */
@@ -97,6 +99,19 @@ export default function ResourcePlusMenu(props: ResourcePlusMenuProps) {
       });
     }
     rows.push({ key: "divider", name: "", kind: "divider" });
+    // 本会话目录（D-8/4d）：产出文件由系统按会话落在 files/{月}/{日期}_{任务}/，
+    // 用户要"看这次聊出来的东西"时，这是最短路径（不用从我的空间一层层点）。
+    if (props.onOpenSessionDir) {
+      rows.push({
+        key: "action:session-dir",
+        name: t("resourceMenu.sessionDir", "本会话目录"),
+        kind: "action",
+        onAction: () => {
+          setOpen(false);
+          props.onOpenSessionDir?.();
+        },
+      });
+    }
     // 上传行：bubble=true，点击冒泡到外层 Upload 打开原生文件选择
     rows.push({
       key: "action:upload",
@@ -118,7 +133,7 @@ export default function ResourcePlusMenu(props: ResourcePlusMenuProps) {
       },
     });
     return rows;
-  }, [t, showKnowledge, props.sessionCount, props.onOpenModal]);
+  }, [t, showKnowledge, props.sessionCount, props.onOpenModal, props.onOpenSessionDir]);
 
   const load = useMemo(
     () =>
