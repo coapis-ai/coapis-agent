@@ -31,10 +31,10 @@ from __future__ import annotations
 
 import logging
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 
 from ..constant import WORKSPACES_DIR
 from .db.engine import get_session
@@ -66,6 +66,25 @@ NON_USER_WORKSPACE_DIRS = frozenset({"system"})
 
 #: 单次补扫最多登记多少个文件（防止一次巡检写爆数据库）。
 BACKFILL_CAP = 5000
+
+#: 台账行"文件已消失"多久后软删（秒）。巡检每天 03:00 跑一次，取 36h ≈ 两个
+#: 巡检周期：一次看不见可能只是文件正在被移动/写入中途，两次都看不见才算真没了。
+#: 软删只写 ``deleted_at``，**永不删 FS 文件**（沿用 sweep 铁律）。
+LEDGER_MISSING_TTL_SEC = 36 * 3600
+
+
+def title_from_path(kind: str, path: str) -> str:
+    """``kind=file`` 的兜底标题 = 文件名。
+
+    台账钩子（``file_ledger._sync_resource``）登记时不传标题，实测 dev 347 行里
+    94 行 ``title`` 为空 → 前端资源条只能退化成显示整条路径
+    （``files/2026-10/2026-10-22_任务/报告.docx``）。标题是纯展示字段，文件名
+    就是最诚实的默认值，不需要 LLM 起名。
+    """
+    if str(kind) != "file":
+        return ""
+    name = PurePosixPath(str(path or "").replace("\\", "/")).name
+    return name.strip()
 
 
 def canonical_file_path(path: str, *, form: str = "workspace") -> str:
@@ -202,6 +221,8 @@ class ResourceLedger:
                 return ""
             key = make_resource_key(owner_scope, owner_id, kind, path)
             now = time.time()
+            # 标题兜底：调用方没给标题时用文件名（见 title_from_path）。
+            title_in = (title or "").strip() or title_from_path(kind, path)
             with get_session() as s:
                 res = s.execute(
                     select(Resource).where(Resource.resource_key == key)
@@ -218,7 +239,7 @@ class ResourceLedger:
                             owner_id=owner_id,
                             kind=kind,
                             path=path,
-                            title=title or None,
+                            title=title_in or None,
                             status="draft",
                             size_bytes=size,
                             source=source or "hook",
@@ -233,6 +254,9 @@ class ResourceLedger:
                     res.updated_at = now
                     if title:
                         res.title = title
+                    elif not res.title and title_in:
+                        # 只补空标题，不把采集器给过的真实标题（网页标题等）降级成文件名。
+                        res.title = title_in
                     if res.status == "deleted":
                         # Soft-deleted rows are resurrected on re-registration.
                         res.deleted_at = None
@@ -394,12 +418,236 @@ class ResourceLedger:
 
     # ── sweep (FS → DB, one-way) ─────────────────────────────────────
 
-    def sweep(self, *, full: bool = False, backfill: bool = False) -> dict:
+    def _files_root_index(self, owner_id: str) -> dict:
+        """``basename → [(rel, abs, size, mtime)]``：该用户 files 根下所有可当"新位置"的文件。
+
+        扫描口径与巡检主循环一致（files 根相对路径），返回的 rel 经
+        ``canonical_file_path(..., form="files_root")`` 换算后即台账口径。
+        排除 ``NOISE_DIR_PARTS``（回收站/暂存/git…）——把文件移进回收站是**删除**，
+        不是换位置，资源条指向 ``.trash/...`` 也根本下载不到（前端分类只认
+        ``files/``/``media/``）。这类行交给 ``_expire_missing`` 软删。
+        """
+        index: dict[str, list[tuple[str, Path, int, float]]] = {}
+        root = self._files_root(owner_id)
+        if not root.is_dir():
+            return index
+        try:
+            found = list(root.rglob("*"))
+        except OSError:
+            return index
+        for f in found:
+            try:
+                if not f.is_file():
+                    continue
+                rel = f.relative_to(root).as_posix()
+                if NOISE_DIR_PARTS.intersection(PurePosixPath(rel).parts):
+                    continue
+                st = f.stat()
+            except OSError:
+                continue
+            index.setdefault(f.name, []).append((rel, f, st.st_size, st.st_mtime))
+        return index
+
+    @staticmethod
+    def _pick_relocate_target(
+        cands: list[tuple[str, Path, int, float]], size_hint: int
+    ) -> Optional[tuple[str, Path, int, float]]:
+        """同名候选里选一个；判不准就返回 ``None``（宁留旧行也不猜）。"""
+        if not cands:
+            return None
+        if len(cands) == 1:
+            return cands[0]
+        pool = [c for c in cands if size_hint and c[2] == size_hint] or cands
+        pool.sort(key=lambda c: (-c[3], len(c[0].split("/")), c[0]))
+        best, second = pool[0], pool[1]
+        if best[2] == second[2] and best[3] == second[3]:
+            return None  # 大小与 mtime 全同 → 无法判定是哪一个
+        return best
+
+    def _relocate_missing(self, cap: int = 200) -> dict:
+        """台账跟随移动：文件在工作区里换了位置 → 台账行改指新位置。
+
+        为什么必须迁 ``resource_refs``：``resource_key`` 含路径，路径一变 key 就变，
+        而会话资源条/采集器全靠 refs 找资源。只改 path 不迁 refs，等于把整条会话的
+        资源引用清空（顺带还会被孤儿判定打上 orphan）。
+
+        新位置已有台账行时**合并**：refs 迁过去（同 referrer+role 去重），旧行删除
+        —— 同一文件在台账里永远只有一行，这是 key 口径统一后必须守住的不变量。
+        """
+        relocated: list[dict] = []
+        now = time.time()
+        with get_session() as s:
+            rows = s.execute(
+                select(Resource)
+                .where(
+                    Resource.kind == "file",
+                    Resource.owner_scope == "user",
+                    Resource.fs_present == 0,
+                    Resource.deleted_at.is_(None),
+                )
+                .limit(cap)
+            ).scalars().all()
+            indices: dict[str, dict] = {}
+            for res in rows:
+                name = PurePosixPath(str(res.path)).name
+                if not name:
+                    continue
+                owner = res.owner_id
+                if owner not in indices:
+                    indices[owner] = self._files_root_index(owner)
+                cands = indices[owner].get(name) or []
+                target = self._pick_relocate_target(cands, int(res.size_bytes or 0))
+                if target is None:
+                    continue
+                new_rel, abs_p, size, mtime = target
+                new_path = canonical_file_path(new_rel, form="files_root")
+                new_key = make_resource_key(
+                    res.owner_scope, res.owner_id, res.kind, new_path
+                )
+                old_key = res.resource_key
+                old_path = str(res.path)
+                if new_key == old_key:
+                    continue
+                existing = s.execute(
+                    select(Resource).where(Resource.resource_key == new_key)
+                ).scalar_one_or_none()
+                old_refs = list(
+                    s.execute(
+                        select(ResourceRef).where(ResourceRef.resource_key == old_key)
+                    ).scalars().all()
+                )
+                if existing is not None:
+                    # 合并：旧行的 refs 迁到新行，重复引用直接丢。
+                    for ref in old_refs:
+                        dup = s.execute(
+                            select(ResourceRef)
+                            .where(
+                                ResourceRef.resource_key == new_key,
+                                ResourceRef.referrer_kind == ref.referrer_kind,
+                                ResourceRef.referrer_id == ref.referrer_id,
+                                ResourceRef.role == ref.role,
+                            )
+                            .limit(1)
+                        ).scalar_one_or_none()
+                        if dup is not None:
+                            s.delete(ref)
+                        else:
+                            ref.resource_key = new_key
+                    s.delete(res)
+                    s.flush()
+                    keep = existing
+                else:
+                    if old_refs:
+                        s.execute(
+                            update(ResourceRef)
+                            .where(ResourceRef.resource_key == old_key)
+                            .values(resource_key=new_key)
+                        )
+                    res.resource_key = new_key
+                    res.path = new_path
+                    keep = res
+                keep.fs_present = 1
+                keep.size_bytes = int(size)
+                keep.last_seen_at = now
+                keep.updated_at = now
+                if keep.status == "orphan":
+                    keep.status = "draft"
+                if not keep.title:
+                    keep.title = title_from_path("file", new_path)
+                relocated.append(
+                    {
+                        "owner_id": owner,
+                        "from": old_path,
+                        "to": new_path,
+                        "merged": existing is not None,
+                    }
+                )
+                if len(relocated) >= cap:
+                    break
+        return {
+            "relocated": len(relocated),
+            "relocated_list": relocated[:50],
+        }
+
+    def _expire_missing(
+        self, ttl_sec: float = LEDGER_MISSING_TTL_SEC, cap: int = 500
+    ) -> dict:
+        """确认消失（连续两个巡检周期看不见）→ 软删台账行，资源条不再挂死链。
+
+        ``updated_at`` 天然就是"第一次发现缺失"的时刻：缺失行不在扫描可见集里，
+        之后的巡检不会再刷它（``fs_present`` 已是 0，标记循环跳过），所以不需要
+        额外的"缺失起始时间"列。首轮发现只起表，超过 TTL 才软删。
+        """
+        expired: list[dict] = []
+        now = time.time()
+        with get_session() as s:
+            rows = s.execute(
+                select(Resource)
+                .where(
+                    Resource.kind == "file",
+                    Resource.owner_scope == "user",
+                    Resource.fs_present == 0,
+                    Resource.deleted_at.is_(None),
+                )
+                .limit(cap)
+            ).scalars().all()
+            for res in rows:
+                if res.updated_at is None:
+                    res.updated_at = now  # 起表：这一轮开始计时
+                    continue
+                if now - float(res.updated_at) < ttl_sec:
+                    continue
+                res.deleted_at = now
+                res.status = "deleted"
+                res.updated_at = now
+                expired.append(
+                    {
+                        "owner_id": res.owner_id,
+                        "path": res.path,
+                        "missing_days": round((now - float(res.updated_at)) / 86400, 2),
+                    }
+                )
+        return {"expired": len(expired), "expired_list": expired[:50]}
+
+    def _backfill_titles(self, cap: int = 5000) -> int:
+        """给存量空标题补文件名（实测 dev 347 行里 94 行标题为空）。"""
+        titled = 0
+        with get_session() as s:
+            rows = s.execute(
+                select(Resource)
+                .where(
+                    Resource.kind == "file",
+                    Resource.deleted_at.is_(None),
+                    or_(Resource.title.is_(None), Resource.title == ""),
+                )
+                .limit(cap)
+            ).scalars().all()
+            for res in rows:
+                name = title_from_path("file", res.path)
+                if name:
+                    res.title = name
+                    titled += 1
+        return titled
+
+
+    def sweep(
+        self,
+        *,
+        full: bool = False,
+        backfill: bool = False,
+        relocate: bool = True,
+        expire_after: Optional[float] = None,
+    ) -> dict:
         """Reconcile the ledger against the filesystem. **Never deletes files.**
 
         Report keys:
         * ``fs_missing`` — ledger rows whose file is gone (``fs_present=0``)
         * ``fs_present`` — rows verified present
+        * ``relocated`` — fs_missing 行其实是**被移动**了：台账改指工作区里的新位置，
+          ``resource_refs`` 一起迁（``relocate=False`` 关闭）
+        * ``expired`` — fs_missing 行超过 ``expire_after`` 秒（默认两个巡检周期）
+          仍看不见 → 软删台账行，资源条不再挂死链；**永不删 FS 文件**
+        * ``titled`` — 空标题补上文件名的行数（钩子登记不传标题的存量）
         * ``orphans`` — resources with zero refs (status moved to orphan)
         * ``unledgered`` — files on FS with no ledger row **and a real user owner**
         * ``unowned`` — files under a workspace dir that is not a known user
@@ -415,12 +663,17 @@ class ResourceLedger:
         report = {
             "fs_missing": 0,
             "fs_present": 0,
+            "relocated": 0,
+            "expired": 0,
+            "titled": 0,
             "orphans": 0,
             "unledgered": 0,
             "unowned": 0,
             "noise_skipped": 0,
             "backfilled": 0,
             "fs_missing_list": [],
+            "relocated_list": [],
+            "expired_list": [],
             "orphan_list": [],
             "unledgered_list": [],
             "unowned_list": [],
@@ -511,6 +764,35 @@ class ResourceLedger:
                                 )
                             if backfill and len(pending) < BACKFILL_CAP:
                                 pending.append((owner_id, rel))
+
+            # ── 台账跟随移动 / 失效 / 补标题（各自独立事务）───────────
+            # 顺序固定：先搬家（文件还在，只是换了位置）→ 再判死（真没了）→
+            # 最后补标题。反过来会把"移动"误判成"删除"。
+            # 三段各自兜底：任何一段炸了都不能把整份巡检报告一起带走。
+            try:
+                if relocate:
+                    rep = self._relocate_missing(cap=cap)
+                    report["relocated"] = rep["relocated"]
+                    report["relocated_list"] = rep["relocated_list"]
+            except Exception:
+                logger.exception("ledger: 台账跟随移动失败")
+            try:
+                rep = self._expire_missing(
+                    ttl_sec=(
+                        LEDGER_MISSING_TTL_SEC
+                        if expire_after is None
+                        else float(expire_after)
+                    ),
+                    cap=cap,
+                )
+                report["expired"] = rep["expired"]
+                report["expired_list"] = rep["expired_list"]
+            except Exception:
+                logger.exception("ledger: 台账失效判定失败")
+            try:
+                report["titled"] = self._backfill_titles()
+            except Exception:
+                logger.exception("ledger: 台账标题补齐失败")
 
             # 补登记放在外层 session 之外：register() 自带一个 session，
             # 在巡检事务里嵌套开第二个 session 会把锁顺序搞乱。

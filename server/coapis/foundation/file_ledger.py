@@ -89,6 +89,7 @@ class FileLedgerService:
         agent_id: Optional[str] = None,
         status: Optional[str] = None,
         source: str = "other",
+        title: Optional[str] = None,
     ) -> None:
         """Append-only wiring to the resource ledger (R1).
 
@@ -108,6 +109,9 @@ class FileLedgerService:
                 owner_id=owner_id,
                 kind="file",
                 path=rel_path,
+                # 标题透传：钩子登记不传标题时，台账侧用文件名兜底（实测 dev
+                # 347 行里 94 行空标题，前端资源条只能退化成显示整条路径）。
+                title=title,
             )
             if not key:
                 return
@@ -193,6 +197,7 @@ class FileLedgerService:
                 chat_id=chat_id,
                 agent_id=agent_id,
                 source=source if source in VALID_SOURCES else "other",
+                title=title,
             )
             return True
         except Exception as exc:  # pragma: no cover - defensive
