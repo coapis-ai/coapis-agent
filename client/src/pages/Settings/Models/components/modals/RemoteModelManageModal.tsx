@@ -369,7 +369,8 @@ export function RemoteModelManageModal({
   const [showFreeOnly, setShowFreeOnly] = useState(false);
   const [loadingFilters, setLoadingFilters] = useState(false);
 
-  const [loadingDiscoveredModels, setLoadingDiscoveredModels] = useState(false);
+  // 只读消费（972 行 loading 态）；自动 discover 的 useEffect 已移除，setter 无消费者
+  const [loadingDiscoveredModels] = useState(false);
 
   const modelTypeOptions = useMemo(
     () => [
@@ -704,23 +705,8 @@ export function RemoteModelManageModal({
     }
   };
 
-  useEffect(() => {
-    if (!adding) {
-      setDiscoveredModels([]);
-      return;
-    }
-    setLoadingDiscoveredModels(true);
-    api
-      .discoverModels(provider.id, undefined, false)
-      .then((result) => {
-        const sorted = result.models
-          .slice()
-          .sort((a, b) => a.id.localeCompare(b.id));
-        setDiscoveredModels(sorted as unknown as ExtendedModelInfo[]);
-      })
-      .catch(() => setDiscoveredModels([]))
-      .finally(() => setLoadingDiscoveredModels(false));
-  }, [adding, provider.id]);
+  // 已移除自动discover逻辑：用户点击"添加模型"时不再自动拉取所有模型
+  // 保留手动"自动获取模型"按钮供用户主动触发
 
   useEffect(() => {
     if (!isOpenRouter || !adding) return;

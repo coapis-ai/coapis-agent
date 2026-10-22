@@ -37,7 +37,7 @@ services:
       - PYTHONPATH=/app
       # 日志时间戳用本地时区：容器默认 UTC，运维读日志要自己 +8
       - TZ=Asia/Shanghai
-      - COAPIS_VERSION=1.1.0
+      - COAPIS_VERSION=1.2.0
       - COAPIS_WORKING_DIR=/apps/ai/coapis
       - COAPIS_WORKSPACES_DIR=/apps/ai/coapis/workspaces
       - COAPIS_SHARED_RUNTIME_DIR=/apps/ai/coapis/shared_runtime
