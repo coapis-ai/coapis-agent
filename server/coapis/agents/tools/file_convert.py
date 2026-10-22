@@ -75,7 +75,7 @@ async def convert_file(
     except Exception as exc:  # pylint: disable=broad-except
         return _text(f"源文件路径无法解析：{exc}")
 
-    dest = Path(_resolve_write_path(out_path)) if out_path else None
+    dest = Path(await _resolve_write_path(out_path)) if out_path else None
 
     try:
         result = _convert(src, target_format, dest)

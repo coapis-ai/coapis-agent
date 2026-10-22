@@ -2133,6 +2133,7 @@
     "aiGenerated": "Создано ИИ",
     "sessionGroup": "Сессия",
     "noSession": "Без сессии",
-    "undated": "Без даты"
+    "undated": "Без даты",
+    "dirGroup": "Папки"
   }
 }

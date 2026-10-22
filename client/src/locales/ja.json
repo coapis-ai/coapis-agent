@@ -2118,6 +2118,7 @@
     "aiGenerated": "AI生成",
     "sessionGroup": "会話",
     "noSession": "セッションなし",
-    "undated": "日付なし"
+    "undated": "日付なし",
+    "dirGroup": "フォルダー"
   }
 }

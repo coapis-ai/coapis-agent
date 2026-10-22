@@ -2738,7 +2738,8 @@
     "aiGenerated": "AI 生成",
     "sessionGroup": "会话",
     "noSession": "无会话归属",
-    "undated": "未记录日期"
+    "undated": "未记录日期",
+    "dirGroup": "目录"
   },
   "monitoring": {
     "title": "系统监控",

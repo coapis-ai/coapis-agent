@@ -363,6 +363,10 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
     # Create core managers (instant — no I/O)
     logger.debug("Initializing MultiAgentManager...")
     multi_agent_manager = MultiAgentManager(base_dir=WORKSPACES_DIR)
+    # 进程级登记：工具侧（会话目录解析）与备份恢复按此取用
+    from .multi_agent_manager import set_multi_agent_manager
+
+    set_multi_agent_manager(multi_agent_manager)
     provider_manager = ProviderManager.get_instance()
     local_model_manager = LocalModelManager.get_instance()
     
@@ -722,6 +726,22 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
                 logger.info("WorkspaceMonitor started (auto-recovery enabled)")
             except Exception as e:
                 logger.warning(f"Failed to start WorkspaceMonitor: {e}")
+
+            # ---- 会话目录巡检（只报告，不删除）----
+            # 目录由系统创建（files/月/日期_任务/），建了没写东西会留下空壳。
+            # 删除需要可靠的"曾有文件"依据，而台账依据有已知噪声 → 先观察量。
+            try:
+                from ..agents.context.session_dir import sweep_report
+
+                _sweep = sweep_report()
+                logger.info(
+                    "[session_dir] 空会话目录巡检：用户 %d 个，空目录 %d 个 %s",
+                    _sweep["users"],
+                    _sweep["total"],
+                    _sweep["empty_dirs"],
+                )
+            except Exception as e:
+                logger.debug(f"[session_dir] 巡检失败（忽略）: {e}")
 
             startup_elapsed = time.time() - startup_start_time
             logger.info(

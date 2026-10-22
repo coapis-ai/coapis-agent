@@ -114,7 +114,9 @@ const MySpacePage: React.FC = () => {
   // 分组"就把来源筛选顶掉了，选"AI 生成"又会把分组顶掉——互斥语义被塞进同一个
   // state，用户看到的是"筛选器互相打架"。
   const [sourceFilter, setSourceFilter] = useState<string>('all');
-  const [groupMode, setGroupMode] = useState<'none' | 'session' | 'date'>('none');
+  // 默认「按日期」分组：目录层由系统规划成 月/日期_任务 后，进页面第一眼
+  // 就是按时间聚合的视图，不必逐层点目录（方案 D9）。
+  const [groupMode, setGroupMode] = useState<'none' | 'session' | 'date'>('date');
   const [ledger, setLedger] = useState<Record<string, any>>({});
   const [usage, setUsage] = useState<{ usage_mb: number; limit_mb: number; usage_percent: number } | null>(null);
   const [renameModal, setRenameModal] = useState<{ visible: boolean; item: any; value: string }>({
@@ -665,10 +667,21 @@ const MySpacePage: React.FC = () => {
         timeZone: 'Asia/Shanghai',
       }).format(new Date(ts * 1000));
     };
-    const sorted = [...sourceFiltered].sort(
+    // 目录没有台账日期，混在日期组里会沉到最底部 —— 目录是导航入口，
+    // 单独一组放最前面（月层/会话目录都靠它进）。
+    const dirs = sourceFiltered.filter((i: any) => i.type === 'directory');
+    const files = sourceFiltered.filter((i: any) => i.type !== 'directory');
+    const sorted = [...files].sort(
       (a, b) => (ledgerMeta(b)?.created_at ?? 0) - (ledgerMeta(a)?.created_at ?? 0),
     );
     grouped = buildGrouped(sorted, dateLabel, dateLabel);
+    if (dirs.length) {
+      grouped = buildGrouped(
+        dirs,
+        () => '__dirs__',
+        () => t('myspace.dirGroup', '目录'),
+      ).concat(grouped);
+    }
   }
 
   const filteredItems = grouped.filter((item: any) => {

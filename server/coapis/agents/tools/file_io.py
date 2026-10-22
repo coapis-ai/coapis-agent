@@ -71,18 +71,29 @@ def _resolve_file_path(file_path: str) -> str:
         workspace_dir = Path(workspace_dir)
         # 用户文件存储在 workspace/files/ 目录
         files_dir = workspace_dir / "files"
-        return str(files_dir / file_path)
+        # 读取侧同样接受带 files/ 前缀的写法：写工具回报的相对路径就是
+        # ``files/2026-10/x.md`` 这种形态，模型抄回来时必须命中同一文件，
+        # 否则会解析成 files/files/... 而"写了却读不到"。
+        rel_in = Path(file_path)
+        if rel_in.parts[:1] == ("files",):
+            rel_in = (
+                Path(*rel_in.parts[1:]) if len(rel_in.parts) > 1 else Path(".")
+            )
+        return str(files_dir / rel_in)
 
 
-def _resolve_write_path(file_path: str) -> str:
+async def _resolve_write_path(file_path: str) -> str:
     """Resolve file path for WRITE operations.
 
     Priority rules:
     1. Absolute paths → used as-is
-    2. User-specified relative paths → resolved from workspace/files/
-       (the files/ prefix is added automatically unless the path already
-       starts with it)
-    3. The files/ directory is auto-created if it doesn't exist
+    2. Active folder reference → inside the referenced directory
+       (the user picked that directory; the system must not re-layout it)
+    3. Relative paths → ``files/{YYYY-MM}/{YYYY-MM-DD}_{任务}/<name>``
+
+       目录由系统按会话身份决定（见 ``agents/context/session_dir.py``）：
+       模型只给文件名，"放哪个目录"不再是它的决定。无会话身份时退化为
+       月层平铺，与历史行为一致。
 
     Args:
         file_path: The input file path (absolute or relative).
@@ -115,7 +126,29 @@ def _resolve_write_path(file_path: str) -> str:
     rel = Path(file_path)
     if rel.parts[:1] == ("files",):
         rel = Path(*rel.parts[1:]) if len(rel.parts) > 1 else Path(".")
-    target = files_dir / rel
+
+    # 系统目录不重排：memory/ 是每日笔记等系统写入的固定落点
+    if rel.parts[:1] == ("memory",):
+        target = workspace_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return str(target)
+
+    from ..context.session_dir import flatten_rel_path, session_write_dir
+    from ...config.session_context import (
+        get_current_chat_id,
+        get_current_username,
+    )
+
+    try:
+        session_dir = await session_write_dir(
+            files_dir,
+            get_current_chat_id(),
+            get_current_username(),
+        )
+    except Exception:  # noqa: BLE001 - 目录解析绝不能阻断写文件
+        session_dir = files_dir
+
+    target = session_dir / flatten_rel_path(rel)
     target.parent.mkdir(parents=True, exist_ok=True)
     return str(target)
 
@@ -351,7 +384,11 @@ async def read_file(  # pylint: disable=too-many-return-statements
 
 @register_tool(
     name="write_file",
-    description="写入文件内容。必需参数：file_path（文件路径）、content（文件内容）。",
+    description=(
+        "写入文件内容。必需参数：file_path（文件路径）、content（文件内容）。"
+        "file_path 只需给文件名（如 report.md）——产出目录由系统按当前会话"
+        "自动规划，无需自行设计目录结构，也不要指定绝对路径。"
+    ),
     category="builtin",
     tags=['file', 'write'],
 )
@@ -382,7 +419,7 @@ async def write_file(
             ],
         )
 
-    file_path = _resolve_write_path(file_path)
+    file_path = await _resolve_write_path(file_path)
 
     # ── WorkspaceGuard: path isolation check ──
     try:
@@ -467,7 +504,7 @@ async def edit_file(
             ],
         )
 
-    resolved_path = _resolve_write_path(file_path)
+    resolved_path = await _resolve_write_path(file_path)
 
     # ── WorkspaceGuard: path isolation check ──
     try:
@@ -579,7 +616,7 @@ async def append_file(
             ],
         )
 
-    file_path = _resolve_write_path(file_path)
+    file_path = await _resolve_write_path(file_path)
     encoding = _get_encoding_for_file(file_path)
 
     try:

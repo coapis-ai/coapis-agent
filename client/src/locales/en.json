@@ -2687,7 +2687,8 @@
     "aiGenerated": "AI-generated",
     "sessionGroup": "Session",
     "noSession": "No session",
-    "undated": "Undated"
+    "undated": "Undated",
+    "dirGroup": "Folders"
   },
   "monitoring": {
     "title": "System Monitoring",

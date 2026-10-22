@@ -974,3 +974,21 @@ class MultiAgentManager:
         """String representation of manager."""
         loaded = list(self.agents.keys())
         return f"MultiAgentManager(loaded_agents={loaded})"
+
+
+# ── 进程级单例访问器 ──────────────────────────────────────────────────
+# 管理器在应用启动时创建一次（``_app.py``）并挂在 ``app.state`` 上。
+# 工具调用侧（写文件时按会话身份决定落点）拿不到 ``request.app``，
+# 故提供进程级访问；``backup/_ops/restore.py`` 亦按此名字导入。
+_MANAGER: Optional["MultiAgentManager"] = None
+
+
+def set_multi_agent_manager(manager: Optional["MultiAgentManager"]) -> None:
+    """Register the process-wide manager (called once at startup)."""
+    global _MANAGER
+    _MANAGER = manager
+
+
+def get_multi_agent_manager() -> Optional["MultiAgentManager"]:
+    """The startup-registered manager, or ``None`` before startup."""
+    return _MANAGER
