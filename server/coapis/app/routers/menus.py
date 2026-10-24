@@ -137,28 +137,11 @@ async def get_menus(
         
         menu_items.append(menu_item)
     
-    # 内置固定入口：首页与消息中心不依赖标签数据，保证「想找到都能找到」。
-    # 标签系统里若已配置同路径入口，则不重复注入，避免菜单出现两项。
-    _builtin = [
-        {
-            "key": "__builtin_home",
-            "label": "首页",
-            "path": "/home",
-            "icon": "🏠",
-            "sortOrder": -100,
-        },
-        {
-            "key": "__builtin_messages",
-            "label": "消息",
-            "path": "/messages",
-            "icon": "🔔",
-            "sortOrder": -99,
-        },
-    ]
-    _existing_paths = {item.get("path") for item in menu_items}
-    for _item in _builtin:
-        if _item["path"] not in _existing_paths:
-            menu_items.append(_item)
+    # 不再注入任何内置固定入口（2026-10-23 拍板：菜单 = 标签数据）。
+    # 原先这里硬塞了「首页 /home」与「消息 /messages」两项 sortOrder=-100/-99，
+    # 于是菜单永远删不掉它们——标签系统删了、改名字了，下一轮又长回来。
+    # 现在菜单项完全由标签数据决定：标签里没有，菜单上就没有。
+    # 「消息」入口仍由标签系统提供（消息中心页面与 /messages 路由保留）。
 
     # Final sort by sort_order ascending, then by label
     menu_items.sort(key=lambda item: (item.get("sortOrder", 0), item.get("label", "")))

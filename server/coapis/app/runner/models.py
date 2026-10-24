@@ -95,6 +95,20 @@ class ChatHistory(BaseModel):
     )
 
 
+class ChatSpecPage(BaseModel):
+    """One page of the chat list (B5 左栏分页).
+
+    ``total`` is the size of the *whole* filtered list, not the page size —
+    the sidebar needs it to know when to stop asking for more pages.
+    """
+
+    items: list[ChatSpec] = Field(default_factory=list)
+    total: int = 0
+    offset: int = 0
+    limit: int = 20
+    has_more: bool = False
+
+
 class ChatsFile(BaseModel):
     """Chat registry file for JSON repository.
 

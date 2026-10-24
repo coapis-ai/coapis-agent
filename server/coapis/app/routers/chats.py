@@ -349,31 +349,107 @@ def _release_chat_refs(chat_id: str, session_id: str = "") -> None:
 
 # ── Endpoints ────────────────────────────────────────────────────────────
 
+async def _build_chat_entries(
+    request: Request,
+    agent_id: str,
+    channel: str,
+) -> List[Dict[str, Any]]:
+    """Build the frontend chat list for one agent+channel scope.
+
+    Shared by ``GET /chats`` (full list) and ``GET /chats/page`` (B5 paged)
+    so the two can never drift in shape, in the ``generating`` flag, or in the
+    stale-status self-healing.
+
+    Returns normalized dicts — the exact shape the frontend consumes.
+    """
+    cm = await _get_chat_manager(request, agent_id=agent_id)
+    chats = await cm.list_chats(channel=channel)
+
+    # Get generating chat IDs from stream tracking
+    generating_chat_ids = set()
+    try:
+        mgr = getattr(request.app.state, "multi_agent_manager", None)
+        if mgr:
+            for ws in mgr.get_workspaces():
+                generating_chat_ids.update(ws.get_generating_chat_ids())
+    except Exception:
+        pass
+
+    result: List[Dict[str, Any]] = []
+    for c in chats:
+        entry = _normalize_chat_spec(c)
+        is_generating = c.id in generating_chat_ids
+        entry["generating"] = is_generating
+
+        # Self-healing: clear stale "running" status when not generating
+        if not is_generating and c.status == "running":
+            entry["status"] = "idle"
+            try:
+                await cm.update_chat(c.id, ChatUpdate(status="idle"))
+            except Exception as exc:
+                logger.debug(
+                    "Self-healing failed for chat %s: %s",
+                    c.id[:8],
+                    exc,
+                )
+
+        result.append(entry)
+    return result
+
+
+def _chat_entry_time(entry: Dict[str, Any]) -> str:
+    """Sort key: ISO string of last activity (missing timestamps sort last)."""
+    return entry.get("updated_at") or entry.get("created_at") or ""
+
+
+def _sort_chat_entries(
+    entries: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Pinned first, then most-recently-active first.
+
+    The sidebar paginates server-side (B5), so the order has to be decided
+    *before* the slice — sorting only what the browser already holds would
+    let a pinned chat sit on page 5 forever.
+    """
+    pinned = [e for e in entries if e.get("pinned")]
+    rest = [e for e in entries if not e.get("pinned")]
+    pinned.sort(key=_chat_entry_time, reverse=True)
+    rest.sort(key=_chat_entry_time, reverse=True)
+    return pinned + rest
+
+
 @router.get("/chats")
 @require_permission("chat:history")
 async def list_chats(
     request: Request,
     response: Response,
-    channel: Optional[str] = Query(None),
-    user_id: Optional[str] = Query(None, alias="user_id"),
-    agent_id: Optional[str] = Query(None, alias="agent_id"),
+    channel: Optional[str] = Query(None, description="Filter by channel"),
+    agent_id: Optional[str] = Query(
+        None,
+        description="Filter by agent ID for multi-agent isolation",
+    ),
 ) -> List[Dict[str, Any]]:
-    """List chat sessions for a specific agent, strictly isolated.
+    """List chats for the current user, scoped to a specific agent.
 
     Query Parameters:
-        channel: Filter by channel name (e.g., "console", "wecom")
-        user_id: Filter by specific user ID (admin only, ignored for non-admin)
-        agent_id: Filter by agent ID (required for multi-agent isolation).
-                  Falls back to X-Agent-Id header if not in query param.
+        channel: "console"/omitted → all channels (default view); any other
+            value filters by that channel.
+        agent_id: required (query param, else the X-Agent-Id header).
+
+    Full list. The sidebar switched to ``GET /chats/page`` (B5); this endpoint
+    stays for the admin pages and every caller that needs everything at once.
     """
     username, is_admin = _get_current_user(request)
 
-    # channel="console" means "default view" — return all channels
+    # channel="console" means "default view" → return all channels.
+    # (HEAD semantics — the sidebar depends on it; do not force a single
+    # channel, that is what hides every wecom/discord session.)
     effective_channel = "" if (channel == "console" or not channel) else channel
 
-    # Resolve agent_id: query param > header
+    # Resolve agent_id: query param > X-Agent-Id header.
+    # (HEAD semantics. There is no ``resolve_user_default_agent`` in this
+    # tree — inventing it here crashed both /chats and /chats/page.)
     resolved_agent_id = agent_id or request.headers.get("X-Agent-Id", "")
-
     if not resolved_agent_id:
         raise HTTPException(
             status_code=400,
@@ -381,69 +457,96 @@ async def list_chats(
         )
 
     try:
-        cm = await _get_chat_manager(request, agent_id=resolved_agent_id)
+        result = await _build_chat_entries(
+            request,
+            agent_id=resolved_agent_id,
+            channel=effective_channel,
+        )
     except HTTPException:
-        logger.warning(
-            "list_chats: agent_id=%s not found for user=%s",
-            resolved_agent_id, username,
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Failed to list chats for agent=%s user=%s",
+            resolved_agent_id,
+            username,
         )
         raise HTTPException(
             status_code=404,
-            detail=f"Agent '{resolved_agent_id}' not found or access denied",
-        )
+            detail=f"Chat manager not found for agent '{resolved_agent_id}'",
+        ) from exc
 
-    chats = await cm.list_chats(channel=effective_channel)
-
-    # Check TaskTracker for generating status of each chat
-    generating_chat_ids: set = set()
-    try:
-        ws = _find_workspace_for_agent(request, resolved_agent_id, username)
-        tracker = getattr(ws, "task_tracker", None) if ws else None
-        if tracker:
-            active_tasks = await tracker.list_active_tasks()
-            generating_chat_ids = set(active_tasks)
-    except Exception:
-        pass  # Non-critical: generating status is best-effort
-
-    # Ensure browsers never cache chat list responses
+    # Prevent browser from caching the chat list
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
-    result = []
-    for c in chats:
-        entry = _normalize_chat_spec(c)
-        
-        # Check generating status from multiple sources
-        # Priority 1: TaskTracker (in-memory, most accurate)
-        is_in_tracker = entry["id"] in generating_chat_ids
-        # Priority 2: ChatSpec.status (persistent, survives restart)
-        status_running = entry.get("status") == "running"
-        
-        if is_in_tracker:
-            entry["generating"] = True
-        elif status_running:
-            # TaskTracker doesn't have this task, but status shows "running"
-            # This means the task was lost (backend restart), fix the status
-            entry["generating"] = False
-            # WARNING, not INFO: a chat sitting in "running" with no task
-            # behind it is exactly the state a stalled model call leaves
-            # behind, and it was invisible in the log (dev 2026-10-18: 18 min
-            # 40 s of "running" with zero lines).  The age is the number that
-            # tells a stall from a restart.
-            logger.warning(
-                "Self-healing stale 'running' status for chat %s "
-                "(last update %s): no task behind it.",
-                entry["id"],
-                entry.get("updated_at") or "unknown",
-            )
-            try:
-                await cm.patch_chat(entry["id"], ChatUpdate(status="idle"))
-            except Exception as e:
-                logger.warning(f"Failed to fix stale status: {e}")
-        else:
-            entry["generating"] = False
-        
-        result.append(entry)
+
     return result
+
+
+@router.get("/chats/page")
+@require_permission("chat:history")
+async def list_chats_page(
+    request: Request,
+    response: Response,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    channel: Optional[str] = Query(None),
+    agent_id: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """Paged chat list for the sidebar (B5) — first paint loads 20, not 100.
+
+    ``total`` is the size of the whole filtered list, so the caller knows when
+    to stop asking for pages. Order is pinned-first then updated_at desc,
+    applied before slicing.
+
+    Registered **before** ``GET /chats/{chat_id}``: FastAPI matches routes in
+    registration order, so this literal path placed after the parameterised
+    route would be swallowed by it (``page`` → chat_id → 404).
+    """
+    username, is_admin = _get_current_user(request)
+
+    # Same channel/agent semantics as ``GET /chats`` (see notes there):
+    # channel="console"/omitted → all channels; agent from param or header.
+    effective_channel = "" if (channel == "console" or not channel) else channel
+    resolved_agent_id = agent_id or request.headers.get("X-Agent-Id", "")
+    if not resolved_agent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="agent_id is required (query param or X-Agent-Id header)",
+        )
+
+    try:
+        entries = await _build_chat_entries(
+            request,
+            agent_id=resolved_agent_id,
+            channel=effective_channel,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Failed to list chats (page) for agent=%s user=%s",
+            resolved_agent_id,
+            username,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=f"Chat manager not found for agent '{resolved_agent_id}'",
+        ) from exc
+
+    ordered = _sort_chat_entries(entries)
+    total = len(ordered)
+    items = ordered[offset : offset + limit]
+
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+
+    return {
+        "items": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(items) < total,
+    }
 
 
 @router.post("/chats")
@@ -685,11 +788,13 @@ async def list_chat_resources(
             chat_id=chat_id,
             limit=limit,
             offset=offset,
+            include_deleted=True,
         )
         total = rl.count_resources_for_chat(
             owner_scope="user",
             owner_id=owner or username,
             chat_id=chat_id,
+            include_deleted=True,
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("chat %s resources skipped: %s", chat_id[:16], exc)
@@ -709,6 +814,8 @@ async def list_chat_resources(
             "role": role,
             "ref_count": row.get("ref_count", 0),
             "status": row.get("status"),
+            "version": int(row.get("version") or 1),
+            "deleted": bool(row.get("deleted_at")),
             "updated_at": row.get("last_seen_at") or row.get("updated_at"),
             "size": None,
             "exists": True,

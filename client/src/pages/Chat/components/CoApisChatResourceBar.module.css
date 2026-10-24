@@ -1,0 +1,182 @@
+/* 会话资源条（方案 §12.4 L2）——挂在输入框上方（sender beforeUI 槽位） */
+
+.bar {
+  border: 1px solid var(--coapis-border, #ececec);
+  border-radius: 10px;
+  background: var(--coapis-fill, #fafafa);
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.groups {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 11px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.show-all {
+  color: #1677ff;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 2px;
+  border-radius: 6px;
+}
+
+.row:hover {
+  background: rgba(22, 119, 255, 0.06);
+}
+
+/* 已删除 / 已失效：灰显 + 删除线，不给可点感 */
+.row-dead,
+.row-dead:hover {
+  background: transparent;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.row-dead .name {
+  text-decoration: line-through;
+  color: rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+
+.kind {
+  flex: 0 0 auto;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.82);
+}
+
+.name:hover {
+  color: #1677ff;
+}
+
+.tag {
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 5px;
+  flex: 0 0 auto;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.actions .anticon {
+  cursor: pointer;
+}
+
+.actions .anticon:hover {
+  color: #1677ff;
+}
+
+.more {
+  margin-top: 2px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  text-align: right;
+}
+
+/* 本轮资源条（方案 §3.2 L2）：引用/产出分组 + 折叠 */
+.group {
+  margin-top: 4px;
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
+  margin-bottom: 2px;
+}
+
+.group-count {
+  padding: 0 5px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.06);
+  font-size: 10px;
+}
+
+.expand,
+.collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #1677ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.collapse {
+  margin-right: 10px;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.expand:hover,
+.collapse:hover {
+  color: #1677ff;
+}

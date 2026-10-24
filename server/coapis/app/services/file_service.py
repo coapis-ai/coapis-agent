@@ -92,6 +92,77 @@ def sort_file_infos(files: List[FileInfo], order: str = "name") -> List[FileInfo
 # File Info Model
 # ═══════════════════════════════════════════════════════════
 
+
+# ── Office 预览（docx/xlsx/pptx → Markdown）────────────────────────────
+# 预览抽屉此前只认文本/图片/PDF，office 文档一律掉进 "other" → 用户点预览
+# 就是「不支持在线预览」。企业场景的交付物恰恰以 docx 为主，因此补上转换。
+# 解析能力镜像里已齐备（python-docx / openpyxl / python-pptx / markitdown），
+# 直接复用 doc_reader 的现成实现，不引入新依赖。
+_OFFICE_PREVIEW_SUFFIXES = {
+    ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp",
+}
+_OFFICE_PREVIEW_TIMEOUT_S = 120.0
+_OFFICE_PREVIEW_MAX_CHARS = 64_000
+
+
+async def _office_preview_text(target: Path) -> Optional[dict]:
+    """把 office 文档转成可渲染的 Markdown 文本；失败返回 None（调用方降级）。"""
+    import asyncio
+    import zipfile
+
+    suffix = target.suffix.lower()
+
+    # 容器闸门：docx/xlsx/pptx/odt/ods/odp 都是 zip 包。损坏或伪装成这些扩展名
+    # 的文件，python-docx 会直接失败，而 markitdown 兜底会把**原始字节当文本**
+    # 吐回来（实测损坏 docx → 预览正文 = "PK not really a zip"），用户看到的
+    # 就是一串乱码。因此先验容器：不是合法 zip 就判定不可解析 → 降级下载。
+    if not zipfile.is_zipfile(target):
+        logger.info("office preview skipped (not a zip container): %s", target.name)
+        return None
+
+    async def _dispatch():
+        from ...agents.tools.doc_reader import (
+            _read_docx,
+            _read_pptx,
+            _read_xlsx,
+            _read_with_markitdown,
+        )
+
+        res = None
+        if suffix in (".docx", ".odt"):
+            res = await _read_docx(str(target))
+        elif suffix in (".xlsx", ".ods"):
+            res = await _read_xlsx(str(target))
+        elif suffix in (".pptx", ".odp"):
+            res = await _read_pptx(str(target))
+        if not res or not res.get("content"):
+            res = await _read_with_markitdown(str(target))
+        return res
+
+    try:
+        res = await asyncio.wait_for(_dispatch(), timeout=_OFFICE_PREVIEW_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "office preview timeout: %s (%.0fs)", target.name,
+            _OFFICE_PREVIEW_TIMEOUT_S,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001 — 预览失败降级，不影响下载
+        logger.warning("office preview failed: %s: %s", target.name, exc)
+        return None
+
+    content = (res or {}).get("content") or ""
+    if not content.strip():
+        return None
+
+    truncated = False
+    if len(content) > _OFFICE_PREVIEW_MAX_CHARS:
+        content = content[:_OFFICE_PREVIEW_MAX_CHARS]
+        truncated = True
+
+    return {"content": content, "truncated": truncated}
+
+
 class FileInfo:
     """File information model."""
     
@@ -578,6 +649,38 @@ class LocalFileBackend(FileService):
                 "url": f"/myfiles/preview?path={path}&category={category}"
             }
         
+        # PDF：抽屉需要内联渲染。此前这里没有 PDF 分支，PDF 会掉到下面的
+        # "other"，抽屉吃到「不支持在线预览」——与 docx 同一类缺口，一并补齐。
+        if target.suffix.lower() == ".pdf":
+            return {
+                "type": "pdf",
+                "name": target.name,
+                "path": path,
+                "mime_type": mime_type or "application/pdf",
+                "size": target.stat().st_size,
+            }
+
+        # Office 文档：企业场景的交付物以 docx/xlsx/pptx 为主。抽屉必须能渲染正文，
+        # 否则用户点预览只会吃到「不支持在线预览」。复用 doc_reader 的现成解析链
+        # （python-docx / openpyxl / python-pptx 优先，markitdown 兜底），转成
+        # Markdown 走前端已有的 markdown 渲染分支。
+        # 护栏沿用 doc_reader 口径：超时 + 正文截断；失败降级为 "other"，不抛 500。
+        # 注意顺序：.doc/.xls/.ppt 的 mime 是 msword/excel/powerpoint，
+        # 上面已按 mime 前缀 return "other"，因此这里只覆盖真正的
+        # .docx/.xlsx/.pptx/.odt/.ods/.odp（旧格式走下载，属可接受降级）。
+        if target.suffix.lower() in _OFFICE_PREVIEW_SUFFIXES:
+            converted = await _office_preview_text(target)
+            if converted is not None:
+                return {
+                    "type": "text",
+                    "content": converted["content"],
+                    "name": target.name,
+                    "mime_type": mime_type or "text/markdown",
+                    "size": target.stat().st_size,
+                    "preview_truncated": converted["truncated"],
+                    "converted_from": target.suffix.lower(),
+                }
+
         # Other: return metadata only
         return {
             "type": "other",

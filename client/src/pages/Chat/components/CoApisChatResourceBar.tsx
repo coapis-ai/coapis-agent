@@ -1,206 +1,268 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button } from "antd";
+import React, { useMemo, useState } from "react";
+import { Dropdown, Tag, Tooltip } from "antd";
 import {
-  ClearOutlined,
+  AppstoreOutlined,
+  AimOutlined,
+  DownloadOutlined,
+  DownOutlined,
+  EyeOutlined,
   FileTextOutlined,
   GlobalOutlined,
-  DatabaseOutlined,
-  ApiOutlined,
-  DownOutlined,
-  UpOutlined,
+  RightOutlined,
+  SwapOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { chatApi, type ChatResourceItem } from "../../../api/modules/chat";
-import { getApiToken, getApiUrl } from "../../../api/config";
-import { toMyfilesParams } from "../workspaceLinks";
+import type { ChatResourceItem } from "../../../api/modules/chat";
+import {
+  toLedgerRelPath,
+  getPreviewKind,
+  downloadFile,
+  previewFile,
+} from "../../../utils/webPreview";
+import styles from "./CoApisChatResourceBar.module.css";
 
-/** 折叠态跨刷新保持（默认折叠；用户展开后不该被刷新打回） */
-const EXPANDED_KEY = "coapis.chat.resourceBar.expanded";
+const KIND_ICON: Record<string, React.ReactNode> = {
+  file: <FileTextOutlined />,
+  web: <GlobalOutlined />,
+  kb: <FileTextOutlined style={{ color: "#722ed1" }} />,
+  mcp: <FileTextOutlined style={{ color: "#fa8c16" }} />,
+  db: <FileTextOutlined style={{ color: "#13c2c2" }} />,
+};
 
-/**
- * 会话资源条（B3 · 会话级清单）。
- *
- * 权威源是资源台账（`GET /api/chats/{id}/resources`），所以**刷新页面、
- * 切换会话、会话压缩之后清单都还在** —— 答案气泡里那份是实时增量，这份是
- * 全量底账。默认折叠成一行「资源 · N」，点开成列表：标题 + 链接，文件走
- * 预览抽屉，网页新窗口。
- *
- * 位置：悬浮在聊天区底部、输入框上方（与历史浮层同层，不遮输入框）。
- */
+/** 状态词表（与 L3 完全一致，方案 §3.2 / §12.4 验收项 1） */
+const STATUS_META: Record<string, { label: string; color: string }> = {
+  official: { label: "statusPublished", color: "green" },
+  draft: { label: "statusDraft", color: "default" },
+  orphan: { label: "statusMoved", color: "orange" },
+  archived: { label: "statusArchived", color: "purple" },
+  deleted: { label: "statusDeleted", color: "red" },
+  missing: { label: "statusMissing", color: "red" },
+};
 
-interface Props {
-  chatId: string;
-  onPreview?: (target: { path: string; title?: string }) => void;
-  /** 每次回答结束触发刷新（completed 事件后调用） */
-  refreshSignal?: number;
+/** 一行资源现在算什么状态：软删 > 磁盘失效 > 台账状态。 */
+export function resourceStatusOf(item: ChatResourceItem): string {
+  if (item.deleted || item.status === "deleted") return "deleted";
+  if (item.kind === "file" && item.exists === false) return "missing";
+  return item.status || "draft";
 }
 
-const kindIcon = (kind: string) => {
-  switch (kind) {
-    case "web":
-      return <GlobalOutlined style={{ flexShrink: 0, opacity: 0.6 }} />;
-    case "kb":
-      return <DatabaseOutlined style={{ flexShrink: 0, opacity: 0.6 }} />;
-    case "mcp":
-      return <ApiOutlined style={{ flexShrink: 0, opacity: 0.6 }} />;
-    default:
-      return <FileTextOutlined style={{ flexShrink: 0, opacity: 0.6 }} />;
-  }
-};
+export interface ResourcePreviewRequest {
+  path: string;
+  name: string;
+  source: "produced" | "reference";
+}
 
-const fileDownloadUrl = (path: string) => {
-  // 台账给的是工作区相对路径（files/x.md），myfiles 要的是分类内路径（x.md）
-  const { category, path: rel } = toMyfilesParams(path);
-  return getApiUrl(
-    `/myfiles/download?path=${encodeURIComponent(rel)}&category=${encodeURIComponent(
-      category,
-    )}&token=${encodeURIComponent(getApiToken())}`,
-  );
-};
+interface Props {
+  /**
+   * 本轮资源（方案 §3.2 L2 = 答案气泡末尾的**本轮**引用+产出摘要）。
+   * 由消息 metadata 提供，台账 meta 合并进来（大小/时间/版本/状态）。
+   */
+  items: ChatResourceItem[];
+  /** 会话级抽屉（方案 §12.4）：预览走抽屉，不退化成新窗口 */
+  onPreview?: (req: ResourcePreviewRequest) => void;
+  /** 「查看全部」→ 打开会话资源抽屉（L3） */
+  onShowAll?: () => void;
+  /** 「定位到消息」：滚到产出这条资源的那一轮（方案 §3.2 产出动作） */
+  onLocate?: (messageId: string) => void;
+}
 
-export default function CoApisChatResourceBar({
-  chatId,
+/** 每组最多 8 行，其余折叠成「展开其余 N 项」（方案 §3.2 L2）。 */
+const GROUP_CAP = 8;
+
+/**
+ * 本轮资源条（方案 §3.2 L2 / §12.4）
+ * ---------------------------------------------------------------------------
+ * 挂在**答案气泡末尾**（`chat-resources` 插件位，order 14），显示本轮全部
+ * 引用 + 产出：分角色计数、引用/产出分组、每组 8 行 +「展开其余 N 项」、
+ * 来源标签、状态标签、行右侧 [预览]/[下载]/[转格式]，尾部「查看全部」。
+ * 默认折叠成单行摘要（方案：默认折叠，单行 28px）；本轮无资源时整条不渲染。
+ */
+const CoApisChatResourceBar: React.FC<Props> = ({
+  items,
   onPreview,
-  refreshSignal,
-}: Props) {
+  onShowAll,
+  onLocate,
+}) => {
   const { t } = useTranslation();
-  const [items, setItems] = useState<ChatResourceItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [expanded, setExpanded] = useState(
-    // 折叠态跨刷新保持（§2.4：默认折叠，用户展开后不该被刷新打回）
-    () => {
-      try {
-        return localStorage.getItem(EXPANDED_KEY) === "1";
-      } catch {
-        return false;
-      }
-    },
+  const [expanded, setExpanded] = useState(false);
+
+  const produced = useMemo(
+    () => items.filter((i) => i.role === "producer" || i.role === "export"),
+    [items],
+  );
+  const referenced = useMemo(
+    () => items.filter((i) => i.role !== "producer" && i.role !== "export"),
+    [items],
   );
 
-  const toggleExpanded = (next: boolean) => {
-    setExpanded(next);
-    try {
-      localStorage.setItem(EXPANDED_KEY, next ? "1" : "0");
-    } catch {
-      /* 隐私模式 / 配额满：记住算赚到，记不住不影响功能 */
-    }
-  };
-
-  const load = useCallback(async () => {
-    if (!chatId) {
-      setItems([]);
-      setTotal(0);
+  const doPreview = (item: ChatResourceItem) => {
+    if (item.kind === "web") {
+      window.open(item.path, "_blank", "noopener,noreferrer");
       return;
     }
-    try {
-      const res = await chatApi.listChatResources(chatId, 200, 0);
-      setItems(res?.items || []);
-      setTotal(res?.total || 0);
-    } catch {
-      // 台账坏了就整条不显示——资源条是增强，不该制造报错
-      setItems([]);
-      setTotal(0);
+    const path = toLedgerRelPath(item.path);
+    if (getPreviewKind(path) === "unsupported") {
+      downloadFile(item.path, item.title, item.kind);
+      return;
     }
-  }, [chatId]);
+    if (onPreview) {
+      onPreview({
+        path,
+        name: item.title,
+        source: item.role === "producer" ? "produced" : "reference",
+      });
+      return;
+    }
+    previewFile(path, item.title);
+  };
 
-  useEffect(() => {
-    void load();
-  }, [load, refreshSignal]);
+  const convertMenu = (item: ChatResourceItem) => ({
+    items: [
+      {
+        key: "docx",
+        label: t("chat.preview.convertDocx", "Word (docx)"),
+        onClick: () =>
+          downloadFile(item.path, `${item.title}.docx`, "docx", item.kind),
+      },
+      {
+        key: "pdf",
+        label: t("chat.preview.convertPdf", "PDF"),
+        onClick: () =>
+          downloadFile(item.path, `${item.title}.pdf`, "pdf", item.kind),
+      },
+    ],
+  });
 
-  const rows = useMemo(() => (expanded ? items : []), [items, expanded]);
+  const renderGroup = (
+    label: string,
+    list: ChatResourceItem[],
+    source: "produced" | "reference",
+  ) => {
+    if (!list.length) return null;
+    const shown = expanded ? list : list.slice(0, GROUP_CAP);
+    const rest = list.length - shown.length;
+    return (
+      <div className={styles.group}>
+        <div className={styles.groupHead}>
+          {label}
+          <span className={styles.groupCount}>{list.length}</span>
+        </div>
+        {shown.map((item) => {
+          const st = resourceStatusOf(item);
+          const dead = st === "deleted" || st === "missing";
+          return (
+            <div
+              key={`${item.kind}:${item.path}`}
+              className={`${styles.row} ${dead ? styles.rowDead : ""}`}
+              title={item.path}
+            >
+              <span className={styles.kind}>{KIND_ICON[item.kind]}</span>
+              <span
+                className={styles.name}
+                onClick={() => !dead && doPreview(item)}
+              >
+                {item.title}
+              </span>
+              <Tag className={styles.tag} color={source === "produced" ? "green" : "blue"}>
+                {source === "produced"
+                  ? t("chat.resources.produced")
+                  : t("chat.resources.reference")}
+              </Tag>
+              <Tag className={styles.tag} color={STATUS_META[st]?.color}>
+                {t(`chat.resources.${STATUS_META[st]?.label ?? "statusDraft"}`)}
+              </Tag>
+              {source === "produced" && item.messageId && onLocate ? (
+                <Tooltip title={t("chat.resources.locateMessage")}>
+                  <AimOutlined
+                    className={styles.action}
+                    onClick={() => onLocate(item.messageId as string)}
+                  />
+                </Tooltip>
+              ) : null}
+              <span className={styles.actions}>
+                <Tooltip title={dead ? t("chat.resources.statusMissing") : t("chat.resources.preview")}>
+                  <EyeOutlined
+                    onClick={() => !dead && doPreview(item)}
+                    style={{ cursor: dead ? "not-allowed" : "pointer" }}
+                  />
+                </Tooltip>
+                {item.kind === "file" && !dead ? (
+                  <>
+                    <Tooltip title={t("chat.resources.download")}>
+                      <DownloadOutlined
+                        onClick={() =>
+                          downloadFile(item.path, item.title, item.kind)
+                        }
+                      />
+                    </Tooltip>
+                    <Dropdown menu={convertMenu(item)} trigger={["click"]}>
+                      <Tooltip title={t("chat.resources.convert")}>
+                        <SwapOutlined style={{ cursor: "pointer" }} />
+                      </Tooltip>
+                    </Dropdown>
+                  </>
+                ) : null}
+              </span>
+            </div>
+          );
+        })}
+        {rest > 0 && (
+          <a className={styles.expand} onClick={() => setExpanded(true)}>
+            {t("chat.resources.expandRest", {
+              n: rest,
+              defaultValue: "展开其余 {{n}} 项",
+            })}
+          </a>
+        )}
+      </div>
+    );
+  };
 
-  if (!chatId || items.length === 0) return null;
+  if (!items.length) return null;
+
+  // 「定位到消息」的 DOM 锚点：本条资源条属于哪一轮，就标在哪
+  const anchorMessageId = produced.find((i) => i.messageId)?.messageId;
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--coapis-border, #e8e8e8)",
-        borderRadius: 10,
-        background: "var(--coapis-card-bg, #fff)",
-        boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
-        padding: "6px 10px",
-        fontSize: 12,
-        maxWidth: 520,
-        maxHeight: expanded ? "40vh" : undefined,
-        overflow: expanded ? "auto" : "visible",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ opacity: 0.75 }}>
-          {t("chat.resources.barTitle", "会话资源")} · {total}
+    <div className={styles.bar} data-coapis-resource-msg={anchorMessageId}>
+      {/* 折叠态：单行摘要（方案：默认折叠，单行 28px） */}
+      <div className={styles.header}>
+        <span className={styles.title}>
+          <AppstoreOutlined /> {t("chat.resources.title", "本轮资源")}
         </span>
-        <Button
-          size="small"
-          type="text"
-          style={{ fontSize: 12 }}
-          icon={expanded ? <UpOutlined /> : <DownOutlined />}
-          onClick={() => toggleExpanded(!expanded)}
-        >
+        <span className={styles.groups}>
+          <span className={styles.groupChip}>
+            {t("chat.resources.reference")} {referenced.length}
+          </span>
+          <span className={styles.groupChip}>
+            {t("chat.resources.produced")} {produced.length}
+          </span>
+        </span>
+        <span className={styles.spacer} />
+        <a className={styles.collapse} onClick={() => setExpanded((v) => !v)}>
+          {expanded ? (
+            <DownOutlined />
+          ) : (
+            <RightOutlined />
+          )}
           {expanded
             ? t("chat.resources.collapse", "收起")
             : t("chat.resources.expand", "展开")}
-        </Button>
-        <span style={{ flex: 1 }} />
-        <Button
-          size="small"
-          type="text"
-          style={{ fontSize: 12 }}
-          icon={<ClearOutlined />}
-          onClick={() => void load()}
-        >
-          {t("chat.resources.refresh", "刷新")}
-        </Button>
+        </a>
+        {onShowAll && (
+          <a className={styles.showAll} onClick={onShowAll}>
+            {t("chat.resources.viewAll", "查看全部")}
+          </a>
+        )}
       </div>
       {expanded && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 6 }}>
-          {rows.map((r) => {
-            const title = r.title || r.path;
-            const href = r.kind === "file" ? fileDownloadUrl(r.path) : r.path;
-            return (
-              <div
-                key={r.resource_key || `${r.kind}-${r.path}`}
-                style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}
-              >
-                {kindIcon(r.kind)}
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  title={r.path}
-                  onClick={(e) => {
-                    if (r.kind === "file" && onPreview) {
-                      e.preventDefault();
-                      onPreview({ path: r.path, title });
-                    }
-                  }}
-                  style={{
-                    flex: "1 1 auto",
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    color: "inherit",
-                    textDecoration: "none",
-                    borderBottom: "1px dotted rgba(0,0,0,0.25)",
-                  }}
-                >
-                  {title}
-                </a>
-                {r.role === "producer" && (
-                  <span style={{ flexShrink: 0, opacity: 0.55, fontSize: 11 }}>
-                    {t("chat.resources.produced", "产出")}
-                  </span>
-                )}
-                {r.exists === false && (
-                  <span style={{ flexShrink: 0, opacity: 0.55, fontSize: 11 }}>
-                    {t("chat.resources.missing", "已删除")}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <>
+          {renderGroup(t("chat.resources.groupReference"), referenced, "reference")}
+          {renderGroup(t("chat.resources.groupProduced"), produced, "produced")}
+        </>
       )}
     </div>
   );
-}
+};
+
+export default CoApisChatResourceBar;

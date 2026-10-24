@@ -1,116 +1,90 @@
-@keyframes chatStatusBreathe {
-  0%,
-  100% {
-    opacity: 0.65;
-    box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.55);
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 1;
-    box-shadow: 0 0 10px 3px rgba(20, 184, 166, 0.35);
-    transform: scale(1.12);
-  }
-}
+/* 左侧会话列表项样式 */
 
 .chatSessionItem {
   position: relative;
   display: flex;
-  min-height: 77px;
-  flex-shrink: 0;
-  border-radius: 6px;
+  align-items: flex-start;
   gap: 8px;
-  background-color: var(--colorBgBase, #fff);
+  width: 100%;
+  /* 批次 B3：操作行独立成行后一行 104px —— 与 ChatSessionDropdown 的
+     ITEM_HEIGHT 必须一致，否则虚拟化行高与内容错位。 */
+  min-height: 104px;
+  padding: 10px 12px 10px 8px;
+  border: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  background: transparent;
   cursor: pointer;
+  transition: background 0.2s;
+  box-sizing: border-box;
   overflow: hidden;
-  transition: background-color 0.2s;
 
   &:hover {
-    border-radius: 6px;
-    background-color: var(--colorBgBase, #fff);
-    background-image: linear-gradient(
-      var(--color-fill-tertiary, rgba(43, 18, 0, 0.03)),
-      var(--color-fill-tertiary, rgba(43, 18, 0, 0.03))
-    );
+    background: rgba(0, 0, 0, 0.04);
 
-    .actions {
+    .actionRow {
       opacity: 1;
-      pointer-events: auto;
-    }
-
-    .iconPlaceholder {
-      // Highlight connector line and dot on hover
-      &::before {
-        background-color: var(--colorBorder, #c1bebb);
-        transition: background-color 0.2s;
-      }
-
-      &::after {
-        border: 1px solid var(--colorBorder, #c1bebb);
-        transition: background-color 0.2s;
-      }
     }
   }
 
   &.active {
-    border-radius: 6px;
-    background: var(--color-fill-tertiary, rgba(43, 18, 0, 0.03));
+    background: rgba(0, 0, 0, 0.06);
+
+    .name {
+      font-weight: 600;
+    }
+
+    .actionRow {
+      opacity: 1;
+    }
   }
 
-  // Reserve right-side padding for the edit input in editing mode
+  /* 编辑态：整行就是输入框，操作行让位 */
   &.editing {
     .content {
-      padding-right: 12px;
+      display: none;
+    }
+
+    .actionRow {
+      opacity: 0;
     }
   }
 }
 
+/* 左侧占位（保持与主列表一致的缩进节奏） */
 .iconPlaceholder {
-  width: 24px;
-  flex-shrink: 0;
-  position: relative;
-
-  // Vertical connector line centered in the 24px container (x = 11.5px)
-  &::before {
-    content: "";
-    position: absolute;
-    left: calc(50% - 0.5px);
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background-color: var(--colorBorder, #d9d9d9);
-  }
-
-  // Timeline dot (6x6px) centered on the connector line
-  &::after {
-    content: "";
-    position: absolute;
-    left: calc(50% - 3px);
-    top: 20px;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background-color: var(--colorBgBase, #fff);
-    border: 1px solid var(--colorBorder, #d9d9d9);
-    z-index: 1;
-  }
+  flex: 0 0 4px;
+  width: 4px;
+  height: 20px;
+  margin-top: 5px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.2s;
 }
 
+.chatSessionItem:hover .iconPlaceholder {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.chatSessionItem.active .iconPlaceholder {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* 内容区：三行纵向堆叠（标题 / 日期 / 操作） */
 .content {
-  flex: 1;
-  min-width: 0;
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 14px;
+  gap: 4px;
+  min-width: 0;
 }
 
+/* 第一行：标题 + 状态点 + 展开 caret */
 .titleRow {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  width: 100%;
 }
 
 .name {
@@ -118,140 +92,224 @@
   min-width: 0;
   font-size: 14px;
   font-weight: 500;
-  line-height: 24px;
-  color: var(--colorText, #1a1716);
+  line-height: 20px;
+  color: rgba(0, 0, 0, 0.85);
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  overflow: hidden;
 }
 
 .statusWrap {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  flex-shrink: 0;
 }
 
 .statusDot {
-  width: 7px;
-  height: 7px;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .statusDotIdle {
-  background: #94a3b8;
-  box-shadow: none;
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .statusDotActive {
-  background: rgba(20, 184, 166, 1);
-  animation: chatStatusBreathe 1.6s ease-in-out infinite;
+  background: #52c41a;
 }
 
+.statusDotFailed {
+  background: #ff4d4f;
+}
+
+.statusDotRunning {
+  background: #52c41a;
+  animation: sessionPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes sessionPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.45;
+    transform: scale(1.35);
+  }
+}
+
+/* 批次 B2：展开 caret 挂在标题行末尾（原来在资源面板头部，与会话割裂） */
+.expandCaret {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+
+  &:hover {
+    color: rgba(0, 0, 0, 0.75);
+    background: rgba(0, 0, 0, 0.06);
+  }
+}
+
+.caret {
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.caretOpen {
+  font-size: 11px;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+/* 第二行：日期 + 渠道标签 */
 .metaRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  width: 100%;
 }
 
 .time {
-  flex: 1;
-  min-width: 0;
+  flex: 0 0 auto;
   font-size: 12px;
   line-height: 18px;
-  color: var(--colorTextSecondary, rgba(26, 23, 22, 0.45));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.45);
+  font-variant-numeric: tabular-nums;
 }
 
 .channelTag {
-  flex-shrink: 0;
-  max-width: 52%;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 1px 6px 1px 4px;
-  border-radius: 4px;
+  gap: 4px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.05);
   font-size: 11px;
-  font-weight: 500;
   line-height: 18px;
-  color: var(--colorTextSecondary, rgba(26, 23, 22, 0.55));
-  background: var(--color-fill-tertiary, rgba(43, 18, 0, 0.06));
-  min-width: 0;
-}
-
-.channelIcon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  border-radius: 3px;
-  object-fit: contain;
+  color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  max-width: 96px;
+  overflow: hidden;
 }
 
 .channelTagText {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
 }
 
-.actions {
-  position: absolute;
-  right: 16px;
-  top: 14px;
+/* 第三行（批次 B3）：置顶 + 编辑 + 删除，独占一行。
+   之前是 position:absolute 叠在标题右上角 —— 用户反馈"按钮重叠在标题上"。
+   常驻占位（opacity 0）保证行高恒定，hover 才显色。 */
+.actionRow {
   display: flex;
-  gap: 8px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s;
-}
-
-.pinButton {
-  position: absolute;
-  right: 16px;
-  top: 14px;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  justify-content: center;
   align-items: center;
-  padding: 4px;
-  border-radius: 4px;
-  color: var(--colorText, rgba(26, 23, 22, 0.88));
+  gap: 6px;
+  height: 24px;
   opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s;
-  z-index: 10;
+  transition: opacity 0.15s;
+}
 
-  // Show on hover (when parent is hovered) or when pinned
-  .chatSessionItem:hover &,
-  &[data-pinned="true"] {
-    opacity: 1;
-    pointer-events: auto;
-  }
+.pinIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
 
-  // Pinned state - primary color
-  &[data-pinned="true"] {
-    color: var(--colorPrimary, #ff9d4d);
+  &:hover {
+    color: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.06);
   }
 }
 
-// Actions always positioned to the left of pin button
+.pinnedIcon {
+  color: #1677ff;
+
+  &:hover {
+    color: #1677ff;
+  }
+}
+
 .actions {
-  right: 48px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
-/* Dark mode */
-:global(.dark-mode) {
+.actionBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+
+  &:hover {
+    color: rgba(0, 0, 0, 0.85);
+    background: rgba(0, 0, 0, 0.08);
+  }
+}
+
+.dangerBtn {
+  &:hover {
+    color: #ff4d4f;
+    background: rgba(255, 77, 79, 0.08);
+  }
+}
+
+/* 编辑态输入框 */
+.editInput {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #1677ff;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+}
+
+/* 暗色模式 */
+:global(.dark) {
   .chatSessionItem {
-    background-color: #1f1f1f;
+    border-bottom-color: rgba(255, 255, 255, 0.08);
 
     &:hover {
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.05);
     }
 
     &.active {
@@ -260,38 +318,59 @@
   }
 
   .iconPlaceholder {
-    &::before {
-      background-color: rgba(255, 255, 255, 0.2);
-    }
+    background: transparent;
+  }
 
-    &::after {
-      background-color: #1f1f1f;
-      border-color: rgba(255, 255, 255, 0.2);
-    }
+  .chatSessionItem:hover .iconPlaceholder {
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  .chatSessionItem.active .iconPlaceholder {
+    background: rgba(255, 255, 255, 0.45);
   }
 
   .name {
-    color: rgba(255, 255, 255, 0.95);
-  }
-
-  .statusDotIdle {
-    background: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.88);
   }
 
   .time {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.45);
   }
 
   .channelTag {
-    color: rgba(255, 255, 255, 0.65);
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
   }
 
-  .pinButton {
-    color: rgba(255, 255, 255, 0.72);
+  .expandCaret {
+    color: rgba(255, 255, 255, 0.45);
 
-    &[data-pinned="true"] {
-      color: var(--colorPrimary, #ff9d4d);
+    &:hover {
+      color: rgba(255, 255, 255, 0.85);
+      background: rgba(255, 255, 255, 0.08);
     }
+  }
+
+  .pinIcon {
+    color: rgba(255, 255, 255, 0.45);
+
+    &:hover {
+      color: rgba(255, 255, 255, 0.85);
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  .actionBtn {
+    color: rgba(255, 255, 255, 0.45);
+
+    &:hover {
+      color: rgba(255, 255, 255, 0.9);
+      background: rgba(255, 255, 255, 0.1);
+    }
+  }
+
+  .editInput {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.9);
   }
 }

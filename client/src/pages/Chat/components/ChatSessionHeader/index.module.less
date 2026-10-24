@@ -1,3 +1,24 @@
+/* 顶栏图标按钮（历史/新建）：历史按钮在左栏展开时高亮（批次 D1） */
+.headerActionBtn {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.headerActionBtnActive {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.1);
+}
+
+:global(.dark) {
+  .headerActionBtn {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .headerActionBtnActive {
+    color: #69b1ff;
+    background: rgba(105, 177, 255, 0.16);
+  }
+}
+
 .sessionHeader {
   display: flex;
   flex-direction: row;

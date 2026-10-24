@@ -8,23 +8,36 @@ import {
 } from "@agentscope-ai/design";
 // Space/Spin/Typography/Empty 不在 @agentscope-ai/design 的导出里（Empty 的
 // image/description 在本包被收窄成 string），直接用底层 antd。
-import { Empty, Space, Spin, Typography } from "antd";
+import { Empty, Segmented, Space, Spin, Typography } from "antd";
 import {
   AlertTriangle,
+  Copy,
   Download,
   ExternalLink,
   FileText,
+  FolderOpen,
+  Link2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { XMarkdown } from "@ant-design/x-markdown";
+import useIsMobile from "../../../hooks/useIsMobile";
+import { getChatGlobals } from "../../../lib/chatGlobals";
 
 import { getApiUrl } from "../../../api/config";
 import { stripFrontmatter } from "../../../utils/markdown";
 import { isPreviewablePath, toMyfilesParams } from "../workspaceLinks";
 
 const { Text } = Typography;
+
+/** §3.3 底部固定栏：相对工作区根的展示路径（files/…）。 */
+function displayPath(target: PreviewTarget): string {
+  const cat = (target.category || "files").replace(/^\/+|\/+$/g, "");
+  const rel = (target.path || "").replace(/^\/+/, "");
+  return rel.startsWith(`${cat}/`) ? rel : `${cat}/${rel}`;
+}
 
 export interface PreviewTarget {
   /** 工作区相对路径（files/x.md） */
@@ -100,6 +113,14 @@ export default function CoApisPreviewDrawer(props: {
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  // §3.3：右侧抽屉 480px；企微 H5/窄屏（含企微 H5 内嵌）→ 全屏弹层
+  const isMobile = useIsMobile();
+  const drawerWidth =
+    isMobile || getChatGlobals().mode === "embedded" ? "100%" : 480;
+  const [rawView, setRawView] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const { target, onClose } = props;
   const [loading, setLoading] = useState(false);
   const [text, setText] = useState<string | null>(null);
@@ -117,6 +138,8 @@ export default function CoApisPreviewDrawer(props: {
     setText(null);
     setError(null);
     setTruncated(false);
+    setRawView(false);
+    setCopied(false);
     if (!target || !canPreview || IMAGE_EXT.has(ext) || ext === PDF_EXT) {
       setLoading(false);
       return;
@@ -176,7 +199,32 @@ export default function CoApisPreviewDrawer(props: {
   // 转格式入口（B5）：md 是默认产出格式，交付那一刻按需转一次。原本只有
   // 智能体能转（convert_file 工具），用户在预览里点一下就能转，产物落进
   // 同目录同名并进台账（我的空间与会话资源条都能看到）。
-  const doConvert = useCallback(
+  const copyFull = async () => {
+    if (text === null) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError(t("chat.preview.copyFailed"));
+    }
+  };
+
+  const copyDirectLink = async () => {
+    try {
+      const href = new URL(
+        myfilesUrl(path, "download", category ?? undefined),
+        window.location.origin,
+      ).href;
+      await navigator.clipboard.writeText(href);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 1500);
+    } catch {
+      setError(t("chat.preview.copyFailed"));
+    }
+  };
+
+  const convertFile = useCallback(
     async (target2: "docx" | "pdf") => {
       if (!path || converting) return;
       setConverting(target2);
@@ -209,13 +257,17 @@ export default function CoApisPreviewDrawer(props: {
   );
 
   const isMd = MD_EXT.has(ext);
+  // §3.3「复制全文」对一切文本类正文可用（md/txt/json/代码…）
+  // §3.3「复制全文」对一切文本类正文可用：可预览、非图片/PDF、正文已取到
+  const isText =
+    canPreview && !IMAGE_EXT.has(ext) && ext !== PDF_EXT && text !== null;
 
   return (
     <Drawer
       open={!!target}
       onClose={onClose}
       placement="right"
-      width={Math.min(760, typeof window !== "undefined" ? window.innerWidth * 0.92 : 760)}
+      width={drawerWidth}
       title={
         <Space size={6} style={{ maxWidth: "80%", overflow: "hidden" }}>
           <FileText size={14} style={{ flexShrink: 0 }} />
@@ -227,13 +279,34 @@ export default function CoApisPreviewDrawer(props: {
       extra={
         <Space size={4}>
           {isMd && (
+            <Segmented
+              size="small"
+              value={rawView ? "raw" : "rendered"}
+              onChange={(v) => setRawView(v === "raw")}
+              options={[
+                { label: t("chat.preview.render"), value: "rendered" },
+                { label: t("chat.preview.source"), value: "raw" },
+              ]}
+            />
+          )}
+          {(isText || isMd) && (
+            <Tooltip title={t("chat.preview.copy")}>
+              <Button
+                size="small"
+                type={copied ? "primary" : "text"}
+                icon={<Copy size={14} />}
+                onClick={copyFull}
+              />
+            </Tooltip>
+          )}
+          {isMd && (
             <>
               <Tooltip title={t("chat.preview.convert")}>
                 <Button
                   size="small"
                   type="text"
                   loading={converting === "docx"}
-                  onClick={() => doConvert("docx")}
+                  onClick={() => convertFile("docx")}
                 >
                   docx
                 </Button>
@@ -243,7 +316,7 @@ export default function CoApisPreviewDrawer(props: {
                   size="small"
                   type="text"
                   loading={converting === "pdf"}
-                  onClick={() => doConvert("pdf")}
+                  onClick={() => convertFile("pdf")}
                 >
                   pdf
                 </Button>
@@ -255,7 +328,7 @@ export default function CoApisPreviewDrawer(props: {
               size="small"
               type="text"
               icon={<Download size={14} />}
-              href={myfilesUrl(path, "download", category)}
+              href={myfilesUrl(path, "download", category ?? undefined)}
               target="_blank"
             />
           </Tooltip>
@@ -272,6 +345,51 @@ export default function CoApisPreviewDrawer(props: {
         </Space>
       }
       styles={{ body: { padding: 12, overflow: "auto" } }}
+      footer={
+        // §3.3 底部固定栏：相对路径 +「在我的空间定位」+「复制直链」
+        target ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+              fontSize: 12,
+            }}
+          >
+            <Tooltip title={displayPath(target)}>
+              <Text
+                code
+                ellipsis
+                style={{ maxWidth: 220, fontSize: 12 }}
+              >
+                <FolderOpen size={12} /> {displayPath(target)}
+              </Text>
+            </Tooltip>
+            <Button
+              size="small"
+              icon={<FolderOpen size={13} />}
+              onClick={() =>
+                navigate(
+                  `/workspace/myspace?locate=${encodeURIComponent(target.path)}`,
+                )
+              }
+            >
+              {t("chat.preview.locate")}
+            </Button>
+            <Tooltip title={t("chat.preview.copyLink")}>
+              <Button
+                size="small"
+                type={linkCopied ? "primary" : "default"}
+                icon={<Link2 size={13} />}
+                onClick={copyDirectLink}
+              >
+                {t("chat.preview.copyLink")}
+              </Button>
+            </Tooltip>
+          </div>
+        ) : null
+      }
     >
       {loading && (
         <div style={{ textAlign: "center", padding: 40 }}>
@@ -301,7 +419,8 @@ export default function CoApisPreviewDrawer(props: {
       {!loading && !error && text !== null && (
         // md 走 markdown 渲染（与「我的空间」记忆面板同一渲染器），其余文本
         // 保持等宽原样 —— 日志/代码不该被 markdown 吃掉换行。
-        isMd ? (
+        // §3.3「原文/渲染」切换：切到「原文」时 md 也走等宽源文本。
+        isMd && !rawView ? (
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
             <XMarkdown>{stripFrontmatter(text)}</XMarkdown>
           </div>

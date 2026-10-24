@@ -46,6 +46,7 @@ import {
   EyeOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { api, getApiUrl } from '@/api';
 import { buildAuthHeaders } from '@/api/authHeaders';
 import AgentIdentityPanel from './AgentIdentityPanel';
@@ -121,11 +122,15 @@ const getFileIcon = (item: any) => {
   return <FileOutlined style={{ fontSize: 20 }} />;
 };
 
-const formatSize = (bytes: number) => {
-  if (bytes === 0) return '0 B';
+const formatSize = (bytes: number | string | null | undefined) => {
+    // 台账/资源接口里 size 是 number | string（后端历史数据混过字符串），
+    // 这里统一兜底，避免调用点到处 Number()。
+    const n = Number(bytes);
+    const v = Number.isFinite(n) ? n : 0;
+  if (v === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+  const i = Math.floor(Math.log(v) / Math.log(1024));
+  return `${(v / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 };
 
 const formatTime = (timestamp: number) => {
@@ -152,6 +157,10 @@ const MySpacePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
   const [searchKeyword, setSearchKeyword] = useState('');
+  // 「在我的空间定位」（方案 §3.2 L3）：?locate=<绝对路径> → 搜索命中 + 高亮
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [locateName, setLocateName] = useState<string | null>(null);
+  const locateRef = useRef<HTMLDivElement | null>(null);
   const [fileTypeFilter, setFileTypeFilter] = useState<string>('all');
   // 来源（全部/我上传的/AI 生成的）与分组视图（不分组/按会话/按日期）是**正交的
   // 两个维度**，各自一个控件。以前五个值挤在同一个 Segmented 里：选了"按会话
@@ -283,6 +292,27 @@ const MySpacePage: React.FC = () => {
       // 台账不可用：筛选维度自动失效，列表照常显示
     }
   }, []);
+
+  // 「在我的空间定位」（方案 §3.2 L3）：进入时消费一次 ?locate=<绝对路径>
+  useEffect(() => {
+    const raw = searchParams.get('locate');
+    if (!raw) return;
+    const clean = decodeURIComponent(raw).replace(/^file:\/\//, '');
+    const name = clean.split('/').pop() || clean;
+    setViewMode('list');
+    setLocateName(name);
+    setSearchKeyword(name);
+    searchParams.delete('locate');
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  // 命中后滚动到该行并高亮 3 秒
+  useEffect(() => {
+    if (!locateName || !locateRef.current) return;
+    locateRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => setLocateName(null), 3000);
+    return () => clearTimeout(timer);
+  }, [locateName]);
 
   useEffect(() => {
     loadFiles();
@@ -1024,7 +1054,14 @@ const MySpacePage: React.FC = () => {
               locale={{ emptyText: <Empty description={t('myspace.emptyFolder')} /> }}
               renderItem={(item: any) => (
                 <List.Item
-                  style={item.type === 'group' ? { background: 'rgba(115,109,255,0.06)', padding: '6px 12px' } : undefined}
+                  ref={locateName && item.name === locateName ? locateRef : undefined}
+                  style={
+                    item.type === 'group'
+                      ? { background: 'rgba(115,109,255,0.06)', padding: '6px 12px' }
+                      : locateName && item.name === locateName
+                        ? { background: 'rgba(22,119,255,0.16)', borderRadius: 6 }
+                        : undefined
+                  }
                   actions={item.type === 'group' ? [] : [
                     item.type === 'file' && (
                       <Tooltip key="preview" title={t('myspace.preview', '预览')}>

@@ -104,8 +104,15 @@ def install_auth_middleware(app):
 
         # Allow browser page requests (SPA routes) to pass through.
         # The frontend will check auth state after loading and redirect to /login if needed.
+        #
+        # SECURITY: 必须排除 /api/*。浏览器点击 <a target="_blank"> 发起顶层导航时，
+        # Accept 恒为 "text/html,application/xhtml+xml,..."。若不排除 /api，
+        # 直链下载/预览（/api/myfiles/download?…&token=…）会先命中这条放行、
+        # 被置为 anonymous，把下面的「?token= 查询串认证」整个废掉
+        # → 新标签页显示 401「需要登录」。数据端点一律按
+        # header → query token → cookie 判定。
         accept = request.headers.get("accept", "")
-        if "text/html" in accept:
+        if "text/html" in accept and not path.startswith("/api/"):
             request.state.username = "anonymous"
             request.state.role = "user"
             request.state.user_info = {"username": "anonymous", "role": "user"}

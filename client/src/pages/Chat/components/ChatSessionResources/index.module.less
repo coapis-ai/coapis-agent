@@ -1,0 +1,156 @@
+/* 会话资源（批次 D2）：挂在左栏当前会话节点下方，紧凑、不抢会话列表的视觉 */
+.panel {
+  margin: 0 0 6px 14px;
+  padding: 6px 8px 6px 10px;
+  border-left: 2px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 0 8px 8px 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* 会话「资源」Tab（方案 §12.4 L3）：工具条 + 表格 */
+.resourcesTab {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar .count {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-left: auto;
+}
+
+.group + .group {
+  margin-top: 6px;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.02em;
+  padding: 2px 0 4px;
+}
+
+.count {
+  font-weight: 500;
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.38);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  color: rgba(0, 0, 0, 0.75);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    color: #1677ff;
+  }
+}
+
+.acts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.act {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: rgba(0, 0, 0, 0.45);
+
+  &:hover {
+    background: rgba(22, 119, 255, 0.1);
+    color: #1677ff;
+  }
+}
+
+.liveDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #52c41a;
+  display: inline-block;
+  margin-right: 2px;
+}
+
+.more {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.38);
+  padding: 2px 0;
+}
+
+.empty {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.35);
+  padding: 2px 0;
+}
+
+:global(.dark) {
+  .panel {
+    border-left-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .groupHead {
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .count,
+  .more,
+  .empty {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .name {
+    color: rgba(255, 255, 255, 0.8);
+
+    &:hover {
+      color: #69b1ff;
+    }
+  }
+
+  .act {
+    color: rgba(255, 255, 255, 0.5);
+
+    &:hover {
+      background: rgba(105, 177, 255, 0.15);
+      color: #69b1ff;
+    }
+  }
+}

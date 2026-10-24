@@ -138,7 +138,8 @@ def main():
     check("未入台账标 status=unledgered", unledgered and unledgered[0].status == "unledgered")
 
     hits = asyncio.run(fa.search("季度报表", 10))
-    check("file 检索命中台账行", hits and hits[0].meta.ref == "季度报表.md", f"{hits[:1]}")
+    # 台账 ref 统一口径为工作区相对（register("季度报表.md") 落库为 "files/季度报表.md"）。
+    check("file 检索命中台账行", hits and hits[0].meta.ref == "files/季度报表.md", f"{hits[:1]}")
 
     content = asyncio.run(fa.fetch("季度报表.md"))
     check("file fetch 取到正文", "42 万元" in content.text, f"{content.text[:40]}")

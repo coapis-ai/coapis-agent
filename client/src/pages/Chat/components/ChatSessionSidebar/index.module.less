@@ -1,0 +1,80 @@
+/* 固定左栏（批次 D1）：与聊天区同级的常驻列，不是浮层 */
+.sidebar {
+  width: 260px;
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.015);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 4px 14px;
+  flex-shrink: 0;
+}
+
+.headActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+/* L3 会话资源抽屉的常驻入口（D3 下线顶栏按钮后唯一固定入口） */
+.resourcesBtn {
+  color: rgba(0, 0, 0, 0.55);
+
+  &:hover {
+    color: #1677ff;
+  }
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 折叠态：44px 图标条，只留展开入口 */
+.rail {
+  width: 44px;
+  flex: 0 0 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.015);
+}
+
+:global(.dark) {
+  .sidebar,
+  .rail {
+    border-right-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .title {
+    color: rgba(255, 255, 255, 0.65);
+  }
+
+  .resourcesBtn {
+    color: rgba(255, 255, 255, 0.55);
+
+    &:hover {
+      color: #69b1ff;
+    }
+  }
+}

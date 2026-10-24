@@ -138,7 +138,7 @@ def main():
           any(x["owner_id"] == "alice" and x["path"] == "loose.txt"
               for x in rep_full["unledgered_list"]), str(rep_full["unledgered_list"]))
     check("orphan_list 列出孤儿资源",
-          any(x["owner_id"] == "bob" and x["path"] == "report/doc.md"
+          any(x["owner_id"] == "bob" and x["path"] == "files/report/doc.md"
               for x in rep_full["orphan_list"]), str(rep_full["orphan_list"]))
 
     # FS 删除 → fs_present=0，行保留（不自动删行，保留审计）
@@ -146,7 +146,7 @@ def main():
     rep2 = rl.sweep()
     check("FS 缺失置 fs_present=0", rep2["fs_missing"] == 1, f"fs_missing={rep2['fs_missing']}")
     check("fs_missing_list 列出该行",
-          any(x["owner_id"] == "bob" and x["path"] == "report/doc.md"
+          any(x["owner_id"] == "bob" and x["path"] == "files/report/doc.md"
               for x in rep2["fs_missing_list"]), str(rep2["fs_missing_list"]))
     check("FS 缺失不删行", len(rl.list_resources(owner_scope="user", owner_id="bob")) == 1)
     check("FS 缺失后行标记 fs_present=0",
@@ -187,13 +187,13 @@ def main():
     check("按 referrer 解除返回删除数", n == 2, f"n={n}")
     check("k1 refs 清空流转 orphan",
           [r for r in rl.list_resources(owner_scope="user", owner_id="alice")
-           if r["path"] == "chatdel/a.md"][0]["status"] == "orphan")
+           if r["path"] == "files/chatdel/a.md"][0]["status"] == "orphan")
     check("k2 仍有 session ref 不判孤儿",
           [r for r in rl.list_resources(owner_scope="user", owner_id="alice")
-           if r["path"] == "chatdel/b.md"][0]["status"] == "draft")
+           if r["path"] == "files/chatdel/b.md"][0]["status"] == "draft")
     check("按 referrer 解除不误删他人 ref",
           [r for r in rl.list_resources(owner_scope="user", owner_id="alice")
-           if r["path"] == "chatdel/b.md"][0]["ref_count"] == 1)
+           if r["path"] == "files/chatdel/b.md"][0]["ref_count"] == 1)
     check("非法 referrer_kind 被拒",
           rl.detach_refs_by_referrer("bogus", "chatX") == 0)
     check("空 referrer_id 被拒",
@@ -238,7 +238,7 @@ def main():
 
     # 接线：record 应同步登记资源并挂上 chat/session/agent refs
     lst_a = rl.list_resources(owner_scope="user", owner_id="alice")
-    newrow = [r for r in lst_a if r["path"] == "report/new.md"]
+    newrow = [r for r in lst_a if r["path"] == "files/report/new.md"]
     check("record 接线登记资源", len(newrow) == 1, f"got {len(newrow)}")
     if newrow:
         check("record 接线挂 3 refs (chat/session/agent)",
@@ -248,7 +248,7 @@ def main():
     fl.archive_file("alice", "report/new.md")
     check("archive_file 接线流转 archived",
           [r for r in rl.list_resources(owner_scope="user", owner_id="alice")
-           if r["path"] == "report/new.md"][0]["status"] == "archived")
+           if r["path"] == "files/report/new.md"][0]["status"] == "archived")
 
     # attach_chat 接线：chat_id=NULL 的行被标记后应挂 chat ref
     f3 = ws / "bob" / "files" / "report" / "late.md"
@@ -258,7 +258,7 @@ def main():
                        source="upload")
     check("attach_chat 仍返回行数", n == 1, f"n={n}")
     bobrow = [r for r in rl.list_resources(owner_scope="user", owner_id="bob")
-             if r["path"] == "report/late.md"]
+             if r["path"] == "files/report/late.md"]
     # record 时挂 session ref，attach_chat 再挂 chat ref → 共 2 个。
     check("attach_chat 接线挂 chat ref（session+chat 共2）",
           len(bobrow) == 1 and bobrow[0]["ref_count"] == 2,
@@ -280,7 +280,7 @@ def main():
     # ── R3 消费面：chat_id 过滤 + 分页前总数（前端尾巴行的正确性依赖它） ──
     only = rl.list_resources(owner_scope="user", owner_id="bob", chat_id="chat-77")
     check("chat_id 过滤只返回被该会话引用过的资源",
-          len(only) == 1 and only[0]["path"] == "report/late.md",
+          len(only) == 1 and only[0]["path"] == "files/report/late.md",
           str([r["path"] for r in only]))
     empty = rl.list_resources(owner_scope="user", owner_id="bob", chat_id="chat-none")
     check("无引用的 chat_id 返回空（不是全量兜底）", empty == [], str(empty))
@@ -324,7 +324,7 @@ def main():
           str(rep_b["unowned_list"]))
     check("补登记只补真用户（alice/loose.txt + carol/legacy.md）",
           rep_b["backfilled"] == 2
-          and any(r["path"] == "legacy.md"
+          and any(r["path"] == "files/legacy.md"
                   for r in rl.list_resources(owner_scope="user", owner_id="carol")),
           f"backfilled={rep_b['backfilled']}")
     check("补登记不给无主目录造行",

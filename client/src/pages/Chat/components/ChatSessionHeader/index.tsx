@@ -23,6 +23,8 @@ interface ChatSessionHeaderProps {
   chatName?: string;
   /** 打开历史会话（左侧按钮） */
   onHistoryClick?: () => void;
+  /** 左栏当前是展开态（批次 D1：按钮要能看出左栏开着/收起） */
+  historyActive?: boolean;
   /** 新建聊天（左侧按钮） */
   onNewChat?: () => void;
   /** 切换场景（最左侧按钮：打开场景选择面板） */
@@ -47,6 +49,7 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
   sceneName,
   chatName,
   onHistoryClick,
+  historyActive,
   onNewChat,
   onSwitchScene,
   isPinned,
@@ -84,7 +87,11 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
           icon={<HistoryOutlined />}
           title={t("chat.header.history")}
           onClick={onHistoryClick}
-          className={styles.headerActionBtn}
+          className={
+            historyActive
+              ? `${styles.headerActionBtn} ${styles.headerActionBtnActive}`
+              : styles.headerActionBtn
+          }
         />
         {/* 新聊天：普通按钮（不默认选中/高亮） */}
         <Button
@@ -105,6 +112,8 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
       </div>
 
       {/* 右侧：嵌入模式控制按钮（钉子 + 关闭） */}
+      {/* 注：会话资源入口不在顶栏硬加按钮（方案 §3.2 的 L3 入口为资源条「全部」
+          与「+」菜单），顶栏保持精简。 */}
       <div className={styles.rightSection}>
         {isEmbeddedMode && (
           <>

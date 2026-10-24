@@ -260,7 +260,7 @@ async def _read_with_markitdown(filepath: str) -> Optional[dict[str, Any]]:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
             content = stdout.decode(errors="replace")
             if content.strip():
                 return {"content": content, "chars": len(content), "format": "markitdown-cli"}

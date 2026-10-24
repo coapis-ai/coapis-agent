@@ -242,6 +242,7 @@ class ResourceLedger:
                             title=title_in or None,
                             status="draft",
                             size_bytes=size,
+                            version=1,
                             source=source or "hook",
                             fs_present=1,
                             first_seen_at=now,
@@ -252,6 +253,21 @@ class ResourceLedger:
                 else:
                     res.last_seen_at = now
                     res.updated_at = now
+                    # 版本推进只在**内容真的换了**时发生：重新 stat 一次文件，
+                    # 大小与台账记录不同才算新版；同一份内容重复引用版本不动。
+                    if kind == "file":
+                        try:
+                            _p = self._resolve(abs_path, owner_id)
+                            _st = _p.stat() if _p is not None else None
+                            if _st is not None:
+                                size = int(_st.st_size)
+                        except Exception:  # pragma: no cover - defensive
+                            size = None
+                    if size and res.size_bytes and size != res.size_bytes:
+                        res.version = int(res.version or 1) + 1
+                        res.size_bytes = size
+                    elif size and res.size_bytes != size:
+                        res.size_bytes = size
                     if title:
                         res.title = title
                     elif not res.title and title_in:
@@ -902,6 +918,7 @@ class ResourceLedger:
         owner_scope: str,
         owner_id: str,
         chat_id: str,
+        include_deleted: bool = False,
     ) -> int:
         """Count of **distinct resources** referenced by one chat.
 
@@ -913,6 +930,7 @@ class ResourceLedger:
                 owner_scope=owner_scope,
                 owner_id=owner_id,
                 chat_id=chat_id,
+                include_deleted=include_deleted,
             )
         )
 
@@ -926,6 +944,7 @@ class ResourceLedger:
         owner_id: str,
         chat_id: str,
         fetch_cap: int = 2000,
+        include_deleted: bool = False,
     ) -> list[dict]:
         """本会话引用的资源，**已按 (kind, 规范路径) 合并成一行**。
 
@@ -950,11 +969,14 @@ class ResourceLedger:
                     .join(ResourceRef, ResourceRef.resource_key == Resource.resource_key)
                     .where(Resource.owner_scope == owner_scope)
                     .where(Resource.owner_id == owner_id)
-                    .where(Resource.deleted_at.is_(None))
                     .where(ResourceRef.referrer_kind == "chat")
                     .where(ResourceRef.referrer_id == chat_id)
                     .limit(fetch_cap)
                 )
+                # 软删行默认不出（与 memories 惯例一致）；会话面板要灰显
+                # 「已删除」，由调用方显式 include_deleted=True 带出。
+                if not include_deleted:
+                    stmt = stmt.where(Resource.deleted_at.is_(None))
                 owner_dir = self._ws / owner_id
                 merged: dict[tuple[str, str], dict] = {}
                 for r, role in s.execute(stmt).all():
@@ -1007,6 +1029,7 @@ class ResourceLedger:
         chat_id: str,
         limit: int = 200,
         offset: int = 0,
+        include_deleted: bool = False,
     ) -> list[dict]:
         """Resources referenced by one chat, **with that chat's ref role**.
 
@@ -1023,6 +1046,7 @@ class ResourceLedger:
             owner_scope=owner_scope,
             owner_id=owner_id,
             chat_id=chat_id,
+            include_deleted=include_deleted,
         )
         if offset:
             rows = rows[offset:]

@@ -26,6 +26,15 @@ export interface ChatHistory {
   status?: ChatStatus; // Conversation status: idle or running
 }
 
+/** 分页会话列表信封（B5 GET /chats/page）。 */
+export interface ChatSpecPage {
+  items: ChatSpec[];
+  total: number; // 过滤后的全量条数
+  offset: number;
+  limit: number;
+  has_more: boolean;
+}
+
 export interface ChatUpdateRequest {
   name?: string;
   pinned?: boolean;

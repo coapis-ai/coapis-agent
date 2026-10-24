@@ -50,8 +50,17 @@ import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
 import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import CoApisKbCitations from "./components/CoApisKbCitations";
-import CoApisChatResources from "./components/CoApisChatResources";
+import CoApisChatResources, {
+  type LiveResource,
+} from "./components/CoApisChatResources";
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
+import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
+import {
+  useChatResourceLedger,
+  ledgerKey,
+} from "./components/useChatResourceLedger";
+import type { ChatResourceItem } from "../../api/modules/chat";
+import ChatSessionSidebar from "./components/ChatSessionSidebar";
 import CoApisPreviewDrawer, {
   type PreviewTarget,
 } from "./components/CoApisPreviewDrawer";
@@ -77,7 +86,6 @@ import type { CascadeNode } from "../../components/CascadeMenu/CascadeMenu";
 import { invalidateCascade } from "../../components/Chat/resource/cascadeAdapters";
 import { useChatWindow } from "../../contexts/ChatWindowContext";
 import type { SceneConfig } from "../Workbench/types";
-import ChatSessionDropdown from "./components/ChatSessionDropdown";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -121,6 +129,9 @@ import {
   appendMediaToUserBubble,
   mySpaceDisplayUrl,
 } from "./utils";
+
+/** 左栏折叠态持久化键（批次 D1：折叠是用户选择，刷新要保住） */
+const SIDEBAR_COLLAPSE_KEY = "coapis_chat_sidebar_collapsed";
 
 const CHAT_ATTACHMENT_MAX_MB = 10;
 
@@ -766,39 +777,20 @@ export default function ChatPage() {
   // 所以「本会话」只覆盖新产生的文件（D2，接受的现状）。
   const [sessionFiles, setSessionFiles] = useState<SessionFile[]>([]);
   const [scenePickerOpen, setScenePickerOpen] = useState(false);
-  // 顶部「历史」按钮：左侧可隐藏抽屉（会话列表，复用 ChatSessionDropdown）
-  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
-  // 历史浮层高度约束：以输入框（sender）顶部为底界，动态测量，避免盖住输入框
+  // 固定左栏（批次 D1）：会话列表常驻聊天区左侧；折叠态持久化，
+  // 窄屏/嵌入模式默认折叠（批次 D5），不挤占聊天区。
   const mainAreaRef = useRef<HTMLDivElement>(null);
-  const [historyMaxHeight, setHistoryMaxHeight] = useState<number | null>(null);
-  useEffect(() => {
-    if (!historyDrawerOpen) return;
-    const compute = () => {
-      const area = mainAreaRef.current;
-      if (!area) return;
-      const ta = area.querySelector("textarea") as HTMLTextAreaElement | null;
-      const areaH = area.getBoundingClientRect().height;
-      if (!ta) {
-        setHistoryMaxHeight(Math.max(160, Math.round(areaH - 148)));
-        return;
-      }
-      // 输入框区域高度 = 容器底边 - textarea 顶边（含 textarea 下方按钮行）
-      const below = area.getBoundingClientRect().bottom - ta.getBoundingClientRect().top;
-      const h = Math.round(areaH - below - 8);
-      setHistoryMaxHeight(Math.max(160, h));
-    };
-    compute();
-    const timer = setTimeout(compute, 120);
-    window.addEventListener("resize", compute);
-    const ro = new ResizeObserver(compute);
-    const ta = mainAreaRef.current?.querySelector("textarea");
-    if (ta) ro.observe(ta);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("resize", compute);
-      ro.disconnect();
-    };
-  }, [historyDrawerOpen]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem(SIDEBAR_COLLAPSE_KEY);
+    if (saved === "1") return true;
+    if (saved === "0") return false;
+    return isMobile || isEmbeddedMode;
+  });
+  const toggleSidebarCollapsed = useCallback((next: boolean) => {
+    setSidebarCollapsed(next);
+    localStorage.setItem(SIDEBAR_COLLAPSE_KEY, next ? "1" : "0");
+  }, []);
+  // 本轮实时增量（答案气泡那份）→ 与左栏「会话资源」的台账清单合并
 
   // ---------------------------------------------------------------------
   // 正文文件链接接管（B4/B5）
@@ -2006,6 +1998,128 @@ export default function ChatPage() {
     [],
   );
 
+  // ---- 会话资源：台账单一数据源 + L3 抽屉（方案 §12.4）----
+  // 必须留在组件顶层：ledger / roundItems 是 hook。此前它们被插进 options 的
+  // 对象字面量内部（response: { const ledger = ... }），既不是合法语法，也让
+  // hook 落进了 useMemo 回调——deps 未变时 React 会跳过回调，两次渲染的 hook
+  // 数量不一致，直接触发 "Rendered fewer hooks than expected"。
+  const ledger = useChatResourceLedger(chatId, resourceRefresh);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const ledgerMetaOf = ledger.metaOf;
+
+  /** 本轮资源（消息 metadata）+ 台账 meta（大小/时间/版本/状态）合并 */
+  /**
+   * L2「定位到消息」：滚到产出这条资源的那一轮并闪一下（方案 §3.2 产出动作）。
+   *
+   * 聊天区由 @agentscope-ai/chat 渲染，它不给消息挂 DOM 锚点，所以锚点自己打：
+   * 资源条根节点带 data-coapis-resource-msg，往上找库的
+   * `*-bubble-content-wrapper-card` 就是那一轮的卡片。
+   */
+  const handleLocateResource = useCallback((messageId: string) => {
+    if (!messageId) return;
+    const anchor = document.querySelector(
+      `[data-coapis-resource-msg=${JSON.stringify(messageId)}]`,
+    ) as HTMLElement | null;
+    const card =
+      (anchor?.closest('[class*="bubble-content-wrapper-card"]') as HTMLElement | null) ??
+      anchor;
+    if (!card) return;
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.classList.add("coapis-locate-flash");
+    window.setTimeout(() => card.classList.remove("coapis-locate-flash"), 1600);
+  }, []);
+
+  const roundItems = useCallback(
+    (raw?: LiveResource[], messageId?: string): ChatResourceItem[] => {
+      if (!raw?.length) return [];
+      const out: ChatResourceItem[] = [];
+      const seen = new Set<string>();
+      for (const r of raw) {
+        // 两套字段词汇都要吃：实时 completed 事件用 {url|source, type, name}，
+        // 台账/持久化用 {path, kind, title}。只认前者会让回放通道的资源整块丢掉。
+        const path = String(r.path || r.url || r.source || "");
+        if (!path) continue;
+        const key = ledgerKey(path);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const meta = ledgerMetaOf(path);
+        out.push({
+          kind: ((r.kind === "url" ? "web" : r.kind) || r.type || "file") as ChatResourceItem["kind"],
+          path,
+          title: r.title || r.name || path.split("/").pop() || path,
+          messageId,
+          role: meta?.role || "producer",
+          ref_count: meta?.ref_count,
+          status: meta?.status,
+          updated_at: meta?.updated_at,
+          last_seen_at: meta?.last_seen_at,
+          size: meta?.size,
+          exists: meta?.exists,
+          version: meta?.version,
+          deleted: meta?.deleted,
+        });
+      }
+      return out;
+    },
+    [ledgerMetaOf],
+  );
+
+  /** 响应气泡末尾插槽（方案 §3.2 L2 / §12.3）：产出卡 + 本轮资源条 */
+  const chatAppendSlots = useMemo(
+    () => [
+      {
+        id: "kb-citations",
+        order: 10,
+        render: ({ data }: { data: any }) => (
+          <CoApisKbCitations
+            data={{
+              citations:
+                data?.citations ?? data?.metadata?.metadata?.kb_citations,
+            }}
+          />
+        ),
+      },
+      {
+        // 本轮产出卡 + 引用资源。双数据源（方案 §12.3）：
+        // 实时 = completed 事件顶层 resources；刷新回放 = assistant 消息
+        // metadata.metadata.resources（后端 _persist_chat_messages 写入）。
+        // 此前只读实时通道 → 刷新后产出卡整块消失。
+        id: "chat-resources",
+        order: 11,
+        render: ({ data }: { data: any }) => (
+          <CoApisChatResources
+            resources={
+              data?.resources ?? data?.metadata?.metadata?.resources
+            }
+            onPreview={(target) =>
+              setPreviewTarget({ path: target.path, title: target.name })
+            }
+            metaOf={ledgerMetaOf}
+            onShowAll={() => setResourcesOpen(true)}
+          />
+        ),
+      },
+      {
+        // 本轮资源条（方案 §3.2 L2）：答案气泡末尾，引用/产出分组，
+        // 每组 8 行 +「展开其余 N 项」，尾部「查看全部」开 L3 抽屉。
+        id: "coapis-chat-resource-bar",
+        order: 14,
+        render: ({ data }: { data: any }) => (
+          <CoApisChatResourceBar
+            items={roundItems(
+              data?.resources ?? data?.metadata?.metadata?.resources,
+              data?.id,
+            )}
+            onPreview={(target) => setPreviewTarget(target)}
+            onShowAll={() => setResourcesOpen(true)}
+            onLocate={handleLocateResource}
+          />
+        ),
+      },
+    ],
+    [roundItems, ledgerMetaOf, handleLocateResource],
+  );
+
   const options = useMemo(() => {
     const i18nConfig = getDefaultConfig(t);
     const commandSuggestions: CommandSuggestion[] = [
@@ -2141,6 +2255,8 @@ export default function ChatPage() {
           label: renderSuggestionLabel(item.command, item.description),
           value: item.value,
         })),
+        // L2 本轮资源条**不在输入框上方**：方案 §3.2 规定它挂在答案气泡
+        // 末尾（chat-resources 槽位 order 14），见下方 response.append。
         // 输入框下方 - 显示引用条（始终占位）
         afterUI: (
           <ChatInputFooter
@@ -2294,9 +2410,9 @@ export default function ChatPage() {
             // 响应事件。SDK 的响应气泡只按消息 type 渲染，不读消息级 cards，
             // 所以引用必须挂在响应对象顶层，由 response.append 插槽消费。
             const _kbCites = (payload as any).citations;
+            const _turnRes = (payload as any).resources;
             // ⭐ 会话资源（B1/B2）：本轮读到的网页 / 写到工作区的文件，同样
             // 挂顶层，由 response.append 的 CoApisChatResources 消费。
-            const _turnRes = (payload as any).resources;
             if (Array.isArray(_turnRes) && _turnRes.length > 0) {
               // 台账是权威底账：本轮结束后刷一次会话资源条，让清单与
               // 气泡里的增量对齐（fire-and-forget，失败不影响消息）。
@@ -2386,27 +2502,7 @@ export default function ChatPage() {
         },
       },
       response: {
-        // 知识库引用来源：挂在响应气泡末尾（Actions 之前），默认折叠
-        append: [
-          {
-            id: "kb-citations",
-            order: 10,
-            render: ({ data }: { data: any }) => (
-              <CoApisKbCitations data={{ citations: data?.citations }} />
-            ),
-          },
-          {
-            // 本轮产出卡 + 引用资源（B1 采集 → completed 事件顶层 resources）
-            id: "chat-resources",
-            order: 11,
-            render: ({ data }: { data: any }) => (
-              <CoApisChatResources
-                resources={data?.resources}
-                onPreview={(target) => setPreviewTarget(target)}
-              />
-            ),
-          },
-        ],
+        append: chatAppendSlots,
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
@@ -2446,6 +2542,7 @@ export default function ChatPage() {
     sessionApi,
     selectedFiles,
     selectedKnowledge,
+    chatAppendSlots,
   ]);
 
   return (
@@ -2466,34 +2563,26 @@ export default function ChatPage() {
           onClose={embeddedOnClose}
           sceneName={activeSceneName}
           chatName={chatName}
-          onHistoryClick={() => setHistoryDrawerOpen((v) => !v)}
+          onHistoryClick={() => toggleSidebarCollapsed(!sidebarCollapsed)}
+          historyActive={!sidebarCollapsed}
           onNewChat={handleNewChat}
           onSwitchScene={() => setScenePickerOpen(true)}
           isPinned={isEmbeddedMode ? getChatGlobals().isPinned : undefined}
           onTogglePin={isEmbeddedMode ? getChatGlobals().onTogglePin : undefined}
         />
         
-        {/* 主内容区域：历史浮层锚（relative）+ 工具栏 + 聊天区 */}
-        <div ref={mainAreaRef} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
-        {/* 历史会话：下拉浮层 —— 悬浮在聊天区左上，底界止于输入框上方，不盖输入框 */}
-        {historyDrawerOpen && (
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              top: 0,
-              zIndex: 30,
-              maxHeight: historyMaxHeight != null ? `${historyMaxHeight}px` : "calc(100% - 148px)",
-            }}
-          >
-            <ChatSessionDropdown
-              open={historyDrawerOpen}
-              onClose={() => setHistoryDrawerOpen(false)}
-              showSearch
-              maxHeight={historyMaxHeight ?? 520}
-            />
-          </div>
-        )}
+        {/* 主内容行：固定左栏（会话列表 + 当前会话资源）+ 聊天区，同级并列。
+            左栏是常驻列，不再用绝对定位浮层盖在对话上（批次 D1/D3）。 */}
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+          <ChatSessionSidebar
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleSidebarCollapsed}
+            currentBackendId={chatId}
+            onPreview={(path, title) => setPreviewTarget({ path, title })}
+            onShowAll={() => setResourcesOpen(true)}
+            resourceRefresh={resourceRefresh}
+          />
+          <div ref={mainAreaRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
         <div className={styles.chatContentArea}>
           
           {/* 聊天区域 */}
@@ -2527,28 +2616,20 @@ export default function ChatPage() {
             </ChatErrorBoundary>
           </div>
         </div>
-        {/* 会话资源条（B3）：悬浮聊天区左下、输入框上方；权威源是资源台账，
-            刷新页面/切会话后清单仍在。无资源时组件自身返回 null，不占位。 */}
-        {chatId && (
-          <div
-            style={{
-              position: "absolute",
-              left: 12,
-              bottom: 104,
-              zIndex: 25,
-              maxWidth: "min(520px, 70%)",
-            }}
-          >
-            <CoApisChatResourceBar
-              chatId={chatId}
-              refreshSignal={resourceRefresh}
-              onPreview={(target) => setPreviewTarget(target)}
-            />
-          </div>
-        )}
+        </div>
         </div>
 
         {/* 文件预览抽屉（B4）：产出卡/资源条点「预览」统一进这里 */}
+        <CoApisResourceDrawer
+          open={resourcesOpen}
+          chatId={chatId}
+          refreshSignal={resourceRefresh}
+          onClose={() => setResourcesOpen(false)}
+          onPreview={(target) => {
+            setResourcesOpen(false);
+            setPreviewTarget({ path: target.path, title: target.name });
+          }}
+        />
         <CoApisPreviewDrawer
           target={previewTarget}
           onClose={() => setPreviewTarget(null)}

@@ -1,0 +1,239 @@
+/* 左栏当前会话标题下方的资源下拉（批次 B2 后：caret 在会话标题行，这里只剩两组资源）
+   缩进 32px = 会话行的 24px 时间轴列 + 8px 间距，视觉上挂在标题下面。 */
+
+.panel {
+  margin: 0 8px 6px 0;
+  padding-left: 32px;
+  min-width: 0;
+}
+
+/* 批次 B1：面板自身限高并阻止滚动链 —— 滚到面板底部不会把整条左栏带着滚，
+   用户反馈的"展开后下方列表被顶出视野、要手动滚"就是这么来的。 */
+.body {
+  margin: 2px 0 0 5px;
+  padding: 0 0 0 4px;
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  max-height: 168px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.group + .group {
+  margin-top: 6px;
+}
+
+/* 批次 B2：生成 / 引用 两组各自可折叠，计数直接跟在标签后面 */
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 1px 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.groupHead:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.groupLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+
+.groupCount {
+  padding: 0 4px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.06);
+  font-size: 10px;
+  line-height: 14px;
+  color: rgba(0, 0, 0, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.groupChevron {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.chevron {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  transform: rotate(-45deg);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px;
+  border-radius: 4px;
+  min-width: 0;
+}
+
+.row:hover {
+  background: rgba(22, 119, 255, 0.08);
+}
+
+.typeTag {
+  flex-shrink: 0;
+  padding: 0 4px;
+  height: 15px;
+  line-height: 15px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.75);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name:hover {
+  color: #1677ff;
+  text-decoration: underline;
+}
+
+.dl {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.row:hover .dl {
+  opacity: 1;
+}
+
+.dl:hover {
+  background: rgba(22, 119, 255, 0.12);
+}
+
+.dlIcon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-left: 1px solid rgba(0, 0, 0, 0.5);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.5);
+  transform: rotate(-45deg);
+}
+
+.empty {
+  padding: 4px 2px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+/* L3 入口（「查看全部」）。顶栏资源按钮下线后，左栏下拉是常驻入口，
+   多于面板上限的资源只能从这条进抽屉。 */
+.showAll {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  margin-top: 5px;
+  padding: 2px 2px;
+  border: none;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 0 0 4px 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.showAll:hover {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.08);
+}
+
+:global(.dark) {
+  .showAll {
+    border-top-color: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .showAll:hover {
+    color: #69b1ff;
+    background: rgba(105, 177, 255, 0.12);
+  }
+
+  .body {
+    border-left-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .groupHead:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .groupLabel {
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .groupCount {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .chevron {
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+
+  .typeTag {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .name {
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .name:hover {
+    color: #69b1ff;
+  }
+
+  .row:hover {
+    background: rgba(105, 177, 255, 0.12);
+  }
+
+  .dlIcon {
+    border-color: rgba(255, 255, 255, 0.6);
+  }
+
+  .empty {
+    color: rgba(255, 255, 255, 0.45);
+  }
+}

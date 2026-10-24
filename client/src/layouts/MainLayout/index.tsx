@@ -51,7 +51,6 @@ const DebugPage = lazyImportWithRetry("../../pages/Settings/Debug");
 const BackupsPage = lazyImportWithRetry("../../pages/Settings/Backups");
 const MyScenesPage = lazyImportWithRetry("../../pages/MyScenes/index");
 const MySpacePage = lazyImportWithRetry("../../pages/MySpace/index");
-const HomePage = lazyImportWithRetry("../../pages/Home/index");
 const MessagesPage = lazyImportWithRetry("../../pages/Messages/index");
 const CrossAgentPage = lazyImportWithRetry("../../pages/CrossAgent/index");
 const UserSystemPage = lazyImportWithRetry("../../pages/UserSystem/index");
@@ -224,7 +223,8 @@ export default function MainLayout() {
                 <Routes key={pluginRoutes.length}>
                   {/* 根路径和 home 路径都重定向到聊天页面（首页已隐藏） */}
                   <Route path="/" element={<Navigate to="/chat" replace />} />
-                  <Route path="/home" element={<HomePage />} />
+                  {/* B0：/home 已删除——首页菜单是后端硬塞的，路由留着只会
+                      让「删不掉的菜单」换个名字继续存在。 */}
                   {/* 消息中心 - 通知栏/消息卡落地页（E1） */}
                   <Route path="/messages" element={<MessagesPage />} />
                   <Route path="/chat/*" element={<div />} />

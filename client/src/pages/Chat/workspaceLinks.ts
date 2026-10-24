@@ -15,12 +15,26 @@
 //
 // 纯函数模块：不依赖 React、不依赖 api 层，方便单测与复用。
 
-/** 预览抽屉能渲染的类型（与 CoApisPreviewDrawer 共用同一份判定）。 */
+/**
+ * 预览抽屉能渲染的类型（与 CoApisPreviewDrawer 共用同一份判定）。
+ *
+ * 白名单必须与后端 `file_service.file_preview` 的能力对齐：后端已把
+ * docx/xlsx/pptx 转成 markdown 吐回（type:text），所以前端不认这些后缀时
+ * 会出现「后端能预览、前端只给下载」的口径分裂（2026-10-22 实测：产出卡
+ * 点预览显示「该类型不支持在线预览」）。
+ */
 export const PREVIEWABLE_SUFFIXES = new Set([
   ".md", ".markdown", ".txt", ".text", ".log", ".json", ".jsonl", ".yaml",
   ".yml", ".toml", ".ini", ".cfg", ".conf", ".csv", ".tsv", ".py", ".js",
   ".ts", ".tsx", ".jsx", ".css", ".sql", ".sh", ".bash", ".xml", ".rst",
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".pdf",
+  // Office/ODF：后端转 markdown 后内联渲染（B2）
+  ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".ods", ".odp",
+]);
+
+/** 后端走「转 markdown」路径的办公格式（渲染走 markdown，不走 <pre>）。 */
+export const OFFICE_SUFFIXES = new Set([
+  ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".ods", ".odp",
 ]);
 
 export function pathSuffix(p: string): string {

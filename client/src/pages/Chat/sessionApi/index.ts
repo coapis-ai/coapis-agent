@@ -364,6 +364,71 @@ function buildUserCard(msg: Message): IAgentScopeRuntimeWebUIMessage {
 }
 
 /**
+ * 历史回放时把持久化在 assistant 消息 metadata 里的本轮产出/引用抬到卡片 data 上。
+ *
+ * 实时通道由 completed 事件的顶层 ``resources`` 提供（库会把它合并进 data），
+ * 回放通道没有这个事件：buildResponseCard 原本只搬 output/status/usage，整块
+ * metadata 丢掉 → 前端读 data.resources 与 data.metadata.metadata.resources
+ * 都是 undefined → 刷新页面后产出卡、资源条、引用块全部消失。
+ *
+ * 后端持久化形状：``msg.metadata = { original_id, original_name, metadata:
+ * { resources: [{kind,path,title,role}], kb_citations: [...] } }``。
+ * 同名去重按 path/doc_name，与实时通道口径一致。
+ */
+function collectTurnAnnotations(messages: OutputMessage[]): {
+  resources?: Array<Record<string, unknown>>;
+  citations?: Array<Record<string, unknown>>;
+} {
+  const resources: Array<Record<string, unknown>> = [];
+  const citations: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+
+  for (const msg of messages) {
+    const outer = msg.metadata as Record<string, unknown> | null | undefined;
+    if (!outer || typeof outer !== "object") continue;
+    // 兼容两种落库形状：嵌套 metadata.metadata，以及直接平铺在 metadata 上。
+    const inner = (
+      outer.metadata && typeof outer.metadata === "object"
+        ? outer.metadata
+        : outer
+    ) as Record<string, unknown>;
+
+    const rawRes = inner.resources;
+    if (Array.isArray(rawRes)) {
+      for (const r of rawRes) {
+        if (!r || typeof r !== "object") continue;
+        const row = r as Record<string, unknown>;
+        const key = String(
+          row.path || row.url || row.source || row.title || row.name || "",
+        );
+        if (!key || seen.has("r:" + key)) continue;
+        seen.add("r:" + key);
+        resources.push(row);
+      }
+    }
+
+    const rawCit = inner.kb_citations;
+    if (Array.isArray(rawCit)) {
+      for (const c of rawCit) {
+        if (!c || typeof c !== "object") continue;
+        const row = c as Record<string, unknown>;
+        const key = `${String(row.doc_name || "")}|${String(
+          row.start_page ?? row.page ?? "",
+        )}`;
+        if (seen.has("c:" + key)) continue;
+        seen.add("c:" + key);
+        citations.push(row);
+      }
+    }
+  }
+
+  return {
+    ...(resources.length ? { resources } : {}),
+    ...(citations.length ? { citations } : {}),
+  };
+}
+
+/**
  * Build an assistant response card (AgentScopeRuntimeResponseCard)
  * wrapping a group of consecutive non-user output messages.
  */
@@ -385,6 +450,9 @@ const buildResponseCard = (
   // The library's default card handles thinking/tool/text rendering internally.
   const cards: Array<{ code: string; data: Record<string, unknown> }> = [];
 
+  // 回放通道的产出/引用抬升（见 collectTurnAnnotations 注释）。
+  const annotations = collectTurnAnnotations(normalizedMessages);
+
   if (normalizedMessages.length > 0) {
     cards.push({
       code: CARD_RESPONSE,
@@ -398,6 +466,7 @@ const buildResponseCard = (
         error: null,
         completed_at: now,
         usage: null,
+        ...annotations,
       },
     });
   }
@@ -915,6 +984,50 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   }
 
   /** Track the last session ID that triggered onSessionSelected to avoid duplicate calls. */
+  /**
+   * Paged fetch for the left sidebar (B5).
+   *
+   * Pulls ONE page from ``GET /chats/page`` and does not touch the full-list
+   * cache (``_sessions`` / ``_lastListResult``) — the sidebar accumulates its
+   * own pages, so the first paint costs 20 rows instead of the whole 100.
+   *
+   * No ``.reverse()`` here: the paged endpoint already returns newest-first
+   * (pinned first, then updated_at desc) and slices after sorting.
+   */
+  async getSessionListPage(
+    offset = 0,
+    limit = 20,
+  ): Promise<{
+    sessions: IAgentScopeRuntimeWebUISession[];
+    total: number;
+    hasMore: boolean;
+  }> {
+    const userId = window.currentUserId || this.getAuthUserId();
+    const channel = window.currentChannel;
+    const agentId = useAgentStore.getState().selectedAgent;
+    if (!userId || !agentId) {
+      return { sessions: [], total: 0, hasMore: false };
+    }
+
+    const page = await api.listChatsPage({
+      offset,
+      limit,
+      // 归属由后端按请求者 + agent 工作区判定，前端不传 user_id（越权入口）。
+      channel: channel || undefined,
+      agent_id: agentId,
+    });
+
+    const sessions = (page.items || [])
+      .filter((c) => c.id && c.id !== "undefined" && c.id !== "null")
+      .map(chatSpecToSession);
+
+    return {
+      sessions,
+      total: typeof page.total === "number" ? page.total : sessions.length,
+      hasMore: !!page.has_more,
+    };
+  }
+
   private lastSelectedSessionId: string | null = null;
 
   async getSession(sessionId: string) {

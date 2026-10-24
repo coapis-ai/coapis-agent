@@ -3,6 +3,7 @@ import { getApiUrl, getApiToken } from "../config";
 import { buildAuthHeaders } from "../authHeaders";
 import type {
   ChatSpec,
+  ChatSpecPage,
   ChatHistory,
   ChatDeleteResponse,
   ChatUpdateRequest,
@@ -29,8 +30,15 @@ export interface ChatResourceItem {
   ref_count?: number;
   status?: string;
   updated_at?: number | string;
+  last_seen_at?: number;
   size?: number | null;
   exists?: boolean;
+  /** 交付版本号：首次=1，内容（大小）变了才 +1 */
+  version?: number;
+  /** 台账软删标记（灰显「已删除」） */
+  deleted?: boolean;
+  /** 产出这条资源的那条消息 id（L2「定位到消息」用；引用类没有） */
+  messageId?: string;
 }
 
 export interface ChatResourceList {
@@ -40,16 +48,42 @@ export interface ChatResourceList {
   limit: number;
 }
 
+/** 在途的会话资源请求（批次 B4 并发合并用），落地即摘除 */
+const resourceInflight = new Map<string, Promise<ChatResourceList>>();
+
 export const chatApi = {
-  /** 会话资源清单（权威源=资源台账，刷新后仍可还原）。 */
+  /**
+   * 会话资源清单（权威源=资源台账，刷新后仍可还原）。
+   *
+   * 批次 B4：切一次会话，顶栏(L1)、左栏资源条(L2)、资源抽屉(L3)会同时来要
+   * 同一份清单 —— 各发一次就是 3 个请求。这里做**并发合并**：同一
+   * (chatId, limit, offset) 在途时复用同一个 Promise，请求落地即从表里摘除，
+   * 所以只省掉同时发生的重复，不会把旧数据当新数据用（无陈旧风险）。
+   */
   listChatResources: (
     chatId: string,
     limit = 200,
     offset = 0,
-  ): Promise<ChatResourceList> =>
-    request<ChatResourceList>(
+  ): Promise<ChatResourceList> => {
+    const key = `${chatId}|${limit}|${offset}`;
+    const inflight = resourceInflight.get(key);
+    if (inflight) return inflight;
+    const req = request<ChatResourceList>(
       `/chats/${encodeURIComponent(chatId)}/resources?limit=${limit}&offset=${offset}`,
-    ),
+    );
+    const paged = req.then(
+      (res) => {
+        resourceInflight.delete(key);
+        return res;
+      },
+      (err) => {
+        resourceInflight.delete(key);
+        throw err;
+      },
+    );
+    resourceInflight.set(key, paged);
+    return paged;
+  },
 
   /** Upload a file for chat attachment. Returns URL path for content. */
   uploadFile: async (
@@ -142,6 +176,26 @@ export const chatApi = {
     const headers: Record<string, string> = {};
     if (params?.agent_id) headers["X-Agent-Id"] = params.agent_id;
     return request<ChatSpec[]>(`/chats${query ? `?${query}` : ""}`, { headers });
+  },
+
+  /** 左栏分页列表（B5）：首屏只取一页，滚到底再取下一页。
+   *  total 是「过滤后的全量条数」，不是本页条数。 */
+  listChatsPage: (params: {
+    offset?: number;
+    limit?: number;
+    channel?: string;
+    agent_id?: string;
+  }) => {
+    const searchParams = new URLSearchParams();
+    searchParams.append("offset", String(params.offset ?? 0));
+    searchParams.append("limit", String(params.limit ?? 20));
+    if (params.channel) searchParams.append("channel", params.channel);
+    if (params.agent_id) searchParams.append("agent_id", params.agent_id);
+    const headers: Record<string, string> = {};
+    if (params.agent_id) headers["X-Agent-Id"] = params.agent_id;
+    return request<ChatSpecPage>(`/chats/page?${searchParams.toString()}`, {
+      headers,
+    });
   },
 
   createChat: (chat: Partial<ChatSpec>) =>

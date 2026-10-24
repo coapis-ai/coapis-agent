@@ -12,6 +12,16 @@
   border: 1px solid var(--colorBorder, #f0f0f0);
 }
 
+/* 左栏形态（批次 D1）：常驻面板，不是浮层 —— 去阴影/圆角，铺满左栏容器 */
+.sidebarContainer {
+  width: 100%;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
 /* Header bar */
 .header {
   display: flex;
@@ -82,6 +92,8 @@
   padding: 0 8px;
   height: 100%;
   overflow-y: auto;
+  /* 批次 B1：展开会话资源后面板要滚进视野，没有 smooth 就是硬跳 */
+  scroll-behavior: smooth;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -180,5 +192,64 @@
     &::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.22);
     }
+  }
+}
+
+/* ---- 批次 B2：展开会话资源的 caret 挂在会话标题行末尾 ---- */
+.expandCaret {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+
+  &:hover {
+    color: rgba(0, 0, 0, 0.78);
+    background: rgba(0, 0, 0, 0.06);
+  }
+}
+
+.caret,
+.caretOpen {
+  font-size: 10px;
+  transition: transform 0.18s ease;
+}
+
+.caretOpen {
+  transform: rotate(90deg);
+}
+
+/* ---- 批次 B5：分页页脚（"共 N 条" / "加载中…" / "已全部加载"） ---- */
+.pageFooter {
+  flex-shrink: 0;
+  padding: 8px 12px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.4);
+  background: transparent;
+  user-select: none;
+}
+
+:global(.dark) {
+  .expandCaret {
+    color: rgba(255, 255, 255, 0.45);
+
+    &:hover {
+      color: rgba(255, 255, 255, 0.85);
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  .pageFooter {
+    color: rgba(255, 255, 255, 0.45);
   }
 }

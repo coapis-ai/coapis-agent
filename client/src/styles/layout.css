@@ -1095,3 +1095,35 @@ html.dark-mode .ant-typography-secondary {
 html.dark-mode .debug-log-path strong {
   color: rgba(255, 255, 255, 0.85) !important;
 }
+
+/* L2「定位到消息」：滚到那一轮后闪一下，让眼睛跟得上（方案 §3.2） */
+.coapis-locate-flash {
+  animation: coapis-locate-flash 1.6s ease-out 1;
+  border-radius: 12px;
+}
+
+@keyframes coapis-locate-flash {
+  0% {
+    background: rgba(22, 119, 255, 0.18);
+    box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.35);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 rgba(22, 119, 255, 0);
+  }
+}
+
+html.dark-mode .coapis-locate-flash {
+  animation-name: coapis-locate-flash-dark;
+}
+
+@keyframes coapis-locate-flash-dark {
+  0% {
+    background: rgba(105, 177, 255, 0.22);
+    box-shadow: 0 0 0 3px rgba(105, 177, 255, 0.4);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 rgba(105, 177, 255, 0);
+  }
+}

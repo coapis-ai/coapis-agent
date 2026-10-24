@@ -327,6 +327,61 @@ def _resolve_turn_identity(request) -> tuple:
     return str(cid or ""), str(uname or "")
 
 
+def _annotate_turn_resources(
+    msgs: list,
+    resources: list,
+    citations: list,
+) -> int:
+    """把本轮产出/引用资源与知识库来源写进最后一条 assistant 消息的 metadata。
+
+    方案 §12.2/§12.3（验收项 5「刷新后还在」）。此前这些信息只挂在 SSE
+    ``completed`` 事件上，assistant 消息里没有 ``resources`` 字段 → 刷新页面
+    后产出卡、引用资源、来源卡片整块消失。写入后经
+    ``agentscope_msg_to_message`` 透传（前端读 ``metadata.metadata.resources``）。
+
+    Returns:
+        写入的字段数（0 表示没有可写信息，未改动任何消息）。
+    """
+    if not resources and not citations:
+        return 0
+
+    # 调用方有两种形状：整轮消息列表（Msg 对象）与单条 dict 消息
+    # （_persist_chat_messages 的落库路径）。dict 没有 .role 属性，
+    # 必须按形状取值，否则 last_asst 恒为 None → 静默不写。
+    items = list(msgs) if isinstance(msgs, (list, tuple)) else [msgs]
+
+    def _role(msg: Any) -> Any:
+        if isinstance(msg, dict):
+            return msg.get("role")
+        return getattr(msg, "role", None)
+
+    def _meta(msg: Any) -> dict:
+        if isinstance(msg, dict):
+            return dict(msg.get("metadata") or {})
+        return dict(getattr(msg, "metadata", None) or {})
+
+    def _set_meta(msg: Any, meta: dict) -> None:
+        if isinstance(msg, dict):
+            msg["metadata"] = meta
+        else:
+            msg.metadata = meta
+
+    last_asst = None
+    for msg in items:
+        if _role(msg) == "assistant":
+            last_asst = msg
+    if last_asst is None:
+        return 0
+
+    meta = _meta(last_asst)
+    if resources:
+        meta["resources"] = resources
+    if citations:
+        meta["kb_citations"] = citations
+    _set_meta(last_asst, meta)
+    return len(resources) + len(citations)
+
+
 class AgentRunner(Runner):
     def __init__(
         self,
@@ -765,6 +820,37 @@ class AgentRunner(Runner):
                     )
                 _msgs_to_add = _kept_msgs
 
+                # ── 刷新回放（方案 §12.2/§12.3，验收项 5）──────────────────
+                # 本轮产出/引用资源与知识库来源此前只挂在 SSE completed 事件上，
+                # assistant 消息里没有 resources 字段 → 刷新页面后产出卡、引用
+                # 资源、来源卡片整块消失。写进最后一条 assistant 消息的 metadata，
+                # get_chat 回放时经 agentscope_msg_to_message 透传给前端。
+                try:
+                    # 必须用 effective_user_id：台账 owner 是工作区属主（如 admin），
+                    # 而请求侧 user_id 常是渠道名（wecom:xxx）或 default。
+                    # 此处曾误写未定义的全局名 username → NameError 被下面的
+                    # except Exception 吞成空列表 → 资源条恒空。
+                    _turn_res = _turn_resources_from_ledger(
+                        chat.id, effective_user_id,
+                    )
+                    _kb_cites = _enrich_citations_ctx.get() or []
+                    _annotated = _annotate_turn_resources(
+                        _msgs_to_add, _turn_res, _kb_cites,
+                    )
+                    if _annotated:
+                        logger.info(
+                            "_persist_chat_messages: annotated assistant msg "
+                            "with resources=%d citations=%d (chat=%s)",
+                            len(_turn_res), len(_kb_cites), chat.id,
+                        )
+                except Exception:  # noqa: BLE001 — 回放增强失败不影响落库
+                    # WARNING 而非 DEBUG：DEBUG 在 INFO 级别的生产/开发日志里
+                    # 不可见，曾让 NameError 静默数月、资源条恒空无人察觉。
+                    logger.warning(
+                        "_persist_chat_messages: turn resource annotation failed",
+                        exc_info=True,
+                    )
+
                 for msg in _msgs_to_add:
                     await isolated_mem.add(msg)
                 logger.info(
@@ -800,6 +886,24 @@ class AgentRunner(Runner):
                     await isolated_mem.add(reasoning_msg)
                 if assistant_text:
                     assistant_msg = Msg(name="assistant", content=[TextBlock(text=assistant_text)], role="assistant")
+                    # 刷新回放：兜底路径同样带上本轮资源/来源（方案 §12.2）
+                    try:
+                        _fb_res = _turn_resources_from_ledger(
+                            chat.id, effective_user_id,
+                        )
+                        _fb_cites = _enrich_citations_ctx.get() or []
+                        _fb_md = {}
+                        if _fb_res:
+                            _fb_md["resources"] = _fb_res
+                        if _fb_cites:
+                            _fb_md["kb_citations"] = _fb_cites
+                        if _fb_md:
+                            assistant_msg.metadata = _fb_md
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "fallback resource annotation failed",
+                            exc_info=True,
+                        )
                     await isolated_mem.add(assistant_msg)
                 elif reasoning_text:
                     summary = self._extract_summary_from_reasoning(reasoning_text)

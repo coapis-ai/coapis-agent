@@ -1,0 +1,138 @@
+/* 会话内资源卡（方案 §3.2 L1 / §12.4）——挂在答案气泡末尾 */
+
+.card {
+  margin: 6px 0 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--coapis-border, #ececec);
+  border-radius: 10px;
+  background: var(--coapis-fill, #fafafa);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.title {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(22, 119, 255, 0.1);
+  color: #1677ff;
+  font-size: 11px;
+}
+
+.show-all {
+  margin-left: auto;
+  color: #1677ff;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.item:hover {
+  background: rgba(22, 119, 255, 0.06);
+}
+
+/* 已删除 / 已失效：灰显 + 删除线，不给可点感 */
+.item-dead,
+.item-dead:hover {
+  background: transparent;
+}
+
+.item-dead .name {
+  text-decoration: line-through;
+  color: rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+
+.kind {
+  flex: 0 0 auto;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.name-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.82);
+}
+
+.name:hover {
+  color: #1677ff;
+}
+
+/* 大小 · 更新时间 · 版本徽标（方案 §12.4 L1） */
+.meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.45);
+  line-height: 1.3;
+}
+
+.version-tag {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.tag {
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 5px;
+  flex: 0 0 auto;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.actions .anticon {
+  cursor: pointer;
+}
+
+.actions .anticon:hover {
+  color: #1677ff;
+}

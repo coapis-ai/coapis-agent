@@ -19,7 +19,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ...foundation.resource_ledger import NOISE_DIR_PARTS
+from ...foundation.resource_ledger import (
+    NOISE_DIR_PARTS,
+    canonical_file_path,
+)
 from .contract import (
     MAX_DISCOVER_ITEMS,
     MAX_FETCH_CHARS,
@@ -171,12 +174,16 @@ class FileAdapter(ResourceAdapter):
                 if not is_doc and not is_text:
                     continue
                 rel = str(f.relative_to(root)).replace("\\", "/")
-                if rel in paths:
+                # 台账统一口径是工作区相对（register 落库为 "files/xxx"），而本扫描根
+                # 就是 files/ 目录，rel 少了 "files/" 前缀。直接拿 rel 比对台账永远
+                # 不命中 → 已入账的文件被当成"未入账"重复上报，ref 也两套口径混用。
+                canon = canonical_file_path(rel, form="files_root")
+                if canon in paths:
                     continue
                 reader = _READER_BY_SUFFIX.get(suffix)
                 meta = ResourceMeta(
                     kind="file",
-                    ref=rel,
+                    ref=canon,
                     title=f.name,
                     summary=(
                         f"size={f.stat().st_size} (未入台账)"

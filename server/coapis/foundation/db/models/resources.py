@@ -83,6 +83,11 @@ class Resource(BaseRow):
     size_bytes: Mapped[int] = mapped_column(
         Integer, default=0, server_default=text("0")
     )
+    # 交付版本号（方案 §12.4 L1 版本徽标）：首次登记=1；再次登记时**大小变了**
+    # （内容真的换了）才 +1；同一份内容被反复引用不算新版。规则只写在 register。
+    version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default=text("1")
+    )
     #: 这一行是怎么来的：``hook``（工具调用时登记）/ ``backfill``（巡检补登记
     #: 的台账上线前存量）/ ``reconcile``。写入后不再改写——来源是历史事实。
     source: Mapped[str] = mapped_column(
