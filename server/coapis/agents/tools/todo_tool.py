@@ -35,6 +35,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 logger = logging.getLogger(__name__)
 
 # ── Path helpers ──────────────────────────────────────────────────────
@@ -49,7 +51,7 @@ def _todo_path() -> Path:
     if ws:
         return Path(ws) / _TODO_FILENAME
     # Fallback: current working directory
-    return Path.cwd() / _TODO_FILENAME
+    return workspace_dir("todo_tool") / _TODO_FILENAME
 
 
 def _load_todos() -> list[dict[str, Any]]:

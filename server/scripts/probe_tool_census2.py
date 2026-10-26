@@ -3,11 +3,12 @@
 """工具调用普查（只读）：自适应 schema 落地后的真实使用分布。"""
 import json
 import re
-import sqlite3
 from collections import Counter
 
+from _probe_db import connect_ro
+
 DB = "/apps/ai/coapis-dev/system/coapis.db"
-con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True)
+con = connect_ro(DB)
 tabs = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
 print("表:", tabs[:14])
 

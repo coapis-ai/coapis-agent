@@ -30,6 +30,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 logger = logging.getLogger(__name__)
 
 # Max file size to scan (5MB)
@@ -47,7 +49,7 @@ def _get_workspace() -> Path:
             return Path(ws)
     except Exception:
         pass
-    return Path.cwd()
+    return workspace_dir("session_search")
 
 
 def _search_jsonl_files(query: str, limit: int) -> list[dict]:

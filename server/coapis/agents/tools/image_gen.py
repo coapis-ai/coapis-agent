@@ -29,6 +29,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import files_dir, workspace_dir
+
 logger = logging.getLogger(__name__)
 
 # Supported image sizes
@@ -49,9 +51,9 @@ def _get_output_dir() -> Path:
         if ws:
             out = Path(ws) / "files"
         else:
-            out = Path.cwd() / "files"
+            out = files_dir("image_gen")
     except Exception:
-        out = Path.cwd() / "files"
+        out = files_dir("image_gen")
     out.mkdir(parents=True, exist_ok=True)
     return out
 

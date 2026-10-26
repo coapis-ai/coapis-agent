@@ -31,6 +31,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +45,7 @@ def _notes_path() -> Path:
             return Path(ws) / ".notes.json"
     except Exception:
         pass
-    return Path.cwd() / ".notes.json"
+    return workspace_dir("notes") / ".notes.json"
 
 
 def _load_notes() -> list[dict[str, Any]]:

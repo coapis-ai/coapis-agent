@@ -33,6 +33,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 logger = logging.getLogger(__name__)
 
 # Stats file location
@@ -50,7 +52,7 @@ def _stats_path() -> Path:
             return Path(ws) / "files" / _STATS_FILE
     except Exception:
         pass
-    return Path.cwd() / "files" / _STATS_FILE
+    return workspace_dir("tool_stats") / "files" / _STATS_FILE
 
 
 def _load_stats() -> dict[str, Any]:

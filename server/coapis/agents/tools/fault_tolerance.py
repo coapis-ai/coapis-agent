@@ -23,6 +23,8 @@ from datetime import datetime
 from pathlib import Path
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 
 def _get_checkpoint_dir() -> Path:
     try:
@@ -32,7 +34,7 @@ def _get_checkpoint_dir() -> Path:
             return Path(ws) / "files" / "checkpoints"
     except Exception:
         pass
-    return Path.cwd() / "files" / "checkpoints"
+    return workspace_dir("fault_tolerance") / "files" / "checkpoints"
 
 
 # ── Checkpoint ──

@@ -6,8 +6,9 @@ import glob
 import json
 import os
 import re
-import sqlite3
 from collections import Counter
+
+from _probe_db import connect_ro
 
 SRC = "coapis/agents/tools/browser_control.py"
 t = ast.parse(open(SRC, encoding="utf-8").read())
@@ -28,7 +29,7 @@ cands = glob.glob("/apps/ai/coapis-dev/**/history.db", recursive=True) + \
 cands = sorted(set(cands), key=lambda p: -os.path.getsize(p))
 print("   候选库: " + ", ".join("%s(%.1fMB)" % (c, os.path.getsize(c) / 1e6) for c in cands[:4]))
 if cands:
-    con = sqlite3.connect("file:%s?mode=ro" % cands[0], uri=True)
+    con = connect_ro(cands[0])
     names = Counter()
     rows = 0
     for (b,) in con.execute("SELECT content FROM messages WHERE role='tool' ORDER BY seq").fetchall():

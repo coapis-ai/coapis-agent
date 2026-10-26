@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """只读诊断：最近每日 prompt_tokens / 调用次数 → 单次平均（真实 token 口径）。"""
-import sqlite3
+import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _probe_db import connect_ro  # noqa: E402
+
 DB = "/apps/ai/coapis-dev/system/coapis.db"
-c = sqlite3.connect(DB)
+c = connect_ro(DB)
 rows = list(
     c.execute(
         "select date, provider_id, model_name, prompt_tokens, completion_tokens, call_count "

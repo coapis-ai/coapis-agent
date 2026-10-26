@@ -26,6 +26,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30
@@ -39,7 +41,7 @@ def _get_workspace() -> Path:
             return Path(ws)
     except Exception:
         pass
-    return Path.cwd()
+    return workspace_dir("git_ops")
 
 
 async def _run_git(args: list[str], cwd: str, timeout: int = _TIMEOUT) -> dict[str, Any]:

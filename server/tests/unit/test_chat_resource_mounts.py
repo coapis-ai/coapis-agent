@@ -66,11 +66,17 @@ def test_resource_bar_mounted_above_input():
     assert "onShowAll={() => setResourcesOpen(true)}" in src, "资源条未接「查看全部」→ L3"
 
 
-def test_producer_card_mounted_in_response():
-    """L1 本轮产出卡必须挂在回答区。"""
+def test_producer_card_merged_into_resource_bar():
+    """「本轮产出」卡已按合并决策下线，产出由 L2 资源条单点承载。
+
+    用户拍板：「本来产出」与「本轮资源」两张卡内容重复，合并为一张、保留「本轮资源」。
+    这条断言是合并的守卫——产出卡组件文件保留（别处可复用），但聊天页不得再挂载它，
+    否则两卡重复的旧问题会复活。
+    """
     src = _read("pages/Chat/index.tsx")
-    assert "CoApisChatResources" in src, "产出卡组件未导入"
-    assert "<CoApisChatResources" in src, "产出卡组件未挂载"
+    assert "<CoApisChatResources" not in src, "产出卡被挂回聊天页，两卡重复的问题复活"
+    assert "<CoApisChatResourceBar" in src, "产出卡下线后必须由 L2 资源条承载产出"
+    assert "onLocate={handleLocateResource}" in src, "资源条必须接住产出卡的「定位到消息」"
 
 
 def test_drawer_mounted():

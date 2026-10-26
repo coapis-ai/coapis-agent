@@ -23,6 +23,8 @@ from pathlib import Path
 from collections import OrderedDict
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 
 def _get_db_path() -> Path:
     try:
@@ -32,7 +34,7 @@ def _get_db_path() -> Path:
             return Path(ws) / "files" / "data_store.db"
     except Exception:
         pass
-    return Path.cwd() / "files" / "data_store.db"
+    return workspace_dir("data_store") / "files" / "data_store.db"
 
 
 # ── DB ops ──

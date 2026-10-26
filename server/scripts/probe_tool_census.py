@@ -5,14 +5,15 @@ import glob
 import json
 import os
 import re
-import sqlite3
 from collections import Counter
+
+from _probe_db import connect_ro
 
 cands = sorted(set(glob.glob("/apps/ai/coapis-dev/**/*.db", recursive=True)),
                key=lambda p: -os.path.getsize(p))
 for c in cands:
     try:
-        con = sqlite3.connect("file:%s?mode=ro" % c, uri=True)
+        con = connect_ro(c)
         tabs = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
     except Exception as e:
         print("%s -> %s" % (c, e))

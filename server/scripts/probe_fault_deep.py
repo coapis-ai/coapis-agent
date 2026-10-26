@@ -3,9 +3,10 @@
 """故障深挖（只读）：异常栈归类 + 压缩不可拟合后果 + 计划/分片工具真实使用率。"""
 import json
 import re
-import sqlite3
 import sys
 from collections import Counter
+
+from _probe_db import connect_ro
 
 LOG = "/apps/ai/coapis-dev/coapis.log"
 DB = "/apps/ai/coapis-dev/working/workspaces/default/history/history.db"
@@ -52,7 +53,7 @@ for i in idx[-6:]:
             print("      ↳ " + s[:190])
 
 print("\n=== 3) 计划/分片类工具真实使用率（全历史）===")
-con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True)
+con = connect_ro(DB)
 names = Counter()
 for (b,) in con.execute("SELECT content FROM messages WHERE role='tool' ORDER BY seq").fetchall():
     try:

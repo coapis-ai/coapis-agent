@@ -29,6 +29,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ._paths import workspace_dir
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ def _get_workspace() -> Path:
             return Path(ws)
     except Exception:
         pass
-    return Path.cwd()
+    return workspace_dir("test_runner")
 
 
 def _detect_runner(project_dir: Path) -> str:

@@ -29,6 +29,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import files_dir, workspace_dir
+
 logger = logging.getLogger(__name__)
 
 _MAX_ENV_ENTRIES = 200
@@ -45,7 +47,7 @@ def _get_workspace() -> Path:
             return Path(ws)
     except Exception:
         pass
-    return Path.cwd()
+    return workspace_dir("env_manager")
 
 
 def _get_files_dir() -> Path:

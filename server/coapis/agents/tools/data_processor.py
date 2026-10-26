@@ -28,6 +28,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from ._paths import files_dir, workspace_dir
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ def _get_workspace() -> Path:
             return Path(ws)
     except Exception:
         pass
-    return Path.cwd()
+    return workspace_dir("data_processor")
 
 
 def _get_files_dir() -> Path:

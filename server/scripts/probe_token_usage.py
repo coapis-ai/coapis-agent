@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """只读诊断：最近真实 LLM 调用的 prompt_tokens（token_usage 表）。"""
-import sqlite3
+import os
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _probe_db import connect_ro  # noqa: E402
+
 DB = sys.argv[1] if len(sys.argv) > 1 else "/apps/ai/coapis-dev/system/coapis.db"
 
-c = sqlite3.connect(DB)
+c = connect_ro(DB)
 tables = [r[0] for r in c.execute("select name from sqlite_master where type='table'")]
 print("token tables:", [t for t in tables if "token" in t])
 

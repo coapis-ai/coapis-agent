@@ -35,6 +35,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 logger = logging.getLogger(__name__)
 
 # ── Storage ───────────────────────────────────────────────────────────
@@ -47,7 +49,7 @@ def _memory_dir() -> Path:
     """Return the absolute path to the memory directory."""
     from ...config.context import get_current_workspace_dir
     ws = get_current_workspace_dir()
-    base = Path(ws) if ws else Path.cwd()
+    base = Path(ws) if ws else workspace_dir("memory_manager")
     return base / _MEMORY_DIR
 
 

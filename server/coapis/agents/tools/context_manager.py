@@ -30,6 +30,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +44,7 @@ def _ctx_path() -> Path:
             return Path(ws) / ".context.json"
     except Exception:
         pass
-    return Path.cwd() / ".context.json"
+    return workspace_dir("context_manager") / ".context.json"
 
 
 def _load_ctx() -> dict[str, Any]:

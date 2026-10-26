@@ -26,6 +26,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 logger = logging.getLogger(__name__)
 
 # Language detection by extension
@@ -130,7 +132,7 @@ def _get_workspace() -> Path:
             return workspace
     except Exception:
         pass
-    return Path.cwd()
+    return workspace_dir("project_analyzer")
 
 
 def _detect_project_types(root: Path) -> list[str]:

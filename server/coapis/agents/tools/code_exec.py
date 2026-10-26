@@ -35,6 +35,8 @@ from typing import Any
 
 from .registry import register_tool
 
+from ._paths import workspace_dir
+
 
 def _set_child_resource_limits() -> None:
     """Set resource limits for child processes (preexec_fn)."""
@@ -83,7 +85,7 @@ def _get_workspace() -> Path:
             return Path(ws)
     except Exception:
         pass
-    return Path.cwd()
+    return workspace_dir("code_exec")
 
 
 async def _run_cmd(
