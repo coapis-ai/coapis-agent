@@ -50,9 +50,8 @@ import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
 import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import CoApisKbCitations from "./components/CoApisKbCitations";
-import CoApisChatResources, {
-  type LiveResource,
-} from "./components/CoApisChatResources";
+// 合并后只剩一张卡（「本轮资源」），产出卡组件下线，这里只保留它的资源类型。
+import type { LiveResource } from "./components/CoApisChatResources";
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
 import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
 import {
@@ -2098,28 +2097,10 @@ export default function ChatPage() {
         ),
       },
       {
-        // 本轮产出卡 + 引用资源。双数据源（方案 §12.3）：
-        // 实时 = completed 事件顶层 resources；刷新回放 = assistant 消息
-        // metadata.metadata.resources（后端 _persist_chat_messages 写入）。
-        // 此前只读实时通道 → 刷新后产出卡整块消失。
-        id: "chat-resources",
-        order: 11,
-        render: ({ data }: { data: any }) => (
-          <CoApisChatResources
-            resources={
-              data?.resources ?? data?.metadata?.metadata?.resources
-            }
-            onPreview={(target) =>
-              openPreview({ path: target.path, title: target.name })
-            }
-            metaOf={ledgerMetaOf}
-            onShowAll={() => setResourcesOpen(true)}
-          />
-        ),
-      },
-      {
         // 本轮资源条（方案 §3.2 L2）：答案气泡末尾，引用/产出分组，
         // 每组 8 行 +「展开其余 N 项」，尾部「查看全部」开 L3 抽屉。
+        // 原 order 11 的「本轮产出」卡（CoApisChatResources）与本条内容重复，
+        // 用户要求合并为一张卡 → 保留本条，产出卡下线。
         id: "coapis-chat-resource-bar",
         order: 14,
         render: ({ data }: { data: any }) => (

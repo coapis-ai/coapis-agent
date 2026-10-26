@@ -84,7 +84,7 @@ const SessionLine = React.memo(function SessionLine({
   const expanded = data.expandedId === session.id;
 
   return (
-    <>
+    <div className={styles.lineWrap}>
       <ChatSessionItem
         sessionId={session.id!}
         name={session.name || "New Chat"}
@@ -154,7 +154,7 @@ const SessionLine = React.memo(function SessionLine({
         }
       />
       {extra}
-    </>
+    </div>
   );
 });
 
@@ -722,9 +722,10 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
           </div>
         ) : (
           <>
-            {/* Background loading — only show when content overflows the container,
-                so it's visible through unrendered gaps during fast scroll */}
-            {sortedSessions.length * ITEM_HEIGHT > listHeight && (
+            {/* Background loading — only while a page is actually being
+                fetched. Gating on `loadingMore` keeps the spinner from
+                sitting in the list permanently whenever content overflows. */}
+            {sortedSessions.length * ITEM_HEIGHT > listHeight && loadingMore && (
               <div className={styles.virtualListBackground}>
                 <Spin size="small" />
               </div>

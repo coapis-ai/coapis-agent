@@ -116,6 +116,15 @@
 }
 
 /* Background loading indicator */
+/* One row of the list: the session item plus the resource panel that belongs
+   to it. Stacking them keeps the panel attached to the item box instead of
+   floating as a detached sibling. */
+.lineWrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .virtualListBackground {
   position: absolute;
   inset: 0;

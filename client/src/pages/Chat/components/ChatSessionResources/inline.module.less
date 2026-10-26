@@ -453,3 +453,40 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ── 坑2 尾巴：chip 不许折行 ──────────────────────────────────────
+   左栏只有 260px，.rowName 里文件名一长就折成两三行，整条 chip 的基线
+   跟着上下跳，看起来像掉到了盒子外面。这里让容器自身不换行、超长省略。 */
+.rowName {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowDl {
+  white-space: nowrap;
+}
+
+/* 暗色：L2 行内 chip 此前在暗色下零定义（.rowName 用 color: inherit 继承到
+   暗底上几乎看不见，.rowDl 是 0.45 的黑），补三条。 */
+:global(.dark) {
+  .rowName {
+    color: rgba(255, 255, 255, 0.78);
+
+    &:hover {
+      color: #69b1ff;
+    }
+  }
+
+  .rowDl {
+    color: rgba(255, 255, 255, 0.5);
+
+    &:hover {
+      color: #ffb066;
+    }
+  }
+
+  .rowTag {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.6);
+  }
+}

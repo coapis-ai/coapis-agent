@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useState } from "react";
 import { Button, Tooltip } from "antd";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import ChatSessionDropdown from "../ChatSessionDropdown";
 import ChatSessionResourcesInline from "../ChatSessionResources/Inline";
+import CoApisResourceDrawer from "../CoApisResourceDrawer";
 import styles from "./index.module.less";
 
 interface Props {
@@ -36,10 +37,12 @@ const ChatSessionSidebar: React.FC<Props> = (props) => {
     onToggleCollapsed,
     currentBackendId,
     onPreview,
-    onShowAll,
     resourceRefresh = 0,
   } = props;
   const { t } = useTranslation();
+  // 「查看全部」的抽屉由本组件自己挂载：按钮渲染在这里，抽屉也在同一棵子树里，
+  // 挂载与状态不再依赖聊天页那条 onShowAll 链路（实测该链路置位后抽屉不出现）。
+  const [allOpen, setAllOpen] = useState(false);
 
   if (collapsed) {
     return (
@@ -84,11 +87,18 @@ const ChatSessionSidebar: React.FC<Props> = (props) => {
               chatId={backendId}
               refreshKey={resourceRefresh}
               onPreview={onPreview}
-              onShowAll={onShowAll}
+              onShowAll={() => setAllOpen(true)}
             />
           )}
         />
       </div>
+      {/* L3 抽屉：本组件挂载，容器固定到 body，主内容区 ref 缺席时也能正常展开 */}
+      <CoApisResourceDrawer
+        open={allOpen}
+        onClose={() => setAllOpen(false)}
+        chatId={currentBackendId ?? undefined}
+        getContainer={() => document.body}
+      />
     </aside>
   );
 };

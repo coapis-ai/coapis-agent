@@ -101,6 +101,19 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
     }
   }, [visible, scene]);
 
+  // 浮窗默认收起左栏：聊天页用同一个 localStorage 键决定左栏初始状态，
+  // 浮窗挂载时把它置为「收起」，卸载时还原，避免影响主聊天页的用户偏好。
+  // 键名与 pages/Chat/index.tsx 的 SIDEBAR_COLLAPSE_KEY 保持一致。
+  useEffect(() => {
+    const KEY = "coapis_chat_sidebar_collapsed";
+    const prev = localStorage.getItem(KEY);
+    localStorage.setItem(KEY, "1");
+    return () => {
+      if (prev === null) localStorage.removeItem(KEY);
+      else localStorage.setItem(KEY, prev);
+    };
+  }, []);
+
   // 重置状态（仅在未固定时）
   useEffect(() => {
     if (!visible) {

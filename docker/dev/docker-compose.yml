@@ -94,6 +94,24 @@ services:
       retries: 3
       start_period: 10s
 
+  # ── 测试一次性服务 ──
+  # 跑全量测试的唯一合规入口：全程走 docker compose，不碰运行中的 server 容器。
+  #   docker compose -f docker-compose.yml run --no-deps test
+  # profiles 保证 `up -d` 不会把它带起来；compose v2 的 `run` 默认跑完即删容器
+  # （无需 --rm），所以不会堆积。仓库根整树只读挂载到 /repo，测试文件里
+  # Path(__file__).parents[2] 之类相对定位才能解析到真实的 /repo/scripts
+  # （从 /app 跑会解析成不存在的 /app/scripts）。
+  test:
+    image: coapis-agent:latest
+    profiles: ["test"]
+    volumes:
+      - ../../:/repo:ro
+    working_dir: /repo
+    environment:
+      - PYTHONPATH=/repo/server
+      - COAPIS_WORKING_DIR=/tmp/coapis-test
+    command: python -m pytest -q -p no:cacheprovider
+
 networks:
   frontend-dev:
     driver: bridge
