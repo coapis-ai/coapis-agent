@@ -179,6 +179,97 @@ export function chatIdQuery(chatId?: string | number): string {
 }
 
 /**
+ * 能在页面内**内联渲染**的类型（预览窗口方案 F2）。
+ *
+ * 与 `isPreviewablePath` 的区别：后者是「后端 preview 端点答不答应」，
+ * 前者是「抽屉里渲染出来用户看不看得懂」。office 系（docx/xlsx/pptx…）
+ * 后端是转 markdown 再吐出来的，表格/排版/图片全丢，用户点开看到的是一坨
+ * 残缺文本 —— 实测这就是「预览窗口布局很不友好」的来源之一。
+ * 因此 office 系不进抽屉，直接进下载下拉（与 word/pdf 归到下载下拉的口径一致）。
+ */
+export function canInlinePreview(p: string): boolean {
+  const kind = getPreviewKind(p);
+  return kind === "image" || kind === "pdf" || kind === "markdown" || kind === "text";
+}
+
+/**
+ * 允许「转格式后下载」的**源**格式（方案 D4：只对 md/txt 显示转格式项）。
+ *
+ * 后端 /myfiles/convert 的转换链是「文档 → markdown → 目标」，office 系本身
+ * 就是这条链的中段，md→docx 与 md→pdf 才是稳定可用的路径；对 xlsx 之类
+ * 转 docx 出来的是表格文本，用户拿到的是个假 Word。
+ */
+const CONVERTIBLE_SOURCE_EXT = new Set([
+  "md",
+  "markdown",
+  "mdx",
+  "txt",
+  "text",
+  "log",
+]);
+
+/** 该文件可转成的目标格式（空数组 = 不显示转格式项）。 */
+export function convertTargetsFor(p: string): string[] {
+  return CONVERTIBLE_SOURCE_EXT.has(extOf(p)) ? ["pdf", "docx"] : [];
+}
+
+/**
+ * 签发一次性预览/下载票据（方案 D6）。
+ *
+ * 直链 `?token=<JWT>` 把 24 小时的全局凭证明文挂在每条文件链接上（浏览器
+ * 历史 / 访问日志 / Referer 全都能捞）。票据形态下 URL 里只有一张 60 秒、
+ * 兑换一次即失效的短票，签发走 header 认证。
+ *
+ * 签发失败（离线 / 后端旧版无此端点）返回 null，调用方退回旧的 `?token=` 直链，
+ * 保证功能不因后端版本而中断。
+ */
+export async function requestPreviewTicket(
+  relPath: string,
+  mode: "preview" | "download" = "preview",
+): Promise<string | null> {
+  const p = String(relPath || "").trim();
+  if (!p) return null;
+  const { category, path } = toMyfilesParams(p);
+  try {
+    const res = await fetch("/api/myfiles/preview-ticket", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ path, category, mode }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const url = String(data?.url || "").trim();
+    return url || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 票据 URL 转成可分享的绝对地址（复制直链 / 内联 src 用）。 */
+export function absoluteUrl(url: string): string {
+  try {
+    return new URL(url, window.location.origin).href;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * 内联渲染（`<img src>` / `<iframe src>`）用的资源地址。
+ *
+ * 图片与 PDF 是浏览器直接发起的请求，带不了 Authorization 头，只能走 URL 里的
+ * 凭证 —— 优先用 60 秒即焚的一次性票据，签发失败才退回带 `?token=` 的旧直链。
+ */
+export async function previewSrcUrl(
+  relPath: string,
+  category?: string,
+): Promise<string> {
+  void category; // myfilesUrl 内部按路径自行推导分类，此参数仅保留签名兼容
+  const ticket = await requestPreviewTicket(relPath, "preview");
+  return ticket ? absoluteUrl(ticket) : myfilesUrl(relPath, "preview");
+}
+
+/**
  * 打开预览：新标签走 /myfiles/preview。
  * 白名单外的类型直接给下载，避免点开一个空白页。
  *
@@ -191,7 +282,39 @@ export function previewFile(displayPath: string, title?: string): void {
     void downloadFile(p, title || basename(p));
     return;
   }
-  window.open(myfilesUrl(p, "preview"), "_blank", "noopener,noreferrer");
+  void openPreviewWindow(p);
+}
+
+/**
+ * 新窗口预览（抽屉「⋯ → 新窗口预览」与 previewFile 共用）。
+ *
+ * 优先用一次性票据；签发不成再退回带 `?token=` 的旧直链。
+ */
+export async function openPreviewWindow(relPath: string): Promise<void> {
+  const p = String(relPath || "").trim();
+  if (!p) return;
+  const ticket = await requestPreviewTicket(p, "preview");
+  const url = ticket ? absoluteUrl(ticket) : myfilesUrl(p, "preview");
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/**
+ * 复制「一次性直链」到剪贴板（抽屉「⋯ → 复制直链」）。
+ *
+ * 复制的是 60 秒即焚的票据链接，不是 24 小时的 JWT 直链 —— 贴到聊天窗口、
+ * 邮件、日志里都不会留下一条长期可用的文件入口。
+ */
+export async function copyDirectLink(relPath: string): Promise<boolean> {
+  const p = String(relPath || "").trim();
+  if (!p) return false;
+  const ticket = await requestPreviewTicket(p, "preview");
+  const url = absoluteUrl(ticket ?? myfilesUrl(p, "preview"));
+  try {
+    await navigator.clipboard.writeText(url);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -206,6 +329,44 @@ export function previewFile(displayPath: string, title?: string): void {
  *
  * 转换失败退回原文件下载，不静默吞掉。
  */
+/**
+ * D6 口径：取 60s 一次性票据并把字节取回来（带 Authorization 头，票据本身无需鉴权）。
+ * 浏览器地址栏 / 历史 / 服务器日志里都不会出现 JWT。取不到票据时退回带 token 直链。
+ */
+async function fetchBytesViaTicket(
+  relPath: string,
+  fallbackUrl: string,
+  mode: "preview" | "download" = "download",
+): Promise<Response | null> {
+  const ticket = await requestPreviewTicket(relPath, mode);
+  if (ticket) {
+    try {
+      const res = await fetch(absoluteUrl(ticket));
+      if (res.ok) return res;
+    } catch {
+      /* 落到直链兜底：下载功能优先 */
+    }
+  }
+  try {
+    const res = await fetch(fallbackUrl, { headers: authHeaders() });
+    return res.ok ? res : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveBlob(blob: Blob, filename: string): Promise<void> {
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objUrl;
+  a.download = filename || "download";
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+}
+
 export async function downloadFile(
   rawPath: string,
   filename?: string,
@@ -227,6 +388,11 @@ export async function downloadFile(
     (sourceExt === "markdown" && target === "md");
 
   if (sameFormat) {
+    const res = await fetchBytesViaTicket(p, myfilesUrl(p, "download"), "download");
+    if (res) {
+      await saveBlob(await res.blob(), name);
+      return;
+    }
     await saveFile(myfilesUrl(p, "download"), name);
     return;
   }
@@ -252,6 +418,11 @@ export async function downloadFile(
     const data = await res.json();
     const out = String(data?.path || "");
     if (!out) return;
+    const got = await fetchBytesViaTicket(out, myfilesUrl(out, "download"), "download");
+    if (got) {
+      await saveBlob(await got.blob(), `${name}.${target}`);
+      return;
+    }
     await saveFile(myfilesUrl(out, "download"), `${name}.${target}`);
   } catch {
     await saveFile(myfilesUrl(p, "download"), name);

@@ -1,6 +1,7 @@
 import React from "react";
 import { Drawer } from "antd";
 import { useTranslation } from "react-i18next";
+import styles from "./CoApisResourceDrawer.module.less";
 import ChatSessionResources from "./ChatSessionResources";
 import type { ResourcePreviewRequest } from "./CoApisChatResourceBar";
 
@@ -10,6 +11,11 @@ interface Props {
   onClose: () => void;
   refreshSignal?: number;
   onPreview?: (req: ResourcePreviewRequest) => void;
+  /**
+   * 锚定容器（方案 §F1）：传主内容区节点时，抽屉铺满**主内容区**而不是
+   * 整个浏览器窗口 —— 与预览抽屉同一口径，侧栏与顶栏保持可见可用。
+   */
+  getContainer?: () => HTMLElement;
 }
 
 /**
@@ -26,6 +32,7 @@ const CoApisResourceDrawer: React.FC<Props> = ({
   onClose,
   refreshSignal = 0,
   onPreview,
+  getContainer,
 }) => {
   const { t } = useTranslation();
   return (
@@ -37,6 +44,8 @@ const CoApisResourceDrawer: React.FC<Props> = ({
       onClose={onClose}
       destroyOnClose
       styles={{ body: { padding: "12px 16px" } }}
+      getContainer={getContainer ? getContainer : undefined}
+      rootClassName={getContainer ? styles["coapis-resource-drawer"] : undefined}
     >
       {open && chatId ? (
         <ChatSessionResources

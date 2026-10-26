@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -39,6 +40,9 @@ MAX_TURN_RESOURCES = 20
 
 #: 单个工具调用最多贡献多少条资源（glob 一次列 50 个文件不该刷屏）。
 MAX_PER_CALL = 8
+
+#: 一次搜索最多暂存多少条候选链接（等正文闸门筛，见 finalize_web_references）。
+MAX_SEARCH_CANDIDATES = 15
 
 #: 工具名 → (kind, role)。未列出的工具不采集。
 FILE_PRODUCER_TOOLS = frozenset({"write_file", "edit_file", "send_file_to_user"})
@@ -64,6 +68,12 @@ _GLOB_LINE_RE = re.compile(r"^(?P<path>[^\s:]{3,256}):\d+:")
 #: 输出文本里的 URL。
 _URL_RE = re.compile(r"https?://[^\s'\"`|<>()\[\]]{5,300}")
 
+#: 正文里的 markdown 链接 `[标题](url)` —— 正文闸门的匹配依据。
+_MD_LINK_RE = re.compile(r"\[(?P<title>[^\]\n]{1,160})\]\((?P<url>https?://[^)\s]{5,300})\)")
+
+#: 规范化时剥掉的跟踪参数（正文里粘贴链接时这些参数经常丢，不该因此判为未引用）。
+_TRACKING_PARAMS = re.compile(r"[?&](utm_[a-z]+|spm|from|ref|ref_src|gclid|scid)=[^&]*")
+
 _TRAILING_PUNCT = ".,;:!?)]}'\"<>，。；：！？）】」"
 
 
@@ -79,6 +89,8 @@ class TurnResources:
     username: str = ""
     items: list[dict] = field(default_factory=list)
     seen: set[str] = field(default_factory=set)
+    #: 搜索/输出里出现过的链接候选，等正文闸门裁决（见 finalize_web_references）
+    pending_web: list[dict] = field(default_factory=list)
 
     def add(self, item: dict) -> bool:
         key = f"{item.get('kind')}::{item.get('ref')}"
@@ -255,6 +267,9 @@ def _extract_urls(text: str) -> list[tuple[str, str]]:
                 url = str(item.get("url") or "")
                 title = str(item.get("title") or "")
                 if url.startswith(("http://", "https://")):
+                    # 搜索聚合器返回 HTML 实体（&amp;/&#39;/&quot;…），不反转义
+                    # 会原样入库，前端显示成 `R&amp;D` 这种乱码。
+                    title = html.unescape(title).strip() if title else ""
                     out.append((url, title or url))
             if out:
                 return out
@@ -345,18 +360,31 @@ def collect_from_tool_call(
                     break
 
         elif tool_name in WEB_REFERENCE_TOOLS:
-            urls: list[tuple[str, str]] = []
+            # 闸门（D2-A）：只有智能体**显式访问**的页面（web_fetch / browser_use
+            # 传了 url）算"真引用"，立即登记；web_search 返回的十条链接只是候选
+            # —— 实测 15 条里只有 2 条被正文引用，全量入库会让台账变成搜索流水账。
+            # 候选先攒着，回复写完后由 finalize_web_references 按正文裁决。
             v = tool_input.get("url")
             if isinstance(v, str) and v.startswith(("http://", "https://")):
-                urls.append((v, v))
-            for t in texts:
-                urls.extend(_extract_urls(t))
-            seen_url: set[str] = set()
-            for url, title in urls:
-                if url in seen_url:
-                    continue
-                seen_url.add(url)
                 candidates.append(
+                    {
+                        "kind": "web",
+                        "ref": v,
+                        "title": v,
+                        "role": "reference",
+                        "source": tool_name,
+                    }
+                )
+
+            pending: list[tuple[str, str]] = []
+            for t in texts:
+                pending.extend(_extract_urls(t))
+            for url, title in pending:
+                if url == v:
+                    continue
+                if len(turn.pending_web) >= MAX_SEARCH_CANDIDATES:
+                    break
+                turn.pending_web.append(
                     {
                         "kind": "web",
                         "ref": url,
@@ -365,10 +393,6 @@ def collect_from_tool_call(
                         "source": tool_name,
                     }
                 )
-                if len(candidates) >= (
-                    5 if tool_name == "web_search" else MAX_PER_CALL
-                ):
-                    break
         else:
             return added
 
@@ -389,6 +413,95 @@ def collect_from_tool_call(
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("resource collection skipped (%s): %s", tool_name, exc)
     return added
+
+
+#: 正文里 URL 后常紧跟标点（中文正文尤其如此："…/p/1。"），正则不排除就会吞进 URL。
+_URL_TRAILING = ".,;:!?、。，；：！？）)】」》”’\"'`"
+
+
+def _clean_url(u: str) -> str:
+    """剥掉 URL 尾部粘连的中英文标点。"""
+    return (u or "").rstrip(_URL_TRAILING)
+
+
+def _norm_url(u: str) -> str:
+    """规范化 URL 供正文匹配：去 fragment、去跟踪参数、去尾斜杠、小写域名。
+
+    path 大小写敏感所以不动；跟踪参数（utm_*/spm/from/ref…）在正文里粘贴
+    链接时经常被丢掉，不剥会误判成"没引用"。
+    """
+    u = (u or "").strip().split("#", 1)[0]
+    u = _TRACKING_PARAMS.sub("", u)
+    u = re.sub(r"[?&]+$", "", u).rstrip("/")
+    m = re.match(r"(https?)://([^/]+)(.*)$", u)
+    if not m:
+        return u
+    return f"{m.group(1).lower()}://{m.group(2).lower()}{m.group(3)}"
+
+
+def _cited_in_body(key: str, cited: dict[str, str]) -> bool:
+    """正文里是否引用了这个 URL（精确，或一方是另一方在 /?#&= 边界处的截断）。"""
+    if not key:
+        return False
+    if key in cited:
+        return True
+    for c in cited:
+        if not c:
+            continue
+        if key.startswith(c) and len(c) >= 12 and (
+            len(key) == len(c) or key[len(c)] in "/?#&="
+        ):
+            return True
+        if c.startswith(key) and len(key) >= 12 and (
+            len(c) == len(key) or c[len(key)] in "/?#&="
+        ):
+            return True
+    return False
+
+
+def finalize_web_references(body_text: str) -> int:
+    """正文闸门：搜索结果里的链接，只有正文真正引用了才算"引用"。
+
+    回复写完后调用（post_reply 钩子）。候选一律不入台账 —— 命中正文的才登记，
+    台账因此与前端展示口径一致（台账是资源清单的权威源）。标题优先用正文里
+    markdown 链接的锚文本，比搜索聚合器给的标题干净。返回保留条数。
+    """
+    turn = _turn_resources_ctx.get()
+    if turn is None:
+        return 0
+    pending = turn.pending_web
+    turn.pending_web = []
+    if not pending or not body_text:
+        return 0
+
+    cited: dict[str, str] = {}
+    for m in _MD_LINK_RE.finditer(body_text):
+        title = html.unescape(m.group("title")).strip()
+        cited.setdefault(_norm_url(_clean_url(m.group("url"))), title)
+    for m in _URL_RE.finditer(body_text):
+        cited.setdefault(_norm_url(_clean_url(m.group(0))), "")
+    if not cited:
+        return 0
+
+    kept = 0
+    for item in pending:
+        key = _norm_url(item.get("ref", ""))
+        if not _cited_in_body(key, cited):
+            continue
+        title = cited.get(key, "")
+        if title and len(title) >= 4:
+            item["title"] = title
+        if not turn.add(item):
+            continue
+        _ledger_register(item, chat_id=turn.chat_id, username=turn.username)
+        kept += 1
+    if kept:
+        logger.info(
+            "web reference gate: kept %d/%d search links cited in reply",
+            kept,
+            len(pending),
+        )
+    return kept
 
 
 def _ledger_register(item: dict, *, chat_id: str, username: str) -> None:

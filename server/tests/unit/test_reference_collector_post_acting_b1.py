@@ -95,7 +95,7 @@ def test_iter_text_chunks_reads_tool_result_output_field():
 
 
 def test_web_urls_parsed_from_tool_result_block_end_to_end(monkeypatch, tmp_path):
-    """整条链路：ToolResultBlock → 采集 → 网页条目。"""
+    """整条链路：ToolResultBlock → 采集 → 正文闸门 → 网页条目。"""
     rc.begin_turn(chat_id="chat-Z", username="alice")
     monkeypatch.setattr(rc, "_workspace_root", lambda u: tmp_path / u)
     added = rc.collect_from_tool_call(
@@ -107,6 +107,10 @@ def test_web_urls_parsed_from_tool_result_block_end_to_end(monkeypatch, tmp_path
         ),
         username="alice",
     )
-    assert any(i["kind"] == "web" for i in added)
+    # 搜索结果只是候选，采集阶段不进清单
+    assert added == []
+    assert rc.get_turn_resources().pending_web[0]["ref"] == "https://example.com/webb"
+    # 正文引用了它，闸门放行
+    assert rc.finalize_web_references("参见 [韦伯](https://example.com/webb)。") == 1
     turn = rc.take_turn_resources()
     assert any(i["kind"] == "web" for i in turn)

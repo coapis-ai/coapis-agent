@@ -791,9 +791,14 @@ const MySpacePage: React.FC = () => {
   // 渲染
   // ═══════════════════════════════════════════════════════════
 
+  // 预览抽屉的锚点：挂在页面容器内（position:relative），高度=主内容区高度，
+  // 不铺满整个浏览器窗口、不盖住顶栏 —— 与聊天页 getContainer 同一口径。
+  const containerRef = useRef<HTMLDivElement>(null);
+
   return (
     <div 
       className="page-container myspace-container"
+      ref={containerRef}
       onDragOver={(e) => { e.preventDefault(); if (!isReadOnly) setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
       onDrop={isReadOnly ? undefined : handleDrop}
@@ -1480,6 +1485,7 @@ const MySpacePage: React.FC = () => {
       <CoApisPreviewDrawer
         target={previewTarget}
         onClose={() => setPreviewTarget(null)}
+        getContainer={() => containerRef.current ?? document.body}
       />
     </div>
   );

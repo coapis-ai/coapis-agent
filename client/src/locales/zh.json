@@ -2151,13 +2151,21 @@
       "copyFailed": "复制失败，请全选正文后手动复制",
       "locate": "在我的空间定位",
       "copyLink": "复制直链",
+      "copyLinkDone": "直链已复制",
       "convertDocx": "转为 Word",
       "convertPdf": "转为 PDF",
       "failed": "预览失败",
       "retry": "重试",
       "imageFailed": "图片加载失败，可下载查看",
       "pdfFailed": "PDF 无法内联显示，可下载查看",
-      "unsupportedTitle": "该格式暂不支持内联预览"
+      "unsupportedTitle": "该格式暂不支持内联预览",
+      "downloadOriginal": "下载原文",
+      "convertTo": "转为 {{fmt}}",
+      "more": "更多",
+      "maximize": "铺满",
+      "restore": "还原",
+      "copied": "已复制",
+      "resize": "拖拽调整宽度"
     },
     "resources": {
       "generated": "生成",

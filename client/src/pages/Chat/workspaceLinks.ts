@@ -1,3 +1,5 @@
+import { canInlinePreview } from "../../utils/webPreview";
+
 // ---------------------------------------------------------------------------
 // 会话正文里的文件路径 → 可点链接（B5 · 产出直链兜底）
 // ---------------------------------------------------------------------------
@@ -23,18 +25,18 @@
  * 会出现「后端能预览、前端只给下载」的口径分裂（2026-10-22 实测：产出卡
  * 点预览显示「该类型不支持在线预览」）。
  */
+
+// 预览窗口方案 F2：白名单 = **能在页面里看懂**的类型。
+//
+// 此前把 docx/xlsx/pptx/odt 也放进来，抽屉里走的是「后端转 markdown」这条
+// 降级路径 —— 表格、排版、内嵌图片全丢，用户点开看到的是一坨残缺文本，
+// 这就是「布局很不友好」的直接来源。办公格式现在统一走**下载下拉**
+// （原件下载 + 转格式项），不再给一个看着像预览的东西。
 export const PREVIEWABLE_SUFFIXES = new Set([
   ".md", ".markdown", ".txt", ".text", ".log", ".json", ".jsonl", ".yaml",
   ".yml", ".toml", ".ini", ".cfg", ".conf", ".csv", ".tsv", ".py", ".js",
   ".ts", ".tsx", ".jsx", ".css", ".sql", ".sh", ".bash", ".xml", ".rst",
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".pdf",
-  // Office/ODF：后端转 markdown 后内联渲染（B2）
-  ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".ods", ".odp",
-]);
-
-/** 后端走「转 markdown」路径的办公格式（渲染走 markdown，不走 <pre>）。 */
-export const OFFICE_SUFFIXES = new Set([
-  ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".ods", ".odp",
 ]);
 
 export function pathSuffix(p: string): string {
@@ -43,7 +45,9 @@ export function pathSuffix(p: string): string {
 }
 
 export function isPreviewablePath(p: string): boolean {
-  return PREVIEWABLE_SUFFIXES.has(pathSuffix(p));
+  // F2：单一闸门 —— 预览能力只由 webPreview.ts 的 canInlinePreview 决定，
+  // 避免两处后缀表各说各话（实测过：卡片可点、抽屉拒显）。
+  return canInlinePreview(p);
 }
 
 /**

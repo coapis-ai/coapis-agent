@@ -1,0 +1,76 @@
+/* 预览抽屉（L3）样式。
+ *
+ * 前缀说明（重要）：App.tsx 用 ConfigProvider prefixCls="coapis" 覆盖了 antd
+ * 默认前缀，抽屉真实类名是 `.coapis-drawer-*` 而不是 `.ant-drawer-*`。穿透
+ * antd 内部一律走 `:global(.coapis-drawer-*)`，与 layouts/index.module.less 里
+ * `:global(.coapis-modal-content)` 同一写法；写成 `.ant-drawer-*` 不会命中。
+ *
+ * 抽屉已改为挂在聊天主内容区（getContainer），高度=主内容区高度，不铺满浏览器。
+ */
+
+.coapis-preview-drawer {
+  // rootClassName 就挂在抽屉根节点上：双类名（0,2,0）压过 antd 的
+  // `.coapis-drawer { position: fixed; inset: 0 }`（0,1,0），抽屉落在容器内。
+  &:global(.coapis-drawer) {
+    position: absolute;
+  }
+
+  :global(.coapis-drawer-content-wrapper) {
+    max-width: 100%;
+  }
+
+  // 头部：标题 + 更多(⋯) + 关闭，窄屏不挤爆
+  :global(.coapis-drawer-header) {
+    padding: 10px 12px;
+    align-items: flex-start;
+  }
+
+  // 正文：padding 归零，由内部块自己控制
+  :global(.coapis-drawer-body) {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  // Spin 的中间层（nested-loading > container）默认是普通块级元素，不给它
+  // flex:1 的话正文只按内容高度收缩，下方留大片空白。
+  :global(.coapis-drawer-body) > :global(.coapis-spin-nested-loading) {
+    flex: 1;
+    min-height: 0;
+
+    > :global(.coapis-spin-container) {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
+  // 左缘拖拽调宽
+  .coapis-preview-resize-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: rgba(22, 119, 255, 0.18);
+    }
+  }
+
+  // 拖拽中：禁用抽屉的宽度过渡动画，跟手
+  &:global(.coapis-drawer) .coapis-preview-drawer-dragging {
+    transition: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .coapis-preview-resize-handle {
+    display: none;
+  }
+}

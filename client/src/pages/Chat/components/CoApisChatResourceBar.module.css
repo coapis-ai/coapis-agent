@@ -132,6 +132,17 @@
   color: #1677ff;
 }
 
+/* 单个操作图标（"定位到消息"）：挂在 .actions 之外，样式与 .actions .anticon 同口径。
+   缺这个类时 CSS Module 解析成 undefined，图标会裸奔（无手型、无 hover 色）。 */
+.action {
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.action:hover {
+  color: #1677ff;
+}
+
 .more {
   margin-top: 2px;
   color: rgba(0, 0, 0, 0.45);

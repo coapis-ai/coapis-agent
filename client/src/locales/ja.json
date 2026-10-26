@@ -1492,13 +1492,21 @@
       "copyFailed": "コピーに失敗しました。テキストを選択して手動でコピーしてください。",
       "locate": "マイスペースで表示",
       "copyLink": "直リンクをコピー",
+      "copyLinkDone": "直リンクをコピーしました",
       "convertDocx": "Word に変換",
       "convertPdf": "PDF に変換",
       "failed": "プレビューに失敗しました",
       "retry": "再試行",
       "imageFailed": "画像を読み込めません。ダウンロードしてください。",
       "pdfFailed": "PDF をインライン表示できません。ダウンロードしてください。",
-      "unsupportedTitle": "この形式はインラインプレビューに対応していません"
+      "unsupportedTitle": "この形式はインラインプレビューに対応していません",
+      "downloadOriginal": "元ファイルをダウンロード",
+      "convertTo": "{{fmt}} に変換",
+      "more": "その他",
+      "maximize": "最大化",
+      "restore": "復元",
+      "copied": "コピーしました",
+      "resize": "ドラッグで幅を変更"
     },
     "resources": {
       "generated": "生成",
@@ -1556,7 +1564,87 @@
       "statusMissing": "無効"
     },
     "resourceGroupProduced": "生成",
-    "resourceGroupReferenced": "参照"
+    "resourceGroupReferenced": "参照",
+    "capability": {
+      "imageAndVideo": "画像と動画の認識に対応",
+      "imageOnly": "画像認識に対応",
+      "notProbed": "モデル能力未検出",
+      "textOnly": "現在のモデルは画像/動画認識に対応していません",
+      "videoOnly": "動画認識に対応"
+    },
+    "chatHistory": "チャット履歴",
+    "delete": "削除",
+    "header": {
+      "history": "履歴セッション",
+      "switchScene": "シーン切替",
+      "switchSession": "セッション切替"
+    },
+    "newChat": "新規チャット",
+    "newChatTitle": "新規チャット",
+    "pin": "ピン留め",
+    "rename": "名前変更",
+    "unpin": "ピン留め解除",
+    "settings": {
+      "appearance": {
+        "title": "外観設定"
+      },
+      "autoScroll": {
+        "label": "最下部へ自動スクロール"
+      },
+      "close": "確定",
+      "codeTheme": {
+        "dark": "ダーク",
+        "light": "ライト",
+        "title": "コードブロックテーマ"
+      },
+      "detailedModeNote": "詳細モードはすべての情報を表示します。簡潔モードに切り替えると表示オプションをカスタマイズできます。",
+      "displayMode": {
+        "detailed": "詳細モード",
+        "detailedDesc": "Agent の実行過程を完全に表示（ツール呼び出し・中間結果を含む）",
+        "simple": "簡潔モード",
+        "simpleDesc": "会話内容のみ表示し、ツール呼び出し・思考過程などの詳細を非表示",
+        "title": "表示モード"
+      },
+      "fontSize": {
+        "large": "大",
+        "normal": "標準",
+        "small": "小",
+        "title": "フォントサイズ"
+      },
+      "hideFooter": {
+        "label": "フッター情報を非表示",
+        "tooltip": "token 統計・タイムスタンプ・モデル名を非表示"
+      },
+      "hideSystemMessages": {
+        "label": "システムメッセージを非表示",
+        "tooltip": "システムメッセージを非表示"
+      },
+      "hideThinking": {
+        "label": "思考過程を非表示",
+        "tooltip": "思考過程/推論チェーンを非表示"
+      },
+      "hideToolCall": {
+        "label": "ツール呼び出しを非表示",
+        "tooltip": "ツール呼び出し詳細カードを非表示"
+      },
+      "interaction": {
+        "title": "インタラクション設定"
+      },
+      "messageDetails": {
+        "title": "メッセージ詳細"
+      },
+      "reset": "デフォルトに戻す",
+      "showModelName": {
+        "label": "モデル名を表示"
+      },
+      "showTimestamps": {
+        "label": "タイムスタンプを表示"
+      },
+      "showTokenCounts": {
+        "label": "Token 数を表示"
+      },
+      "title": "チャット表示設定"
+    }
   },
   "security": {
     "parent": "設定",

@@ -2073,7 +2073,12 @@
       "collapse": "Collapse sidebar",
       "expand": "Show chat list",
       "showAll": "View all",
-      "showAllTitle": "Open the full resource list"
+      "showAllTitle": "Open the full resource list",
+      "noResources": "No resources in this chat"
+    },
+    "resource": {
+      "download": "Download",
+      "noPreview": "Download only"
     },
     "sessionResources": {
       "title": "Chat resources",
@@ -2086,8 +2091,26 @@
     "chatHistoryTooltip": "Chat history",
     "allChats": "All Chats",
     "createNewChat": "Create New Chat",
+    "chatHistory": "Chat history",
+    "delete": "Delete",
+    "newChatTitle": "New Chat",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "pinSession": "Pin",
+    "unpinSession": "Unpin",
+    "renameTooltip": "Rename",
+    "deleteTooltip": "Delete",
     "statusIdle": "Idle",
     "statusInProgress": "In progress",
+    "statusRunning": "Generating",
+    "statusFailed": "Failed",
+    "searchHistory": "Search chat history...",
+    "loadingMore": "Loading…",
+    "allLoaded": "All chats loaded",
+    "scrollForMore": "Keep scrolling to load more chats",
+    "collapseSessionResources": "Collapse chat resources",
+    "expandSessionResources": "Expand chat resources",
     "disclaimer": "Works for you, grows with you",
     "greeting": "Hello, how can I help you today?",
     "description": "I am a helpful assistant that can help you with your questions.",
@@ -2116,7 +2139,12 @@
       "plan": {
         "description": "Create a structured plan to decompose the task into subtasks"
       },
-      "stop": "Stop the task currently running"
+      "stop": {
+        "description": "Stop the task currently running"
+      },
+      "model": {
+        "description": "Switch AI model"
+      }
     },
     "attachments": {
       "tooltip": "Supports documents, images, videos, audio and more formats, single file up to {{limit}}MB",
@@ -2126,7 +2154,8 @@
       "multimodalDisabled": "Current model does not support file upload",
       "multimodalWarning": "No multimodal capability detected for current model, images or videos may not be processed correctly",
       "imageOnlyAccept": "Current model only supports image files",
-      "imageOnlyWarning": "Current model only supports images, non-image files like videos may not be processed correctly"
+      "imageOnlyWarning": "Current model only supports images, non-image files like videos may not be processed correctly",
+      "fileExists": "File already exists, rename it and try again"
     },
     "capability": {
       "imageAndVideo": "Supports image and video recognition",
@@ -2244,13 +2273,21 @@
       "copyFailed": "Copy failed. Select the text and copy manually.",
       "locate": "Locate in My Space",
       "copyLink": "Copy direct link",
+      "copyLinkDone": "Direct link copied",
       "convertDocx": "To Word",
       "convertPdf": "To PDF",
       "failed": "Preview failed",
       "retry": "Retry",
       "imageFailed": "Image failed to load. You can download it.",
       "pdfFailed": "PDF cannot be shown inline. You can download it.",
-      "unsupportedTitle": "This format cannot be previewed inline"
+      "unsupportedTitle": "This format cannot be previewed inline",
+      "downloadOriginal": "Download original",
+      "convertTo": "Convert to {{fmt}}",
+      "more": "More",
+      "maximize": "Maximize",
+      "restore": "Restore",
+      "copied": "Copied",
+      "resize": "Drag to resize"
     },
     "resources": {
       "generated": "Generated",

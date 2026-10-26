@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Dropdown, Tag, Tooltip } from "antd";
+import type { MenuProps } from "antd";
 import {
   AppstoreOutlined,
   AimOutlined,
@@ -9,13 +10,13 @@ import {
   FileTextOutlined,
   GlobalOutlined,
   RightOutlined,
-  SwapOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { ChatResourceItem } from "../../../api/modules/chat";
 import {
   toLedgerRelPath,
   getPreviewKind,
+  convertTargetsFor,
   downloadFile,
   previewFile,
 } from "../../../utils/webPreview";
@@ -116,22 +117,31 @@ const CoApisChatResourceBar: React.FC<Props> = ({
     previewFile(path, item.title);
   };
 
-  const convertMenu = (item: ChatResourceItem) => ({
-    items: [
+  // F2：下载是动作 —— 原文 + 全部转换目标收进一个下拉，不再单列 ⇄ 图标
+  const downloadMenu = (item: ChatResourceItem) => {
+    const items: NonNullable<MenuProps["items"]> = [
       {
-        key: "docx",
-        label: t("chat.preview.convertDocx", "Word (docx)"),
-        onClick: () =>
-          downloadFile(item.path, `${item.title}.docx`, "docx", item.kind),
+        key: "raw",
+        label: t("chat.preview.downloadOriginal"),
+        onClick: () => downloadFile(item.path, item.title),
       },
-      {
-        key: "pdf",
-        label: t("chat.preview.convertPdf", "PDF"),
-        onClick: () =>
-          downloadFile(item.path, `${item.title}.pdf`, "pdf", item.kind),
-      },
-    ],
-  });
+    ];
+    if (item.kind === "file") {
+      const targets = convertTargetsFor(item.path);
+      if (targets.length) {
+        items.push({ type: "divider" });
+        for (const target of targets) {
+          items.push({
+            key: `conv-${target}`,
+            label: t("chat.preview.convertTo", { fmt: target.toUpperCase() }),
+            onClick: () =>
+              downloadFile(item.path, `${item.title}.${target}`, target, item.kind),
+          });
+        }
+      }
+    }
+    return { items };
+  };
 
   const renderGroup = (
     label: string,
@@ -187,20 +197,14 @@ const CoApisChatResourceBar: React.FC<Props> = ({
                   />
                 </Tooltip>
                 {item.kind === "file" && !dead ? (
-                  <>
+                  <Dropdown
+                    menu={downloadMenu(item)}
+                    trigger={["click"]}
+                  >
                     <Tooltip title={t("chat.resources.download")}>
-                      <DownloadOutlined
-                        onClick={() =>
-                          downloadFile(item.path, item.title, item.kind)
-                        }
-                      />
+                      <DownloadOutlined style={{ cursor: "pointer" }} />
                     </Tooltip>
-                    <Dropdown menu={convertMenu(item)} trigger={["click"]}>
-                      <Tooltip title={t("chat.resources.convert")}>
-                        <SwapOutlined style={{ cursor: "pointer" }} />
-                      </Tooltip>
-                    </Dropdown>
-                  </>
+                  </Dropdown>
                 ) : null}
               </span>
             </div>

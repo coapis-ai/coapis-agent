@@ -64,6 +64,7 @@ import ChatSessionSidebar from "./components/ChatSessionSidebar";
 import CoApisPreviewDrawer, {
   type PreviewTarget,
 } from "./components/CoApisPreviewDrawer";
+import { downloadFile } from "../../utils/webPreview";
 import {
   isPreviewablePath,
   linkifyMessageOutput,
@@ -756,6 +757,23 @@ export default function ChatPage() {
   // 抽屉是页面级单例，气泡里的产出卡与资源条共用它。
   const [resourceRefresh, setResourceRefresh] = useState(0);
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
+
+  /**
+   * 打开预览抽屉的唯一入口（L1 资源条 / L2 行内 chip / 正文链接 / 左栏会话资源共用）。
+   * D3：不可预览格式不再进抽屉（旧行为是给一个只会下载或白屏的「新窗口预览」按钮），
+   * 直接触发下载。
+   */
+  const openPreview = useCallback(
+    (target: PreviewTarget | null) => {
+      if (!target?.path) return;
+      if (!isPreviewablePath(target.path)) {
+        void downloadFile(target.path, target.title);
+        return;
+      }
+      setPreviewTarget(target);
+    },
+    [setPreviewTarget],
+  );
   const [showModelPrompt, setShowModelPrompt] = useState(false);
   const { selectedAgent } = useAgentStore();
   const { toolRenderConfig } = usePlugins();
@@ -818,7 +836,7 @@ export default function ChatPage() {
       e.stopPropagation();
       const name = rel.split("/").pop() || rel;
       if (isPreviewablePath(rel)) {
-        setPreviewTarget({ path: rel, title: name });
+        openPreview({ path: rel, title: name });
       } else {
         const { category, path: myRel } = toMyfilesParams(rel);
         window.open(
@@ -2092,7 +2110,7 @@ export default function ChatPage() {
               data?.resources ?? data?.metadata?.metadata?.resources
             }
             onPreview={(target) =>
-              setPreviewTarget({ path: target.path, title: target.name })
+              openPreview({ path: target.path, title: target.name })
             }
             metaOf={ledgerMetaOf}
             onShowAll={() => setResourcesOpen(true)}
@@ -2110,7 +2128,7 @@ export default function ChatPage() {
               data?.resources ?? data?.metadata?.metadata?.resources,
               data?.id,
             )}
-            onPreview={(target) => setPreviewTarget(target)}
+            onPreview={(target) => openPreview(target)}
             onShowAll={() => setResourcesOpen(true)}
             onLocate={handleLocateResource}
           />
@@ -2578,7 +2596,7 @@ export default function ChatPage() {
             collapsed={sidebarCollapsed}
             onToggleCollapsed={toggleSidebarCollapsed}
             currentBackendId={chatId}
-            onPreview={(path, title) => setPreviewTarget({ path, title })}
+            onPreview={(path, title) => openPreview({ path, title })}
             onShowAll={() => setResourcesOpen(true)}
             resourceRefresh={resourceRefresh}
           />
@@ -2627,12 +2645,16 @@ export default function ChatPage() {
           onClose={() => setResourcesOpen(false)}
           onPreview={(target) => {
             setResourcesOpen(false);
-            setPreviewTarget({ path: target.path, title: target.name });
+            openPreview({ path: target.path, title: target.name });
           }}
+          // F1：会话资源抽屉与预览抽屉同一口径 —— 铺满主内容区，不铺满整窗
+          getContainer={() => mainAreaRef.current ?? document.body}
         />
         <CoApisPreviewDrawer
           target={previewTarget}
           onClose={() => setPreviewTarget(null)}
+          // F1：抽屉锚定聊天主内容区（实测 y=117/h=750），不再铺满整个浏览器窗口
+          getContainer={() => mainAreaRef.current ?? document.body}
         />
 
         {/* Chat display settings modal */}

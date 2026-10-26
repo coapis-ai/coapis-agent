@@ -114,7 +114,8 @@ def test_read_file_registers_reference(env):
     assert added[0]["ref"] == "files/notes.md"
 
 
-def test_web_search_registers_urls_with_titles(env):
+def test_web_search_queues_candidates_not_ledgered(env):
+    """闸门（D2-A）：搜索结果只是候选，采集阶段不入台账、不进清单。"""
     ws, ledger = env
     rc.begin_turn(chat_id="chat-1", username="alice")
     payload = (
@@ -125,14 +126,72 @@ def test_web_search_registers_urls_with_titles(env):
     added = rc.collect_from_tool_call(
         _tool("web_search", search_term="深圳 规划"), _text(payload)
     )
-    assert len(added) == 2
-    assert added[0]["kind"] == "web"
-    assert added[0]["title"] == "深圳市空间规划"
-    assert added[1]["ref"] == "https://fj.ta.gov.cn/zc/2035"
+    assert added == []
+    turn = rc.get_turn_resources()
+    assert len(turn.pending_web) == 2
+    assert turn.pending_web[0]["title"] == "深圳市空间规划"
     rows = ledger.list_resources_for_chat(
         owner_scope="user", owner_id="alice", chat_id="chat-1"
     )
-    assert {r["kind"] for r in rows} == {"web"}
+    assert rows == []
+
+
+def test_finalize_keeps_only_links_cited_in_body(env):
+    """闸门（D2-A）：正文引用了哪条，台账里就只有哪条，标题用正文锚文本。"""
+    ws, ledger = env
+    rc.begin_turn(chat_id="chat-1", username="alice")
+    payload = (
+        '{"query":"深圳 规划","results":['
+        '{"title":"深圳市空间规划","url":"https://www.dghx.gov.cn/gh/index.html"},'
+        '{"title":"深圳2035","url":"https://fj.ta.gov.cn/zc/2035"}]}'
+    )
+    rc.collect_from_tool_call(
+        _tool("web_search", search_term="深圳 规划"), _text(payload)
+    )
+    kept = rc.finalize_web_references(
+        "依据 [深圳市空间规划](https://www.dghx.gov.cn/gh/index.html) 编制。"
+    )
+    assert kept == 1
+    items = rc.take_turn_resources()
+    assert len(items) == 1
+    assert items[0]["ref"] == "https://www.dghx.gov.cn/gh/index.html"
+    assert items[0]["title"] == "深圳市空间规划"
+    rows = ledger.list_resources_for_chat(
+        owner_scope="user", owner_id="alice", chat_id="chat-1"
+    )
+    assert [r["ref"] if "ref" in r else r.get("path") for r in rows] == [
+        "https://www.dghx.gov.cn/gh/index.html"
+    ]
+
+
+def test_finalize_strips_tracking_params_and_entities(env):
+    """正文粘贴链接常丢跟踪参数；标题里的 HTML 实体要反转义。"""
+    ws, ledger = env
+    rc.begin_turn(chat_id="chat-1", username="alice")
+    payload = (
+        '{"query":"R&D","results":['
+        '{"title":"R&amp;D 税收政策","url":"https://t.example.gov.cn/p/1?utm_source=agg"}]}'
+    )
+    rc.collect_from_tool_call(_tool("web_search", search_term="R&D"), _text(payload))
+    assert rc.get_turn_resources().pending_web[0]["title"] == "R&D 税收政策"
+    # 正文里丢了 utm 参数，仍算引用
+    assert rc.finalize_web_references("见 https://t.example.gov.cn/p/1。") == 1
+    items = rc.take_turn_resources()
+    assert items[0]["ref"] == "https://t.example.gov.cn/p/1?utm_source=agg"
+
+
+def test_finalize_without_body_drops_all_candidates(env):
+    ws, ledger = env
+    rc.begin_turn(chat_id="chat-1", username="alice")
+    payload = (
+        '{"query":"x","results":[{"title":"A","url":"https://a.example.com/1"}]}'
+    )
+    rc.collect_from_tool_call(_tool("web_search", search_term="x"), _text(payload))
+    assert rc.finalize_web_references("这段回答没有任何链接。") == 0
+    assert rc.take_turn_resources() == []
+    assert ledger.list_resources_for_chat(
+        owner_scope="user", owner_id="alice", chat_id="chat-1"
+    ) == []
 
 
 def test_web_fetch_registers_input_url(env):

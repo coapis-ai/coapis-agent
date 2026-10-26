@@ -531,6 +531,105 @@ async def archive_file_record(file_id: int, request: Request = None):
     return {"success": True, "file_id": file_id, "status": "archived"}
 
 
+# ═══════════════════════════════════════════════════════════
+# 一次性预览票据（预览窗口方案 D6）
+# ----------------------------------------------------------------
+# 现状：直链形如 /api/myfiles/preview?path=x&token=<JWT>，JWT 24h 有效且明文
+# 躺在 URL 里（浏览器历史 / 访问日志 / Referer 全都能捞）。这里改为「签发即焚」：
+#   POST /api/myfiles/preview-ticket  → {token, url}   （走 header 认证）
+#   GET  /api/myfiles/p/{token}       → 预览            （公开前缀，票据自带身份）
+#   GET  /api/myfiles/d/{token}       → 下载            （同上）
+# 票据绑定 (username, path, category, mode)，60 秒过期，兑换一次即失效。
+# ═══════════════════════════════════════════════════════════
+
+
+class PreviewTicketRequest(BaseModel):
+    path: str
+    category: str = "files"
+    mode: str = "preview"  # preview | download
+
+
+@router.post("/preview-ticket")
+@require_permission("chat:read")
+async def create_preview_ticket(body: PreviewTicketRequest, request: Request = None):
+    """签发一张一次性预览/下载票据。
+
+    签发阶段就按**用户作用域**做一次路径校验：越权、不存在直接 4xx，
+    不给票据——避免票据成为绕过隔离的入口。
+    """
+    from ..services import preview_ticket as ticket_store
+
+    username = get_current_user(request)["username"]
+    mode = body.mode if body.mode in ticket_store.VALID_MODES else ticket_store.MODE_PREVIEW
+
+    service = FileServiceFactory.get_service()
+    # 复用与 download/preview 完全同一套防穿越解析（LocalFileBackend 的私有方法；
+    # 后端未暴露时跳过预检——兑换端点自身按票据 username 走同一套作用域校验）
+    get_user_dir = getattr(service, "_get_user_dir", None)
+    resolve_path = getattr(service, "_resolve_path", None)
+    if callable(get_user_dir) and callable(resolve_path):
+        user_dir = get_user_dir(username, body.category)
+        resolved = resolve_path(user_dir, body.path)  # 越权时抛 403
+        if not resolved.exists() or not resolved.is_file():
+            raise HTTPException(status_code=404, detail="文件不存在")
+
+    token, ttl = ticket_store.issue(username, body.path, body.category, mode)
+    prefix = "p" if mode == ticket_store.MODE_PREVIEW else "d"
+    return {
+        "success": True,
+        "token": token,
+        "url": f"/api/myfiles/{prefix}/{token}",
+        "expires_in": ttl,
+    }
+
+
+async def _redeem_preview_ticket(token: str, mode: str, request: Request):
+    """兑换票据并把身份写回 request.state，返回票据内容。"""
+    from ..services import preview_ticket as ticket_store
+
+    ticket = ticket_store.redeem(token, mode)
+    if ticket is None:
+        # 不区分「不存在/已用过/已过期」，避免给探测留反馈面
+        raise HTTPException(status_code=403, detail="票据无效、已使用或已过期")
+    # 兑换端点在公开前缀里（中间件只会标 anonymous），这里用票据绑定的身份覆盖
+    request.state.username = ticket.username
+    return ticket
+
+
+@router.get("/p/{token}")
+async def preview_by_ticket(token: str, request: Request = None):
+    """用一次性票据预览文件（URL 里不含任何长期凭证）。"""
+    from ..services import preview_ticket as ticket_store
+
+    ticket = await _redeem_preview_ticket(token, ticket_store.MODE_PREVIEW, request)
+    service = FileServiceFactory.get_service()
+    response = await service.preview_file(
+        username=ticket.username,
+        path=ticket.path,
+        category=ticket.category,
+    )
+    if response is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return response
+
+
+@router.get("/d/{token}")
+async def download_by_ticket(token: str, request: Request = None):
+    """用一次性票据下载文件（URL 里不含任何长期凭证）。"""
+    from ..services import preview_ticket as ticket_store
+
+    ticket = await _redeem_preview_ticket(token, ticket_store.MODE_DOWNLOAD, request)
+    service = FileServiceFactory.get_service()
+    response = await service.download_file(
+        username=ticket.username,
+        path=ticket.path,
+        category=ticket.category,
+    )
+    if response is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return response
+
+
 @router.get("/download")
 @require_permission("chat:read")
 async def download_file(path: str, category: str = "files", request: Request = None):

@@ -1104,6 +1104,17 @@ class LightContextManager(BaseContextManager):
         When ``auto_memory_interval`` is set (e.g., 2), this hook counts user
         messages in the memory and triggers auto memory every N queries.
         """
+        # 会话引用闸门（D2-A）：搜索结果里的链接只有被正文真正引用才算引用。
+        # 必须放在最前面 —— 下面 memory_manager 为空会提前 return。
+        try:
+            from .reference_collector import _iter_text_chunks, finalize_web_references
+
+            body = "\n".join(_iter_text_chunks(output))
+            if body:
+                finalize_web_references(body)
+        except Exception:
+            logger.debug("web reference gate skipped", exc_info=True)
+
         try:
             memory_manager = agent.memory_manager
             if memory_manager is None:

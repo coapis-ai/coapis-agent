@@ -845,6 +845,10 @@ PUBLIC_PREFIXES: tuple = (
     "/api/external",  # SSO login endpoint (no auth required, it's for getting token)
     # Plugin asset files (enterprise frontend plugins entry JS)
     "/api/plugins/enterprise/files/",
+    # 一次性预览票据（预览窗口方案 D6）：URL 里只有 60 秒即焚的短票据，
+    # 身份由票据本身携带、兑换端点自行校验；旧 ?token=<JWT> 直链不受影响。
+    "/api/myfiles/p/",
+    "/api/myfiles/d/",
     "/favicon.ico",
     "/robots.txt",
 )

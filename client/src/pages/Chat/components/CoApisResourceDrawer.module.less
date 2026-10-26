@@ -1,0 +1,20 @@
+/* 会话资源抽屉（L3）锚定样式。
+ *
+ * 与 CoApisPreviewDrawer.module.less 同一口径：App.tsx 用 ConfigProvider
+ * prefixCls="coapis"，抽屉真实类名是 `.coapis-drawer-*`，穿透一律走
+ * `:global(.coapis-drawer-*)`。
+ *
+ * 抽屉通过 getContainer 挂进聊天主内容区后，antd 自带的
+ * `.coapis-drawer { position: fixed; inset: 0 }` 仍会把它拉成整窗铺满；
+ * 这里用双类名（0,2,0）压回 absolute，抽屉就只铺满主内容区。
+ */
+
+.coapis-resource-drawer {
+  &:global(.coapis-drawer) {
+    position: absolute;
+  }
+
+  :global(.coapis-drawer-content-wrapper) {
+    max-width: 100%;
+  }
+}
