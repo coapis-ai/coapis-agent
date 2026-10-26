@@ -40,6 +40,21 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   missing: { label: "statusMissing", color: "red" },
 };
 
+/**
+ * 只有「出事了」的状态才渲染标签。
+ *
+ * 台账的 `draft` 是产出物的**出厂默认**（用户确认/投递后才升 official），
+ * `orphan` 是「已不被任何会话引用」的常态——dev 实测 346 行台账里
+ * draft 105 + orphan 214 + official 0，给它们打标签等于每一行都挂个
+ * 「未发布」，用户读成「这东西没做好」，纯噪音。
+ * 因此 L2/L3 统一：archived / deleted / missing 才出标签。
+ */
+export const TAGGED_STATUSES: ReadonlySet<string> = new Set([
+  "archived",
+  "deleted",
+  "missing",
+]);
+
 /** 一行资源现在算什么状态：软删 > 磁盘失效 > 台账状态。 */
 export function resourceStatusOf(item: ChatResourceItem): string {
   if (item.deleted || item.status === "deleted") return "deleted";
@@ -178,9 +193,11 @@ const CoApisChatResourceBar: React.FC<Props> = ({
                   ? t("chat.resources.produced")
                   : t("chat.resources.reference")}
               </Tag>
-              <Tag className={styles.tag} color={STATUS_META[st]?.color}>
-                {t(`chat.resources.${STATUS_META[st]?.label ?? "statusDraft"}`)}
-              </Tag>
+              {TAGGED_STATUSES.has(st) ? (
+                <Tag className={styles.tag} color={STATUS_META[st]?.color}>
+                  {t(`chat.resources.${STATUS_META[st]?.label ?? "statusDraft"}`)}
+                </Tag>
+              ) : null}
               {source === "produced" && item.messageId && onLocate ? (
                 <Tooltip title={t("chat.resources.locateMessage")}>
                   <AimOutlined

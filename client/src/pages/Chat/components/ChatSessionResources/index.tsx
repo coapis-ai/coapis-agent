@@ -28,6 +28,7 @@ import {
   downloadFile,
   previewFile,
 } from "../../../../utils/webPreview";
+import { TAGGED_STATUSES } from "../CoApisChatResourceBar";
 import styles from "./index.module.less";
 
 const PAGE_SIZE = 20;
@@ -232,19 +233,21 @@ const ChatSessionResources: React.FC<Props> = ({
                 {t("chat.resources.produced")}
               </Tag>
             ) : null}
-            <Tag
-              color={STATUS_META[st]?.color}
-              style={{ marginLeft: 2 }}
-              title={
-                st === "deleted"
-                  ? t("chat.resources.deletedHint")
-                  : st === "missing"
-                    ? t("chat.resources.missingHint")
-                    : undefined
-              }
-            >
-              {t(`chat.resources.${STATUS_META[st]?.label ?? "statusDraft"}`)}
-            </Tag>
+            {TAGGED_STATUSES.has(st) ? (
+              <Tag
+                color={STATUS_META[st]?.color}
+                style={{ marginLeft: 2 }}
+                title={
+                  st === "deleted"
+                    ? t("chat.resources.deletedHint")
+                    : st === "missing"
+                      ? t("chat.resources.missingHint")
+                      : undefined
+                }
+              >
+                {t(`chat.resources.${STATUS_META[st]?.label ?? "statusDraft"}`)}
+              </Tag>
+            ) : null}
           </span>
         );
       },
