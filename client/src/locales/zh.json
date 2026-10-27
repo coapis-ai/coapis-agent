@@ -2223,7 +2223,8 @@
       "statusMissing": "已失效"
     },
     "resourceGroupProduced": "生成",
-    "resourceGroupReferenced": "引用"
+    "resourceGroupReferenced": "引用",
+    "sessionMissing": "这条会话没有可回放的内容：索引里有记录，但会话文件不存在（迁移遗留的空壳）。直接发消息即可开始新对话。"
   },
   "security": {
     "parent": "设置",

@@ -120,6 +120,11 @@ interface ExtendedSession extends IAgentScopeRuntimeWebUISession {
   hasMore?: boolean;
   /** Total message count in the chat (including archived). */
   totalCount?: number;
+  /**
+   * 批次 A2：后端报告索引在、会话文件不在（空壳会话）。
+   * 聊天区用它把「空白页」换成一句解释。
+   */
+  sessionMissing?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,7 +516,10 @@ const convertMessages = (
 const chatSpecToSession = (chat: ChatSpec): ExtendedSession =>
   ({
     id: chat.id,
-    name: chat.name || DEFAULT_SESSION_NAME,
+    // 批次 A4：列表行优先用后端算好的短标题。此前只显示 name，而 name
+    // 为空时回退「新聊天」—— 实测 92 条索引里 90 条是空壳，整列都是
+    // 「新聊天」，用户无法分辨任何一条会话。
+    name: chat.title || chat.name || DEFAULT_SESSION_NAME,
     sessionId: chat.session_id,
     userId: chat.user_id,
     channel: chat.channel,
@@ -1083,6 +1091,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
             generating,
             hasMore: chatHistory.has_more ?? false,
             totalCount: chatHistory.total_count,
+            sessionMissing: (chatHistory as any).session_missing === true,
           };
           this.updateWindowVariables(session);
           this._upsertSession(session);
@@ -1200,6 +1209,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         generating,
         hasMore: chatHistory.has_more ?? false,
         totalCount: chatHistory.total_count,
+        sessionMissing: (chatHistory as any).session_missing === true,
       };
 
       this.updateWindowVariables(session);

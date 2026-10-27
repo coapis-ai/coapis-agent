@@ -806,3 +806,54 @@
     }
   }
 }
+
+/* ── 会话资源条位置（方案 D4）────────────────────────────────────────────
+   答案气泡是 flex column，实测 DOM 顺序为
+   [header, 工具卡…, markdown, coapis-bubble-footer, 会话资源条]
+   —— 资源条排在「结束标志」之后，问答已结束后才出现，读起来割裂。
+   用 order 把它插回 footer 之前：正文/工具卡保持默认 order 0，
+   资源条 1，footer 2。资源条用显式 data 属性定位（CSS Module 类名带 hash，
+   不可作为选择器依赖）。 */
+:global {
+  [class*="bubble-content-wrapper"] {
+    > [data-coapis-resource-bar] {
+      order: 1;
+
+      /* 批次 C2「资源条对齐」：资源条此前继承气泡内容宽度，实测左缩进
+         210px、右缩进 110px，与消息列左边缘对不齐，像浮在正文里的一块。
+         flex column 里用 stretch + 100% 让它与正文同宽、左边缘齐平。 */
+      align-self: stretch;
+      width: auto;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+
+    > [class*="bubble-footer"] {
+      order: 2;
+    }
+  }
+}
+
+/* ── 批次 A2「空壳兜底」提示条 ──────────────────────────────────────────
+   .chatContentArea 是 display:flex 的行容器，直接插一个块会把聊天区
+   横向挤窄；聊天区外层 mainAreaRef 已带 position:relative，用绝对定位
+   浮在顶部，不占布局、不改滚动结构。 */
+.sessionMissingTip {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(680px, calc(100% - 32px));
+  padding: 8px 14px;
+  border: 1px solid var(--coapis-border, #ececec);
+  border-radius: 10px;
+  background: var(--coapis-fill, #fbfbfb);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(0, 0, 0, 0.65);
+}

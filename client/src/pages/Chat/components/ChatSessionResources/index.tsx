@@ -29,7 +29,18 @@ import {
   previewFile,
 } from "../../../../utils/webPreview";
 import { TAGGED_STATUSES } from "../CoApisChatResourceBar";
+import { displayName, shortDir } from "./helpers";
 import styles from "./index.module.less";
+
+/** 名称单元格里「可被截断」的那一个：省略号在尾部，标签优先占位。 */
+const NAME_CLIP: React.CSSProperties = {
+  minWidth: 0,
+  flex: "0 1 auto",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  display: "inline-block",
+};
 
 const PAGE_SIZE = 20;
 
@@ -143,10 +154,11 @@ const ChatSessionResources: React.FC<Props> = ({
         (kind === "all" || it.kind === kind) &&
         (!kw ||
           (it.title || "").toLowerCase().includes(kw) ||
-          (it.path || "").toLowerCase().includes(kw)),
+          (it.path || "").toLowerCase().includes(kw) ||
+          displayName(it).toLowerCase().includes(kw)),
     );
     out = [...out].sort((a, b) => {
-      if (sort === "name") return (a.title || "").localeCompare(b.title || "");
+      if (sort === "name") return displayName(a).localeCompare(displayName(b));
       const at = (x: ChatResourceItem) =>
         Number(x.updated_at ?? x.last_seen_at ?? 0) || 0;
       const sz = (x: ChatResourceItem) => Number(x.size ?? 0) || 0;
@@ -163,19 +175,21 @@ const ChatSessionResources: React.FC<Props> = ({
       return;
     }
     const path = toLedgerRelPath(item.path);
+    // 名字口径统一走 helpers（含扩展名）：预览标题与下载文件名都该带上扩展名
+    const name = displayName(item) || path;
     if (getPreviewKind(path) === "unsupported") {
-      downloadFile(item.path, item.title, item.kind);
+      downloadFile(item.path, name, item.kind);
       return;
     }
     if (onPreview) {
       onPreview({
         path,
-        name: item.title,
+        name,
         source: item.role === "producer" ? "produced" : "reference",
       });
       return;
     }
-    previewFile(path, item.title);
+    previewFile(path, name);
   };
 
   const doLocate = (item: ChatResourceItem) => {
@@ -195,10 +209,13 @@ const ChatSessionResources: React.FC<Props> = ({
     {
       title: t("chat.resources.name"),
       key: "name",
-      ellipsis: true,
+      // 名称列自己管两行的省略（antd 的 ellipsis 只认单行，套两行会把目录那行裁掉）
       render: (_, item) => {
         const st = statusOf(item);
         const dead = st === "deleted" || st === "missing";
+        // 名字口径统一走 helpers：文件名**含扩展名**优先，title 只兜底
+        const name = displayName(item) || item.path;
+        const dir = shortDir(item); // 只留末尾两段，全路径在 title
         const link =
           item.kind === "web" ? (
             <a
@@ -206,37 +223,46 @@ const ChatSessionResources: React.FC<Props> = ({
               target="_blank"
               rel="noopener noreferrer"
               title={item.path}
+              style={NAME_CLIP}
             >
-              {item.title}
+              {name}
             </a>
           ) : dead ? (
             // 已删除 / 已失效：灰显、不给死链
-            <span style={{ color: "rgba(0,0,0,0.35)" }} title={item.path}>
-              {item.title}
+            <span style={{ ...NAME_CLIP, color: "rgba(0,0,0,0.35)" }} title={item.path}>
+              {name}
             </span>
           ) : (
-            <a onClick={() => doPreview(item)} title={item.path}>
-              {item.title}
+            <a onClick={() => doPreview(item)} title={item.path} style={NAME_CLIP}>
+              {name}
             </a>
           );
         return (
-          <span
-            style={
-              dead
-                ? { textDecoration: "line-through", color: "rgba(0,0,0,0.35)" }
-                : undefined
-            }
-          >
-            {link}{" "}
+          <span style={{ display: "block", minWidth: 0, overflow: "hidden" }}>
+            <span
+              style={{
+                display: "flex",
+                gap: 4,
+                alignItems: "center",
+                minWidth: 0,
+                ...(dead
+                  ? {
+                      textDecoration: "line-through",
+                      color: "rgba(0,0,0,0.35)",
+                    }
+                  : {}),
+              }}
+            >
+            {link}
             {item.role === "producer" || item.role === "export" ? (
-              <Tag color="green" style={{ marginLeft: 4 }}>
+              <Tag color="green" style={{ margin: 0, flexShrink: 0 }}>
                 {t("chat.resources.produced")}
               </Tag>
             ) : null}
             {TAGGED_STATUSES.has(st) ? (
               <Tag
                 color={STATUS_META[st]?.color}
-                style={{ marginLeft: 2 }}
+                style={{ margin: 0, flexShrink: 0 }}
                 title={
                   st === "deleted"
                     ? t("chat.resources.deletedHint")
@@ -248,6 +274,25 @@ const ChatSessionResources: React.FC<Props> = ({
                 {t(`chat.resources.${STATUS_META[st]?.label ?? "statusDraft"}`)}
               </Tag>
             ) : null}
+            </span>
+            {/* 第二行：所在目录。路径此前只藏在 tooltip 里，用户看一列名字
+                认不出文件在哪个目录（方案 F2） */}
+            {dir ? (
+              <span
+                title={item.path}
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  lineHeight: "16px",
+                  color: "rgba(0,0,0,0.45)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {dir}
+              </span>
+            ) : null}
           </span>
         );
       },
@@ -255,19 +300,19 @@ const ChatSessionResources: React.FC<Props> = ({
     {
       title: t("chat.resources.time"),
       key: "time",
-      width: 170,
+      width: 112,
       render: (_, item) => fmtTime(item.updated_at || item.last_seen_at),
     },
     {
       title: t("chat.resources.size"),
       key: "size",
-      width: 90,
+      width: 62,
       render: (_, item) => fmtSize(item.size),
     },
     {
       title: t("chat.resources.actions"),
       key: "actions",
-      width: 150,
+      width: 88,
       render: (_, item) => {
         const st = statusOf(item);
         const dead = st === "deleted" || st === "missing";
@@ -290,7 +335,13 @@ const ChatSessionResources: React.FC<Props> = ({
                     size="small"
                     icon={<DownloadOutlined />}
                     disabled={dead}
-                    onClick={() => downloadFile(item.path, item.title, item.kind)}
+                    onClick={() =>
+                      downloadFile(
+                        item.path,
+                        displayName(item) || item.path,
+                        item.kind,
+                      )
+                    }
                   />
                 </Tooltip>
                 <Tooltip title={t("chat.resources.locate")}>
@@ -316,6 +367,9 @@ const ChatSessionResources: React.FC<Props> = ({
         <Select
           size="small"
           style={{ width: 110 }}
+          getPopupContainer={(node) =>
+            (node.parentElement as HTMLElement) ?? document.body
+          }
           value={kind}
           onChange={setKind}
           options={[
@@ -338,6 +392,9 @@ const ChatSessionResources: React.FC<Props> = ({
         <Select
           size="small"
           style={{ width: 120 }}
+          getPopupContainer={(node) =>
+            (node.parentElement as HTMLElement) ?? document.body
+          }
           value={sort}
           onChange={setSort}
           options={[
@@ -359,6 +416,7 @@ const ChatSessionResources: React.FC<Props> = ({
       <Table
         rowKey={(r) => `${r.kind}:${r.path}`}
         size="small"
+        tableLayout="fixed"
         loading={loading}
         columns={columns}
         dataSource={rows}

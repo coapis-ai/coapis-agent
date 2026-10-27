@@ -23,6 +23,7 @@ import {
 } from "../../../../utils/webPreview";
 import type { ChatResourceItem } from "../../../../api/modules/chat";
 import { getChatResourcesShared } from "../useChatResourceLedger";
+import { displayName } from "./helpers";
 import styles from "./inline.module.less";
 
 /**
@@ -51,7 +52,7 @@ interface ChatSessionResourcesInlineProps {
    * 留一条「查看全部」——否则台账里资源多于面板上限的会话，多出来的那些
    * 在本页没有任何入口。
    */
-  onShowAll?: () => void;
+  onShowAll?: (chatId?: string) => void;
 }
 
 /**
@@ -64,7 +65,7 @@ function openResource(
 ): void {
   const rel = toLedgerRelPath(item.path);
   if (!rel) return;
-  const title = item.title || rel.split("/").pop() || rel;
+  const title = displayName(item) || rel;
   if (onPreview) {
     onPreview(rel, title);
     return;
@@ -151,7 +152,7 @@ export function ChatSessionResourcesInline({
           <ul className={styles.list}>
             {rows.slice(0, PANEL_LIMIT).map((item) => {
               const rel = toLedgerRelPath(item.path);
-              const name = item.title || rel.split("/").pop() || rel;
+              const name = displayName(item) || rel;
               const previewable = rel
                 ? getPreviewKind(rel) !== "unsupported"
                 : false;
@@ -224,8 +225,10 @@ export function ChatSessionResourcesInline({
         <button
           type="button"
           className={styles.showAll}
-          onClick={onShowAll}
+          onClick={() => onShowAll(chatId ?? undefined)}
           title={t("chat.sidebar.showAllTitle", "打开完整资源列表")}
+          /* 抽屉「点外面就关」认这个标记：入口自己 toggle，抢关会关掉又立刻重开 */
+          data-coapis-res-trigger=""
         >
           <FolderOpen size={11} />
           <span>

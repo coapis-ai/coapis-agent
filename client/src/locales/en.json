@@ -2345,7 +2345,8 @@
       "statusMissing": "Missing"
     },
     "resourceGroupProduced": "Produced",
-    "resourceGroupReferenced": "Referenced"
+    "resourceGroupReferenced": "Referenced",
+    "sessionMissing": "This conversation has nothing to replay: the index lists it, but the session file is missing (an empty shell left by a migration). Send a message to start a new conversation."
   },
   "security": {
     "parent": "Settings",

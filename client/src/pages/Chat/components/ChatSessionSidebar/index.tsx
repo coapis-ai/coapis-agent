@@ -1,10 +1,9 @@
-import React, { useState } from "react";
+import React from "react";
 import { Button, Tooltip } from "antd";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import ChatSessionDropdown from "../ChatSessionDropdown";
 import ChatSessionResourcesInline from "../ChatSessionResources/Inline";
-import CoApisResourceDrawer from "../CoApisResourceDrawer";
 import styles from "./index.module.less";
 
 interface Props {
@@ -14,8 +13,10 @@ interface Props {
   currentBackendId?: string | null;
   /** 预览文件（走页面级预览抽屉）。 */
   onPreview?: (path: string, title: string) => void;
-  /** 打开 L3 资源抽屉（左栏下拉里的「查看全部」）。 */
-  onShowAll?: () => void;
+  /** 「查看全部」：交给聊天页那**一个**会话资源抽屉（L3）。
+   *  带上被展开那一行的 chat id —— 展开的不是当前会话时，抽屉要显示
+   *  那一行的资源，不能张冠李戴。 */
+  onShowAll?: (chatId?: string) => void;
   /** 台账写入后自增，让当前会话的资源下拉立刻重取。 */
   resourceRefresh?: number;
 }
@@ -37,12 +38,15 @@ const ChatSessionSidebar: React.FC<Props> = (props) => {
     onToggleCollapsed,
     currentBackendId,
     onPreview,
+    onShowAll,
     resourceRefresh = 0,
   } = props;
   const { t } = useTranslation();
-  // 「查看全部」的抽屉由本组件自己挂载：按钮渲染在这里，抽屉也在同一棵子树里，
-  // 挂载与状态不再依赖聊天页那条 onShowAll 链路（实测该链路置位后抽屉不出现）。
-  const [allOpen, setAllOpen] = useState(false);
+  // 「查看全部」**不在这里挂抽屉**（方案 F1，2026-10-27 实测）：左栏曾经
+  // 自挂一份 CoApisResourceDrawer，聊天页又挂了一份，于是同一个入口出现两种
+  // 形态——左栏那份 getContainer 走 document.body 铺满整窗，聊天窗那份锚定
+  // 主内容区。现在只留聊天页那一份，左栏把事件抛上去，预览抽屉与资源抽屉
+  // 同一口径（都铺主内容区，侧栏/顶栏保持可见）。
 
   if (collapsed) {
     return (
@@ -87,18 +91,11 @@ const ChatSessionSidebar: React.FC<Props> = (props) => {
               chatId={backendId}
               refreshKey={resourceRefresh}
               onPreview={onPreview}
-              onShowAll={() => setAllOpen(true)}
+              onShowAll={onShowAll}
             />
           )}
         />
       </div>
-      {/* L3 抽屉：本组件挂载，容器固定到 body，主内容区 ref 缺席时也能正常展开 */}
-      <CoApisResourceDrawer
-        open={allOpen}
-        onClose={() => setAllOpen(false)}
-        chatId={currentBackendId ?? undefined}
-        getContainer={() => document.body}
-      />
     </aside>
   );
 };

@@ -2022,6 +2022,9 @@ export default function ChatPage() {
   // 数量不一致，直接触发 "Rendered fewer hooks than expected"。
   const ledger = useChatResourceLedger(chatId, resourceRefresh);
   const [resourcesOpen, setResourcesOpen] = useState(false);
+  // 「查看全部」针对的是哪个会话。左栏展开的那一行未必是当前会话，抽屉必须
+  // 跟着被点的那一行走，否则显示的是另一个会话的资源（方案 F1）。
+  const [resourcesChatId, setResourcesChatId] = useState<string | null>(null);
   const ledgerMetaOf = ledger.metaOf;
 
   /** 本轮资源（消息 metadata）+ 台账 meta（大小/时间/版本/状态）合并 */
@@ -2110,7 +2113,7 @@ export default function ChatPage() {
               data?.id,
             )}
             onPreview={(target) => openPreview(target)}
-            onShowAll={() => setResourcesOpen(true)}
+            onShowAll={() => setResourcesOpen((v) => !v)}
             onLocate={handleLocateResource}
           />
         ),
@@ -2578,12 +2581,35 @@ export default function ChatPage() {
             onToggleCollapsed={toggleSidebarCollapsed}
             currentBackendId={chatId}
             onPreview={(path, title) => openPreview({ path, title })}
-            onShowAll={() => setResourcesOpen(true)}
+            onShowAll={(cid) => {
+              // 再点同一个会话的「查看全部」= 收起（与抽屉「点外面就关」同一套语义）
+              if (cid && cid === resourcesChatId && resourcesOpen) {
+                setResourcesOpen(false);
+                return;
+              }
+              setResourcesChatId(cid ?? null);
+              setResourcesOpen(true);
+            }}
             resourceRefresh={resourceRefresh}
           />
           <div ref={mainAreaRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
         <div className={styles.chatContentArea}>
           
+          {/* 批次 A2「空壳兜底」：索引里有这条会话、会话文件不在 ——
+              后端 getChat 报 session_missing。此前前端什么都不显示，
+              用户看到的是一个空白聊天页，只能靠猜。给一句解释。 */}
+          {currentSessionData?.sessionMissing && (
+            <div className={styles.sessionMissingTip}>
+              <ExclamationCircleOutlined style={{ color: "#faad14" }} />
+              <span>
+                {t(
+                  "chat.sessionMissing",
+                  "这条会话没有可回放的内容：索引里有记录，但会话文件不存在。直接发消息即可开始新对话。",
+                )}
+              </span>
+            </div>
+          )}
+
           {/* 聊天区域 */}
           <div
             className={styles.chatMessagesArea}
@@ -2621,11 +2647,15 @@ export default function ChatPage() {
         {/* 文件预览抽屉（B4）：产出卡/资源条点「预览」统一进这里 */}
         <CoApisResourceDrawer
           open={resourcesOpen}
-          chatId={chatId}
+          chatId={resourcesChatId ?? chatId}
           refreshSignal={resourceRefresh}
-          onClose={() => setResourcesOpen(false)}
+          onClose={() => {
+            setResourcesOpen(false);
+            setResourcesChatId(null);
+          }}
           onPreview={(target) => {
             setResourcesOpen(false);
+            setResourcesChatId(null);
             openPreview({ path: target.path, title: target.name });
           }}
           // F1：会话资源抽屉与预览抽屉同一口径 —— 铺满主内容区，不铺满整窗

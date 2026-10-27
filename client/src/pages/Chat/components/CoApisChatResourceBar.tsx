@@ -14,6 +14,10 @@ import {
 import { useTranslation } from "react-i18next";
 import type { ChatResourceItem } from "../../../api/modules/chat";
 import {
+  displayName,
+  stemName,
+} from "./ChatSessionResources/helpers";
+import {
   toLedgerRelPath,
   getPreviewKind,
   convertTargetsFor,
@@ -117,19 +121,21 @@ const CoApisChatResourceBar: React.FC<Props> = ({
       return;
     }
     const path = toLedgerRelPath(item.path);
+    // 名字口径统一走 helpers（含扩展名）：预览标题与下载文件名都该带上扩展名
+    const name = displayName(item) || path;
     if (getPreviewKind(path) === "unsupported") {
-      downloadFile(item.path, item.title, item.kind);
+      downloadFile(item.path, name, item.kind);
       return;
     }
     if (onPreview) {
       onPreview({
         path,
-        name: item.title,
+        name,
         source: item.role === "producer" ? "produced" : "reference",
       });
       return;
     }
-    previewFile(path, item.title);
+    previewFile(path, name);
   };
 
   // F2：下载是动作 —— 原文 + 全部转换目标收进一个下拉，不再单列 ⇄ 图标
@@ -138,7 +144,7 @@ const CoApisChatResourceBar: React.FC<Props> = ({
       {
         key: "raw",
         label: t("chat.preview.downloadOriginal"),
-        onClick: () => downloadFile(item.path, item.title),
+        onClick: () => downloadFile(item.path, displayName(item) || item.path),
       },
     ];
     if (item.kind === "file") {
@@ -150,7 +156,13 @@ const CoApisChatResourceBar: React.FC<Props> = ({
             key: `conv-${target}`,
             label: t("chat.preview.convertTo", { fmt: target.toUpperCase() }),
             onClick: () =>
-              downloadFile(item.path, `${item.title}.${target}`, target, item.kind),
+              // 转换命名：去掉原扩展名再拼新格式（`a.txt`+pdf → `a.pdf`）
+              downloadFile(
+                item.path,
+                `${stemName(item)}.${target}`,
+                target,
+                item.kind,
+              ),
           });
         }
       }
@@ -186,7 +198,7 @@ const CoApisChatResourceBar: React.FC<Props> = ({
                 className={styles.name}
                 onClick={() => !dead && doPreview(item)}
               >
-                {item.title}
+                {displayName(item) || item.path}
               </span>
               <Tag className={styles.tag} color={source === "produced" ? "green" : "blue"}>
                 {source === "produced"
@@ -245,11 +257,15 @@ const CoApisChatResourceBar: React.FC<Props> = ({
   const anchorMessageId = produced.find((i) => i.messageId)?.messageId;
 
   return (
-    <div className={styles.bar} data-coapis-resource-msg={anchorMessageId}>
+    <div
+      className={styles.bar}
+      data-coapis-resource-msg={anchorMessageId}
+      data-coapis-resource-bar=""
+    >
       {/* 折叠态：单行摘要（方案：默认折叠，单行 28px） */}
       <div className={styles.header}>
         <span className={styles.title}>
-          <AppstoreOutlined /> {t("chat.resources.title", "本轮资源")}
+          <AppstoreOutlined /> {t("chat.resources.barTitle", "会话资源")}
         </span>
         <span className={styles.groups}>
           <span className={styles.groupChip}>
@@ -271,7 +287,12 @@ const CoApisChatResourceBar: React.FC<Props> = ({
             : t("chat.resources.expand", "展开")}
         </a>
         {onShowAll && (
-          <a className={styles.showAll} onClick={onShowAll}>
+          <a
+            className={styles.showAll}
+            onClick={onShowAll}
+            /* 抽屉「点外面就关」认这个标记：入口自己 toggle，抢关会关掉又立刻重开 */
+            data-coapis-res-trigger=""
+          >
             {t("chat.resources.viewAll", "查看全部")}
           </a>
         )}

@@ -17,4 +17,34 @@
   :global(.coapis-drawer-content-wrapper) {
     max-width: 100%;
   }
+
+  /* 左缘拖拽把手（与预览抽屉同一手势）：6px 透明条，悬停亮一下 */
+  .coapis-resource-resize-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: rgba(22, 119, 255, 0.18);
+    }
+  }
+
+  /* 头部「铺满/还原 + 关闭」两个按钮：与预览抽屉同一视觉 */
+  :global(.coapis-drawer-extra) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 768px) {
+  .coapis-resource-resize-handle {
+    display: none;
+  }
 }
