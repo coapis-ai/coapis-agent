@@ -1,0 +1,178 @@
+/**
+ * 聊天区「真浮窗」骨架样式 —— 预览窗与会话资源抽屉共用（G1=A）。
+ *
+ * 三段式（头部/内容/底部）+ 四边四角把手 + 拖移期禁选。位置与尺寸由组件写
+ * inline style（记忆在 localStorage），这里只管外观与把手热区。
+ */
+
+@handle: 7px;
+@corner: 14px;
+@hairline: 1px solid var(--color-border-secondary, rgba(0, 0, 0, 0.06));
+
+.window {
+  position: absolute;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 340px;
+  min-height: 260px;
+  overflow: hidden;
+  background: var(--color-bg-container, #fff);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.18);
+}
+
+/* ── 缩放把手：四边 + 四角 ──────────────────────────────────────── */
+
+.rz-n,
+.rz-s,
+.rz-e,
+.rz-w,
+.rz-ne,
+.rz-nw,
+.rz-se,
+.rz-sw {
+  position: absolute;
+  z-index: 3;
+}
+
+.rz-n,
+.rz-s {
+  left: @corner;
+  right: @corner;
+  height: @handle;
+  cursor: ns-resize;
+}
+
+.rz-e,
+.rz-w {
+  top: @corner;
+  bottom: @corner;
+  width: @handle;
+  cursor: ew-resize;
+}
+
+.rz-n {
+  top: 0;
+}
+
+.rz-s {
+  bottom: 0;
+}
+
+.rz-w {
+  left: 0;
+}
+
+.rz-e {
+  right: 0;
+}
+
+.rz-ne,
+.rz-nw,
+.rz-se,
+.rz-sw {
+  width: @corner;
+  height: @corner;
+}
+
+.rz-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.rz-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+
+.rz-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.rz-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+/* ── 头部：标题 + 附加按钮 + 铺满 + 关闭（只有一个关闭按钮） ───────── */
+
+.header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: @hairline;
+  user-select: none;
+}
+
+/* 自由浮窗时头部可拖移（铺满/窄屏/内嵌时不拖） */
+.freeform .header {
+  cursor: move;
+}
+
+/* 标题区占满剩余空间，把附加按钮推到右侧 */
+.head-title {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.head-extra {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 拖移中：整窗禁选，避免拖出文本选中 */
+.interacting {
+  user-select: none;
+}
+
+/* ── 内容 / 底部 ───────────────────────────────────────────────── */
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 12px 16px;
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-top: @hairline;
+}
+
+/* ── 窄屏/企微内嵌：占满宿主，无把手无拖拽（组件里已同步 fullscreen） ── */
+
+:global(html[data-mobile="true"]),
+:global(body.coapis-embedded) {
+  .window {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .window {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}

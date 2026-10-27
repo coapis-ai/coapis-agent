@@ -1506,7 +1506,12 @@
       "maximize": "最大化",
       "restore": "復元",
       "copied": "コピーしました",
-      "resize": "ドラッグで幅を変更"
+      "resize": "ドラッグで幅を変更",
+      "convertNotReady": "変換サービスが準備できていません。管理者が設定で LibreOffice 変換を有効にしてください。",
+      "convertTimeout": "変換がタイムアウトしました。後で再試行してください。",
+      "downloadFailed": "ダウンロードに失敗しました",
+      "fileGone": "このファイルは存在しません。削除または移動された可能性があります。",
+      "fileTooLarge": "ファイルが大きすぎてプレビューできません。ダウンロードして確認してください。"
     },
     "resources": {
       "generated": "生成",
@@ -1561,7 +1566,8 @@
       "statusMoved": "移動済み",
       "statusArchived": "アーカイブ",
       "statusDeleted": "削除済み",
-      "statusMissing": "無効"
+      "statusMissing": "無効",
+      "close": "閉じる"
     },
     "resourceGroupProduced": "生成",
     "resourceGroupReferenced": "参照",
@@ -1645,7 +1651,19 @@
       },
       "title": "チャット表示設定"
     },
-    "sessionMissing": "この会話には再生できる内容がありません：一覧に記録はありますが、セッションファイルが存在しません（移行で残った空壳）。メッセージを送れば新しい会話を始められます。"
+    "sessionMissing": "この会話には再生できる内容がありません：一覧に記録はありますが、セッションファイルが存在しません（移行で残った空壳）。メッセージを送れば新しい会話を始められます。",
+    "previewClose": "プレビューを閉じる",
+    "previewConvert": "変換",
+    "copied": "コピーしました",
+    "copyFull": "全文をコピー",
+    "copyLink": "直リンクをコピー",
+    "locateInWorkspace": "ワークスペースで表示",
+    "previewLoading": "読み込み中…",
+    "previewNoPreview": "このファイル形式はブラウザでプレビューできません。",
+    "previewOfficeHint": "Office ドキュメントは PDF または HTML に変換してからプレビューします。",
+    "previewRaw": "ソース",
+    "previewRendered": "レンダリング",
+    "previewTruncated": "ファイルが大きいため冒頭のみ表示しています。全文は「新しいウィンドウで開く」または「ダウンロード」をご利用ください。"
   },
   "security": {
     "parent": "設定",

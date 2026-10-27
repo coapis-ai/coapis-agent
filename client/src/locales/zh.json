@@ -2165,7 +2165,12 @@
       "maximize": "铺满",
       "restore": "还原",
       "copied": "已复制",
-      "resize": "拖拽调整宽度"
+      "resize": "拖拽调整宽度",
+      "convertNotReady": "转换服务尚未就绪，请管理员在设置中开启 LibreOffice 转换。",
+      "convertTimeout": "转换超时，请稍后重试。",
+      "downloadFailed": "下载失败",
+      "fileGone": "文件已不存在，可能已被删除或移动。",
+      "fileTooLarge": "文件过大，无法预览，请下载后查看。"
     },
     "resources": {
       "generated": "生成",
@@ -2220,11 +2225,24 @@
       "statusMoved": "已迁移",
       "statusArchived": "已归档",
       "statusDeleted": "已删除",
-      "statusMissing": "已失效"
+      "statusMissing": "已失效",
+      "close": "关闭"
     },
     "resourceGroupProduced": "生成",
     "resourceGroupReferenced": "引用",
-    "sessionMissing": "这条会话没有可回放的内容：索引里有记录，但会话文件不存在（迁移遗留的空壳）。直接发消息即可开始新对话。"
+    "sessionMissing": "这条会话没有可回放的内容：索引里有记录，但会话文件不存在（迁移遗留的空壳）。直接发消息即可开始新对话。",
+    "previewClose": "关闭预览",
+    "previewConvert": "转换",
+    "copied": "已复制",
+    "copyFull": "复制全文",
+    "copyLink": "复制直链",
+    "locateInWorkspace": "在工作区中定位",
+    "previewLoading": "加载中…",
+    "previewNoPreview": "该文件类型暂不支持在线预览。",
+    "previewOfficeHint": "Office 文档需先转换为 PDF 或 HTML 才能预览。",
+    "previewRaw": "原文",
+    "previewRendered": "渲染",
+    "previewTruncated": "文件较大，这里只显示开头一段；完整内容请用「新窗口打开」或「下载」。"
   },
   "security": {
     "parent": "设置",

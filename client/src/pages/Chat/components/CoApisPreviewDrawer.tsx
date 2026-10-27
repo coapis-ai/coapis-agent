@@ -6,28 +6,22 @@ import {
 } from "@agentscope-ai/design";
 // Space/Spin/Typography/Empty 不在 @agentscope-ai/design 的导出里（Empty 的
 // image/description 在本包被收窄成 string），直接用底层 antd。
-import { Empty, Segmented, Select, Space, Spin, Typography } from "antd";
+import { Alert, Empty, Segmented, Select, Space, Spin, Typography } from "antd";
 import {
-  AlertTriangle,
   ChevronDown,
   Copy,
   Download,
   FileText,
   FolderOpen,
   Link2,
-  Maximize2,
-  Minimize2,
-  X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { XMarkdown } from "@ant-design/x-markdown";
-import useIsMobile from "../../../hooks/useIsMobile";
-import { getChatGlobals } from "../../../lib/chatGlobals";
 
 import { getApiToken, getApiUrl } from "@/api/config";
+import FloatingWindow from "./FloatingWindow";
 import styles from "./CoApisPreviewDrawer.module.less";
 import {
   canInlinePreview,
@@ -41,21 +35,11 @@ import { toMyfilesParams } from "../workspaceLinks";
 
 const { Text } = Typography;
 
-/** 抽屉默认宽度（方案 D1：480px，左边缘可拖拽调宽）。 */
-const DEFAULT_WIDTH = 480;
-/** 拖拽下限：再窄标题与按钮就挤成一坨。 */
+/** 浮窗尺寸上下限与默认值（几何、手势、localStorage 记忆由骨架负责）。 */
 const MIN_WIDTH = 340;
-/** 宽度记忆键（方案 D1：拖完写 localStorage，下次打开保持）。 */
-const WIDTH_KEY = "coapis.previewDrawer.width";
-
-function savedWidth(): number {
-  try {
-    const v = Number(localStorage.getItem(WIDTH_KEY));
-    return Number.isFinite(v) && v >= MIN_WIDTH ? v : DEFAULT_WIDTH;
-  } catch {
-    return DEFAULT_WIDTH;
-  }
-}
+const MIN_HEIGHT = 260;
+const DEFAULT_WIDTH = 560;
+const DEFAULT_HEIGHT = 560;
 
 export interface PreviewTarget {
   /** 工作区相对路径（files/x.md） */
@@ -71,102 +55,6 @@ const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 const PDF_EXT = "pdf";
 const MD_EXT = new Set(["md", "markdown"]);
 
-/* ================================================================== *
- * 浮窗几何（D3=C 真浮窗 · D1-补 头部拖动 + 八向缩放）
- *
- * 旧实现是 antd Drawer：贴右缘、只有左边界一条把手能拖宽（用户反馈「实现
- * 只有可以拖动左边框」）。这里换成挂在宿主容器内的绝对定位浮窗：头部可拖、
- * 四边四角可缩放，位置与尺寸写 localStorage，铺满/还原保留。
- * ================================================================== */
-
-interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-type Edge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
-
-const EDGES: Edge[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
-
-const MIN_H = 260;
-const DEFAULT_H = 560;
-const SIZE_W_KEY = "coapis.previewWin.w";
-const SIZE_H_KEY = "coapis.previewWin.h";
-const POS_X_KEY = "coapis.previewWin.x";
-const POS_Y_KEY = "coapis.previewWin.y";
-
-const clampNum = (v: number, lo: number, hi: number) =>
-  Math.min(Math.max(v, lo), Math.max(lo, hi));
-
-function readNum(key: string): number | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
-}
-
-function safeSet(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* 隐私模式下 localStorage 会抛，忽略 */
-  }
-}
-
-function persistRect(r: Rect) {
-  safeSet(SIZE_W_KEY, String(Math.round(r.w)));
-  safeSet(SIZE_H_KEY, String(Math.round(r.h)));
-  safeSet(POS_X_KEY, String(Math.round(r.x)));
-  safeSet(POS_Y_KEY, String(Math.round(r.y)));
-}
-
-/** 首次打开按宿主右上摆放；有记录则沿用并夹回宿主可视范围。 */
-function initialRect(hostW: number, hostH: number): Rect {
-  const w = clampNum(
-    readNum(SIZE_W_KEY) ?? Math.min(560, Math.max(MIN_WIDTH, hostW)),
-    MIN_WIDTH,
-    Math.max(MIN_WIDTH, hostW),
-  );
-  const h = clampNum(
-    readNum(SIZE_H_KEY) ?? DEFAULT_H,
-    MIN_H,
-    Math.max(MIN_H, hostH),
-  );
-  const savedX = readNum(POS_X_KEY);
-  const savedY = readNum(POS_Y_KEY);
-  return {
-    x:
-      savedX === null
-        ? Math.max(0, hostW - w - 16)
-        : clampNum(savedX, 0, Math.max(0, hostW - w)),
-    y: savedY === null ? 12 : clampNum(savedY, 0, Math.max(0, hostH - h)),
-    w,
-    h,
-  };
-}
-
-/** 把浮窗夹回宿主可视范围内（宿主变小 / 拖出边界时）。 */
-function clampRect(r: Rect, hostW: number, hostH: number): Rect {
-  const w = clampNum(r.w, MIN_WIDTH, Math.max(MIN_WIDTH, hostW));
-  const h = clampNum(r.h, MIN_H, Math.max(MIN_H, hostH));
-  return {
-    x: clampNum(r.x, 0, Math.max(0, hostW - w)),
-    y: clampNum(r.y, 0, Math.max(0, hostH - h)),
-    w,
-    h,
-  };
-}
-
-/**
- * 头部切换器条目（D2：只列当前会话的资源，下拉选择即切换）。
- * 由聊天页把会话台账喂进来，作用域限定当前会话，不跨会话、不跨用户。
- */
 export interface PreviewSwitchItem {
   path: string;
   title?: string;
@@ -244,13 +132,11 @@ export default function CoApisPreviewDrawer(props: {
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  // §3.3：企微 H5/窄屏（含企微 H5 内嵌）→ 全屏弹层
-  const isMobile = useIsMobile();
-  // D3：铺满 = 占满宿主；还原 = 回到铺满前的位置尺寸
-  const [maximized, setMaximized] = useState(false);
   const [rawView, setRawView] = useState(false);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  // 取内容失败后「重试」用：自增一下让加载 effect 重新跑一遍（加载逻辑内联在 effect 里）
+  const [reloadTick, setReloadTick] = useState(0);
   const { target, onClose, getContainer, items, onSelect } = props;
   const [loading, setLoading] = useState(false);
   const [text, setText] = useState<string | null>(null);
@@ -341,7 +227,7 @@ export default function CoApisPreviewDrawer(props: {
     return () => {
       cancelled = true;
     };
-  }, [target?.path, ext, canPreview, t]);
+  }, [target?.path, ext, canPreview, t, reloadTick]);
 
   // md 工具条「复制内容」：复制的是**正文文本**（不是文件链接）。
   const copyFull = async () => {
@@ -412,301 +298,127 @@ export default function CoApisPreviewDrawer(props: {
     return el ?? (typeof document !== "undefined" ? document.body : null);
   }, [getContainer]);
 
-  const fullscreen = isMobile || getChatGlobals().mode === "embedded";
-  const hostRef = useRef<HTMLElement | null>(null);
-  const [host, setHost] = useState<HTMLElement | null>(null);
-  const rectRef = useRef<Rect>({ x: 0, y: 0, w: savedWidth(), h: DEFAULT_H });
-  const [rect, setRectState] = useState<Rect>(rectRef.current);
-  const setRect = useCallback((next: Rect) => {
-    rectRef.current = next;
-    setRectState(next);
-  }, []);
-  /** 拖动/缩放中：关掉过渡，跟手 */
-  const [interacting, setInteracting] = useState(false);
-  const prevRectRef = useRef<Rect | null>(null);
-  const onMoveRef = useRef<((ev: MouseEvent) => void) | null>(null);
-  const maximizedRef = useRef(false);
-  maximizedRef.current = maximized;
-  const open = !!target;
-
-  // 打开时定位：宿主必须是定位上下文，否则浮窗会跑到整页
-  useEffect(() => {
-    if (!open) return;
-    const el = resolveHost();
-    if (!el) return;
-    hostRef.current = el;
-    setHost(el);
-    if (getComputedStyle(el).position === "static") {
-      el.style.position = "relative";
-    }
-    setRect(
-      fullscreen
-        ? { x: 0, y: 0, w: el.clientWidth, h: el.clientHeight }
-        : initialRect(el.clientWidth, el.clientHeight),
-    );
-  }, [open, fullscreen, resolveHost, setRect]);
-
-  // 宿主尺寸变化：铺满/全屏时跟随，否则把浮窗夹回可视范围
-  useEffect(() => {
-    if (!open || !host) return;
-    const onResize = () => {
-      const hw = host.clientWidth;
-      const hh = host.clientHeight;
-      setRect(
-        fullscreen
-          ? { x: 0, y: 0, w: hw, h: hh }
-          : clampRect(rectRef.current, hw, hh),
-      );
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [open, host, fullscreen, setRect]);
-
-  const endInteraction = useCallback(
-    (onUp: () => void) => {
-      if (onMoveRef.current) {
-        document.removeEventListener("mousemove", onMoveRef.current);
-        onMoveRef.current = null;
-      }
-      document.removeEventListener("mouseup", onUp);
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-      setInteracting(false);
-      if (!maximizedRef.current) persistRect(rectRef.current);
-    },
-    [],
-  );
-
-  // 头部拖动（铺满/全屏时禁拖，避免把浮窗拖没）
-  const startDrag = useCallback(
-    (e: React.MouseEvent) => {
-      if (fullscreen || maximized) return;
-      if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
-      const el = hostRef.current;
-      if (!el) return;
-      const start = rectRef.current;
-      const sx = e.clientX;
-      const sy = e.clientY;
-      setInteracting(true);
-      document.body.style.userSelect = "none";
-      document.body.style.cursor = "move";
-      const onMove = (ev: MouseEvent) => {
-        setRect(
-          clampRect(
-            {
-              x: start.x + (ev.clientX - sx),
-              y: start.y + (ev.clientY - sy),
-              w: start.w,
-              h: start.h,
-            },
-            el.clientWidth,
-            el.clientHeight,
-          ),
-        );
-      };
-      onMoveRef.current = onMove;
-      const onUp = () => endInteraction(onUp);
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    },
-    [fullscreen, maximized, setRect, endInteraction],
-  );
-
-  // 八向缩放：四边 + 四角
-  const startResize = useCallback(
-    (edge: Edge) =>
-      (e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const el = hostRef.current;
-        if (!el) return;
-        const start = rectRef.current;
-        const sx = e.clientX;
-        const sy = e.clientY;
-        let w = start.w;
-        let h = start.h;
-        let x = start.x;
-        let y = start.y;
-        setInteracting(true);
-        document.body.style.userSelect = "none";
-        const onMove = (ev: MouseEvent) => {
-          const hw = el.clientWidth;
-          const hh = el.clientHeight;
-          const dx = ev.clientX - sx;
-          const dy = ev.clientY - sy;
-          const maxW = Math.max(MIN_WIDTH, hw);
-          const maxH = Math.max(MIN_H, hh);
-          w = start.w;
-          h = start.h;
-          x = start.x;
-          y = start.y;
-          if (edge.includes("e")) w = clampNum(start.w + dx, MIN_WIDTH, maxW);
-          if (edge.includes("s")) h = clampNum(start.h + dy, MIN_H, maxH);
-          if (edge.includes("w")) {
-            const nw = clampNum(start.w - dx, MIN_WIDTH, maxW);
-            x = start.x + (start.w - nw);
-            w = nw;
-          }
-          if (edge.includes("n")) {
-            const nh = clampNum(start.h - dy, MIN_H, maxH);
-            y = start.y + (start.h - nh);
-            h = nh;
-          }
-          setRect(clampRect({ x, y, w, h }, hw, hh));
-        };
-        onMoveRef.current = onMove;
-        const onUp = () => endInteraction(onUp);
-        document.addEventListener("mousemove", onMove);
-        document.addEventListener("mouseup", onUp);
-      },
-    [setRect, endInteraction],
-  );
-
-  // 铺满 / 还原
-  const toggleMaximize = useCallback(() => {
-    const el = hostRef.current;
-    const next = !maximized;
-    if (next) {
-      prevRectRef.current = rectRef.current;
-      if (el) setRect({ x: 0, y: 0, w: el.clientWidth, h: el.clientHeight });
-    } else if (prevRectRef.current) {
-      setRect(prevRectRef.current);
-    }
-    maximizedRef.current = next;
-    setMaximized(next);
-    if (!next) persistRect(rectRef.current);
-  }, [maximized, setRect]);
-
-  if (!target || !host) return null;
-
-  // D2：头部切换器只列**当前会话**的资源（台账作用域 = 当前 chat_id）
-  const switchOptions: { value: string; label: string; title: string }[] = [];
+  const switchOptions: (PreviewSwitchItem & {
+    value: string;
+    label: string;
+  })[] = [];
   const seenPath = new Set<string>();
   (items ?? []).forEach((it) => {
     if (!it?.path || seenPath.has(it.path)) return;
     seenPath.add(it.path);
     switchOptions.push({
+      path: it.path,
       value: it.path,
       label: it.title || it.path.split("/").pop() || it.path,
       title: it.path,
     });
   });
   if (!seenPath.has(path)) {
-    switchOptions.unshift({ value: path, label: title, title: path });
+    switchOptions.unshift({
+      path,
+      value: path,
+      label: title,
+      title: path,
+    });
   }
 
-  return createPortal(
-    <div
-      className={styles["coapis-preview-win"]}
-      style={{
-        left: rect.x,
-        top: rect.y,
-        width: rect.w,
-        height: rect.h,
-        transition: interacting ? "none" : undefined,
-      }}
-      role="dialog"
-      aria-label={title}
-    >
-      {/* D1-补：四边 + 四角都能拖（旧版只有左缘一条把手） */}
-      {!fullscreen &&
-        !maximized &&
-        EDGES.map((edge) => (
-          <div
-            key={edge}
-            className={styles[`rz-${edge}`]}
-            onMouseDown={startResize(edge)}
-          />
-        ))}
-
-      <div
-        className={styles["coapis-preview-win-header"]}
-        onMouseDown={startDrag}
-        style={{
-          cursor: fullscreen || maximized ? "default" : "move",
-        }}
-      >
-        <FileText size={14} className={styles["coapis-preview-icon"]} />
-        <span className={styles["coapis-preview-head-title"]} data-nodrag>
-          <Select
-            size="small"
-            className={styles["coapis-preview-switch"]}
-            popupClassName={styles["coapis-preview-switch-dd"]}
-            value={path}
-            onChange={(v: string) => {
-              const hit = (items ?? []).find((i) => i.path === v);
-              if (hit) onSelect?.(hit);
-            }}
-            showSearch
-            optionFilterProp="label"
-            listHeight={280}
-            popupMatchSelectWidth={false}
-            suffixIcon={<ChevronDown size={12} />}
-            options={switchOptions}
-          />
-        </span>
-        <span className={styles["coapis-preview-head-spacer"]} />
-        <span data-nodrag>
+﻿  return (
+    <FloatingWindow
+      open={!!target}
+      storageKey="previewWin"
+      getContainer={resolveHost}
+      label={title}
+      closeTip={t("chat.previewClose", "关闭预览")}
+      defaultWidth={DEFAULT_WIDTH}
+      defaultHeight={DEFAULT_HEIGHT}
+      minWidth={MIN_WIDTH}
+      minHeight={MIN_HEIGHT}
+      onClose={onClose}
+      bodyClassName={styles["coapis-preview-body-host"]}
+      title={
+        <>
+          <FileText size={14} className={styles["coapis-preview-icon"]} />
+          {switchOptions.length > 1 ? (
+            <Select
+              className={styles["coapis-preview-switch"]}
+              size="small"
+              value={path}
+              onChange={(v) => {
+                const hit = switchOptions.find((o) => o.value === v);
+                if (hit) onSelect?.(hit);
+              }}
+              options={switchOptions}
+              popupClassName={styles["coapis-preview-switch-dd"]}
+            />
+          ) : (
+            <Tooltip title={path}>
+              <Text strong style={{ fontSize: 13 }} ellipsis>
+                {title}
+              </Text>
+            </Tooltip>
+          )}
+        </>
+      }
+      extra={
+        convertTargets.length > 0 ? (
           <Dropdown
             menu={{
-              items: [
-                {
-                  key: "raw",
-                  icon: <Download size={12} />,
-                  label: t("chat.downloadRaw", "下载原文件"),
-                  onClick: () => void downloadFile(path, title),
-                },
-                ...convertTargets.map((fmt) => ({
-                  key: `conv-${fmt}`,
-                  icon: <Download size={12} />,
-                  label: t("chat.convertDownload", "转换为 {{fmt}} 后下载", {
-                    fmt,
-                  }),
-                  disabled: converting === fmt,
-                  onClick: () => void convertAndDownload(fmt),
-                })),
-              ],
+              items: convertTargets.map((f) => ({
+                key: f,
+                label: t(`chat.preview.format.${f}`, f.toUpperCase()),
+                onClick: () => convertAndDownload(f),
+              })),
             }}
             trigger={["click"]}
           >
-            <Button
-              type="text"
-              size="small"
-              loading={converting !== null}
-              icon={
-                <Space size={2}>
-                  <Download size={14} />
-                  <ChevronDown size={12} />
-                </Space>
-              }
-            />
+            <Tooltip title={t("chat.previewConvert", "转换格式下载")}>
+              <Button type="text" size="small">
+                <Download size={14} />
+                <ChevronDown size={12} />
+              </Button>
+            </Tooltip>
           </Dropdown>
-        </span>
-        {!fullscreen && (
-          <span data-nodrag>
+        ) : null
+      }
+      footer={
+        <>
+          <Tooltip title={path}>
+            <Text
+              type="secondary"
+              className={styles["coapis-preview-path"]}
+              ellipsis
+              style={{ maxWidth: "100%" }}
+            >
+              {path}
+            </Text>
+          </Tooltip>
+          <Space size={2}>
+            <Tooltip title={t("chat.locateInWorkspace", "在我的空间定位")}>
+              <Button
+                type="text"
+                size="small"
+                icon={<FolderOpen size={12} />}
+                onClick={locateInWorkspace}
+              />
+            </Tooltip>
             <Tooltip
               title={
-                maximized
-                  ? t("chat.previewRestore", "还原")
-                  : t("chat.previewMaximize", "铺满")
+                linkCopied
+                  ? t("chat.copied", "已复制")
+                  : t("chat.copyLink", "复制直链")
               }
             >
               <Button
                 type="text"
                 size="small"
-                icon={maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                onClick={toggleMaximize}
+                icon={<Link2 size={12} />}
+                onClick={() => void copyLink()}
               />
             </Tooltip>
-          </span>
-        )}
-        <span data-nodrag>
-          <Tooltip title={t("chat.close", "关闭")}>
-            <Button type="text" size="small" icon={<X size={14} />} onClick={onClose} />
-          </Tooltip>
-        </span>
-      </div>
-
+          </Space>
+        </>
+      }
+    >
       {isMd && (
         <div className={styles["coapis-preview-mdbar"]}>
           <Segmented
@@ -715,139 +427,113 @@ export default function CoApisPreviewDrawer(props: {
             onChange={(v) => setRawView(v === "raw")}
             options={[
               {
+                label: t("chat.previewRendered", "渲染视图"),
                 value: "render",
-                label: t("chat.previewRender", "渲染"),
+                icon: <FileText size={12} />,
               },
-              {
-                value: "raw",
-                label: t("chat.previewRaw", "原文"),
-              },
+              { label: t("chat.previewRaw", "md 原文"), value: "raw" },
             ]}
           />
+          <span className={styles["coapis-preview-head-spacer"]} />
           <Tooltip
-            title={
-              copied ? t("chat.copied", "已复制") : t("chat.copyContent", "复制内容")
-            }
+            title={copied ? t("chat.copied", "已复制") : t("chat.copyFull", "复制全文")}
           >
             <Button
               type="text"
               size="small"
               icon={<Copy size={12} />}
-              disabled={!text}
               onClick={() => void copyFull()}
             />
           </Tooltip>
         </div>
       )}
-
       <Spin spinning={loading} wrapperClassName={styles["coapis-preview-spin"]}>
         <div className={styles["coapis-preview-win-body"]}>
-          {error ? (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={
-                <Text type="danger">{error}</Text>
+          {/* 取不到内容时必须有话说：旧版只 console，用户对着空白窗干瞪眼 */}
+          {error && (
+            <Alert
+              className={styles["coapis-preview-alert"]}
+              type="warning"
+              showIcon
+              message={error}
+              action={
+                <Button
+                  type="text"
+                  size="small"
+                  onClick={() => {
+                    setError("");
+                    setReloadTick((n) => n + 1);
+                  }}
+                >
+                  {t("chat.preview.retry", "重试")}
+                </Button>
               }
             />
-          ) : kind === "image" ? (
-            srcUrl ? (
+          )}
+          {truncated && !error && (
+            <Alert
+              className={styles["coapis-preview-alert"]}
+              type="info"
+              showIcon
+              message={t(
+                "chat.previewTruncated",
+                "文件较大，这里只显示开头一段；完整内容请用「新窗口打开」或「下载」。",
+              )}
+            />
+          )}
+          {kind === "image" &&
+            (srcUrl ? (
               <img
                 src={srcUrl}
                 alt={title}
                 className={styles["coapis-preview-image"]}
               />
             ) : (
+              <Spin tip={t("chat.previewLoading", "加载中…")} />
+            ))}
+          {kind === "office" &&
+            (convertTargets.length > 0 ? (
+              <div className={styles["coapis-preview-office"]}>
+                <Empty
+                  description={t(
+                    "chat.previewOfficeHint",
+                    "此格式需转换后预览，请在上方选择转换格式",
+                  )}
+                />
+              </div>
+            ) : (
               <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={t("chat.previewLoading", "加载中…")}
+                description={t("chat.previewNoPreview", "该文件不支持预览")}
               />
-            )
-          ) : kind === "pdf" ? (
-            srcUrl ? (
+            ))}
+          {kind === "pdf" &&
+            (srcUrl ? (
               <iframe
                 title={title}
                 src={srcUrl}
                 className={styles["coapis-preview-iframe"]}
               />
             ) : (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={t("chat.previewLoading", "加载中…")}
-              />
-            )
-          ) : kind === "markdown" ? (
-            rawView ? (
-              <pre className={styles["coapis-preview-code"]}>
-                {truncated && (
-                  <div className={styles["coapis-preview-truncated"]}>
-                    <AlertTriangle size={12} />
-                    <span>{t("chat.previewTruncated", "内容过长，已截断")}</span>
-                  </div>
-                )}
-                {text}
-              </pre>
+              <Spin tip={t("chat.previewLoading", "加载中…")} />
+            ))}
+          {kind === "markdown" &&
+            (rawView ? (
+              <pre className={styles["coapis-preview-code"]}>{text}</pre>
             ) : (
               <div className={styles["coapis-preview-md"]}>
-                {truncated && (
-                  <div className={styles["coapis-preview-truncated"]}>
-                    <AlertTriangle size={12} />
-                    <span>{t("chat.previewTruncated", "内容过长，已截断")}</span>
-                  </div>
-                )}
-                <XMarkdown content={text ?? ""} />
+                <XMarkdown content={text ?? undefined} />
               </div>
-            )
-          ) : (
-            <pre className={styles["coapis-preview-code"]}>
-              {truncated && (
-                <div className={styles["coapis-preview-truncated"]}>
-                  <AlertTriangle size={12} />
-                  <span>{t("chat.previewTruncated", "内容过长，已截断")}</span>
-                </div>
-              )}
-              {text}
-            </pre>
+            ))}
+          {kind === "unsupported" && (
+            <Empty
+              description={t("chat.previewNoPreview", "该文件不支持预览")}
+            />
+          )}
+          {kind === "text" && (
+            <pre className={styles["coapis-preview-code"]}>{text}</pre>
           )}
         </div>
       </Spin>
-
-      <div className={styles["coapis-preview-win-footer"]}>
-        <Tooltip title={path}>
-          <Text
-            type="secondary"
-            className={styles["coapis-preview-path"]}
-            ellipsis
-            style={{ maxWidth: "100%" }}
-          >
-            {path}
-          </Text>
-        </Tooltip>
-        <Space size={2}>
-          <Tooltip title={t("chat.locateInWorkspace", "在我的空间定位")}>
-            <Button
-              type="text"
-              size="small"
-              icon={<FolderOpen size={12} />}
-              onClick={locateInWorkspace}
-            />
-          </Tooltip>
-          <Tooltip
-            title={
-              linkCopied
-                ? t("chat.copied", "已复制")
-                : t("chat.copyLink", "复制直链")
-            }
-          >
-            <Button
-              type="text"
-              size="small"
-              icon={<Link2 size={12} />}
-              onClick={() => void copyLink()}
-            />
-          </Tooltip>
-        </Space>
-      </div>
-    </div>,
-    host,
+    </FloatingWindow>
   );
 }

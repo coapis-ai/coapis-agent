@@ -1,50 +1,45 @@
-/* 会话资源抽屉（L3）锚定样式。
+/**
+ * 会话资源浮窗（B4）—— 只写「会话资源」特有的三处样式。
  *
- * 与 CoApisPreviewDrawer.module.less 同一口径：App.tsx 用 ConfigProvider
- * prefixCls="coapis"，抽屉真实类名是 `.coapis-drawer-*`，穿透一律走
- * `:global(.coapis-drawer-*)`。
- *
- * 抽屉通过 getContainer 挂进聊天主内容区后，antd 自带的
- * `.coapis-drawer { position: fixed; inset: 0 }` 仍会把它拉成整窗铺满；
- * 这里用双类名（0,2,0）压回 absolute，抽屉就只铺满主内容区。
+ * 浮窗本体（外框、头部、八向把手、底部条、铺满、窄屏占满）全部由共用骨架
+ * FloatingWindow.module.less 提供，与预览窗同一套外观；这里若再写一遍
+ * 外框/头部/把手，就是上一版「预览窗改了、资源抽屉没改」的根源，故删干净。
  */
 
-.coapis-resource-drawer {
-  &:global(.coapis-drawer) {
-    position: absolute;
-  }
-
-  :global(.coapis-drawer-content-wrapper) {
-    max-width: 100%;
-  }
-
-  /* 左缘拖拽把手（与预览抽屉同一手势）：6px 透明条，悬停亮一下 */
-  .coapis-resource-resize-handle {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 6px;
-    height: 100%;
-    cursor: col-resize;
-    z-index: 10;
-    background: transparent;
-    transition: background 0.15s ease;
-
-    &:hover {
-      background: rgba(22, 119, 255, 0.18);
-    }
-  }
-
-  /* 头部「铺满/还原 + 关闭」两个按钮：与预览抽屉同一视觉 */
-  :global(.coapis-drawer-extra) {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
+/* 内容区：贴边铺满，列表自己管滚动（骨架默认有 12/16 内边距，这里收掉） */
+.coapis-res-body {
+  padding: 0;
 }
 
-@media (max-width: 768px) {
-  .coapis-resource-resize-handle {
-    display: none;
-  }
+/* 头部标题 */
+.coapis-res-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text, #333);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 头部小按钮（刷新） */
+.coapis-res-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.55));
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.coapis-res-btn:hover {
+  background: var(--color-fill-secondary, rgba(0, 0, 0, 0.06));
+  color: var(--color-text, #333);
 }

@@ -2288,7 +2288,12 @@
       "maximize": "Maximize",
       "restore": "Restore",
       "copied": "Copied",
-      "resize": "Drag to resize"
+      "resize": "Drag to resize",
+      "convertNotReady": "Conversion service is not ready. Ask an admin to enable LibreOffice conversion in settings.",
+      "convertTimeout": "Conversion timed out. Please try again later.",
+      "downloadFailed": "Download failed",
+      "fileGone": "This file no longer exists. It may have been deleted or moved.",
+      "fileTooLarge": "This file is too large to preview. Please download it instead."
     },
     "resources": {
       "generated": "Generated",
@@ -2343,11 +2348,24 @@
       "statusMoved": "Moved",
       "statusArchived": "Archived",
       "statusDeleted": "Deleted",
-      "statusMissing": "Missing"
+      "statusMissing": "Missing",
+      "close": "Close"
     },
     "resourceGroupProduced": "Produced",
     "resourceGroupReferenced": "Referenced",
-    "sessionMissing": "This conversation has nothing to replay: the index lists it, but the session file is missing (an empty shell left by a migration). Send a message to start a new conversation."
+    "sessionMissing": "This conversation has nothing to replay: the index lists it, but the session file is missing (an empty shell left by a migration). Send a message to start a new conversation.",
+    "previewClose": "Close preview",
+    "previewConvert": "Convert",
+    "copied": "Copied",
+    "copyFull": "Copy full text",
+    "copyLink": "Copy direct link",
+    "locateInWorkspace": "Locate in workspace",
+    "previewLoading": "Loading…",
+    "previewNoPreview": "This file type can't be previewed in the browser.",
+    "previewOfficeHint": "Office documents must be converted to PDF or HTML before preview.",
+    "previewRaw": "Source",
+    "previewRendered": "Rendered",
+    "previewTruncated": "The file is large — only the beginning is shown. Use “Open in new window” or “Download” for the full content."
   },
   "security": {
     "parent": "Settings",
