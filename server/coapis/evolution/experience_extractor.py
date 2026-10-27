@@ -155,7 +155,7 @@ If no issues found, output: []
         extract_chunk_chars: int = 24_000,
         extract_max_segments: int = 8,
         extract_round_seconds: float = 240.0,
-        llm_retries: int = 3,
+        llm_retries: int = 2,
         llm_backoff_seconds: float = 2.0,
         llm_timeout_seconds: float | None = None,
     ):
@@ -217,6 +217,16 @@ If no issues found, output: []
             import re as _re
             words = _re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', existing_memory_content.lower())
             self._memory_keywords = set(words)
+
+        # 批次 D-2「抽取超时降级」第三段：连续失败后熔断。
+        # 实测（dev 2026-10-26 23:21）一轮抽取刷出 3 行 WARNING
+        # （45s 超时 → retry 1/3 → retry 2/3），端点持续变慢时每个轮次
+        # 都要付满这 141s 才退回启发式。连续 5 次失败后停 5 分钟直接走
+        # 启发式抽取，并只报 1 行 WARN。
+        self._llm_fail_streak = 0
+        self._llm_cooldown_until = 0.0
+        self._llm_cooldown_after = 5
+        self._llm_cooldown_seconds = 300.0
 
     async def extract_from_trajectory(
         self,
@@ -648,26 +658,54 @@ If no issues found, output: []
         the alternative to retrying is a heuristic extraction that records
         nothing at all.  Backoff is exponential so a rate-limited key gets
         room instead of a second of hammering.
+
+        批次 D-2「抽取超时降级」：
+        * 失败不再每次尝试刷一行 WARNING（实测一轮 3 行），全部尝试用尽
+          后只报 1 行。
+        * 连续 _llm_cooldown_after 次失败后进入熔断：这段时间内直接抛错
+          让调用方走启发式抽取，不再逐轮付满「超时 × 重试」的时间去抽一条
+          可选的经验。
         """
+        now = time.monotonic()
+        if now < self._llm_cooldown_until:
+            raise TimeoutError(
+                f"extraction LLM in cooldown "
+                f"({self._llm_cooldown_until - now:.0f}s left)",
+            )
+
         attempts = self.llm_retries
         last: Exception | None = None
         for attempt in range(attempts):
             try:
-                return await self._call_llm_once(prompt)
+                result = await self._call_llm_once(prompt)
+                self._llm_fail_streak = 0
+                return result
             except Exception as exc:
                 last = exc
                 if attempt + 1 < attempts:
                     delay = self.llm_backoff_seconds * (2**attempt)
-                    logger.warning(
-                        "Extraction LLM call failed (%s); retry %d/%d in "
-                        "%.1fs",
-                        exc,
-                        attempt + 2,
-                        attempts,
-                        delay,
-                    )
                     await asyncio.sleep(delay)
+
         assert last is not None
+        self._llm_fail_streak += 1
+        if self._llm_fail_streak >= self._llm_cooldown_after:
+            self._llm_cooldown_until = (
+                time.monotonic() + self._llm_cooldown_seconds
+            )
+            self._llm_fail_streak = 0
+            logger.warning(
+                "Extraction LLM disabled for %.0fs after %d consecutive "
+                "failures (last: %s); falling back to heuristic extraction",
+                self._llm_cooldown_seconds,
+                self._llm_cooldown_after,
+                last,
+            )
+        else:
+            logger.warning(
+                "Extraction LLM call failed after %d attempts: %s",
+                attempts,
+                last,
+            )
         raise last
 
     async def _call_llm_once(self, prompt: str) -> str:

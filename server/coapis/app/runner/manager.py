@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from .models import ChatSpec, ChatUpdate
 from .repo import BaseChatRepository
@@ -283,3 +285,67 @@ class ChatManager:
                 f"(from {len(matching_chats)} matches)",
             )
             return most_recent.id
+
+
+    # ---- 批次 A1「索引 GC」 -----------------------------------------------
+
+    async def archive_chats_where(
+        self,
+        keep,
+        archive_dir: Path,
+        *,
+        dry_run: bool = True,
+    ) -> Dict[str, Any]:
+        """Split the index into kept / archived entries under the write lock.
+
+        "Archived" means moved out of ``chats.json`` into
+        ``<archive_dir>/<stamp>.json`` verbatim -- the entries stay on disk
+        in one file and can be restored in one move; nothing is deleted.
+
+        The keep/drop decision comes from the caller: only the router layer
+        holds a session object, and therefore only it can decide using the
+        same path logic the writer uses (``_session_file_exists``).
+        Duplicating the directory rules here is exactly how index entries
+        get judged missing when they are not.
+        """
+        async with self._lock:
+            cf = await self._repo.load()
+            kept, dropped = [], []
+            for spec in cf.chats:
+                (kept if keep(spec) else dropped).append(spec)
+
+            report: Dict[str, Any] = {
+                "index": str(getattr(self._repo, "path", "?")),
+                "total": len(cf.chats),
+                "kept": len(kept),
+                "archived": len(dropped),
+                "dry_run": dry_run,
+                "archived_ids": [s.id for s in dropped],
+            }
+            if dry_run or not dropped:
+                return report
+
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "version": cf.version,
+                "archived_at": stamp,
+                "archived_by": "chat_index_gc",
+                "reason": "index entry whose session file does not exist",
+                "chats": [c.model_dump(mode="json") for c in dropped],
+            }
+            (archive_dir / f"{stamp}.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            before = len(cf.chats)
+            cf.chats = kept
+            await self._repo.save(cf)
+            logger.info(
+                "Chat index GC: archived %d/%d entries -> %s",
+                len(dropped),
+                before,
+                archive_dir,
+            )
+            return report

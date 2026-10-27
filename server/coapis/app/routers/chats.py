@@ -24,6 +24,8 @@ only access their own chat sessions. Admin users can access all chats.
 """
 
 import logging
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Path, Body, Response
@@ -72,6 +74,7 @@ class ChatHistory(BaseModel):
     """Chat history with messages."""
     messages: List[Message]
     status: str = "idle"
+    session_missing: bool = False
 
 
 class ChatUpdateRequest(BaseModel):
@@ -282,7 +285,99 @@ def _get_session_for_chat(chat_spec, request: Request = None):
     return _get_session_for_user(username, request)
 
 
+# ── Helper: openability of a chat (index/session drift guard) ──────────────
+
+# A chat index entry is written when the chat is created; the session
+# snapshot is written when the turn finishes.  So a freshly created chat is
+# legitimately file-less for a few minutes.  Anything older than this grace
+# window without a snapshot is an orphan: clicking it can only ever return
+# an empty shell, so it must not be listed.
+_CHAT_FILE_GRACE = timedelta(minutes=30)
+
+
+def _session_file_exists(
+    session_obj,
+    session_id: str,
+    user_id: str,
+) -> Optional[bool]:
+    """True/False = 判定结果；None = 无从判定。
+
+    Uses the exact path the session writer uses
+    (``SafeJSONSession._get_save_path``), so the guard can never disagree
+    with the writer about where a session lives.
+
+    ``None`` is the load-bearing case: when the session store is
+    unavailable (no session object, no id, path resolution blows up) we
+    have no evidence the snapshot is gone.  Treating that as "gone" would
+    blank the whole sidebar the moment the session path is misconfigured —
+    a far worse failure than listing a chat that opens empty.  Callers
+    must drop an entry only on an explicit ``False``.
+    """
+    if session_obj is None or not session_id:
+        return None
+    try:
+        path = session_obj._get_save_path(session_id, user_id=user_id)
+    except Exception:  # pragma: no cover - defensive
+        return None
+    return os.path.exists(path)
+
+
+def _entry_age_too_old(entry: Dict[str, Any]) -> bool:
+    """True when an entry's last activity is past the file grace window."""
+    stamp = entry.get("updated_at") or entry.get("created_at")
+    if not stamp:
+        return True
+    try:
+        when = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - when > _CHAT_FILE_GRACE
+
+
+def _agent_scope_match(entry_agent: str, agent_id: str) -> bool:
+    """Exact agent scoping for the sidebar list.
+
+    ``GET /chats?agent_id=X`` used to return *every* chat in the user's
+    workspace, so a user's list mixed in chats owned by scene agents, the
+    legacy ``default`` agent and empty agent ids.  Those chats open against
+    a different agent than the one the UI is talking to, which is how the
+    "session does not exist" shells show up.  Only the requested agent's own
+    chats (or, for a legacy chat with no agent id, the default agent) are
+    listed.
+    """
+    if not agent_id:
+        return True
+    if entry_agent == agent_id:
+        return True
+    if not entry_agent and agent_id in ("", "default"):
+        return True
+    return False
+
+
 # ── Helper: normalize ChatSpec for frontend ────────────────────────────────
+
+def _short_title(name: Optional[str]) -> str:
+    """One-line, length-capped title for the sidebar.
+
+    ``ChatSpec.name`` is the whole first prompt, which for real usage is a
+    multi-paragraph instruction; the sidebar row is 20px tall so the row
+    reads as noise.  The title keeps the first non-empty line and caps it,
+    with an ellipsis when it was cut.
+    """
+    text = (name or "").strip()
+    if not text:
+        return ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            text = line
+            break
+    if len(text) <= 40:
+        return text
+    return text[:40].rstrip() + "…"
+
 
 def _normalize_chat_spec(spec) -> Dict[str, Any]:
     """Convert ChatSpec (from runner/models.py) to frontend-compatible dict.
@@ -295,6 +390,7 @@ def _normalize_chat_spec(spec) -> Dict[str, Any]:
         "user_id": spec.user_id,
         "channel": spec.channel,
         "name": spec.name,
+        "title": _short_title(spec.name),
         "status": spec.status,
         "pinned": spec.pinned,
         "agent_id": getattr(spec, "agent_id", "") or "",
@@ -375,11 +471,36 @@ async def _build_chat_entries(
     except Exception:
         pass
 
+    username, _ = _get_current_user(request)
     result: List[Dict[str, Any]] = []
+    dropped = 0
     for c in chats:
+        if not _agent_scope_match(getattr(c, "agent_id", "") or "", agent_id):
+            dropped += 1
+            continue
         entry = _normalize_chat_spec(c)
         is_generating = c.id in generating_chat_ids
         entry["generating"] = is_generating
+
+        # Openability: an index entry whose session snapshot is gone can
+        # only ever open as an empty shell.  Keep it out of the list once
+        # the grace window has passed (a chat created seconds ago has no
+        # snapshot yet and must stay visible).  An unknown verdict (None)
+        # keeps the entry — see _session_file_exists.
+        session_obj = _get_session_for_chat(c, request)
+        session_exists = _session_file_exists(
+            session_obj,
+            c.session_id or c.id,
+            getattr(session_obj, "user_id", "") or username,
+        )
+        entry["session_exists"] = session_exists is not False
+        if (
+            session_exists is False
+            and not is_generating
+            and _entry_age_too_old(entry)
+        ):
+            dropped += 1
+            continue
 
         # Self-healing: clear stale "running" status when not generating
         if not is_generating and c.status == "running":
@@ -394,6 +515,14 @@ async def _build_chat_entries(
                 )
 
         result.append(entry)
+    if dropped:
+        logger.info(
+            "Chat list for agent=%s: %d openable entries, %d dropped "
+            "(agent scope / missing session snapshot).",
+            agent_id or "-",
+            len(result),
+            dropped,
+        )
     return result
 
 
@@ -653,6 +782,7 @@ async def get_chat(
     # Use chat.id (UUID) as session key for per-chat isolation.
     # Messages are stored at workspaces/{username}/sessions/{chat_id}.json
     messages = []
+    session_found = False
     try:
         # Use workspace owner username for session lookup, not spec.user_id
         # (spec.user_id may be an external sender ID like wecom open ID)
@@ -663,6 +793,7 @@ async def get_chat(
             state = await session_obj.get_session_state_dict(
                 spec.id, session_user_id, allow_not_exist=True,
             )
+            session_found = bool(state)
         # Fallback: when session_obj is None (workspace not registered in
         # multi_agent_manager), load session file directly from disk.
         if not state:
@@ -739,10 +870,22 @@ async def get_chat(
                 chat_id[:16], e,
             )
 
+    # Explicit empty state: the UI used to render a chat with no messages as
+    # a blank page, which reads as "the product is broken".  Tell the caller
+    # the snapshot is gone so it can say so.
+    session_missing = not session_found
+    if session_missing and not messages:
+        logger.info(
+            "get_chat: chat %s has an index entry but no session snapshot "
+            "under any known name (session_id=%s).",
+            chat_id[:8], spec.session_id,
+        )
+
     return {
         "spec": _normalize_chat_spec(spec),
         "messages": messages,
         "status": effective_status,
+        "session_missing": session_missing,
         "total_count": total_count,
         "has_more": total_count > limit or (before is not None),
     }
@@ -1008,3 +1151,82 @@ async def batch_delete_chats(
         raise HTTPException(status_code=404, detail="No chats found to delete")
 
     return {"success": True, "deleted_count": total_deleted}
+
+
+@router.post("/chats/admin/gc-orphans")
+async def gc_orphan_chats(
+    request: Request,
+    agent_id: Optional[str] = Query(None),
+    dry_run: bool = Query(True),
+):
+    """批次 A1「索引 GC」：把「索引里有、会话文件不在」的条目归档。
+
+    实测（dev 数据根 /apps/ai/coapis-dev，2026-10-27）：25 个 chats.json
+    共 447 条索引，393 条（88%）的会话文件不存在；admin 一个索引 283 条
+    里 257 条是空壳。列表把它们全列出来，用户点开是空白页。
+
+    归档不是删除：条目原样写进
+    ``<workspace>/.trash/chat_archive/<时间戳>.json``，一份文件即可整份
+    还原。默认 dry_run，必须显式 dry_run=false 才落盘。
+
+    判定只用 ``_session_file_exists`` 的显式 False —— 它返回 None 代表
+    「无法判定」（没有 session 对象），这种情况一律保留，绝不因为探测
+    不到就删用户的会话。
+    """
+    from pathlib import Path as FsPath
+
+    # _get_current_user 返回 (username, is_admin) 元组，不是对象。
+    current = _get_current_user(request)
+    if not current or not current[1]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    manager = getattr(request.app.state, "multi_agent_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="多智能体管理器未就绪")
+    reports = []
+    for key, ws in list(manager.agents.items()):
+        if agent_id:
+            ws_agent = getattr(ws, "agent_id", None)
+            if ws_agent and ws_agent != agent_id:
+                continue
+        chat_manager = getattr(ws, "chat_manager", None)
+        if chat_manager is None:
+            continue
+
+        session = getattr(getattr(ws, "runner", None), "session", None)
+        ws_username = getattr(ws, "username", "") or ""
+
+        def keep(spec, _session=session, _username=ws_username):
+            verdict = _session_file_exists(
+                _session,
+                spec.session_id,
+                spec.user_id or _username,
+            )
+            # None = 判不了 -> 保留。只有明确 False 才归档。
+            return verdict is not False
+
+        archive_dir = FsPath(ws.workspace_dir) / ".trash" / "chat_archive"
+        report = await chat_manager.archive_chats_where(
+            keep,
+            archive_dir,
+            dry_run=dry_run,
+        )
+        report["workspace_key"] = key
+        reports.append(report)
+
+    total = sum(r["total"] for r in reports)
+    archived = sum(r["archived"] for r in reports)
+    logger.info(
+        "Chat index GC (dry_run=%s): %d entries scanned, %d orphan across %d indexes",
+        dry_run,
+        total,
+        archived,
+        len(reports),
+    )
+    return {
+        "dry_run": dry_run,
+        "indexes": len(reports),
+        "total_entries": total,
+        "orphan_entries": archived,
+        "reports": reports,
+    }

@@ -212,7 +212,81 @@ class TestSegmentedExtraction:
         assert len(result) >= 2
 
     def test_retry_defaults_are_sane(self):
+        # 批次 D-2「抽取超时降级」：重试 3 -> 2（保留 1 次抖动容错）。
+        # 配合 20s 单次超时，一次抽取最坏 2x20+2=42s；原先 3x45+2+4=141s
+        # 都在为一次可选的经验抽取占用抽取槽位。
         ex = ExperienceExtractor(agent_core=_core(None))
-        assert ex.llm_retries == 3
+        assert ex.llm_retries == 2
         assert ex.llm_backoff_seconds == 2.0
         assert ex.extract_chunk_chars == 24_000
+
+
+class TestLlmCooldown:
+    """批次 D-2：连续失败后熔断；失败只报一行 WARN，不再每次尝试一行。"""
+
+    @pytest.mark.asyncio
+    async def test_failures_log_one_warning_not_one_per_attempt(self, caplog):
+        ex = ExperienceExtractor(agent_core=_core(None), llm_retries=3)
+        ex.llm_backoff_seconds = 0.0
+
+        async def _boom(prompt):
+            raise TimeoutError("endpoint did not answer")
+
+        ex._call_llm_once = _boom
+        with caplog.at_level("WARNING"):
+            with pytest.raises(TimeoutError):
+                await ex._call_llm("p")
+        lines = [
+            r.getMessage()
+            for r in caplog.records
+            if "Extraction LLM call failed" in r.getMessage()
+        ]
+        assert len(lines) == 1, lines
+
+    @pytest.mark.asyncio
+    async def test_consecutive_failures_open_the_cooldown(self):
+        ex = ExperienceExtractor(agent_core=_core(None), llm_retries=1)
+        ex.llm_backoff_seconds = 0.0
+        ex._llm_cooldown_after = 2
+        ex._llm_cooldown_seconds = 300.0
+
+        async def _boom(prompt):
+            raise TimeoutError("endpoint down")
+
+        ex._call_llm_once = _boom
+        for _ in range(2):
+            with pytest.raises(TimeoutError):
+                await ex._call_llm("p")
+
+        # 熔断期内不再触碰端点：连 _call_llm_once 都不该被调用。
+        calls = []
+
+        async def _spy(prompt):
+            calls.append(prompt)
+            return "should not run"
+
+        ex._call_llm_once = _spy
+        with pytest.raises(TimeoutError, match="cooldown"):
+            await ex._call_llm("p")
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_success_resets_the_streak(self):
+        ex = ExperienceExtractor(agent_core=_core(None), llm_retries=1)
+        ex._llm_cooldown_after = 2
+
+        async def _boom(prompt):
+            raise TimeoutError("momentary")
+
+        ex._call_llm_once = _boom
+        with pytest.raises(TimeoutError):
+            await ex._call_llm("p")
+        assert ex._llm_fail_streak == 1
+
+        async def _ok(prompt):
+            return "answer"
+
+        ex._call_llm_once = _ok
+        assert await ex._call_llm("p") == "answer"
+        assert ex._llm_fail_streak == 0
+        assert ex._llm_cooldown_until == 0.0

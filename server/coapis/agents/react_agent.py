@@ -3767,10 +3767,16 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                         and not (hasattr(b, "__class__") and "ToolUse" in type(b).__name__)
                     ]
                 # Inject a system hint to guide the model
+                # 方案 D6「强制停止并汇报」：force_exit 已经剥掉 tool_use、
+                # 把 tool_choice 锁成 none，本轮不可能再调工具。此时泛泛的
+                # "换个方法"没有落点（没有方法可用），唯一正确的行为是把
+                # 现状讲清楚交回用户 —— 所以提示词直接规定汇报四段式。
                 hint = Msg(
                     "user",
-                    "[系统提示] 检测到重复推理模式，请尝试换一种工具或方法，"
-                    "或直接根据已有信息给出回答。",
+                    "[系统提示] 检测到重复推理模式，本轮工具调用已被强制停止。"
+                    "请立即停止调用工具，用一段面向用户的文字汇报，按以下四点："
+                    "1) 已完成什么；2) 还没完成什么；3) 卡在哪一步、卡住的原因；"
+                    "4) 需要用户决定什么或提供什么。不要重复之前已做过的操作。",
                     "user",
                 )
                 await self.memory.add(hint, marks=_MemoryMark.HINT)

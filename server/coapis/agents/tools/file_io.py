@@ -252,7 +252,9 @@ def _ledger_record(abs_path: str, source: str) -> None:
             chat_id=get_current_chat_id(),
             agent_id=get_current_agent_id(),
             source=source,
-            title=Path(abs_path).stem or None,
+            # 登记**文件名含扩展名**。此前登记的是 stem（`a.txt` → `a`），
+            # 前端一列名字里看不出文件类型，且无法从 title 反推真实文件。
+            title=Path(abs_path).name or None,
         )
     except Exception:
         pass

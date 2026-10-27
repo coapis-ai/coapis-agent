@@ -444,9 +444,17 @@ EVOLUTION_EXTRACTION_SLOTS = EnvVarLoader.get_int(
 # provider client, which inherits the SDK's 600 s default; extraction ran on
 # the path that closes the user's stream, so an endpoint that never answered
 # held a delivered answer open for minutes (dev, 2026-10-18: 199 s).
+#
+# 批次 D-2「抽取超时降级」45 → 20：抽取已改为纯后台任务（evolution_engine
+# 用 asyncio.create_task 调度，用户流不等待它），所以这里约束的不再是用户
+# 可见的尾巴，而是抽取槽位 EVOLUTION_EXTRACTION_SLOTS 被占用多久。实测
+# （dev 2026-10-26 23:21）单次调用要 20~45s，45s 门槛配合下面的重试次数，
+# 最坏 141s 都在为一次「可选」的经验抽取占槽，后续轮次只能
+# "deferred: all slots busy"。20s 覆盖住实测成功那次的 23s 附近的抖动，
+# 超时就退回启发式抽取 —— 经验数据少一条，问答不受影响。
 EVOLUTION_EXTRACT_TIMEOUT_SECONDS = EnvVarLoader.get_float(
     "COAPIS_EVOLUTION_EXTRACT_TIMEOUT_SECONDS",
-    45.0,
+    20.0,
     min_value=5.0,
     max_value=300.0,
 )
