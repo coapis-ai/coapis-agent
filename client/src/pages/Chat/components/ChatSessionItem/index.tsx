@@ -44,12 +44,17 @@ interface ChatSessionItemProps {
   onEditChange: (value: string) => void;
   onEditSubmit: () => void;
   onEditCancel: () => void;
+  /** 最近活跃时间（updated_at）。行上时间与左栏排序口径必须同一个尺子，
+      缺省时回退 createdAt。 */
+  updatedAt?: string | null;
   /** 右键菜单（编辑/删除/置顶），替代原来挤在标题上的图标 */
   onContextMenu?: (sessionId: string, event: React.MouseEvent) => void;
 }
 
-/** 紧凑时间：今天 "14:29"，本年 "10-23 14:29"，跨年 "2025-10-23"。 */
-export function formatCreatedAt(
+/** 紧凑时间：今天 "14:29"，本年 "10-23 14:29"，跨年 "2025-10-23"。
+ *  传入的是**最近活跃时间（updated_at）**——左栏按 updated_at 倒序排，
+ *  行上必须显示同一个尺子，否则视觉上永远是乱序（旧名 formatCreatedAt）。 */
+export function formatActivityTime(
   iso: string | null | undefined,
 ): string | undefined {
   if (!iso) return undefined;
@@ -98,8 +103,9 @@ const ChatSessionItem: React.FC<ChatSessionItemProps> = (props) => {
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
-  const titleTip = props.createdAt
-    ? `${props.name} · ${fullTime(props.createdAt)}`
+  const activityStamp = props.updatedAt ?? props.createdAt;
+  const titleTip = activityStamp
+    ? `${props.name} · 最近活跃 ${fullTime(activityStamp)}`
     : props.name;
 
   return (

@@ -19,7 +19,14 @@ import { useNavigate } from "react-router-dom";
 import type { ChatStatus } from "../../../../api/types/chat";
 import { chatApi } from "../../../../api/modules/chat";
 import sessionApi from "../../sessionApi";
-import ChatSessionItem from "../ChatSessionItem";
+import ChatSessionItem, {
+  // One time formatter for the whole list: the compact ladder the item
+  // renders (time today / 昨天 / 10-21 / 2025-10-21), full stamp in the
+  // tooltip. A full "14:23" here read as "today 14:23" by people who saw a
+  // chat from last Tuesday.
+  formatActivityTime,
+} from "../ChatSessionItem";
+import { useAgentStore } from "../../../../stores/agentStore";
 import { getChannelLabel } from "../../../Control/Channels/components";
 import {
   ContextMenu,
@@ -38,8 +45,14 @@ import styles from "./index.module.less";
  */
 const ITEM_HEIGHT = 104;
 
-/** 左栏分页（B5）：首屏只取一页 20 条，滚到底才要下一页。 */
-const PAGE_SIZE = 20;
+/**
+ * 左栏分页（B5）：首屏只取一页 10 条，滚到底或点"加载更多"才要下一页。
+ *
+ * 10 而不是 20：一屏可视约 6 行，10 条已经覆盖"今日 + 昨天"，剩下的都是要
+ * 滚动才看得见的。首屏要传多少条不改变后端构建整表的开销（分页在后端切窗后
+ * 才成立），所以这一页取小、后面按需要，比一次要 20 条更贴近真实使用。
+ */
+const PAGE_SIZE = 10;
 
 /** Data passed to each row via FixedSizeList's itemData prop */
 interface SessionRowData {
@@ -88,7 +101,8 @@ const SessionLine = React.memo(function SessionLine({
       <ChatSessionItem
         sessionId={session.id!}
         name={session.name || "New Chat"}
-        time={formatCreatedAt(session.createdAt ?? null)}
+        time={formatActivityTime(session.updatedAt ?? session.createdAt ?? null) ?? ""}
+        updatedAt={session.updatedAt ?? session.createdAt ?? null}
         channelKey={channelKey || undefined}
         channelLabel={channelLabel}
         chatStatus={session.status}
@@ -180,6 +194,7 @@ export interface ExtendedChatSession extends IAgentScopeRuntimeWebUISession {
   userId?: string;
   channel?: string;
   createdAt?: string | null;
+  updatedAt?: string | null;
   meta?: Record<string, unknown>;
   status?: ChatStatus;
   generating?: boolean;
@@ -231,19 +246,6 @@ interface ChatSessionDropdownProps {
   isMobile?: boolean;
 }
 
-/** Format an ISO 8601 timestamp to YYYY-MM-DD HH:mm:ss */
-const formatCreatedAt = (raw: string | null | undefined): string => {
-  if (!raw) return "";
-  const date = new Date(raw);
-  if (isNaN(date.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-    date.getDate(),
-  )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
-    date.getSeconds(),
-  )}`;
-};
-
 /** Resolve the real backend UUID from an extended session (id may be a local timestamp) */
 const getBackendId = (session: ExtendedChatSession): string | null => {
   if (session.realId) return session.realId;
@@ -255,6 +257,13 @@ const getBackendId = (session: ExtendedChatSession): string | null => {
 const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  /**
+   * 当前智能体身份。订阅它是因为左栏拉不拉得到数据全看它：sessionApi 取的是
+   * agentStore 里的 selectedAgent，而首屏那一刻它常常还没落地（首登要过
+   * listAgents 兜底）。不订阅，effect 就永远不会因为"身份到了"而重跑——左栏
+   * 会一直空着，直到用户手动刷新，看起来就是"刷新很慢"。
+   */
+  const selectedAgent = useAgentStore((s) => s.selectedAgent);
   const { currentSessionId, setCurrentSessionId, setSessions } =
     useChatAnywhereSessionsState();
 
@@ -294,8 +303,15 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   const [loadingMore, setLoadingMore] = useState(false);
   /** 后端返回的总条数：分页文案与「是否还有下一页」都看它。 */
   const [total, setTotal] = useState(0);
-  /** 已加载条数：触底请求下一页时的 offset。用 ref 免得闭包读到旧长度。 */
-  const loadedRef = useRef(0);
+  /**
+   * 下一页的 offset。用 ref 免得闭包读到旧长度。
+   *
+   * 按「请求的页大小」前进，不按「已合并的条数」：后端一页会丢掉打不开的
+   * 会话（快照缺失/越权），返回行数可以少于 limit。拿合并后的长度当
+   * offset，下一页会落回同一批行，去重后长度不变——点"加载更多"永远拉不出
+   * 新东西，看起来就是卡住。
+   */
+  const offsetRef = useRef(0);
 
   // ── 左栏展开位（B4）───────────────────────────────────────────────
   // 资源下拉挂在「展开的那一行」下方，默认就是当前会话；点别的会话跟过去。
@@ -398,7 +414,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   const loadSessions = useCallback(
     async (opts?: { append?: boolean }) => {
       const append = opts?.append === true;
-      const offset = append ? loadedRef.current : 0;
+      const offset = append ? offsetRef.current : 0;
       if (append) setLoadingMore(true);
       else setListLoading(true);
       try {
@@ -406,7 +422,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
         const mapped = page.sessions as unknown as ExtendedChatSession[];
         setLocalSessions((prev) => {
           const next = append ? mergePages(prev, mapped) : mapped;
-          loadedRef.current = next.length;
+          offsetRef.current = offset + PAGE_SIZE;
           return next;
         });
         setSessions(mapped as never);
@@ -422,12 +438,24 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
     [mergePages, setSessions],
   );
 
-  /** 首屏/刷新：挂载、切 agent、下拉重新打开时都要拿到最新的第一页。 */
+  /**
+   * 首屏/刷新：挂载、切 agent、下拉重新打开时都要拿到最新的第一页。
+   *
+   * selectedAgent 必须在依赖里——左栏取数据靠的就是它，而首屏那一刻它常常还没
+   * 落地（首登要过 listAgents 兜底）。不订阅，effect 不会因为"身份到了"重跑，
+   * 左栏就一直空着，看起来就是"刷新很慢"。
+   */
   useEffect(() => {
     if (props.variant === "sidebar" || props.open) {
       loadSessions();
     }
-  }, [props.variant, props.open, props.refreshKey, loadSessions]);
+  }, [
+    props.variant,
+    props.open,
+    props.refreshKey,
+    selectedAgent,
+    loadSessions,
+  ]);
 
   /** 滚动触底（距底 80px）加载下一页。 */
   const handleListScroll = useCallback(
@@ -710,15 +738,19 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
         ref={listWrapperRef}
       >
         <div className={styles.topGradient} />
-        {listLoading ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              padding: 40,
-            }}
-          >
-            <Spin />
+        {listLoading && sortedSessions.length === 0 ? (
+          /* F2-3：首屏取数中的骨架屏。整块列表换成居中 Spin 时，「加载中」和
+             「今天没有会话」长得一样——用户读到的就是"刷新很慢/没有会话"。 */
+          <div className={styles.skeletonList} aria-busy="true">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div className={styles.skeletonRow} key={i}>
+                <span className={styles.skeletonDot} />
+                <span
+                  className={styles.skeletonBar}
+                  style={{ width: `${62 - i * 8}%` }}
+                />
+              </div>
+            ))}
           </div>
         ) : (
           <>
@@ -760,15 +792,25 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
                 )}
                 {!loadingMore && sortedSessions.length > 0 && (
                   <div className={styles.pageFooter}>
-                    {hasMore
-                      ? t(
-                          "chat.scrollForMore",
-                          `继续向下滚动加载更多（已加载 ${sortedSessions.length}/${total}）`,
-                        )
-                      : t(
-                          "chat.allLoaded",
-                          `已加载全部会话（${total}）`,
-                        )}
+                    {hasMore ? (
+                      <>
+                        <button
+                          type="button"
+                          className={styles.loadMoreBtn}
+                          onClick={() => loadSessions({ append: true })}
+                        >
+                          {t("chat.loadMore", "加载更多")}
+                        </button>
+                        <span className={styles.pageCount}>
+                          {`${sortedSessions.length}/${total}`}
+                        </span>
+                      </>
+                    ) : (
+                      t(
+                        "chat.allLoaded",
+                        `已加载全部会话（${total}）`,
+                      )
+                    )}
                   </div>
                 )}
               </div>

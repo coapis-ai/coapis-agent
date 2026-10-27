@@ -2,7 +2,7 @@
 """批次 B5：``GET /api/chats/page`` 真分页端点。
 
 左栏原来一次拉 200 条会话（实测 279 行全挂载 + 切会话阻塞 5.8s），改成
-"首屏 20 条、滚到底再要下一页"后，分页语义必须由后端保证：
+"首屏 10 条、滚到底再要下一页"后，分页语义必须由后端保证：
 
 * ``total`` 是**过滤后的总数**，不是本页条数 —— 前端靠它判断"还有没有下一页"；
 * 排序在分页前完成（updated_at 倒序），页与页之间不重叠、不丢条目；
@@ -292,5 +292,73 @@ def test_agent_id_required_on_both_endpoints(specs):
                        headers={"X-Agent-Id": "default"})
         assert r.status_code == 200, (r.status_code, r.text[:120])
         assert "total" in r.json(), r.text[:120]
+    finally:
+        restore()
+
+
+def test_mixed_timestamp_formats_sort_by_real_time():
+    """排序按真实时刻，不按 ISO 字符串的字典序。
+
+    时间戳来自不同代码路径，格式并不统一（带/不带时区、有无微秒、缺失）。
+    按字符串比较时 "2026-10-01" 会排到 "2026-1-05" 之后这类陷阱里，分页顺序
+    就乱——而分页是"先排序后切窗"，顺序错等于内容错。
+    """
+    from types import SimpleNamespace
+
+    from coapis.app.routers.chats import _sort_chat_specs
+
+    specs = [
+        SimpleNamespace(pinned=False, updated_at="2026-01-05T09:00:00"),
+        SimpleNamespace(pinned=False, updated_at="2026-10-01T00:00:00+00:00"),
+        SimpleNamespace(pinned=False, updated_at="2026-01-05T09:00:00.500000"),
+        SimpleNamespace(pinned=False, updated_at=None),
+        SimpleNamespace(pinned=False, updated_at="not-a-date"),
+        SimpleNamespace(pinned=True, updated_at="2025-06-01T00:00:00"),
+    ]
+    stamps = [s.updated_at for s in _sort_chat_specs(specs)]
+
+    # 置顶优先，哪怕它是全场最旧的一条。
+    assert stamps[0] == "2025-06-01T00:00:00"
+    # 2026-10 比 2026-01 新：字典序下 "2026-10-01..." 会排到 "2026-01-05..."
+    # 之前（'1'<'2' 在第一位就定了），真实时刻才是反过来的。
+    assert stamps[1] == "2026-10-01T00:00:00+00:00"
+    # 同一时刻带微秒的那条更新 → 排在前。
+    assert stamps[2] == "2026-01-05T09:00:00.500000"
+    assert stamps[3] == "2026-01-05T09:00:00"
+    # 缺失/非法时间戳排最后，不炸排序。
+    assert set(stamps[4:]) == {None, "not-a-date"}
+
+
+def test_paged_window_pays_expensive_work_only_for_the_window(monkeypatch):
+    """分页必须"先切窗、后做重活"：要 10 条就只付 10 次会话快照检查。
+
+    每条会话的打开性检查要 stat 会话快照文件，是这条链路上唯一随会话总数
+    增长的开销。原来分页是"全量构建 → 排序 → 切片"，首屏要 10 条也得把全部
+    会话检查一遍；切窗在前才是真分页。
+    """
+    specs = [
+        _spec(
+            f"c{i:02d}",
+            "alice",
+            datetime.now(timezone.utc) - timedelta(days=i),
+            f"chat-{i}",
+        )
+        for i in range(30)
+    ]
+    client, restore = _make_client(specs)
+    calls: list = []
+    real = chats_router._get_session_for_chat
+
+    def _counting(chat_spec, request):
+        calls.append(chat_spec.id)
+        return real(chat_spec, request)
+
+    monkeypatch.setattr(chats_router, "_get_session_for_chat", _counting)
+    try:
+        body = _page(client, limit=10, offset=0).json()
+        assert len(body["items"]) == 10
+        assert body["total"] == 30
+        # 只检查窗口内的 10 条，不是全部 30 条。
+        assert len(calls) == 10
     finally:
         restore()

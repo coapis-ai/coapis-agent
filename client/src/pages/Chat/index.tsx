@@ -61,9 +61,10 @@ import {
 import type { ChatResourceItem } from "../../api/modules/chat";
 import ChatSessionSidebar from "./components/ChatSessionSidebar";
 import CoApisPreviewDrawer, {
+  type PreviewSwitchItem,
   type PreviewTarget,
 } from "./components/CoApisPreviewDrawer";
-import { downloadFile } from "../../utils/webPreview";
+import { downloadFile, toLedgerRelPath, categoryOf } from "../../utils/webPreview";
 import {
   isPreviewablePath,
   linkifyMessageOutput,
@@ -2021,6 +2022,28 @@ export default function ChatPage() {
   // hook 落进了 useMemo 回调——deps 未变时 React 会跳过回调，两次渲染的 hook
   // 数量不一致，直接触发 "Rendered fewer hooks than expected"。
   const ledger = useChatResourceLedger(chatId, resourceRefresh);
+
+  /**
+   * 预览浮窗头部切换器的数据源（D2：只列当前会话的资源，不跨会话、不跨用户）。
+   * 台账本身按时间倒序，这里保持顺序、按路径去重，只留能在浮窗里预览的文件条目。
+   */
+  const previewItems = useMemo<PreviewSwitchItem[]>(() => {
+    const seen = new Set<string>();
+    const out: PreviewSwitchItem[] = [];
+    for (const it of ledger.items) {
+      if (it.kind !== "file") continue;
+      if (it.deleted || it.status === "deleted") continue;
+      const rel = toLedgerRelPath(it.path);
+      if (!rel || seen.has(rel)) continue;
+      seen.add(rel);
+      out.push({
+        path: rel,
+        title: it.title || rel.split("/").pop() || rel,
+        category: categoryOf(rel),
+      });
+    }
+    return out;
+  }, [ledger.items]);
   const [resourcesOpen, setResourcesOpen] = useState(false);
   // 「查看全部」针对的是哪个会话。左栏展开的那一行未必是当前会话，抽屉必须
   // 跟着被点的那一行走，否则显示的是另一个会话的资源（方案 F1）。
@@ -2664,8 +2687,10 @@ export default function ChatPage() {
         <CoApisPreviewDrawer
           target={previewTarget}
           onClose={() => setPreviewTarget(null)}
-          // F1：抽屉锚定聊天主内容区（实测 y=117/h=750），不再铺满整个浏览器窗口
+          // D3=C：预览窗锚定聊天主内容区内的真浮窗（可拖、可缩放），不再铺满整窗
           getContainer={() => mainAreaRef.current ?? document.body}
+          items={previewItems}
+          onSelect={(it) => openPreview({ path: it.path, title: it.title })}
         />
 
         {/* Chat display settings modal */}

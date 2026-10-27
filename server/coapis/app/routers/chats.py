@@ -26,7 +26,7 @@ only access their own chat sessions. Admin users can access all chats.
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Path, Body, Response
 from fastapi.requests import Request
@@ -449,17 +449,40 @@ async def _build_chat_entries(
     request: Request,
     agent_id: str,
     channel: str,
-) -> List[Dict[str, Any]]:
-    """Build the frontend chat list for one agent+channel scope.
+    offset: int = 0,
+    limit: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Build one window of the frontend chat list for an agent+channel scope.
 
-    Shared by ``GET /chats`` (full list) and ``GET /chats/page`` (B5 paged)
-    so the two can never drift in shape, in the ``generating`` flag, or in the
-    stale-status self-healing.
+    Shared by ``GET /chats`` (full list, ``limit=None``) and ``GET /chats/page``
+    (B5 paged) so the two can never drift in shape, in the ``generating`` flag,
+    or in the stale-status self-healing.
 
-    Returns normalized dicts — the exact shape the frontend consumes.
+    Returns ``(entries, total)``: ``entries`` is the requested window of
+    normalized dicts — the exact shape the frontend consumes — and ``total``
+    is the size of the *candidate* set (after agent scoping, before the
+    openability pass), which is what the sidebar needs to know when to stop
+    asking for more pages.
+
+    Two passes on purpose.  Pass 1 is pure in-memory work (scope filter, sort,
+    slice); pass 2 — the per-entry session-snapshot stat and self-healing —
+    runs **only on the window**.  Before that split a 10-row first paint paid
+    the filesystem cost of every chat in the workspace (92 on dev) for ten
+    rows of output.
     """
     cm = await _get_chat_manager(request, agent_id=agent_id)
     chats = await cm.list_chats(channel=channel)
+
+    # ── pass 1: scope → sort → window (cheap, in memory) ──────────
+    candidates = [
+        c
+        for c in chats
+        if _agent_scope_match(getattr(c, "agent_id", "") or "", agent_id)
+    ]
+    scope_dropped = len(chats) - len(candidates)
+    ordered = _sort_chat_specs(candidates)
+    total = len(ordered)
+    window = ordered[offset:] if limit is None else ordered[offset : offset + limit]
 
     # Get generating chat IDs from stream tracking
     generating_chat_ids = set()
@@ -471,13 +494,11 @@ async def _build_chat_entries(
     except Exception:
         pass
 
+    # ── pass 2: expensive per-entry work, window only ─────────────
     username, _ = _get_current_user(request)
     result: List[Dict[str, Any]] = []
     dropped = 0
-    for c in chats:
-        if not _agent_scope_match(getattr(c, "agent_id", "") or "", agent_id):
-            dropped += 1
-            continue
+    for c in window:
         entry = _normalize_chat_spec(c)
         is_generating = c.id in generating_chat_ids
         entry["generating"] = is_generating
@@ -515,36 +536,68 @@ async def _build_chat_entries(
                 )
 
         result.append(entry)
-    if dropped:
+    if dropped or scope_dropped:
         logger.info(
             "Chat list for agent=%s: %d openable entries, %d dropped "
-            "(agent scope / missing session snapshot).",
+            "(%d agent scope / %d missing session snapshot).",
             agent_id or "-",
             len(result),
+            dropped + scope_dropped,
+            scope_dropped,
             dropped,
         )
-    return result
+    return result, total
 
 
-def _chat_entry_time(entry: Dict[str, Any]) -> str:
-    """Sort key: ISO string of last activity (missing timestamps sort last)."""
-    return entry.get("updated_at") or entry.get("created_at") or ""
+def _spec_epoch(spec) -> float:
+    """Sortable activity stamp for a ChatSpec (missing stamps sort last).
+
+    ``updated_at`` is the activity time, so the paging order matches what the
+    sidebar displays.  Sorting on **epoch seconds** and not on the ISO strings:
+    stamps written by different code paths are not guaranteed to share a
+    format (offset, microseconds), and lexicographic order on strings that
+    differ in length puts a shorter timestamp after a longer one.  Naive
+    stamps are read as UTC so aware and naive never meet in a sort.
+    """
+    for attr in ("updated_at", "created_at"):
+        value = getattr(spec, attr, None)
+        if value is None:
+            continue
+        if isinstance(value, datetime):
+            return (
+                value.timestamp()
+                if value.tzinfo
+                else value.replace(tzinfo=timezone.utc).timestamp()
+            )
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            continue
+        return (
+            parsed.timestamp()
+            if parsed.tzinfo
+            else parsed.replace(tzinfo=timezone.utc).timestamp()
+        )
+    return 0.0
 
 
-def _sort_chat_entries(
-    entries: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+def _sort_chat_specs(specs: List[Any]) -> List[Any]:
     """Pinned first, then most-recently-active first.
 
     The sidebar paginates server-side (B5), so the order has to be decided
     *before* the slice — sorting only what the browser already holds would
-    let a pinned chat sit on page 5 forever.
+    let a pinned chat sit on page 5 forever.  Sorting the specs (and not the
+    normalized dicts) is what lets the paged endpoint slice before paying the
+    per-entry filesystem work.
     """
-    pinned = [e for e in entries if e.get("pinned")]
-    rest = [e for e in entries if not e.get("pinned")]
-    pinned.sort(key=_chat_entry_time, reverse=True)
-    rest.sort(key=_chat_entry_time, reverse=True)
-    return pinned + rest
+    return sorted(
+        specs,
+        key=lambda s: (
+            1 if getattr(s, "pinned", False) else 0,
+            _spec_epoch(s),
+        ),
+        reverse=True,
+    )
 
 
 @router.get("/chats")
@@ -586,7 +639,7 @@ async def list_chats(
         )
 
     try:
-        result = await _build_chat_entries(
+        result, _total = await _build_chat_entries(
             request,
             agent_id=resolved_agent_id,
             channel=effective_channel,
@@ -617,11 +670,11 @@ async def list_chats_page(
     request: Request,
     response: Response,
     offset: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(10, ge=1, le=100),
     channel: Optional[str] = Query(None),
     agent_id: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
-    """Paged chat list for the sidebar (B5) — first paint loads 20, not 100.
+    """Paged chat list for the sidebar (B5) — first paint loads 10, not 100.
 
     ``total`` is the size of the whole filtered list, so the caller knows when
     to stop asking for pages. Order is pinned-first then updated_at desc,
@@ -644,10 +697,15 @@ async def list_chats_page(
         )
 
     try:
-        entries = await _build_chat_entries(
+        # Sorting and slicing happen inside the shared builder, on the specs,
+        # so the per-entry filesystem work is paid for ``limit`` rows and not
+        # for the whole workspace.
+        items, total = await _build_chat_entries(
             request,
             agent_id=resolved_agent_id,
             channel=effective_channel,
+            offset=offset,
+            limit=limit,
         )
     except HTTPException:
         raise
@@ -661,10 +719,6 @@ async def list_chats_page(
             status_code=404,
             detail=f"Chat manager not found for agent '{resolved_agent_id}'",
         ) from exc
-
-    ordered = _sort_chat_entries(entries)
-    total = len(ordered)
-    items = ordered[offset : offset + limit]
 
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"

@@ -919,10 +919,13 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         // This prevents duplicate entries caused by mismatched IDs between
         // local cache (timestamp) and backend (UUID).
         // Only preserve the current session's messages if they exist in cache.
+        // F1-3: 不再 .reverse()。后端已按「置顶优先 + updated_at 倒序」排好，
+        // 前端再翻一次会把顺序翻成「置顶最后 + 时间正序」——左栏自带二次排序
+        // 掩盖了差异，台账/搜索弹窗没有二次排序，直接暴露成倒序。两条加载
+        // 路径（全量 / 分页）统一为「后端顺序即显示顺序」。
         const newList = chats
           .filter((c) => c.id && c.id !== "undefined" && c.id !== "null")
-          .map(chatSpecToSession)
-          .reverse();
+          .map(chatSpecToSession);
 
         // Preserve messages from current cache for sessions that have them
         const messagesMap = new Map<string, any[]>();
@@ -997,14 +1000,14 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
    *
    * Pulls ONE page from ``GET /chats/page`` and does not touch the full-list
    * cache (``_sessions`` / ``_lastListResult``) — the sidebar accumulates its
-   * own pages, so the first paint costs 20 rows instead of the whole 100.
+   * own pages, so the first paint costs 10 rows instead of the whole 100.
    *
    * No ``.reverse()`` here: the paged endpoint already returns newest-first
    * (pinned first, then updated_at desc) and slices after sorting.
    */
   async getSessionListPage(
     offset = 0,
-    limit = 20,
+    limit = 10,
   ): Promise<{
     sessions: IAgentScopeRuntimeWebUISession[];
     total: number;
@@ -1012,9 +1015,23 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   }> {
     const userId = window.currentUserId || this.getAuthUserId();
     const channel = window.currentChannel;
-    const agentId = useAgentStore.getState().selectedAgent;
+    let agentId = useAgentStore.getState().selectedAgent;
     if (!userId || !agentId) {
-      return { sessions: [], total: 0, hasMore: false };
+      // 首屏竞态：agent 身份是异步落地的（agentStore 从 localStorage 恢复，
+      // 首登还要过 listAgents 兜底）。这里直接返回空 = 左栏在身份落地之前一直是
+      // 空的，用户看到的就是"刷新很慢/今天没有会话"。所以像 createSession 一样
+      // 短暂等它，最多 2s；等不到才认输，并留下日志——空列表不再是静默失败。
+      for (let i = 0; i < 20 && (!userId || !agentId); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        agentId = useAgentStore.getState().selectedAgent;
+      }
+      if (!userId || !agentId) {
+        console.warn(
+          "[sessionApi] getSessionListPage: 身份未就绪，返回空列表",
+          { userId, agentId },
+        );
+        return { sessions: [], total: 0, hasMore: false };
+      }
     }
 
     const page = await api.listChatsPage({

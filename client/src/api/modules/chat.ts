@@ -188,7 +188,7 @@ export const chatApi = {
   }) => {
     const searchParams = new URLSearchParams();
     searchParams.append("offset", String(params.offset ?? 0));
-    searchParams.append("limit", String(params.limit ?? 20));
+    searchParams.append("limit", String(params.limit ?? 10));
     if (params.channel) searchParams.append("channel", params.channel);
     if (params.agent_id) searchParams.append("agent_id", params.agent_id);
     const headers: Record<string, string> = {};

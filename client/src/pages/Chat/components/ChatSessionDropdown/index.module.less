@@ -116,6 +116,65 @@
 }
 
 /* Background loading indicator */
+/* F2-3 骨架屏：首屏取数期间给出「正在加载」的形状，和「真没有会话」区分开。
+   之前是一个居中的 Spin 把整块列表换成空白转圈——用户读不出「在加载」还是
+   「今天没有会话」。骨架行与真实行同高，加载完成不跳版。 */
+.skeletonList {
+  padding: 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skeletonRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px;
+}
+
+.skeletonDot,
+.skeletonBar {
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.05) 25%,
+    rgba(0, 0, 0, 0.11) 37%,
+    rgba(0, 0, 0, 0.05) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeletonShimmer 1.2s ease-in-out infinite;
+}
+
+.skeletonDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.skeletonBar {
+  height: 10px;
+  flex: 0 1 auto;
+}
+
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonDot,
+  .skeletonBar {
+    animation: none;
+  }
+}
+
 /* One row of the list: the session item plus the resource panel that belongs
    to it. Stacking them keeps the panel attached to the item box instead of
    floating as a detached sibling. */
@@ -248,6 +307,33 @@
   user-select: none;
 }
 
+/* 左栏"加载更多"：分页的显式把手。触底自动加载仍在（列表长时省事），
+   但列表很短时触底条件永远不满足——没有这个按钮，剩下的会话就再也出不来。 */
+.loadMoreBtn {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.02);
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 20px;
+  padding: 2px 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+
+  &:hover {
+    border-color: var(--colorPrimary, #ff7f16);
+    color: var(--colorPrimary, #ff7f16);
+  }
+}
+
+.pageCount {
+  margin-left: 8px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.35);
+}
+
 :global(.dark) {
   .expandCaret {
     color: rgba(255, 255, 255, 0.45);
@@ -260,5 +346,20 @@
 
   .pageFooter {
     color: rgba(255, 255, 255, 0.45);
+  }
+
+  .loadMoreBtn {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+
+    &:hover {
+      border-color: var(--colorPrimary, #ff7f16);
+      color: var(--colorPrimary, #ff7f16);
+    }
+  }
+
+  .pageCount {
+    color: rgba(255, 255, 255, 0.35);
   }
 }

@@ -37,6 +37,21 @@ def _read(rel: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _shows_all(src: str) -> bool:
+    """「查看全部」是否接上抽屉开关。
+
+    抽屉按 D3（浮层可关）改成了**开/关切换** `setResourcesOpen((v) => !v)`，
+    字面量 `setResourcesOpen(true)` 已不存在。守卫要锁的是「接上了开关」这件事，
+    不是某个具体写法，故两种形态都算通过。
+    """
+    return bool(
+        re.search(
+            r"onShowAll=\{\(\)\s*=>\s*setResourcesOpen\((?:true|\(v\)\s*=>\s*!v)\)\}",
+            src,
+        ),
+    )
+
+
 def _code_only(src: str) -> str:
     """剥掉注释后再做词表断言。
 
@@ -63,7 +78,7 @@ def test_resource_bar_mounted_above_input():
     src = _read("pages/Chat/index.tsx")
     assert "CoApisChatResourceBar" in src, "资源条组件未导入"
     assert "<CoApisChatResourceBar" in src, "资源条组件未挂载"
-    assert "onShowAll={() => setResourcesOpen(true)}" in src, "资源条未接「查看全部」→ L3"
+    assert _shows_all(src), "资源条未接「查看全部」→ L3"
 
 
 def test_producer_card_merged_into_resource_bar():
@@ -128,7 +143,7 @@ def test_l3_entry_from_sidebar():
     assert "open={resourcesOpen}" in chat, "L3 抽屉未接上抽屉开关"
 
     chat = _read("pages/Chat/index.tsx")
-    assert "onShowAll={() => setResourcesOpen(true)}" in chat, "左栏「查看全部」未接抽屉"
+    assert _shows_all(chat), "左栏「查看全部」未接抽屉"
 
     # 折叠态只留展开按钮：D2 明确「左栏顶部不放资源入口」，D3 明确顶栏不得有资源按钮，
     # 收起左栏等于收起整条会话列表，资源入口跟着收起是设计本意，不是缺陷。

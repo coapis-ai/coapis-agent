@@ -1,76 +1,285 @@
-/* 预览抽屉（L3）样式。
+/**
+ * 会话资源预览「真浮窗」（D3=C）。
  *
- * 前缀说明（重要）：App.tsx 用 ConfigProvider prefixCls="coapis" 覆盖了 antd
- * 默认前缀，抽屉真实类名是 `.coapis-drawer-*` 而不是 `.ant-drawer-*`。穿透
- * antd 内部一律走 `:global(.coapis-drawer-*)`，与 layouts/index.module.less 里
- * `:global(.coapis-modal-content)` 同一写法；写成 `.ant-drawer-*` 不会命中。
+ * 旧版是 antd Drawer：贴右缘、只有左缘一条把手能拖宽，且头部/内容/底部全靠
+ * 全局 .ant-drawer-body 兜着 —— 用户反馈「实现只有可以拖动左边框」「顶部布局
+ * 很乱」。这里换成挂在主内容区里的绝对定位浮窗，自己定义头部/内容/底部三段，
+ * 四边四角都能拖。
  *
- * 抽屉已改为挂在聊天主内容区（getContainer），高度=主内容区高度，不铺满浏览器。
+ * 内容类（md/code/image/iframe/path/truncated/mdbar/icon）此前**从未在 LESS
+ * 里定义**（组件里引用了 8 个），markdown 表格、代码块、图片全是浏览器默认
+ * 样式在裸奔，一并补齐。
  */
 
-.coapis-preview-drawer {
-  // rootClassName 就挂在抽屉根节点上：双类名（0,2,0）压过 antd 的
-  // `.coapis-drawer { position: fixed; inset: 0 }`（0,1,0），抽屉落在容器内。
-  &:global(.coapis-drawer) {
-    position: absolute;
+@handle: 7px;
+@corner: 14px;
+@hairline: 1px solid var(--color-border-secondary, rgba(0, 0, 0, 0.06));
+
+.coapis-preview-win {
+  position: absolute;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 340px;
+  min-height: 260px;
+  background: var(--color-bg-container, #fff);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+/* ── 缩放把手：四边 + 四角 ──────────────────────────────────────── */
+
+.rz-n,
+.rz-s,
+.rz-e,
+.rz-w,
+.rz-ne,
+.rz-nw,
+.rz-se,
+.rz-sw {
+  position: absolute;
+  z-index: 3;
+}
+
+.rz-n,
+.rz-s {
+  left: @corner;
+  right: @corner;
+  height: @handle;
+  cursor: ns-resize;
+}
+
+.rz-e,
+.rz-w {
+  top: @corner;
+  bottom: @corner;
+  width: @handle;
+  cursor: ew-resize;
+}
+
+.rz-n {
+  top: 0;
+}
+
+.rz-s {
+  bottom: 0;
+}
+
+.rz-w {
+  left: 0;
+}
+
+.rz-e {
+  right: 0;
+}
+
+.rz-ne,
+.rz-nw,
+.rz-se,
+.rz-sw {
+  width: @corner;
+  height: @corner;
+}
+
+.rz-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.rz-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+
+.rz-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.rz-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+/* ── 头部：图标 + 会话内切换器 + 下载 + 铺满 + 关闭（D1-补：只有一个关闭） ── */
+
+.coapis-preview-win-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: @hairline;
+  user-select: none;
+}
+
+.coapis-preview-icon {
+  flex: none;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.45));
+}
+
+.coapis-preview-head-title {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 切换器宽度自适应头部，超长文件名省略号（title 属性给全路径） */
+.coapis-preview-switch {
+  width: 100%;
+  min-width: 0;
+}
+
+.coapis-preview-switch :global(.ant-select-selection-item) {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.coapis-preview-head-spacer {
+  flex: 0 0 4px;
+}
+
+/* 下拉里显示全路径，别截断成看不出的短名 */
+.coapis-preview-switch-dd :global(.ant-select-item-option-content) {
+  white-space: normal;
+  word-break: break-all;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ── md 原文/渲染切换条 ─────────────────────────────────────────── */
+
+.coapis-preview-mdbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-bottom: @hairline;
+}
+
+/* ── 内容区：Spin 包一层也要能撑满并自己滚动 ─────────────────────── */
+
+.coapis-preview-spin {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.coapis-preview-spin :global(.ant-spin-container) {
+  height: 100%;
+}
+
+.coapis-preview-win-body {
+  height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 12px 16px;
+}
+
+/* ── 内容样式（此前未定义 → 裸奔） ──────────────────────────────── */
+
+.coapis-preview-md {
+  font-size: 14px;
+  line-height: 1.7;
+  word-break: break-word;
+
+  :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
   }
 
-  :global(.coapis-drawer-content-wrapper) {
+  :global(th),
+  :global(td) {
+    border: 1px solid var(--color-border-secondary, #eaeaea);
+    padding: 4px 8px;
+  }
+
+  :global(pre) {
+    overflow: auto;
+    padding: 8px;
+    border-radius: 6px;
+    background: var(--color-fill-tertiary, rgba(0, 0, 0, 0.04));
+  }
+
+  :global(pre code) {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  :global(img) {
     max-width: 100%;
-  }
-
-  // 头部：标题 + 更多(⋯) + 关闭，窄屏不挤爆
-  :global(.coapis-drawer-header) {
-    padding: 10px 12px;
-    align-items: flex-start;
-  }
-
-  // 正文：padding 归零，由内部块自己控制
-  :global(.coapis-drawer-body) {
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  // Spin 的中间层（nested-loading > container）默认是普通块级元素，不给它
-  // flex:1 的话正文只按内容高度收缩，下方留大片空白。
-  :global(.coapis-drawer-body) > :global(.coapis-spin-nested-loading) {
-    flex: 1;
-    min-height: 0;
-
-    > :global(.coapis-spin-container) {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-    }
-  }
-
-  // 左缘拖拽调宽
-  .coapis-preview-resize-handle {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 6px;
-    height: 100%;
-    cursor: col-resize;
-    z-index: 10;
-    background: transparent;
-    transition: background 0.15s ease;
-
-    &:hover {
-      background: rgba(22, 119, 255, 0.18);
-    }
-  }
-
-  // 拖拽中：禁用抽屉的宽度过渡动画，跟手
-  &:global(.coapis-drawer) .coapis-preview-drawer-dragging {
-    transition: none !important;
   }
 }
 
-@media (max-width: 768px) {
-  .coapis-preview-resize-handle {
-    display: none;
+.coapis-preview-code {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+}
+
+.coapis-preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.coapis-preview-iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  border: 0;
+}
+
+.coapis-preview-truncated {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: #d48806;
+  font-size: 12px;
+}
+
+/* ── 底部：路径 + 定位 + 复制直链 ───────────────────────────────── */
+
+.coapis-preview-win-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-top: @hairline;
+}
+
+.coapis-preview-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ── 窄屏/企微内嵌：占满宿主，无把手无拖拽 ──────────────────────── */
+
+:global(html[data-mobile="true"]),
+:global(body.coapis-embedded) {
+  .coapis-preview-win {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 }
