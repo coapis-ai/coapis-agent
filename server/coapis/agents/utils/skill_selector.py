@@ -244,12 +244,64 @@ class SkillSelector:
         the message are selected ahead of everything else. ``top_k`` caps the
         result for callers that want a smaller set than the configured maximum.
         """
+        prepared = self._prepare_selection(user_message, scene_skills)
+        if prepared is None:
+            return list(self.always_load_skills)
+        scene_names, selected = prepared
+
+        # Stage 2: LLM classification (only if keyword didn't match)
+        if not selected and self.config.get("enable_llm_fallback", True):
+            llm_matched = self._llm_classify_sync(
+                user_message, self._llm_candidates(scene_names),
+            )
+            if llm_matched:
+                selected.extend(llm_matched)
+                logger.debug("LLM matched skills: %s", llm_matched)
+
+        return self._finalize_selection(selected, top_k)
+
+    async def select_async(
+        self,
+        user_message: str,
+        scene_skills: list[str] | None = None,
+        top_k: int | None = None,
+    ) -> list[str]:
+        """异步入口（第0批 F1）：Stage 2 兜底判 **await 直连**。
+
+        ``select()`` 在已有事件循环的上下文里无法 await，只能告警跳过；
+        异步调用链（reply() 等）应使用本方法，兜底判不再静默失效。
+        """
+        prepared = self._prepare_selection(user_message, scene_skills)
+        if prepared is None:
+            return list(self.always_load_skills)
+        scene_names, selected = prepared
+
+        if not selected and self.config.get("enable_llm_fallback", True):
+            llm_matched = await self._llm_classify(
+                user_message, self._llm_candidates(scene_names),
+            )
+            if llm_matched:
+                selected.extend(llm_matched)
+                logger.debug("LLM matched skills: %s", llm_matched)
+
+        return self._finalize_selection(selected, top_k)
+
+    def _prepare_selection(
+        self,
+        user_message: str,
+        scene_skills: list[str] | None,
+    ) -> tuple[list[str], list[str]] | None:
+        """Stage 0（场景优先）+ Stage 1（关键词）。
+
+        Returns ``(scene_names, selected)``; ``None`` when there is nothing
+        to select from (index not built / empty message).
+        """
         if not self._built:
             logger.warning("SkillSelector index not built, returning always_load only")
-            return list(self.always_load_skills)
+            return None
 
         if not user_message or not user_message.strip():
-            return list(self.always_load_skills)
+            return None
 
         scene_names = list(scene_skills) if scene_skills is not None else self.scene_skills
         selected: list[str] = []
@@ -269,20 +321,21 @@ class SkillSelector:
             selected.extend(keyword_matched)
             logger.debug("Keyword matched skills: %s", keyword_matched)
 
-        # Stage 2: LLM classification (only if keyword didn't match)
-        if not selected and self.config.get("enable_llm_fallback", True):
-            # When keywords found nothing, restrict LLM candidates to the scene
-            # skill set — the scene config is the best prior we have.
-            llm_candidates = (
-                [n for n in scene_names if n in self.skill_meta]
-                if scene_names else None
-            )
-            llm_matched = self._llm_classify_sync(user_message, llm_candidates)
-            if llm_matched:
-                selected.extend(llm_matched)
-                logger.debug("LLM matched skills: %s", llm_matched)
+        return scene_names, selected
 
-        # Stage 3: Fallback to always_load
+    def _llm_candidates(self, scene_names: list[str]) -> list[str] | None:
+        """When keywords found nothing, restrict LLM candidates to the scene
+        skill set — the scene config is the best prior we have."""
+        if scene_names:
+            return [n for n in scene_names if n in self.skill_meta]
+        return None
+
+    def _finalize_selection(
+        self,
+        selected: list[str],
+        top_k: int | None,
+    ) -> list[str]:
+        """Stage 3（always_load 兜底）+ 去重 + 上限截断。"""
         if not selected:
             selected = list(self.always_load_skills)
             logger.debug("No match, using always_load: %s", selected)
@@ -436,19 +489,24 @@ class SkillSelector:
         """Stage 1: Weighted keyword matching, scene skills boosted."""
         return self.keyword_match_weighted(message, scene_skills)
 
-    def _llm_classify_sync(
-        self,
-        message: str,
-        candidates: "dict[str, dict] | list[str] | None" = None,
-    ) -> list[str]:
-        """Stage 2: LLM intent classification (synchronous wrapper).
+    def _llm_timeout_s(self) -> float:
+        """兜底判超时（秒），来自 ``llm_timeout_ms``，默认 3s。"""
+        try:
+            return max(0.5, float(self.config.get("llm_timeout_ms", 3000)) / 1000.0)
+        except (TypeError, ValueError):
+            return 3.0
 
-        ``candidates`` restricts the LLM to a specific skill set — used for
+    def _llm_summaries(
+        self,
+        candidates: "dict[str, dict] | list[str] | None" = None,
+    ) -> dict[str, str]:
+        """Build skill summaries for the LLM classifier.
+
+        ``candidates`` restricts the pool to a specific skill set — used for
         scene-priority matching (S2.3) so the LLM only picks among the scene's
         declared skills. Accepts a name list or a metadata dict.
         """
-        # Build skill summaries for LLM
-        skill_summaries = {}
+        skill_summaries: dict[str, str] = {}
         if isinstance(candidates, list):
             pool = {n: self.skill_meta[n] for n in candidates if n in self.skill_meta}
         else:
@@ -463,24 +521,67 @@ class SkillSelector:
                 skill_summaries[name] = f"{desc} ||| {hints}"
             else:
                 skill_summaries[name] = desc
+        return skill_summaries
 
+    async def _llm_classify(
+        self,
+        message: str,
+        candidates: "dict[str, dict] | list[str] | None" = None,
+    ) -> list[str]:
+        """Stage 2 兜底判（异步原生，第0批 F1）。
+
+        超时/异常均返回 ``[]`` 并在日志留痕——不再静默吞掉。
+        """
+        import asyncio
+
+        skill_summaries = self._llm_summaries(candidates)
+        if not skill_summaries:
+            logger.debug("LLM classification skipped: no skill summaries")
+            return []
+
+        timeout = self._llm_timeout_s()
+        try:
+            from .intent_classifier import classify_intent_llm
+
+            result = await asyncio.wait_for(
+                classify_intent_llm(message, skill_summaries, timeout=timeout),
+                timeout=timeout + 1.0,
+            )
+            if result:
+                logger.info("LLM classified skills: %s", result)
+            return result or []
+        except asyncio.TimeoutError:
+            logger.warning("LLM classification timed out (>%.1fs)", timeout)
+            return []
+        except Exception as e:
+            logger.warning("LLM classification failed: %s", e)
+            return []
+
+    def _llm_classify_sync(
+        self,
+        message: str,
+        candidates: "dict[str, dict] | list[str] | None" = None,
+    ) -> list[str]:
+        """Stage 2 兜底判的**同步**入口（仅适用于没有事件循环的上下文）。
+
+        第0批 F1：删除「检测到事件循环就静默 ``return []``」的死分支。
+        异步调用链请改用 ``select_async()`` / ``_llm_classify()``；真的落在
+        事件循环内时明确 WARNING 留痕，不再无声失效。
+        """
+        import asyncio
+
+        skill_summaries = self._llm_summaries(candidates)
         if not skill_summaries:
             return []
 
         try:
             from .intent_classifier import classify_intent_llm
-            import asyncio
 
-            # Check if there's a running event loop
             try:
-                loop = asyncio.get_running_loop()
-                # We're in an async context, schedule as task
-                # This shouldn't happen in reply() flow, but handle it
-                logger.debug("Skipping LLM classification (in async context)")
-                return []
+                asyncio.get_running_loop()
             except RuntimeError:
                 # No running loop, safe to use asyncio.run()
-                timeout = self.config.get("llm_timeout_ms", 3000) / 1000.0
+                timeout = self._llm_timeout_s()
                 result = asyncio.run(
                     classify_intent_llm(message, skill_summaries, timeout=timeout)
                 )
@@ -488,8 +589,14 @@ class SkillSelector:
                     logger.info("LLM classified skills: %s", result)
                 return result or []
 
+            logger.warning(
+                "LLM 兜底判经同步入口调用但当前处于事件循环内，本次跳过；"
+                "异步调用链请使用 SkillSelector.select_async()/_llm_classify()。"
+            )
+            return []
+
         except Exception as e:
-            logger.debug("LLM classification failed: %s", e)
+            logger.warning("LLM classification failed: %s", e)
             return []
 
     def get_skill_dir(self, skill_name: str) -> str | None:

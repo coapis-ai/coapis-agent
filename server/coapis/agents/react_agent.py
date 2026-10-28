@@ -1883,12 +1883,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         )
         return True
 
-    def _load_on_demand_skills(self, user_message: str) -> None:
+    async def _load_on_demand_skills(self, user_message: str) -> None:
         """Load on-demand skills matching user intent.
 
-        Two-phase keyword-first strategy (no LLM round-trip needed):
+        Two-phase keyword-first strategy:
         Phase 1: Keyword matching via IntentClassifier (instant, zero cost)
-        Phase 2: LLM classification only if Phase 1 found nothing (best-effort)
+        Phase 2: LLM classification only if Phase 1 found nothing — 第0批 F3:
+                 异步原生 await（不再用线程池/嵌套事件循环），带超时硬限，
+                 超时/异常均保留关键词结果并留痕。
 
         All skills pass through security scanning before registration.
         Unsafe skills are blocked per the configured scan mode.
@@ -1976,7 +1978,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             if not _scene_candidates:
                 # 无场景声明时退回全池，保持原有行为
                 _scene_candidates = None
-            llm_matched_names = self._llm_classify_skills(
+            llm_matched_names = await self._llm_classify_skills(
                 user_message, restrict_names=_scene_candidates,
             )
             logger.info(
@@ -2092,17 +2094,31 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         else:
             logger.info("[TriggerDebug] No on-demand skills loaded for this message")
 
-    def _llm_classify_skills(
+    def _skill_llm_timeout_s(self) -> float:
+        """兜底判超时（秒），来自 skill 触发配置 ``llm_timeout_ms``，默认 3s。"""
+        cfg = getattr(self._skill_selector, "config", None) or {}
+        try:
+            return max(0.5, float(cfg.get("llm_timeout_ms", 3000)) / 1000.0)
+        except (TypeError, ValueError):
+            return 3.0
+
+    async def _llm_classify_skills(
         self,
         user_message: str,
         restrict_names: list[str] | None = None,
     ) -> list[str]:
-        """Try LLM-based intent classification. Returns matching skill names.
+        """Phase 2 兜底判：LLM 意图分类（异步原生）。返回命中的技能名。
 
         ``restrict_names`` narrows the candidate set — used for scene priority
         (S2.3): when keywords found nothing, the LLM only considers the skills
         the scene declares, which is a far better prior than the whole pool.
+
+        第0批 F2：删除「线程池 + asyncio.run 嵌套事件循环」兜底。本方法在
+        reply() 的异步调用链内被 await，不存在同步调异步的问题；超时硬限由
+        ``_skill_llm_timeout_s()`` 控制，超时即放弃并留痕，不阻塞主流程。
         """
+        import asyncio
+
         try:
             from .utils.intent_classifier import classify_intent_llm
             # Build skill summaries for the classifier, including intent_hints
@@ -2121,24 +2137,24 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 else:
                     summaries[name] = summary
             if not summaries:
+                logger.debug("[TriggerDebug] LLM fallback skipped: no candidate summaries")
                 return []
-            # Note: classify_intent_llm is async, but _load_on_demand_skills is sync.
-            # Use asyncio.run in a thread-safe way for the lightweight call.
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                # We're already in an async context, create a task
-                # But since this is called from reply() which is sync,
-                # we need to handle differently
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(asyncio.run, classify_intent_llm(user_message, summaries, timeout=3.0))
-                    result = future.result(timeout=5.0)
-            except RuntimeError:
-                result = asyncio.run(classify_intent_llm(user_message, summaries, timeout=3.0))
+            timeout = self._skill_llm_timeout_s()
+            result = await asyncio.wait_for(
+                classify_intent_llm(user_message, summaries, timeout=timeout),
+                timeout=timeout + 1.0,
+            )
+            if result:
+                logger.info("[TriggerDebug] LLM fallback matched: %s", result)
             return result if result else []
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[TriggerDebug] LLM fallback timed out (>%.1fs), keyword result kept",
+                self._skill_llm_timeout_s(),
+            )
+            return []
         except Exception as e:
-            logger.debug("LLM skill classification skipped: %s", e)
+            logger.warning("[TriggerDebug] LLM fallback skipped: %s", e)
             return []
 
     # ── Global auto-assist: detect uncertainty, consult global knowledge ──
@@ -4272,7 +4288,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # Intent-based skill loading: load on-demand skills matching user message
         if query:
-            self._load_on_demand_skills(query)
+            await self._load_on_demand_skills(query)
 
         # ── Hook: POST_DISPATCH ──
         try:
