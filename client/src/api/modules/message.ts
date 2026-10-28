@@ -5,14 +5,14 @@ import type { MessageStats, MessageCategoryStat, MessageListQuery, MessageListRe
 
 export const messageService = {
   getStats: async (): Promise<MessageStats> => {
-    return request.get('/api/ent/messages/stats');
+    return request.get('/ent/messages/stats');
   },
 
   getCategoryStats: async (): Promise<MessageCategoryStat[]> => {
-    return request.get('/api/ent/messages/categories/stats');
+    return request.get('/ent/messages/categories/stats');
   },
 
   getList: async (query: MessageListQuery): Promise<MessageListResponse> => {
-    return request.post('/api/ent/messages/list', query);
+    return request.post('/ent/messages/list', query);
   }
 };

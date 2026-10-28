@@ -740,13 +740,13 @@ export const skillApi = {
     }>,
 
   approvePromotion: (skillName: string) =>
-    request(`/api/skills/promotion/${encodeURIComponent(skillName)}/approve`, { method: "POST" }) as Promise<{
+    request(`/skills/promotion/${encodeURIComponent(skillName)}/approve`, { method: "POST" }) as Promise<{
       success: boolean;
       candidate: Record<string, unknown>;
     }>,
 
   rejectPromotion: (skillName: string) =>
-    request(`/api/skills/promotion/${encodeURIComponent(skillName)}/reject`, { method: "POST" }) as Promise<{
+    request(`/skills/promotion/${encodeURIComponent(skillName)}/reject`, { method: "POST" }) as Promise<{
       success: boolean;
       candidate: Record<string, unknown>;
     }>,
@@ -766,7 +766,7 @@ export const skillApi = {
     }>,
 
   getTriggerAggregation: (skillName: string) =>
-    request(`/api/skills/cross-agent/trigger-aggregation/${encodeURIComponent(skillName)}`) as Promise<{
+    request(`/skills/cross-agent/trigger-aggregation/${encodeURIComponent(skillName)}`) as Promise<{
       skill_name: string;
       aggregation: Array<{
         keyword: string;
@@ -784,26 +784,26 @@ export const skillApi = {
 
   getSkillSuggestions: (params?: { skill_name?: string; status?: string }) => {
     const qs = params ? "?" + new URLSearchParams(params as Record<string, string>).toString() : "";
-    return request(`/api/skills/suggestions${qs}`) as Promise<{
+    return request(`/skills/suggestions${qs}`) as Promise<{
       suggestions: Array<Record<string, unknown>>;
       total: number;
     }>;
   },
 
   approveSuggestion: (suggestionId: string) =>
-    request(`/api/skills/suggestions/${encodeURIComponent(suggestionId)}/approve`, { method: "POST" }) as Promise<{
+    request(`/skills/suggestions/${encodeURIComponent(suggestionId)}/approve`, { method: "POST" }) as Promise<{
       success: boolean;
       suggestion: Record<string, unknown>;
     }>,
 
   rejectSuggestion: (suggestionId: string) =>
-    request(`/api/skills/suggestions/${encodeURIComponent(suggestionId)}/reject`, { method: "POST" }) as Promise<{
+    request(`/skills/suggestions/${encodeURIComponent(suggestionId)}/reject`, { method: "POST" }) as Promise<{
       success: boolean;
       suggestion: Record<string, unknown>;
     }>,
 
   analyzeSkillIssues: (skillName: string) =>
-    request(`/api/skills/${encodeURIComponent(skillName)}/improve/analyze`) as Promise<{
+    request(`/skills/${encodeURIComponent(skillName)}/improve/analyze`) as Promise<{
       skill_name: string;
       trigger_issues: Record<string, unknown>;
       content_issues: Record<string, unknown>;
@@ -811,7 +811,7 @@ export const skillApi = {
     }>,
 
   generateSkillSuggestion: (skillName: string, body?: Record<string, unknown>) =>
-    request(`/api/skills/${encodeURIComponent(skillName)}/improve/suggest`, {
+    request(`/skills/${encodeURIComponent(skillName)}/improve/suggest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
