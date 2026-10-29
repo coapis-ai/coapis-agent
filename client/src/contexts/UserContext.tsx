@@ -17,6 +17,8 @@ interface User {
 interface UserPreferences {
   theme?: string;
   language?: string;
+  /** 一期 U2：时区按用户取；缺省 = 跟随全局配置 */
+  timezone?: string;
   sidebar_collapsed?: number;
   /** 后端 GET /user/preferences 实际返回的嵌套结构 */
   chat_display?: {

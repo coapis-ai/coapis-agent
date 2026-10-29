@@ -30,6 +30,7 @@ Design notes — this is a *base capability*, so it is deliberately strict:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import subprocess
@@ -709,24 +710,7 @@ async def _paginated_read(
         }
 
 
-@register_tool(
-    name="doc_reader",
-    description=(
-        "多格式文档解析：PDF/DOCX/PPTX/XLSX/CSV/文本 → 结构化文本。"
-        "路径可用绝对路径、files/ 相对路径或 /media/ 形式；"
-        "老格式 .doc/.xls/.ppt 不支持，请先转成 .docx/.xlsx/.pptx。"
-    ),
-    category="builtin",
-    tags=["file", "reader", "document", "office"],
-    dependencies=[
-        {"name": "python-docx", "manager": "pip", "required": False, "reason": "DOCX 解析"},
-        {"name": "python-pptx", "manager": "pip", "required": False, "reason": "PPTX 解析"},
-        {"name": "openpyxl", "manager": "pip", "required": False, "reason": "XLSX 解析"},
-        {"name": "pymupdf4llm", "manager": "pip", "required": False, "reason": "PDF 解析"},
-        {"name": "markitdown", "manager": "pip", "required": False, "reason": "文档解析兜底"},
-    ],
-)
-async def doc_reader(
+async def _doc_reader_core(
     action: str = "read",
     file_path: str = "",
     content: str = "",
@@ -1001,3 +985,118 @@ async def doc_reader(
             ),
         }
     return out
+
+
+# ---------------------------------------------------------------------------
+# 解析台账（一期 A1）：解析结果不再跑完就蒸发
+#
+# 解析此前只进日志——成功/失败/超时/超阈值/降级方式台账一概不知，
+# 于是「附件到底读没读通」无法成为计划闸门（P1）的输入，智能体只能
+# 盲猜。这里用一层薄包装把每次解析钉进文件台账，核心逻辑一行未动。
+# ---------------------------------------------------------------------------
+
+
+def _ledger_username():
+    """台账归属用的用户名。
+
+    用户名有三个 ContextVar 仓库，生产里只有两个真的被绑：
+    ``config.session_context``（runner 绑）和 ``app.agent_context``
+    （workspace 绑）；``config.context`` 那个没有任何地方 set，读它
+    恒为 None —— 台账写下去没有归属，A1 等于没做。所以按前两个取，
+    与 A5/A6 的取法保持一致。
+    """
+    try:
+        from coapis.config.session_context import get_current_username
+        name = get_current_username()
+    except Exception:  # pragma: no cover - 仓库缺失
+        name = None
+    if not name:
+        try:
+            from coapis.app.agent_context import get_current_username as _ac
+            name = _ac()
+        except Exception:  # pragma: no cover - 仓库缺失
+            name = None
+    return name
+
+
+def _record_parse_ledger(args: tuple, kwargs: dict, result) -> None:
+    """把一次解析的结果写进文件台账。永不抛异常，绝不影响读取。"""
+    try:
+        if not isinstance(result, dict):
+            return
+        action = kwargs.get("action")
+        if action is None:
+            action = args[0] if args else "read"
+        if action != "read":
+            return  # formats/detect 不产生解析事实
+        if kwargs.get("content"):
+            return  # 直接喂内容，没有文件可记
+        path = kwargs.get("file_path")
+        if path is None and len(args) > 1:
+            path = args[1]
+        target = result.get("file") or path
+        if not target:
+            return
+        err = str(result.get("error") or "")
+        mode = str(result.get("mode") or "full")
+        if err:
+            status = "timeout" if "超时" in err else "fail"
+        elif result.get("truncated") or mode != "full":
+            status = "degraded"  # 内容可用但不是全文
+        else:
+            status = "ok"
+        chars = int(
+            result.get("returned_chars")
+            or len(str(result.get("content") or ""))
+            or 0
+        )
+        method = f"{mode}/{result.get('format') or 'unknown'}"
+        # 延迟导入：台账/上下文属基础设施，模块级导入易撞循环
+        from coapis.config.session_context import (
+            get_current_agent_id,
+            get_current_chat_id,
+        )
+        from coapis.foundation.file_ledger import record_parse_event
+
+        record_parse_event(
+            _ledger_username(),
+            str(target),
+            status=status,
+            chars=chars,
+            method=method,
+            chat_id=get_current_chat_id(),
+            agent_id=get_current_agent_id(),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("doc_reader parse ledger skipped: %s", exc)
+
+
+@register_tool(
+    name="doc_reader",
+    description=(
+        "多格式文档解析：PDF/DOCX/PPTX/XLSX/CSV/文本 → 结构化文本。"
+        "路径可用绝对路径、files/ 相对路径或 /media/ 形式；"
+        "老格式 .doc/.xls/.ppt 不支持，请先转成 .docx/.xlsx/.pptx。"
+    ),
+    category="builtin",
+    tags=["file", "reader", "document", "office"],
+    dependencies=[
+        {"name": "python-docx", "manager": "pip", "required": False, "reason": "DOCX 解析"},
+        {"name": "python-pptx", "manager": "pip", "required": False, "reason": "PPTX 解析"},
+        {"name": "openpyxl", "manager": "pip", "required": False, "reason": "XLSX 解析"},
+        {"name": "pymupdf4llm", "manager": "pip", "required": False, "reason": "PDF 解析"},
+        {"name": "markitdown", "manager": "pip", "required": False, "reason": "文档解析兜底"},
+    ],
+)
+async def doc_reader(*args, **kwargs) -> dict:
+    """多格式文档解析（带解析台账）；核心实现见 ``_doc_reader_core``。"""
+    result = await _doc_reader_core(*args, **kwargs)
+    _record_parse_ledger(args, kwargs, result)
+    return result
+
+
+# 工具注册看 __name__、schema 看签名：包装层必须对外长得和核心一样。
+# 用 __signature__/__wrapped__ 而不是 functools.wraps——wraps 会把
+# __name__ 也改成核心函数名，注册表的名字一致性检查当场就红。
+doc_reader.__signature__ = inspect.signature(_doc_reader_core)
+doc_reader.__wrapped__ = _doc_reader_core

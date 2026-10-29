@@ -45,12 +45,47 @@ from ...config import load_config
 logger = logging.getLogger(__name__)
 
 
+def _effective_timezone(user_id: str | None = None) -> str:
+    """一期 U2：时区按用户取，全局配置只作兜底。
+
+    此前时间上下文只认全局 ``user_timezone``，跨时区团队里所有人的
+    "今天" 都按同一个时区算。用户偏好里存了 ``timezone`` 就用它，
+    没存、值非法、或读取失败一律回到全局配置——绝不因取时区把环境
+    上下文搞崩。
+    """
+    fallback = (load_config().user_timezone or "UTC").strip() or "UTC"
+    if not user_id:
+        return fallback
+    try:
+        from ...user_system.database import UserSystemDB
+
+        row = UserSystemDB().get_user_preferences(str(user_id)) or {}
+        # 偏好仓储返回**已摊平**的字典：settings 里的键直接铺在顶层，
+        # 另附 username/updated_at。只认嵌套的 "settings" 会让用户时区
+        # 静默失效（永远回退全局），因此两种形状都要认。
+        settings = row.get("settings")
+        if isinstance(settings, str):
+            settings = json.loads(settings or "{}")
+        if not isinstance(settings, dict):
+            settings = row
+        tz = str(settings.get("timezone") or "").strip()
+        if not tz:
+            return fallback
+        ZoneInfo(tz)  # 非法时区名直接回到兜底
+        return tz
+    except Exception:  # pragma: no cover - 兜底路径
+        return fallback
+
+
 def build_env_context(
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
     channel: Optional[str] = None,
     working_dir: Optional[str] = None,
     add_hint: bool = True,
+    user_name: Optional[str] = None,
+    user_role: Optional[str] = None,
+    agent_id: Optional[str] = None,
 ) -> str:
     """
     Build environment context with current request context prepended.
@@ -61,11 +96,14 @@ def build_env_context(
         channel: Current channel name
         working_dir: Working directory path
         add_hint: Whether to add hint context
+        user_name: 说话人的显示名（U2 身份提示，可空）
+        user_role: 说话人角色，如 admin / member（U2，可空）
+        agent_id: 本次服务的智能体（U2 所属智能体，可空）
     Returns:
         Formatted environment context string
     """
     parts = []
-    user_tz = load_config().user_timezone or "UTC"
+    user_tz = _effective_timezone(user_id)
     try:
         now = datetime.now(ZoneInfo(user_tz))
     except (ZoneInfoNotFoundError, KeyError):
@@ -76,7 +114,17 @@ def build_env_context(
     if session_id is not None:
         parts.append(f"- Session ID: {session_id}")
     if user_id is not None:
-        parts.append(f"- User ID: {user_id}")
+        ident = f"- User ID: {user_id}"
+        who = []
+        if user_name:
+            who.append(f"name: {user_name}")
+        if user_role:
+            who.append(f"role: {user_role}")
+        if who:
+            ident += " (" + ", ".join(who) + ")"
+        parts.append(ident)
+    if agent_id:
+        parts.append(f"- Agent: {agent_id}")
     if channel is not None:
         parts.append(f"- Channel: {channel}")
 

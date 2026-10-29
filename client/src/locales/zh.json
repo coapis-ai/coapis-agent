@@ -2114,7 +2114,10 @@
         "title": "代码块主题",
         "light": "浅色",
         "dark": "深色"
-      }
+      },
+      "timezone": "时区",
+      "timezoneGlobal": "跟随全局配置",
+      "timezoneDesc": "影响智能体看到的“今天”与时间表述"
     },
     "newChatTitle": "新聊天",
     "chatHistory": "聊天历史",

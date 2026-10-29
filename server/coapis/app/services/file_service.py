@@ -34,6 +34,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import hashlib
 import os
 import shutil
 import time
@@ -548,6 +549,46 @@ class LocalFileBackend(FileService):
             overwrite=overwrite,
         )
 
+    # D9 内容哈希去重的扫描/体积上限：去重是优化，绝不能把上传拖慢
+    _DEDUP_SCAN_LIMIT = 3000
+    _DEDUP_MAX_BYTES = 64 * 1024 * 1024
+
+    def _find_content_twin(
+        self,
+        user_dir: Path,
+        upload_dir: Path,
+        content: bytes,
+        exclude: Path,
+    ) -> Optional[Path]:
+        """D9 内容哈希去重：本用户上传区里已有同内容文件就复用，不落第二份。
+
+        只在**本用户自己的上传区**内比对（跨用户不串）；先按体积过滤再比
+        sha256，扫描条数与文件体积都有上限。任何异常一律按「没找到」处理——
+        去重失败最多退化成「照旧落一份」，不得让上传报错。
+        """
+        try:
+            size = len(content)
+            if size == 0 or size > self._DEDUP_MAX_BYTES:
+                return None
+            digest = hashlib.sha256(content).hexdigest()
+            scanned = 0
+            for fp in upload_dir.rglob("*"):
+                if scanned >= self._DEDUP_SCAN_LIMIT:
+                    break
+                try:
+                    if fp == exclude or not fp.is_file():
+                        continue
+                    scanned += 1
+                    if fp.stat().st_size != size:
+                        continue
+                    if hashlib.sha256(fp.read_bytes()).hexdigest() == digest:
+                        return fp
+                except OSError:
+                    continue
+            return None
+        except Exception:
+            return None
+
     async def upload_file_with_content(
         self,
         username: str,
@@ -569,13 +610,38 @@ class LocalFileBackend(FileService):
         
         if target.exists() and not overwrite:
             raise HTTPException(status_code=409, detail="File already exists")
-        
+
+        # D9 内容哈希去重：同内容已存在就复用旧文件，不再落第二份。
+        # 去重是优化：取模/扫描出任何岔子都按「没找到」处理，上传照旧落文件。
+        try:
+            twin = self._find_content_twin(user_dir, user_dir, content, exclude=target)
+        except Exception:
+            logger.warning("[FileService] 内容去重扫描异常，按未命中处理", exc_info=True)
+            twin = None
+        if twin is not None:
+            twin_stat = twin.stat()
+            twin_mime, _ = mimetypes.guess_type(twin.name)
+            return FileInfo(
+                path=f"/{str(twin.relative_to(user_dir))}",
+                name=twin.name,
+                size=twin_stat.st_size,
+                is_dir=False,
+                mime_type=twin_mime or "",
+                created_at=twin_stat.st_ctime,
+                modified_at=twin_stat.st_mtime,
+                parent_dir=(
+                    twin.parent.relative_to(user_dir).as_posix()
+                    if twin.parent != user_dir
+                    else "."
+                ),
+            )
+
         # Write file
         target.write_bytes(content)
-        
+
         stat = target.stat()
         mime_type, _ = mimetypes.guess_type(filename)
-        
+
         return FileInfo(
             path=f"/{str(target.relative_to(user_dir))}",
             name=target.name,

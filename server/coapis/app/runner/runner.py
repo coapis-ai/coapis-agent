@@ -1176,10 +1176,17 @@ class AgentRunner(Runner):
             KB_HINT_TOKEN as _KB_HINT_TOKEN,
             StreamLeakFilter as _KBLeakFilter,
             strip_kb_hint_leak as _strip_kb_hint_leak,
+            begin_kb_turn as _begin_kb_turn,
         )
         _kb_filter = _KBLeakFilter()
+        # 本轮开关载体：query_handler 拿到引用材料后就地置位自述剔除
+        _kb_turn = _begin_kb_turn()
         _kb_leak_seen = False
         async for event in super().stream_query(request, **kwargs):
+            if not _kb_leak_seen and _kb_turn.get("self_talk"):
+                # 本轮注入了知识库材料：从第一个数据块起就过滤，不必
+                # 等模型先把提示词复述出来才反应
+                _kb_leak_seen = True
             # 知识库引用材料「复述泄漏」兜底：模型把注入材料原样吐进可见
             # 输出时，流式逐行抑制 + 完成态整段清理，用户看不到内部提示语。
             try:
@@ -1483,6 +1490,21 @@ class AgentRunner(Runner):
                 ),
             )
 
+            # U2 身份提示：让智能体知道"在跟谁说话"（查不到就退回只有 User ID）
+            _speaker_name = None
+            _speaker_role = None
+            if user_id:
+                try:
+                    from ..user_store import get_user as _get_user
+
+                    _u = _get_user(user_id) or {}
+                    _dn = str(_u.get("display_name") or "").strip()
+                    if _dn and _dn != user_id:
+                        _speaker_name = _dn
+                    _speaker_role = str(_u.get("role") or "").strip() or None
+                except Exception:
+                    pass
+
             env_context = build_env_context(
                 session_id=session_id,
                 user_id=user_id,
@@ -1492,6 +1514,9 @@ class AgentRunner(Runner):
                     if self.workspace_dir
                     else str(WORKING_DIR)
                 ),
+                user_name=_speaker_name,
+                user_role=_speaker_role,
+                agent_id=self.agent_id,
             )
 
             # Get MCP clients from manager (hot-reloadable)
@@ -2284,6 +2309,14 @@ class AgentRunner(Runner):
 
             # 把本次请求的知识库引用交给外层 stream_query 透出到响应事件
             _enrich_citations_ctx.set(_enrich_citations)
+            if _enrich_citations:
+                # 本轮注入了知识库材料 → 开启自述行剔除。模型拿到材料块后
+                # 常把"用户问的是……""我应该简洁地回答""让我基于知识库
+                # 内容回答"这类思考过程写进正文，用户读到的是两段重复
+                # 答案夹一句自言自语。没有材料块时不开，避免误杀正常表述。
+                from .kb_hint_guard import enable_self_talk as _enable_self_talk
+
+                _enable_self_talk()
 
             # --- Execution: Mission Mode (phased) or standard -----
             # Collect full assistant response for evolution engine & chat persistence

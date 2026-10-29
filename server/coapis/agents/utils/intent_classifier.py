@@ -36,11 +36,47 @@ _ON_DEMAND_SKILLS_REGISTRY: dict[str, dict] = {}
 _REGISTRY_LOCK = threading.Lock()
 
 
-def _get_provider_config() -> dict | None:
-    """Read LLM provider config from ProviderManager."""
+def _get_provider_config(user_id: str = "", agent_id: str = "") -> dict | None:
+    """Read LLM provider config from ProviderManager.
+
+    智能判断中枢 一期：优先走**判断槽位**回落链（judgment → chat 三层解析
+    → 全局活动模型 → 第一个可用 provider），判断槽位没配置时行为与改造前
+    完全一致（活动模型 → 第一个 provider）。
+    """
+    # 作用域链（用户偏好 → 智能体 active_model → 全局默认）**每次现算**，
+    # 绝不进进程级缓存——缓存会把首个解析到的用户模型钉死给所有人用
+    # （跨用户污染）。
+    if user_id or agent_id:
+        try:
+            from coapis.decision.resolver import get_judgment_provider_config
+
+            judged = get_judgment_provider_config(user_id, agent_id)
+            if judged and judged.get("api_base") and judged.get("model"):
+                return judged
+        except Exception:
+            pass
     global _PROVIDER_CONFIG
     if _PROVIDER_CONFIG is not None:
         return _PROVIDER_CONFIG
+
+    try:
+        from coapis.decision.resolver import get_judgment_provider_config
+
+        judged = get_judgment_provider_config()
+        if judged and judged.get("api_base") and judged.get("model"):
+            _PROVIDER_CONFIG = {
+                "api_base": judged["api_base"],
+                "api_key": judged.get("api_key") or "none",
+                "model": judged["model"],
+            }
+            logger.debug(
+                "Intent classifier using judgment chain: %s (%s)",
+                judged.get("model"),
+                judged.get("hit_layer"),
+            )
+            return _PROVIDER_CONFIG
+    except Exception as exc:
+        logger.debug("Judgment slot chain unavailable: %s", exc)
 
     try:
         from coapis.providers.provider_manager import ProviderManager
@@ -176,6 +212,8 @@ async def classify_intent_llm(
     user_message: str,
     skill_summaries: dict[str, str],
     timeout: float = 5.0,
+    user_id: str = "",
+    agent_id: str = "",
 ) -> list[str] | None:
     """Classify user intent and return matching skill names.
 
@@ -198,7 +236,7 @@ async def classify_intent_llm(
         return keyword_matches
 
     # Phase 2: no keyword matches, try LLM classification
-    config = _get_provider_config()
+    config = _get_provider_config(user_id, agent_id)
     if not config:
         logger.debug("No LLM provider configured for intent classification")
         return None

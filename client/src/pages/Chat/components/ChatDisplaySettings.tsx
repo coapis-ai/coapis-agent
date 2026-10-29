@@ -10,13 +10,14 @@
  * 配置自动保存到 localStorage 并同步到后端（通过 UserContext）。
  */
 import React, { useCallback, useMemo } from 'react';
-import { Modal, Switch, Radio, Divider, Space, Button } from 'antd';
+import { Modal, Switch, Radio, Divider, Space, Button, Select } from 'antd';
 import {
   EyeOutlined,
   ReloadOutlined,
   VerticalAlignBottomOutlined,
   FontSizeOutlined,
   CodeOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import {
@@ -25,6 +26,32 @@ import {
   saveChatDisplayConfig,
 } from '../types';
 import { useChatDisplayFromUser } from '@/hooks/useChatDisplayFromUser';
+import { useUser } from '@/contexts/UserContext';
+
+/** 常用时区（IANA 名，与后端 ZoneInfo 一致）。 */
+const TIMEZONE_OPTIONS = [
+  'Asia/Shanghai',
+  'Asia/Urumqi',
+  'Asia/Kolkata',
+  'Asia/Bangkok',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'Europe/Moscow',
+  'Europe/Istanbul',
+  'Europe/Berlin',
+  'Europe/Paris',
+  'Europe/London',
+  'Africa/Cairo',
+  'America/Sao_Paulo',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'Australia/Sydney',
+  'Pacific/Auckland',
+  'UTC',
+];
 
 interface ChatDisplaySettingsProps {
   visible: boolean;
@@ -41,6 +68,7 @@ const ChatDisplaySettings: React.FC<ChatDisplaySettingsProps> = ({
 }) => {
   const { t } = useTranslation();
   const { updateDisplayConfig: backendUpdate, resetToDefaults: backendReset } = useChatDisplayFromUser();
+  const { preferences, updatePreferences } = useUser();
 
   const updateConfig = useCallback(
     (key: keyof ChatDisplayConfig, value: boolean | string) => {
@@ -179,6 +207,35 @@ const ChatDisplaySettings: React.FC<ChatDisplaySettingsProps> = ({
                 </Radio.Button>
               ))}
             </Radio.Group>
+          </div>
+        </div>
+
+        <Divider style={{ margin: '8px 0' }} />
+
+        {/* 时区（一期 U2：时区按用户取，缺省跟随全局配置） */}
+        <div>
+          <Space style={{ marginBottom: 8 }}>
+            <GlobalOutlined />
+            <span>{t('chat.settings.timezone', { defaultValue: '时区' })}</span>
+          </Space>
+          <Select
+            value={preferences?.timezone || ''}
+            onChange={(v) => updatePreferences({ timezone: v })}
+            style={{ width: '100%' }}
+            options={[
+              {
+                value: '',
+                label: t('chat.settings.timezoneGlobal', {
+                  defaultValue: '跟随全局配置',
+                }),
+              },
+              ...TIMEZONE_OPTIONS.map((tz) => ({ value: tz, label: tz })),
+            ]}
+          />
+          <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+            {t('chat.settings.timezoneDesc', {
+              defaultValue: '影响智能体看到的“今天”与时间表述',
+            })}
           </div>
         </div>
 

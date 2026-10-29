@@ -11,6 +11,7 @@ the ORM metadata so a fresh database built with ``alembic upgrade head``
 alone contains every community table.
 """
 
+from .decision import DecisionEvent
 from .eval import AgentRun, AgentTask, AgentTrajectory
 from .external import ExternalBinding, ExternalSystem
 from .files import FileRecord
@@ -29,6 +30,7 @@ __all__ = [
     "AgentTrajectory",
     "ApiKey",
     "AuditLog",
+    "DecisionEvent",
     "ExternalBinding",
     "ExternalSystem",
     "FileRecord",

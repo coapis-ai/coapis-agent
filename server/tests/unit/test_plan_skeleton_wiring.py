@@ -52,6 +52,9 @@ def _stub(notebook, memory):
     )
     stub._gate_text = CoPawAgent._gate_text
     stub._PLAN_SKELETON_HINT = CoPawAgent._PLAN_SKELETON_HINT
+    # 真实实现从 request_context 取台账作用域；桩里返回空 scope 即可
+    # （只影响判级入账，不影响判档与骨架注入本身）。
+    stub._decision_scope = lambda: {}
     stub._maybe_arm_plan = lambda msg: CoPawAgent._maybe_arm_plan(stub, msg)
     return stub
 

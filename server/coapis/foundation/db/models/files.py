@@ -48,6 +48,12 @@ class FileRecord(BaseRow):
     )
     updated_at: Mapped[Optional[float]] = mapped_column(REAL)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    # Parse ledger (一期 A1, migration 0019): 解析结果不再跑完就蒸发。
+    # parse_status: ok / timeout / fail / degraded；None = 从未解析过
+    parse_status: Mapped[Optional[str]] = mapped_column(Text)
+    parse_chars: Mapped[Optional[int]] = mapped_column(Integer)
+    parse_method: Mapped[Optional[str]] = mapped_column(Text)
+    parse_at: Mapped[Optional[float]] = mapped_column(REAL)
 
     __table_args__ = (
         Index("idx_file_records_user", "user_id"),

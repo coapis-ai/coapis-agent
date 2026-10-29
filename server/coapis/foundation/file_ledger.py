@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from ..constant import WORKING_DIR, WORKSPACES_DIR
 from .db.engine import get_session
@@ -55,6 +55,10 @@ def role_for_source(source: str) -> str:
 
 #: Deliverables-ledger status states (approved plan C1, three-state machine).
 VALID_STATUSES = frozenset({"draft", "delivered", "archived"})
+
+#: 解析台账的合法状态（一期 A1）。``degraded`` = 超阈值/超时的降级读——
+#: 内容可用但不是全文，计划闸门据此决定要不要先补读。
+PARSE_STATUSES = frozenset({"ok", "timeout", "fail", "degraded"})
 
 
 class FileLedgerService:
@@ -204,6 +208,128 @@ class FileLedgerService:
             logger.debug("file ledger record failed (ignored): %s", exc)
             return False
 
+    def mark_parse(
+        self,
+        username: Optional[str],
+        abs_path: Optional[str],
+        *,
+        status: str,
+        chars: int = 0,
+        method: Optional[str] = None,
+        session_id: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> bool:
+        """把一次文档解析的结果钉在台账上（一期 A1）。
+
+        解析此前跑完就蒸发：成功/失败/超时/超阈值/降级方式只进日志，
+        台账与计划闸门（P1）都看不见，智能体只能盲猜附件可用性。
+
+        写在**该路径最新的一行**上（台账是追加式事件流，解析状态属于
+        当前事实，跟着最新版本走）。台账里还没有这个文件时补登一行，
+        解析过却没登记过的文件同样要留下痕迹。
+
+        ``status``: ok / timeout / fail / degraded。永不抛异常。
+        """
+        try:
+            username = (username or "").strip()
+            if not abs_path:
+                return False
+            p = Path(abs_path)
+            rel = None
+            uid = username
+            if username:
+                rel = self._normalize_rel(p, self._files_root(username))
+            if rel is None:
+                rel = self._normalize_rel(p, WORKING_DIR / "files")
+                uid = username or "shared"
+            if rel is None:
+                return False  # 台账管不到的目录 → 不记
+            now = time.time()
+            st = status if status in PARSE_STATUSES else "fail"
+            with get_session() as s:
+                row = (
+                    s.query(FileRecord)
+                    .filter(
+                        FileRecord.user_id == uid,
+                        FileRecord.file_path == rel,
+                    )
+                    .order_by(FileRecord.created_at.desc())
+                    .first()
+                )
+                if row is not None:
+                    row.parse_status = st
+                    row.parse_chars = int(chars or 0)
+                    row.parse_method = method
+                    row.parse_at = now
+                else:
+                    try:
+                        size = p.stat().st_size if p.exists() else 0
+                    except OSError:
+                        size = 0
+                    s.add(
+                        FileRecord(
+                            user_id=uid,
+                            session_id=session_id or None,
+                            chat_id=chat_id or None,
+                            agent_id=agent_id or None,
+                            file_path=rel,
+                            size_bytes=size,
+                            source="other",
+                            created_at=now,
+                            title=p.name,
+                            parse_status=st,
+                            parse_chars=int(chars or 0),
+                            parse_method=method,
+                            parse_at=now,
+                        )
+                    )
+            return True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("file ledger mark_parse failed (ignored): %s", exc)
+            return False
+
+    def parse_status_of(
+        self, username: Optional[str], abs_path: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """取某文件最近的解析结果（A5 用）。无记录返回 None。"""
+        try:
+            username = (username or "").strip()
+            if not abs_path:
+                return None
+            p = Path(abs_path)
+            rel = None
+            uid = username
+            if username:
+                rel = self._normalize_rel(p, self._files_root(username))
+            if rel is None:
+                rel = self._normalize_rel(p, WORKING_DIR / "files")
+                uid = username or "shared"
+            if rel is None:
+                return None
+            with get_session() as s:
+                row = (
+                    s.query(FileRecord)
+                    .filter(
+                        FileRecord.user_id == uid,
+                        FileRecord.file_path == rel,
+                        FileRecord.parse_status.isnot(None),
+                    )
+                    .order_by(FileRecord.parse_at.desc())
+                    .first()
+                )
+                if row is None:
+                    return None
+                return {
+                    "status": row.parse_status,
+                    "chars": row.parse_chars,
+                    "method": row.parse_method,
+                    "at": row.parse_at,
+                }
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("file ledger parse_status_of failed (ignored): %s", exc)
+            return None
+
     # ── read ──────────────────────────────────────────────────────────
 
     def list_records(
@@ -249,6 +375,35 @@ class FileLedgerService:
             return {"items": [], "total": 0, "limit": limit, "offset": offset}
 
     # ── deliverables ledger (approved plan C1) ─────────────────────────
+
+    def upload_version(self, username: str, abs_path: str) -> int:
+        """该文件在台账里的上传版次（第几次上传），未入台账返回 ``0``。
+
+        上传提示语（A6）用它说「第几版」，口径直接数台账里该路径
+        ``source="upload"`` 的行数——提示语与台账同源，不另立计数器。
+        路径不在台账管辖根内（外部渠道下载的媒体）返回 0，提示语据此
+        不宣称「已入台账」。
+        """
+        try:
+            username = (username or "").strip()
+            if not username or not abs_path:
+                return 0
+            rel = self._normalize_rel(Path(abs_path), self._files_root(username))
+            if rel is None:
+                return 0
+            with get_session() as s:
+                return int(
+                    s.execute(
+                        select(func.count())
+                        .select_from(FileRecord)
+                        .where(FileRecord.user_id == username)
+                        .where(FileRecord.file_path == rel)
+                        .where(FileRecord.source == "upload")
+                    ).scalar(),
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("file ledger upload_version failed (ignored): %s", exc)
+            return 0
 
     def resolve_path(
         self, username: str, record_id: int
@@ -647,6 +802,28 @@ def record_file_event(
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("file ledger event failed (ignored): %s", exc)
+        return False
+
+
+def record_parse_event(
+    username: Optional[str],
+    abs_path: Optional[str],
+    *,
+    status: str,
+    chars: int = 0,
+    method: Optional[str] = None,
+    session_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+) -> bool:
+    """Fire-and-forget parse-ledger hook (一期 A1, never raises)."""
+    try:
+        return get_file_ledger().mark_parse(
+            username, abs_path, status=status, chars=chars, method=method,
+            session_id=session_id, chat_id=chat_id, agent_id=agent_id,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("file ledger parse event failed (ignored): %s", exc)
         return False
 
 

@@ -50,8 +50,15 @@ def make_selector(skill_meta, config=None, scene_skills=None):
 class _AgentStub:
     """借用 CoApisAgent 的兜底判方法，避免构造完整 agent。"""
 
+    _skill_judge_model_name = CoApisAgent._skill_judge_model_name
+    _decision_hub = CoApisAgent._decision_hub
+    _decision_scope = CoApisAgent._decision_scope
     _llm_classify_skills = CoApisAgent._llm_classify_skills
+    _decision_hub = CoApisAgent._decision_hub
+    _decision_scope = CoApisAgent._decision_scope
     _skill_llm_timeout_s = CoApisAgent._skill_llm_timeout_s
+    _agent_id = ""
+    _agent_config = None
 
     def __init__(self, skill_names, config=None):
         self._on_demand_skills = {
@@ -87,7 +94,7 @@ def test_no_threadpool_or_nested_loop_in_fallback():
 
 @pytest.mark.asyncio
 async def test_llm_classify_skills_returns_matches(monkeypatch):
-    async def fake_llm(message, summaries, timeout=3.0):
+    async def fake_llm(message, summaries, timeout=3.0, **_kw):
         assert "pdf" in summaries
         return ["pdf"]
 
@@ -101,7 +108,7 @@ async def test_llm_classify_skills_returns_matches(monkeypatch):
 async def test_llm_classify_skills_timeout_returns_empty(monkeypatch, caplog):
     """超时硬限：LLM 卡住时放弃兜底判并留痕，不阻塞主流程。"""
 
-    async def slow_llm(message, summaries, timeout=3.0):
+    async def slow_llm(message, summaries, timeout=3.0, **_kw):
         await asyncio.sleep(5)
         return ["pdf"]
 
@@ -115,7 +122,7 @@ async def test_llm_classify_skills_timeout_returns_empty(monkeypatch, caplog):
 
 @pytest.mark.asyncio
 async def test_llm_classify_skills_exception_returns_empty(monkeypatch, caplog):
-    async def boom(message, summaries, timeout=3.0):
+    async def boom(message, summaries, timeout=3.0, **_kw):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr(intent_classifier, "classify_intent_llm", boom)
@@ -130,7 +137,7 @@ async def test_llm_classify_skills_exception_returns_empty(monkeypatch, caplog):
 async def test_llm_classify_skills_no_candidates_skips_llm(monkeypatch):
     called = False
 
-    async def fake_llm(message, summaries, timeout=3.0):
+    async def fake_llm(message, summaries, timeout=3.0, **_kw):
         nonlocal called
         called = True
         return []
@@ -158,7 +165,7 @@ def test_selector_has_async_entry():
 
 @pytest.mark.asyncio
 async def test_selector_llm_classify_async_match(monkeypatch):
-    async def fake_llm(message, summaries, timeout=3.0):
+    async def fake_llm(message, summaries, timeout=3.0, **_kw):
         assert "mail" in summaries
         assert "发邮件" in summaries["mail"]  # intent_hints 进 prompt
         return ["mail"]
@@ -171,7 +178,7 @@ async def test_selector_llm_classify_async_match(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_selector_llm_classify_async_timeout(monkeypatch, caplog):
-    async def slow_llm(message, summaries, timeout=3.0):
+    async def slow_llm(message, summaries, timeout=3.0, **_kw):
         await asyncio.sleep(5)
         return ["mail"]
 
@@ -185,7 +192,7 @@ async def test_selector_llm_classify_async_timeout(monkeypatch, caplog):
 
 @pytest.mark.asyncio
 async def test_selector_llm_classify_async_failure_returns_empty(monkeypatch, caplog):
-    async def boom(message, summaries, timeout=3.0):
+    async def boom(message, summaries, timeout=3.0, **_kw):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr(intent_classifier, "classify_intent_llm", boom)
@@ -208,7 +215,7 @@ async def test_sync_entry_warns_instead_of_silently_skipping(caplog):
 
 @pytest.mark.asyncio
 async def test_select_async_uses_llm_when_keywords_miss(monkeypatch):
-    async def fake_llm(message, summaries, timeout=3.0):
+    async def fake_llm(message, summaries, timeout=3.0, **_kw):
         return ["mail"]
 
     monkeypatch.setattr(intent_classifier, "classify_intent_llm", fake_llm)
@@ -221,7 +228,7 @@ async def test_select_async_uses_llm_when_keywords_miss(monkeypatch):
 async def test_select_async_skips_llm_when_keywords_hit(monkeypatch):
     calls = []
 
-    async def fake_llm(message, summaries, timeout=3.0):
+    async def fake_llm(message, summaries, timeout=3.0, **_kw):
         calls.append(message)
         return []
 

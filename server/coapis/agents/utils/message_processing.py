@@ -605,6 +605,116 @@ async def _process_single_block(
         return None
 
 
+def _upload_notice(local_path: str, lang: str) -> str:
+    """上传提示语（A6）：路径之外补「会话归属 / 台账 / 版次」。
+
+    只说台账查得到的事——台账里没有这条上传（外部渠道下载的媒体、
+    未入台账的路径）就不宣称「已入台账」，避免提示语与台账两套口径。
+    上下文缺失（无用户名/会话 id）时退回原来的纯路径提示，行为不变。
+    """
+    zh = lang == "zh"
+    base = (
+        f"用户上传文件，已经下载到 {local_path}"
+        if zh
+        else f"User uploaded a file, downloaded to {local_path}"
+    )
+    try:
+        from ...config.session_context import (
+            get_current_chat_id,
+            get_current_session_id,
+            get_current_username,
+        )
+        from ...foundation.file_ledger import get_file_ledger
+
+        username = get_current_username()
+        if not username:
+            from ...app.agent_context import get_current_username as _legacy
+
+            username = _legacy()
+        marks: list[str] = []
+        if get_current_chat_id() or get_current_session_id():
+            marks.append("已归入本会话" if zh else "attached to this chat")
+        if username:
+            version = get_file_ledger().upload_version(username, local_path)
+            if version:
+                marks.append(
+                    f"已入台账 第{version}版" if zh else f"ledgered v{version}",
+                )
+        if not marks:
+            return base
+        joined = " · ".join(marks)
+        return (
+            f"{base}（{joined}）" if zh else f"{base} ({joined})"
+        )
+    except Exception:  # pragma: no cover - 提示语绝不阻断消息路径
+        return base
+
+
+#: 解析状态话术（A5）：台账里没有 = 从未解析过。
+_PARSE_LABELS = {
+    "ok": "已解析（{chars} 字符）",
+    "degraded": "只解析了部分（{chars} 字符，方式 {method}）",
+    "timeout": "解析超时",
+    "fail": "解析失败",
+}
+
+
+def _attachment_manifest(files: list, lang: str) -> str:
+    """A5：附件清单 + 解析状态，进判档输入与执行判据。
+
+    解析状态取自文件台账（A1）。智能体据此知道哪些附件真读通过、
+    哪些只读了部分、哪些压根没解析过，而不是对着文件名臆测。
+    台账不可用时返回空串——绝不阻断消息路径。
+    """
+    if not files:
+        return ""
+    zh = lang == "zh"
+    try:
+        from ...config.session_context import get_current_username
+        from ...foundation.file_ledger import get_file_ledger
+
+        ledger = get_file_ledger()
+        username = get_current_username()
+    except Exception:  # pragma: no cover - 基础设施缺失
+        return ""
+    lines = []
+    for name, local_path in files:
+        info = (
+            ledger.parse_status_of(username, local_path)
+            if (username and local_path)
+            else None
+        )
+        if not info:
+            state = "未解析" if zh else "not parsed"
+        else:
+            st = info.get("status") or "fail"
+            if zh:
+                tmpl = _PARSE_LABELS.get(st, "未解析")
+                state = tmpl.format(
+                    chars=info.get("chars") or 0,
+                    method=info.get("method") or "?",
+                )
+            else:
+                state = f"{st} ({info.get('chars') or 0} chars)"
+        lines.append(f"- {name}: {state}")
+    if not lines:
+        return ""
+    if zh:
+        return (
+            "[附件清单]\n"
+            + "\n".join(lines)
+            + "\n判据：标为未解析/解析失败/解析超时的附件不要臆测内容——"
+              "先用 doc_reader 读取；读不通就明说并给出替代方案。"
+        )
+    return (
+        "[Attachment manifest]\n"
+        + "\n".join(lines)
+        + "\nRule: never guess the content of attachments marked "
+          "not parsed / failed / timed out — read them with doc_reader "
+          "first, and say so plainly if reading fails."
+    )
+
+
 async def process_file_and_media_blocks_in_message(msg) -> None:
     """
     Process file and media blocks (file, image, audio, video) in messages.
@@ -641,13 +751,16 @@ async def process_file_and_media_blocks_in_message(msg) -> None:
         if downloaded_files:
             lang = load_config().agents.language
             for i, local_path in reversed(downloaded_files):
-                text = (
-                    f"用户上传文件，已经下载到 {local_path}"
-                    if lang == "zh"
-                    else f"User uploaded a file, downloaded to {local_path}"
-                )
-                text_block = {"type": "text", "text": text}
+                text_block = {"type": "text", "text": _upload_notice(local_path, lang)}
                 message.content.insert(i + 1, text_block)
+            # A5：本轮附件清单 + 解析状态（台账 A1 提供），随消息进入
+            # 判档输入与执行判据——智能体从此知道附件到底读没读通。
+            manifest = _attachment_manifest(
+                [(Path(p).name, p) for _i, p in downloaded_files],
+                lang,
+            )
+            if manifest:
+                message.content.append({"type": "text", "text": manifest})
 
 
 def is_first_user_interaction(messages: list) -> bool:

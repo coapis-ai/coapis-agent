@@ -157,3 +157,41 @@ def test_list_empty_user(env):
     res = svc.list_records("nobody")
     assert res["items"] == []
     assert res["total"] == 0
+
+
+# ── upload_version（A6 上传提示语「第几版」的台账口径） ────────────────
+
+
+def test_upload_version_counts_upload_rows(env):
+    svc, ws = env
+    fp = _mk(ws, "alice", "uploads/doc.pdf")
+    for _ in range(3):
+        assert svc.record("alice", str(fp), session_id="s1", source="upload")
+    assert svc.upload_version("alice", str(fp)) == 3
+
+
+def test_upload_version_ignores_other_sources(env):
+    svc, ws = env
+    fp = _mk(ws, "alice", "gen/report.md")
+    svc.record("alice", str(fp), source="write_file")
+    assert svc.upload_version("alice", str(fp)) == 0
+
+
+def test_upload_version_scopes_per_user(env):
+    svc, ws = env
+    fp = _mk(ws, "alice", "uploads/doc.pdf")
+    svc.record("alice", str(fp), source="upload")
+    other = _mk(ws, "bob", "uploads/doc.pdf")
+    svc.record("bob", str(other), source="upload")
+    assert svc.upload_version("alice", str(fp)) == 1
+    assert svc.upload_version("bob", str(other)) == 1
+
+
+def test_upload_version_outside_root_and_empty_args(env):
+    svc, ws = env
+    outsider = ws / "alice" / "media" / "x.png"
+    outsider.parent.mkdir(parents=True, exist_ok=True)
+    outsider.write_bytes(b"x")
+    assert svc.upload_version("alice", str(outsider)) == 0
+    assert svc.upload_version("", str(outsider)) == 0
+    assert svc.upload_version("alice", "") == 0

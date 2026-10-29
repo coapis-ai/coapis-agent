@@ -1603,6 +1603,9 @@
         "light": "ライト",
         "title": "コードブロックテーマ"
       },
+      "timezone": "タイムゾーン",
+      "timezoneGlobal": "グローバル設定に従う",
+      "timezoneDesc": "エージェントが見る「今日」と時刻の表記に影響します",
       "detailedModeNote": "詳細モードはすべての情報を表示します。簡潔モードに切り替えると表示オプションをカスタマイズできます。",
       "displayMode": {
         "detailed": "詳細モード",

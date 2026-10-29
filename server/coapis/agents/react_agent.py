@@ -2102,6 +2102,49 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except (TypeError, ValueError):
             return 3.0
 
+    def _skill_judge_model_name(self) -> str:
+        """本次兜底判会用到哪个模型（台账用；解析失败返回空串）。"""
+        try:
+            from ..decision import get_judgment_provider_config
+
+            scope = self._decision_scope()
+            cfg = get_judgment_provider_config(
+                scope.get("user_id", ""),
+                scope.get("agent_id", ""),
+            )
+            return str((cfg or {}).get("model") or "")
+        except Exception:  # pragma: no cover
+            return ""
+
+    def _decision_hub(self):
+        """判断中枢配置（来自智能体 running_config.decision_hub + env）。"""
+        from ..decision import DecisionHubConfig
+
+        raw = None
+        cfg = getattr(self, "_agent_config", None)
+        if cfg is not None:
+            running = getattr(cfg, "running", None)
+            if isinstance(running, dict):
+                raw = running.get("decision_hub")
+            elif running is not None:
+                raw = getattr(running, "decision_hub", None)
+        return DecisionHubConfig.from_dict(raw if isinstance(raw, dict) else None)
+
+    def _decision_scope(self) -> dict:
+        """判断台账作用域：user_id / agent_id / chat_id。
+
+        与技能触发兜底判同源（都取 request_context），保证台账可按
+        用户 / 智能体 / 会话聚合。
+        """
+        ctx = getattr(self, "_request_context", None) or {}
+        if not isinstance(ctx, dict):
+            ctx = {}
+        return {
+            "user_id": str(ctx.get("user_id") or ""),
+            "agent_id": str(ctx.get("agent_id") or self._agent_id or ""),
+            "chat_id": str(ctx.get("chat_id") or ctx.get("session_id") or ""),
+        }
+
     async def _llm_classify_skills(
         self,
         user_message: str,
@@ -2113,11 +2156,52 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         (S2.3): when keywords found nothing, the LLM only considers the skills
         the scene declares, which is a far better prior than the whole pool.
 
-        第0批 F2：删除「线程池 + asyncio.run 嵌套事件循环」兜底。本方法在
-        reply() 的异步调用链内被 await，不存在同步调异步的问题；超时硬限由
-        ``_skill_llm_timeout_s()`` 控制，超时即放弃并留痕，不阻塞主流程。
+        第0批 F2：删除「线程池 + asyncio.run 嵌套事件循环」兜底——本方法在
+        reply() 的异步调用链内被 await，超时硬限由 ``_skill_llm_timeout_s()``
+        控制，超时即放弃并留痕，不阻塞主流程。
+
+        一期（判断中枢）：技能触发岗接入 结论缓存 → 熔断 → 判断槽位 → 台账。
+        岗位开关关闭时行为与改造前一致（关键词命中即用，无命中返回 []）。
         """
         import asyncio
+        import time as _time
+
+        from ..decision import (
+            DecisionResult,
+            get_breaker,
+            get_bus,
+            get_cached_judgment,
+            make_cache_key,
+            put_cached_judgment,
+        )
+
+        hub = self._decision_hub()
+        ctx = getattr(self, "_request_context", None) or {}
+        scope = {
+            "user_id": str(ctx.get("user_id") or ctx.get("username") or ""),
+            "agent_id": str(ctx.get("agent_id") or getattr(self, "_agent_id", "") or ""),
+            "chat_id": str(ctx.get("chat_id") or ctx.get("session_id") or ""),
+        }
+
+        def _emit(res: DecisionResult, started: float) -> None:
+            if not hub_active:
+                return
+            res.latency_ms = int((_time.monotonic() - started) * 1000)
+            try:
+                res.user_id = scope["user_id"]
+                res.agent_id = scope["agent_id"]
+                res.chat_id = scope["chat_id"]
+                get_bus().emit(res)
+            except Exception:  # pragma: no cover - 台账不影响主流程
+                pass
+
+        hub_active = hub.enabled
+        if hub_active and not hub.post_enabled("skill_trigger"):
+            # 岗位开关关闭 → 兜底判停用（只用关键词结果）
+            return []
+        if not hub_active:
+            # 总开关关闭 → 与改造前行为一致：直连 LLM 兜底判，不加缓存/熔断/台账
+            logger.debug("[TriggerDebug] 判断中枢关闭，兜底判直连 LLM（改造前行为）")
 
         try:
             from .utils.intent_classifier import classify_intent_llm
@@ -2139,22 +2223,95 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             if not summaries:
                 logger.debug("[TriggerDebug] LLM fallback skipped: no candidate summaries")
                 return []
+
+            breaker = get_breaker("skill_trigger")
+            if not breaker.allow("skill_trigger"):
+                logger.warning("[TriggerDebug] LLM fallback 熔断打开，仅用关键词结果")
+                _emit(
+                    DecisionResult(
+                        source="skill_trigger", action=None, hit_layer="breaker_open",
+                        reason="判断岗熔断打开", model=self._skill_judge_model_name(),
+                    ),
+                    _time.monotonic(),
+                )
+                return []
+
+            cache_key = make_cache_key(
+                "skill_trigger",
+                user_message,
+                sorted(summaries),
+                user_id=scope.get("user_id", ""),
+                agent_id=scope.get("agent_id", ""),
+            )
+            cached = None
+            if hub.cache_enabled:
+                cached = get_cached_judgment(cache_key)
+            if cached is not None:
+                logger.debug("[TriggerDebug] LLM fallback cache hit: %s", cached)
+                _emit(
+                    DecisionResult(
+                        source="skill_trigger", action="tool" if cached else None,
+                        hit_layer="cache", reason="结论缓存命中",
+                        payload={"skills": list(cached)},
+                    ),
+                    _time.monotonic(),
+                )
+                return list(cached)
+
             timeout = self._skill_llm_timeout_s()
+            started = _time.monotonic()
             result = await asyncio.wait_for(
-                classify_intent_llm(user_message, summaries, timeout=timeout),
+                classify_intent_llm(
+                    user_message,
+                    summaries,
+                    timeout=timeout,
+                    user_id=scope.get("user_id", ""),
+                    agent_id=scope.get("agent_id", ""),
+                ),
                 timeout=timeout + 1.0,
             )
-            if result:
-                logger.info("[TriggerDebug] LLM fallback matched: %s", result)
-            return result if result else []
+            breaker.record_success("skill_trigger")
+            skills = list(result) if result else []
+            if hub.cache_enabled:
+                put_cached_judgment(cache_key, skills)
+            if skills:
+                logger.info("[TriggerDebug] LLM fallback matched: %s", skills)
+            _emit(
+                DecisionResult(
+                    source="skill_trigger",
+                    action="tool" if skills else None,
+                    hit_layer="llm",
+                    reason="LLM 兜底判",
+                    model=self._skill_judge_model_name(),
+                    payload={"skills": skills},
+                ),
+                started,
+            )
+            return skills
         except asyncio.TimeoutError:
+            get_breaker("skill_trigger").record_failure("skill_trigger")
             logger.warning(
                 "[TriggerDebug] LLM fallback timed out (>%.1fs), keyword result kept",
                 self._skill_llm_timeout_s(),
             )
+            _emit(
+                DecisionResult(
+                    source="skill_trigger", action=None, hit_layer="error",
+                    reason="判断超时", model=self._skill_judge_model_name(),
+                ),
+                _time.monotonic(),
+            )
             return []
         except Exception as e:
+            get_breaker("skill_trigger").record_failure("skill_trigger")
             logger.warning("[TriggerDebug] LLM fallback skipped: %s", e)
+            _emit(
+                DecisionResult(
+                    source="skill_trigger", action=None, hit_layer="error",
+                    reason=f"判断异常: {e}", model=self._skill_judge_model_name(),
+                ),
+                _time.monotonic(),
+            )
             return []
 
     # ── Global auto-assist: detect uncertainty, consult global knowledge ──
@@ -4149,6 +4306,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             if classifier is None:
                 classifier = ComplexityClassifier(judge_enabled=False)
                 self._complexity_classifier = classifier
+            classifier.set_ledger_scope(self._decision_scope())
             level = classifier.classify(text)
         except Exception:  # the gate must never break a reply
             logger.debug("Plan gate skipped", exc_info=True)

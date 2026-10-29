@@ -68,10 +68,52 @@ class ComplexityClassifier:
         self.judge_enabled = judge_enabled
         self.judge_timeout = judge_timeout
         self._judge_cache: dict[str, tuple[str, float]] = {}
+        # 台账作用域（user_id / agent_id / chat_id），由接线方注入
+        self._ledger_scope: dict[str, str] = {}
 
     # ------------------------------------------------------------------ #
     # 规则层（同步、确定性，单测只打这一层）
     # ------------------------------------------------------------------ #
+    def set_ledger_scope(self, scope: dict) -> None:
+        """注入台账作用域（user_id / agent_id / chat_id），供判级入账。"""
+        self._ledger_scope = dict(scope or {})
+
+    def _emit_judgment(
+        self,
+        text: str,
+        *,
+        complexity: str,
+        action: str,
+        reason: str,
+        hit_layer: str,
+        model: str,
+        latency_ms: int,
+    ) -> None:
+        """复杂度判级入账（台账岗位 ``plan_gate``）。
+
+        只在真正调用判级模型时入账：规则层判级零成本且每条消息都跑，
+        入账会淹没台账。失败静默 —— 台账不得影响闸门。
+        """
+        try:
+            from ..decision import DecisionResult, get_bus
+
+            get_bus().emit(
+                DecisionResult(
+                    source="plan_gate",
+                    action=action or None,
+                    complexity=complexity,
+                    reason=reason,
+                    hit_layer=hit_layer,
+                    model=model,
+                    latency_ms=latency_ms,
+                ),
+                user_id=str(self._ledger_scope.get("user_id", "") or ""),
+                agent_id=str(self._ledger_scope.get("agent_id", "") or ""),
+                chat_id=str(self._ledger_scope.get("chat_id", "") or ""),
+            )
+        except Exception:  # pragma: no cover - 台账不得影响主流程
+            pass
+
     def classify(self, text: str, tools_available: Optional[Sequence[str]] = None) -> str:
         """规则层判级。tools_available 预留（"需≥3类工具"信号暂由子目标数近似）。"""
         t = (text or "").strip()
@@ -120,52 +162,115 @@ class ComplexityClassifier:
         return judged if judged in LEVELS else level
 
     async def _lite_judge(self, text: str) -> Optional[str]:
-        key = hashlib.md5((text or "").lower().strip().encode()).hexdigest()[:16]
+        """判级模型兜底判：命中缓存直接返回；失败返回 None（不阻断）。
+
+        三条硬约束：
+        - **判断模型跟随会话激活模型**（v13 D1/D2，零配置）；
+        - **台账只记真实调用过判级模型的轮次**，无模型/熔断期不写，
+          避免把台账灌成噪音；
+        - **熔断 + 超时**双保险，判级模型挂了直接降级为规则层，绝不卡死。
+        """
+        key = hashlib.md5(text[:2000].encode("utf-8", errors="replace")).hexdigest()
         cached = self._judge_cache.get(key)
         if cached and time.monotonic() - cached[1] < 300:
             return cached[0]
-        config = _get_judge_provider_config()
+
+        config = _get_judge_provider_config(
+            self._ledger_scope.get("user_id", ""),
+            self._ledger_scope.get("agent_id", ""),
+        )
         if not config:
+            # 无判级模型 → 降级为规则层，不写台账
             return None
+
+        from ..decision.breaker import get_breaker
+
+        breaker = get_breaker()
+        if not breaker.allow("plan_gate"):
+            # 熔断打开 → 冷却期内直接跳过判级模型，绝不阻塞消息路径
+            return None
+
+        started = time.monotonic()
         try:
             import httpx
 
-            prompt = (
-                "你是任务复杂度分类器。把用户任务分为三类之一：\n"
-                "- simple：一句话能说清的单一目标，无需多步操作\n"
-                "- medium：需要 2 个左右步骤或一次条件分支\n"
-                "- complex：≥3 个独立子目标、多阶段流水线或超长任务\n"
-                f"\n用户任务：{text}\n\n只输出 simple / medium / complex 之一，不要任何其他文字。"
-            )
-            payload = {
-                "model": config["model"],
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 32,
-                "temperature": 0.0,
-            }
-            headers = {"Content-Type": "application/json"}
-            if config["api_key"] and config["api_key"] != "none":
-                headers["Authorization"] = f"Bearer {config['api_key']}"
             async with httpx.AsyncClient(timeout=self.judge_timeout) as client:
                 resp = await client.post(
                     f"{config['api_base']}/chat/completions",
-                    json=payload, headers=headers,
+                    headers={"Authorization": f"Bearer {config['api_key']}"},
+                    json={
+                        "model": config["model"],
+                        "messages": [{"role": "user", "content": _JUDGE_PROMPT.format(text=text[:2000])}],
+                        "max_tokens": 60,
+                        "temperature": 0.0,
+                        "chat_template_kwargs": {"enable_thinking": False},
+                    },
                 )
                 resp.raise_for_status()
-                data = resp.json()
-            content = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip().lower()
-            for lv in LEVELS:
-                if lv in content:
-                    self._judge_cache[key] = (lv, time.monotonic())
-                    return lv
-            return None
+                content = resp.json()["choices"][0]["message"]["content"]
+            latency = int((time.monotonic() - started) * 1000)
         except Exception as e:
             logger.debug("ComplexityClassifier lite judge failed: %s", e)
+            breaker.record_failure("plan_gate")
+            self._emit_judgment(
+                text,
+                complexity="",
+                action="",
+                reason=f"判级模型调用失败，降级为规则层: {type(e).__name__}",
+                hit_layer="error",
+                model=config.get("model", ""),
+                latency_ms=int((time.monotonic() - started) * 1000),
+            )
             return None
 
+        breaker.record_success("plan_gate")
+        for lv in LEVELS:
+            if lv in content:
+                self._judge_cache[key] = (lv, time.monotonic())
+                self._emit_judgment(
+                    text,
+                    complexity=lv,
+                    action="",
+                    reason=f"判级={lv}",
+                    hit_layer="llm",
+                    model=config["model"],
+                    latency_ms=latency,
+                )
+                return lv
+        return None
 
-def _get_judge_provider_config() -> Optional[dict]:
-    """读取 LLM provider 配置（与 intent_classifier 相同的 ProviderManager 范式）。"""
+
+
+def _get_judge_provider_config(
+    user_id: str = "",
+    agent_id: str = "",
+) -> Optional[dict]:
+    """读取判级模型配置（与 intent_classifier 同源）。
+
+    判级模型**跟随会话激活模型**（v13 第 15 章 D1/D2：复用 active_model，
+    零配置）：用户偏好 → 智能体 active_model → 全局默认 → 第一个可用
+    provider 兜底。
+    """
+    try:
+        from coapis.decision.resolver import get_judgment_provider_config
+    except ModuleNotFoundError:
+        try:
+            from decision.resolver import get_judgment_provider_config
+        except ImportError:
+            get_judgment_provider_config = None
+
+    if get_judgment_provider_config is not None:
+        try:
+            judged = get_judgment_provider_config(user_id, agent_id)
+            if judged and judged.get("api_base") and judged.get("model"):
+                return {
+                    "api_base": judged["api_base"],
+                    "api_key": judged.get("api_key") or "none",
+                    "model": judged["model"],
+                }
+        except Exception as e:
+            logger.debug("Judgment slot chain unavailable for lite judge: %s", e)
+
     try:
         from coapis.providers.provider_manager import ProviderManager
     except ModuleNotFoundError:

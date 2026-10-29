@@ -2243,7 +2243,10 @@
         "title": "Code Block Theme",
         "light": "Light",
         "dark": "Dark"
-      }
+      },
+      "timezone": "Time zone",
+      "timezoneGlobal": "Follow global setting",
+      "timezoneDesc": "Changes the “today” and time wording your agent sees"
     },
     "header": {
       "switchSession": "Switch session",

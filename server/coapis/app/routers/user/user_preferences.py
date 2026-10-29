@@ -63,6 +63,8 @@ class UserPreferencesResponse(BaseModel):
     user_id: Optional[int] = None
     theme: str = "coapis"
     language: str = "zh"
+    #: 时区按用户取（一期 U2）；None = 跟随全局配置
+    timezone: Optional[str] = None
     sidebar_collapsed: bool = False
     chat_display: ChatDisplayConfig = Field(default_factory=ChatDisplayConfig)
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
@@ -75,6 +77,8 @@ class UserPreferencesUpdate(BaseModel):
     """更新用户偏好（部分更新）."""
     theme: Optional[str] = None
     language: Optional[str] = None
+    #: 时区按用户取（一期 U2）；传空串 = 清除、回到全局配置
+    timezone: Optional[str] = None
     sidebar_collapsed: Optional[bool] = None
     chat_display: Optional[ChatDisplayConfig] = None
     notifications: Optional[NotificationConfig] = None
@@ -88,6 +92,8 @@ class FlatPreferencesUpdate(BaseModel):
     """前端直接发送的扁平化偏好数据（兼容 UserPreferences 接口）."""
     theme: Optional[str] = None
     language: Optional[str] = None
+    #: 时区按用户取（一期 U2）；传空串 = 清除、回到全局配置
+    timezone: Optional[str] = None
     sidebar_collapsed: Optional[int] = None
     chat_display_mode: Optional[str] = None
     chat_hide_tool_call: Optional[int] = None
@@ -168,6 +174,7 @@ def _row_to_response(row: Dict[str, Any]) -> UserPreferencesResponse:
         user_id=row.get("user_id"),
         theme=row.get("theme", "coapis"),
         language=row.get("language", "zh"),
+        timezone=row.get("timezone"),
         sidebar_collapsed=bool(row.get("sidebar_collapsed", 0)),
         chat_display=ChatDisplayConfig(
             hideToolCall=bool(row.get("chat_hide_tool_call", 1)),
@@ -231,6 +238,8 @@ def _save_preferences_flat(username: str, flat: FlatPreferencesUpdate) -> UserPr
     flat_field_map = {
         'theme': ('theme', None),
         'language': ('language', None),
+        # 一期 U2：时区按用户取，空串表示清除（回到全局配置）
+        'timezone': ('timezone', lambda v: (v or "").strip() or None),
         'sidebar_collapsed': ('sidebar_collapsed', bool),
         'chat_display_mode': ('chat_display_mode', None),
         'chat_hide_tool_call': ('chat_hide_tool_call', lambda v: 1 if v else 0),
@@ -276,6 +285,10 @@ def _save_preferences(username: str, update: UserPreferencesUpdate) -> UserPrefe
 
     if update.language is not None:
         update_data["language"] = update.language
+
+    # 一期 U2：时区按用户取（空串 = 清除，回到全局配置）
+    if update.timezone is not None:
+        update_data["timezone"] = (update.timezone or "").strip() or None
 
     if update.sidebar_collapsed is not None:
         update_data["sidebar_collapsed"] = 1 if update.sidebar_collapsed else 0
