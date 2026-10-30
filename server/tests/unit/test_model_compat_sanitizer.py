@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from agentscope.message import Msg
 
@@ -17,6 +19,7 @@ from coapis.agents.utils.message_request_normalizer import (
     normalize_messages_for_model_request,
 )
 from coapis.agents.utils.tool_message_utils import extract_tool_ids
+from coapis.providers.openai_chat_model_compat import _sanitize_stream_item
 
 
 @pytest.fixture(autouse=True)
@@ -258,6 +261,76 @@ def test_apply_mode_rewrites(monkeypatch) -> None:
         target_family="anthropic",
     )
     assert len(out) == 2
+
+
+# ---------------------------------------------------------------------------
+# 流式 delta 消毒（Ollama 的 audio:null 会把上游库炸掉）
+# ---------------------------------------------------------------------------
+
+
+def _delta(**kw):
+    return SimpleNamespace(**kw)
+
+
+def test_stream_delta_drops_null_audio() -> None:
+    """Ollama 每个 delta 都带 audio:null；上游库做 ``"data" in delta.audio``
+    会抛 TypeError('NoneType' object is not iterable)，整轮回复直接死掉。
+    消毒后该属性必须消失，库的守卫返回 False。
+    库读的是 ``chunk.choices[0].delta``，两种形状都要覆盖。"""
+    delta = _delta(content="你好", audio=None, function_call=None, tool_calls=None)
+    item = SimpleNamespace(chunk=SimpleNamespace(choices=[_delta(delta=delta)]))
+
+    out = _sanitize_stream_item(item)
+
+    assert out is item
+    assert not hasattr(delta, "audio"), "audio=None 必须被消毒掉"
+    assert delta.content == "你好"
+
+
+def test_stream_delta_drops_null_audio_top_level_shape() -> None:
+    """结构化 ChatCompletion 形状：delta 挂在 chunk.delta 上。"""
+    delta = _delta(content="hi", audio=None, tool_calls=None)
+    _sanitize_stream_item(SimpleNamespace(chunk=SimpleNamespace(delta=delta)))
+    assert not hasattr(delta, "audio")
+
+    delta2 = _delta(content="hi", audio=None, tool_calls=None)
+    _sanitize_stream_item(SimpleNamespace(delta=delta2))
+    assert not hasattr(delta2, "audio")
+
+
+def test_stream_delta_keeps_non_null_attrs() -> None:
+    """消毒只删 None，不碰有值的字段。"""
+    delta = _delta(content="x", audio={"data": "z"}, reasoning_content="r")
+    _sanitize_stream_item(SimpleNamespace(chunk=SimpleNamespace(delta=delta)))
+
+    assert delta.audio == {"data": "z"}
+    assert delta.reasoning_content == "r"
+    assert delta.content == "x"
+
+
+def test_stream_delta_survives_library_guard() -> None:
+    """复刻上游库那行守卫：消毒后跑一遍不得抛异常。"""
+    delta = _delta(content="hi", audio=None, tool_calls=None)
+    _sanitize_stream_item(SimpleNamespace(chunk=SimpleNamespace(delta=delta)))
+
+    audio = None
+    if hasattr(delta, "audio") and "data" in delta.audio:
+        audio = delta.audio["data"]
+    assert audio is None
+
+
+def test_openai_shaped_providers_use_the_compat_class() -> None:
+    """自定义提供商（如 dev 的 A3）配置的是原版 ``OpenAIChatModel``，
+    不经过 compat 子类就收不到流消毒。get_chat_model_cls 必须把
+    OpenAIChatModel 换成 OpenAIChatModelCompat，否则这些提供商一收流
+    就炸 audio:null（现象：聊天只回一句 Error: ...）。"""
+    from coapis.providers.provider import Provider
+    from coapis.providers.openai_chat_model_compat import OpenAIChatModelCompat
+
+    # Provider 是抽象类；get_chat_model_cls 只读 chat_model 字段，
+    # 用未绑定方法 + 轻量替身即可验证映射。
+    fake = SimpleNamespace(chat_model="OpenAIChatModel")
+    assert Provider.get_chat_model_cls(fake) is OpenAIChatModelCompat
 
 
 def test_off_mode_skips_pass(monkeypatch) -> None:

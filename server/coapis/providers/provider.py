@@ -309,6 +309,16 @@ class Provider(ProviderInfo, ABC):
                     f"not found for provider '{self.name}'."
                 ),
             )
+        # Every OpenAI-shaped provider goes through the compat class: it
+        # sanitizes streaming deltas.  Endpoints like Ollama (and custom
+        # proxies such as the dev "A3") send ``"audio": null`` on every
+        # chunk, and the plain agentscope parser dies on it with
+        # ``TypeError: 'NoneType' object is not iterable`` — the user sees
+        # a chat that answers ``Error: ...`` and nothing else.
+        if chat_model_cls is agentscope.model.OpenAIChatModel:
+            from .openai_chat_model_compat import OpenAIChatModelCompat
+
+            return OpenAIChatModelCompat
         return chat_model_cls
 
     @staticmethod

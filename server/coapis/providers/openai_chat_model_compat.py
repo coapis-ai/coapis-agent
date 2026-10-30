@@ -139,15 +139,49 @@ def _sanitize_chunk(chunk: Any) -> Any:
     return _clone_with_overrides(chunk, choices=sanitized_choices)
 
 
+def _strip_none_delta_attrs(delta: Any) -> None:
+    """Drop ``None``-valued attributes from a streaming delta, in place.
+
+    Ollama's OpenAI-compatible stream sends ``"audio": null`` on every
+    delta.  agentscope's OpenAI model then evaluates
+    ``"data" in chunk.delta.audio`` — membership on ``None`` raises
+    ``TypeError: 'NoneType' object is not iterable``, which surfaces to
+    the user as a bare ``Error: ...`` and kills the reply.  Deleting the
+    attribute makes the library's ``"audio" in delta`` guard answer
+    False, which is exactly the semantics of "no audio in this delta".
+    """
+    for name in list(getattr(delta, "__dict__", {}) or {}):
+        if getattr(delta, name, None) is None:
+            try:
+                delattr(delta, name)
+            except (AttributeError, TypeError):
+                pass
+
+
+def _sanitize_chunk_deltas(chunk: Any) -> None:
+    """Scrub ``None`` attributes from *every* delta the library may read.
+
+    The library reads ``chunk.choices[0].delta``; the structured
+    ``ChatCompletion`` shape carries the delta under ``chunk.delta``.
+    Both must be scrubbed, otherwise ``audio: null`` survives the
+    sanitizer and the library crashes on it.
+    """
+    _strip_none_delta_attrs(getattr(chunk, "delta", None))
+    for choice in getattr(chunk, "choices", None) or []:
+        _strip_none_delta_attrs(getattr(choice, "delta", None))
+
+
 def _sanitize_stream_item(item: Any) -> Any:
     """Sanitize either plain stream chunks or structured stream items."""
     if hasattr(item, "chunk"):
         chunk = item.chunk
+        _sanitize_chunk_deltas(chunk)
         sanitized_chunk = _sanitize_chunk(chunk)
         if sanitized_chunk is chunk:
             return item
         return _clone_with_overrides(item, chunk=sanitized_chunk)
 
+    _sanitize_chunk_deltas(item)
     return _sanitize_chunk(item)
 
 

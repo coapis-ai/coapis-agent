@@ -2139,10 +2139,23 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         ctx = getattr(self, "_request_context", None) or {}
         if not isinstance(ctx, dict):
             ctx = {}
+        # 聊天 UUID 在请求 contextvar 里（console 路由设置），不在
+        # request_context；session_id 只作最后兜底，台账不留空 chat_id。
+        try:
+            from ..config.session_context import get_current_chat_id
+
+            live_chat_id = get_current_chat_id()
+        except Exception:
+            live_chat_id = None
         return {
             "user_id": str(ctx.get("user_id") or ""),
             "agent_id": str(ctx.get("agent_id") or self._agent_id or ""),
-            "chat_id": str(ctx.get("chat_id") or ctx.get("session_id") or ""),
+            "chat_id": str(
+                ctx.get("chat_id")
+                or live_chat_id
+                or ctx.get("session_id")
+                or "",
+            ),
         }
 
     async def _llm_classify_skills(
@@ -4289,8 +4302,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         once compaction rolls the early turns away the agent cannot say
         which subtasks are done, so the run drifts or repeats work.
 
-        Cost is deliberately zero: the rule layer only (no model call), and
-        only when the plan tools are registered and no plan is active.  This
+        Cost: the rule layer is free.  The judge model is consulted only for
+        the boundary band (rule layer said MEDIUM) and its timeout is clamped
+        to 1.5s, so the reply path never pays more than that.  The judge
+        reuses the session's active model (定稿v13 D1/D2) and only ever
+        escalates MEDIUM -> COMPLEX; it never lowers a level.
+        Kill switch: COAPIS_DECISION_ENABLED=false, or per-post
+        COAPIS_DECISION_PLAN_GATE_ENABLED=false.
+        Only when the plan tools are registered and no plan is active.  This
         injects the skeleton; the agent writes the plan itself.
         """
         notebook = getattr(self, "plan_notebook", None)
@@ -4302,12 +4321,22 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         try:
             from .plan_gate import COMPLEX, ComplexityClassifier
 
+            hub = self._decision_hub()
             classifier = getattr(self, "_complexity_classifier", None)
             if classifier is None:
-                classifier = ComplexityClassifier(judge_enabled=False)
+                classifier = ComplexityClassifier(
+                    judge_enabled=(
+                        hub.enabled and hub.post_enabled("plan_gate")
+                    ),
+                    # 中枢说了算：推理型模型 1.5s 出不完思考，判官必败。
+                    judge_timeout=float(hub.llm_timeout_ms) / 1000.0,
+                    judge_max_tokens=int(hub.llm_max_tokens),
+                )
                 self._complexity_classifier = classifier
             classifier.set_ledger_scope(self._decision_scope())
-            level = classifier.classify(text)
+            # 必须走 classify_smart：同步 classify() 不认 judge_enabled，
+            # 判级模型永远不会被咨询（v13 D1 的"跟随会话激活模型"落空）。
+            level = await classifier.classify_smart(text)
         except Exception:  # the gate must never break a reply
             logger.debug("Plan gate skipped", exc_info=True)
             return

@@ -357,6 +357,8 @@ async def console_chat(
         session_id=session_id,
         channel="console",
         workspace_dir=workspace.workspace_dir,
+        # 前端每次请求都带 chat_id（聊天 UUID）；判断中枢台账靠它归集。
+        chat_id=payload.get("chat_id") or "",
     )
 
     # ── Get console channel ──

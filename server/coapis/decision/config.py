@@ -35,7 +35,10 @@ DEFAULTS = {
     "breaker_failure_threshold": 3,
     "breaker_cooldown_s": 120.0,
     "breaker_cooldown_floor_s": 1.0,
-    "llm_timeout_ms": 1500.0,
+    # 判断模型要跑在"会话激活模型"上；推理型模型（Q3 这类）光思考就要
+    # 几百 token、两三秒，1.5s/60token 的预算等于"判官必败、静默退回规则"。
+    "llm_timeout_ms": 3000.0,
+    "llm_max_tokens": 512,
 }
 
 
@@ -78,7 +81,10 @@ class DecisionHubConfig:
     breaker_failure_threshold: int = 3
     breaker_cooldown_s: float = 120.0
     breaker_cooldown_floor_s: float = 1.0
-    llm_timeout_ms: float = 1500.0
+    llm_timeout_ms: float = 3000.0
+    # 判断模型的输出预算。推理型模型（Q3 这类）先思考后作答，
+    # 60 token 连思考都出不完，判官必败、静默退回规则层。
+    llm_max_tokens: int = 512
     posts: dict = field(default_factory=dict)
 
     # ---- 构造 ----
@@ -124,6 +130,7 @@ class DecisionHubConfig:
             300.0,
         )
         self.llm_timeout_ms = min(max(float(self.llm_timeout_ms), 100.0), 8000.0)
+        self.llm_max_tokens = min(max(int(self.llm_max_tokens), 64), 4096)
         return self
 
     # ---- 开关 ----

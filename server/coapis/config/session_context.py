@@ -111,6 +111,7 @@ def set_session_context(
     username: Optional[str] = None,
     root_session_id: Optional[str] = None,
     workspace_dir: Optional[Path] = None,
+    chat_id: Optional[str] = None,
 ) -> None:
     """Set all session context variables at once.
 
@@ -126,6 +127,7 @@ def set_session_context(
         username: Human-readable username (same as user_id in most cases).
         root_session_id: Root session ID for agent-to-agent chains.
         workspace_dir: Workspace directory path for this agent+user.
+        chat_id: Chat UUID of this conversation (decision-ledger grouping).
     """
     if user_id is not None:
         _USER_ID.set(user_id)
@@ -141,6 +143,10 @@ def set_session_context(
         _USERNAME.set(username)
     if root_session_id is not None:
         _ROOT_SESSION_ID.set(root_session_id)
+    if chat_id is not None:
+        # 判断中枢台账按聊天 UUID 归集：不传就只能落在 session 键上，
+        # 台账里看不出"哪一次对话"做的判断。
+        _CHAT_ID.set(chat_id)
     if workspace_dir is not None:
         _WORKSPACE_DIR.set(workspace_dir)
 

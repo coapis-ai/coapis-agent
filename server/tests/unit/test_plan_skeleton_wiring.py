@@ -24,6 +24,7 @@ from agentscope.message import Msg
 
 from coapis.agents.react_agent import CoApisAgent as CoPawAgent
 from coapis.agents.plan_gate import COMPLEX, SIMPLE, ComplexityClassifier
+from coapis.decision.config import DecisionHubConfig
 
 MULTI_STEP = (
     "请全面分析这个模块的实现，找出所有问题，然后给出方案，"
@@ -55,6 +56,9 @@ def _stub(notebook, memory):
     # 真实实现从 request_context 取台账作用域；桩里返回空 scope 即可
     # （只影响判级入账，不影响判档与骨架注入本身）。
     stub._decision_scope = lambda: {}
+    # 判断中枢配置：桩里给默认值（总开关开、plan_gate 岗位开），
+    # 与真实智能体的 _decision_hub() 同形。
+    stub._decision_hub = lambda: DecisionHubConfig.from_dict({})
     stub._maybe_arm_plan = lambda msg: CoPawAgent._maybe_arm_plan(stub, msg)
     return stub
 
@@ -112,15 +116,19 @@ class TestSkeletonArming:
         asyncio.run(stub._maybe_arm_plan(None))
         assert memory.added == []
 
-    def test_classifier_is_cached_and_rule_only(self):
+    def test_classifier_is_cached_and_judge_wired(self):
         memory = _FakeMemory()
         stub = _stub(SimpleNamespace(plan=None), memory)
         asyncio.run(stub._maybe_arm_plan(Msg("user", MULTI_STEP, "user")))
         classifier = stub._complexity_classifier
         assert isinstance(classifier, ComplexityClassifier)
-        assert classifier.judge_enabled is False, (
-            "the gate must not spend a model call"
-        )
+        # v13 D1：判级模型跟随会话激活模型，由中枢开关控制（不再硬编码 False）。
+        hub = DecisionHubConfig.from_dict({})
+        assert classifier.judge_enabled is hub.post_enabled("plan_gate")
+        assert classifier.judge_timeout == hub.llm_timeout_ms / 1000
+        assert classifier.judge_max_tokens == hub.llm_max_tokens
+        # 规则层非 medium 直通：MULTI_STEP 判 complex，零模型调用。
+        assert asyncio.run(classifier.classify_smart(MULTI_STEP)) == COMPLEX
         # Second call reuses the same classifier instance.
         asyncio.run(stub._maybe_arm_plan(Msg("user", MULTI_STEP, "user")))
         assert stub._complexity_classifier is classifier
@@ -128,9 +136,11 @@ class TestSkeletonArming:
     def test_gate_failure_never_breaks_the_reply(self):
         memory = _FakeMemory()
         stub = _stub(SimpleNamespace(plan=None), memory)
-        stub._complexity_classifier = SimpleNamespace(
-            classify=lambda text: (_ for _ in ()).throw(RuntimeError("boom")),
-        )
+
+        async def _boom(_text):
+            raise RuntimeError("boom")
+
+        stub._complexity_classifier = SimpleNamespace(classify_smart=_boom)
         asyncio.run(stub._maybe_arm_plan(Msg("user", MULTI_STEP, "user")))
         assert memory.added == []
 

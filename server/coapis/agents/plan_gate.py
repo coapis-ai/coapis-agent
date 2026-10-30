@@ -52,6 +52,19 @@ _CONSEC_MARKER_RE = re.compile(
 _COMMA_SPLIT_RE = re.compile(r"[，,]")
 _COLON_SPLIT_RE = re.compile(r"[：:]")
 
+# 判官提示词。要求模型只回一个词，解析层做宽松匹配。
+# ⚠ 必须用 .format(text=...) 注入，因此正文里不能出现裸花括号。
+_JUDGE_PROMPT = """判断下面这个任务的复杂度，只回答一个词：simple、medium 或 complex。
+
+标准：
+- simple：一句话就能做完（查、看、改一处、单步操作）。
+- medium：2~3 个步骤，或需要读文件、写内容、调用工具。
+- complex：多步骤串联、跨系统、需要交付物（报告/部署/重构）。
+
+不要解释，不要标点，只输出那一个词。
+
+任务：{text}"""
+
 
 class ComplexityClassifier:
     """规则判级 + lite judge 的三级复杂度分类器。
@@ -64,9 +77,16 @@ class ComplexityClassifier:
 
     LEVELS = LEVELS
 
-    def __init__(self, judge_enabled: bool = True, judge_timeout: float = 5.0):
+    def __init__(
+        self,
+        judge_enabled: bool = True,
+        judge_timeout: float = 5.0,
+        judge_max_tokens: int = 512,
+    ):
         self.judge_enabled = judge_enabled
         self.judge_timeout = judge_timeout
+        # 推理型模型要先思考后作答：预算太小 = 判官必败。
+        self.judge_max_tokens = max(64, int(judge_max_tokens))
         self._judge_cache: dict[str, tuple[str, float]] = {}
         # 台账作用域（user_id / agent_id / chat_id），由接线方注入
         self._ledger_scope: dict[str, str] = {}
@@ -201,7 +221,7 @@ class ComplexityClassifier:
                     json={
                         "model": config["model"],
                         "messages": [{"role": "user", "content": _JUDGE_PROMPT.format(text=text[:2000])}],
-                        "max_tokens": 60,
+                        "max_tokens": self.judge_max_tokens,
                         "temperature": 0.0,
                         "chat_template_kwargs": {"enable_thinking": False},
                     },
