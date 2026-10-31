@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -616,7 +616,10 @@ def test_plan_gate_emits_ledger(ledger_db):
     rows = _query_all()
     assert len(rows) == 1
     assert rows[0].source == "plan_gate"
+    # 命中层白名单含 llm：环境里真配了判断模型时，L1 命中就是本用例要锁的
+    # "发生了判断并留下完整台账"。判成哪一档不锁（由校准岗按台账统计）。
     assert rows[0].hit_layer in (
+        "llm",
         "no_model",
         "error",
         "timeout",
@@ -745,3 +748,99 @@ def test_decision_package_does_not_import_agents():
         text = path.read_text(encoding="utf-8")
         for bad in ("from ..agents", "from coapis.agents"):
             assert bad not in text, "%s 反向依赖了 agents 层" % path.name
+
+
+# ---------- 台账保留期清理（验收 15.3 之三：90 天清理生效）----------
+
+
+def _bus_ret(days: int) -> DecisionBus:
+    """带指定保留期的写入器；_purged_at 归零保证本用例必触发清理。"""
+    cfg = DecisionHubConfig.from_env()
+    cfg.ledger_enabled = True
+    cfg.ledger_retention_days = days
+    cfg.normalized()
+    bus = DecisionBus(cfg)
+    bus._purged_at = 0.0
+    return bus
+
+
+def _age(event_id: str, days: int) -> None:
+    """把某行人为老化到 N 天前，模拟历史台账。"""
+    from coapis.foundation.db import get_session_factory
+    from coapis.foundation.db.models.decision import DecisionEvent
+
+    with get_session_factory()() as s:
+        row = s.query(DecisionEvent).filter(DecisionEvent.event_id == event_id).one()
+        row.created_at = time.time() - days * 86400.0
+        s.commit()
+
+
+def test_bus_purges_rows_past_retention(ledger_db):
+    """超过保留期的行在下一次写入时被清掉；新行原样留着。"""
+    bus = _bus_ret(7)
+    assert bus.emit(DecisionResult(source="plan_pre", complexity="simple")) is True
+    assert len(_query_all()) == 1
+
+    _age(_query_all()[0].event_id, 30)
+    bus._purged_at = 0.0  # 越过节流窗口：本次写入必须顺带清掉超期行
+    assert bus.emit(DecisionResult(source="plan_mid", complexity="complex")) is True
+
+    rows = _query_all()
+    assert len(rows) == 1, "30 天前的行应被清掉，只剩本轮新行"
+    assert rows[0].source == "plan_mid"
+
+
+def test_bus_keeps_rows_within_retention(ledger_db):
+    """保留期内的行绝不清掉——复盘校准岗要做跨轮对照。"""
+    bus = _bus_ret(90)
+    assert bus.emit(DecisionResult(source="plan_pre")) is True
+    _age(_query_all()[0].event_id, 30)
+    bus._purged_at = 0.0  # 越过节流窗口，确保本次写入真的触发清理
+    assert bus.emit(DecisionResult(source="plan_mid")) is True
+    assert len(_query_all()) == 2, "30 天 < 90 天保留期，不得清理"
+
+
+def test_bus_purge_is_throttled_per_process(ledger_db):
+    """清理按进程节流：节流窗口内不重复清理，热路径不做全表删除。"""
+    bus = _bus_ret(7)
+    assert bus.emit(DecisionResult(source="a")) is True
+
+    _age(_query_all()[0].event_id, 30)
+    assert bus.emit(DecisionResult(source="b")) is True
+    assert len(_query_all()) == 2, "节流窗口内不触发清理"
+
+    bus._purged_at = 0.0
+    assert bus.emit(DecisionResult(source="c")) is True
+    rows = _query_all()
+    assert len(rows) == 2, "越过节流窗口后超期行被清掉"
+    assert {r.source for r in rows} == {"b", "c"}
+
+
+def test_bus_purge_failure_never_blocks_write(ledger_db, monkeypatch):
+    """台账写入异常必须被吞掉：绝不阻断对话（清理与写入同处一个护罩）。"""
+    bus = _bus_ret(7)
+
+    calls = {"n": 0}
+
+    def _flaky(row):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("写入/清理时表不可用")
+
+    monkeypatch.setattr(bus, "_insert", _flaky)
+    assert bus.emit(DecisionResult(source="plan_pre")) is True
+    assert bus.emit(DecisionResult(source="plan_mid")) is False
+
+
+def test_retention_days_in_config_contract():
+    """保留期进单一配置契约：有默认值、有边界、界面可改。"""
+    from coapis.decision.config import DEFAULTS
+
+    assert DEFAULTS["ledger_retention_days"] == 90
+    assert "ledger_retention_days" in DecisionHubConfig.known_keys()
+
+    cfg = DecisionHubConfig.from_env()
+    cfg.ledger_retention_days = 1
+    assert cfg.normalized().ledger_retention_days == 7, "下限 7 天"
+    cfg.ledger_retention_days = 99999
+    assert cfg.normalized().ledger_retention_days == 3650, "上限 3650 天"
