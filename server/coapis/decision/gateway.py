@@ -72,6 +72,15 @@ LAYER_TIMEOUT = "timeout"       # 超时
 LAYER_TRANSPORT = "transport"   # 传输/调用异常
 LAYER_PARSE_FAIL = "parse_fail"  # 返回了但解析不出结论
 
+# 真判断层：出现在这些 hit_layer 上代表"确实发起过一次模型判断"
+# （成功或失败）。其余（rule/disabled/breaker_open/budget_cap/cache/
+# inflight/abstain）是"压根不需要判"——统计判官战绩必须把两类分开，
+# 否则免判行会把总数灌满，看不出判官到底有没有发生作用。
+JUDGED_LAYERS = (
+    LAYER_LLM, LAYER_LLM_SESSION, LAYER_NO_MODEL, LAYER_NOT_CHAT,
+    LAYER_TIMEOUT, LAYER_TRANSPORT, LAYER_PARSE_FAIL, LAYER_ERROR,
+)
+
 _MAX_TURN_KEYS = 200
 
 
@@ -417,9 +426,6 @@ class JudgeGateway:
         reply = JudgeReply(
             value=value,
             hit_layer=LAYER_RULE,
-            from_llm=False,
-            tokens_in=0,
-            tokens_out=0,
         )
         self._ledger(
             purpose=purpose,

@@ -71,13 +71,8 @@ def _identity(request: Request) -> tuple[str, str]:
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
-    data = dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
-    ts = data.get("ts")
-    if hasattr(ts, "isoformat"):
-        data["ts"] = ts.isoformat()
-    elif ts is not None:
-        data["ts"] = str(ts)
-    return data
+    """行 -> dict。台账的时间列是 created_at（float epoch），原样交给前端格式化。"""
+    return dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
 
 
 def _active_agent_id(request: Request, username: str) -> str:
@@ -183,14 +178,14 @@ def decision_stats(
         params["chat_id"] = chat_id
     clause = " AND ".join(where)
     degraded = ",".join(f"'{x}'" for x in _DEGRADED)
-    from coapis.decision.hub_acceptance import _NO_JUDGMENT_SOURCES
-    no_judge = ",".join(f"'{x}'" for x in _NO_JUDGMENT_SOURCES)
+    from coapis.decision.gateway import JUDGED_LAYERS
+    judged_set = ",".join(f"'{x}'" for x in JUDGED_LAYERS)
     sql = text(
         "SELECT source, "
         "COUNT(*) AS n, "
         # 真判断次数：规则/闸门/开关关闭这类"压根不需要判"的行不是判断。
         # 混在一起计数会被巡检噪声灌满，看不出判官有没有发生作用。
-        f"SUM(CASE WHEN hit_layer NOT IN ({no_judge}) THEN 1 ELSE 0 END) AS judged, "
+        f"SUM(CASE WHEN hit_layer IN ({judged_set}) THEN 1 ELSE 0 END) AS judged, "
         "SUM(CASE WHEN hit_layer='llm' THEN 1 ELSE 0 END) AS llm, "
         f"SUM(CASE WHEN hit_layer IN ({degraded}) THEN 1 ELSE 0 END) AS degraded, "
         "SUM(CASE WHEN hit_layer='timeout' THEN 1 ELSE 0 END) AS timeouts, "
@@ -216,7 +211,10 @@ def decision_stats(
                 params,
             ).scalar() or 0
             total_n = session.execute(
-                text(f"SELECT COUNT(*) FROM decision_events WHERE {clause}"),
+                text(
+                    f"SELECT COUNT(*) FROM decision_events "
+                    f"WHERE {clause} AND hit_layer IN ({judged_set})"
+                ),
                 params,
             ).scalar() or 0
     except Exception as exc:  # pragma: no cover
@@ -289,7 +287,10 @@ def get_config(request: Request) -> dict[str, Any]:
     except Exception:  # pragma: no cover - 槽位解析失败时只报配置
         slot = {}
     return {
-        "config": hub.as_dict(),
+        # 全字段视图：页面要能看见"当前生效的每一项"，不做单位换算、读写同名
+        "config": hub.full_view(),
+        # decision_hub：管理端读取的那一节（与落盘段同名，前端只认这一节）
+        "decision_hub": hub.full_view(),
         "judge": {
             "provider_id": str(slot.get("provider_id") or ""),
             "model": str(slot.get("model") or ""),
@@ -301,32 +302,32 @@ def get_config(request: Request) -> dict[str, Any]:
 
 @router.put("/config")
 def put_config(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """改判官配置，写进 agent.json 的 ``decision_hub`` 段（重启后仍生效）。
+    """改判官配置：落盘到部署级配置文件（重启后仍生效）并立即生效。
 
     只认 :mod:`coapis.decision.config` 认识的键，未知键拒收——不再制造
-    "配置写了没人读"的死字段（v14 §0.3 的教训）。
+    "配置写了没人读"的死字段（v14 §0.3 的教训）。落盘位置是
+    ``WORKING_DIR/config/decision_hub.json`` 单一真相，读取侧
+    ``get_hub_config()`` 直接压过环境变量，页面改完下一轮判断就生效。
     """
-    from coapis.config import load_agent_config, save_agent_config
-    from coapis.decision.config import DecisionHubConfig, reset_hub_config
+    from coapis.decision import normalize_hub_keys
+    from coapis.decision.config import (
+        HUB_KEY_ALIASES,
+        DecisionHubConfig,
+        save_hub_section,
+    )
 
-    agent_id = _active_agent_id(request, _identity(request)[0])
-    try:
-        cfg = load_agent_config(agent_id)
-    except Exception as exc:  # pragma: no cover
-        raise HTTPException(status_code=404, detail=f"智能体读不到: {exc}") from exc
     known = set(DecisionHubConfig.known_keys())
     body = body or {}
-    payload = {k: v for k, v in body.items() if k in known}
-    unknown = sorted(set(body) - known)
-    if not payload:
+    # 只筛掉不认识的键；键名收敛交给写入侧统一做（别名归一 + 全名落盘），
+    # 读取侧与落盘段同名，两处不会各认一套键名。
+    accepted = {k: v for k, v in body.items() if k in known or k in HUB_KEY_ALIASES}
+    unknown = sorted(set(body) - set(accepted))
+    if not accepted:
         raise HTTPException(status_code=400, detail="没有可识别的配置项")
-    merged = dict(getattr(cfg, "decision_hub", None) or {})
-    merged.update(payload)
     try:
-        cfg.decision_hub = merged
-        save_agent_config(agent_id, cfg)
+        cfg = save_hub_section(accepted)
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=500, detail=f"保存失败: {exc}") from exc
-    reset_hub_config()
-    return {"ok": True, "agent_id": agent_id, "decision_hub": merged,
-            "ignored": unknown}
+    # checked 回传全字段生效值（越界值已夹取），供前端核对真正生效的每一项
+    return {"ok": True, "decision_hub": accepted,
+            "ignored": unknown, "checked": cfg.full_view()}

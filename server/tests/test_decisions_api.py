@@ -77,7 +77,7 @@ def client(tmp_path, monkeypatch):
     api.include_router(decisions_mod.router, prefix="/decisions")
     app.include_router(api, prefix="/api")
 
-    # 配置写盘落到临时目录，测试不碰真实 agent.json
+    # 配置写盘落到临时目录，测试不碰真实部署目录
     cfg_dir = tmp_path / "agents"
     cfg_dir.mkdir()
     payload = {"id": "default", "name": "default", "running_config": {},
@@ -85,7 +85,7 @@ def client(tmp_path, monkeypatch):
     (cfg_dir / "default.json").write_text(json.dumps(payload), encoding="utf-8")
 
     def _load(agent_id: str):
-        from coapis.config import AgentProfileConfig
+        from coapis.config.config import AgentProfileConfig
 
         return AgentProfileConfig(**json.loads((cfg_dir / f"{agent_id}.json").read_text()))
 
@@ -97,6 +97,10 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr("coapis.config.load_agent_config", _load)
     monkeypatch.setattr("coapis.config.save_agent_config", _save)
+    # 中枢配置落盘位置改到临时目录：写入侧与读取侧都走这一条路径
+    hub_file = tmp_path / "hub" / "decision_hub.json"
+    hub_file.parent.mkdir()
+    monkeypatch.setattr("coapis.decision.config.hub_config_path", lambda: hub_file)
 
     yield TestClient(app), holder, cfg_dir
     reset_engine()
@@ -175,34 +179,81 @@ def test_config_get_shape(client):
 
 
 def test_config_put_persists_known_keys_only(client):
-    c, _holder, cfg_dir = client
-    res = c.put("/api/decisions/config", json={
+    c, _holder, _cfg_dir = client
+    res = c.put("/api/decisions/config?agent_id=a1", json={
         "timeout_ms": 2500,
         "advisor_enabled": False,
         "judge_model": "glm-4.7",
     }).json()
     assert res["decision_hub"] == {"timeout_ms": 2500, "advisor_enabled": False}
-    assert res["ignored"] == ["judge_model"], "未知键必须报告，不留死字段"
-    saved = json.loads((cfg_dir / "a1.json").read_text())["decision_hub"]
-    assert saved == {"timeout_ms": 2500, "advisor_enabled": False}
+    assert res["ignored"] == ["judge_model"], "未知键拒收，不写死字段"
+    # 读回走读取侧那一条路径：落盘文件就是 get_hub_config() 读的那份，
+    # 只有一份真相，测试不碰真实部署目录。
+    from coapis.decision.config import get_hub_config, hub_config_path, reset_hub_config
 
-    assert c.put("/api/decisions/config", json={"nope": 1}).status_code == 400
+    saved = json.loads(hub_config_path().read_text())
+    # 落盘只认全名（别名在写入侧归一），读取侧与落盘段同名
+    assert saved["llm_timeout_ms"] == 2500
+    # advisor_enabled=False 归一成"每 N 轮复核 = 0"，即关闭
+    assert saved["advisor_every_iters"] == 0
+    assert "judge_model" not in saved
+    assert "timeout_ms" not in saved, "别名不落盘，只有一份键名"
+    assert "advisor_enabled" not in saved, "别名不落盘，只有一份键名"
+
+    reset_hub_config()
+    assert get_hub_config().timeout_ms == 2500, "重启后仍生效（读盘，不靠进程内状态）"
+
+    assert c.put("/api/decisions/config?agent_id=a1", json={"nope": 1}).status_code == 400
+
 
 
 def test_config_put_reaches_hub_config(client):
-    """PUT 之后判官配置要**立刻**被网关读到——配置改了不生效等于没改。"""
     c, _holder, _ = client
     from coapis.decision.config import get_hub_config
 
-    assert get_hub_config().timeout_ms != 2500
-    c.put("/api/decisions/config", json={"timeout_ms": 2500})
-    assert get_hub_config().timeout_ms == 2500
-    c.put("/api/decisions/config", json={"timeout_ms": 3000})
-    assert get_hub_config().timeout_ms == 3000
+    # 基线值不假设（各环境环境变量不同），只验"改了立刻变"
+    before = get_hub_config().timeout_ms
+    c.put("/api/decisions/config?agent_id=a1", json={"timeout_ms": 2100})
+    # 写入侧落盘 + 主动失效缓存：页面改完，网关下一轮就是新值
+    assert get_hub_config().timeout_ms == 2100
+    c.put("/api/decisions/config?agent_id=a1", json={"timeout_ms": 2600})
+    assert get_hub_config().timeout_ms == 2600
+    assert (before == 2100) is False
+
+
+
+def _walk_router_paths(node):
+    """摊平路由树。新版 FastAPI 把 include_router 存成 _IncludedRouter，
+    生效路径要逐层展开——只看顶层会把 /api/decisions 看成不存在。"""
+    out = set()
+    stack = [node]
+    seen = set()
+    while stack:
+        cur = stack.pop()
+        if id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        for r in getattr(cur, "routes", []):
+            getter = getattr(r, "effective_route_contexts", None)
+            if callable(getter):
+                for ctx in getter():
+                    out.add(getattr(ctx, "path", ""))
+                inner = getattr(r, "original_router", None)
+                if inner is not None:
+                    stack.append(inner)
+                continue
+            out.add(getattr(r, "path", ""))
+    return out
 
 
 def test_router_registered_under_api_prefix():
+    """/decisions 必须真的挂进生产路由树——没挂载等于功能不存在。"""
     from coapis.app.routers import router as api_router
 
-    paths = [getattr(r, "path", "") for r in api_router.routes]
-    assert any(p.startswith("/decisions") for p in paths), paths
+    hits = {p for p in _walk_router_paths(api_router) if "/decisions" in p}
+    assert {
+        "/decisions",
+        "/decisions/stats",
+        "/decisions/config",
+        "/decisions/{event_id}/rating",
+    } <= hits, sorted(hits)

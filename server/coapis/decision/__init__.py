@@ -23,7 +23,7 @@ from .cache import (
     put_cached_judgment,
     reset_judgment_cache,
 )
-from .config import DecisionHubConfig, get_hub_config, merge_hub_config
+from .config import DecisionHubConfig, get_hub_config, merge_hub_config, normalize_hub_keys
 from .gateway import (
     JudgeGateway,
     JudgeReply,
@@ -50,6 +50,7 @@ from .types import (
 __all__ = [
     "DecisionHubConfig",
     "merge_hub_config",
+    "normalize_hub_keys",
     "get_hub_config",
     "DecisionResult",
     "Complexity",

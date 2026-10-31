@@ -71,6 +71,20 @@ class DecisionEvent(BaseRow):
     tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+    # 判断置信度（0~1）：判官方给出的把握程度，未给出时为 0。
+    # 校准岗按它统计"判得准不准"，也是台账里唯一能区分"敢判"与"蒙的"的量。
+    confidence: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default=text("0")
+    )
+    # 判断的 token 收支分开记：判官是独立模型，prompt 与 completion 的单价
+    # 和用途都不同，合计成一列就没法算"判一次花多少"。
+    # tokens 保留为合计，供既有查询与统计接口继续读。
+    tokens_in: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    tokens_out: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
 
     # 作用域（与记忆域 scope 语义一致）
     user_id: Mapped[str] = mapped_column(

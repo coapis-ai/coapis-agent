@@ -9,8 +9,11 @@
 """
 from __future__ import annotations
 
+import json
 import os
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass, field, fields
+from pathlib import Path
 from typing import Any, Mapping
 
 ENV_PREFIX = "COAPIS_DECISION_"
@@ -84,6 +87,35 @@ def _as_float(val: Any, default: float) -> float:
         return default
 
 
+#: 管理端可用的短名键（写盘时按原样保留，读取时收敛成全名）。
+HUB_KEY_ALIASES = frozenset({"timeout_ms", "max_calls_per_turn", "advisor_enabled"})
+
+
+def normalize_hub_keys(raw: Any) -> dict:
+    """把管理端短名收敛成中枢全名（键名只在这一处映射）。
+
+    管理端与既有接口习惯用短名（``timeout_ms`` / ``max_calls_per_turn`` /
+    ``advisor_enabled``），中枢内部用带岗位前缀的全名。两处各写一套键名
+    迟早对不上，所以映射只留这一份：配置写入、读取校验、路由过滤都调它。
+
+    只在短名出现且对应全名缺席时生效，避免同一份配置里两个键名互相覆盖。
+    """
+    out = dict(raw or {})
+    for alias, full in (
+        ("timeout_ms", "llm_timeout_ms"),
+        ("max_calls_per_turn", "judge_max_calls_per_turn"),
+    ):
+        if alias in out and full not in out:
+            out[full] = out[alias]
+    if "advisor_enabled" in out and "advisor_every_iters" not in out:
+        out["advisor_every_iters"] = (
+            int(DEFAULTS["advisor_every_iters"])
+            if _as_bool(out["advisor_enabled"], True)
+            else 0
+        )
+    return out
+
+
 def _as_int(val: Any, default: int) -> int:
     try:
         return int(val)
@@ -155,21 +187,7 @@ class DecisionHubConfig:
 
         优先级：智能体配置 > 环境变量 > 默认值。
         """
-        raw = dict(raw or {})
-        # 短名 → 全名（管理端契约别名，与上面的 property 一一对应）。
-        # 只在短名出现且全名缺席时生效，避免同一份配置出现两个键名。
-        for _alias, _full in (
-            ("timeout_ms", "llm_timeout_ms"),
-            ("max_calls_per_turn", "judge_max_calls_per_turn"),
-        ):
-            if _alias in raw and _full not in raw:
-                raw[_full] = raw[_alias]
-        if "advisor_enabled" in raw and "advisor_every_iters" not in raw:
-            raw["advisor_every_iters"] = (
-                int(DEFAULTS["advisor_every_iters"])
-                if _as_bool(raw["advisor_enabled"], True)
-                else 0
-            )
+        raw = normalize_hub_keys(raw)
         merged: dict[str, Any] = {}
         for key, default in DEFAULTS.items():
             env_name = key.upper()
@@ -221,6 +239,14 @@ class DecisionHubConfig:
         """配置段里被认识的键名——配置 API 只收这些，防止死字段再生。"""
         return [f.name for f in fields(cls)]
 
+    def full_view(self) -> dict[str, Any]:
+        """全字段视图（落盘与管理页读取用）。
+
+        与 :meth:`as_dict` 的区别：这里不换算单位、不改名，读写同名，
+        落盘再读回不会丢值；页面要显示"当前生效的每一项"也用这个。
+        """
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
     def as_dict(self) -> dict[str, Any]:
         """判官设置项 API 的字典视图（v14 §5.2 的契约字段名）。
 
@@ -269,12 +295,73 @@ class DecisionHubConfig:
 _hub_cache: "DecisionHubConfig | None" = None
 _merged_cache: "dict[tuple, DecisionHubConfig]" = {}
 
+#: 管理页落盘的配置段多久重读一次（秒）。写入口会主动失效，这里只是兜底。
+_SAVED_TTL_SECONDS = 30.0
+_saved_cache: dict[str, Any] = {"at": 0.0, "data": {}}
+
+
+def hub_config_path() -> Path:
+    """管理页保存的中枢配置落盘位置（部署级单一真相）。"""
+    from ..constant import WORKING_DIR
+
+    return Path(WORKING_DIR) / "config" / "decision_hub.json"
+
+
+def saved_hub_section() -> dict[str, Any]:
+    """读管理页已保存的配置段。文件缺失、损坏一律当空，不影响主流程。"""
+    now = time.monotonic()
+    if _saved_cache["data"] is not None and (now - _saved_cache["at"]) < _SAVED_TTL_SECONDS:
+        return _saved_cache["data"]
+    data: dict[str, Any] = {}
+    try:
+        path = hub_config_path()
+        if path.is_file():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, Mapping):
+                data = dict(raw)
+    except Exception:  # 配置读不到就退回环境变量，绝不把对话带崩
+        data = {}
+    _saved_cache["at"] = now
+    _saved_cache["data"] = data
+    return data
+
+
+def save_hub_section(patch: Mapping[str, Any]) -> DecisionHubConfig:
+    """管理页保存入口：别名归一 → 夹取 → 落盘 → 立刻生效。
+
+    只写一个文件、只认一份真相；写盘用全字段视图（读写同名，不换算单位），
+    因此"写进去的"和"读出来的"永远一致。
+    """
+    accepted = normalize_hub_keys(patch)
+    merged = {k: v for k, v in saved_hub_section().items() if k not in accepted}
+    merged.update(accepted)
+    cfg = DecisionHubConfig.from_dict(merged).normalized()
+    cfg = DecisionHubConfig.from_dict(cfg.full_view()).normalized()
+
+    path = hub_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / (path.name + ".tmp")
+    tmp.write_text(json.dumps(cfg.full_view(), ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    reset_hub_config()
+    return cfg
+
 
 def get_hub_config() -> "DecisionHubConfig":
-    """读一次环境变量，之后一直用这份（避免每次判断都重解析）。"""
+    """当前生效的中枢配置：**管理页保存值 > 环境变量 > 默认值**，进程内缓存。
+
+    环境变量是出厂值，管理页保存的值压在它上面。页面写完会调用
+    :func:`reset_hub_config`，因此「页面改了立刻生效」不需要重启。
+    """
     global _hub_cache
     if _hub_cache is None:
-        _hub_cache = DecisionHubConfig.from_env().normalized()
+        cfg = DecisionHubConfig.from_env().normalized()
+        saved = saved_hub_section()
+        if saved:
+            cfg = DecisionHubConfig.from_dict(
+                {**cfg.full_view(), **normalize_hub_keys(saved)}
+            ).normalized()
+        _hub_cache = cfg
     return _hub_cache
 
 
@@ -294,10 +381,12 @@ def merge_hub_config(raw: Mapping[str, Any] | None) -> "DecisionHubConfig":
 
 
 def reset_hub_config() -> None:
-    """清空配置缓存（测试用）。"""
+    """清空配置缓存（管理页保存后、测试用）。"""
     global _hub_cache
     _hub_cache = None
     _merged_cache.clear()
+    _saved_cache["data"] = None
+    _saved_cache["at"] = 0.0
 
 
 __all__ = [

@@ -30,6 +30,23 @@ from typing import Any
 
 from .rubric import JSON_ONLY, rubric_for
 
+# 免判来源：这些 source/hit_layer 代表"这一轮压根不需要判断"——规则命中、
+# 闸门拦截、开关关闭、预算/轮次上限、缓存与在途复用等。统计判官战绩时
+# 要把它们排除在"判断次数"之外，否则台账总数被巡检噪声灌满，看不出判官
+# 到底有没有发生作用（v14 §5.2 验收要求"逐来源判断次数"是真次数）。
+_NO_JUDGMENT_SOURCES = (
+    "rule",
+    "gate",
+    "disabled",
+    "keyword",
+    "budget_exempt",
+    "turn_cap",
+    "no_judgment",
+    "cache",
+    "inflight",
+    "abstain",
+)
+
 logger = logging.getLogger(__name__)
 
 #: 需求/交付的最小长度（低于此不判，见模块 docstring）
