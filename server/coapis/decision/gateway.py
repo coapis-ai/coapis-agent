@@ -135,6 +135,30 @@ class JudgeReply:
 # =====================================================================
 
 
+# 判档档位词表，与 plan_gate.LEVELS 逐字对齐（test_decision_ledger 里
+# 有断言钉住，防止两边漂移）。判断值形状是 ``select:<effort>,<level>``。
+_LEVELS = frozenset({"simple", "medium", "complex"})
+
+
+def _level_of(judgment: str) -> str:
+    """判档行的判断值 → 档位本身。
+
+    台账这一列要的是档位（simple/medium/complex），历史上塞进去的是
+    判断值整串，实测出现 'select:low,medium' 这种值——按复杂度分组、
+    筛选、算成本分布的查询全部作废。判断值是 ``select:<effort>,<level>``，
+    effort 和 level 的词表有重叠（medium 两边都有），所以从右往左取第一个
+    命中档位词表的词。解析不出来就返回空串——空档位比假档位好，假档位
+    会污染按复杂度分组的所有统计。
+    """
+    text = str(judgment or "").strip()
+    if text.startswith("select:"):
+        text = text[len("select:"):]
+    for token in reversed([t.strip().lower() for t in text.split(",") if t.strip()]):
+        if token in _LEVELS:
+            return token
+    return ""
+
+
 def _usage_of(obj: Any) -> tuple[int, int]:
     """从模型响应里取 ``(输入 token, 输出 token)``，取不到给 0。
 
@@ -309,6 +333,10 @@ class JudgeGateway:
             "user_id": str(sc.get("user_id") or ""),
             "agent_id": str(sc.get("agent_id") or ""),
             "chat_id": str(sc.get("chat_id") or ""),
+            # session 是 chat 取空时的预算键兜底：没有它，作用域缺失的
+            # 判断行会全部共用同一个预算键（实测判官 30% 的调用被
+            # budget_cap 掐死）。
+            "session_id": str(sc.get("session_id") or ""),
             "turn": int(sc.get("turn") or 0),
             # 台账只存输入指纹，绝不存原文（v14 §4.5①）
             "input_hash": hashlib.sha1(user.encode("utf-8")).hexdigest()[:12],
@@ -352,7 +380,19 @@ class JudgeGateway:
             )
 
         # --- L0 前置门：单轮预算（判断不能变成循环） ---
-        tkey = (ids["user_id"], ids["agent_id"], ids["chat_id"], turn)
+        # 键必须能区分"哪一次会话的第几轮"。曾经只有
+        # (user, agent, chat, turn)：判档行的 chat 取空、turn 恒 0 时
+        # 退化成"每用户一个全局键"，跑满上限后判官对该用户**永久**熔断
+        # （实测 66 行台账里 20 行 hit_layer=budget_cap）。chat 空时用
+        # session 兜底；四项全空时键里带上本实例身份，绝不与他人共用。
+        tkey = (
+            ids["user_id"],
+            ids["agent_id"],
+            ids["chat_id"] or ids.get("session_id", ""),
+            turn,
+        )
+        if not any(tkey):
+            tkey = (id(self), purpose, turn)
         if len(self._turn_calls) > _MAX_TURN_KEYS:
             self._turn_calls.clear()
         cap = int(cfg.judge_max_calls_per_turn)
@@ -407,38 +447,6 @@ class JudgeGateway:
         return replace(reply, hit_layer=LAYER_INFLIGHT, source="inflight")
 
     # ---------------- L1/L2：真去问模型 ----------------
-
-    def rule_reply(
-        self,
-        *,
-        purpose: str,
-        value: Any,
-        describe: Callable[[Any], str],
-        scope: Optional[dict[str, Any]] = None,
-    ) -> JudgeReply:
-        """规则层出口（v14 §3.1 阶梯 L3）：零次大模型参与，只入账。
-
-        规则判级也是判档出口，台账要能查到"这一轮判了什么档、思考开没开"；
-        但它没有大模型参与，故 hit_layer=rule、cost=0、无 token——绝不冒充
-        一次真判断。台账唯一写者是本网关，所以规则层不自己写行。
-        """
-        hub = get_hub_config()
-        reply = JudgeReply(
-            value=value,
-            hit_layer=LAYER_RULE,
-        )
-        self._ledger(
-            purpose=purpose,
-            reply=reply,
-            started=time.perf_counter(),
-            model_id="",
-            eng=_EngineStat(),
-            hub=hub,
-            scope=scope,
-            describe=describe,
-            prompt=None,
-        )
-        return reply
 
     async def _run_llm(
         self,
@@ -587,11 +595,12 @@ class JudgeGateway:
         reply: JudgeReply,
         describe: Callable[[JudgeReply], str] | None,
         *,
-        user_id: str,
-        agent_id: str,
-        chat_id: str,
+        user_id: str = "",
+        agent_id: str = "",
+        chat_id: str = "",
         turn: int = 0,
         input_hash: str = "",
+        **ids: Any,
     ) -> None:
         """每次判断都进台账，**原文一个字都不落**（v14 §4.3）。
 
@@ -599,9 +608,16 @@ class JudgeGateway:
         花费 / 输入指纹 / 轮次。判了什么必须看得见，判什么的**内容**
         （提示词、用户消息原文）一个字都不落。
 
+        ``**ids`` 是必需的：调用点统一透传一整套会话标识（session_id、
+        channel、scope、prompt、started、model_id、eng、hub……），台账只取
+        其中自己要的列。签名写死成固定参数时，多出来的键会让每次判断
+        直接 TypeError——异常被本函数吞掉，结果是**台账在真实判断链路上
+        一条都写不进去**，界面永远空白。
+
         写入走 :class:`coapis.decision.bus.DecisionBus`（内部吞异常，
         台账故障绝不带回判断路径）。
         """
+
         if not get_hub_config().ledger_enabled:
             return
         try:
@@ -622,7 +638,10 @@ class JudgeGateway:
                     source=purpose,
                     # complexity 存**判出来的档位**（只有判档岗位有档位）。
                     # 岗位名已经在 source 列，重复存一遍是台账噪声。
-                    complexity=(judgment[:64] if purpose == "plan_gate" else ""),
+                    # 只写档位本身。原来塞的是判断值整串，实测台账里
+                    # 出现 'select:low,medium' 这种值——按复杂度分组、
+                    # 筛选、算成本分布的查询全部作废。
+                    complexity=_level_of(judgment) if purpose == "plan_gate" else "",
                     action=(description or judgment)[:64],
                     hit_layer=reply.hit_layer,
                     reason=(reply.reason or "")[:512],

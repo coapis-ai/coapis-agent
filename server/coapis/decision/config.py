@@ -65,6 +65,9 @@ DEFAULTS = {
     "acceptance_max_chars": 4000,
     # 预算豁免轮数：前 N 轮不吃思考预算降级。
     "budget_exempt_turns": 5,
+    # 台账保留天数：判断日志只进台账、不进记忆管道，因此**必须**有出口，
+    # 否则详单表无限增长。总线在写入时顺带清掉超期的行。
+    "ledger_retention_days": 90,
 }
 
 
@@ -140,6 +143,7 @@ class DecisionHubConfig:
     # 判断模型的输出预算。推理型模型（Q3 这类）先思考后作答，
     # 60 token 连思考都出不完，判官必败、静默退回规则层。
     llm_max_tokens: int = 512
+    ledger_retention_days: int = 90
 
     # -------------------------------------------------------------- #
     # 管理端契约别名（v14 §5.2）
@@ -232,6 +236,8 @@ class DecisionHubConfig:
             max(int(self.acceptance_max_chars), 500), 40000,
         )
         self.budget_exempt_turns = min(max(int(self.budget_exempt_turns), 0), 64)
+        # 保留期下限 7 天：低于一周的判断日志撑不住复盘校准岗的对照。
+        self.ledger_retention_days = min(max(int(self.ledger_retention_days), 7), 3650)
         return self
 
     @classmethod

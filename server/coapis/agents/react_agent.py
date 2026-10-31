@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # This program is free software: you can redistribute it and/or modify
@@ -24,6 +23,7 @@ with integrated tools, skills, and memory management.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -2128,35 +2128,135 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         return merge_hub_config(getattr(self._agent_config, "decision_hub", None))
 
-    def _decision_scope(self) -> dict:
-        """判断台账作用域：user_id / agent_id / chat_id。
+    @staticmethod
+    def _hub_turn_clock_hook(agent: Any) -> None:
+        """轮次计数钩子（pre_reply）：轮次号 +1，坏数据当 1 重起，绝不抛。
 
-        与技能触发兜底判同源（都取 request_context），保证台账可按
-        用户 / 智能体 / 会话聚合。
+        判官的单轮 LLM 预算按轮清账、"同一输入不重复判"按轮生效，都依赖
+        这个计数。它挂在对话入口上，因此**必须**比计数本身更皮实：
+        ``_turn_seq`` 被外部写成非数字（测试注入、子类覆盖、持久化回来是
+        字符串）时不能抛 ValueError 把对话打死——直接当作新账重起。
+
+        首参是 ``agent`` 而非 self：钩子按"传进来的那个 agent"计数，
+        未绑定调用 ``CoApisAgent._hub_turn_clock_hook(agent)`` 也要能用。
         """
-        ctx = getattr(self, "_request_context", None) or {}
+        try:
+            current = int(getattr(agent, "_turn_seq", 0))
+        except (TypeError, ValueError):
+            current = 0
+        agent._turn_seq = current + 1
+
+    @staticmethod
+    def _hub_scope_hook(
+        agent: Any,
+        purpose: str = "",
+        text: str = "",
+        channel: str = "",
+    ) -> dict[str, Any]:
+        """会话标识钩子（pre_reply）：把台账要用的标识写到 agent 上。
+
+        三条铁律（v14 §4.3）：
+
+        - 上下文缺失一律空串，**绝不**出现 None 或字面量 "auto"；
+        - 输入指纹按**本次调用**算——固定输入复用固定指纹，不同输入
+          不得相同（否则"同一输入不重复判"会误命中）；
+        - 任何异常都吞掉：标识取不到时判断照跑，**绝不打断对话**。
+        """
+        try:
+            scope = CoApisAgent._decision_scope(
+                agent,
+                purpose=purpose,
+                text=text if purpose == "reply" else "",
+                channel=channel,
+            )
+            agent._ledger_scope = scope
+            return scope
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("decision hub: scope hook skipped: %s", exc)
+            return {}
+
+    def _decision_scope(
+        self,
+        agent: Any = None,
+        *,
+        purpose: str = "",
+        text: str = "",
+        channel: str = "",
+    ) -> dict[str, Any]:
+        """本次判断的会话标识——**每次调用按调用方传的用例取**。
+
+        ``agent`` 可显式传入（未绑定调用 ``CoApisAgent._decision_scope(agent)``
+        供钩子与测试使用），不传就用 self。
+
+        取值优先级：会话上下文变量 > ``_request_context`` > 空串。
+        绝不返回 None，绝不用字面量 "auto"——缺就明说缺，台账才分得清
+        "没配" 与 "取不到"。
+        """
+        ag = agent if agent is not None else self
+        ctx = getattr(ag, "_request_context", None)
         if not isinstance(ctx, dict):
             ctx = {}
-        # 聊天 UUID 在请求 contextvar 里（console 路由设置），不在
-        # request_context；session_id 只作最后兜底，台账不留空 chat_id。
         try:
-            from ..config.session_context import get_current_chat_id
+            # 名字必须与 session_context 的导出逐字对得上：写错一个会被
+            # 下面的 except 吞成"身份全空"，台账从此不响不报。
+            from ..config.session_context import (
+                get_current_agent_id,
+                get_current_channel,
+                get_current_chat_id,
+                get_current_session_id,
+                get_current_user_id,
+            )
 
-            live_chat_id = get_current_chat_id()
-        except Exception:
-            live_chat_id = None
-        return {
-            "user_id": str(ctx.get("user_id") or ""),
-            "agent_id": str(ctx.get("agent_id") or self._agent_id or ""),
-            "chat_id": str(
-                ctx.get("chat_id")
-                or live_chat_id
-                or ctx.get("session_id")
-                or "",
-            ),
-            # 轮次号：判官的单轮预算与"同输入不重复判"按轮生效
-            "turn": int(getattr(self, "_turn_seq", 0)),
-        }
+            def pick(key: str, getter) -> str:
+                try:
+                    return str(getter() or ctx.get(key) or "")
+                except Exception:  # noqa: BLE001
+                    return str(ctx.get(key) or "")
+
+            scope = {
+                "user_id": pick("user_id", get_current_user_id),
+                "chat_id": pick("chat_id", get_current_chat_id),
+                "session_id": pick("session_id", get_current_session_id),
+                "channel": pick("channel", get_current_channel) or str(channel or ""),
+                "agent_id": pick("agent_id", get_current_agent_id)
+                or str(getattr(self, "_agent_id", "") or ""),
+                # 台账留两列：数字 id 与展示名。展示名优先取上下文，
+                # 取不到用 agent 档案 id 兜底——绝不写 "auto"。
+                "agent_name": pick("agent_name", get_current_agent_id)
+                or str(ctx.get("agent_id") or "")
+                or str(getattr(ag, "agent_id", "") or "")
+                or str(getattr(self, "_agent_id", "") or "")
+                or str(
+                    getattr(getattr(self, "_agent_config", None), "id", "")
+                    or "",
+                ),
+                # 轮次号：判官的单轮预算与"同输入不重复判"按轮生效
+                "turn": int(getattr(ag, "_turn_seq", 0) or 0),
+                "purpose": purpose,
+            }
+            if purpose == "reply" and text is not None:
+                scope["input_hash"] = hashlib.sha256(
+                    text.encode("utf-8")
+                ).hexdigest()[:16]
+            return scope
+        except Exception as exc:  # noqa: BLE001
+            # 升到 warning：身份取不到 = 台账按全空入账，必须看得见。
+            logger.warning(
+                "decision hub: 台账身份取不到，按全空入账（%s: %s）",
+                type(exc).__name__,
+                exc,
+            )
+            return {
+                "user_id": "",
+                "chat_id": "",
+                "session_id": "",
+                "channel": "",
+                "agent_id": "",
+                "agent_name": "",
+                "turn": 0,
+                "purpose": purpose,
+            }
+
 
     async def _llm_classify_skills(
         self,
@@ -4362,7 +4462,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         import time as _time
         self._reply_started_at = _time.time()
         # 判断中枢：轮次号 +1 —— 判官的单轮 LLM 预算按轮清账（v14 §4.3⑤）
-        self._turn_seq = int(getattr(self, "_turn_seq", 0)) + 1
+        self._hub_turn_clock_hook(self)
         self._reply_finished_at = None
         # 事中改道（v14 §3.4）：本轮第几次动作的计数器，环1 按它决定节奏
         self._hub_iters = 0

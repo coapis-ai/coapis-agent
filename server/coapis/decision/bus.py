@@ -48,8 +48,13 @@ _LEDGER_COLUMNS = (
 class DecisionBus:
     """判断台账写入器。"""
 
+    # 清理节流：每个进程最多每小时清一次。台账写入是对话热路径，
+    # 不能每条都跑一次全表删除。
+    _PURGE_INTERVAL_S = 3600.0
+
     def __init__(self, config: DecisionHubConfig | None = None) -> None:
         self._config = config or DecisionHubConfig.from_env()
+        self._purged_at = 0.0
 
     @property
     def config(self) -> DecisionHubConfig:
@@ -88,10 +93,34 @@ class DecisionBus:
             return False
         try:
             self._insert(row)
+            self._purge()
             return True
         except Exception as exc:
             logger.warning("[DecisionHub] 台账写入失败（忽略）: %s", exc)
             return False
+
+    def _purge(self) -> None:
+        """按保留期清掉超期的台账行（v13 验收 15.3 之三：90 天清理）。
+
+        判断日志只进台账、不进记忆管道，因此**必须**有出口，否则详单表
+        无限增长。清理由写入顺带触发，并按进程节流（一小时一次）——
+        台账写入是对话热路径，不能每条都做一次全表删除。异常由调用方
+        统一吞掉：清理失败不影响判断写入本身。
+        """
+        now = time.time()
+        if now - self._purged_at < self._PURGE_INTERVAL_S:
+            return
+        self._purged_at = now
+        days = int(getattr(self._config, "ledger_retention_days", 90) or 90)
+        cutoff = now - float(days) * 86400.0
+        from ..foundation.db.engine import get_session
+        from sqlalchemy import text
+
+        with get_session() as session:
+            session.execute(
+                text("DELETE FROM decision_events WHERE created_at < :cutoff"),
+                {"cutoff": cutoff},
+            )
 
     def _insert(self, row: dict[str, Any]) -> None:
         from ..foundation.db.engine import get_session
