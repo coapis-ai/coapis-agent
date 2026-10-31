@@ -15,10 +15,13 @@ Run: python3 -m pytest server/tests/test_decision_hub_batch0.py -q
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import types
+from contextlib import ExitStack
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -59,6 +62,11 @@ class _AgentStub:
     _skill_llm_timeout_s = CoApisAgent._skill_llm_timeout_s
     _agent_id = ""
     _agent_config = None
+    _user_id = ""
+    _current_chat_id = ""
+    _reasoning_turn = 0
+    # 生产 __init__ 里的留痕字段，桩必须齐（降级留痕靠它断言）
+    _skill_trigger_reason = ""
 
     def __init__(self, skill_names, config=None):
         self._on_demand_skills = {
@@ -104,33 +112,96 @@ async def test_llm_classify_skills_returns_matches(monkeypatch):
     assert got == ["pdf"]
 
 
-@pytest.mark.asyncio
-async def test_llm_classify_skills_timeout_returns_empty(monkeypatch, caplog):
-    """超时硬限：LLM 卡住时放弃兜底判并留痕，不阻塞主流程。"""
+# --------------------------------------------------------------------------
+# 判官不可用时消费方契约（v14 §4.4②③）——走真实判断网关
+# --------------------------------------------------------------------------
+@contextlib.contextmanager
+def _hub_chain(monkeypatch, tmp_path, invoke, rows=None):
+    """把兜底判接在真实判断网关上，判官层用注入的假模型调用。
 
-    async def slow_llm(message, summaries, timeout=3.0, **_kw):
+    batch0 时代是整层替换 classify_intent_llm，超时/异常由消费方自己兜；
+    v14 起超时与降级归网关管，测试必须走真实链路，别把网关跳过。
+    ``rows`` 传入列表时收集台账行，便于断言入账内容。
+    """
+    from coapis.decision import config as cfg
+    from coapis.decision import gateway as gw
+
+    provider = types.SimpleNamespace(
+        provider_id="p1",
+        provider_type="openai",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        models=[{"id": "m1", "name": "m1", "type": "chat"}],
+        get_effective_generate_kwargs=lambda model_id=None: {"top_k": None},
+    )
+
+    async def _fake_ledger(_self, purpose, reply, _describe, **_ids):
+        if rows is not None:
+            rows.append((purpose, reply.hit_layer, reply.reason))
+
+    monkeypatch.setattr(
+        gw,
+        "get_judgment_provider_config",
+        lambda **_kw: {"provider_id": "p1", "model": "m1"},
+    )
+    with ExitStack() as stack:
+        for _name, replacement in (
+            ("_get_provider", lambda _self, _pid: provider),
+            ("_model_type", lambda _self, _p, _m: "chat"),
+            ("_invoke", invoke),
+            ("_ledger", _fake_ledger),
+        ):
+            stack.enter_context(patch.object(gw.JudgeGateway, _name, replacement))
+        monkeypatch.setenv("COAPIS_DECISION_ENABLED", "1")
+        monkeypatch.setenv("COAPIS_DECISION_LLM_TIMEOUT_MS", "200")
+        monkeypatch.setenv("COAPIS_DECISION_LLM_BUDGET_PER_TURN", "1")
+        monkeypatch.setenv("COAPIS_DECISION_CACHE_ENABLED", "0")
+        cfg.reset_hub_config()
+        gw.reset_judge_gateway()
+        try:
+            yield
+        finally:
+            gw.reset_judge_gateway()
+            cfg.reset_hub_config()
+
+
+@pytest.mark.asyncio
+async def test_llm_classify_skills_timeout_returns_empty(monkeypatch, tmp_path, caplog):
+    """超时硬限（走真实判断网关）：判官卡住 → 空结果 + 降级留痕，不阻塞主流程。"""
+
+    async def slow_invoke(_self, _provider, _model_id, _system, _user, _kwargs):
         await asyncio.sleep(5)
-        return ["pdf"]
+        return ("pdf", 10, 2)
 
-    monkeypatch.setattr(intent_classifier, "classify_intent_llm", slow_llm)
-    stub = _AgentStub(["pdf"], config={"llm_timeout_ms": 200})
+    stub = _AgentStub(["pdf", "mail"])
+    rows: list[tuple] = []
     with caplog.at_level(logging.WARNING):
-        got = await stub._llm_classify_skills("pdf 转图片")
+        with _hub_chain(monkeypatch, tmp_path, slow_invoke, rows):
+            got = await stub._llm_classify_skills("帮我把这份 pdf 转成图片")
     assert got == []
-    assert any("timed out" in r.message for r in caplog.records)
+    # 消费方留痕写明判官兜底判空；台账记下真正的降级层与原因
+    assert stub._skill_trigger_reason.startswith("judge_empty")
+    assert rows and rows[0][0] == "skill_trigger"
+    assert rows[0][1] == "timeout"
+    assert "判断超时" in rows[0][2]
 
 
 @pytest.mark.asyncio
-async def test_llm_classify_skills_exception_returns_empty(monkeypatch, caplog):
-    async def boom(message, summaries, timeout=3.0, **_kw):
+async def test_llm_classify_skills_exception_returns_empty(monkeypatch, tmp_path, caplog):
+    """异常降级（走真实判断网关）：提供商炸了 → 空结果 + 台账记 transport 层。"""
+
+    async def boom_invoke(_self, _provider, _model_id, _system, _user, _kwargs):
         raise RuntimeError("provider down")
 
-    monkeypatch.setattr(intent_classifier, "classify_intent_llm", boom)
-    stub = _AgentStub(["pdf"])
+    stub = _AgentStub(["pdf", "mail"])
+    rows: list[tuple] = []
     with caplog.at_level(logging.WARNING):
-        got = await stub._llm_classify_skills("pdf")
+        with _hub_chain(monkeypatch, tmp_path, boom_invoke, rows):
+            got = await stub._llm_classify_skills("帮我把这份 pdf 转成图片")
     assert got == []
-    assert any("provider down" in r.message for r in caplog.records)
+    assert stub._skill_trigger_reason.startswith("judge_empty")
+    assert rows and rows[0][1] == "transport"
+    assert "判断调用失败" in rows[0][2]
+
 
 
 @pytest.mark.asyncio

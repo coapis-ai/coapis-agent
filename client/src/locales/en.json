@@ -2927,5 +2927,30 @@
     "empty": "Nothing here yet",
     "more": "… {{n}} more not shown",
     "refreshing": "Refreshing…"
+  },
+  "decision": {
+    "title": "Judgment Hub",
+    "entry": "Judgment",
+    "entryTip": "This turn's judgment log",
+    "close": "Close judgment panel",
+    "refresh": "Refresh",
+    "all": "All",
+    "empty": "No judgment records yet",
+    "stats": "Last 7 days",
+    "enabled": "Judge",
+    "advisor": "Re-route",
+    "acceptance": "Acceptance",
+    "judgeModel": "Judge model",
+    "noJudge": "Not configured (rules only)",
+    "rateGood": "Judged well",
+    "rateBad": "Judged badly",
+    "col": {
+      "time": "Time",
+      "post": "Post",
+      "judgment": "Judgment",
+      "layer": "Source",
+      "cost": "Latency/Cost",
+      "rate": "Rating"
+    }
   }
 }

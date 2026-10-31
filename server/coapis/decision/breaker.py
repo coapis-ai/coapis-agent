@@ -3,7 +3,9 @@
 
 - 连续失败达到阈值 → 打开熔断，冷却期内直接跳过判断；
 - 冷却到期 → 半开，只放一次探测请求；探测失败重新打开，成功则关闭；
-- 按 key（岗位 / 岗位+模型）隔离，技能触发挂了不影响计划闸门。
+- 按 key 隔离。判官三处（计划闸门 / 技能触发 / 验收）共用同一个键
+  ``judge-model``，任一连续失败就一起降级（v14 §4.3①）。
+- 半开探测失败 → 冷却翻倍，封顶 4×基准；探测成功 → 回到基准。
 """
 from __future__ import annotations
 
@@ -36,6 +38,8 @@ class CircuitBreaker:
         self._threshold = max(1, int(failure_threshold))
         self._floor = max(0.0, float(cooldown_floor_s))
         self._cooldown_s = max(self._floor, float(cooldown_s))
+        #: 基准冷却：半开探测失败会翻倍，探测成功回到这里
+        self._base_cooldown_s = self._cooldown_s
         self._enabled = enabled
         self._clock = clock
         self._states: dict[str, _BreakerState] = {}
@@ -78,10 +82,18 @@ class CircuitBreaker:
         if not self._enabled:
             return
         state = self._state(key)
+        was_probing = state.probing
         state.failures += 1
         state.probing = False
         if state.failures >= self._threshold:
             state.opened_at = self._clock()
+            if was_probing:
+                # 半开探测失败 → 冷却翻倍，封顶 4×基准。判官模型一直不可用
+                # 就别每次都重新撞一次超时（v14 §4.3②）。
+                self._cooldown_s = min(
+                    self._cooldown_s * 2.0,
+                    self._base_cooldown_s * 4.0,
+                )
 
     def record_success(self, key: str) -> None:
         if not self._enabled:
@@ -91,6 +103,7 @@ class CircuitBreaker:
             state.failures = 0
             state.opened_at = 0.0
             state.probing = False
+            self._cooldown_s = self._base_cooldown_s
 
     def state_of(self, key: str) -> str:
         """当前状态：``disabled`` / ``closed`` / ``open`` / ``half_open``。"""
@@ -102,6 +115,11 @@ class CircuitBreaker:
         if self._clock() - state.opened_at >= self._cooldown_s:
             return "half_open"
         return "open"
+
+    def failures_of(self, key: str) -> int:
+        """当前累计的连续失败次数（未熔断时也在计数）。"""
+        state = self._states.get(key)
+        return 0 if state is None else int(state.failures)
 
     def reset(self, key: Optional[str] = None) -> None:
         """清空熔断状态（测试/运维用）。"""

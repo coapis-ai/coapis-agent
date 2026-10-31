@@ -23,8 +23,20 @@ from .cache import (
     put_cached_judgment,
     reset_judgment_cache,
 )
-from .config import DecisionHubConfig
+from .config import DecisionHubConfig, get_hub_config, merge_hub_config
+from .gateway import (
+    JudgeGateway,
+    JudgeReply,
+    get_judge_gateway,
+    reset_judge_gateway,
+)
+from .hub_acceptance import fire_acceptance, judge_acceptance
+from .hub_advisor import advise, build_digest, fire_advisor, should_advise
 from .resolver import get_judgment_provider_config
+from .rubric import JSON_ONLY as JSON_ONLY
+from .rubric import rubric_for
+from .rubric import scan_skill_rubrics as scan_skill_rubrics
+from .rubric import system_for as system_for
 from .types import (
     Action,
     Complexity,
@@ -37,6 +49,8 @@ from .types import (
 
 __all__ = [
     "DecisionHubConfig",
+    "merge_hub_config",
+    "get_hub_config",
     "DecisionResult",
     "Complexity",
     "Action",
@@ -58,4 +72,18 @@ __all__ = [
     "DecisionBus",
     "get_bus",
     "set_bus",
+    "JudgeGateway",
+    "JudgeReply",
+    "get_judge_gateway",
+    "reset_judge_gateway",
+    "rubric_for",
+    "scan_skill_rubrics",
+    "system_for",
+    "JSON_ONLY",
+    "fire_acceptance",
+    "judge_acceptance",
+    "fire_advisor",
+    "advise",
+    "should_advise",
+    "build_digest",
 ]

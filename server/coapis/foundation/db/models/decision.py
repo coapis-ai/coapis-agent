@@ -93,6 +93,25 @@ class DecisionEvent(BaseRow):
         Float, nullable=False, default=0.0, server_default=text("0")
     )
 
+    # ---- v14 §4.3 台账补列（迁移 0020）----
+    # 同样遵守非空红线：老行读出为 ''/0（未知），不引入可空列。
+    # 输入指纹（sha1 前 12 位，**不存原文**）
+    input_hash: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    # 判断内容（结论值本身，如 select:pdf / complex / advise:change）
+    judgment: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    # 轮次号（单轮判官预算按轮清账，"本轮判官花了几次"按轮聚合）
+    turn: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    # 用户评价：0 无效 / 1 有用 / 2 很有用 / 3 没评价
+    rating: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default=text("3")
+    )
+
     __table_args__ = (
         Index("ix_decision_events_source_created", "source", "created_at"),
         Index("ix_decision_events_user_created", "user_id", "created_at"),

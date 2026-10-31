@@ -2117,18 +2117,16 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             return ""
 
     def _decision_hub(self):
-        """判断中枢配置（来自智能体 running_config.decision_hub + env）。"""
-        from ..decision import DecisionHubConfig
+        """判断中枢配置：**进程内读一次**（v14 §4.1）。
 
-        raw = None
-        cfg = getattr(self, "_agent_config", None)
-        if cfg is not None:
-            running = getattr(cfg, "running", None)
-            if isinstance(running, dict):
-                raw = running.get("decision_hub")
-            elif running is not None:
-                raw = getattr(running, "decision_hub", None)
-        return DecisionHubConfig.from_dict(raw if isinstance(raw, dict) else None)
+        优先级 = 智能体 ``decision_hub`` 段 > ``COAPIS_DECISION_*`` 环境变量 >
+        内置默认值（:func:`merge_hub_config` 复用同一份 from_dict 逻辑并按
+        配置内容缓存）。配置在每个回合里都会被读，不能每次重新解析；改了
+        环境变量要重启才生效。
+        """
+        from ..decision.config import merge_hub_config
+
+        return merge_hub_config(getattr(self._agent_config, "decision_hub", None))
 
     def _decision_scope(self) -> dict:
         """判断台账作用域：user_id / agent_id / chat_id。
@@ -2156,176 +2154,71 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 or ctx.get("session_id")
                 or "",
             ),
+            # 轮次号：判官的单轮预算与"同输入不重复判"按轮生效
+            "turn": int(getattr(self, "_turn_seq", 0)),
         }
 
     async def _llm_classify_skills(
         self,
         user_message: str,
-        restrict_names: list[str] | None = None,
+        restrict_names: Optional[list[str]] = None,
     ) -> list[str]:
-        """Phase 2 兜底判：LLM 意图分类（异步原生）。返回命中的技能名。
+        """LLM 兜底预选（v14 三层漏斗 Layer 2）。
 
-        ``restrict_names`` narrows the candidate set — used for scene priority
-        (S2.3): when keywords found nothing, the LLM only considers the skills
-        the scene declares, which is a far better prior than the whole pool.
+        关键词没命中时，让判官从候选技能里挑出最贴合的 1~3 个。
 
-        第0批 F2：删除「线程池 + asyncio.run 嵌套事件循环」兜底——本方法在
-        reply() 的异步调用链内被 await，超时硬限由 ``_skill_llm_timeout_s()``
-        控制，超时即放弃并留痕，不阻塞主流程。
-
-        一期（判断中枢）：技能触发岗接入 结论缓存 → 熔断 → 判断槽位 → 台账。
-        岗位开关关闭时行为与改造前一致（关键词命中即用，无命中返回 []）。
+        v14：判官调用**全部经判断网关**——模型解析（含 chat 类型硬校验）、
+        超时、熔断、缓存、台账、单飞、单轮预算都由网关统一负责，这里只把
+        判断结论翻译成技能名。判官不可用（无对话模型 / 熔断打开 / 本轮预算
+        耗尽 / 中枢关闭）时返回空列表 = 本轮只用关键词层，**绝不**自己抓
+        一个模型来判，也绝不重复判断。
         """
-        import asyncio
-        import time as _time
-
-        from ..decision import (
-            DecisionResult,
-            get_breaker,
-            get_bus,
-            get_cached_judgment,
-            make_cache_key,
-            put_cached_judgment,
-        )
-
         hub = self._decision_hub()
-        ctx = getattr(self, "_request_context", None) or {}
-        scope = {
-            "user_id": str(ctx.get("user_id") or ctx.get("username") or ""),
-            "agent_id": str(ctx.get("agent_id") or getattr(self, "_agent_id", "") or ""),
-            "chat_id": str(ctx.get("chat_id") or ctx.get("session_id") or ""),
-        }
-
-        def _emit(res: DecisionResult, started: float) -> None:
-            if not hub_active:
-                return
-            res.latency_ms = int((_time.monotonic() - started) * 1000)
-            try:
-                res.user_id = scope["user_id"]
-                res.agent_id = scope["agent_id"]
-                res.chat_id = scope["chat_id"]
-                get_bus().emit(res)
-            except Exception:  # pragma: no cover - 台账不影响主流程
-                pass
-
-        hub_active = hub.enabled
-        if hub_active and not hub.post_enabled("skill_trigger"):
-            # 岗位开关关闭 → 兜底判停用（只用关键词结果）
+        # 防御性初始化：本方法所有提前返回路径都会写这个属性，但判官"无命中"
+        # 分支（下方 `if not self._skill_trigger_reason`）要在写入之前读它。
+        # 属性缺失时读取会抛 AttributeError，被上层翻译成"模型执行失败"，
+        # 表现为聊天直接失败——这里先给一个空值兜底。
+        if not getattr(self, "_skill_trigger_reason", None):
+            self._skill_trigger_reason = ""
+        if not hub.enabled:
+            self._skill_trigger_reason = "disabled: 判断中枢总开关关闭"
             return []
-        if not hub_active:
-            # 总开关关闭 → 与改造前行为一致：直连 LLM 兜底判，不加缓存/熔断/台账
-            logger.debug("[TriggerDebug] 判断中枢关闭，兜底判直连 LLM（改造前行为）")
-
-        try:
-            from .utils.intent_classifier import classify_intent_llm
-            # Build skill summaries for the classifier, including intent_hints
-            summaries = {}
-            for name, (skill_dir, _kw) in getattr(self, "_on_demand_skills", {}).items():
-                if restrict_names is not None and name not in restrict_names:
-                    continue
-                # 获取完整描述（不截断）
-                summary = self._get_skill_summary(skill_dir, max_len=500)
-                if not summary:
-                    continue
-                # 尝试读取 intent_hints
-                intent_hints = self._get_skill_intent_hints(skill_dir)
-                if intent_hints:
-                    summaries[name] = f"{summary} ||| {', '.join(intent_hints)}"
-                else:
-                    summaries[name] = summary
-            if not summaries:
-                logger.debug("[TriggerDebug] LLM fallback skipped: no candidate summaries")
-                return []
-
-            breaker = get_breaker("skill_trigger")
-            if not breaker.allow("skill_trigger"):
-                logger.warning("[TriggerDebug] LLM fallback 熔断打开，仅用关键词结果")
-                _emit(
-                    DecisionResult(
-                        source="skill_trigger", action=None, hit_layer="breaker_open",
-                        reason="判断岗熔断打开", model=self._skill_judge_model_name(),
-                    ),
-                    _time.monotonic(),
-                )
-                return []
-
-            cache_key = make_cache_key(
-                "skill_trigger",
-                user_message,
-                sorted(summaries),
-                user_id=scope.get("user_id", ""),
-                agent_id=scope.get("agent_id", ""),
-            )
-            cached = None
-            if hub.cache_enabled:
-                cached = get_cached_judgment(cache_key)
-            if cached is not None:
-                logger.debug("[TriggerDebug] LLM fallback cache hit: %s", cached)
-                _emit(
-                    DecisionResult(
-                        source="skill_trigger", action="tool" if cached else None,
-                        hit_layer="cache", reason="结论缓存命中",
-                        payload={"skills": list(cached)},
-                    ),
-                    _time.monotonic(),
-                )
-                return list(cached)
-
-            timeout = self._skill_llm_timeout_s()
-            started = _time.monotonic()
-            result = await asyncio.wait_for(
-                classify_intent_llm(
-                    user_message,
-                    summaries,
-                    timeout=timeout,
-                    user_id=scope.get("user_id", ""),
-                    agent_id=scope.get("agent_id", ""),
-                ),
-                timeout=timeout + 1.0,
-            )
-            breaker.record_success("skill_trigger")
-            skills = list(result) if result else []
-            if hub.cache_enabled:
-                put_cached_judgment(cache_key, skills)
-            if skills:
-                logger.info("[TriggerDebug] LLM fallback matched: %s", skills)
-            _emit(
-                DecisionResult(
-                    source="skill_trigger",
-                    action="tool" if skills else None,
-                    hit_layer="llm",
-                    reason="LLM 兜底判",
-                    model=self._skill_judge_model_name(),
-                    payload={"skills": skills},
-                ),
-                started,
-            )
-            return skills
-        except asyncio.TimeoutError:
-            get_breaker("skill_trigger").record_failure("skill_trigger")
-            logger.warning(
-                "[TriggerDebug] LLM fallback timed out (>%.1fs), keyword result kept",
-                self._skill_llm_timeout_s(),
-            )
-            _emit(
-                DecisionResult(
-                    source="skill_trigger", action=None, hit_layer="error",
-                    reason="判断超时", model=self._skill_judge_model_name(),
-                ),
-                _time.monotonic(),
-            )
+        if not hub.post_enabled("skill_trigger"):
+            self._skill_trigger_reason = "disabled: 技能触发岗关闭，只用关键词"
             return []
-        except Exception as e:
-            get_breaker("skill_trigger").record_failure("skill_trigger")
-            logger.warning("[TriggerDebug] LLM fallback skipped: %s", e)
-            _emit(
-                DecisionResult(
-                    source="skill_trigger", action=None, hit_layer="error",
-                    reason=f"判断异常: {e}", model=self._skill_judge_model_name(),
-                ),
-                _time.monotonic(),
+
+        candidates: dict[str, str] = {}
+        for name, (skill_dir, _kw) in getattr(self, "_on_demand_skills", {}).items():
+            if restrict_names is not None and name not in restrict_names:
+                continue
+            summary = self._get_skill_summary(skill_dir, max_len=500)
+            if not summary:
+                continue
+            hints = self._get_skill_intent_hints(skill_dir)
+            candidates[name] = (
+                f"{summary} ||| {', '.join(hints)}" if hints else summary
             )
+        if not candidates:
+            logger.debug("[TriggerDebug] LLM fallback skipped: no candidate summaries")
+            self._skill_trigger_reason = "no_summaries: 候选技能无摘要，只用关键词"
             return []
+
+        from .utils.intent_classifier import classify_intent_llm
+
+        matched = await classify_intent_llm(
+            user_message,
+            candidates,
+            self._decision_scope(),
+        )
+        if not matched:
+            if not self._skill_trigger_reason:
+                self._skill_trigger_reason = "judge_empty: 判官判断不触发"
+            logger.info("[TriggerDebug] %s", self._skill_trigger_reason)
+            return []
+        matched = [n for n in matched if n in candidates]
+        self._skill_trigger_reason = f"judge_ok: 命中 {matched}"
+        logger.info("[TriggerDebug] LLM fallback matched: %s", matched)
+        return matched
 
     # ── Global auto-assist: detect uncertainty, consult global knowledge ──
 
@@ -3673,6 +3566,40 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception:  # pragma: no cover
             logger.debug("plan-confirm hint injection skipped", exc_info=True)
 
+    async def _inject_advisor_hint(self, res: dict) -> None:
+        """事中改道提示（v14 §3.4）：判官说方向偏了，下一轮动作吃它。
+
+        Args:
+            res: :func:`coapis.decision.hub_advisor.advise` 的返回值，
+                ``verdict`` 为 ``change``/``stop``，带 ``evidence``/``next``。
+        """
+        try:
+            from agentscope.message import Msg, TextBlock
+
+            verdict = str(res.get("verdict") or "")
+            nxt = str(res.get("next") or "").strip()
+            evidence = str(res.get("evidence") or "").strip()
+            kind = "coapis-route-change" if verdict == "change" else "coapis-route-stop"
+            lead = "方向纠察" if verdict == "change" else "越界纠察"
+            hint = (
+                f"<{kind}>{lead}："
+                + (nxt or "停止当前做法，回到用户要的东西。")
+                + (f"（依据：{evidence}）" if evidence else "")
+                + " 请按此调整下一步；若与用户要求冲突，以用户要求为准。"
+                f"</{kind}>"
+            )
+            await self.memory.add(
+                Msg(
+                    "system",
+                    [TextBlock(type="text", text=hint)],
+                    "system",
+                    name="coapis_route_hint",
+                ),
+            )
+            logger.info("[Advisor] 改道提示已注入 verdict=%s", verdict)
+        except Exception:  # pragma: no cover
+            logger.debug("advisor hint injection skipped", exc_info=True)
+
     # pylint: disable=too-many-branches
     async def _reasoning(
         self,
@@ -3709,7 +3636,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # --- Thinking budget control ---
         try:
-            from .utils.thinking_budget import ThinkingBudgetManager
+            from .plan_gate import ComplexityClassifier
+            from .utils.thinking_budget import (
+                ThinkingBudgetManager,
+                apply_thinking_shape,
+                complexity_to_effort,
+                provider_type_of_model,
+                restore_thinking_shape,
+            )
             if not hasattr(self, "_thinking_budget_mgr"):
                 self._thinking_budget_mgr = ThinkingBudgetManager()
             # Classify from the last user message
@@ -3740,15 +3674,28 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             complexity = self._thinking_budget_mgr.classify(
                 user_query, self._recent_tool_msgs,
             )
-            budget_kwargs = self._thinking_budget_mgr.apply_budget(complexity)
-            # Set reasoning_effort on the underlying model for this turn
-            _original_effort = getattr(self.model, "reasoning_effort", None)
-            if "reasoning_effort" in budget_kwargs:
-                self.model.reasoning_effort = budget_kwargs["reasoning_effort"]
+            # §4.4④ 消灭双头决策：思考开支**优先消费判档结论里的 effort**，
+            # 判档没跑（规则直通/缓存失效/网关降级）才用关键词规则兜底——
+            # 两条路都走 EFFORT_LEVEL_MAP 这同一把尺子，不再各判各的。
+            _judge_effort = ComplexityClassifier.pop_effort(user_query)
+            _effort = _judge_effort or complexity_to_effort(complexity)
+            # 落到承载请求参数的真模型上（包装层上的键没人读）+ 各家 provider
+            # 的关闭思考形状（§3.1.3：hint 必须在适配层消费）
+            _thinking_restore = apply_thinking_shape(
+                self.model,
+                _effort,
+                provider_type=provider_type_of_model(self.model),
+            )
             self._last_complexity = complexity
+            logger.info(
+                "[thinking] effort=%s hint=%s 来源=%s",
+                _thinking_restore["effort"],
+                _thinking_restore["hint"],
+                "判档结论" if _judge_effort else "规则兜底",
+            )
         except Exception:
             complexity = "normal"
-            _original_effort = None
+            _thinking_restore = None
 
         # --- P0: ProgressTracker — 注入进度摘要 ---
         _progress_summary = None
@@ -3787,11 +3734,38 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     "yes" if _query_analysis.pruned_tools is not None else "no",
                     _query_analysis.latency_ms,
                 )
-                # 用 QueryAnalyzer 结果设置 thinking_effort
+                # v14 §4.4④ 双头消灭：思考档位只认判官结论（上方
+                # apply_thinking_shape 已把形状写到真模型上）。
+                # QueryAnalyzer 的关键词 effort 是第三个头，绝不覆盖判官。
                 if _query_analysis.thinking_effort:
-                    self.model.reasoning_effort = _query_analysis.thinking_effort
+                    logger.debug(
+                        "[P1] QueryAnalyzer effort=%s 被忽略（思考档位归判官）",
+                        _query_analysis.thinking_effort,
+                    )
         except Exception as _qa_err:
             logger.debug("[P1] QueryAnalyzer failed: %s", _qa_err)
+
+        # --- P4: 事中改道（v14 §3.4 · 环1）----------------------------
+        # 发射即忘：判官要 1~3s，绝不能卡在动作前面；本轮判、下轮吃提示。
+        # 节奏与闸门全在 hub（advisor_every_iters / 岗位开关 / 网关预算）。
+        try:
+            self._hub_iters = int(getattr(self, "_hub_iters", 0)) + 1
+            from ..decision.hub_advisor import fire_advisor as _fire_advisor
+
+            _adv_hub = self._decision_hub()
+            if _adv_hub is not None and _adv_hub.post_enabled("advisor"):
+                _adv_scope = self._decision_scope()
+                _adv_scope["iters"] = int(self._hub_iters)
+                _fire_advisor(
+                    goal=str(getattr(self, "_hub_goal", "") or user_query),
+                    tool_msgs=self._recent_tool_msgs,
+                    scope=_adv_scope,
+                    hub=_adv_hub,
+                    skills=self._on_demand_skill_summaries,
+                    on_verdict=self._inject_advisor_hint,
+                )
+        except Exception as _adv_err:  # pragma: no cover
+            logger.debug("[P4] 事中改道跳过: %s", _adv_err)
 
         # --- P2: 工具 Schema 按需裁剪 ---
         _pruned_schemas_orig = None  # 用于恢复
@@ -3898,12 +3872,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         finally:
             if should_strip and self._uses_request_time_media_normalization():
                 self._set_formatter_media_strip(False)
-            # Restore original reasoning_effort after this turn
+            # §4.4④：还原本轮写到真模型上的思考参数（跨轮不粘滞）
             try:
-                if _original_effort is not None:
-                    self.model.reasoning_effort = _original_effort
-                elif hasattr(self.model, "reasoning_effort"):
-                    self.model.reasoning_effort = None
+                if _thinking_restore is not None:
+                    restore_thinking_shape(_thinking_restore)
             except Exception:
                 pass
             # P2: Restore tool schema pruning
@@ -4318,6 +4290,8 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         text = self._gate_text(msg)
         if not text:
             return
+        # 事中改道与验收都拿它当「用户要的东西」（v14 §3.4/§3.5）
+        self._hub_goal = text
         try:
             from .plan_gate import COMPLEX, ComplexityClassifier
 
@@ -4334,6 +4308,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 )
                 self._complexity_classifier = classifier
             classifier.set_ledger_scope(self._decision_scope())
+            # 判则技能跟着工作区走（v14 §4.5）：判档 prompt 里的判则 =
+            # 内置判则 + 本工作区的判则技能，用户定制判则不需要改代码。
+            classifier.set_skills_dir(
+                str(Path(str(getattr(self, "_workspace_dir", "") or "")) / "skills"),
+            )
             # 必须走 classify_smart：同步 classify() 不认 judge_enabled，
             # 判级模型永远不会被咨询（v13 D1 的"跟随会话激活模型"落空）。
             level = await classifier.classify_smart(text)
@@ -4382,7 +4361,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         """
         import time as _time
         self._reply_started_at = _time.time()
+        # 判断中枢：轮次号 +1 —— 判官的单轮 LLM 预算按轮清账（v14 §4.3⑤）
+        self._turn_seq = int(getattr(self, "_turn_seq", 0)) + 1
         self._reply_finished_at = None
+        # 事中改道（v14 §3.4）：本轮第几次动作的计数器，环1 按它决定节奏
+        self._hub_iters = 0
 
         # Set workspace_dir and recent_max_bytes in context for tool functions
         from ..config.context import (
@@ -4630,6 +4613,25 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             })
         except Exception:
             pass
+
+        # ── 验收回灌（v14 §3.5 · 插手点⑤）───────────────────────────
+        # 发射即忘：轮尾判「需求满足了没」，并把同轮判档行回填 hit/miss。
+        # 任何异常都在 hub_acceptance 内部吞掉——验收是加分项，不进关键路径。
+        try:
+            from ..decision.hub_acceptance import fire_acceptance as _fire_acc
+
+            _acc_hub = self._decision_hub()
+            if _acc_hub is not None and _acc_hub.post_enabled("acceptance"):
+                _fire_acc(
+                    query=str(query or ""),
+                    answer=(response.get_text_content()
+                            if response is not None else "") or "",
+                    scope=self._decision_scope(),
+                    hub=_acc_hub,
+                    skills=self._on_demand_skill_summaries,
+                )
+        except Exception as _acc_err:  # pragma: no cover
+            logger.debug("[Accept] 验收发射跳过: %s", _acc_err)
 
         return response
 

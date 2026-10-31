@@ -2302,5 +2302,30 @@
     "dirGroup": "フォルダー",
     "monthDir": "{{y}}年{{m}}月",
     "dateDir": "{{d}} の出力"
+  },
+  "decision": {
+    "title": "判断ハブ",
+    "entry": "判断",
+    "entryTip": "このターンの判断ログ",
+    "close": "判断パネルを閉じる",
+    "refresh": "更新",
+    "all": "すべて",
+    "empty": "判断記録はまだありません",
+    "stats": "直近 7 日",
+    "enabled": "判定",
+    "advisor": "途中誘導",
+    "acceptance": "完了検収",
+    "judgeModel": "判定モデル",
+    "noJudge": "未設定（ルールのみ）",
+    "rateGood": "判定が的確",
+    "rateBad": "判定が不正確",
+    "col": {
+      "time": "時刻",
+      "post": "役割",
+      "judgment": "判断",
+      "layer": "取得元",
+      "cost": "所要/費用",
+      "rate": "評価"
+    }
   }
 }

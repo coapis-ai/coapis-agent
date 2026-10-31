@@ -73,6 +73,15 @@ class DecisionResult:
     outcome: str = "pending"
     created_at: float = 0.0
     payload: Mapping[str, Any] = field(default_factory=dict)
+    # ---- v14 §4.3 台账补列（迁移 0020）----
+    # 判断内容（结论值本身，如 ``select:pdf`` / ``complex``）
+    value: str = ""
+    # 轮次号（单轮判官预算按轮清账）
+    turn: int = 0
+    # 输入指纹（sha1 前 12 位，**不存原文**）
+    input_hash: str = ""
+    # 用户评价：0 无效 / 1 有用 / 2 很有用 / 3 没评价
+    rating: int = 3
 
     def to_row(self) -> dict[str, Any]:
         """转成台账行（全字段显式列举，配合全字段非空红线）。"""
@@ -92,6 +101,11 @@ class DecisionResult:
             "chat_id": str(self.chat_id),
             "outcome": str(self.outcome or "pending"),
             "created_at": float(self.created_at),
+            # v14 §4.3 台账补列
+            "input_hash": str(self.input_hash or ""),
+            "judgment": str(self.value or ""),
+            "turn": int(self.turn or 0),
+            "rating": int(self.rating if self.rating is not None else 3),
         }
 
 

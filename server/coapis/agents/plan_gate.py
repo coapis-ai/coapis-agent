@@ -17,7 +17,9 @@ import json
 import logging
 import re
 import time
-from typing import Optional, Sequence
+from typing import Any, ClassVar, Optional, Sequence
+
+from .utils.thinking_budget import complexity_to_effort
 
 logger = logging.getLogger(__name__)
 
@@ -52,18 +54,83 @@ _CONSEC_MARKER_RE = re.compile(
 _COMMA_SPLIT_RE = re.compile(r"[，,]")
 _COLON_SPLIT_RE = re.compile(r"[：:]")
 
-# 判官提示词。要求模型只回一个词，解析层做宽松匹配。
+# 判官提示词。v14 §4.4④：一次判级同时给出思考开支档位，
+# 判档与思考开支必须是**同一个结论**（消灭双头决策）。
 # ⚠ 必须用 .format(text=...) 注入，因此正文里不能出现裸花括号。
-_JUDGE_PROMPT = """判断下面这个任务的复杂度，只回答一个词：simple、medium 或 complex。
+_JUDGE_PROMPT = """判断下面这个任务的复杂度，并给出该给它多少思考开支。
 
-标准：
+只输出一个 JSON 对象，不要解释、不要代码块标记：
+{{"level": "simple 或 medium 或 complex", "reasoning_effort": "minimal 或 low 或 medium 或 high"}}
+
+level 标准：
 - simple：一句话就能做完（查、看、改一处、单步操作）。
 - medium：2~3 个步骤，或需要读文件、写内容、调用工具。
 - complex：多步骤串联、跨系统、需要交付物（报告/部署/重构）。
 
-不要解释，不要标点，只输出那一个词。
+reasoning_effort 标准（默认不思考，越贵越要给到位）：
+- minimal：不思考也答得对（查、看、单步操作）。
+- low：照标准流程做即可（读文件、写内容、调一个工具）。
+- medium：需要先规划步骤（多工具协作、有前后依赖）。
+- high：需要多轮规划与自我检查（跨系统、长链、交付物）。
 
 任务：{text}"""
+
+# effort 词表（v14 §4.4④）。与档位词表同等严格：不认识即整次作废。
+EFFORTS = ("minimal", "low", "medium", "high")
+
+# 判档结论里记录的 effort 缓存（类级共享：判档与思考开支共用一个结论）
+_EFFORT_TTL_S = 300.0
+
+
+def _get_judge_provider_config(
+    user_id: str | None,
+    agent_id: str | None,
+) -> dict | None:
+    """取判官模型配置，返回 ``{api_base, api_key, model}`` 或 None。
+
+    v14：解析链统一在 ``coapis.decision.resolver``（会话激活模型优先），
+    这里只是一层薄委托，供判级调用点使用。
+
+    取不到就返回 None，调用方必须保留自己的规则结论——严禁抓"第一个
+    可用模型"兜底：把嵌入模型当判官就是这么发生的（v14 §4.4③）。
+    """
+    from coapis.decision.resolver import get_judgment_provider_config
+
+    return get_judgment_provider_config(user_id, agent_id)
+
+
+def _parse_level_and_effort(raw: str) -> tuple[str, str]:
+    """复核输出 → (档位, 思考开支档)。
+
+    D9：档位词表解析失败即判非法、整次作废——这里抛 ValueError，由网关
+    按降级阶梯回退规则层，不做重试、不做宽松兜底。
+    """
+    text = (raw or "").strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            data = json.loads(text[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"复核输出 JSON 解析失败: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("复核输出 JSON 不是对象")
+        level = str(data.get("level") or data.get("complexity") or "")
+        effort = str(data.get("reasoning_effort") or data.get("effort") or "")
+    else:
+        # 模型没守 JSON 约定：词表里能唯一命中就收，否则整次作废
+        hits = [lv for lv in LEVELS if lv in text.lower()]
+        if len(hits) != 1:
+            raise ValueError(f"复核输出里没有唯一档位词: {text[:80]!r}")
+        level = hits[0]
+        effort = ""
+    level = level.strip().lower()
+    if level not in LEVELS:
+        raise ValueError(f"复核输出的档位词不在词表里: {level[:40]!r}")
+    effort = effort.strip().lower()
+    if effort not in EFFORTS:
+        # effort 缺失/不认识 → 整次判级作废（D9），回退规则层
+        raise ValueError(f"复核输出的思考档不在词表里: {effort[:40]!r}")
+    return level, effort
 
 
 class ComplexityClassifier:
@@ -76,63 +143,112 @@ class ComplexityClassifier:
     """
 
     LEVELS = LEVELS
+    EFFORTS = EFFORTS
 
+    # 判档结论里的思考开支档（§4.4④：判档与思考开支必须是同一个结论）。
+    # 类级共享——判档在 plan_gate 里跑，思考开支在 react_agent 里消费。
+    _effort_cache: ClassVar[dict[str, tuple[str, float]]] = {}
+
+    # ------------------------------------------------------------------ #
+    # 判档结论 → 思考开支（§4.4④）
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def remember_effort(cls, text: str, effort: str) -> None:
+        """记录本次判档结论里的思考开支档。"""
+        key = (text or "").strip()[:200]
+        if not key:
+            return
+        if effort not in EFFORTS:
+            cls._effort_cache.pop(key, None)
+            return
+        now = time.time()
+        cls._effort_cache[key] = (effort, now)
+        cls._effort_cache = {
+            k: v for k, v in cls._effort_cache.items() if now - v[1] <= _EFFORT_TTL_S
+        }
+
+    @classmethod
+    def pop_effort(cls, text: str) -> Optional[str]:
+        """取本次判档的思考开支档；无结论返回 None（调用方按规则层降级）。"""
+        key = (text or "").strip()[:200]
+        hit = cls._effort_cache.get(key)
+        if hit is None:
+            return None
+        if time.time() - hit[1] > _EFFORT_TTL_S:
+            cls._effort_cache.pop(key, None)
+            return None
+        return hit[0]
+
+    # ------------------------------------------------------------------ #
+    # 规则层（同步、确定性，单测只打这一层）
+    # ------------------------------------------------------------------ #
     def __init__(
         self,
         judge_enabled: bool = True,
         judge_timeout: float = 5.0,
         judge_max_tokens: int = 512,
-    ):
+    ) -> None:
+        """兼容既有调用点的签名（react_agent 等以带参方式构造）。
+
+        三个参数在 v14 之后都不再控制行为，这里显式收下并写明原因：
+
+        - ``judge_enabled``：v14 §4.4① 取消了判档总开关——判断恒走网关，
+          降级是网关的职责，调用方无权单方关掉判断。
+        - ``judge_timeout`` / ``judge_max_tokens``：预算归中枢统一配置
+          （``DecisionHubConfig``）管理；单点覆盖会让轮内预算、熔断计数和
+          台账口径互相矛盾，因此不接受逐调用预算。
+
+        三个值都保存为公开属性：不驱动行为，只用于核对调用点传进来的确实
+        是中枢配置（接线测试锁这一点）。
+
+        此前这里没有 ``__init__``：带参构造抛 TypeError 被调用点的 ``except``
+        静默吞掉，判档器恒为 None，判档接线整条链断掉（骨架恒不武装）。
+        """
         self.judge_enabled = judge_enabled
         self.judge_timeout = judge_timeout
-        # 推理型模型要先思考后作答：预算太小 = 判官必败。
-        self.judge_max_tokens = max(64, int(judge_max_tokens))
-        self._judge_cache: dict[str, tuple[str, float]] = {}
-        # 台账作用域（user_id / agent_id / chat_id），由接线方注入
-        self._ledger_scope: dict[str, str] = {}
+        self.judge_max_tokens = judge_max_tokens
+        self._ledger_scope: dict = {}
 
-    # ------------------------------------------------------------------ #
-    # 规则层（同步、确定性，单测只打这一层）
-    # ------------------------------------------------------------------ #
     def set_ledger_scope(self, scope: dict) -> None:
         """注入台账作用域（user_id / agent_id / chat_id），供判级入账。"""
         self._ledger_scope = dict(scope or {})
 
-    def _emit_judgment(
+    def record_ledger(
         self,
-        text: str,
-        *,
-        complexity: str,
+        level: str,
         action: str,
-        reason: str,
-        hit_layer: str,
-        model: str,
-        latency_ms: int,
+        detail: str = "",
+        source: str = "plan_gate",
     ) -> None:
-        """复杂度判级入账（台账岗位 ``plan_gate``）。
+        """规则判级也要入账（§4.5①）：台账得知道这一轮判了什么档、思考开没开。
 
-        只在真正调用判级模型时入账：规则层判级零成本且每条消息都跑，
-        入账会淹没台账。失败静默 —— 台账不得影响闸门。
+        §4.5③：思考开支写进 ``action``（``thinking:effort``），台账才能还原现场。
+        ``source`` 用岗位名（plan_gate/query_analysis/…），``hit_layer`` 才分层。
+
+        台账故障绝不影响判级——判断是旁路能力，主链优先。
         """
         try:
-            from ..decision import DecisionResult, get_bus
+            from coapis.decision import DecisionResult, get_bus
 
+            scope = self._ledger_scope
+            effort = complexity_to_effort(level)
+            act = (action or f"规则判级为{level}")[:48]
             get_bus().emit(
                 DecisionResult(
-                    source="plan_gate",
-                    action=action or None,
-                    complexity=complexity,
-                    reason=reason,
-                    hit_layer=hit_layer,
-                    model=model,
-                    latency_ms=latency_ms,
+                    source=source,
+                    complexity=level,
+                    action=f"{act}; thinking:{effort}",
+                    reason=(detail or "")[:512],
+                    hit_layer="rule",
+                    value=level,
+                    user_id=scope.get("user_id", "") or "",
+                    agent_id=scope.get("agent_id", "") or "",
+                    chat_id=scope.get("chat_id", "") or "",
+                    turn=int(scope.get("turn", 0) or 0),
                 ),
-                user_id=str(self._ledger_scope.get("user_id", "") or ""),
-                agent_id=str(self._ledger_scope.get("agent_id", "") or ""),
-                chat_id=str(self._ledger_scope.get("chat_id", "") or ""),
             )
-        except Exception:  # pragma: no cover - 台账不得影响主流程
-            pass
+        except Exception:  # noqa: BLE001 - 台账故障不影响判级
+            logger.debug("[plan-gate] 规则判级入账异常（忽略）", exc_info=True)
 
     def classify(self, text: str, tools_available: Optional[Sequence[str]] = None) -> str:
         """规则层判级。tools_available 预留（"需≥3类工具"信号暂由子目标数近似）。"""
@@ -176,146 +292,76 @@ class ComplexityClassifier:
     async def classify_smart(self, text: str, tools_available: Optional[Sequence[str]] = None) -> str:
         """规则层 + lite judge。规则层非 medium 时零成本直通。"""
         level = self.classify(text, tools_available)
-        if level != MEDIUM or not self.judge_enabled:
+        if level != MEDIUM:
+            # 直通样本的 thinking 来自规则映射（同一把尺子），入账含 thinking（§4.5）
+            effort = complexity_to_effort(level)
+            self.remember_effort(text, effort)
+            # 零次判断不入账：直通没有任何判断发生，写台账等于伪造判断记录
             return level
         judged = await self._lite_judge(text)
         return judged if judged in LEVELS else level
 
-    async def _lite_judge(self, text: str) -> Optional[str]:
-        """判级模型兜底判：命中缓存直接返回；失败返回 None（不阻断）。
+    def set_skills_dir(self, skills_dir: Any) -> None:
+        """告诉判档员去哪找**判则技能**（工作区 skills 目录）。
 
-        三条硬约束：
-        - **判断模型跟随会话激活模型**（v13 D1/D2，零配置）；
-        - **台账只记真实调用过判级模型的轮次**，无模型/熔断期不写，
-          避免把台账灌成噪音；
-        - **熔断 + 超时**双保险，判级模型挂了直接降级为规则层，绝不卡死。
+        判则可以按智能体/用户定制：工作区里名字含 ``判则``/``rubric`` 的
+        技能会自动叠加进判档 prompt 并优先。没设过就不叠加——内置判则兜底。
         """
-        key = hashlib.md5(text[:2000].encode("utf-8", errors="replace")).hexdigest()
-        cached = self._judge_cache.get(key)
-        if cached and time.monotonic() - cached[1] < 300:
-            return cached[0]
+        self._skills_dir = str(skills_dir) if skills_dir else None
 
-        config = _get_judge_provider_config(
-            self._ledger_scope.get("user_id", ""),
-            self._ledger_scope.get("agent_id", ""),
-        )
-        if not config:
-            # 无判级模型 → 降级为规则层，不写台账
-            return None
+    def _judge_system(self) -> str:
+        """判档岗位的**系统提示词** = 判则全文 + 取值约束（v14 §4.5）。
 
-        from ..decision.breaker import get_breaker
-
-        breaker = get_breaker()
-        if not breaker.allow("plan_gate"):
-            # 熔断打开 → 冷却期内直接跳过判级模型，绝不阻塞消息路径
-            return None
-
-        started = time.monotonic()
+        判则只有一处定义（``coapis/decision/rubric.py``），工作区里名字含
+        ``判则``/``rubric`` 的技能会自动叠加进来并优先。过去这里是空串——
+        判则不进 prompt，判官等于在按"没人知道的尺子"判，台账里的
+        judgment 回溯不到标准，"判得准不准"根本无从核对。
+        """
         try:
-            import httpx
+            from coapis.decision import JSON_ONLY, rubric_for, scan_skill_rubrics
 
-            async with httpx.AsyncClient(timeout=self.judge_timeout) as client:
-                resp = await client.post(
-                    f"{config['api_base']}/chat/completions",
-                    headers={"Authorization": f"Bearer {config['api_key']}"},
-                    json={
-                        "model": config["model"],
-                        "messages": [{"role": "user", "content": _JUDGE_PROMPT.format(text=text[:2000])}],
-                        "max_tokens": self.judge_max_tokens,
-                        "temperature": 0.0,
-                        "chat_template_kwargs": {"enable_thinking": False},
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
-            latency = int((time.monotonic() - started) * 1000)
-        except Exception as e:
-            logger.debug("ComplexityClassifier lite judge failed: %s", e)
-            breaker.record_failure("plan_gate")
-            self._emit_judgment(
-                text,
-                complexity="",
-                action="",
-                reason=f"判级模型调用失败，降级为规则层: {type(e).__name__}",
-                hit_layer="error",
-                model=config.get("model", ""),
-                latency_ms=int((time.monotonic() - started) * 1000),
+            skills_dir = getattr(self, "_skills_dir", None)
+            skills = scan_skill_rubrics(skills_dir) if skills_dir else []
+            return (
+                rubric_for("level", skills)
+                + "\n\n取值约束：level 只能是 simple/medium/complex；"
+                "effort 只能是 off/light/full；confidence 取 0.0~1.0。\n"
+                + JSON_ONLY
             )
-            return None
+        except Exception:  # pragma: no cover - 判则装载失败不该炸判断
+            return ""
 
-        breaker.record_success("plan_gate")
-        for lv in LEVELS:
-            if lv in content:
-                self._judge_cache[key] = (lv, time.monotonic())
-                self._emit_judgment(
-                    text,
-                    complexity=lv,
-                    action="",
-                    reason=f"判级={lv}",
-                    hit_layer="llm",
-                    model=config["model"],
-                    latency_ms=latency,
-                )
-                return lv
+    async def _lite_judge(self, text: str) -> Optional[str]:
+        """规则拿不准时的那一次复核，走判断网关（v14 §4.4②）。
+
+        网关负责模型解析（只认会话激活模型链，没有"取第一个模型"兜底）、缓存、
+        共用熔断、轮内预算、超时、台账。这里只提供提示词与解析器。网关降级
+        返回 ``None``，由 ``classify_smart`` 回退规则层结论——判断失败不该
+        打断主链，也不该让台账只剩成功样本。
+
+        一次判级同时产出档位与思考开支（§4.4④），思考档写进台账 action。
+        """
+        from coapis.decision import get_judge_gateway
+
+        scope = {
+            "user_id": self._ledger_scope.get("user_id", ""),
+            "agent_id": self._ledger_scope.get("agent_id", ""),
+            "chat_id": self._ledger_scope.get("chat_id", ""),
+            "turn": self._ledger_scope.get("turn", 0),
+        }
+        reply = await get_judge_gateway().judge(
+            purpose="plan_gate",
+            system=self._judge_system(),
+            user=_JUDGE_PROMPT.format(text=text[:2000]),
+            parse=_parse_level_and_effort,
+            describe=lambda pair: f"复核为{pair[0]}; thinking:{pair[1]}",
+            scope=scope,
+            rule_fallback=lambda: (self.classify(text), complexity_to_effort(self.classify(text))),
+        )
+        if isinstance(reply.value, tuple) and len(reply.value) == 2:
+            level, effort = reply.value
+            self.remember_effort(text, effort)
+            return level if level in LEVELS else None
         return None
 
 
-
-def _get_judge_provider_config(
-    user_id: str = "",
-    agent_id: str = "",
-) -> Optional[dict]:
-    """读取判级模型配置（与 intent_classifier 同源）。
-
-    判级模型**跟随会话激活模型**（v13 第 15 章 D1/D2：复用 active_model，
-    零配置）：用户偏好 → 智能体 active_model → 全局默认 → 第一个可用
-    provider 兜底。
-    """
-    try:
-        from coapis.decision.resolver import get_judgment_provider_config
-    except ModuleNotFoundError:
-        try:
-            from decision.resolver import get_judgment_provider_config
-        except ImportError:
-            get_judgment_provider_config = None
-
-    if get_judgment_provider_config is not None:
-        try:
-            judged = get_judgment_provider_config(user_id, agent_id)
-            if judged and judged.get("api_base") and judged.get("model"):
-                return {
-                    "api_base": judged["api_base"],
-                    "api_key": judged.get("api_key") or "none",
-                    "model": judged["model"],
-                }
-        except Exception as e:
-            logger.debug("Judgment slot chain unavailable for lite judge: %s", e)
-
-    try:
-        from coapis.providers.provider_manager import ProviderManager
-    except ModuleNotFoundError:
-        try:
-            from providers.provider_manager import ProviderManager
-        except ImportError:
-            return None
-    try:
-        pm = ProviderManager.get_instance()
-        active = pm.get_active_model()
-        if active:
-            provider = pm.get_provider(active.provider_id)
-            if provider and provider.base_url:
-                return {
-                    "api_base": provider.base_url.rstrip("/"),
-                    "api_key": provider.api_key or "none",
-                    "model": active.model,
-                }
-        for pid, provider in {**pm.builtin_providers, **pm.custom_providers}.items():
-            if provider.models and provider.base_url:
-                return {
-                    "api_base": provider.base_url.rstrip("/"),
-                    "api_key": provider.api_key or "none",
-                    "model": provider.models[0].id,
-                }
-    except Exception as e:
-        logger.debug("Failed to read provider config for lite judge: %s", e)
-    return None

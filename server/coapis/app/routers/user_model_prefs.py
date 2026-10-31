@@ -259,6 +259,7 @@ def _slot_is_valid(provider_id: str, model: str) -> bool:
 def resolve_chat_model_slot(
     username: Optional[str],
     agent_id: Optional[str] = None,
+    out_source: Optional[dict] = None,
 ) -> Optional[tuple[str, str]]:
     """聊天模型的唯一解析入口：用户偏好 → 智能体默认 → 全局默认。
 
@@ -266,12 +267,17 @@ def resolve_chat_model_slot(
 
     这是唯一权威解析函数（model_factory / prompt / view_media 三处共用），
     避免"聊天用模型 A、多模态判断用模型 B"导致图片上传误警告。
+
+    ``out_source`` 传入 dict 时写入 ``source`` = ``user_pref`` /
+    ``agent_default`` / ``global_default``（判断台账用，v14 §4.4②）。
     """
     # 1) 用户全局偏好
     if username:
         prefs = _load_user_prefs(username)
         if prefs.default_provider_id and prefs.default_model:
             if _slot_is_valid(prefs.default_provider_id, prefs.default_model):
+                if out_source is not None:
+                    out_source["source"] = "user_pref"
                 return prefs.default_provider_id, prefs.default_model
             logger.warning(
                 "User %s preference %s/%s is stale (provider/model missing); "
@@ -288,6 +294,8 @@ def resolve_chat_model_slot(
 
             agent_model = load_agent_config(agent_id).active_model
             if agent_model and agent_model.provider_id and agent_model.model:
+                if out_source is not None:
+                    out_source["source"] = "agent_default"
                 return agent_model.provider_id, agent_model.model
         except Exception:
             pass
@@ -298,6 +306,8 @@ def resolve_chat_model_slot(
 
         global_slot = ProviderManager.get_instance().get_active_model()
         if global_slot and global_slot.provider_id and global_slot.model:
+            if out_source is not None:
+                out_source["source"] = "global_default"
             return global_slot.provider_id, global_slot.model
     except Exception:
         pass

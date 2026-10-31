@@ -2947,5 +2947,30 @@
     "empty": "这里还没有内容",
     "more": "…还有 {{n}} 项未显示",
     "refreshing": "刷新中…"
+  },
+  "decision": {
+    "title": "判断中枢",
+    "entry": "判断",
+    "entryTip": "本轮判断台账",
+    "close": "关闭判断面板",
+    "refresh": "刷新",
+    "all": "全部",
+    "empty": "还没有判断记录",
+    "stats": "近 7 天",
+    "enabled": "判官",
+    "advisor": "事中改道",
+    "acceptance": "完成验收",
+    "judgeModel": "判官模型",
+    "noJudge": "未配置（走规则）",
+    "rateGood": "判得准",
+    "rateBad": "判得不准",
+    "col": {
+      "time": "时间",
+      "post": "岗位",
+      "judgment": "判断",
+      "layer": "怎么来的",
+      "cost": "耗时/花费",
+      "rate": "打分"
+    }
   }
 }

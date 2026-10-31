@@ -37,6 +37,11 @@ _LEDGER_COLUMNS = (
     "chat_id",
     "outcome",
     "created_at",
+    # v14 §4.3 台账补列（迁移 0020）
+    "input_hash",
+    "judgment",
+    "turn",
+    "rating",
 )
 
 

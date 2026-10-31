@@ -82,6 +82,8 @@ interface Props {
   onPreview?: (req: ResourcePreviewRequest) => void;
   /** 「查看全部」→ 打开会话资源抽屉（L3） */
   onShowAll?: () => void;
+  /** 「判断」→ 打开判断中枢浮窗（v14 §5.2：本轮判断台账 + 判官开关） */
+  onJudgment?: () => void;
   /** 「定位到消息」：滚到产出这条资源的那一轮（方案 §3.2 产出动作） */
   onLocate?: (messageId: string) => void;
 }
@@ -101,6 +103,7 @@ const CoApisChatResourceBar: React.FC<Props> = ({
   items,
   onPreview,
   onShowAll,
+  onJudgment,
   onLocate,
 }) => {
   const { t } = useTranslation();
@@ -294,6 +297,17 @@ const CoApisChatResourceBar: React.FC<Props> = ({
             data-coapis-res-trigger=""
           >
             {t("chat.resources.viewAll", "查看全部")}
+          </a>
+        )}
+        {onJudgment && (
+          <a
+            className={styles.showAll}
+            onClick={onJudgment}
+            /* 本轮判断台账入口（v14 §5.2）：判没判、判成什么，一轮一行 */
+            title={t("decision.entryTip", "本轮判断台账")}
+            data-coapis-res-trigger=""
+          >
+            {t("decision.entry", "判断")}
           </a>
         )}
       </div>

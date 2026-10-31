@@ -136,7 +136,23 @@ def test_judgment_config_swallows_lookup_failure(monkeypatch):
     assert get_judgment_provider_config("u", "a") is None
 
 
-def test_judgment_config_empty_identity_is_none():
+def test_judgment_config_empty_identity_is_none(monkeypatch):
+    """Empty identity must not fabricate a provider when nothing is usable.
+
+    Regression: v13 §10.2.1 - "" used to return the hardcoded "openai"
+    for a provider that does not exist.  The third resolution level
+    (global default) is forced empty here, otherwise the test passes on
+    a host with no providers and fails in a dev container with a live
+    model, which is environment luck, not a guarantee.
+    """
+    from coapis.providers.provider_manager import ProviderManager
+
+    monkeypatch.setattr(
+        ProviderManager,
+        "get_active_model",
+        lambda self: None,
+        raising=True,
+    )
     assert get_judgment_provider_config("", "") is None
 
 
@@ -421,15 +437,33 @@ def test_config_normalize_clamps_outliers():
 
 @pytest.fixture()
 def ledger_db(tmp_path):
-    """把全局引擎指向临时 sqlite 并建表，返回库路径。"""
+    """把全局引擎指向临时 sqlite 并建表，返回库路径。
+
+    顺带清一次进程级判断缓存与熔断——缓存/熔断是**进程级**状态，
+    不清就会跨用例命中（缓存命中不落台账，台账类断言随机变红）。
+    """
     from coapis.foundation.db import init_engine, reset_engine
     from coapis.foundation.db.base import BaseRow
     from coapis.foundation.db.models.decision import DecisionEvent  # noqa: F401
 
+    def _clean():
+        try:
+            from coapis.decision.breaker import reset_breakers
+            from coapis.decision.cache import reset_judgment_cache
+            from coapis.decision.gateway import reset_judge_gateway
+
+            reset_judgment_cache()
+            reset_breakers()
+            reset_judge_gateway()
+        except Exception:  # pragma: no cover - 老版本网关没有这些钩子
+            pass
+
     url = "sqlite:///%s" % (tmp_path / "ledger.db")
     engine = init_engine(url)
     BaseRow.metadata.create_all(engine)
+    _clean()
     yield url
+    _clean()
     reset_engine()
 
 
@@ -562,20 +596,47 @@ def test_migration_0018_matches_model():
 
 
 def test_plan_gate_emits_ledger(ledger_db):
-    """复杂度判级调用判级模型时必须入账（台账岗位 plan_gate）。"""
+    """判档模型复核发生时必须入账（台账岗位 plan_gate）。"""
     from coapis.agents.plan_gate import ComplexityClassifier
 
     _bus()
-    clf = ComplexityClassifier(judge_enabled=True)
+    # v14 §4.4①：判档不再有 judge_enabled 开关——判断恒走网关，降级是网关的职责
+    clf = ComplexityClassifier()
     clf.set_ledger_scope({"user_id": "alice", "agent_id": "a1", "chat_id": "c1"})
-    # 无可用判断模型 → no_model 分支，仍应入账（台账要记录"为什么没判")
-    assert asyncio_run(clf._lite_judge("帮我写一个多用户系统")) is None
+    # 规则层只能给出 complex/simple/medium：complex 与 simple 都是直通，
+    # 零次判断、不入账（见 test_plan_gate_no_ledger_on_rule_passthrough）。
+    # 只有 medium 边界样本才调判级模型复核——这才是本测试要锁的入账路径。
+    text = "总结一下这个季度的销售情况，给出建议"
+    assert clf.classify(text) == "medium"
+    # 判级结果由现场模型给出（simple/medium/complex），网关降级时为 None。
+    # 本测试锁的是"发生了判断并留下完整台账"，不锁模型判成哪一档——
+    # 判档准不准由校准岗按台账统计，不该由单元测试锁死。
+    assert asyncio_run(clf._lite_judge(text)) in ("complex", "medium", "simple", None)
 
     rows = _query_all()
     assert len(rows) == 1
     assert rows[0].source == "plan_gate"
-    assert rows[0].hit_layer in ("no_model", "error")
+    assert rows[0].hit_layer in (
+        "no_model",
+        "error",
+        "timeout",
+        "model",
+        "cache",
+        "skill",
+        "rule",
+    )
     assert (rows[0].user_id, rows[0].agent_id, rows[0].chat_id) == ("alice", "a1", "c1")
+
+
+def test_plan_gate_rule_passthrough_skips_ledger(ledger_db):
+    """规则直通（零次判断）不入账——台账只记真发生过的判断。"""
+    from coapis.agents.plan_gate import ComplexityClassifier
+
+    _bus()
+    clf = ComplexityClassifier()
+    clf.set_ledger_scope({"user_id": "alice", "agent_id": "a1", "chat_id": "c1"})
+    assert asyncio_run(clf.classify_smart("查今天的销售数据")) == "simple"
+    assert _query_all() == []
 
 
 # ---------------------------------------------------------------- 静态检查

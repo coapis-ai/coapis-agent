@@ -1496,6 +1496,16 @@ class AgentProfileConfig(BaseModel):
         default_factory=PlanConfig,
         description="Plan mode configuration for this agent",
     )
+    decision_hub: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Judgment-hub overrides for this agent (v14 §5.2). Keys are the "
+            "ones coapis.decision.config understands (enabled, "
+            "post_overrides, timeout_ms, thinking_enabled, advisor_enabled, "
+            "acceptance_enabled, ...); unknown keys are reported as ignored. "
+            "Per-user overrides win over this. Empty = built-in defaults."
+        ),
+    )
 
 
 class AgentsConfig(BaseModel):

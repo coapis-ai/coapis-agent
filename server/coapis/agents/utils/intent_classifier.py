@@ -28,84 +28,9 @@ _CLASSIFICATION_CACHE: dict[str, tuple[list[str], float]] = {}
 _CACHE_TTL = 300  # 5 minutes
 _CACHE_LOCK = threading.Lock()
 
-# Provider config cache
-_PROVIDER_CONFIG: dict | None = None
-
 # On-demand skills registry (set by _load_on_demand_skills)
 _ON_DEMAND_SKILLS_REGISTRY: dict[str, dict] = {}
 _REGISTRY_LOCK = threading.Lock()
-
-
-def _get_provider_config(user_id: str = "", agent_id: str = "") -> dict | None:
-    """Read LLM provider config from ProviderManager.
-
-    智能判断中枢 一期：优先走**判断槽位**回落链（judgment → chat 三层解析
-    → 全局活动模型 → 第一个可用 provider），判断槽位没配置时行为与改造前
-    完全一致（活动模型 → 第一个 provider）。
-    """
-    # 作用域链（用户偏好 → 智能体 active_model → 全局默认）**每次现算**，
-    # 绝不进进程级缓存——缓存会把首个解析到的用户模型钉死给所有人用
-    # （跨用户污染）。
-    if user_id or agent_id:
-        try:
-            from coapis.decision.resolver import get_judgment_provider_config
-
-            judged = get_judgment_provider_config(user_id, agent_id)
-            if judged and judged.get("api_base") and judged.get("model"):
-                return judged
-        except Exception:
-            pass
-    global _PROVIDER_CONFIG
-    if _PROVIDER_CONFIG is not None:
-        return _PROVIDER_CONFIG
-
-    try:
-        from coapis.decision.resolver import get_judgment_provider_config
-
-        judged = get_judgment_provider_config()
-        if judged and judged.get("api_base") and judged.get("model"):
-            _PROVIDER_CONFIG = {
-                "api_base": judged["api_base"],
-                "api_key": judged.get("api_key") or "none",
-                "model": judged["model"],
-            }
-            logger.debug(
-                "Intent classifier using judgment chain: %s (%s)",
-                judged.get("model"),
-                judged.get("hit_layer"),
-            )
-            return _PROVIDER_CONFIG
-    except Exception as exc:
-        logger.debug("Judgment slot chain unavailable: %s", exc)
-
-    try:
-        from coapis.providers.provider_manager import ProviderManager
-        pm = ProviderManager.get_instance()
-        # 优先使用 active model
-        active = pm.get_active_model()
-        if active:
-            provider = pm.get_provider(active.provider_id)
-            if provider and provider.base_url:
-                _PROVIDER_CONFIG = {
-                    "api_base": provider.base_url.rstrip("/"),
-                    "api_key": provider.api_key or "none",
-                    "model": active.model,
-                }
-                logger.debug("Intent classifier using active model: %s/%s", active.provider_id, active.model)
-                return _PROVIDER_CONFIG
-        # 回退：找第一个有模型且配置好的 provider
-        for pid, provider in {**pm.builtin_providers, **pm.custom_providers}.items():
-            if provider.models and provider.base_url:
-                _PROVIDER_CONFIG = {
-                    "api_base": provider.base_url.rstrip("/"),
-                    "api_key": provider.api_key or "none",
-                    "model": provider.models[0].id,
-                }
-                logger.debug("Intent classifier using provider: %s/%s", pid, provider.models[0].id)
-                return _PROVIDER_CONFIG
-    except Exception as e:
-        logger.debug("Failed to read provider config from ProviderManager: %s", e)
-    return None
 
 
 def _build_classify_prompt(
@@ -208,129 +133,53 @@ def register_on_demand_skills(skills: dict[str, dict]) -> None:
             _ON_DEMAND_SKILLS_REGISTRY[skill_name] = data
 
 
+def _parse_skill_names(raw: str, allowed: dict[str, str]) -> list[str]:
+    """判官输出 → 技能名列表。
+
+    只认注册表里真实存在的名字，绝不把模型随口说的名字当技能。一个都认不出
+    来不算失败（那是"没命中"），但输出不成 JSON 就算解析失败，交网关降级。
+    """
+    text = raw.strip()
+    match = re.search(r"\[[^\]]*\]", text)
+    if match:
+        text = match.group(0)
+    try:
+        names = json.loads(text)
+    except Exception as exc:  # noqa: BLE001 - 交给网关记 parse_fail
+        raise ValueError(f"判官输出不是 JSON 数组: {raw[:80]!r}") from exc
+    if not isinstance(names, list):
+        raise ValueError(f"判官输出不是数组: {raw[:80]!r}")
+    return [n for n in names if isinstance(n, str) and n in allowed]
+
+
 async def classify_intent_llm(
     user_message: str,
     skill_summaries: dict[str, str],
-    timeout: float = 5.0,
-    user_id: str = "",
-    agent_id: str = "",
-) -> list[str] | None:
-    """Classify user intent and return matching skill names.
+    scope: dict | None = None,
+) -> list[str]:
+    """语义兜底判断走判断网关（v14 §4.4③）。
 
-    Primary: keyword matching (instant, no LLM cost).
-    Fallback: LLM classification (richer semantics).
+    超时、缓存、共用熔断、轮内预算、台账都在网关里；本模块只提供提示词与
+    解析器。网关降级时返回空列表 = 不预激活（关键词层已经判过，不重复拦）。
 
-    Returns:
-        List of matching skill names, or None if both methods failed.
+    ``scope`` 是 ``{user_id, agent_id, chat_id, turn}``，调用方显式传，
+    台账才知道这次判断属于谁的哪一轮。
     """
-    if not skill_summaries:
-        return []
+    from coapis.decision import get_judge_gateway
 
-    # Phase 1: keyword matching (cheap, instant)
-    keyword_matches = classify_intent_keywords(user_message, skill_summaries)
-    if keyword_matches:
-        logger.debug(
-            "Intent classifier: keyword match: user_msg=%s -> skills=%s",
-            user_message[:50], keyword_matches,
-        )
-        return keyword_matches
+    reply = await get_judge_gateway().judge(
+        purpose="skill_trigger",
+        system="",
+        user=_build_classify_prompt(user_message, skill_summaries),
+        parse=lambda raw: _parse_skill_names(raw, skill_summaries),
+        describe=(
+            lambda names: ("预激活" + ",".join(names[:3]))
+            if names else "无技能命中"
+        ),
+        scope=scope,
+    )
+    return list(reply.value or [])
 
-    # Phase 2: no keyword matches, try LLM classification
-    config = _get_provider_config(user_id, agent_id)
-    if not config:
-        logger.debug("No LLM provider configured for intent classification")
-        return None
-
-    # Check cache
-    cache_key = hashlib.md5(
-        user_message.lower().strip().encode()
-    ).hexdigest()[:16]
-    with _CACHE_LOCK:
-        cached = _CLASSIFICATION_CACHE.get(cache_key)
-        if cached and time.monotonic() - cached[1] < _CACHE_TTL:
-            logger.debug("Intent classifier cache hit")
-            return cached[0]
-
-    try:
-        import httpx
-
-        prompt = _build_classify_prompt(user_message, skill_summaries)
-        payload = {
-            "model": config["model"],
-            "messages": [
-                {"role": "user", "content": prompt},
-            ],
-            "max_tokens": 512,  # Thinking models need space for reasoning chain
-            "temperature": 0.0,
-        }
-        headers = {
-            "Content-Type": "application/json",
-        }
-        if config["api_key"] and config["api_key"] != "none":
-            headers["Authorization"] = f"Bearer {config['api_key']}"
-
-        url = f"{config['api_base']}/chat/completions"
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-
-        # Extract response text — handle thinking models (reasoning field)
-        choice = data.get("choices", [{}])[0]
-        message = choice.get("message", {})
-        content = (message.get("content") or "").strip()
-
-        # Fallback: extract JSON array from reasoning field (thinking models)
-        if not content:
-            reasoning = (message.get("reasoning") or "").strip()
-            if reasoning:
-                import re
-                match = re.search(r'\[[\s\S]*?\]', reasoning)
-                if match:
-                    content = match.group()
-
-        if not content:
-            logger.debug(
-                "LLM returned empty content (finish_reason=%s)",
-                choice.get("finish_reason"),
-            )
-            return None
-
-        # Parse JSON array from response
-        # Handle markdown code blocks
-        if "```" in content:
-            import re
-            match = re.search(r'\[.*?\]', content, re.DOTALL)
-            if match:
-                content = match.group()
-
-        skills = json.loads(content)
-        if not isinstance(skills, list):
-            return None
-
-        # Validate skill names exist in the summaries
-        valid_skills = [s for s in skills if s in skill_summaries]
-
-        # Cache result
-        with _CACHE_LOCK:
-            _CLASSIFICATION_CACHE[cache_key] = (valid_skills, time.monotonic())
-            # Evict old entries
-            if len(_CLASSIFICATION_CACHE) > 500:
-                cutoff = time.monotonic() - _CACHE_TTL
-                expired = [k for k, (_, ts) in _CLASSIFICATION_CACHE.items() if ts < cutoff]
-                for k in expired:
-                    del _CLASSIFICATION_CACHE[k]
-
-        logger.info(
-            "LLM intent classification: user_msg=%s -> skills=%s",
-            user_message[:50], valid_skills,
-        )
-        return valid_skills
-
-    except Exception as e:
-        logger.debug("LLM intent classification failed: %s", e)
-        return None
 
 
 def get_classification_cache_stats() -> dict:
