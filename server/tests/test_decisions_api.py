@@ -183,10 +183,17 @@ def test_config_put_persists_known_keys_only(client):
     res = c.put("/api/decisions/config?agent_id=a1", json={
         "timeout_ms": 2500,
         "advisor_enabled": False,
+        # 判官模型是已知键（判官必须能指定纯文本模型，写死必翻车）
         "judge_model": "glm-4.7",
+        # 未知键照旧拒收
+        "judge_mode": "x",
     }).json()
-    assert res["decision_hub"] == {"timeout_ms": 2500, "advisor_enabled": False}
-    assert res["ignored"] == ["judge_model"], "未知键拒收，不写死字段"
+    assert res["decision_hub"] == {
+        "timeout_ms": 2500,
+        "advisor_enabled": False,
+        "judge_model": "glm-4.7",
+    }
+    assert res["ignored"] == ["judge_mode"], "未知键拒收，不写死字段"
     # 读回走读取侧那一条路径：落盘文件就是 get_hub_config() 读的那份，
     # 只有一份真相，测试不碰真实部署目录。
     from coapis.decision.config import get_hub_config, hub_config_path, reset_hub_config
@@ -196,7 +203,8 @@ def test_config_put_persists_known_keys_only(client):
     assert saved["llm_timeout_ms"] == 2500
     # advisor_enabled=False 归一成"每 N 轮复核 = 0"，即关闭
     assert saved["advisor_every_iters"] == 0
-    assert "judge_model" not in saved
+    assert saved.get("judge_model") == "glm-4.7", "判官模型必须落盘（F1：判官槽位）"
+    assert "judge_mode" not in saved, "未知键不落盘"
     assert "timeout_ms" not in saved, "别名不落盘，只有一份键名"
     assert "advisor_enabled" not in saved, "别名不落盘，只有一份键名"
 

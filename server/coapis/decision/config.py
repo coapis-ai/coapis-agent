@@ -46,14 +46,23 @@ DEFAULTS = {
     "breaker_cooldown_floor_s": 1.0,
     # 判断模型要跑在"会话激活模型"上；推理型模型（Q3 这类）光思考就要
     # 几百 token、两三秒，1.5s/60token 的预算等于"判官必败、静默退回规则"。
-    "llm_timeout_ms": 3000.0,
+    # ``0`` = 按链路自适应（本地取 ``llm_timeout_ms_local``，远端 API 取
+    # ``llm_timeout_ms_api``）：判官是同步调用，本地 vLLM 跑思考模型实测
+    # 5~15 秒，固定 3000ms 对本地链路必然全灭（台账 timeout 层的真因）。
+    "llm_timeout_ms": 0.0,
+    "llm_timeout_ms_local": 8000.0,
+    "llm_timeout_ms_api": 5000.0,
+    # 判官固定模型槽：两者都非空时判官固定用该模型（建议轻量非思考模型），
+    # 任一为空则回落"会话激活模型"链——会话模型差，判官跟着差。
+    "judge_provider_id": "",
+    "judge_model": "",
     "llm_max_tokens": 512,
     # 每轮判官 LLM 调用上限（v14 §4.1 第 4 条）。判官是辅助判断，
     # 一轮里判档 + 技能触发 + 验收加起来就该封顶，不能把整轮预算
     # 吃在判断上——这是"重复/循环判断"的根治闸门。
     # 判档 1 次 + 事中改道 1 次 + 收尾验收 1 次 = 3。低于 3 时后到的岗位
     # 只会记下 budget_cap 台账（可见但不生效），等于关掉改道与验收。
-    "judge_max_calls_per_turn": 3,
+    "judge_max_calls_per_turn": 4,
     # 判官默认关思考（v14 D1）：判断要的是结论，不是推理过程。
     "judge_thinking_enabled": False,
     # ── 判官设置项 API 的两处配置位（v14 §5.2）─────────────────────
@@ -88,6 +97,20 @@ def _as_float(val: Any, default: float) -> float:
         return float(val)
     except (TypeError, ValueError):
         return default
+
+
+def _as_str(val: Any, default: str) -> str:
+    """字符串项归一化。
+
+    模型槽（``judge_provider_id``/``judge_model``）是字符串——以前没有
+    字符串分支，非数值配置一律被 ``_as_float`` 吞回默认值，判官固定模型槽
+    会永远读成空（等于该功能恒不生效）。
+    """
+    if val is None:
+        return default
+    if isinstance(val, str):
+        return val.strip()
+    return str(val).strip()
 
 
 #: 管理端可用的短名键（写盘时按原样保留，读取时收敛成全名）。
@@ -139,7 +162,9 @@ class DecisionHubConfig:
     breaker_failure_threshold: int = 3
     breaker_cooldown_s: float = 120.0
     breaker_cooldown_floor_s: float = 1.0
-    llm_timeout_ms: float = 3000.0
+    llm_timeout_ms: float = 0.0
+    llm_timeout_ms_local: float = 8000.0
+    llm_timeout_ms_api: float = 5000.0
     # 判断模型的输出预算。推理型模型（Q3 这类）先思考后作答，
     # 60 token 连思考都出不完，判官必败、静默退回规则层。
     llm_max_tokens: int = 512
@@ -162,13 +187,28 @@ class DecisionHubConfig:
         """单轮判断调用上限（API 契约名）。"""
         return self.judge_max_calls_per_turn
 
+    def effective_timeout_ms(self, is_local: bool) -> float:
+        """按链路类型取本次判断的毫秒预算（F1 自适应超时）。
+
+        ``llm_timeout_ms > 0`` 视为人工显式指定，最高优先；``0`` 时本地链路
+        取 ``llm_timeout_ms_local``，远端 API 取 ``llm_timeout_ms_api``。
+        """
+        fixed = float(self.llm_timeout_ms)
+        if fixed > 0:
+            return fixed
+        return float(
+            self.llm_timeout_ms_local if is_local else self.llm_timeout_ms_api,
+        )
+
     @property
     def advisor_enabled(self) -> bool:
         """事中改道是否开启（API 契约名 = 每 N 轮复核，N>0 即开启）。"""
         return self.advisor_every_iters > 0
     # 每轮判官 LLM 调用上限。判档 + 技能触发 + 验收加起来就该封顶，
     # 不能把整轮预算吃在判断上——这是"重复/循环判断"的根治闸门。
-    judge_max_calls_per_turn: int = 3
+    judge_max_calls_per_turn: int = 4
+    judge_provider_id: str = ""
+    judge_model: str = ""
     # 判官是否开思考（默认关）。推理型模型一开思考，光思考就吃掉
     # 大几百 token，判断这种"要一个字母结论"的调用纯属浪费。
     judge_thinking_enabled: bool = False
@@ -201,11 +241,14 @@ class DecisionHubConfig:
                 val = _env(env_name)
             if val is None:
                 val = default
-            merged[key] = (
-                _as_bool(val, default)
-                if isinstance(default, bool)
-                else (_as_int(val, default) if isinstance(default, int) and not isinstance(default, bool) else _as_float(val, default))
-            )
+            if isinstance(default, bool):
+                merged[key] = _as_bool(val, default)
+            elif isinstance(default, int):
+                merged[key] = _as_int(val, default)
+            elif isinstance(default, str):
+                merged[key] = _as_str(val, default)
+            else:
+                merged[key] = _as_float(val, default)
         posts = {p: _as_bool(raw.get(f"{p}_enabled"), merged["enabled"]) for p in POSTS}
         # 构造即夹取安全区间：调用方漏调 normalized() 也不会把判断环节配成拖死主链路
         return cls(posts=posts, **merged).normalized()
@@ -225,7 +268,9 @@ class DecisionHubConfig:
             max(float(self.breaker_cooldown_floor_s), 1.0),
             300.0,
         )
-        self.llm_timeout_ms = min(max(float(self.llm_timeout_ms), 100.0), 8000.0)
+        self.llm_timeout_ms = min(max(float(self.llm_timeout_ms), 0.0), 20000.0)
+        self.llm_timeout_ms_local = min(max(float(self.llm_timeout_ms_local), 200.0), 20000.0)
+        self.llm_timeout_ms_api = min(max(float(self.llm_timeout_ms_api), 200.0), 20000.0)
         self.llm_max_tokens = min(max(int(self.llm_max_tokens), 64), 4096)
         self.judge_max_calls_per_turn = min(
             max(int(self.judge_max_calls_per_turn), 1), 8,
@@ -267,6 +312,10 @@ class DecisionHubConfig:
             "advisor_min_iters": int(self.advisor_min_iters),
             "acceptance_max_chars": int(self.acceptance_max_chars),
             "timeout_s": float(self.llm_timeout_ms) / 1000.0,
+            "timeout_ms_local": float(self.llm_timeout_ms_local),
+            "timeout_ms_api": float(self.llm_timeout_ms_api),
+            "judge_provider_id": str(self.judge_provider_id),
+            "judge_model": str(self.judge_model),
             "budget_exempt_turns": int(self.budget_exempt_turns),
         }
 

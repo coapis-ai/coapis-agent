@@ -140,8 +140,8 @@ def _hub_chain(monkeypatch, tmp_path, invoke, rows=None):
 
     monkeypatch.setattr(
         gw,
-        "get_judgment_provider_config",
-        lambda **_kw: {"provider_id": "p1", "model": "m1"},
+        "get_judge_provider_config",
+        lambda *_a, **_kw: {"provider_id": "p1", "model": "m1"},
     )
     with ExitStack() as stack:
         for _name, replacement in (

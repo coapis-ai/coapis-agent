@@ -71,20 +71,14 @@ class DecisionEvent(BaseRow):
     tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
-    # 判断置信度（0~1）：判官方给出的把握程度，未给出时为 0。
-    # 校准岗按它统计"判得准不准"，也是台账里唯一能区分"敢判"与"蒙的"的量。
-    confidence: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0, server_default=text("0")
-    )
-    # 判断的 token 收支分开记：判官是独立模型，prompt 与 completion 的单价
-    # 和用途都不同，合计成一列就没法算"判一次花多少"。
-    # tokens 保留为合计，供既有查询与统计接口继续读。
-    tokens_in: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default=text("0")
-    )
-    tokens_out: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default=text("0")
-    )
+    # 注：设计稿里的 confidence / tokens_in / tokens_out **不在这里**（2026-11-01 删）。
+    # 它们曾以模型列存在（b7240d9），但既没有配套迁移、也不在写入列清单
+    # ``bus._LEDGER_COLUMNS`` 里 —— 于是 dev/生产（alembic 建表，19 列）与测试
+    # （create_all 按模型建表，22 列）长成两套 schema：写入走裸 SQL 显式列名
+    # 一切正常，而任何走 ORM 实体的读取在真实环境必炸
+    # ``no such column: decision_events.confidence``（dev 实测复现）。
+    # 判官当前也不产出置信度，留着只会长期摆空值。真要记"判得准不准"，
+    # 连同写入链与迁移一起做，模型与库必须同一批落地。
 
     # 作用域（与记忆域 scope 语义一致）
     user_id: Mapped[str] = mapped_column(

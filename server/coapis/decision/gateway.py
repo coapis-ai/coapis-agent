@@ -40,7 +40,7 @@ from .breaker import get_breaker
 from .bus import get_bus
 from .cache import get_cached_judgment, make_cache_key, put_cached_judgment
 from .config import DecisionHubConfig, get_hub_config
-from .resolver import get_judgment_provider_config
+from .resolver import get_judge_provider_config, is_local_base_url
 from .types import DecisionResult
 
 logger = logging.getLogger(__name__)
@@ -472,10 +472,10 @@ class JudgeGateway:
                 purpose, layer, reason, rule_fallback, describe, elapsed, ids,
             )
 
-        # 模型槽位：判官显式配置 → 会话激活模型（由 resolver 决定，
-        # 网关不自己挑模型——绕过配置是 v14 明令禁止的）
-        slot = get_judgment_provider_config(
-            user_id=ids["user_id"], agent_id=ids["agent_id"],
+        # 模型槽位：判官固定模型槽（v15 D1=A）→ 会话激活模型（由 resolver
+        # 决定，网关不自己挑模型——绕过配置是 v14 明令禁止的）
+        slot = get_judge_provider_config(
+            cfg, user_id=ids["user_id"], agent_id=ids["agent_id"],
         ) or {}
         provider_id = str(slot.get("provider_id") or "")
         model_id = str(slot.get("model") or "")
@@ -493,7 +493,13 @@ class JudgeGateway:
 
         kwargs = self._build_kwargs(provider, model_id, cfg)
         breaker = get_breaker(BREAKER_KEY)
-        timeout = max(float(cfg.llm_timeout_s), 0.01)
+        # F1 自适应超时：本地链路（ollama/vLLM）8s、远端 API 5s。
+        # 判官同步调用，本地思考模型实测 5~15 秒，固定短超时=台账里
+        # 一整层 "判断超时（2.6s）" 的真因。
+        timeout = max(
+            cfg.effective_timeout_ms(is_local_base_url(slot.get("base_url"))) / 1000.0,
+            0.01,
+        )
         try:
             text, tin, tout = await asyncio.wait_for(
                 self._invoke(provider, model_id, system, user, kwargs),
@@ -501,12 +507,20 @@ class JudgeGateway:
             )
         except asyncio.TimeoutError:
             breaker.record_failure(BREAKER_KEY)
-            return await degrade(LAYER_TIMEOUT, f"判断超时（{timeout:.1f}s）")
+            return await degrade(
+                LAYER_TIMEOUT,
+                f"判断超时（{timeout:.1f}s，模型 {model_id}）",
+            )
         except Exception as exc:
-            logger.debug("[决策中枢] %s 调用失败: %s", purpose, exc)
+            # F4：失败必须留下能归因的痕迹。reason 带异常类型名（进台账），
+            # 完整 traceback 记 warning（进日志）——只记 debug 等于故障隐身。
+            logger.warning(
+                "[决策中枢] %s 调用失败: %s: %s", purpose, type(exc).__name__, exc,
+                exc_info=True,
+            )
             breaker.record_failure(BREAKER_KEY)
             return await degrade(
-                LAYER_TRANSPORT, f"判断调用失败（{type(exc).__name__}）",
+                LAYER_TRANSPORT, f"判断调用失败（{type(exc).__name__}: {exc}）",
             )
 
         try:

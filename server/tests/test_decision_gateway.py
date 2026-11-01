@@ -155,8 +155,8 @@ def wire(monkeypatch, model, *, slot=_DEFAULT_SLOT, provider=None):
     if slot is _DEFAULT_SLOT:
         slot = {"provider_id": "p1", "model": "m1"}
     monkeypatch.setattr(
-        gw, "get_judgment_provider_config",
-        lambda user_id=None, agent_id=None: dict(slot),
+        gw, "get_judge_provider_config",
+        lambda cfg=None, user_id=None, agent_id=None: dict(slot),
         raising=True,
     )
 

@@ -421,7 +421,9 @@ def test_config_normalize_clamps_outliers():
         "breaker_cooldown_s": -1,
     })
     # 超时上限封顶：判断绝不允许拖垮主链路（改造前无此护栏）
-    assert cfg.llm_timeout_ms == 8000
+    # 上限 20000ms：再大的超时只会让请求端先断开、台账全刷成假 timeout；
+    # 0 是合法值（=按 base_url 自适应：本地 8s / 远程 API 5s），不能被夹成地板
+    assert cfg.llm_timeout_ms == 20000.0
     assert cfg.cache_max_entries == 4096
     # TTL / 冷却 / 阈值都有地板：配错不会变成「永不失效」或「零冷却」
     assert cfg.cache_ttl_s == 1.0
