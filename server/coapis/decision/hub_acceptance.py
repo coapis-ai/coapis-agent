@@ -179,6 +179,8 @@ async def judge_acceptance(
         "reason": str((reply.value or {}).get("reason") or ""),
         "missing": str((reply.value or {}).get("missing") or ""),
         "hit_layer": reply.hit_layer,
+        "latency_ms": float(getattr(reply, "latency_ms", 0) or 0),
+        "cost": float(getattr(reply, "cost", 0.0) or 0.0),
     }
 
 
@@ -196,9 +198,10 @@ async def _run_acceptance(
         )
         logger.info(
             "[Accept] verdict=%s overreach=%s overdesign=%s layer=%s "
-            "cost=%.1fms chat=%s turn=%s",
+            "耗时=%.0fms 成本=%.4f chat=%s turn=%s",
             res["verdict"], res["overreach"], res["overdesign"],
-            res["hit_layer"], 0.0, scope.get("chat_id"), scope.get("turn"),
+            res["hit_layer"], res["latency_ms"], res["cost"],
+            scope.get("chat_id"), scope.get("turn"),
         )
     except Exception:  # pragma: no cover - 验收是加分项，任何异常都不能影响收尾
         logger.debug("[Accept] 验收任务异常（已吞）", exc_info=True)

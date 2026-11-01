@@ -2175,6 +2175,29 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             logger.debug("decision hub: scope hook skipped: %s", exc)
             return {}
 
+    @property
+    def _on_demand_skill_summaries(self) -> dict:
+        """按需技能：名字 → 一句话摘要。
+
+        判官的验收岗/改道岗都要这份清单作为判断依据。技能字典的真名是
+        ``_on_demand_skills``（``{name: (skill_dir, keywords)}``），这里统一
+        转成摘要字典，避免调用方各自拼属性名拼出 AttributeError。
+        """
+        out: dict = {}
+        skills = getattr(self, "_on_demand_skills", None) or {}
+        for name, item in skills.items():
+            skill_dir = None
+            if isinstance(item, (tuple, list)) and item:
+                skill_dir = item[0]
+            summary = ""
+            if skill_dir:
+                try:
+                    summary = self._get_skill_summary(skill_dir) or ""
+                except Exception:  # 摘要拿不到就留空，判官照样能跑
+                    summary = ""
+            out[name] = summary
+        return out
+
     def _decision_scope(
         self,
         agent: Any = None,
@@ -4721,17 +4744,24 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             from ..decision.hub_acceptance import fire_acceptance as _fire_acc
 
             _acc_hub = self._decision_hub()
+            _acc_ans = (response.get_text_content()
+                        if response is not None else "") or ""
             if _acc_hub is not None and _acc_hub.post_enabled("acceptance"):
+                _acc_scope = self._decision_scope()
+                logger.debug(
+                    "[Accept] 发射检查 query=%d字 answer=%d字 turn=%s chat=%s",
+                    len(query or ""), len(_acc_ans),
+                    _acc_scope.get("turn"), _acc_scope.get("chat_id"),
+                )
                 _fire_acc(
                     query=str(query or ""),
-                    answer=(response.get_text_content()
-                            if response is not None else "") or "",
-                    scope=self._decision_scope(),
+                    answer=_acc_ans,
+                    scope=_acc_scope,
                     hub=_acc_hub,
                     skills=self._on_demand_skill_summaries,
                 )
         except Exception as _acc_err:  # pragma: no cover
-            logger.debug("[Accept] 验收发射跳过: %s", _acc_err)
+            logger.info("[Accept] 验收发射跳过: %s", _acc_err)
 
         return response
 

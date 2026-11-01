@@ -420,6 +420,19 @@ def get_hub_config() -> "DecisionHubConfig":
     return _hub_cache
 
 
+def _saved_file_section_safe() -> dict:
+    """读数据根 ``config/decision_hub.json``（管理台保存的那份），失败给空。
+
+    优先级：智能体段 > 环境变量 > 这份文件 > 默认值。界面改了预算要能
+    真的落到判官身上，运行时就必须读它（带 5 秒缓存，改配置不必重启）。
+    """
+    try:
+        sec = saved_hub_section()
+        return dict(sec) if isinstance(sec, Mapping) else {}
+    except Exception:  # 读不到就退回原有优先级，绝不影响启动
+        return {}
+
+
 def merge_hub_config(raw: Mapping[str, Any] | None) -> "DecisionHubConfig":
     """智能体 ``decision_hub`` 段叠加在 env 配置之上，**进程内缓存**。
 
@@ -427,10 +440,13 @@ def merge_hub_config(raw: Mapping[str, Any] | None) -> "DecisionHubConfig":
     这里只是把结果按配置内容缓存起来：判断中枢每轮都会取配置，
     不能每次都重新解析一遍（v14 §4.1 第 2 条）。改了环境变量要重启才生效。
     """
-    key = tuple(sorted((str(k), str(v)) for k, v in (raw or {}).items()))
+    file_sec = _saved_file_section_safe()
+    key = tuple(sorted(
+        (str(k), str(v)) for k, v in {**file_sec, **(raw or {})}.items()
+    ))
     cfg = _merged_cache.get(key)
     if cfg is None:
-        cfg = DecisionHubConfig.from_dict(raw).normalized()
+        cfg = DecisionHubConfig.from_dict({**file_sec, **(raw or {})}).normalized()
         _merged_cache[key] = cfg
     return cfg
 
