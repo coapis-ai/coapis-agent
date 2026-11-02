@@ -877,27 +877,35 @@ class SceneAgentService:
     # -------------------------------------------------------------------------
     
     def _load_scenes_file(self) -> ScenesFile:
-        """Load scenes (community M1: SQLite, otherwise scenes.json).
-        
-        Returns:
-            ScenesFile object
+        """Load the scene registry through whichever repository is wired.
+
+        三条分支的返回体必须与 ScenesFile 契约完全一致：该模型只声明
+        version:int 与 scenes 两个字段，且 extra="forbid"——旧实现传入
+        并不存在的 self.default_section、并把 version 写成字符串 "1.0"，
+        导致任何走仓储的调用（标签聚合 / 工作台 / 热门场景）一进入即抛，
+        前端表现为 500。
+
+        企业版下镜像内并没有 scenes.json，场景只存在于 PostgreSQL，
+        仓储返回整表投影（多出 tenant_id / org_id / deleted_at 三个平台
+        列），因此必须先投影到前端契约字段再构造 SceneConfig。
         """
         if self._community_repo is not None:
-            try:
-                scenes = [SceneConfig(**d) for d in self._community_repo.get_all()]
-            except Exception as e:
-                logger.error(f"Failed to load scenes from SQLite: {e}")
-                return ScenesFile(version=1, scenes=[])
-            return ScenesFile(version=1, scenes=scenes)
+            return ScenesFile(scenes=self._community_repo.get_all())
+
+        if self._enterprise_repo is not None:
+            keys = set(SceneConfig.model_fields)
+            scenes = [
+                SceneConfig(**{k: v for k, v in dto.items() if k in keys})
+                for dto in self._enterprise_repo.get_all()
+            ]
+            return ScenesFile(scenes=scenes)
 
         if not self.scenes_file.exists():
-            return ScenesFile(version=1, scenes=[])
-        
+            return ScenesFile(scenes=[])
         with open(self.scenes_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        return ScenesFile(**data)
-    
+            return ScenesFile(**json.load(f))
+
+
     def _save_scenes_file(self, scenes_file: ScenesFile) -> None:
         """Save scenes (community M1: SQLite reconcile upsert, otherwise scenes.json).
         
@@ -1039,6 +1047,17 @@ class SceneAgentService:
         Args:
             scene_id: Scene ID
         """
+        # 仓储分发：企业版（PostgreSQL）优先，其次社区版 SQLite，
+        # 与本文件其余读写操作保持同一模式。
+        # 企业版镜像内并不存在 scenes.json——此处一旦漏判企业仓储，
+        # 执行会落到下方 JSON 分支，因 FileNotFoundError 让前端
+        # 把"进入场景"表现为 404（历史缺陷）。
+        if self._enterprise_repo is not None:
+            if self._enterprise_repo.get_scene(scene_id) is None:
+                raise SceneNotFoundError(f"Scene not found: {scene_id}")
+            self._enterprise_repo.increment_usage(scene_id)
+            return
+
         if self._community_repo is not None:
             if self._community_repo.get_scene(scene_id) is None:
                 raise SceneNotFoundError(f"Scene not found: {scene_id}")
