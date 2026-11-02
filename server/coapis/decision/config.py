@@ -67,6 +67,11 @@ DEFAULTS = {
     # v14 §批次3 软超时：主链最多等判官这么久，超时先返回降级、
     # 判官后台跑完补写台账。
     "judge_soft_ms": 4000.0,
+    # 验收岗单独的软阈值（毫秒）。验收在整轮交付跑完才触发，是**幕后岗**——
+    # 没有任何人等它的结论。拿主链那 4 秒量它，等于让唯一能判交付的岗位恒
+    # 弃权；验收 verdict 是判档行 outcome 的唯一来源，弃权 = 闭环 0 行
+    # （dev 实测 182 行台账 180 行停在 pending 的直接成因）。
+    "judge_soft_ms_acceptance": 12000.0,
     # 判官默认关思考（v14 D1）：判断要的是结论，不是推理过程。
     "judge_thinking_enabled": False,
     # ── 判官设置项 API 的两处配置位（v14 §5.2）─────────────────────
@@ -214,6 +219,10 @@ class DecisionHubConfig:
     # v14 §批次3 软超时（毫秒）：超过即主链先返回降级、判官后台跑完
     # 补写台账；硬超时 effective_timeout_ms 退居保险丝。
     judge_soft_ms: float = 4000.0
+    # 验收岗单独的软阈值（毫秒）。验收是幕后岗：整轮交付跑完才触发，
+    # 没有任何消费者在等它的结论，所以不该吃主链那 4 秒的预算。
+    # 它的 verdict 是判档行 outcome 的唯一来源——验收弃权 = 闭环恒 0。
+    judge_soft_ms_acceptance: float = 12000.0
     judge_provider_id: str = ""
     judge_model: str = ""
     # 判官是否开思考（默认关）。推理型模型一开思考，光思考就吃掉
@@ -280,6 +289,12 @@ class DecisionHubConfig:
         self.llm_timeout_ms_api = min(max(float(self.llm_timeout_ms_api), 200.0), 20000.0)
         self.llm_max_tokens = min(max(int(self.llm_max_tokens), 64), 4096)
         self.judge_soft_ms = min(max(float(self.judge_soft_ms), 200.0), 20000.0)
+        # 验收在幕后，允许比主链阈值更长；下限不得低于主链阈值，否则
+        # "给验收松绑"这件事被一个手滑的配置值悄悄撤销。
+        self.judge_soft_ms_acceptance = min(
+            max(float(self.judge_soft_ms_acceptance), self.judge_soft_ms),
+            20000.0,
+        )
         self.judge_max_calls_per_turn = min(
             max(int(self.judge_max_calls_per_turn), 1), 8,
         )

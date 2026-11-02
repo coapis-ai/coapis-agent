@@ -316,6 +316,7 @@ class JudgeGateway:
         describe: Optional[Callable[[Any], str]] = None,
         hub: Optional[DecisionHubConfig] = None,
         scope: Optional[dict] = None,
+        on_late_verdict: Optional[Callable[[Any], Any]] = None,
     ) -> JudgeReply:
         """要一个判断结论。**永不抛异常**，拿不到结论就返回规则兜底值。
 
@@ -331,6 +332,10 @@ class JudgeGateway:
             hub: 配置（默认读环境变量）。
             scope: ``{user_id, agent_id, chat_id, turn}``，台账作用域与
                 单轮预算的计数口径。
+            on_late_verdict: **迟到真判的回执**。软超时后主链拿降级值先走，
+                判官在后台跑出的真结论只进台账——消费方（如验收回填判档行）
+                拿到的永远是弃权值，闭环 0 行的真因就在这里。给了这个回调，
+                后台补判成功时就用**真结论**再叫它一次；回调异常一律吞掉。
         """
         cfg = hub if hub is not None else get_hub_config()
         sc = dict(scope or {})
@@ -432,6 +437,7 @@ class JudgeGateway:
                     purpose=purpose, system=system, user=user, parse=parse,
                     rule_fallback=rule_fallback, describe=describe,
                     cfg=cfg, ckey=ckey, ids=ids,
+                    on_late_verdict=on_late_verdict,
                 ),
             )
             self._inflight[ckey] = task
@@ -465,6 +471,7 @@ class JudgeGateway:
         cfg: DecisionHubConfig,
         ckey: str,
         ids: dict,
+        on_late_verdict: Optional[Callable[[Any], Any]] = None,
     ) -> JudgeReply:
         """问模型这一段的全部失败分支都收在这里，**对外永不抛**。"""
         started = time.perf_counter()
@@ -512,10 +519,19 @@ class JudgeGateway:
             # （F1 自适应）退居后台任务的保险丝。此前"判官本地 2.5-4.2s /
             # 远端 4.5-9.3s vs 主链等 2.6s"是真判率被绞肉机绞掉的真因
             # （v14 P5：真判率 19% 大半是超时熔断，不是判官不行）。
-            soft_s = min(
-                max(float(getattr(cfg, "judge_soft_ms", 4000.0)) / 1000.0, 0.2),
-                timeout,
-            )
+            soft_ms = float(getattr(cfg, "judge_soft_ms", 4000.0))
+            if purpose == "acceptance":
+                # 验收岗在幕后：整轮交付跑完才触发，没有任何人等它的结论。
+                # 拿"主链最多等 4 秒"量它 = 把唯一能判交付的岗位判成恒弃权；
+                # 验收的 verdict 是判档行 outcome 的唯一来源，弃权即闭环 0 行
+                # （dev 实测 180/182 行 pending 的直接成因）。单独给预算。
+                soft_ms = float(getattr(cfg, "judge_soft_ms_acceptance", 12000.0))
+            soft_s = min(max(soft_ms / 1000.0, 0.2), timeout)
+            # 硬熔断 = "这一判最多活多久"。主链岗位用自适应预算；验收在幕后，
+            # 允许判到软阈值的 1.5 倍，上限 20 秒（再长就是把连接池占干）。
+            hard_s = timeout
+            if purpose == "acceptance":
+                hard_s = min(max(timeout, soft_s * 1.5), 20.0)
             call_task = asyncio.create_task(
                 self._invoke(provider, model_id, system, user, kwargs),
             )
@@ -537,7 +553,8 @@ class JudgeGateway:
                         describe=describe,
                         ids=ids,
                         started_at=started,
-                        hard_s=timeout,
+                        hard_s=hard_s,
+                        on_late_verdict=on_late_verdict,
                     ),
                 )
                 # 后台任务必须有强引用：事件循环只存弱引用，没人持有的
@@ -598,6 +615,7 @@ class JudgeGateway:
         ids: dict,
         started_at: float,
         hard_s: float = 0.0,
+        on_late_verdict: Optional[Callable[[Any], Any]] = None,
     ) -> None:
         """软超时后把这一判跑完：成功样本照常入账、进缓存（v14 §批次3）。
 
@@ -663,6 +681,16 @@ class JudgeGateway:
             ok=True,
         )
         await self._ledger(purpose, reply, describe, **ids)
+        # 迟到真判的回执：台账记了真结论，消费方也要拿到真结论。
+        # 验收岗靠这一把回填判档行的 outcome——补判不回执，outcome 就永远
+        # 停在主链拿到的弃权值上（v14 §3.2 闭环死锁的第二段）。
+        if on_late_verdict is not None:
+            try:
+                done = on_late_verdict(value)
+                if inspect.isawaitable(done):
+                    await done
+            except Exception:  # noqa: BLE001 - 回执是加分项，绝不反噬
+                logger.debug("[决策中枢] %s 迟到真判回执失败（已吞）", purpose, exc_info=True)
 
     @staticmethod
     async def _invoke(
