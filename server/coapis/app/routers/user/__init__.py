@@ -23,15 +23,19 @@
 - /user/points — 积分信息
 - /user/tokens — Token 用量
 - /user/feedback — 反馈/建议
+- /user/scene-preferences — 场景偏好（收藏/最近使用/常用功能/看板配置）
 """
 from fastapi import APIRouter
 
 from .user_me import router as user_me_router
 from .user_preferences import router as user_preferences_router
 from .user_feedback import router as user_feedback_router
+from .user_scene_preferences import router as user_scene_preferences_router
 
 router = APIRouter()
 
 router.include_router(user_me_router)
 router.include_router(user_preferences_router)
 router.include_router(user_feedback_router)
+# 场景偏好路由此前漏挂，导致前端控制台收藏/最近使用卡片请求 404
+router.include_router(user_scene_preferences_router)

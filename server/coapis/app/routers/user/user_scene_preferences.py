@@ -34,7 +34,10 @@ from ...auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/scene-preferences", tags=["user/scene-preferences"])
+# 前缀必须带 /user 段：本包由 routers/user/__init__.py 平铺挂载（include_router 不加
+# 前缀），同包其他模块都把 /user 写进自身对外路径。只写 /scene-preferences 时最终
+# 路径会落到 /api/scene-preferences，与前端调用的 /api/user/scene-preferences 对不上。
+router = APIRouter(prefix="/user/scene-preferences", tags=["user/scene-preferences"])
 
 
 # ── Pydantic models ─────────────────────────────────────────────────────
