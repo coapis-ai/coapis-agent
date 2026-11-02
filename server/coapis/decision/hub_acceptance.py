@@ -144,6 +144,19 @@ async def judge_acceptance(
             "missing": str(obj.get("missing") or "")[:200],
         }
 
+    def _late_verdict(value: dict) -> Any:
+        """后台补判判出的真结论，也要走一遍回填（v14 §3.2 闭环第二段）。
+
+        软超时后主链拿到的永远是弃权值（弃权不回填，设计如此），真结论只落进
+        台账：验收判了 hit、台账也写着 hit，同轮判档行的 outcome 却永远停在
+        pending——账对不上（dev 实测 182 行台账 180 行卡在 pending 的成因之一）。
+        回执把真结论接回回填通路，闭环这才真的闭上。
+        """
+        return _backfill_plan_gate(
+            scope=scope,
+            verdict=str((value or {}).get("verdict") or "abstain"),
+        )
+
     reply = await get_judge_gateway().judge(
         purpose="acceptance",
         system=(
@@ -166,6 +179,7 @@ async def judge_acceptance(
         ),
         hub=hub,
         scope=scope,
+        on_late_verdict=_late_verdict,
     )
     verdict = str((reply.value or {}).get("verdict") or "abstain")
     overreach = bool((reply.value or {}).get("overreach"))
