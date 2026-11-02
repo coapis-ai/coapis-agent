@@ -38,6 +38,7 @@ from ..providers.model_type import infer_model_type
 from ..providers.provider_manager import ProviderManager
 from .breaker import get_breaker
 from .bus import get_bus
+from .ledger_contract import write_ledger
 from .cache import get_cached_judgment, make_cache_key, put_cached_judgment
 from .config import DecisionHubConfig, get_hub_config
 from .resolver import get_judge_provider_config, is_local_base_url
@@ -205,6 +206,10 @@ def _cost_of(model_id: str, tin: int, tout: int) -> float:
 # 三处判断共用一个熔断键（v14 §4.3①）：任一判断连续失败就三处一起降级，
 # 免得三份失败计数各攒各的、每次都重试每次都超时。
 BREAKER_KEY = "judge-model"
+
+#: 后台补判任务的强引用表（v14 §批次3）。
+#: ``asyncio`` 只持弱引用——没人持有的任务会被垃圾回收，回调连同补判一起蒸发。
+_BG_TASKS: set = set()
 
 class JudgeGateway:
     """判断环节统一网关（v14 §4.1）。
@@ -501,18 +506,51 @@ class JudgeGateway:
             0.01,
         )
         try:
-            text, tin, tout = await asyncio.wait_for(
+            # v14 §批次3 软超时：主链最多等判官 judge_soft_ms（默认 4 秒）；
+            # 超时**不是判官的终点**——任务转后台跑完，成功样本走正常入账
+            # 路径（台账/缓存/breaker），主链拿降级版先走。硬超时 timeout
+            # （F1 自适应）退居后台任务的保险丝。此前"判官本地 2.5-4.2s /
+            # 远端 4.5-9.3s vs 主链等 2.6s"是真判率被绞肉机绞掉的真因
+            # （v14 P5：真判率 19% 大半是超时熔断，不是判官不行）。
+            soft_s = min(
+                max(float(getattr(cfg, "judge_soft_ms", 4000.0)) / 1000.0, 0.2),
+                timeout,
+            )
+            call_task = asyncio.create_task(
                 self._invoke(provider, model_id, system, user, kwargs),
-                timeout=timeout,
             )
-        except asyncio.TimeoutError:
-            breaker.record_failure(BREAKER_KEY)
-            return await degrade(
-                LAYER_TIMEOUT,
-                f"判断超时（{timeout:.1f}s，模型 {model_id}）",
-            )
+            started = time.perf_counter()
+            try:
+                text, tin, tout = await asyncio.wait_for(
+                    asyncio.shield(call_task),
+                    timeout=soft_s,
+                )
+            except asyncio.TimeoutError:
+                # 后台补判：跑完照常写台账/进缓存；主链立刻降级先走。
+                bg = asyncio.create_task(
+                    self._judge_bg_complete(
+                        call_task,
+                        purpose=purpose,
+                        model_id=model_id,
+                        parse=parse,
+                        ckey=ckey,
+                        describe=describe,
+                        ids=ids,
+                        started_at=started,
+                        hard_s=timeout,
+                    ),
+                )
+                # 后台任务必须有强引用：事件循环只存弱引用，没人持有的
+                # 任务会被 GC 掉（"Task was destroyed but it is pending"），
+                # 迟到回填就成了碰运气。
+                _BG_TASKS.add(bg)
+                bg.add_done_callback(_BG_TASKS.discard)
+                breaker.record_failure(BREAKER_KEY)
+                return await degrade(
+                    LAYER_TIMEOUT,
+                    f"判断超时（软阈值 {soft_s:.1f}s，判官后台补判中，模型 {model_id}）",
+                )
         except Exception as exc:
-            # F4：失败必须留下能归因的痕迹。reason 带异常类型名（进台账），
             # 完整 traceback 记 warning（进日志）——只记 debug 等于故障隐身。
             logger.warning(
                 "[决策中枢] %s 调用失败: %s: %s", purpose, type(exc).__name__, exc,
@@ -547,6 +585,84 @@ class JudgeGateway:
         )
         await self._ledger(purpose, reply, describe, **ids)
         return reply
+
+    async def _judge_bg_complete(
+        self,
+        call_task: Any,
+        *,
+        purpose: str,
+        model_id: str,
+        parse: Any,
+        ckey: str,
+        describe: Any,
+        ids: dict,
+        started_at: float,
+        hard_s: float = 0.0,
+    ) -> None:
+        """软超时后把这一判跑完：成功样本照常入账、进缓存（v14 §批次3）。
+
+        主链已经走了，判官结果不丢弃——台账要反映"判官真实判了什么"，
+        治理对账才能把"真判能力"与"预算损耗"分开。本方法在后台任务运行，
+        一切异常吞掉：补判是加护，绝不反噬主链与进程。
+
+        ``hard_s`` 是 F1 自适应预算给的**硬熔断**：软阈值只管"主链等多久"，
+        硬阈值管"这一判最多活多久"，到点取消调用，绝不让一次判官调用挂到
+        天荒地老把连接池占干。
+        """
+        try:
+            if hard_s and hard_s > 0:
+                text, tin, tout = await asyncio.wait_for(
+                    asyncio.shield(call_task),
+                    timeout=hard_s,
+                )
+            else:
+                text, tin, tout = await call_task
+        except asyncio.TimeoutError:
+            call_task.cancel()
+            logger.warning(
+                "[决策中枢] %s 后台补判触硬熔断 %.1fs，取消调用",
+                purpose,
+                hard_s,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - 补判失败只留日志
+            logger.warning(
+                "[决策中枢] %s 后台补判失败: %s: %s",
+                purpose,
+                type(exc).__name__,
+                exc,
+            )
+            return
+        value = None
+        if text:
+            try:
+                value = parse(text)
+            except Exception:  # noqa: BLE001
+                value = None
+        # 局部 import：本方法跑在后台任务里， breaker 在主流程里是局部导入的，
+        # 直接写 breaker 会 NameError（dev 实测：后台补判一进来就炸，
+        # "Task exception was never retrieved"）。后台任务里的每个依赖都要自带。
+        from .breaker import get_breaker as _get_breaker
+
+        breaker = _get_breaker(BREAKER_KEY)
+        if value is None:
+            breaker.record_failure(BREAKER_KEY)
+            return
+        breaker.record_success(BREAKER_KEY)
+        put_cached_judgment(ckey, value)
+        reply = JudgeReply(
+            value=value,
+            hit_layer=LAYER_LLM,
+            source="llm",
+            reason="判官判定（软超时后台补记）",
+            model=model_id,
+            input_tokens=tin,
+            output_tokens=tout,
+            cost=_cost_of(model_id, tin, tout),
+            latency_ms=int((time.perf_counter() - started_at) * 1000),
+            ok=True,
+        )
+        await self._ledger(purpose, reply, describe, **ids)
 
     @staticmethod
     async def _invoke(
@@ -646,31 +762,30 @@ class JudgeGateway:
                 judgment = "select:" + ",".join(sorted(str(v) for v in value))
             else:
                 judgment = str(value)
+            # 台账一律走 ledger_contract 唯一入口（v14 §批次1）：档位清洗、
+            # 身份兜底、零值语义标记由契约统一负责——岗位只出判断，不再各写
+            # 各的。complexity 只认判则词表：判档岗存档位，其余岗位留空，
+            # 'select:low,medium' 这类判断值整串进不了档位列（原值在
+            # dirty_band 留痕）。零值行带语义标记，成本对账不再把
+            # "设计上为 0"和"记账坏了"混成一团。
             await asyncio.to_thread(
-                get_bus().emit,
-                DecisionResult(
-                    source=purpose,
-                    # complexity 存**判出来的档位**（只有判档岗位有档位）。
-                    # 岗位名已经在 source 列，重复存一遍是台账噪声。
-                    # 只写档位本身。原来塞的是判断值整串，实测台账里
-                    # 出现 'select:low,medium' 这种值——按复杂度分组、
-                    # 筛选、算成本分布的查询全部作废。
-                    complexity=_level_of(judgment) if purpose == "plan_gate" else "",
-                    action=(description or judgment)[:64],
-                    hit_layer=reply.hit_layer,
-                    reason=(reply.reason or "")[:512],
-                    model=reply.model,
-                    latency_ms=int(reply.latency_ms),
-                    cost=float(reply.cost),
-                    tokens=int(reply.input_tokens) + int(reply.output_tokens),
-                    user_id=user_id,
-                    agent_id=agent_id,
-                    chat_id=chat_id,
-                    value=judgment[:256],
-                    turn=int(turn or 0),
-                    input_hash=str(input_hash or ""),
-                    outcome="pending",
-                ),
+                write_ledger,
+                source=purpose,
+                purpose=purpose,
+                action=(description or judgment),
+                band=_level_of(judgment) if purpose == "plan_gate" else "",
+                reason=reply.reason or "",
+                hit_layer=reply.hit_layer,
+                model=reply.model,
+                latency_ms=int(reply.latency_ms),
+                cost=float(reply.cost),
+                tokens=int(reply.input_tokens) + int(reply.output_tokens),
+                input_hash=str(input_hash or ""),
+                value=judgment,
+                user_id=user_id,
+                agent_id=agent_id,
+                chat_id=chat_id,
+                turn=int(turn or 0) or None,
             )
         except Exception as exc:  # pragma: no cover - 台账故障不影响判断
             logger.debug("[JudgeGateway] 台账写入异常（忽略）: %s", exc)

@@ -459,7 +459,14 @@ async def console_chat(
             name=name,
             agent_id=agent_id,
         )
-    elif chat.name in ("New Chat", "新聊天", "") and name != "New Chat":
+    # v14 §批次2 chat_id 贯通（主链）：解析出的 chat.id 必须写回请求
+    # meta——新会话前端没有 chat_id，meta 缺位时判断中枢五岗的身份全空，
+    # 验收回填 (chat_id, turn) 恒不命中，闭环 0%。请求身份的唯一真源
+    # 是这里的 chat.id，之后 runner/岗位/回填全部沿用同一个 UUID。
+    native_payload.setdefault("meta", {})["chat_id"] = chat.id
+    native_payload.setdefault("biz_params", {})["chat_id"] = chat.id
+    set_current_chat_id(chat.id)
+    if chat.name in ("New Chat", "新聊天", "") and name != "New Chat":
         # Auto-rename: update chat name from first user message
         # ChatUpdate already imported at top of file
         try:

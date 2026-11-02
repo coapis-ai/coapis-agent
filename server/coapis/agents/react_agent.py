@@ -3266,6 +3266,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         tool_name = str(tool_call.get("name", ""))
 
+        # ── 中枢·工具闸（v14 批次4 · 拍板 D3）：动手前判这一步 ──
+        # 发射即忘：判官要 1~4s，绝不挡在动作前面。判出 reroute 走 HINT 影响
+        # 下一个动作；台账由网关写（source=tool_gate）。一期只提示不拦。
+        self._hub_fire_tool_gate(tool_call, tool_name)
+
         # ── Policy engine / tool governance ──
         if self._policy_engine is not None:
             reg = getattr(self.toolkit, "registry", {}).get(tool_name)
@@ -3723,6 +3728,76 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception:  # pragma: no cover
             logger.debug("advisor hint injection skipped", exc_info=True)
 
+    # ── 中枢·工具闸（v14 批次4 · 拍板 D3）──────────────────────────
+
+    #: 一轮最多过闸几次工具（判断本身不能变成循环，v14 §4.4④）
+    _HUB_TOOL_GATE_CAP = 12
+
+    def _hub_fire_tool_gate(self, tool_call, tool_name: str) -> None:
+        """每次动手前发射工具闸判断（发射即忘，绝不挡在动作前面）。
+
+        Args:
+            tool_call: 本次工具调用块。
+            tool_name: 本次工具名。
+
+        一期只提示不拦：判出 reroute 由总线回调注入 HINT，影响**下一个**
+        动作。闸门（便宜工具/岗位开关）、规则层、预算、熔断、台账全在
+        :mod:`coapis.decision.hub_tool_gate` 与网关里。身份取不到就整段跳过。
+        任何异常全吞——工具执行链不能因为判断中枢挂掉。
+        """
+        try:
+            from ..decision.config import get_hub_config
+            from ..decision.hub_tool_gate import args_digest, fire_tool_gate, should_gate
+
+            hub = get_hub_config()
+            if not should_gate(hub, tool_name):
+                return
+            calls = getattr(self, "_hub_tool_calls", None)
+            if calls is None:
+                calls = self._hub_tool_calls = []
+            digest = args_digest(tool_call)
+            recent = list(calls)
+            calls.append((tool_name, digest))
+            if len(calls) > self._HUB_TOOL_GATE_CAP:
+                return  # 本轮判够了，剩下的直接放行
+            scope = self._decision_scope()
+            if not scope.get("user_id"):
+                return
+            fire_tool_gate(
+                goal=str(getattr(self, "_hub_goal", "") or ""),
+                tool_name=tool_name,
+                digest=digest,
+                recent=recent,
+                scope=scope,
+                hub=hub,
+                skills=getattr(self, "_on_demand_skill_summaries", None),
+                on_verdict=self._on_tool_gate_hint,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[Hub] tool gate fire skipped", exc_info=True)
+
+    async def _on_tool_gate_hint(self, verdict: dict) -> None:
+        """工具闸判出 reroute 时注入提示（影响下一个动作，不改本次执行）。
+
+        Args:
+            verdict: :func:`coapis.decision.hub_tool_gate.judge_tool_gate` 的
+                结论 ``{"verdict","why","tool"}``。只有 ``reroute`` 会注入。
+
+        复用改道岗那条注入通道（同一条记忆里的 system 提示），前缀写清来源是
+        工具闸而不是方向纠察——两条提示在日志与台账里必须分得开。
+        """
+        if not isinstance(verdict, dict) or verdict.get("verdict") != "reroute":
+            return
+        why = str(verdict.get("why") or "").strip()
+        tool = str(verdict.get("tool") or "").strip()
+        await self._inject_advisor_hint(
+            {
+                "verdict": "change",
+                "next": (f"下一步改用 {tool}" if tool else "停止当前做法，回到用户要的东西"),
+                "evidence": f"工具闸：{why}" if why else "工具闸提示",
+            },
+        )
+
     # pylint: disable=too-many-branches
     async def _reasoning(
         self,
@@ -3864,6 +3939,26 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     logger.debug(
                         "[P1] QueryAnalyzer effort=%s 被忽略（思考档位归判官）",
                         _query_analysis.thinking_effort,
+                    )
+                # v14 §批次4 / §4.4④：意图岗并入这条判断链，但**结论必须入账**。
+                # 意图岗此前只在日志里出现，台账五岗覆盖永远缺它一格；这里把
+                # 关键词判定的意图/档位写成一行人账（发射即忘，异常吞掉），
+                # 档位非法时由契约把原值记进 dirty_band，绝不改写。
+                _hub = self._decision_hub()
+                if _hub is not None and _hub.post_enabled("intent"):
+                    from coapis.decision.ledger_contract import write_ledger
+
+                    write_ledger(
+                        source="intent",
+                        purpose="intent",
+                        action=f"关键词意图 {_query_analysis.intent}",
+                        band=_query_analysis.complexity,
+                        hit_layer="rule",
+                        value=_query_analysis.intent,
+                        reason=f"置信 {getattr(_query_analysis, 'confidence', 0.0):.2f}",
+                        latency_ms=float(_query_analysis.latency_ms or 0.0),
+                        scope=self._decision_scope(),
+                        hub=_hub,
                     )
         except Exception as _qa_err:
             logger.debug("[P1] QueryAnalyzer failed: %s", _qa_err)
@@ -4415,6 +4510,8 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             return
         # 事中改道与验收都拿它当「用户要的东西」（v14 §3.4/§3.5）
         self._hub_goal = text
+        # 本轮工具闸记账清零：每轮独立预算，判断本身不能变成循环（v14 §4.4④）
+        self._hub_tool_calls = []
         try:
             from .plan_gate import COMPLEX, ComplexityClassifier
 

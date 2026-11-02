@@ -18,6 +18,7 @@ import time
 import pytest
 
 from coapis.decision import gateway as gw
+from coapis.decision.rubric import LEVELS
 from coapis.decision.breaker import reset_breakers
 from coapis.decision.cache import reset_judgment_cache
 from coapis.decision.config import DecisionHubConfig
@@ -291,15 +292,20 @@ async def test_l3_timeout_counts_into_breaker_and_degrades(monkeypatch):
     assert reply.value == "L1"
     assert model.calls == 1, "超时不得重试"
 
-    # 连续失败到阈值（默认 3）后熔断打开，不再打模型
-    for _ in range(2):
+    # 连续失败到阈值后熔断打开，不再打模型。阈值是可调配置（v14 批次3 把
+    # 默认值从 3 提到 5，避免一次软超时就把判官锁死 60s）——测试跟着配置走，
+    # 不钉死字面量，否则调一次配置就红一片。
+    from coapis.decision import get_hub_config as _cfg
+
+    nth = _cfg().breaker_failure_threshold
+    for _ in range(nth - 1):
         await gw.get_judge_gateway().judge(
             purpose="plan_gate", system="s-x", user="u",
             parse=lambda t: "L2", rule_fallback=lambda: "L1",
             hub=h, scope={"user_id": "u1", "agent_id": "a1",
                           "chat_id": "c3", "turn": 1},
         )
-    assert model.calls == 3, "熔断打开前共 3 次调用"
+    assert model.calls == nth, "熔断打开前共 %d 次调用" % nth
     reply = await gw.get_judge_gateway().judge(
         purpose="plan_gate", system="s-y", user="u",
         parse=lambda t: "L2", rule_fallback=lambda: "L1",
@@ -307,7 +313,7 @@ async def test_l3_timeout_counts_into_breaker_and_degrades(monkeypatch):
                       "chat_id": "c4", "turn": 1},
     )
     assert reply.hit_layer == gw.LAYER_BREAKER
-    assert model.calls == 3, "熔断打开后必须直接降级"
+    assert model.calls == nth, "熔断打开后必须直接降级"
 
 
 async def test_l3_transport_error_degrades(monkeypatch):
@@ -374,8 +380,12 @@ async def test_parse_failure_counts_into_breaker_and_degrades(monkeypatch):
 
     from coapis.decision.breaker import get_breaker
 
-    # 解析失败计入熔断：连续到阈值后该岗位直接降级
-    for i in range(2):
+    # 解析失败计入熔断：连续到阈值后该岗位直接降级。
+    # 阈值是可调配置（v14 批次3 把默认 3 提到 5——一次软超时不该把判官锁死
+    # 60s），循环次数跟着配置走，不钉字面量，否则调一次配置就红一片。
+    from coapis.decision import get_hub_config as _cfg
+
+    for i in range(_cfg().breaker_failure_threshold - 1):
         await gw.get_judge_gateway().judge(
             purpose="plan_gate", system="s%d" % i, user="u",
             parse=parse, rule_fallback=lambda: "L1",
@@ -416,3 +426,44 @@ async def test_ledger_never_stores_prompt_text(monkeypatch):
     for row in get_bus().rows:
         blob = " ".join(str(v) for v in row.values())
         assert secret not in blob
+
+
+async def _drain_bg_tasks() -> None:
+    """等后台补判任务跑完（测试要看见迟到入账，不能靠运气）。"""
+    pending = list(gw._BG_TASKS)
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def test_soft_timeout_degrades_then_background_rejudges(monkeypatch):
+    """软超时：主链立刻降级先走，判官后台跑完照常入账（v14 §批次3）。
+
+    这条同时钉住一个 dev 实测过的 P0：后台任务里引用主流程的局部名
+    （breaker）会 NameError，补判全灭且「Task exception was never retrieved」。
+    """
+    model = FakeModel("complex")
+    model.delay = 0.4
+    wire(monkeypatch, model)
+    h = hub(judge_soft_ms=80.0, llm_timeout_ms=5000.0, ledger_enabled=True)
+
+    got = await gw.get_judge_gateway().judge(
+        purpose="plan_gate", system="s", user="u",
+        parse=lambda t: t.strip().lower() if t.strip().lower() in LEVELS else None,
+        rule_fallback=lambda: "simple",
+        describe=lambda v: v, hub=h, scope=SCOPE,
+    )
+    # 主链：立刻降级，降级原因写的是「判断超时」，值是规则兜底给的合法档位
+    assert got.hit_layer == gw.LAYER_TIMEOUT
+    assert "判断超时" in (got.reason or "")
+    assert got.value == "simple" and got.value in LEVELS
+
+    from coapis.decision.bus import get_bus
+
+    n_before = len(get_bus().rows)
+    await _drain_bg_tasks()
+    rows = get_bus().rows[n_before:]
+    # 后台补判必须入账，且写的是模型真判的 complex（不是降级值）
+    assert any(
+        r.get("hit_layer") == "llm" and r.get("complexity") == "complex" for r in rows
+    ), rows
+    assert any("软超时后台补记" in str(r.get("reason") or "") for r in rows), rows

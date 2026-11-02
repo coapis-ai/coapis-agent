@@ -102,7 +102,7 @@
   cursor: nesw-resize;
 }
 
-/* ── 头部：标题 + 附加按钮 + 铺满 + 关闭（只有一个关闭按钮） ───────── */
+/* ── 头部：标题 + 附加按钮 + 定住 + 铺满 + 关闭（只有一个关闭按钮） ── */
 
 .header {
   display: flex;
@@ -112,6 +112,44 @@
   padding: 6px 8px;
   border-bottom: @hairline;
   user-select: none;
+  /* 头部必须压在四边缩放手柄之上：北手柄（z-index 3）原本盖住头部顶边
+     6px，鼠标在那条带上是「拓展光标」却只能改高度，看起来就是「能拖但拖不动」 */
+  position: relative;
+  z-index: 4;
+}
+
+/* 头部按钮统一尺寸（小蜜蜂反馈 3：顶部按钮大小不一）。
+   lucide 图标默认 24px，按钮 28px，与业务侧 14px 图标的按钮并排就参差。 */
+.header-btn {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+/* 带文字/双图标的附加按钮（如「下载 ▾」）：同高，宽度自适应 */
+.header-btn-wide {
+  height: 26px;
+  min-width: 26px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 定住选中态（本文件配色一律走 CSS 变量，LESS 不做颜色运算） */
+.header-btn-on {
+  color: var(--color-primary, #1677ff);
+  background: var(--color-primary-bg, rgba(22, 119, 255, 0.1));
+  border-radius: 4px;
 }
 
 /* 自由浮窗时头部可拖移（铺满/窄屏/内嵌时不拖） */

@@ -1451,6 +1451,32 @@ class AgentRunner(Runner):
                 user_id,
             )
 
+            # v14 §批次2 chat_id 贯通（主链兜底）：请求没带 chat_id 时按
+            # session 反查 chat_meta 补齐，并写回 ContextVar 让下游 agent
+            # 树继承。企业微信等渠道的 meta 不带 chat_id、ContextVar 也
+            # 为空，判断中枢五岗的身份因此全空——台账归不了因、验收回填
+            # (chat_id, turn) 恒不命中，闭环 0%（v14 P2 真凶）。
+            _hub_chat_id = str(getattr(request, "chat_id", None) or _get_ctx_chat_id() or "")
+            if not _hub_chat_id and session_id and self._chat_manager is not None:
+                try:
+                    _hub_chat_id = str(
+                        await self._chat_manager.get_chat_id_by_session(
+                            session_id,
+                            channel,
+                        )
+                        or "",
+                    )
+                except Exception:  # noqa: BLE001 - 反查坏了不拦主链
+                    logger.debug("runner: chat_id session 反查失败", exc_info=True)
+                    _hub_chat_id = ""
+            if _hub_chat_id:
+                try:
+                    from ...config.session_context import set_current_chat_id
+
+                    set_current_chat_id(_hub_chat_id)
+                except Exception:  # noqa: BLE001
+                    pass
+
             # M2 文件台账：把 username + 用户工作区目录写入会话上下文，
             # 让工具钩子（文件台账、媒体 URL 解析、workspace 守卫）能正确
             # 归因到用户；相对路径写入也会落到 workspaces/{user}/files/。
@@ -1714,6 +1740,16 @@ class AgentRunner(Runner):
                 "user_id": user_id,
                 "channel": channel,
                 "agent_id": self.agent_id,
+                # v14 §批次2 chat_id 贯通（主链）：请求上下文必须带对话
+                # 身份。判断中枢五岗的 scope 从这里取 chat_id，验收回填按
+                # (chat_id, turn) 对账——此前这里没有 chat_id，一半以上
+                # 台账行归不了因，闭环恒 0。取值三保险：请求显式值 →
+                # 主链入口反查后写入的 ContextVar → 空（不编造）。
+                "chat_id": str(
+                    getattr(request, "chat_id", None)
+                    or _get_ctx_chat_id()
+                    or ""
+                ),
             }
             
             # ── Scene Context: 将场景信息传入 request_context ──

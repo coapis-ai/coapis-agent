@@ -183,15 +183,29 @@ async def test_ledger_row_carries_level_tokens_and_scope(monkeypatch):
     直接截获总线收到的那一行——台账的列值就是在这里定形的。
     """
     from coapis.decision import gateway as gw_mod
+    from coapis.decision import ledger_contract as lc_mod
 
     caught = []
     real_bus = gw_mod.get_bus()
 
     class _Bus:
-        def emit(self, row):
-            caught.append(row)
+        """总线桩：照抄真实签名 ``emit(event, *, user_id, agent_id, chat_id)``。
 
-    monkeypatch.setattr(gw_mod, "get_bus", lambda: _Bus())
+        批次1 之后台账唯一入口是 :func:`coapis.decision.ledger_contract.write_ledger`，
+        行从契约层进总线——桩必须打在契约层看到的总线上，否则测试会替代码
+        掩盖签名错配（真总线上的 TypeError 被兜底吞掉过，dev 台账因此 0 行）。
+        """
+
+        def emit(self, event, *, user_id="", agent_id="", chat_id=""):
+            caught.append(event)
+            return event
+
+    # 契约层用「函数内局部 import」取总线，模块命名空间里没有 get_bus；
+    # 桩必须打在总线模块本体上（调用时才解析），否则桩打不上、行全落真空。
+    from coapis.decision import bus as bus_mod
+
+    monkeypatch.setattr(bus_mod, "get_bus", lambda: _Bus())
+    monkeypatch.setattr(lc_mod, "_write_governance", lambda *a, **k: None)
     monkeypatch.setattr(
         gw_mod, "get_hub_config", lambda: types.SimpleNamespace(ledger_enabled=True)
     )
@@ -200,7 +214,7 @@ async def test_ledger_row_carries_level_tokens_and_scope(monkeypatch):
     reply = types.SimpleNamespace(
         hub="judge",
         purpose="plan_gate",
-        source="rule",
+        source="plan_gate",  # 台账来源必须是岗位名（SOURCES 词表），不是命中层
         hit_layer="rule",
         value="low,medium",
         degraded=False,
@@ -230,5 +244,5 @@ async def test_ledger_row_carries_level_tokens_and_scope(monkeypatch):
     assert row.user_id == "u1"
     assert row.agent_id == "a1"
     assert row.outcome == "pending"            # 新行一律 pending，验收再回填
-    assert row.model == "Q3"
+    assert row.model == "q3"  # 契约统一小写，成本对账按小写匹配价表
     assert real_bus is not None

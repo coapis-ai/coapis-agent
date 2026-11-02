@@ -120,6 +120,22 @@ class DecisionEvent(BaseRow):
         Integer, nullable=False, default=3, server_default=text("3")
     )
 
+    # ---- 治理列（v14 §批次1/§批次5，迁移 0021）----
+    # 行来源：web=聊天会话 test=测试/合成 ''=存量未知。预检 KPI 只数 web，
+    # 测试行不得掺入生产指标（v14 P7：真判率掺 e2e 合成行虚高）。
+    origin: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    # 零值语义：no_llm_cost=设计为0 / usage_missing=该有记账没有 /
+    # write_failure=降级路径写的行。无标记且 cost=0 = 记账坏了。
+    zero_reason: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    # 被清洗出档位词表的原值留痕（清洗不销毁证据）
+    dirty_band: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+
     __table_args__ = (
         Index("ix_decision_events_source_created", "source", "created_at"),
         Index("ix_decision_events_user_created", "user_id", "created_at"),

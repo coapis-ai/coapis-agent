@@ -452,6 +452,25 @@ def session_dir_rel(
         return None
 
 
+_MONTH_DIR_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+def month_layer_dirs(files_root: Path) -> list[Path]:
+    """列 ``files`` 根下的月份层目录（``2026-10`` 这种），按月份新→旧排。
+
+    读侧兜底要知道历史上存在过哪些月份层，不能只算今天这个月。
+    """
+    try:
+        subs = [p for p in files_root.iterdir() if p.is_dir()]
+    except OSError:
+        return []
+    return sorted(
+        (p for p in subs if _MONTH_DIR_RE.match(p.name)),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+
+
 def find_loose_file(
     files_root: Path,
     name: str,
@@ -476,7 +495,14 @@ def find_loose_file(
             tried.extend(sub / name for sub in bound.iterdir() if sub.is_dir())
         except OSError:
             pass
-    tried.append(files_root / today.strftime(MONTH_FMT) / name)
+    # 「月份层」不能只算今天这个月：裸文件名是写进**写入那天**的月份层的，
+    # 跨月再读时只看本月必然落空（10 月写的文件，11 月按 files/报告.md
+    # 兜底就永远读不到）。扫全部月份层、按月份新→旧排；根永远垫底——
+    # 根排在前面时，根目录里的同名旧件会抢在正本之前命中，用户就看到
+    # 「写进当月、读回根」。
+    _ = today  # 保留入参：兜底层级按历史目录排，不再依赖"今天"
+    for month in month_layer_dirs(files_root):
+        tried.append(month / name)
     tried.append(files_root / name)
     for cand in tried:
         try:

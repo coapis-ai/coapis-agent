@@ -62,6 +62,20 @@ RUBRIC_ADVICE = """改道判则——回答三问，给一个动作：
 判 change/stop 必须给出证据（引用动作序号），不许凭感觉。
 拿不准就 continue——改道提示每轮都在花钱。"""
 
+#: 工具闸判则（环3 · 动手前这一步该不该这么干）
+RUBRIC_TOOLS = """工具闸判则——只看「即将执行的这一个动作」，回答它该放行还是要改道：
+1. 对症：这个动作与用户目标有直接关系吗？是在推进交付，还是在推进 agent 自己
+   的好奇心（探索用户没提的东西）？
+2. 重复：与「此前已经执行的动作」比，同一工具同一参数是不是已经做过？做过就是
+   原地打转 → reroute，并说明改用什么（换参数、换工具、或直接汇报）。
+3. 越界：动作会改动/外发用户没授权的东西吗（写文件、执行命令、发消息给用户）？
+   目标里找不到授权依据 → reroute。
+4. 更短：存在明显更省的做法（一次读取能拿到、却要反复查询）→ reroute 并给出
+   那个更省的动作。
+取值只有 allow / reroute。**一期没有拦截权**：想拦也选 reroute（提示，不否决）。
+why 必须引用动作序号（如「动作 2 已用同参数调过本工具」），不许凭感觉。
+拿不准就 allow——一次误提示的代价远小于把主链卡死。"""
+
 #: 输出契约：判官必须吐 JSON，解析失败按弃权（台账记 abstain）
 JSON_ONLY = "只输出一个 JSON 对象，不要 markdown 代码围栏，不要解释性文字。"
 
@@ -86,6 +100,7 @@ def rubric_for(purpose: str, skills: Sequence[Any] | None = None) -> str:
         "level": RUBRIC_LEVEL,
         "acceptance": RUBRIC_ACCEPTANCE,
         "advisor": RUBRIC_ADVICE,
+        "tools": RUBRIC_TOOLS,
     }.get(purpose, "")
     if not skills:
         return base

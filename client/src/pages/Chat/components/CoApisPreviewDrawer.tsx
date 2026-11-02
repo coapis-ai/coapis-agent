@@ -14,6 +14,7 @@ import {
   FileText,
   FolderOpen,
   Link2,
+  Loader2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -143,6 +144,25 @@ export default function CoApisPreviewDrawer(props: {
   const [error, setError] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [converting, setConverting] = useState<string | null>(null);
+  // 定住（图钉）：为真时点外面/Esc 都不关闭。持久化，刷新后保持上次的选择。
+  const [pinned, setPinned] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("coapis.previewWin.pin") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const togglePin = useCallback(() => {
+    setPinned((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("coapis.previewWin.pin", next ? "1" : "0");
+      } catch {
+        /* 隐私模式下 localStorage 会抛，忽略即可 */
+      }
+      return next;
+    });
+  }, []);
   /** 图片/PDF 的资源地址：优先一次性票据（方案 D6），退回时才是 ?token= 直链。 */
   const [srcUrl, setSrcUrl] = useState<string | null>(null);
 
@@ -261,7 +281,10 @@ export default function CoApisPreviewDrawer(props: {
       if (!path || converting) return;
       setConverting(fmt);
       try {
-        await downloadFile(path, title, fmt);
+        // 产物按目标扩展名命名：downloadFile 第二参是落盘文件名（不含扩展名），
+        // 直接传 title 会生成「readme.md.pdf」这类双扩展名，故先去掉原扩展名。
+        const stem = title.replace(/\.[^.]+$/, "") || title;
+        await downloadFile(path, stem, fmt);
       } catch (e: any) {
         Modal.error({
           title: t("chat.preview.convertFailed"),
@@ -334,6 +357,13 @@ export default function CoApisPreviewDrawer(props: {
       minWidth={MIN_WIDTH}
       minHeight={MIN_HEIGHT}
       onClose={onClose}
+      pinned={pinned}
+      onTogglePin={togglePin}
+      pinTip={t("chat.preview.pin", "定住（点外面不关闭）")}
+      unpinTip={t("chat.preview.unpin", "取消定住（点外面即关闭）")}
+      closeOnClickOutside={!pinned}
+      closeOnEsc={!pinned}
+      outsideIgnoreSelector="[data-coapis-res-trigger]"
       bodyClassName={styles["coapis-preview-body-host"]}
       title={
         <>
@@ -360,25 +390,65 @@ export default function CoApisPreviewDrawer(props: {
         </>
       }
       extra={
-        convertTargets.length > 0 ? (
-          <Dropdown
-            menu={{
-              items: convertTargets.map((f) => ({
-                key: f,
-                label: t(`chat.preview.format.${f}`, f.toUpperCase()),
-                onClick: () => convertAndDownload(f),
-              })),
-            }}
-            trigger={["click"]}
+        // 单一「下载」入口（小蜜蜂反馈 1/2：顶部「转换」按钮与下载重复、下拉里没有
+        // 原文件格式、md 也该能直接下）：首项恒为原文件，其下才是该格式真支持的
+        // 转换目标；不可转换的格式只留原文件一项。
+        <Dropdown
+          menu={{
+            items: [
+              {
+                key: "__raw",
+                label: (
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Download size={14} />
+                    {t("chat.preview.downloadOriginal", "下载原文")}
+                  </span>
+                ),
+                onClick: () => void downloadFile(path, title),
+              },
+              ...(convertTargets.length > 0
+                ? [
+                    { type: "divider" as const, key: "__dv" },
+                    ...convertTargets.map((f) => ({
+                      key: f,
+                      disabled: converting !== null,
+                      label: (
+                        <span
+                          style={{ display: "flex", alignItems: "center", gap: 6 }}
+                        >
+                          <FileText size={14} />
+                          {t(`chat.preview.format.${f}`, f.toUpperCase())}
+                        </span>
+                      ),
+                      onClick: () => convertAndDownload(f),
+                    })),
+                  ]
+                : []),
+            ],
+          }}
+          trigger={["click"]}
+        >
+          <Tooltip
+            title={
+              converting === null
+                ? t("chat.preview.download", "下载")
+                : t("chat.preview.converting", "正在转换…")
+            }
           >
-            <Tooltip title={t("chat.previewConvert", "转换格式下载")}>
-              <Button type="text" size="small">
-                <Download size={14} />
-                <ChevronDown size={12} />
-              </Button>
-            </Tooltip>
-          </Dropdown>
-        ) : null
+            <Button
+              type="text"
+              size="small"
+              className={styles["fw-hbtn"]}
+              disabled={converting !== null}
+              icon={
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                  {converting === null ? <Download size={14} /> : <Loader2 size={14} />}
+                  <ChevronDown size={12} />
+                </span>
+              }
+            />
+          </Tooltip>
+        </Dropdown>
       }
       footer={
         <>

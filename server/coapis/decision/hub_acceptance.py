@@ -244,10 +244,37 @@ def _backfill_sync(chat_id: str, turn: int, verdict: str) -> None:
         "AND outcome = 'pending'",
     )
     with get_session() as session:
-        session.execute(
+        result = session.execute(
             sql,
             {"outcome": outcome, "rating": 1 if hit else 0,
              "chat_id": chat_id, "turn": turn},
+        )
+        if int(getattr(result, "rowcount", 0) or 0) > 0:
+            return
+        # v14 P1-3 兜底：本轮没有对得上的判行（判官被预算/熔断挡掉，或 turn 缺失）。
+        # 不兜底就永远 0 行 → outcome 恒 pending → 判官准确率永远算不出来
+        # （v14 §3.2 的闭环死锁）。兜底回填**同会话最近一条**判行，并在 reason
+        # 里留痕 outcome_source=acceptance_fallback，让预检能把「精确对账」与
+        # 「兜底对账」分开数。
+        latest = session.execute(
+            text(
+                "SELECT event_id FROM decision_events "
+                "WHERE chat_id = :chat_id AND source = 'plan_gate' "
+                "ORDER BY created_at DESC LIMIT 1",
+            ),
+            {"chat_id": chat_id},
+        ).first()
+        if latest is None:
+            return
+        session.execute(
+            text(
+                "UPDATE decision_events SET outcome = :outcome, rating = :rating, "
+                "reason = CASE WHEN instr(reason, 'outcome_source=') > 0 "
+                "THEN reason ELSE reason || ' [outcome_source=acceptance_fallback]' END "
+                "WHERE event_id = :event_id",
+            ),
+            {"outcome": outcome, "rating": 1 if hit else 0,
+             "event_id": latest[0]},
         )
 
 

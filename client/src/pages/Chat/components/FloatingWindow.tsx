@@ -24,7 +24,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button, Tooltip } from "antd";
-import { Maximize2, Minimize2, X } from "lucide-react";
+import { Maximize2, Minimize2, Pin, PinOff, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import useIsMobile from "../../../hooks/useIsMobile";
 import styles from "./FloatingWindow.module.less";
@@ -62,6 +62,15 @@ export type FloatingWindowProps = {
   /** 点外关闭的豁免选择器（如触发按钮本身：点它是要切换开关，不是关窗） */
   outsideIgnoreSelector?: string;
   closeOnEsc?: boolean;
+  /**
+   * 定住（图钉）：为真时「点外面关闭」不生效。状态由调用方持有并持久化，
+   * 骨架只负责渲染按钮与门控 —— 语义上「定住 = 不关闭窗口」。
+   */
+  pinned?: boolean;
+  /** 提供时在头部渲染定住按钮（排在 铺满/关闭 之前） */
+  onTogglePin?: () => void;
+  pinTip?: string;
+  unpinTip?: string;
   className?: string;
   bodyClassName?: string;
 };
@@ -135,6 +144,10 @@ export default function FloatingWindow({
   closeOnClickOutside = false,
   outsideIgnoreSelector,
   closeOnEsc = true,
+  pinned = false,
+  onTogglePin,
+  pinTip,
+  unpinTip,
   className,
   bodyClassName,
 }: FloatingWindowProps) {
@@ -357,15 +370,15 @@ export default function FloatingWindow({
     return () => window.removeEventListener("resize", onResize);
   }, [open, host, maximized, isMobile, clampRect]);
 
-  /** Esc 关闭。 */
+  /** Esc 关闭（定住时不生效）。 */
   useEffect(() => {
-    if (!open || !closeOnEsc) return;
+    if (!open || !closeOnEsc || pinned) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, closeOnEsc, onClose]);
+  }, [open, closeOnEsc, onClose, pinned]);
 
   /**
    * 点窗口外关闭（资源抽屉沿用旧行为；预览窗默认不开，避免误触丢预览）。
@@ -373,7 +386,7 @@ export default function FloatingWindow({
    * 会先 mousedown 关窗、再 click 开窗，净效果是「点了没关」——故必须豁免。
    */
   useEffect(() => {
-    if (!open || !closeOnClickOutside) return;
+    if (!open || !closeOnClickOutside || pinned) return;
     const onDown = (e: MouseEvent) => {
       const el = winRef.current;
       if (!el || el.contains(e.target as Node)) return;
@@ -383,7 +396,7 @@ export default function FloatingWindow({
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [open, closeOnClickOutside, onClose, outsideIgnoreSelector]);
+  }, [open, closeOnClickOutside, onClose, outsideIgnoreSelector, pinned]);
 
   /** 卸载兜底：拖移中途组件消失也要摘掉监听、还原 body 样式。 */
   useEffect(
@@ -437,6 +450,20 @@ export default function FloatingWindow({
             {extra}
           </div>
         ) : null}
+        {onTogglePin && !isMobile && !isEmbedded() ? (
+          <Tooltip title={pinned ? unpinTip : pinTip}>
+            <Button
+              type="text"
+              size="small"
+              className={`${styles["header-btn"]} ${
+                pinned ? styles["header-btn-on"] : ""
+              }`}
+              icon={pinned ? <Pin size={14} /> : <PinOff size={14} />}
+              onClick={onTogglePin}
+              aria-label={pinned ? unpinTip : pinTip}
+            />
+          </Tooltip>
+        ) : null}
         {showMaximize && !isMobile && !isEmbedded() && (
           <Tooltip
             title={
@@ -446,7 +473,8 @@ export default function FloatingWindow({
             <Button
               type="text"
               size="small"
-              icon={maximized ? <Minimize2 /> : <Maximize2 />}
+              className={styles["header-btn"]}
+              icon={maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               onClick={toggleMaximize}
               aria-label={
                 maximized ? t("chat.preview.restore") : t("chat.preview.maximize")
@@ -458,7 +486,8 @@ export default function FloatingWindow({
           <Button
             type="text"
             size="small"
-            icon={<X />}
+            className={styles["header-btn"]}
+            icon={<X size={14} />}
             onClick={onClose}
             aria-label={t("common.close")}
           />

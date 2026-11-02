@@ -27,6 +27,7 @@ POSTS = (
     "intent",
     "skill_trigger",
     "plan_gate",
+    "tool_gate",
     "tool_guard",
     "verify",
     "context",
@@ -41,8 +42,8 @@ DEFAULTS = {
     "breaker_enabled": True,
     "cache_ttl_s": 300.0,
     "cache_max_entries": 512,
-    "breaker_failure_threshold": 3,
-    "breaker_cooldown_s": 120.0,
+    "breaker_failure_threshold": 5,
+    "breaker_cooldown_s": 60.0,
     "breaker_cooldown_floor_s": 1.0,
     # 判断模型要跑在"会话激活模型"上；推理型模型（Q3 这类）光思考就要
     # 几百 token、两三秒，1.5s/60token 的预算等于"判官必败、静默退回规则"。
@@ -62,12 +63,15 @@ DEFAULTS = {
     # 吃在判断上——这是"重复/循环判断"的根治闸门。
     # 判档 1 次 + 事中改道 1 次 + 收尾验收 1 次 = 3。低于 3 时后到的岗位
     # 只会记下 budget_cap 台账（可见但不生效），等于关掉改道与验收。
-    "judge_max_calls_per_turn": 4,
+    "judge_max_calls_per_turn": 7,
+    # v14 §批次3 软超时：主链最多等判官这么久，超时先返回降级、
+    # 判官后台跑完补写台账。
+    "judge_soft_ms": 4000.0,
     # 判官默认关思考（v14 D1）：判断要的是结论，不是推理过程。
     "judge_thinking_enabled": False,
     # ── 判官设置项 API 的两处配置位（v14 §5.2）─────────────────────
     # 事中改道：每 N 个迭代让判官插话一次；**0 = 关闭事中改道**。
-    "advisor_every_iters": 3,
+    "advisor_every_iters": 6,
     # 前 N 个迭代不判改道：动作太少，判了也看不出来，只产噪声台账。
     "advisor_min_iters": 3,
     # 验收喂给判官的交付文本上限（字）。交付越长越贵，摘要足够判。
@@ -159,8 +163,8 @@ class DecisionHubConfig:
     breaker_enabled: bool = True
     cache_ttl_s: float = 300.0
     cache_max_entries: int = 512
-    breaker_failure_threshold: int = 3
-    breaker_cooldown_s: float = 120.0
+    breaker_failure_threshold: int = 5
+    breaker_cooldown_s: float = 60.0
     breaker_cooldown_floor_s: float = 1.0
     llm_timeout_ms: float = 0.0
     llm_timeout_ms_local: float = 8000.0
@@ -206,7 +210,10 @@ class DecisionHubConfig:
         return self.advisor_every_iters > 0
     # 每轮判官 LLM 调用上限。判档 + 技能触发 + 验收加起来就该封顶，
     # 不能把整轮预算吃在判断上——这是"重复/循环判断"的根治闸门。
-    judge_max_calls_per_turn: int = 4
+    judge_max_calls_per_turn: int = 7
+    # v14 §批次3 软超时（毫秒）：超过即主链先返回降级、判官后台跑完
+    # 补写台账；硬超时 effective_timeout_ms 退居保险丝。
+    judge_soft_ms: float = 4000.0
     judge_provider_id: str = ""
     judge_model: str = ""
     # 判官是否开思考（默认关）。推理型模型一开思考，光思考就吃掉
@@ -215,7 +222,7 @@ class DecisionHubConfig:
 
     # ── 判官设置项 API 的两处配置位（v14 §5.2）─────────────────────
     # 事中改道：每 N 个迭代让判官插话一次；**0 = 关闭事中改道**。
-    advisor_every_iters: int = 3
+    advisor_every_iters: int = 6
     advisor_min_iters: int = 3
     acceptance_max_chars: int = 4000
     # 预算豁免轮数：前 N 轮不吃思考预算降级。
@@ -272,6 +279,7 @@ class DecisionHubConfig:
         self.llm_timeout_ms_local = min(max(float(self.llm_timeout_ms_local), 200.0), 20000.0)
         self.llm_timeout_ms_api = min(max(float(self.llm_timeout_ms_api), 200.0), 20000.0)
         self.llm_max_tokens = min(max(int(self.llm_max_tokens), 64), 4096)
+        self.judge_soft_ms = min(max(float(self.judge_soft_ms), 200.0), 20000.0)
         self.judge_max_calls_per_turn = min(
             max(int(self.judge_max_calls_per_turn), 1), 8,
         )

@@ -19,6 +19,7 @@ import re
 import time
 from typing import Any, ClassVar, Optional, Sequence
 
+from ..decision.ledger_contract import write_ledger
 from .utils.thinking_budget import complexity_to_effort
 
 logger = logging.getLogger(__name__)
@@ -225,27 +226,25 @@ class ComplexityClassifier:
         §4.5③：思考开支写进 ``action``（``thinking:effort``），台账才能还原现场。
         ``source`` 用岗位名（plan_gate/query_analysis/…），``hit_layer`` 才分层。
 
+        v14 §批次1：一律走 ledger_contract 唯一入口——档位按判则词表清洗
+        （调用方把岗位名当 level 传进来时进不了档位列，原值进 dirty_band
+        留痕），身份从 ContextVar 兜底补齐，零值行带语义标记。
         台账故障绝不影响判级——判断是旁路能力，主链优先。
         """
         try:
-            from coapis.decision import DecisionResult, get_bus
-
-            scope = self._ledger_scope
+            scope = dict(self._ledger_scope or {})
             effort = complexity_to_effort(level)
             act = (action or f"规则判级为{level}")[:48]
-            get_bus().emit(
-                DecisionResult(
-                    source=source,
-                    complexity=level,
-                    action=f"{act}; thinking:{effort}",
-                    reason=(detail or "")[:512],
-                    hit_layer="rule",
-                    value=level,
-                    user_id=scope.get("user_id", "") or "",
-                    agent_id=scope.get("agent_id", "") or "",
-                    chat_id=scope.get("chat_id", "") or "",
-                    turn=int(scope.get("turn", 0) or 0),
-                ),
+            write_ledger(
+                source=source,
+                purpose=source,
+                action=f"{act}; thinking:{effort}",
+                band=level,
+                reason=detail,
+                hit_layer="rule",
+                value=level,
+                turn=int(scope.get("turn", 0) or 0) or None,
+                scope=scope,
             )
         except Exception:  # noqa: BLE001 - 台账故障不影响判级
             logger.debug("[plan-gate] 规则判级入账异常（忽略）", exc_info=True)

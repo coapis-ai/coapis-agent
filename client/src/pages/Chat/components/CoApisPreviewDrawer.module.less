@@ -40,6 +40,25 @@
 }
 
 /*
+ * 头部「下载 ▾」按钮：与骨架的 .header-btn（定住/铺满/关闭）同尺寸同图标规格，
+ * 避免一排按钮高矮胖瘦不一。宽度自适应（图标 + 箭头）。
+ */
+.fw-hbtn {
+  width: auto;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+/*
  * 内容宿主（挂在骨架的 body 上）：撑满剩余高度、纵向排布。
  * 顶部提示条按内容高度占位，下面的内容区 flex:1 自己滚。
  */
