@@ -56,9 +56,9 @@ fi
 [ -f "$_entry" ] || { echo "预检脚本不存在：$_entry" >&2; exit 1; }
 
 echo "== 判断中枢预检 · 数据源：$mode =="
-if [ "${mode#容器}" = "$mode" ]; then
-    # 容器模式：脚本和包都在镜像里
-    docker exec -w /app "$container" python3 "$_entry" --url "$url"
+if [ "${mode#容器}" != "$mode" ]; then
+    # 容器模式：脚本和包都在镜像里，用镜像内的路径（宿主路径在容器里不存在）
+    docker exec -w /app "$container" python3 "/app/scripts/$(basename "$_entry")" --url "$url"
 else
     # 宿主模式：档位尺子（LEVELS）直接 import 仓库代码，和线上同一把
     PYTHONPATH="$_repo/server" "$_VENV" "$_entry" --url "$url"

@@ -342,6 +342,10 @@ async def enter_scene(
             # 更新返回的 chat_id 和 session_id（确保一致性）
             result.chat_id = existing_chat.id
             result.session_id = existing_chat.session_id
+
+            # 复用已有会话同样是一次"进入场景"，必须计数；
+            # 此前只在创建新会话的分支计数，导致重复进入统计恒为 1。
+            service.increment_usage(scene_id)
             return result
         
         # ⭐ 创建新会话
