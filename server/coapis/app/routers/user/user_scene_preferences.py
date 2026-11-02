@@ -30,7 +30,8 @@ from fastapi import APIRouter, HTTPException, Body, Request
 from pydantic import BaseModel, Field
 
 from ....user_system.database import UserSystemDB
-from ...auth import get_current_user
+from ....user_system.service import get_user_by_username
+from ...auth import get_current_user, verify_token
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +65,31 @@ class ScenePreferencesResponse(BaseModel):
 # ── Helper functions ────────────────────────────────────────────────────
 
 def _get_user_id(request: Request) -> Any:
-    """从请求中获取用户ID."""
-    user = get_current_user(request)
-    if not user or not hasattr(user, 'id'):
+    """取当前用户主键，未登录抛 401。
+
+    不能依赖 request.state.user_info：社区版 _app.py 只注册了语言探测、安全响应头、
+    请求体缓存等中间件，负责写入用户状态的鉴权中间件并未注册（历史 BaseHTTPMiddleware
+    版会缓冲请求体、破坏上传与表单接口，2026-08 移除后无替代实现），user_info 常年为空，
+    直接交给 auth.get_current_user 必然 401。这里按同包 user_preferences 的做法自行取
+    身份：先认中间件已写入的用户状态，取不到则校验 Authorization 头里的令牌换用户名，
+    再解析成用户主键。
+    """
+    user_info = getattr(request.state, "user_info", None)
+    uid = user_info.get("id") if isinstance(user_info, dict) else getattr(user_info, "id", None)
+    if uid:
+        return uid
+    username = getattr(request.state, "username", None)
+    if not username or username == "anonymous":
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else ""
+        username = verify_token(token) if token else None
+    if not username:
         raise HTTPException(status_code=401, detail="未登录")
-    return user.id
+    row = get_user_by_username(username)
+    uid = getattr(row, "id", None) if row is not None else None
+    if uid is None:
+        raise HTTPException(status_code=401, detail="未登录")
+    return uid
 
 
 def _get_preference(db: UserSystemDB, user_id: Any, key: str, default: any = None) -> any:
