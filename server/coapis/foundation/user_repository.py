@@ -315,3 +315,47 @@ class UserRepository(ABC):
     def set_user_preference(self, user_id: Any, key: str, value: str) -> bool:
         """Set a single preference value by user_id and key. Returns True on success."""
         ...
+
+    # -- audit log read side ------------------------------------------------
+    #
+    # Added 2026-11: the admin audit endpoints (list / stats / export) issued
+    # raw SQL through ``db.execute()``, a method the delegating
+    # ``UserSystemDB`` never exposed -- every one of them answered 500 on
+    # both editions (traceback: ``AttributeError: 'UserSystemDB' object has
+    # no attribute 'execute'``). Audit reads go through this seam instead,
+    # because each edition keeps its own time semantics: community stores
+    # ``created_at`` as a REAL epoch, enterprise as TIMESTAMPTZ, so the
+    # epoch->column translation cannot live in the router.
+    #
+    # Not ``@abstractmethod`` on purpose: repositories written before this
+    # seam keep importing; they inherit the raising default and fail loudly
+    # instead of silently returning nothing.
+
+    def list_audit_logs(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        username: Optional[str] = None,
+        action: Optional[str] = None,
+        resource_type: Optional[str] = None,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+    ) -> "tuple[List[Dict[str, Any]], int]":
+        """Return ``(rows, total)`` of audit logs, newest first.
+
+        Each row carries ``id, username, user_id, action, resource_type,
+        resource_id, details, ip_address, user_agent, success, created_at``.
+        *total* counts the rows the same filters match (the router builds
+        pagination from it). Filters are AND-ed; ``None``/empty ones are
+        skipped. *start_time* / *end_time* are unix epoch seconds.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no audit-log reader")
+
+    def audit_stats(self) -> Dict[str, Any]:
+        """Aggregate counters for the admin audit dashboard.
+
+        Returns ``{"by_action": {action: count}, "total": int,
+        "unique_users": int, "success_count": int, "fail_count": int}``.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no audit-log stats")

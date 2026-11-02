@@ -356,6 +356,78 @@ class SqlaUserRepository(UserRepository):
             )
             session.commit()
 
+    # -- audit log read side (see UserRepository docstring for why) ---------
+
+    def list_audit_logs(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        username: Optional[str] = None,
+        action: Optional[str] = None,
+        resource_type: Optional[str] = None,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+    ) -> tuple[list[dict], int]:
+        conds = []
+        if username:
+            conds.append(AuditLog.username == username)
+        if action:
+            conds.append(AuditLog.action == action)
+        if resource_type:
+            conds.append(AuditLog.resource_type == resource_type)
+        # created_at is a REAL epoch in this schema, so the incoming unix
+        # seconds compare directly.
+        if start_time is not None:
+            conds.append(AuditLog.created_at >= float(start_time))
+        if end_time is not None:
+            conds.append(AuditLog.created_at <= float(end_time))
+        with get_session_factory()() as s:
+            total = s.scalar(select(func.count()).select_from(AuditLog).where(*conds))
+            rows = s.execute(
+                select(AuditLog)
+                .where(*conds)
+                .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+                .limit(limit)
+                .offset(offset)
+            ).scalars().all()
+            data = [
+                {
+                    "id": r.id,
+                    "username": r.username,
+                    "user_id": r.user_id,
+                    "action": r.action,
+                    "resource_type": r.resource_type,
+                    "resource_id": r.resource_id,
+                    "details": r.details,
+                    "ip_address": r.ip_address,
+                    "user_agent": r.user_agent,
+                    # 社区版审计表没有 success 列（企业版有），契约里统一给出，
+                    # 缺列时按「已记录即为成功」处理，避免前端拿到 None 渲染异常。
+                    "success": True,
+                    "created_at": r.created_at,
+                }
+                for r in rows
+            ]
+        return data, int(total or 0)
+
+    def audit_stats(self) -> dict:
+        with get_session_factory()() as s:
+            by_action = {a: int(c) for a, c in s.execute(
+                select(AuditLog.action, func.count()).group_by(AuditLog.action)
+            ).all()}
+            total = s.scalar(select(func.count()).select_from(AuditLog)) or 0
+            unique = s.scalar(
+                select(func.count(func.distinct(AuditLog.username))).select_from(AuditLog)
+            ) or 0
+        # 本版审计表没有 success 列，计数关系保持自洽（全部计为成功）。
+        return {
+            "by_action": by_action,
+            "total": int(total),
+            "unique_users": int(unique),
+            "success_count": int(total),
+            "fail_count": 0,
+        }
     def insert_point_transaction(
         self,
         user_id: Any,

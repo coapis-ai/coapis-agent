@@ -135,6 +135,21 @@ class UserSystemDB:
             details, ip_address, user_agent,
         )
 
+    def list_audit_logs(self, **filters):
+        """Read a page of audit logs plus the filtered total.
+
+        Added 2026-11: the admin audit router used to call ``db.execute()``,
+        which this class never had, so those endpoints 500-ed on both
+        editions. Reads go through the repository seam instead (see
+        :meth:`UserRepository.list_audit_logs` for why the epoch->column
+        translation belongs in the repository, not the router).
+        """
+        return self._repo.list_audit_logs(**filters)
+
+    def audit_stats(self):
+        """Aggregate audit counters (see :meth:`UserRepository.audit_stats`)."""
+        return self._repo.audit_stats()
+
     def insert_point_transaction(
         self,
         user_id: Any,
