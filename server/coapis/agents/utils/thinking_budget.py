@@ -273,6 +273,7 @@ def apply_thinking_shape(
     provider_type: Optional[str] = None,
     base_url: Optional[str] = None,
     provider_id: Optional[str] = None,
+    model_label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """把档位写到真模型上，返回本轮结束后还原所需的状态。
 

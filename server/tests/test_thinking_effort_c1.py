@@ -166,6 +166,25 @@ def test_apply_writes_to_inner_and_restores():
     assert not hasattr(inner, "reasoning_effort")
 
 
+def test_apply_accepts_production_call_form():
+    """回归锁：调用方按生产形态传 model_label / provider_id 关键字。
+
+    生产曾因此处签名缺参数而整条思考整形静默降级（TypeError 被
+    react_agent 的兜底吞掉），故把调用形态钉成测试。
+    """
+    inner = _Inner()
+    restore = apply_thinking_shape(
+        inner,
+        "low",
+        provider_type="openai",
+        base_url="https://api.example.test/v1",
+        provider_id="bailian",
+        model_label="dashscope/qwen3.6-plus",
+    )
+    assert restore["effort"] == "low"
+    assert restore_thinking_shape(restore) is None
+
+
 def test_apply_merges_existing_template_kwargs():
     inner = _Inner()
     inner.generate_kwargs["chat_template_kwargs"] = {"use": False}
