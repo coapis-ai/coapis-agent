@@ -209,7 +209,10 @@ def test_rule_action_records_thinking(tmp_path):
         reset_engine()
     assert len(rows) == 1
     row = rows[0]
-    assert "thinking:high" in row.action
+    # §4.5③ 思考开支必须落台账；但它写在 reason 里，action 保持纯枚举
+    # （continue / plan）——混进 action 会让按动作聚合的统计失效。
+    assert "thinking:high" in row.reason
+    assert row.action in ("continue", "plan")
     assert row.source == "plan_gate"
     assert row.hit_layer == "rule"
     assert row.user_id == "u" and row.agent_id == "a" and row.chat_id == "c"

@@ -606,7 +606,8 @@ def test_plan_gate_emits_ledger(ledger_db):
     clf = ComplexityClassifier()
     clf.set_ledger_scope({"user_id": "alice", "agent_id": "a1", "chat_id": "c1"})
     # 规则层只能给出 complex/simple/medium：complex 与 simple 都是直通，
-    # 零次判断、不入账（见 test_plan_gate_no_ledger_on_rule_passthrough）。
+    # 直通同样留下一条 layer=rule 的台账（见
+    # test_plan_gate_rule_passthrough_records_ledger）。
     # 只有 medium 边界样本才调判级模型复核——这才是本测试要锁的入账路径。
     text = "总结一下这个季度的销售情况，给出建议"
     assert clf.classify(text) == "medium"
@@ -633,15 +634,27 @@ def test_plan_gate_emits_ledger(ledger_db):
     assert (rows[0].user_id, rows[0].agent_id, rows[0].chat_id) == ("alice", "a1", "c1")
 
 
-def test_plan_gate_rule_passthrough_skips_ledger(ledger_db):
-    """规则直通（零次判断）不入账——台账只记真发生过的判断。"""
+def test_plan_gate_rule_passthrough_records_ledger(ledger_db):
+    """规则直通也必须入账（v14 §4.9 闭环口径）。
+
+    台账是校准飞轮的输入。规则直通过去不入账，导致"这一轮为什么直通"
+    没有任何证据，复盘校准岗只能看到 5/39 条有依据的判断。现在按
+    layer=rule 入账，直通理由进 reason。
+    """
     from coapis.agents.plan_gate import ComplexityClassifier
 
     _bus()
     clf = ComplexityClassifier()
     clf.set_ledger_scope({"user_id": "alice", "agent_id": "a1", "chat_id": "c1"})
     assert asyncio_run(clf.classify_smart("查今天的销售数据")) == "simple"
-    assert _query_all() == []
+
+    rows = _query_all()
+    assert len(rows) == 1, "规则直通必须留下一条台账"
+    assert rows[0].source == "plan_gate"
+    assert rows[0].hit_layer == "rule"
+    assert rows[0].action in ("continue", "plan")
+    assert rows[0].reason, "直通理由必须写进台账"
+    assert (rows[0].user_id, rows[0].agent_id, rows[0].chat_id) == ("alice", "a1", "c1")
 
 
 # ---------------------------------------------------------------- 静态检查

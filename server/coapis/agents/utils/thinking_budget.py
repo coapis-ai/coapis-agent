@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -153,81 +153,101 @@ _COMPILED_COMPLEX = [re.compile(p, re.IGNORECASE) for p in _COMPLEX_PATTERNS]
 
 
 # ------------------------------------------------------------------ #
-# §4.4④ 主链侧形状映射：判档结论 → 各家 provider 的思考形状
+# 形状家族 —— 单一真源在 foundation，本模块只向下取用（v14 R1）
 # ------------------------------------------------------------------ #
+# 形状表住在 :mod:`coapis.foundation.thinking_shape`（纯标准库层，不会拉起应用
+# 树）：判官与主链共用同一张表。**不得**在本模块重写表项——两处各抄一张表就是
+# dev 台账里「主链按端点判定生效、判官按 provider_type 判定失效 -> 思考没关
+# -> 单次 12~18 秒 -> 连吃熔断」的真因。
+from ...foundation.thinking_shape import (
+    FAMILIES,
+    FAMILY_ANTHROPIC,
+    FAMILY_CHAT_TEMPLATE,
+    FAMILY_ENABLE_THINKING,
+    FAMILY_GEMINI,
+    FAMILY_NONE,
+    FAMILY_REASONING_EFFORT,
+    family_request_kwargs,
+    host_of,
+    shape_family,
+    thinking_request_kwargs,
+)
 
-#: agentscope 的 OpenAI 适配器把 generate_kwargs 平铺进请求体，所以形状键用
-#: 各家认的键。官方 OpenAI 只认 reasoning_effort（发别的键会被判 400）；
-#: 未知 provider 不发形状键——宁可不关思考，也不能把主链打挂。
-_CHAT_TEMPLATE_PROVIDERS = frozenset(
-    {"ollama", "vllm", "sglang", "lmstudio", "local", "local_file"},
-)
-_ENABLE_THINKING_PROVIDERS = frozenset(
-    {
-        "dashscope",
-        "dashscope_compatible",
-        "aliyun",
-        "deepseek",
-        "moonshot",
-        "xai",
-        "zai",
-        "einstein",
-        "alienchat",
-    },
-)
-#: Ollama 的思考是开关 + 预算，不是 OpenAI 的四档：minimal 落到 low
-_EFFORT_TO_OLLAMA = {"minimal": "low", "low": "low", "medium": "medium", "high": "high"}
+
+def provider_slot_of_model(model: Any) -> Tuple[str, str, str]:
+    """从模型对象取 ``(provider_type, base_url, provider_id)``；取不到 → 三个空串。
+
+    主链按模型自己携带的配置判厂形：厂形判定与模型绑定，不受调用点临时拼出来
+    的参数影响。
+    """
+    try:
+        from ..context.window_source import model_slot_of
+        from ..providers.provider_manager import ProviderManager
+    except Exception:  # noqa: BLE001 - 循环导入保护
+        return ("", "", "")
+    pid, _name = model_slot_of(model)
+    if not pid:
+        return ("", "", "")
+    try:
+        provider = ProviderManager.get_instance().get_provider(pid)
+    except Exception:  # noqa: BLE001 - 取不到 provider 只说明厂形不知道
+        provider = None
+    return (
+        str(getattr(provider, "provider_type", "") or ""),
+        str(getattr(provider, "base_url", "") or ""),
+        str(pid),
+    )
+
+
+def model_slot_of(model: Any) -> Dict[str, str]:
+    """从模型对象取思考形状需要的槽位字典 ``{pid, ptype, base_url, model}``。
+
+    形状判定要同时知道「模型是谁」与「挂在哪个厂形上」，这两件事过去分散在
+    两处各查各的，导致同一个模型在不同调用点判出不同形状。这里收成一处，
+    调用点只拿一个字典。
+    """
+    ptype, base_url, pid = provider_slot_of_model(model)
+    return {
+        "pid": pid,
+        "ptype": ptype,
+        "base_url": base_url,
+        "model": str(getattr(model, "model", "") or ""),
+    }
 
 
 def effort_shape(
-    effort: str,
+    effort: Optional[str],
     provider_type: Optional[str] = None,
-) -> Dict[str, Any]:
-    """档位 → 请求形状（§4.4④）。判档与思考开支从此是同一个结论。
+    base_url: Optional[str] = None,
+    provider_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """把四档 effort 翻成厂商形状；effort 为空/非法 → None（调用方跳过下发）。
 
-    Returns:
-        dict: ``effort`` / ``reasoning_effort`` / ``thinking_budget_hint``，
-        加 ``generate_kwargs``（合并进模型的 generate_kwargs，OpenAI 兼容系）
-        与 ``model_attrs``（agentscope 直接认的属性形状：Anthropic 的
-        ``thinking``、Gemini 的 ``thinking_config``）。
+    厂形取自 :func:`shape_family`（与判官同源）。传了 base_url/provider_id 就按
+    端点判（与判官完全一致）；不传则退回按 provider_type 判——老调用点零改动。
+    返回值键（主链契约，勿改）：``effort`` / ``reasoning_effort`` /
+    ``thinking_budget_hint`` / ``generate_kwargs`` / ``model_attrs``。
     """
-    budget = ThinkingBudgetManager().apply_effort(effort)
-    hint = int(budget["thinking_budget_hint"])
-    pt = (provider_type or "").strip().lower()
-    shape: Dict[str, Any] = {
-        "effort": budget["effort"],
-        "reasoning_effort": budget["reasoning_effort"],
-        "thinking_budget_hint": hint,
-        "generate_kwargs": {},
-        "model_attrs": {},
+    eff = (effort or "").strip().lower()
+    if eff not in _EFFORT_BUDGET:
+        return None
+    fam = shape_family(provider_type or "", base_url or "", provider_id or "")
+    budget = int(_EFFORT_BUDGET[eff]["thinking_budget_hint"] or 0)
+    # 家族级键位翻译只有一处实现（中枢层），主链与判官同源：主链认得的形状
+    # 判官就能用，判官也绝不用主链不认的私有键位。
+    generate_kwargs, model_attrs, reasoning_effort = family_request_kwargs(
+        fam,
+        budget,
+        eff,
+        _EFFORT_BUDGET[eff]["reasoning_effort"],
+    )
+    return {
+        "effort": eff,
+        "reasoning_effort": reasoning_effort,
+        "thinking_budget_hint": budget,
+        "generate_kwargs": generate_kwargs,
+        "model_attrs": model_attrs,
     }
-    if pt in _CHAT_TEMPLATE_PROVIDERS:
-        kwargs: Dict[str, Any] = {"enable_thinking": hint > 0}
-        if hint > 0:
-            kwargs["thinking_budget"] = hint
-        shape["generate_kwargs"]["chat_template_kwargs"] = kwargs
-        if pt == "ollama":
-            # Ollama 只认 low/medium/high：minimal 落 low，关思考由
-            # chat_template_kwargs 的开关负责
-            shape["reasoning_effort"] = _EFFORT_TO_OLLAMA.get(budget["effort"], "low")
-    elif pt in _ENABLE_THINKING_PROVIDERS:
-        # 阿里云百炼兼容模式 / DeepSeek 等：顶层 enable_thinking + thinking_budget
-        shape["generate_kwargs"]["enable_thinking"] = hint > 0
-        if hint > 0:
-            shape["generate_kwargs"]["thinking_budget"] = hint
-    elif pt == "anthropic":
-        shape["model_attrs"]["thinking"] = (
-            {"type": "enabled", "budget_tokens": max(1024, min(hint, 128000))}
-            if hint > 0
-            else {"type": "disabled"}
-        )
-    elif pt == "gemini":
-        shape["model_attrs"]["thinking_config"] = {
-            "thinking_budget": max(0, hint),
-            "include_thoughts": hint > 0,
-        }
-    # 官方 OpenAI / 未知 provider：只带 reasoning_effort，不发形状键
-    return shape
 
 
 def resolve_thinking_target(model: Any) -> Any:
@@ -251,10 +271,36 @@ def apply_thinking_shape(
     model: Any,
     effort: str,
     provider_type: Optional[str] = None,
+    base_url: Optional[str] = None,
+    provider_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """把档位写到真模型上，返回本轮结束后还原所需的状态。"""
+    """把档位写到真模型上，返回本轮结束后还原所需的状态。
+
+    厂形判定与判官同源：provider_type/base_url/provider_id 缺哪个就从模型自带
+    的配置里补哪个（调用点零改动即可吃到端点级判定）。
+    """
     target = resolve_thinking_target(model)
-    shape = effort_shape(effort, provider_type)
+    slot = model_slot_of(model)
+    slot_type = provider_type or slot["ptype"]
+    slot_url = base_url or slot["base_url"]
+    slot_id = provider_id or slot["pid"]
+    shape = effort_shape(
+        effort,
+        slot_type,
+        slot_url,
+        slot_id,
+    )
+    if shape is None:
+        # 档位越界（上游传了四档之外的值）：不能演变成 ``shape["effort"]`` 的
+        # KeyError 把整段思考控制打回「不控预算」，也不能凭空发明第五档——
+        # 落最小档 = 关思考，与 complexity_to_effort 的兜底口径一致。
+        logger.warning("[thinking] 非法档位 %r，按最小档（关思考）执行", effort)
+        shape = effort_shape(
+            EFFORT_MINIMAL,
+            slot_type,
+            slot_url,
+            slot_id,
+        )
     prev_gk = getattr(target, "generate_kwargs", None)
     restore: Dict[str, Any] = {
         "target": target,
@@ -309,21 +355,6 @@ def restore_thinking_shape(restore: Dict[str, Any]) -> None:
             target.generate_kwargs = saved
         except Exception:  # noqa: BLE001
             pass
-
-
-def provider_type_of_model(model: Any) -> Optional[str]:
-    """从模型包装上取 provider_type；取不到返回 None（就不发形状键）。"""
-    try:
-        from ..context.window_source import model_slot_of
-        from ..providers.provider_manager import ProviderManager
-
-        provider_id, _name = model_slot_of(model)
-        if not provider_id:
-            return None
-        provider = ProviderManager.get_instance().get_provider(provider_id)
-        return getattr(provider, "provider_type", None) if provider else None
-    except Exception:  # noqa: BLE001 - 取不到就不发形状键
-        return None
 
 
 class ThinkingBudgetManager:

@@ -35,6 +35,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..providers.model_type import infer_model_type
+from coapis.foundation.thinking_shape import thinking_request_kwargs
 from ..providers.provider_manager import ProviderManager
 from .breaker import get_breaker
 from .bus import get_bus
@@ -83,6 +84,72 @@ JUDGED_LAYERS = (
 )
 
 _MAX_TURN_KEYS = 200
+# 判官五岗调用名（调用方实际传进来的 purpose）：plan_gate / skill_trigger /
+# tool_gate / advisor / acceptance。验收岗在预算分池里单独留额度，见
+# _post_call_cap；上面那组 PURPOSE_* 是台账词表（验收写 verify），两套词
+# 不是一回事，别互相覆盖。
+PURPOSE_CALL_ACC = "acceptance"
+
+
+def _post_call_cap(cfg: Any, purpose: str) -> int:
+    """某岗位每轮可调用判官几次（预算分池，v14 §4.3）。
+
+    上限写在配置里、可按岗位调；0/负数=该岗不限（仍受全局 7 次约束）。
+    """
+    limits = getattr(cfg, "judge_post_limits", {}) or {}
+    cap = int(limits.get(purpose, getattr(cfg, "judge_post_limit_default", 2)))
+    return max(int(cap), 0)
+
+
+def _breaker_key(purpose: str) -> str:
+    """熔断按岗位分池（v14 §4.3）：一个岗位连败，不该把别的岗位一起熔断。
+
+    dev 实测 breaker_open 24 行——全局只有一把熔断闸，tool_gate 每次工具调用
+    判一格、最容易把连败计数填满，一开就把判档岗与验收岗整轮熔掉。
+    岗位独立计数后，慢的岗位自己歇着，闭环岗照常判断。
+    """
+    return f"{BREAKER_KEY}:{purpose}"
+
+
+def _hub_breaker(purpose_key: str, cfg: Any) -> CircuitBreaker:
+    """取岗位闸门，并把阈值对齐到当前在途配置（v15 F6）。
+
+    闸门是惰性建的：第一次用到时按那一刻的配置定阈值。若那一刻中枢
+    配置尚未装载（拿到默认 3 次 / 120 秒），之后配置改成 5 次也不会
+    回头更新——于是「配置说 5 次才熔断、实际 3 次就熔断」，判官被记成
+    故障、整轮判断被跳过。每次取用都对齐一次，口径分裂就此结束。
+    """
+    breaker = get_breaker(purpose_key)
+    breaker.sync_thresholds(
+        cfg.breaker_failure_threshold,
+        cfg.breaker_cooldown_s,
+        window_s=cfg.breaker_window_seconds,
+        probe_s=cfg.breaker_probe_timeout_s,
+    )
+    return breaker
+
+# 上游拒收形状参数时的自愈（v14 §4.2）：形状键来自单一真源，被拒就剥掉重试一次，
+# 并把该 (provider_id, model) 记进进程级拉黑表——同一厂同一模型此后不再发。
+_SHAPE_KEYS = ("enable_thinking", "chat_template_kwargs", "reasoning_effort")
+_SHAPE_REJECT: dict[tuple[str, str], tuple[str, ...]] = {}
+_PARAM_REJECT_HINTS = (
+    "unknown parameter", "unrecognized", "unsupported", "unexpected keyword",
+    "extra inputs", "invalid parameter", "unknown field", "not supported",
+    "unhandled keyword",
+)
+
+
+def _param_rejection_keys(text: str) -> set:
+    """上游报错点到名、且确实是我们发出去的形状键 → 该剥掉重试。
+
+    判官的输入是自然语言，模型答得出来；形状键是我们额外塞的私有参数，
+    不认识它的上游会判 400。参数被拒 ≠ 判断失败：剥掉参数再要一次结论，
+    比直接落一行传输错误、再把连续失败计入熔断要诚实得多。
+    """
+    low = str(text).lower()
+    if not any(h in low for h in _PARAM_REJECT_HINTS):
+        return set()
+    return {k for k in _SHAPE_KEYS if k in low}
 
 
 def _text_of(response: Any) -> str:
@@ -221,7 +288,7 @@ class JudgeGateway:
         # 同问句在飞的判断：key -> Task（单飞，第二个人等同一个结果）
         self._inflight: dict[str, asyncio.Task] = {}
         # 单轮 LLM 判断计数：(user, agent, chat, turn) -> 次数
-        self._turn_calls: dict[tuple[str, str, str, int], int] = {}
+        self._turn_calls: dict[tuple[str, str, str, int], dict[str, int]] = {}
 
     # ---------------- 参数构造 ----------------
 
@@ -229,23 +296,26 @@ class JudgeGateway:
     def _thinking_kwargs(provider: Any, flag: bool) -> dict[str, Any]:
         """按端点类型给出"思考开关"参数；端点不认的一律不发。
 
-        三家三种写法（v14 §4.2）：
-
-        * DashScope compatible-mode → ``enable_thinking``；
-        * Ollama → ``chat_template_kwargs.thinking``；
-        * 其它 OpenAI 兼容端点 → 不认识这个参数，发了会被净化器丢掉，
-          干脆不发，别拿未知参数去赌人家的校验。
+        形状表**不在这份文件里**——取单一真源
+        :mod:`coapis.foundation.thinking_shape`（主链向下取用同一份，判官与主链
+        同源：主链认得的形状判官就能用）。这里以前自己抄了一张三家表
+        （v14 §4.2），结果判官用的 DeepSeek
+        （provider_type=deepseek、base_url=api.deepseek.com）三种形态全不命中，
+        返回空 → 思考没关 → 单次 12~18 秒：4 秒软阈值的工具岗全数超时，
+        连吃三条就熔断整轮，验收岗的 12 秒硬阈值也被 18 秒的思考模型击穿。
         """
-        ptype = str(getattr(provider, "provider_type", "") or "")
-        base = str(getattr(provider, "base_url", "") or "")
-        if ptype == "ollama" or ":11434" in base:
-            return {"chat_template_kwargs": {"thinking": bool(flag)}}
-        if "dashscope" in base:
-            return {"enable_thinking": bool(flag)}
-        if not base and ptype == "openai":
-            # 本地/托管端点：类型声明就是 OpenAI 兼容，可以发。
-            return {"enable_thinking": bool(flag)}
-        return {}
+        try:
+            return dict(
+                thinking_request_kwargs(
+                    getattr(provider, "provider_type", None),
+                    getattr(provider, "base_url", None),
+                    getattr(provider, "provider_id", None),
+                    thinking=bool(flag),
+                )
+                or {}
+            )
+        except Exception:  # noqa: BLE001 - 认不出形状就不注入思考参数，不影响判断
+            return {}
 
     @staticmethod
     def _sanitize_kwargs(raw: Any) -> dict[str, Any]:
@@ -276,8 +346,49 @@ class JudgeGateway:
         kwargs["max_tokens"] = int(cfg.llm_max_tokens)
         kwargs["stream"] = True
         flag = bool(getattr(cfg, "judge_thinking_enabled", False))
-        kwargs.update(self._thinking_kwargs(provider, flag))
+        shape = self._thinking_kwargs(provider, flag)
+        # 这家这个模型以前拒收过哪些形状键，就不再发（见 _invoke_healed）
+        rejected = _SHAPE_REJECT.get(
+            (str(getattr(provider, "provider_id", "") or ""), str(model_id)),
+            (),
+        )
+        for key, value in shape.items():
+            if key in rejected:
+                continue
+            kwargs[key] = value
         return kwargs
+
+    async def _invoke_healed(
+        self,
+        provider: Any,
+        model_id: str,
+        system: str,
+        user: str,
+        kwargs: dict[str, Any],
+        slot_key: tuple[str, str],
+    ) -> tuple[str, int, int]:
+        """调判官；上游拒收形状参数时剥掉该参数重试一次，并拉黑该槽位。
+
+        只治「参数被拒」这一类：报的是模型不存在、鉴权失败、超时，剥参数
+        没有意义，原样抛给调用方分层处理。
+        """
+        try:
+            return await self._invoke(provider, model_id, system, user, kwargs)
+        except BaseException as exc:  # noqa: BLE001 - 分层交给调用方
+            hits = _param_rejection_keys(str(exc)) & set(kwargs)
+            if not hits:
+                raise
+            lean = {k: v for k, v in kwargs.items() if k not in hits}
+            _SHAPE_REJECT[slot_key] = tuple(sorted(set(_SHAPE_REJECT.get(slot_key, ())) | hits))
+            logger.warning(
+                "[决策中枢] 上游拒收形状参数 %s（槽位 %s）→ 剥掉重试一次，"
+                "该槽位此后不再发这些参数",
+                sorted(hits),
+                slot_key,
+            )
+            return await self._invoke(
+                provider, model_id, system, user, lean,
+            )
 
     @staticmethod
     def _model_type(provider: Any, model_id: str) -> str:
@@ -383,7 +494,8 @@ class JudgeGateway:
                 return reply
 
         # --- L0 前置门：熔断（近期连续失败就别再试） ---
-        if not get_breaker(BREAKER_KEY).allow(BREAKER_KEY):
+        bkey = _breaker_key(purpose)
+        if not _hub_breaker(bkey, cfg).allow(bkey):
             return await self._degrade(
                 purpose, LAYER_BREAKER, "熔断中（近期判断连续失败）",
                 rule_fallback, describe, elapsed, ids,
@@ -406,9 +518,30 @@ class JudgeGateway:
         if len(self._turn_calls) > _MAX_TURN_KEYS:
             self._turn_calls.clear()
         cap = int(cfg.judge_max_calls_per_turn)
-        if self._turn_calls.get(tkey, 0) >= cap:
+        # 预算分池（v14 §4.3）：原先五岗抢一个 7 格的池——tool_gate 一次工具
+        # 调用抢一格，池吃光后判档岗与验收岗全数落 budget_cap（dev 实测 38 行：
+        # plan_gate 21 / tool_gate 9 / acceptance 4）。验收是闭环的回执岗，它
+        # 抢不到预算，判档行就永远对不上账（闭环 5/39）；判档抢不到，档位只能
+        # 靠规则兜底。故：验收按岗位预留，其余四岗共享余额，每岗位再各设上限。
+        reserve = int(getattr(cfg, "judge_reserve_acceptance", 2) or 0)
+        post_cap = _post_call_cap(cfg, purpose)
+        counts = self._turn_calls.setdefault(tkey, {})
+        total = sum(int(v) for v in counts.values())
+        acc_used = int(counts.get(PURPOSE_CALL_ACC, 0))
+        is_acc = purpose == PURPOSE_CALL_ACC
+        pool_cap = cap if is_acc else max(cap - reserve, 0)
+        pool_used = acc_used if is_acc else max(total - acc_used, 0)
+        post_used = int(counts.get(purpose, 0))
+        budget_reason = ""
+        if post_used >= post_cap:
+            budget_reason = f"岗位判断预算用尽（{purpose} 每轮 {post_cap} 次）"
+        elif pool_used >= pool_cap:
+            budget_reason = f"单轮判断预算用尽（{cap} 次）" + (
+                "" if is_acc else f"，验收预留 {reserve} 次"
+            )
+        if budget_reason:
             return await self._degrade(
-                purpose, LAYER_BUDGET, f"单轮判断预算用尽（{cap} 次）",
+                purpose, LAYER_BUDGET, budget_reason,
                 rule_fallback, describe, elapsed, ids,
             )
 
@@ -431,7 +564,7 @@ class JudgeGateway:
         task = self._inflight.get(ckey)
         leader = task is None
         if task is None:
-            self._turn_calls[tkey] = self._turn_calls.get(tkey, 0) + 1
+            counts[purpose] = post_used + 1
             task = asyncio.create_task(
                 self._run_llm(
                     purpose=purpose, system=system, user=user, parse=parse,
@@ -504,7 +637,8 @@ class JudgeGateway:
             return await degrade(LAYER_NOT_CHAT, f"非聊天模型（{mtype}）")
 
         kwargs = self._build_kwargs(provider, model_id, cfg)
-        breaker = get_breaker(BREAKER_KEY)
+        bkey = _breaker_key(purpose)
+        breaker = _hub_breaker(bkey, cfg)
         # F1 自适应超时：本地链路（ollama/vLLM）8s、远端 API 5s。
         # 判官同步调用，本地思考模型实测 5~15 秒，固定短超时=台账里
         # 一整层 "判断超时（2.6s）" 的真因。
@@ -533,7 +667,14 @@ class JudgeGateway:
             if purpose == "acceptance":
                 hard_s = min(max(timeout, soft_s * 1.5), 20.0)
             call_task = asyncio.create_task(
-                self._invoke(provider, model_id, system, user, kwargs),
+                self._invoke_healed(
+                    provider,
+                    model_id,
+                    system,
+                    user,
+                    kwargs,
+                    (str(getattr(provider, "provider_id", "") or ""), str(model_id)),
+                ),
             )
             started = time.perf_counter()
             try:
@@ -562,7 +703,7 @@ class JudgeGateway:
                 # 迟到回填就成了碰运气。
                 _BG_TASKS.add(bg)
                 bg.add_done_callback(_BG_TASKS.discard)
-                breaker.record_failure(BREAKER_KEY)
+                breaker.record_failure(bkey)
                 return await degrade(
                     LAYER_TIMEOUT,
                     f"判断超时（软阈值 {soft_s:.1f}s，判官后台补判中，模型 {model_id}）",
@@ -573,7 +714,7 @@ class JudgeGateway:
                 "[决策中枢] %s 调用失败: %s: %s", purpose, type(exc).__name__, exc,
                 exc_info=True,
             )
-            breaker.record_failure(BREAKER_KEY)
+            breaker.record_failure(bkey)
             return await degrade(
                 LAYER_TRANSPORT, f"判断调用失败（{type(exc).__name__}: {exc}）",
             )
@@ -583,10 +724,10 @@ class JudgeGateway:
         except Exception:
             value = None
         if value is None:
-            breaker.record_failure(BREAKER_KEY)
+            breaker.record_failure(bkey)
             return await degrade(LAYER_PARSE_FAIL, "判断结果解析失败")
 
-        breaker.record_success(BREAKER_KEY)
+        breaker.record_success(bkey)
         put_cached_judgment(ckey, value)
         reply = JudgeReply(
             value=value,
@@ -662,11 +803,12 @@ class JudgeGateway:
         # "Task exception was never retrieved"）。后台任务里的每个依赖都要自带。
         from .breaker import get_breaker as _get_breaker
 
-        breaker = _get_breaker(BREAKER_KEY)
+        bkey = _breaker_key(purpose)
+        breaker = _hub_breaker(bkey, get_hub_config())
         if value is None:
-            breaker.record_failure(BREAKER_KEY)
+            breaker.record_failure(bkey)
             return
-        breaker.record_success(BREAKER_KEY)
+        breaker.record_success(bkey)
         put_cached_judgment(ckey, value)
         reply = JudgeReply(
             value=value,

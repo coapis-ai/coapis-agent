@@ -209,6 +209,16 @@ class ComplexityClassifier:
         self.judge_timeout = judge_timeout
         self.judge_max_tokens = judge_max_tokens
         self._ledger_scope: dict = {}
+        self._last_reason: str = ""
+
+    @property
+    def last_reason(self) -> str:
+        """最近一次规则判级的依据（长度/子目标/顺序标记/分支）。
+
+        入账时要写进台账 ``reason``，让「这轮为什么判 complex」能被人事后核对；
+        没有它，台账只有档位没有尺子，效果对账时无法判断规则层判得对不对。
+        """
+        return self._last_reason
 
     def set_ledger_scope(self, scope: dict) -> None:
         """注入台账作用域（user_id / agent_id / chat_id），供判级入账。"""
@@ -217,9 +227,10 @@ class ComplexityClassifier:
     def record_ledger(
         self,
         level: str,
-        action: str,
+        action: str = "",
         detail: str = "",
         source: str = "plan_gate",
+        layer: str = "rule",
     ) -> None:
         """规则判级也要入账（§4.5①）：台账得知道这一轮判了什么档、思考开没开。
 
@@ -234,14 +245,18 @@ class ComplexityClassifier:
         try:
             scope = dict(self._ledger_scope or {})
             effort = complexity_to_effort(level)
-            act = (action or f"规则判级为{level}")[:48]
+            # action 列保持纯枚举：档位写进 reason，不混进 action，
+            # 否则按 action 聚合统计直接废掉（§4.1 / F6）。
+            # action 列是纯枚举（continue / plan），按它聚合才有效。
+            # 判定依据与思考档位一律进 reason，绝不混进 action。
+            act = "continue" if level == "simple" else "plan"
             write_ledger(
                 source=source,
                 purpose=source,
-                action=f"{act}; thinking:{effort}",
+                action=act,
                 band=level,
-                reason=detail,
-                hit_layer="rule",
+                reason=f"thinking:{effort}｜{action or detail or f'规则判级为{level}'}",
+                hit_layer=layer,
                 value=level,
                 turn=int(scope.get("turn", 0) or 0) or None,
                 scope=scope,
@@ -253,16 +268,24 @@ class ComplexityClassifier:
         """规则层判级。tools_available 预留（"需≥3类工具"信号暂由子目标数近似）。"""
         t = (text or "").strip()
         if not t:
+            self._last_reason = "空输入→simple"
             return SIMPLE
         n = len(t)
         seq_kinds = len(set(_SEQ_MARKER_RE.findall(t)))
         has_branch = bool(_BRANCH_MARKER_RE.search(t))
         goals = self._count_goals(t)
         if n > _COMPLEX_MIN_LEN or goals >= 3 or seq_kinds >= 2:
-            return COMPLEX
-        if n <= _SIMPLE_MAX_LEN and goals == 1 and seq_kinds == 0 and not has_branch:
-            return SIMPLE
-        return MEDIUM
+            level = COMPLEX
+        elif n <= _SIMPLE_MAX_LEN and goals == 1 and seq_kinds == 0 and not has_branch:
+            level = SIMPLE
+        else:
+            level = MEDIUM
+        # 尺子随结论一起留下：台账里的档位从此可核对（哪个信号触发的）。
+        self._last_reason = (
+            f"长度{n} 子目标{goals} 顺序标记{seq_kinds}"
+            f" 分支{'有' if has_branch else '无'}"
+        )
+        return level
 
     def _count_goals(self, t: str) -> int:
         """估算独立子目标数。
@@ -295,7 +318,19 @@ class ComplexityClassifier:
             # 直通样本的 thinking 来自规则映射（同一把尺子），入账含 thinking（§4.5）
             effort = complexity_to_effort(level)
             self.remember_effort(text, effort)
-            # 零次判断不入账：直通没有任何判断发生，写台账等于伪造判断记录
+            # 规则直通也是判断，必须入账（v14 §4.9 闭环）。
+            # 原口径是「零次判断不入账：直通没有任何判断发生，写台账等于伪造
+            # 判断记录」——听着干净，实测是闭环断链的真凶：dev 台账里 17 个会话
+            # 判岗行数为 0，验收真判 20 行中只有 5 行能在同轮找到判档行回填
+            # outcome（闭环 5/39）。验收岗回填的硬前提就是「同轮存在判档行」，
+            # 规则档不落账等于对验收说「这轮没判过」，判则 §2 的判档-验收闭环
+            # 在多数轮次上根本闭不上。规则层判定是判则在判（花规则不花判官），
+            # 它是判断结果而非「没有判断」：落账，layer=rule、耗时 0、不进熔断。
+            self.record_ledger(
+                level,
+                f"规则直通：{self.last_reason}",
+                layer="rule",
+            )
             return level
         judged = await self._lite_judge(text)
         return judged if judged in LEVELS else level

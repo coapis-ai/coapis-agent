@@ -3839,7 +3839,6 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 ThinkingBudgetManager,
                 apply_thinking_shape,
                 complexity_to_effort,
-                provider_type_of_model,
                 restore_thinking_shape,
             )
             if not hasattr(self, "_thinking_budget_mgr"):
@@ -3878,11 +3877,16 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             _judge_effort = ComplexityClassifier.pop_effort(user_query)
             _effort = _judge_effort or complexity_to_effort(complexity)
             # 落到承载请求参数的真模型上（包装层上的键没人读）+ 各家 provider
-            # 的关闭思考形状（§3.1.3：hint 必须在适配层消费）
+            # 的关闭思考形状（§3.1.3：hint 必须在适配层消费）。形状表由
+            # thinking_budget 自己按「端点 > 厂商 > 槽位」查单一真相源
+            # （foundation/thinking_shape），本处不再自备厂商参数。
             _thinking_restore = apply_thinking_shape(
                 self.model,
                 _effort,
-                provider_type=provider_type_of_model(self.model),
+                model_label=(
+                    getattr(self.model, "model_name", "")
+                    or getattr(self.model, "model", "")
+                ),
             )
             self._last_complexity = complexity
             logger.info(
@@ -3891,9 +3895,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 _thinking_restore["hint"],
                 "判档结论" if _judge_effort else "规则兜底",
             )
-        except Exception:
+        except Exception as exc:
+            # 这一段整条被 try 兜住是**刻意的**（思考开支控制坏了不能掀翻聊天），
+            # 但坏了必须吵：v14 实测这里因导入不存在的符号 ImportError → 全链静默
+            # 回到「思考照旧、预算不控」，台账上看不到任何异常，查了三天。
             complexity = "normal"
             _thinking_restore = None
+            logger.warning(
+                "[thinking] 本轮思考形状下发失败（降级为不控预算）：%r",
+                exc,
+                exc_info=True,
+            )
 
         # --- P0: ProgressTracker — 注入进度摘要 ---
         _progress_summary = None

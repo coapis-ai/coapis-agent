@@ -45,6 +45,12 @@ DEFAULTS = {
     "breaker_failure_threshold": 5,
     "breaker_cooldown_s": 60.0,
     "breaker_cooldown_floor_s": 1.0,
+    "breaker_probe_timeout_s": 3.0,
+    "breaker_probe_max_in_flight": 1,
+    "breaker_window_seconds": 60.0,
+    "breaker_half_open_cooldown_s": 60.0,
+    "budget_total_seconds": 600.0,
+    "max_call_budget_s": 300.0,
     # 判断模型要跑在"会话激活模型"上；推理型模型（Q3 这类）光思考就要
     # 几百 token、两三秒，1.5s/60token 的预算等于"判官必败、静默退回规则"。
     # ``0`` = 按链路自适应（本地取 ``llm_timeout_ms_local``，远端 API 取
@@ -72,6 +78,22 @@ DEFAULTS = {
     # 弃权；验收 verdict 是判档行 outcome 的唯一来源，弃权 = 闭环 0 行
     # （dev 实测 182 行台账 180 行停在 pending 的直接成因）。
     "judge_soft_ms_acceptance": 12000.0,
+    # 预算分池（v14 §4.3）：一轮 7 格判官额度原先是五岗抢一个池——tool_gate
+    # 一次工具调用抢一格，池吃光后判档岗与验收岗全数落 budget_cap
+    # （dev 实测 budget_cap 38 行：plan_gate 21 / tool_gate 9 / acceptance 4）。
+    # 验收是闭环的回执岗，它抢不到预算，判档行就永远对不上账（闭环 5/39）；
+    # 判档岗抢不到，档位只能靠规则兜底。故验收按岗位预留，其余四岗共享余额，
+    # 且每岗位各有上限——抢池这件事不该由台账来兜。
+    "judge_reserve_acceptance": 2,
+    # 每岗位每轮上限（tool_gate 天生调用多，靠它把单轮调用次数压下来）。
+    "judge_post_limit_default": 2,
+    "judge_post_limits": {
+        "plan_gate": 2,
+        "skill_trigger": 2,
+        "tool_gate": 2,
+        "advisor": 2,
+        "acceptance": 2,
+    },
     # 判官默认关思考（v14 D1）：判断要的是结论，不是推理过程。
     "judge_thinking_enabled": False,
     # ── 判官设置项 API 的两处配置位（v14 §5.2）─────────────────────
@@ -171,6 +193,18 @@ class DecisionHubConfig:
     breaker_failure_threshold: int = 5
     breaker_cooldown_s: float = 60.0
     breaker_cooldown_floor_s: float = 1.0
+    # 熔断探测与统计窗口。缺这三件时熔断只有"打开→冷却→全开"，没有任何一次
+    # 受控探测来判断模型是否恢复；窗口缺失时失败计数永不清零，偶发的历史失败
+    # 会让熔断被反复误触发。半开冷却必须大于探针超时，否则上次探测还在飞、
+    # 下一颗请求又放行，探测并发失控。
+    breaker_probe_timeout_s: float = 3.0
+    breaker_probe_max_in_flight: int = 1
+    breaker_window_seconds: float = 60.0
+    breaker_half_open_cooldown_s: float = 60.0
+    # 整轮判断预算池与单次调用硬上限：池总量必须容得下单次上限，否则一次调用
+    # 就能把整轮额度吃空，后续判断岗位全部直接判死。
+    budget_total_seconds: float = 600.0
+    max_call_budget_s: float = 300.0
     llm_timeout_ms: float = 0.0
     llm_timeout_ms_local: float = 8000.0
     llm_timeout_ms_api: float = 5000.0
@@ -223,6 +257,14 @@ class DecisionHubConfig:
     # 没有任何消费者在等它的结论，所以不该吃主链那 4 秒的预算。
     # 它的 verdict 是判档行 outcome 的唯一来源——验收弃权 = 闭环恒 0。
     judge_soft_ms_acceptance: float = 12000.0
+    # 预算分池（v14 §4.3）：验收岗每轮预留额度 + 每岗位每轮上限。
+    # 依据：dev 实测 budget_cap 38 行（plan_gate 21 / tool_gate 9 / acceptance 4）
+    # ——五岗抢一个 7 格池，抢不到预算的恰是要把闭环合上的那两个岗。
+    judge_reserve_acceptance: int = 2
+    judge_post_limit_default: int = 2
+    judge_post_limits: dict = field(
+        default_factory=lambda: dict(DEFAULTS["judge_post_limits"]),
+    )
     judge_provider_id: str = ""
     judge_model: str = ""
     # 判官是否开思考（默认关）。推理型模型一开思考，光思考就吃掉
@@ -257,7 +299,20 @@ class DecisionHubConfig:
                 val = _env(env_name)
             if val is None:
                 val = default
-            if isinstance(default, bool):
+            if isinstance(default, dict):
+                # 岗位上限表（v14 §4.3）：逐岗位取整数上限，缺的岗位回落默认。
+                got = val if isinstance(val, dict) else {}
+                table: dict[str, int] = {}
+                for name, dv in dict(default).items():
+                    table[name] = max(_as_int(got.get(name, dv), int(dv)), 0)
+                for name, v in got.items():
+                    if name not in table:
+                        table[name] = max(
+                            _as_int(v, int(DEFAULTS["judge_post_limit_default"])),
+                            0,
+                        )
+                merged[key] = table
+            elif isinstance(default, bool):
                 merged[key] = _as_bool(val, default)
             elif isinstance(default, int):
                 merged[key] = _as_int(val, default)
@@ -284,6 +339,32 @@ class DecisionHubConfig:
             max(float(self.breaker_cooldown_floor_s), 1.0),
             300.0,
         )
+        # 熔断三件新参数同样夹取：探针超时写 0 等于永久放行探测，写 600 等于
+        # 每次探测都拖满整轮预算；半开冷却小于探针超时时，上一次探测还在飞
+        # 下一颗就放行，探测并发会失控 → 冷却下限锁探针超时。
+        self.breaker_probe_timeout_s = min(
+            max(float(self.breaker_probe_timeout_s), 0.2), 30.0,
+        )
+        self.breaker_probe_max_in_flight = min(
+            max(int(self.breaker_probe_max_in_flight), 1), 16,
+        )
+        self.breaker_window_seconds = min(
+            max(float(self.breaker_window_seconds), 5.0), 3600.0,
+        )
+        self.breaker_half_open_cooldown_s = min(
+            max(float(self.breaker_half_open_cooldown_s), self.breaker_probe_timeout_s),
+            3600.0,
+        )
+        # 整轮硬墙必须容得下单次调用上限，否则一次调用就能把整轮预算吃空；
+        # 夹取顺序：先把单次上限压进整轮额度内，再夹整轮额度本身。
+        self.max_call_budget_s = min(
+            max(float(self.max_call_budget_s), 1.0),
+            max(float(self.budget_total_seconds), 1.0),
+        )
+        self.budget_total_seconds = min(
+            max(float(self.budget_total_seconds), self.max_call_budget_s),
+            7200.0,
+        )
         self.llm_timeout_ms = min(max(float(self.llm_timeout_ms), 0.0), 20000.0)
         self.llm_timeout_ms_local = min(max(float(self.llm_timeout_ms_local), 200.0), 20000.0)
         self.llm_timeout_ms_api = min(max(float(self.llm_timeout_ms_api), 200.0), 20000.0)
@@ -298,6 +379,17 @@ class DecisionHubConfig:
         self.judge_max_calls_per_turn = min(
             max(int(self.judge_max_calls_per_turn), 1), 8,
         )
+        # 预算分池（v14 §4.3）：验收预留不能吃满全局额度（吃满了其余四岗就
+        # 永远抢不到），每岗位上限非负、封顶 8（与全局同量级，0=该岗不限）。
+        self.judge_reserve_acceptance = min(
+            max(int(self.judge_reserve_acceptance), 0),
+            max(int(self.judge_max_calls_per_turn) - 1, 0),
+        )
+        self.judge_post_limit_default = min(max(int(self.judge_post_limit_default), 0), 8)
+        self.judge_post_limits = {
+            str(k): min(max(int(v), 0), 8)
+            for k, v in dict(self.judge_post_limits).items()
+        }
         self.advisor_every_iters = min(max(int(self.advisor_every_iters), 0), 64)
         self.advisor_min_iters = min(max(int(self.advisor_min_iters), 1), 32)
         self.acceptance_max_chars = min(

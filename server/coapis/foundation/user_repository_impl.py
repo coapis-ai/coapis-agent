@@ -413,20 +413,25 @@ class SqlaUserRepository(UserRepository):
 
     def audit_stats(self) -> dict:
         with get_session_factory()() as s:
+            total = s.scalar(select(func.count()).select_from(AuditLog)) or 0
             by_action = {a: int(c) for a, c in s.execute(
                 select(AuditLog.action, func.count()).group_by(AuditLog.action)
             ).all()}
-            total = s.scalar(select(func.count()).select_from(AuditLog)) or 0
-            unique = s.scalar(
-                select(func.count(func.distinct(AuditLog.username))).select_from(AuditLog)
-            ) or 0
-        # 本版审计表没有 success 列，计数关系保持自洽（全部计为成功）。
+            by_resource = {r: int(c) for r, c in s.execute(
+                select(AuditLog.resource_type, func.count()).group_by(AuditLog.resource_type)
+            ).all() if r}
+            top = {u: int(c) for u, c in s.execute(
+                select(AuditLog.username, func.count())
+                .where(AuditLog.username.isnot(None))
+                .group_by(AuditLog.username)
+                .order_by(func.count().desc())
+                .limit(10)
+            ).all()}
         return {
-            "by_action": by_action,
             "total": int(total),
-            "unique_users": int(unique),
-            "success_count": int(total),
-            "fail_count": 0,
+            "by_action": by_action,
+            "by_resource_type": by_resource,
+            "top_users": top,
         }
     def insert_point_transaction(
         self,

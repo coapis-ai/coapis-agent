@@ -355,7 +355,9 @@ class UserRepository(ABC):
     def audit_stats(self) -> Dict[str, Any]:
         """Aggregate counters for the admin audit dashboard.
 
-        Returns ``{"by_action": {action: count}, "total": int,
-        "unique_users": int, "success_count": int, "fail_count": int}``.
+        Keys follow the shape the admin dashboard consumes:
+        ``{"total": int, "by_action": {action: count},
+        "by_resource_type": {type: count}, "top_users": {username: count}}``.
+        ``top_users`` is capped at the 10 most active users.
         """
         raise NotImplementedError(f"{type(self).__name__} has no audit-log stats")

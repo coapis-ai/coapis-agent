@@ -215,16 +215,22 @@ def main() -> None:
 
         # ── 8 判官预算：单轮调用上限/熔断/超时（自适应）─────────────
         try:
-            from coapis.decision.config import get_config
+            from coapis.decision.config import (
+                get_hub_config,
+                judge_soft_ms_advisor,
+            )
 
-            cfg = get_config()
+            cfg = get_hub_config()
             print(f"8 判官预算        :  单轮上限 {cfg.judge_max_calls_per_turn} 次"
                   f" · 熔断 {cfg.breaker_failure_threshold} 连败/{cfg.breaker_cooldown_s:.0f}s 冷却"
                   f" · 硬超时 {cfg.llm_timeout_ms:.0f}ms(0=按模型自适应)"
                   f" · 软超时 {cfg.judge_soft_ms:.0f}ms · 事中每 {cfg.advisor_every_iters} iter 改道")
-            for kind, ms in (("local", cfg.effective_timeout_ms("local")),
-                             ("api", cfg.effective_timeout_ms("api"))):
-                print(f"   {kind} 生效超时 {ms:.0f}ms · 事中单轮预算 {cfg.advisor_budget_ms:.0f}ms")
+            # is_local 是布尔参，传 "local"/"api" 字符串两个都为真，
+            # 打印出来永远是一样的数（8000/8000），尺子必须按签名传真假。
+            for kind, ms in (("本地", cfg.effective_timeout_ms(True)),
+                             ("远端", cfg.effective_timeout_ms(False))):
+                print(f"   {kind} 生效超时 {ms:.0f}ms · 事中单轮预算 "
+                      f"{judge_soft_ms_advisor(cfg):.0f}ms")
         except Exception as exc:  # noqa: BLE001
             print(f"8 判官预算        :  跳过（{type(exc).__name__}: {exc}）")
 

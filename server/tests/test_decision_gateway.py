@@ -195,7 +195,10 @@ async def test_l0_budget_cap_stops_third_call(monkeypatch):
     model = FakeModel("L2")
     wire(monkeypatch, model)
     scope = {"user_id": "u1", "agent_id": "a1", "chat_id": "c9", "turn": 7}
-    h = hub(judge_max_calls_per_turn=2, posts={"skill_trigger": True})
+    # 额度按岗位分池（v15 G10）：全局 cap 里给验收留的预留不能被普通岗吃掉，
+    # 要看普通岗本身的封顶就把预留设为 0，尺子才是这一岗的池子。
+    h = hub(judge_max_calls_per_turn=2, judge_reserve_acceptance=0,
+            posts={"skill_trigger": True})
 
     async def one(tag):
         return await gw.get_judge_gateway().judge(
@@ -210,6 +213,38 @@ async def test_l0_budget_cap_stops_third_call(monkeypatch):
     assert r1.from_llm and r2.from_llm
     assert r3.hit_layer == gw.LAYER_BUDGET
     assert model.calls == 2, "每轮 LLM 判断必须封顶"
+
+
+async def test_acceptance_reserve_survives_other_posts(monkeypatch):
+    """普通岗把池子打空，验收岗仍必须拿得到自己的判断额度。
+
+    验收是闭环的最后一环：它饿死，outcome 就永远是 pending，
+    整套「判断→验收→学习」的账本断在最后一格。
+    """
+    model = FakeModel("L2")
+    wire(monkeypatch, model)
+    # 验收岗的调用名是 acceptance（hub_acceptance.py:161 就这么传，
+    # config.POSTS 里也在册）：预留配额按调用名认人。这里若写成 verify，
+    # 预留判断（purpose == acceptance）永远不成立，测的是"预留没生效"，
+    # 而不是"预留有没有生效"。
+    h = hub(judge_max_calls_per_turn=3, judge_reserve_acceptance=2,
+            posts={"skill_trigger": True, "acceptance": True})
+
+    async def one(purpose, tag):
+        return await gw.get_judge_gateway().judge(
+            purpose=purpose, system="sys-" + tag, user="u",
+            parse=lambda t: "L2", rule_fallback=lambda: "L1",
+            describe=lambda v: v, hub=h, scope=SCOPE,
+        )
+
+    for i in range(4):  # 把 skill_trigger 自己的池（3-2=1）反复打死
+        await one("skill_trigger", f"s{i}")
+    used_by_skill = model.calls
+    assert used_by_skill == 1, "普通岗只能用 cap 减预留后的池子"
+
+    res = await one("acceptance", "a1")
+    assert res.from_llm, "验收岗被普通岗饿死：预留额度没起作用"
+    assert model.calls == used_by_skill + 1
 
 
 async def test_l1_cache_hit_skips_llm(monkeypatch):
@@ -298,22 +333,36 @@ async def test_l3_timeout_counts_into_breaker_and_degrades(monkeypatch):
     from coapis.decision import get_hub_config as _cfg
 
     nth = _cfg().breaker_failure_threshold
-    for _ in range(nth - 1):
-        await gw.get_judge_gateway().judge(
-            purpose="plan_gate", system="s-x", user="u",
+    # 每轮用独立会话：预算闸门按 (会话, 岗位) 计数，共用一个会话会让预算先于
+    # 熔断把调用挡住，那就测不到熔断本身。
+    opened = False
+    for i in range(nth * 3):
+        reply = await gw.get_judge_gateway().judge(
+            purpose="plan_gate", system="s-%d" % i, user="u",
             parse=lambda t: "L2", rule_fallback=lambda: "L1",
             hub=h, scope={"user_id": "u1", "agent_id": "a1",
-                          "chat_id": "c3", "turn": 1},
+                          "chat_id": "c%d" % i, "turn": 1},
         )
-    assert model.calls == nth, "熔断打开前共 %d 次调用" % nth
-    reply = await gw.get_judge_gateway().judge(
-        purpose="plan_gate", system="s-y", user="u",
-        parse=lambda t: "L2", rule_fallback=lambda: "L1",
-        hub=h, scope={"user_id": "u1", "agent_id": "a1",
-                      "chat_id": "c4", "turn": 1},
-    )
-    assert reply.hit_layer == gw.LAYER_BREAKER
-    assert model.calls == nth, "熔断打开后必须直接降级"
+        if reply.hit_layer == gw.LAYER_BREAKER:
+            opened = True
+            break
+    assert opened, "连续超时后必须熔断"
+    # 一次超时恰好记 1 次失败：前台那颗、以及超时后派出去的后台补判那颗，都是
+    # 一次真打模型 + 一次失败（v14 批次3：超时不重试、改后台补判，补判同样
+    # 计入熔断——这是设计，补判也失败才说明这个源真的坏了）。所以熔断恰好在
+    # 累计 nth 次模型调用处打开：既不提前锁死，也不多打。
+    assert model.calls == nth, \
+        "熔断打开时模型调用数应恰为阈值 %d，实为 %d" % (nth, model.calls)
+    calls_at_open = model.calls
+    for i in range(2):
+        reply = await gw.get_judge_gateway().judge(
+            purpose="plan_gate", system="s-after%d" % i, user="u",
+            parse=lambda t: "L2", rule_fallback=lambda: "L1",
+            hub=h, scope={"user_id": "u1", "agent_id": "a1",
+                          "chat_id": "after%d" % i, "turn": 1},
+        )
+        assert reply.hit_layer == gw.LAYER_BREAKER
+    assert model.calls == calls_at_open, "熔断打开后必须直接降级，不再打模型"
 
 
 async def test_l3_transport_error_degrades(monkeypatch):
@@ -393,8 +442,14 @@ async def test_parse_failure_counts_into_breaker_and_degrades(monkeypatch):
             scope={"user_id": "u1", "agent_id": "a1",
                    "chat_id": "p%d" % i, "turn": 1},
         )
-    br = get_breaker("judge-model")
-    assert br.state_of("judge-model") == "open"
+    # 熔断按岗位分闸（v15 G7）：plan_gate 数到自己闸开，别的岗位不受牵连。
+    # 以前全局一把闸时，验收岗把判官判挂会让 tool_gate 在冷却期内一律闭闸，
+    # 而 dev 里最容易填满连败计数的恰恰是 tool_gate。尺子必须跟着闸一起分。
+    key = gw._breaker_key("plan_gate")
+    other = gw._breaker_key("tool_gate")
+    br = get_breaker(key)
+    assert br.state_of(key) == "open"
+    assert get_breaker(other).state_of(other) == "closed"
 
 
 async def test_thinking_param_shape_per_endpoint(monkeypatch):
@@ -403,8 +458,10 @@ async def test_thinking_param_shape_per_endpoint(monkeypatch):
 
     ollama = FakeProvider(FakeModel("L2"), base_url="http://localhost:11434")
     ollama.provider_type = "ollama"
+    # 模板变量名是模板自己的字段，vLLM/llama.cpp 都吃 ``enable_thinking``；
+    # 旧的 ``{"thinking": ...}`` 是判官自己发明的第二把尺子，已随单一真相源作废。
     assert gw.JudgeGateway._thinking_kwargs(ollama, False) == {
-        "chat_template_kwargs": {"thinking": False},
+        "chat_template_kwargs": {"enable_thinking": False},
     }
 
     other = FakeProvider(FakeModel("L2"), base_url="https://api.example.com/v1")
