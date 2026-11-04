@@ -6,7 +6,9 @@ import {
   SwapOutlined,
   AudioOutlined,
   EyeOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
+import { DEFAULT_MODEL_SLOTS } from "./modelSlots";
 import type { ProviderInfo, ModelInfo } from "@/api/types";
 import styles from "../index.module.less";
 
@@ -16,13 +18,17 @@ interface ModelTypeTabsProps {
   providers: ProviderInfo[];
 }
 
-const typeOrder: Array<"chat" | "embedding" | "rerank" | "audio" | "vision"> = [
-  "chat",
-  "embedding",
-  "rerank",
-  "audio",
-  "vision",
-];
+type AnySlot =
+  | "chat"
+  | "embedding"
+  | "rerank"
+  | "audio"
+  | "vision"
+  | "decision";
+
+// 槽位名单来自共享模块（与后端 VALID_DEFAULT_SLOTS 一一对应）：后端加第 6 个
+// 槽位时，这里不再是需要手改的第 4 处重复字面量。
+const typeOrder: AnySlot[] = DEFAULT_MODEL_SLOTS as AnySlot[];
 
 const typeIcons: Record<string, JSX.Element> = {
   chat: <MessageOutlined />,
@@ -30,6 +36,7 @@ const typeIcons: Record<string, JSX.Element> = {
   rerank: <SwapOutlined />,
   audio: <AudioOutlined />,
   vision: <EyeOutlined />,
+  decision: <ThunderboltOutlined />,
 };
 
 /**
@@ -51,6 +58,7 @@ export function ModelTypeTabs({
       rerank: 0,
       audio: 0,
       vision: 0,
+      decision: 0,
     };
     providers.forEach((p) => {
       (p.models as ModelInfo[]).forEach((m) => {
@@ -58,6 +66,9 @@ export function ModelTypeTabs({
         if (type in c) c[type] += 1;
       });
     });
+    // decision 是用途槽位不是模型类型：判官跑的是 chat 能力的模型，
+    // 所以它的候选数 = chat 模型数。
+    c.decision = c.chat;
     return c;
   }, [providers]);
 
@@ -72,6 +83,7 @@ export function ModelTypeTabs({
     rerank: t("models.rerankModels"),
     audio: t("models.audioModels"),
     vision: t("models.visionModels"),
+    decision: t("models.decisionModels"),
   };
 
   return (

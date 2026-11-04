@@ -206,13 +206,41 @@ def build_provider_config(
         return None
 
 
+def _decision_slot_pair() -> tuple[str, str]:
+    """读"决策模型"默认槽位 —— 模型管理里的第 6 个槽位（v16 新增）。
+
+    判官模型的家从 ``config/decision_hub.json`` 里的一对字符串迁到模型管理
+    的默认槽位体系：与 chat/embedding/rerank/audio/vision 同权，能在模型
+    管理页看到、能设默认、复用 chat 的能力校验。
+
+    返回 ``(provider_id, model_id)``；没配、管理器未就绪、读失败都给空串
+    （判官不上岗 = 设计内行为，不是错误）。
+    """
+    try:
+        from ..providers.provider_manager import ProviderManager
+
+        mgr = ProviderManager.get_instance()
+        if mgr is None:
+            return "", ""
+        slot = mgr.get_default_models().get_by_type("decision")
+        if slot is None:
+            return "", ""
+        return (
+            str(slot.provider_id or "").strip(),
+            str(slot.model_id or "").strip(),
+        )
+    except Exception as exc:  # 槽位读不到 = 没配，判官按规则直判
+        logger.debug("[DecisionHub] 决策模型槽位读取失败: %s", exc)
+        return "", ""
+
+
 def get_judge_provider_config(
     hub: Any = None,
     user_id: str | None = None,
     agent_id: str | None = None,
     out_source: dict | None = None,
 ) -> Optional[dict[str, Any]]:
-    """判官模型解析：**只认判官槽位，不回落会话激活模型**（D-A 2026-11-05 拍板）。
+    """判官模型解析：只认判官槽位与决策模型槽位，不回落会话激活模型（D-A 拍板）。
 
     口径反转：v13 定的"判官没配就借用会话激活模型"实测是 4 秒级卡死的主犯。
     dev 台账 184 行真判全是抄激活模型打出来的——判官档位 2000 ms 预算、
@@ -221,16 +249,45 @@ def get_judge_provider_config(
     最坏一次 16963 ms。用户口径：「当决策模型不可用，过程中自动忽略」——
     未配置就是没有判官，直接按规则判，不该拿用户的对话模型去赌一次判断。
 
-    ``judge_provider_id`` + ``judge_model`` 任一为空 → None（判官不上岗）；
-    配了但模型已删除/非 chat → None（配置坏了也直判，不借模型）。
+    解析优先级（v16 D4 拍板，从高到低）：
+
+    1. 智能体级覆盖：``hub`` 由 ``merge_hub_config`` 合并而来（环境变量 →
+       数据根 ``config/decision_hub.json`` → 该智能体 ``agent.json`` 的
+       ``decision_hub`` 段），所以 ``judge_provider_id``/``judge_model``
+       在智能体段里写了就自动压过全局——这一层本来就存在，保持不动。
+    2. 全局判官槽位（同一对键，管理台/决策中枢面板写的）。
+    3. 决策模型槽位：模型管理里的第 6 个默认槽位 ``default_models.decision``
+       （v16 新增，与 chat/embedding/... 同权，是判官模型现在的家）。
+    4. 都没有 → None：判官不上岗，各岗按确定性规则直判（设计内行为）。
+
+    槽位里的模型已删除/非 chat → 同样 None（配置坏了也直判，绝不借模型）。
+    ``hub.judge_*`` 与决策槽位同时有值时 hub 赢且日志点名，让"我在模型管理
+    里选了却不生效"这件事当场可见；管理台保存决策槽位时会清空 hub 那对键。
 
     ``user_id``/``agent_id`` 形参保留为兼容位（历史签名），不再参与解析。
     """
     pid = str(getattr(hub, "judge_provider_id", "") or "").strip()
     model = str(getattr(hub, "judge_model", "") or "").strip()
+    source = "judge_slot"
+    slot_pid, slot_model = _decision_slot_pair()
+    if pid and model:
+        # 兼容期：hub 那对历史键优先级更高。两边都有值且指向不同模型时
+        # 必须点名——"我在模型管理里选了决策模型却不生效"要当场可见。
+        if slot_pid and slot_model and (slot_pid, slot_model) != (pid, model):
+            logger.warning(
+                "[DecisionHub] 判官模型有两处配置且不一致：判官槽位 %s/%s "
+                "压过决策模型槽位 %s/%s（判官槽位是历史兼容位，管理台保存"
+                "决策模型时会清空它）",
+                pid,
+                model,
+                slot_pid,
+                slot_model,
+            )
+    elif slot_pid and slot_model:
+        pid, model, source = slot_pid, slot_model, "decision_slot"
     if not pid or not model:
         return None
-    cfg = build_provider_config(pid, model, out_source, source="judge_slot")
+    cfg = build_provider_config(pid, model, out_source, source=source)
     if cfg is None:
         logger.warning(
             "[DecisionHub] 判官槽位里的模型 %s/%s 不可用（已删除/非 chat），"

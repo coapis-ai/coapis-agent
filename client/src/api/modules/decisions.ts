@@ -70,7 +70,7 @@ export interface DecisionHubConfigResponse {
 
 export interface DecisionConfigResponse {
   config: DecisionHubConfigResponse;
-  judge: { provider_id: string; model: string };
+  judge: { provider_id: string; model: string; configured?: boolean; source?: string };
   agent_id: string;
   sources: string[];
 }

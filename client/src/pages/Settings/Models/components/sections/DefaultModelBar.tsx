@@ -1,17 +1,17 @@
 import React, { useMemo } from "react";
 import { Tooltip } from "antd";
-import {
-  MessageOutlined,
-  DatabaseOutlined,
-  SwapOutlined,
-  AudioOutlined,
-  EyeOutlined,
-} from "@ant-design/icons";
+import { MessageOutlined, DatabaseOutlined, SwapOutlined, AudioOutlined, EyeOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { ProviderInfo } from "@/api/types";
 import styles from "../../index.module.less";
 
-type ModelType = "chat" | "embedding" | "rerank" | "audio" | "vision";
+type ModelType =
+  | "chat"
+  | "embedding"
+  | "rerank"
+  | "audio"
+  | "vision"
+  | "decision";
 
 const TYPE_META: Array<{ type: ModelType; labelKey: string; icon: JSX.Element }> =
   [
@@ -24,6 +24,8 @@ const TYPE_META: Array<{ type: ModelType; labelKey: string; icon: JSX.Element }>
     { type: "rerank", labelKey: "models.rerankModels", icon: <SwapOutlined /> },
     { type: "audio", labelKey: "models.audioModels", icon: <AudioOutlined /> },
     { type: "vision", labelKey: "models.visionModels", icon: <EyeOutlined /> },
+    // 第 6 个槽位：决策/判断模型（判官用）。与其余五个同权：可设置、可默认。
+    { type: "decision", labelKey: "models.decisionModels", icon: <ThunderboltOutlined /> },
   ];
 
 interface DefaultModelBarProps {

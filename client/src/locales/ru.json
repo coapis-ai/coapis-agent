@@ -1064,7 +1064,28 @@
     "modalityFile": "Файл",
     "modalityText": "Только текст",
     "perMillionIn": "/1M вх.",
-    "perMillionOut": "/1M исх."
+    "perMillionOut": "/1M исх.",
+    "decisionModels": "Решающие модели",
+    "setAsDecision": "Сделать решающей моделью",
+    "decisionModelsHint": "Модель судьи хаба решений: обязана выдавать JSON, поэтому кандидаты — chat-модели",
+    "modelSourceAdded": "Добавлены вручную",
+    "modelSourceDiscovered": "Найдены автоматически",
+    "modelSourceBuiltin": "Встроенные",
+    "manualModelsOnly": "Только добавленные вручную",
+    "manualModelsOnlyHint": "Если включено, поиск моделей не добавляет модели в этот провайдер (записывает только окна контекста). Для пользовательских провайдеров включено по умолчанию",
+    "modelWindowTitle": "Окно контекста (токены)",
+    "modelWindowPlaceholder": "Пусто = глобальное значение",
+    "modelWindowHint": "OpenAI-совместимые API не возвращают размер окна; пусто — бюджет контекста по глобальному значению",
+    "discoverPreviewTitle": "Результаты поиска (ещё не добавлены)",
+    "discoverPreviewHint": "Отметьте модели для добавления; неотмеченные не записываются",
+    "discoverAddSelected": "Добавить выбранные",
+    "discoverAddAll": "Добавить все",
+    "discoverPreviewEmpty": "Новых моделей для добавления нет",
+    "judgeModelLabel": "Решающая модель",
+    "judgeModelNone": "Не настроена: судья не работает, решает правило",
+    "goManageModels": "Открыть управление моделями",
+    "defaultModelSaved": "Модель по умолчанию сохранена",
+    "defaultModelCleared": "Модель по умолчанию снята"
   },
   "agentConfig": {
     "title": "Конфигурация",
@@ -2344,6 +2365,10 @@
       "layer": "Источник",
       "cost": "Время/Стоимость",
       "rate": "Оценка"
-    }
+    },
+    "source.judge_slot": "слот судьи",
+    "source.decision_slot": "управление моделями · решающая модель",
+    "source.agent_default": "модель по умолчанию агента",
+    "source.global_default": "глобальная модель по умолчанию"
   }
 }

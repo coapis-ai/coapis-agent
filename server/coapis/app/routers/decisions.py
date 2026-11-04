@@ -295,7 +295,10 @@ def get_config(request: Request) -> dict[str, Any]:
         "judge": {
             "provider_id": str(slot.get("provider_id") or ""),
             "model": str(slot.get("model") or ""),
-            # 判官是否真的在岗：前端据此提示"未配置判官 = 全程规则直判"
+            # 命中层：judge_slot(判官槽位) / decision_slot(模型管理里的决策模型
+            # 槽位) / agent_default / global_default。面板写清"当前生效的是谁、
+            # 从哪来"，用户就不会拿会话激活模型去猜判官是谁（v16 B7）。
+            "source": str(slot.get("source") or ""),
             "configured": bool(slot.get("provider_id") and slot.get("model")),
         },
         "agent_id": agent_id,

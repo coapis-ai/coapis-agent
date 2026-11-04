@@ -39,6 +39,12 @@ VALID_MODEL_TYPES: tuple[str, ...] = (
     "vision",
 )
 
+# 默认模型**槽位** = 五个模型类型 + ``decision``（决策/判断模型）。
+# decision 刻意不进 VALID_MODEL_TYPES：它是"用途槽位"不是"模型类型"——
+# 槽位里必须放 chat 模型，模型自己的类型仍是五种之一。
+# 读写默认槽位的地方一律用这份共享名单，不再各写各的五项字面量。
+VALID_DEFAULT_SLOTS: tuple[str, ...] = VALID_MODEL_TYPES + ("decision",)
+
 # Keyword rules, checked in order; first match wins.
 _RERANK_KEYWORDS: tuple[str, ...] = ("rerank",)
 _EMBEDDING_KEYWORDS: tuple[str, ...] = ("embed", "bge", "e5-")

@@ -1049,7 +1049,28 @@
     "selectAllProviders": "すべて選択",
     "clearProviderSelection": "すべて解除",
     "noMatchingProviders": "一致するプロバイダーがありません",
-    "filterFreeOnly": "無料モデルのみ"
+    "filterFreeOnly": "無料モデルのみ",
+    "decisionModels": "判断モデル",
+    "setAsDecision": "判断モデルに設定",
+    "decisionModelsHint": "意思決定ハブの判定モデル。JSON を出力する必要があるため候補はチャットモデルです",
+    "modelSourceAdded": "手動追加",
+    "modelSourceDiscovered": "自動発見",
+    "modelSourceBuiltin": "内蔵",
+    "manualModelsOnly": "手動で追加したモデルのみ",
+    "manualModelsOnlyHint": "有効にするとモデル検索はこのプロバイダーにモデルを追加しません（学習したコンテキスト窓の記録のみ）。カスタムプロバイダーは既定で有効",
+    "modelWindowTitle": "コンテキストウィンドウ（トークン）",
+    "modelWindowPlaceholder": "空 = グローバル設定値を使用",
+    "modelWindowHint": "OpenAI 互換 API は窓の大きさを返さないため、空の場合はグローバル設定値で裁きます",
+    "discoverPreviewTitle": "発見結果（未追加）",
+    "discoverPreviewHint": "追加するモデルにチェックしてください。未チェックは書き込みません",
+    "discoverAddSelected": "選択を追加",
+    "discoverAddAll": "すべて追加",
+    "discoverPreviewEmpty": "追加できる新しいモデルはありません",
+    "judgeModelLabel": "判断モデル",
+    "judgeModelNone": "未設定：判定は行わずルールで直接判断します",
+    "goManageModels": "モデル管理を開く",
+    "defaultModelSaved": "デフォルトモデルを保存しました",
+    "defaultModelCleared": "デフォルトモデルを解除しました"
   },
   "agentConfig": {
     "title": "設定",
@@ -2329,6 +2350,10 @@
       "layer": "取得元",
       "cost": "所要/費用",
       "rate": "評価"
-    }
+    },
+    "source.judge_slot": "判定スロット",
+    "source.decision_slot": "モデル管理・判断モデル",
+    "source.agent_default": "このエージェントの既定モデル",
+    "source.global_default": "グローバル既定モデル"
   }
 }

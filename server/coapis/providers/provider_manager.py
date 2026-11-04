@@ -927,13 +927,24 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self,
         provider_id: str,
         save: bool = True,
+        persist_new_models: bool = True,
     ) -> List[ModelInfo]:
         """Fetch the list of available models from a provider.
 
         Args:
             provider_id: The ID of the provider to fetch models from.
             save: If True, save the discovered models to the provider
-                configuration. Defaults to True.
+                configuration. Defaults to True.  The ``/discover``
+                endpoint defaults it to False so "what does this provider
+                have?" is a read-only preview.
+            persist_new_models: If False, models the user never chose are
+                **not** imported; only context-window numbers for models
+                already in the list are recorded.  The background
+                context-window probe runs with this, so a single chat can
+                no longer pull a provider's whole catalogue into the
+                model list (measured on dev 2026-11-02: qwen-flash was
+                created with 2 hand-typed models and ended up with 21 --
+                19 imported by a probe one chat triggered).
 
         Returns:
             List of ModelInfo objects representing available models.
@@ -952,9 +963,20 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 # the model type from ID/name.
                 from .model_type import infer_model_type
 
+                # Duck-typed providers (plugin shims, test fakes) are not
+                # required to carry the tri-state flag: when a provider
+                # cannot answer, assume the conservative answer — do not
+                # bulk-import a catalogue nobody asked for.
+                keeps_manual = getattr(provider, "keeps_models_manual", None)
+                manual_only = keeps_manual() if callable(keeps_manual) else True
+                persist_new = persist_new_models and not manual_only
                 existing_by_id = {m.id: m for m in provider.models}
                 new_models = []
                 seen_ids = set()
+                # A save is worth doing only when something was actually
+                # learned; the probe runs on ordinary chats, so a no-op
+                # fetch must not rewrite provider files every 30 minutes.
+                changed = False
                 for m in models:
                     old = existing_by_id.get(m.id)
                     if old is not None:
@@ -981,12 +1003,21 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                                 m.max_sequence_length
                                 or old.max_sequence_length
                             )
+                            if m.max_sequence_length:
+                                changed = True
                         else:
                             m.max_sequence_length = old.max_sequence_length
                         m.source = old.source
                     else:
+                        if not persist_new:
+                            # Not a model the user chose: leave it out of
+                            # the catalogue, the preview list still shows it.
+                            continue
                         m.model_type = infer_model_type(m.id, m.name)
-                        m.source = "added"
+                        # Honest provenance: a model that arrived by
+                        # discovery is not one the user added by hand.
+                        m.source = "discovered"
+                        changed = True
                     new_models.append(m)
                     seen_ids.add(m.id)
                 # Keep previously-known models that weren't re-discovered
@@ -994,17 +1025,24 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 for m in provider.models:
                     if m.id not in seen_ids:
                         new_models.append(m)
-                provider.models = new_models
-                # Save provider config to appropriate location
-                is_plugin = provider_id in self.plugin_providers
-                if is_plugin:
-                    provider_info = ProviderInfo(**provider.model_dump())
-                    self.plugin_providers[provider_id]["info"] = provider_info
-                    self._save_plugin_provider(provider)
+                if changed:
+                    provider.models = new_models
+                    # Save provider config to appropriate location
+                    is_plugin = provider_id in self.plugin_providers
+                    if is_plugin:
+                        provider_info = ProviderInfo(**provider.model_dump())
+                        self.plugin_providers[provider_id]["info"] = provider_info
+                        self._save_plugin_provider(provider)
+                    else:
+                        self._save_provider(
+                            provider,
+                            is_builtin=provider_id in self.builtin_providers,
+                        )
                 else:
-                    self._save_provider(
-                        provider,
-                        is_builtin=provider_id in self.builtin_providers,
+                    logger.debug(
+                        "Model discovery for provider '%s' learned nothing; "
+                        "provider file left untouched.",
+                        provider_id,
                     )
             return models
         except Exception as e:
@@ -1054,9 +1092,18 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         return True
 
     async def _window_probe_task(self, provider_id: str) -> None:
-        """Background discovery whose only purpose is the window numbers."""
+        """Background discovery whose only purpose is the window numbers.
+
+        ``persist_new_models=False``: the probe fires on ordinary chats, so
+        importing here is what silently grew a 2-model custom provider to
+        21 on dev.  Learning a window size must never widen the catalogue.
+        """
         try:
-            await self.fetch_provider_models(provider_id, save=True)
+            await self.fetch_provider_models(
+                provider_id,
+                save=True,
+                persist_new_models=False,
+            )
             # Read the *stored* state, not the fetched list: the merge above
             # is what the rest of the system (``reported_window_for``) reads.
             provider = self.get_provider(provider_id)
@@ -1240,6 +1287,16 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
             )
         added, error_message = await provider.add_model(model_info)
         if not added:
+            # 幂等（v16）：模型已经在列表里就是"加成功了"。旧实现抛
+            # ProviderError，全局异常处理把这个码包成 HTTP 404 "Not Found"，
+            # 用户在 UI 里看到的是"这个模型不存在"——语义正好相反。
+            if "already exists" in (error_message or "").lower():
+                logger.info(
+                    "Model %s/%s already on the list: treated as success",
+                    provider_id,
+                    model_info.id,
+                )
+                return await provider.get_info()
             raise ProviderError(
                 message=error_message,
                 details={
@@ -1340,7 +1397,9 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 the provider are cleared (provider-level removal).
         """
         cleared_any = False
-        for model_type in ("chat", "embedding", "rerank", "audio", "vision"):
+        from .model_type import VALID_DEFAULT_SLOTS
+
+        for model_type in VALID_DEFAULT_SLOTS:
             slot = self.default_models.get_by_type(model_type)
             if slot is None or slot.provider_id != provider_id:
                 continue
@@ -2094,8 +2153,20 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 message=f"Model '{model_id}' not found in provider '{provider_id}'",
             )
         
-        # Verify model type matches
-        if model.model_type != model_type:
+        # Verify model type matches.  The ``decision`` slot is a *purpose*
+        # slot, not a model type: it holds a chat-capable model (the judge
+        # has to emit JSON verdicts), so it is checked for chat capability
+        # instead of name equality.
+        if model_type == "decision":
+            from ..decision.resolver import assert_chat_capable
+
+            if not assert_chat_capable(provider_id, model_id):
+                raise ProviderError(
+                    message=(
+                        f"模型 '{model_id}' 不是 chat 类型，不能放进决策模型槽位"
+                    ),
+                )
+        elif model.model_type != model_type:
             raise ProviderError(
                 message=f"Model type mismatch: expected '{model_type}', "
                 f"got '{model.model_type}'",
@@ -2121,10 +2192,56 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                 f"✓ Synced active_model with default_models.chat: "
                 f"{provider_id}/{model_id}"
             )
+
+        # The decision hub's own model slot (judge_provider_id/judge_model
+        # in config/decision_hub.json) predates this slot and outranks it
+        # in the resolver.  Choosing here means "this is the judge model",
+        # so the legacy slot is cleared and the slot becomes the single
+        # source -- no hidden second value that keeps winning.
+        if model_type == "decision":
+            try:
+                from ..decision.config import save_hub_section
+
+                save_hub_section({"judge_provider_id": "", "judge_model": ""})
+                logger.info(
+                    "Cleared the legacy judge_provider_id/judge_model slot "
+                    "in decision_hub.json: the decision model slot is now "
+                    "the single source for the judge model.",
+                )
+            except Exception as exc:  # the slot itself is already saved
+                logger.warning(
+                    "Could not clear the legacy judge slot in "
+                    "decision_hub.json: %s",
+                    exc,
+                )
         
         logger.info(
             f"✓ Set default {model_type} model: {provider_id}/{model_id}"
         )
+
+    def clear_default_model(self, model_type: str) -> None:
+        """空掉一个槽位（v16）：只能设不能清 = 判官一旦上岗就永远下不来。
+
+        槽位从 ``default_models.json`` 里删掉；``DefaultModelsConfig.to_dict``
+        跳过空槽，所以 GET 侧立刻看不见这一项。清 chat 槽位时撤掉环境里激活
+        模型的引用（与 set 侧的 pin 对称）；清 decision 槽位时把判官请下岗。
+        """
+        self.default_models.set_by_type(model_type, None)
+        self._save_default_models()
+        if model_type == "chat":
+            self._restore_active_model()
+        elif model_type == "decision":
+            # 判官槽位是 hub 里的历史键，必须一起空掉，否则 resolver 仍从
+            # judge_slot 层命中，UI 上"清空"形同虚设。
+            try:
+                hub = json.loads(self.hub_file.read_text(encoding="utf-8"))
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
+                hub = None
+            if isinstance(hub, dict):
+                hub["judge_provider_id"] = ""
+                hub["judge_model"] = ""
+                self._save_config(self.hub_file, hub)
+        logger.info(f"✓ Cleared default slot: {model_type}")
 
     def get_models_by_type(
         self,
@@ -2140,6 +2257,10 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         Returns:
             List of model info dicts with provider info included
         """
+        # ``decision`` is a purpose slot, not a model type: the judge runs a
+        # chat-capable model, so the candidates listed for that slot are the
+        # chat models.
+        wanted_type = "chat" if model_type == "decision" else model_type
         result = []
         
         # Get all providers (builtin + custom + plugin)
@@ -2166,7 +2287,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
             models = getattr(provider, "models", [])
             for model in models:
                 model_type_value = getattr(model, "model_type", "chat")
-                if model_type_value == model_type:
+                if model_type_value == wanted_type:
                     result.append({
                         "provider_id": provider_id,
                         "provider_name": provider.name,
@@ -2177,6 +2298,13 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
                         "supports_video": model.supports_video,
                         "embedding_dimension": model.embedding_dimension,
                         "is_free": model.is_free,
+                        # Provenance + the context window: the model
+                        # management list shows "hand-added" vs "discovered"
+                        # and the window number next to each model.
+                        "source": getattr(model, "source", "builtin"),
+                        "max_sequence_length": getattr(
+                            model, "max_sequence_length", None,
+                        ),
                     })
         
         return result

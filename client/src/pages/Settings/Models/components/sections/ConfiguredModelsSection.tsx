@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
-import { Table, Input } from "antd";
+import { Space, Table, Input } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { StarFilled, SearchOutlined } from "@ant-design/icons";
+import { StarFilled, SearchOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { DEFAULT_MODEL_SLOTS } from "../modelSlots";
 import { Button, Tag } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 import type { ProviderInfo, ModelInfo } from "@/api/types";
@@ -16,9 +17,17 @@ interface Row {
   model: ModelInfo;
 }
 
-type ModelType = "chat" | "embedding" | "rerank" | "audio" | "vision";
+type ModelType =
+  | "chat"
+  | "embedding"
+  | "rerank"
+  | "audio"
+  | "vision"
+  | "decision";
 
-const TYPE_ORDER: ModelType[] = ["chat", "embedding", "rerank", "audio", "vision"];
+// 槽位名单来自共享模块（与后端 VALID_DEFAULT_SLOTS 一一对应）：加第 6 个槽位
+// 不需要在第四处重复字面量里再补一次。
+const TYPE_ORDER: ModelType[] = DEFAULT_MODEL_SLOTS as ModelType[];
 
 const typeTagColors: Record<string, string> = {
   chat: "blue",
@@ -85,7 +94,30 @@ export const ConfiguredModelsSection = React.memo(function ConfiguredModelsSecti
 
   const rows = useMemo(() => {
     let list = allRows;
-    if (activeType) {
+    if (activeType === "decision") {
+      // 决策槽位是"用途槽位"不是模型类型：候选 = 全部 chat 模型（判官要输出
+      // JSON 判决，embedding/rerank 干不了），当前在岗的那条排最前。
+      const onDuty = defaultModels.decision;
+      list = list
+        .filter((r) => (r.model.model_type || "chat") === "chat")
+        .sort(
+          (a, b) =>
+            Number(
+              !(
+                onDuty &&
+                b.provider.id === onDuty.providerId &&
+                b.model.id === onDuty.modelId
+              ),
+            ) -
+            Number(
+              !(
+                onDuty &&
+                a.provider.id === onDuty.providerId &&
+                a.model.id === onDuty.modelId
+              ),
+            ),
+        );
+    } else if (activeType) {
       list = list.filter((r) => (r.model.model_type || "chat") === activeType);
     }
     const q = query.trim().toLowerCase();
@@ -107,7 +139,7 @@ export const ConfiguredModelsSection = React.memo(function ConfiguredModelsSecti
         return a.model.name.localeCompare(b.model.name);
       },
     );
-  }, [allRows, activeType, query]);
+  }, [allRows, activeType, defaultModels, query]);
 
   const typeLabels: Record<string, string> = {
     chat: t("models.chatModels"),
@@ -115,15 +147,26 @@ export const ConfiguredModelsSection = React.memo(function ConfiguredModelsSecti
     rerank: t("models.rerankModels"),
     audio: t("models.audioModels"),
     vision: t("models.visionModels"),
+  decision: t("models.decisionModels"),
   };
 
-  const isDefault = (r: Row) => {
-    const type = (r.model.model_type || "chat") as string;
-    const slot = defaultModels[type];
+  /** 这一行是否就是某个默认槽位里的模型（decision 槽位里放 chat 模型）。 */
+  const isDefaultFor = (r: Row, slot: ModelType) => {
+    const entry = defaultModels[slot];
     return (
-      !!slot && slot.providerId === r.provider.id && slot.modelId === r.model.id
+      !!entry &&
+      entry.providerId === r.provider.id &&
+      entry.modelId === r.model.id
     );
   };
+
+  /** 这一行的归属槽位 = 模型自己的类型（chat 行 = 对话默认槽位）。 */
+  const owningSlot = (r: Row) => (r.model.model_type || "chat") as ModelType;
+
+  const isDefault = (r: Row) => isDefaultFor(r, owningSlot(r));
+
+  /** chat 模型可以兼任决策模型（判官跑的必须是 chat 能力的模型）。 */
+  const isChatRow = (r: Row) => owningSlot(r) === "chat";
 
   const columns: ColumnsType<Row> = [
     {
@@ -190,37 +233,74 @@ export const ConfiguredModelsSection = React.memo(function ConfiguredModelsSecti
       render: (_, r) => {
         if (!isDefault(r)) return null;
         const type = r.model.model_type || "chat";
-        return (
-          <Tag style={{ color: "#faad14", borderColor: "#faad14" }}>
-            <StarFilled style={{ marginRight: 4 }} />
-            {typeLabels[type] ?? type}
-          </Tag>
-        );
+        const tags = [];
+        if (isDefault(r)) {
+          tags.push(
+            <Tag key="own" style={{ color: "#faad14", borderColor: "#faad14" }}>
+              <StarFilled style={{ marginRight: 4 }} />
+              {typeLabels[type] ?? type}
+            </Tag>,
+          );
+        }
+        // 决策模型槽位：chat 模型可兼任，所以列表里要看得见谁在岗。
+        if (isChatRow(r) && isDefaultFor(r, "decision")) {
+          tags.push(
+            <Tag
+              key="decision"
+              style={{ color: "#13c2c2", borderColor: "#13c2c2" }}
+            >
+              <ThunderboltOutlined style={{ marginRight: 4 }} />
+              {t("models.decisionModels")}
+            </Tag>,
+          );
+        }
+        if (tags.length === 0) return null;
+        return <Space size={4}>{tags}</Space>;
       },
     },
     {
       title: t("models.actions"),
       key: "actions",
-      width: 120,
+      width: 230,
       render: (_, r) => {
+        const slot = owningSlot(r);
         const already = isDefault(r);
+        const judgeOn = isChatRow(r) && isDefaultFor(r, "decision");
         return (
-          <Button
-            size="small"
-            type={already ? "default" : "primary"}
-            disabled={already}
-            onClick={() =>
-              onSetDefault(
-                (r.model.model_type || "chat") as ModelType,
-                {
+          <Space size={4}>
+            <Button
+              size="small"
+              type={already ? "default" : "primary"}
+              disabled={already}
+              onClick={() =>
+                onSetDefault(slot, {
                   providerId: r.provider.id,
                   modelId: r.model.id,
-                },
-              )
-            }
-          >
-            {already ? t("models.alreadyDefault") : t("models.setAsDefault")}
-          </Button>
+                })
+              }
+            >
+              {already ? t("models.alreadyDefault") : t("models.setAsDefault")}
+            </Button>
+            {isChatRow(r) && (
+              // 决策模型（判官）= 模型管理里的第 6 个槽位，与其余槽位同权。
+              <Button
+                size="small"
+                type={judgeOn ? "default" : "primary"}
+                disabled={judgeOn}
+                icon={<ThunderboltOutlined />}
+                onClick={() =>
+                  onSetDefault("decision", {
+                    providerId: r.provider.id,
+                    modelId: r.model.id,
+                  })
+                }
+              >
+                {judgeOn
+                  ? t("models.alreadyDefault")
+                  : t("models.setAsDecision")}
+              </Button>
+            )}
+          </Space>
         );
       },
     },

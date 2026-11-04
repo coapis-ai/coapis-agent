@@ -13,9 +13,12 @@ import {
   ProviderCard,
   CustomProviderModal,
 } from "./components";
+import type { DefaultSlot } from "./components/modelSlots";
 import styles from "./index.module.less";
 
-type ModelType = "chat" | "embedding" | "rerank" | "audio" | "vision";
+// 槽位名单的单一来源在前端共享模块（与后端 VALID_DEFAULT_SLOTS 一一对应）。
+// 页面自己再写一份五项字面量 = 后端加 decision 槽位时页面永远看不见（v16 问题 2）。
+type ModelType = DefaultSlot;
 
 const ModelsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -69,8 +72,20 @@ const ModelsPage: React.FC = () => {
         model_id: value.modelId,
         model_type: modelType,
       });
-      setDefaultModels((prev) => ({ ...prev, [modelType]: value }));
-      message.success(t("models.defaultModelSaved"));
+      // 空 model_id = 清空槽位：本地状态要跟着删掉这一项，否则乐观更新
+      // 会留下 "provider /" 这种半条命显示（判官槽位尤其要看得到"已下岗"）。
+      setDefaultModels((prev) => {
+        const next = { ...prev };
+        if (!value.modelId) {
+          delete next[modelType];
+        } else {
+          next[modelType] = value;
+        }
+        return next;
+      });
+      message.success(
+        value.modelId ? t("models.defaultModelSaved") : t("models.defaultModelCleared"),
+      );
     } catch (error) {
       console.error("Failed to set default model:", error);
       message.error(t("models.failedToSave"));
@@ -81,7 +96,12 @@ const ModelsPage: React.FC = () => {
     type: ModelType,
     value: { providerId: string; modelId: string } | null,
   ) => {
-    if (!value) return;
+    // 之前这里是 `if (!value) return;`：下拉框的 allowClear 清空后前端
+    // 什么都不做，槽位永远只能设不能清（判官上了岗就下不来）。
+    if (!value) {
+      setDefaultModel(type, { providerId: "", modelId: "" });
+      return;
+    }
     setDefaultModel(type, value);
   };
 

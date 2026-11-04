@@ -9,6 +9,10 @@ export interface ModelInfo {
   generate_kwargs: Record<string, unknown>;
   /** Model type: chat, embedding, rerank, audio, or vision. */
   model_type?: string;
+  /** 'added' = typed in by hand, 'discovered' = imported by discovery. */
+  source?: string;
+  /** Context window in tokens; null = the provider never reported one. */
+  max_sequence_length?: number | null;
 }
 
 export interface ProviderInfo {
@@ -24,6 +28,13 @@ export interface ProviderInfo {
   support_model_discovery: boolean;
   /** Whether this provider supports checking connection to the API without model configuration. */
   support_connection_check: boolean;
+  /**
+   * True: model discovery never *adds* models to this provider -- the
+   * model list is exactly the models added by hand (discovery may still
+   * record context windows it learned).  null/undefined = per-kind
+   * default: custom providers are manual-only, built-in providers are not.
+   */
+  manual_models_only?: boolean | null;
   /** True when the base_url should be frozen (not editable). */
   freeze_url: boolean;
   /** True when an API key is required for this provider. */
@@ -34,6 +45,12 @@ export interface ProviderInfo {
 }
 
 export interface ProviderConfigRequest {
+  /**
+   * True: model discovery never *adds* models to this provider.  Omit to
+   * leave the setting untouched; null restores the per-kind default
+   * (custom providers are manual-only).
+   */
+  manual_models_only?: boolean | null;
   api_key?: string;
   base_url?: string;
   chat_model?: string;

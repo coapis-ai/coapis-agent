@@ -89,6 +89,16 @@ class ProviderConfigRequest(BaseModel):
         default=None,
         description="Whether this provider requires an API key",
     )
+    manual_models_only: Optional[bool] = Field(
+        default=None,
+        description=(
+            "True: model discovery never *adds* models to this provider — "
+            "the list is exactly the models added by hand (discovery may "
+            "still record context windows it learned).  None = per-kind "
+            "default: custom providers are manual-only, built-in providers "
+            "are not.  Omit the field to leave the setting untouched."
+        ),
+    )
     generate_kwargs: Optional[dict] = Field(
         default_factory=dict,
         description=(
@@ -119,7 +129,10 @@ class SetDefaultModelRequest(BaseModel):
     model_id: str = Field(..., description="Model ID")
     model_type: str = Field(
         ...,
-        description="Model type: chat, embedding, rerank, audio, or vision",
+        description=(
+            "Slot to fill: chat, embedding, rerank, audio, vision, "
+            "or decision (the judge's own slot)"
+        ),
     )
 
 
@@ -219,6 +232,23 @@ class ModelConfigRequest(BaseModel):
             "These override provider-level generate_kwargs."
         ),
     )
+    max_sequence_length: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Context window of this model, in tokens.  OpenAI-compatible "
+            "``/models`` payloads do not carry this number, so for a "
+            "gateway endpoint the field stays unknown unless the user "
+            "types it in — that is the intended way to pin a window."
+        ),
+    )
+
+    @field_validator("max_sequence_length")
+    @classmethod
+    def _validate_max_sequence_length(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("max_sequence_length must be > 0")
+        return v
 
 
 def _validate_model_slot(
@@ -351,16 +381,19 @@ async def configure_provider(
         if provider_info and provider_info.is_custom and provider_info.owner and provider_info.owner != username:
             raise HTTPException(status_code=403, detail="无权修改他人的 Provider")
 
-    ok = manager.update_provider(
-        provider_id,
-        {
-            "api_key": body.api_key,
-            "base_url": body.base_url,
-            "chat_model": body.chat_model,
-            "require_api_key": body.require_api_key,
-            "generate_kwargs": body.generate_kwargs,
-        },
-    )
+    updates = {
+        "api_key": body.api_key,
+        "base_url": body.base_url,
+        "chat_model": body.chat_model,
+        "require_api_key": body.require_api_key,
+        "generate_kwargs": body.generate_kwargs,
+    }
+    # Tri-state: only forward the field when the request actually carried
+    # it.  Absent means "leave the setting alone"; an explicit null restores
+    # the per-kind default (custom providers are manual-only).
+    if "manual_models_only" in body.model_fields_set:
+        updates["manual_models_only"] = body.manual_models_only
+    ok = manager.update_provider(provider_id, updates)
     if not ok:
         raise HTTPException(
             status_code=404,
@@ -513,7 +546,13 @@ async def test_provider(
 @router.post(
     "/{provider_id}/discover",
     response_model=DiscoverModelsResponse,
-    summary="Discover available models from provider",
+    summary="Discover available models from provider (preview by default)",
+    description=(
+        "Read the catalogue the provider advertises.  ``save=false`` (the "
+        "default) is a read-only preview: the UI lists what it found and "
+        "imports exactly the rows the user ticks.  ``save=true`` keeps the "
+        "legacy import-everything behaviour."
+    ),
 )
 @require_permission("models:write")
 async def discover_models(
@@ -522,8 +561,11 @@ async def discover_models(
     provider_id: str = Path(...),
     body: Optional[DiscoverModelsRequest] = Body(default=None),
     save: bool = Query(
-        default=True,
-        description="Save discovered models to provider",
+        default=False,
+        description=(
+            "Import everything the provider reports into the model list "
+            "(legacy behaviour).  False = preview only."
+        ),
     ),
 ) -> DiscoverModelsResponse:
     try:
@@ -1294,8 +1336,13 @@ async def get_models_by_type(
     - Knowledge base settings (select embedding model)
     - Voice features (select audio model)
     """
-    # Validate model type
-    valid_types = ["chat", "embedding", "rerank", "audio", "vision"]
+    # Validate slot name.  ``decision`` (the decision/judge model slot) is a
+    # purpose slot alongside the five model types -- both lists come from the
+    # single source in providers/model_type.py, so the tabs, this endpoint
+    # and the writer can never disagree about how many slots exist.
+    from coapis.providers.model_type import VALID_DEFAULT_SLOTS
+
+    valid_types = list(VALID_DEFAULT_SLOTS)
     if model_type not in valid_types:
         raise HTTPException(
             status_code=400,
@@ -1326,13 +1373,16 @@ async def get_default_models(
 async def get_default_model_by_type(
     model_type: str = Path(
         ...,
-        description="Model type: chat, embedding, rerank, audio, or vision",
+        description="Slot: chat, embedding, rerank, audio, vision, decision",
     ),
     manager: ProviderManager = Depends(get_provider_manager),
 ):
-    """Get default model for a specific type."""
-    # Validate model type
-    valid_types = ["chat", "embedding", "rerank", "audio", "vision"]
+    """Get the model currently in one default-model slot."""
+    # Slot names come from the single source in providers/model_type.py so
+    # this endpoint and the UI tabs can never disagree about how many exist.
+    from coapis.providers.model_type import VALID_DEFAULT_SLOTS
+
+    valid_types = list(VALID_DEFAULT_SLOTS)
     if model_type not in valid_types:
         raise HTTPException(
             status_code=400,
@@ -1366,6 +1416,14 @@ async def set_default_model(
     Requires 'models:write' permission.
     """
     try:
+        # 空 model_id = 清空这个槽位（v16）。之前 UI 只有"设"没有"清"，
+        # 判官一旦上岗就下不来；旧路径会拿空 model_id 去查模型表然后 400。
+        if not body.model_id.strip():
+            manager.clear_default_model(body.model_type)
+            return {
+                "status": "ok",
+                "message": f"Default {body.model_type} slot cleared",
+            }
         manager.set_default_model(
             model_type=body.model_type,
             provider_id=body.provider_id,

@@ -1321,6 +1321,25 @@
     "rerankModels": "重排序模型",
     "audioModels": "音频模型",
     "visionModels": "视觉模型",
+    "decisionModels": "决策模型",
+    "setAsDecision": "设为决策模型",
+    "decisionModelsHint": "决策中枢的判官用模型；必须能输出 JSON，所以候选是对话模型",
+    "modelSourceAdded": "手动添加",
+    "modelSourceDiscovered": "自动发现",
+    "modelSourceBuiltin": "内置",
+    "manualModelsOnly": "只用手动手加的模型",
+    "manualModelsOnlyHint": "开启后模型发现不会往这个提供商里塞模型（只会补它学到的上下文窗口）；自定义提供商默认开启",
+    "modelWindowTitle": "上下文窗口（token）",
+    "modelWindowPlaceholder": "留空 = 用全局配置值",
+    "modelWindowHint": "OpenAI 兼容接口不回传窗口大小；留空时上下文预算按全局配置值裁剪",
+    "discoverPreviewTitle": "发现结果（尚未添加）",
+    "discoverPreviewHint": "勾选要添加的模型；不勾选不会写入模型列表",
+    "discoverAddSelected": "添加所选",
+    "discoverAddAll": "全部添加",
+    "discoverPreviewEmpty": "没有新模型可添加",
+    "judgeModelLabel": "决策模型",
+    "judgeModelNone": "未配置：判官不上岗，按规则直判",
+    "goManageModels": "去模型管理设置",
     "defaultModelsTitle": "默认模型设置",
     "selectDefaultModel": "选择默认模型",
     "defaultModelSaved": "默认模型已保存",
@@ -1351,7 +1370,8 @@
     "typeUpdated": "类型已更新为 {{type}}",
     "updateModelFailed": "更新模型失败",
     "noConfiguredModels": "暂无已配置模型",
-    "typeFilterPlaceholder": "按类型筛选"
+    "typeFilterPlaceholder": "按类型筛选",
+    "defaultModelCleared": "默认模型已清空"
   },
   "agentConfig": {
     "title": "运行配置",
@@ -2974,6 +2994,10 @@
       "layer": "怎么来的",
       "cost": "耗时/花费",
       "rate": "打分"
-    }
+    },
+    "source.judge_slot": "判官槽位",
+    "source.decision_slot": "模型管理·决策模型",
+    "source.agent_default": "该智能体默认模型",
+    "source.global_default": "全局默认模型"
   }
 }

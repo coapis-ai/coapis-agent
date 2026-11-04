@@ -64,10 +64,12 @@ export default function CoApisDecisionPanel({
   const [items, setItems] = useState<DecisionEventResponse[]>([]);
   const [stats, setStats] = useState<DecisionStatsResponse | null>(null);
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
-  const [judge, setJudge] = useState<{ provider_id: string; model: string }>({
-    provider_id: "",
-    model: "",
-  });
+  const [judge, setJudge] = useState<{
+    provider_id: string;
+    model: string;
+    configured?: boolean;
+    source?: string;
+  }>({ provider_id: "", model: "" });
   const [source, setSource] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
@@ -239,6 +241,20 @@ export default function CoApisDecisionPanel({
         {judge.model
           ? `${judge.provider_id || "?"} / ${judge.model}`
           : t("decision.noJudge", "未配置（走规则）")}
+        {/* 说清"当前生效的是谁、从哪一层来"（判官槽位/决策模型槽位/智能体默认/
+            全局默认）：历史事故就是用户拿会话激活模型去猜判官是谁。 */}
+        {judge.model && judge.source
+          ? `（${t(`decision.source.${judge.source}`, judge.source)}）`
+          : ""}
+        {/* 决策模型的家在模型管理页的第 6 个标签：给一条最短路径。 */}
+        <a
+          href="/settings/models"
+          target="_blank"
+          rel="noreferrer"
+          style={{ marginLeft: 8, fontSize: 11 }}
+        >
+          {t("models.judgeModelLabel", "决策模型")} →
+        </a>
       </span>
     </div>
   );

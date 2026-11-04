@@ -8,7 +8,7 @@ import {
   Tooltip,
   Select,
 } from "@agentscope-ai/design";
-import { AutoComplete } from "antd";
+import { AutoComplete, Checkbox, Space } from "antd";
 import {
   DeleteOutlined,
   PlusOutlined,
@@ -341,6 +341,13 @@ export function RemoteModelManageModal({
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [discoveringModels, setDiscoveringModels] = useState(false);
+  // 发现预览：后端 /discover 现在默认 save=false（只看不写）。这里放"发现了但
+  // 还没添加"的候选，勾选后才写入——一次点击再也不会把提供商的整个目录灌进
+  // 模型列表（v16 问题 1 的治本口径）。
+  const [previewModels, setPreviewModels] = useState<
+    Array<{ id: string; name?: string }>
+  >([]);
+  const [previewSelection, setPreviewSelection] = useState<string[]>([]);
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const [probingModelId, setProbingModelId] = useState<string | null>(null);
   const [configOpenModelId, setConfigOpenModelId] = useState<string | null>(
@@ -705,6 +712,29 @@ export function RemoteModelManageModal({
     }
   };
 
+  /** 把勾选的候选写进模型列表：一次点击只添加用户选中的那几条。 */
+  const handleAddPreviewModels = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    setDiscoveringModels(true);
+    let ok = 0;
+    let lastErr = "";
+    for (const id of ids) {
+      try {
+        // addModel 返回更新后的 ProviderInfo（没有 success 字段）：不抛错即成功。
+        await api.addModel(provider.id, { id, name: id });
+        ok += 1;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+      }
+    }
+    await onSaved();
+    setPreviewModels((prev) => prev.filter((m) => !ids.includes(m.id)));
+    setPreviewSelection([]);
+    if (ok > 0) message.success(t("models.discoverAdded", { count: ok }));
+    if (lastErr) message.warning(lastErr);
+    setDiscoveringModels(false);
+  };
+
   // 已移除自动discover逻辑：用户点击"添加模型"时不再自动拉取所有模型
   // 保留手动"自动获取模型"按钮供用户主动触发
 
@@ -1064,6 +1094,50 @@ export function RemoteModelManageModal({
             </Button>
           </div>
         ))}
+
+      {previewModels.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            {t("models.discoverPreviewTitle")}（{previewModels.length}）
+          </div>
+          <div style={{ color: "#888", fontSize: 12, marginBottom: 6 }}>
+            {t("models.discoverPreviewHint")}
+          </div>
+          <Checkbox.Group
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              maxHeight: 180,
+              overflowY: "auto",
+            }}
+            value={previewSelection}
+            onChange={(v) => setPreviewSelection(v as string[])}
+            options={previewModels.map((m) => ({
+              label: m.name || m.id,
+              value: m.id,
+            }))}
+          />
+          <Space style={{ marginTop: 8 }}>
+            <Button
+              type="primary"
+              size="small"
+              disabled={previewSelection.length === 0}
+              onClick={() => handleAddPreviewModels(previewSelection)}
+            >
+              {t("models.discoverAddSelected")}（{previewSelection.length}）
+            </Button>
+            <Button
+              size="small"
+              onClick={() =>
+                handleAddPreviewModels(previewModels.map((m) => m.id))
+              }
+            >
+              {t("models.discoverAddAll")}
+            </Button>
+          </Space>
+        </div>
+      )}
     </Modal>
   );
 }

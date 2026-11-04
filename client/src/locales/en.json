@@ -1454,6 +1454,25 @@
     "rerankModels": "Rerank Models",
     "audioModels": "Audio Models",
     "visionModels": "Vision Models",
+    "decisionModels": "Decision models",
+    "setAsDecision": "Set as decision model",
+    "decisionModelsHint": "Model used by the decision hub's judge; it must emit JSON, so candidates are chat models",
+    "modelSourceAdded": "Added by hand",
+    "modelSourceDiscovered": "Discovered",
+    "modelSourceBuiltin": "Built-in",
+    "manualModelsOnly": "Only models I added by hand",
+    "manualModelsOnlyHint": "When on, model discovery never adds models to this provider (it may still record context windows it learned); custom providers default to on",
+    "modelWindowTitle": "Context window (tokens)",
+    "modelWindowPlaceholder": "Empty = use the global configured value",
+    "modelWindowHint": "OpenAI-compatible endpoints do not report the window size; when empty, the context budget uses the global configured value",
+    "discoverPreviewTitle": "Discovery results (not added yet)",
+    "discoverPreviewHint": "Tick the models to add; untagged models are never written to the list",
+    "discoverAddSelected": "Add selected",
+    "discoverAddAll": "Add all",
+    "discoverPreviewEmpty": "No new models to add",
+    "judgeModelLabel": "Decision model",
+    "judgeModelNone": "Not configured: the judge stays off and rules decide",
+    "goManageModels": "Open model management",
     "defaultModelsTitle": "Default Models",
     "selectDefaultModel": "Select default model",
     "defaultModelSaved": "Default model saved",
@@ -1484,7 +1503,8 @@
     "typeUpdated": "Type updated to {{type}}",
     "updateModelFailed": "Failed to update model",
     "noConfiguredModels": "No configured models yet",
-    "typeFilterPlaceholder": "Filter by type"
+    "typeFilterPlaceholder": "Filter by type",
+    "defaultModelCleared": "Default model cleared"
   },
   "agentConfig": {
     "title": "Configuration",
@@ -2954,6 +2974,10 @@
       "layer": "Source",
       "cost": "Latency/Cost",
       "rate": "Rating"
-    }
+    },
+    "source.judge_slot": "judge slot",
+    "source.decision_slot": "model management · decision model",
+    "source.agent_default": "this agent's default model",
+    "source.global_default": "global default model"
   }
 }

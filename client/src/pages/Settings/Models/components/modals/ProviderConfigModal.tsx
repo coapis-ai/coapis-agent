@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import type { KeyboardEvent, ReactNode, UIEvent } from "react";
-import { Form, Input, Modal, Button, Select } from "@agentscope-ai/design";
+import { Form, Input, Modal, Button, Select, Switch } from "@agentscope-ai/design";
 import { useAppMessage } from "../../../../../hooks/useAppMessage";
 import { ApiOutlined, DownOutlined, RightOutlined } from "@ant-design/icons";
 import type { ProviderConfigRequest } from "../../../../../api/types";
@@ -248,6 +248,12 @@ interface ProviderConfigModalProps {
     chat_model: string;
     support_connection_check: boolean;
     generate_kwargs: Record<string, unknown>;
+    /**
+     * 三态开关（true=只手加 / false=探测可灌 / null=按类型默认）。
+     * 后端 ProviderInfo 已有这个字段，这里的内联投影必须跟上，否则表单
+     * 读不到值（v16 构建时的 TS2339）。
+     */
+    manual_models_only?: boolean | null;
   };
   activeModels: any;
   open: boolean;
@@ -409,6 +415,8 @@ export function ProviderConfigModal({
         base_url: values.base_url,
         chat_model: values.chat_model,
         generate_kwargs: hasGenerateConfigInput ? generateConfig : {},
+        // 显式写值（不是省略）：这个开关就是“我的模型列表由我说了算”
+        manual_models_only: values.manual_models_only ?? provider.is_custom,
       });
 
       await onSaved();
@@ -538,6 +546,8 @@ export function ProviderConfigModal({
         initialValues={{
           base_url: provider.base_url || undefined,
           chat_model: provider.chat_model || "OpenAIChatModel",
+          manual_models_only:
+            provider.manual_models_only ?? provider.is_custom,
           generate_kwargs_text:
             provider.generate_kwargs &&
             Object.keys(provider.generate_kwargs).length > 0
@@ -654,6 +664,26 @@ export function ProviderConfigModal({
               {t("models.advancedConfig")}
             </span>
           </button>
+
+          <Form.Item
+            hidden={!advancedOpen}
+            name="manual_models_only"
+            valuePropName="checked"
+            label={t("models.manualModelsOnly")}
+            extra={t("models.manualModelsOnlyHint")}
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
+            hidden={!advancedOpen}
+            name="manual_models_only"
+            valuePropName="checked"
+            label={t("models.manualModelsOnly")}
+            extra={t("models.manualModelsOnlyHint")}
+          >
+            <Switch />
+          </Form.Item>
 
           <Form.Item
             hidden={!advancedOpen}

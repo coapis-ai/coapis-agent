@@ -97,8 +97,10 @@ class ModelInfo(BaseModel):
     )
     source: str = Field(
         default="builtin",
-        description="Model source: 'builtin' (defined in code) "
-        "or 'added' (user-added via UI/API).",
+        description="Model source: 'builtin' (defined in code), "
+        "'added' (typed in by hand via UI/API) or 'discovered' "
+        "(imported by model discovery / the background window probe).  "
+        "Only 'added' models are treated as 'the models I chose'.",
     )
 
 
@@ -181,6 +183,17 @@ class ProviderInfo(BaseModel):
             " from the provider's API"
         ),
     )
+    manual_models_only: bool | None = Field(
+        default=None,
+        description=(
+            "True: model discovery never *adds* models to this provider — "
+            "the model list is exactly what was added by hand (discovery "
+            "may still fill in context-window numbers it learned).  "
+            "``None`` means 'not decided': the default applies, which is "
+            "True for custom providers and False for built-in ones.  Set "
+            "explicitly from the UI to override per provider."
+        ),
+    )
     support_connection_check: bool = Field(
         default=True,
         description=(
@@ -197,6 +210,18 @@ class ProviderInfo(BaseModel):
         description="Additional metadata for the provider "
         "(e.g., api_key_url, api_key_hint).",
     )
+
+    def keeps_models_manual(self) -> bool:
+        """Effective "only the models I added by hand" flag for this provider.
+
+        ``manual_models_only`` is tri-state so existing provider files,
+        which never wrote the key, keep working unchanged: an explicit
+        True/False wins, ``None`` falls back to the per-kind default --
+        custom providers are manual-only, built-in ones are not.
+        """
+        if self.manual_models_only is None:
+            return self.is_custom
+        return bool(self.manual_models_only)
 
 
 class Provider(ProviderInfo, ABC):
@@ -243,7 +268,9 @@ class Provider(ProviderInfo, ABC):
         """Delete a model from the provider's model list.
 
         For custom providers, any model can be deleted.
-        For builtin providers, only models with source='added' can be deleted.
+        For builtin providers, only models that arrived through the user
+        (hand-added or imported by discovery) can be deleted -- the
+        built-in catalogue is pinned in code.
         """
         model_id = model_id.strip()
         original_len = len(self.models)
@@ -254,11 +281,14 @@ class Provider(ProviderInfo, ABC):
                 if model.id.strip() != model_id
             ]
         else:
-            # Builtin provider: only allow deleting user-added models
+            # Builtin provider: only allow deleting user-facing models
             self.models = [
                 model
                 for model in self.models
-                if not (model.id.strip() == model_id and model.source == "added")
+                if not (
+                    model.id.strip() == model_id
+                    and model.source in ("added", "discovered")
+                )
             ]
         if len(self.models) == original_len:
             return False, f"Model '{model_id}' not found or not deletable"
@@ -286,6 +316,13 @@ class Provider(ProviderInfo, ABC):
             self.api_key_prefix = str(config["api_key_prefix"])
         if "require_api_key" in config and config["require_api_key"] is not None:
             self.require_api_key = bool(config["require_api_key"])
+        # Tri-state on purpose: None restores the per-kind default
+        # (custom providers only ever use hand-added models).
+        if "manual_models_only" in config:
+            value = config["manual_models_only"]
+            self.manual_models_only = (
+                None if value is None else bool(value)
+            )
         if (
             "generate_kwargs" in config
             and config["generate_kwargs"] is not None
@@ -400,6 +437,21 @@ class Provider(ProviderInfo, ABC):
                     and isinstance(config["generate_kwargs"], dict)
                 ):
                     model.generate_kwargs = config["generate_kwargs"]
+                # Context window, in tokens.  This is the one number the
+                # user may want to pin by hand: OpenAI-compatible
+                # ``/models`` payloads do not carry it, so for a gateway
+                # endpoint discovery leaves the field None and the context
+                # budget falls back to the global configured value.
+                if "max_sequence_length" in config:
+                    value = config["max_sequence_length"]
+                    if value is None:
+                        model.max_sequence_length = None
+                    elif isinstance(value, (int, float)) and not isinstance(
+                        value,
+                        bool,
+                    ):
+                        if int(value) > 0:
+                            model.max_sequence_length = int(value)
                 return True
         return False
 
@@ -488,6 +540,7 @@ class Provider(ProviderInfo, ABC):
             is_local=self.is_local,
             is_custom=self.is_custom,
             support_model_discovery=self.support_model_discovery,
+            manual_models_only=self.manual_models_only,
             # custom providers are assumed to not support connection check
             support_connection_check=self.support_connection_check
             and not self.is_custom,
@@ -503,20 +556,34 @@ class Provider(ProviderInfo, ABC):
 
 
 class DefaultModelSlot(BaseModel):
-    """Default model configuration for a specific model type."""
+    """Default model configuration for a specific slot."""
 
     provider_id: str = Field(..., description="Provider ID")
     model_id: str = Field(..., description="Model ID")
-    # 槽位名（chat/embedding/...）本身就是权威的类型，所以这里刻意可选：
+    # 槽位名（chat/embedding/.../decision）本身就是权威，所以这里刻意可选：
     # 历史落盘文件（to_dict 曾漏写 model_type）必须能读回来。
     # 消费方一律按槽位名取（get_by_type），不读这个字段。
-    model_type: ModelType = Field(
-        default="chat", description="Model type（槽位名的冗余副本，可选以兼容旧文件）"
+    model_type: str = Field(
+        default="chat",
+        description="Slot name（槽位名的冗余副本，可选以兼容旧文件）",
     )
 
 
+# 默认模型槽位 = 五个模型类型 + ``decision``（决策/判断模型）。类型枚举
+# 里刻意不含 decision：模型本身的类型只有五种，decision 是一个"用途槽位"，
+# 里面必须放 chat 模型（判官要输出 JSON 判决，embedding/rerank 干不了）。
+DEFAULT_MODEL_SLOTS: tuple[str, ...] = (
+    "chat",
+    "embedding",
+    "rerank",
+    "audio",
+    "vision",
+    "decision",
+)
+
+
 class DefaultModelsConfig(BaseModel):
-    """Default models configuration for all model types."""
+    """Default models configuration for all model slots."""
 
     chat: DefaultModelSlot | None = Field(
         default=None, description="Default chat model"
@@ -533,20 +600,29 @@ class DefaultModelsConfig(BaseModel):
     vision: DefaultModelSlot | None = Field(
         default=None, description="Default vision model"
     )
+    decision: DefaultModelSlot | None = Field(
+        default=None,
+        description=(
+            "Default decision (judge) model: the model the decision hub "
+            "asks for its judgements.  Must be a chat-capable model.  "
+            "``None`` means the judge does not run and every judgement "
+            "falls back to deterministic rules."
+        ),
+    )
 
-    def get_by_type(self, model_type: ModelType) -> DefaultModelSlot | None:
-        """Get default model by type."""
-        return getattr(self, model_type, None)
+    def get_by_type(self, slot: str) -> DefaultModelSlot | None:
+        """Get default model by slot name."""
+        return getattr(self, slot, None)
 
-    def set_by_type(self, model_type: ModelType, slot: DefaultModelSlot) -> None:
-        """Set default model by type."""
-        if hasattr(self, model_type):
-            setattr(self, model_type, slot)
+    def set_by_type(self, slot: str, slot_value: DefaultModelSlot) -> None:
+        """Set default model by slot name."""
+        if hasattr(self, slot):
+            setattr(self, slot, slot_value)
 
     def to_dict(self) -> Dict[str, Dict]:
         """Export to dict format for JSON serialization."""
         result = {}
-        for field in ["chat", "embedding", "rerank", "audio", "vision"]:
+        for field in DEFAULT_MODEL_SLOTS:
             slot = getattr(self, field)
             if slot:
                 # model_type 必须写出去：to_dict 曾漏掉它，而 DefaultModelSlot
