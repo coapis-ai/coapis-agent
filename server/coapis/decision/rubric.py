@@ -76,6 +76,21 @@ RUBRIC_TOOLS = """工具闸判则——只看「即将执行的这一个动作�
 why 必须引用动作序号（如「动作 2 已用同参数调过本工具」），不许凭感觉。
 拿不准就 allow——一次误提示的代价远小于把主链卡死。"""
 
+RUBRIC_PLAN_REVIEW = """计划审查岗判则——看的是**还没执行的这份计划本身靠不靠谱**，\
+不是任务有多难（那是判档岗的事）：
+1. 终点：计划有没有一条可验收的完成标准？读完文档/查完资料之后有没有「交付」这一步？
+   没有 → revise，并给出该补的那一条。
+2. 对症：各步骤与用户说的目标有直接关系吗？有没有在推进用户没提的东西？
+   有无关步骤 → revise；整个方向不对 → replan。
+3. 可验收：每一步单独做完了能看出来吗（能观察、能检查）？只写「分析一下」「处理一下」
+   这种无法验收的步骤 → revise，给出可验收的写法。
+4. 自设循环数：多步计划被自设成 1 步（finish 之外的步骤为零），而用户明确要的是
+   多件事 → revise。
+5. 计划其实就是「直接回答用户」或只是闲聊，却硬拆成多步 → replan。
+取值只有 pass / revise / replan。**一期只有建议权，没有否决权**：想拦也选 revise。
+why 必须引用步骤序号（如「步骤 2 无验收标准」），不许凭感觉。
+拿不准就 pass——一次误提示的代价远小于把主链卡住。"""
+
 #: 输出契约：判官必须吐 JSON，解析失败按弃权（台账记 abstain）
 JSON_ONLY = "只输出一个 JSON 对象，不要 markdown 代码围栏，不要解释性文字。"
 
@@ -87,7 +102,8 @@ def rubric_for(purpose: str, skills: Sequence[Any] | None = None) -> str:
     """取某岗位的判则全文（内置 + 工作区技能覆盖）。
 
     Args:
-        purpose: ``level`` / ``acceptance`` / ``advisor``。
+        purpose: ``level`` / ``acceptance`` / ``advisor`` / ``tools`` /
+            ``plan_review``。
         skills: 智能体手里已有的技能摘要（``SkillSummary`` 或任何带
             ``name``/``description`` 属性的对象，也接受 ``(name, desc)``
             元组与 ``dict``）。为 None 时只用内置判则。
@@ -101,6 +117,7 @@ def rubric_for(purpose: str, skills: Sequence[Any] | None = None) -> str:
         "acceptance": RUBRIC_ACCEPTANCE,
         "advisor": RUBRIC_ADVICE,
         "tools": RUBRIC_TOOLS,
+        "plan_review": RUBRIC_PLAN_REVIEW,
     }.get(purpose, "")
     if not skills:
         return base

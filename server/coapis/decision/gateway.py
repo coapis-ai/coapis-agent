@@ -55,6 +55,7 @@ PURPOSE_SKILL_TRIGGER = "skill_trigger"
 PURPOSE_INTENT = "intent"
 PURPOSE_ADVISOR = "tool_guard"
 PURPOSE_ACCEPTANCE = "verify"
+PURPOSE_PLAN_REVIEW = "plan_review"  # 计划生成后的审查岗（二期）
 
 # 台账 hit_layer 词表（v14 §4.1 阶梯各层出口）
 LAYER_LLM = "llm"               # L1 判官模型（显式配置）

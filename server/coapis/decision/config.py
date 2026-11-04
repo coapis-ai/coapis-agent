@@ -27,6 +27,7 @@ POSTS = (
     "intent",
     "skill_trigger",
     "plan_gate",
+    "plan_review",
     "tool_gate",
     "tool_guard",
     "verify",

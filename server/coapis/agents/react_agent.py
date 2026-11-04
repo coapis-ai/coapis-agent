@@ -539,6 +539,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self._task_tracker = task_tracker
         self.plan_notebook = plan_notebook  # Connect PlanNotebook to agent
 
+        # 计划审查岗（判断中枢二期）：计划一落地就看一眼「这计划做得下去吗」。
+        # 发射即忘——主链不等它；判出问题由 _inject_plan_review_hint 写进记忆，
+        # 下一轮推理时生效。岗位关掉时这里什么都不发生。
+        try:
+            self.plan_notebook.register_plan_change_hook(
+                "coapis_plan_review",
+                self._on_plan_change_review,
+            )
+        except Exception:
+            logger.debug("plan-review hook unavailable", exc_info=True)
+
         # Governance policy engine
         try:
             from .tools.policy_engine import ToolPolicyEngine
@@ -1132,6 +1143,56 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         """Plan-change hook: a plan means the bookkeeping tools are needed."""
         if plan is not None and getattr(self, "_plan_lazy_tools", None):
             self._equip_lazy_plan_tools("plan created")
+
+    def _on_plan_change_review(self, _nb: Any, plan: Any) -> None:
+        """计划审查岗入口（计划变更钩子）：只判刚写出来的计划，不阻塞主链。
+
+        计划已经在跑（有步骤不是 todo）就不再判——那是验收岗的活。
+        """
+        if plan is None:
+            return
+        try:
+            from ..decision.hub_plan_review import collect, fire_plan_review
+
+            hub = self._decision_hub()
+            if hub is None or not hub.post_enabled("plan_review"):
+                return
+            snap = collect(self.plan_notebook)
+            if snap is None or snap["in_progress"]:
+                return  # 没有计划，或已经在执行中——那是验收岗的活
+            fire_plan_review(
+                self.plan_notebook,
+                scope=self._decision_scope(purpose="plan_review"),
+                hub=hub,
+                skills=getattr(self, "_on_demand_skill_summaries", None),
+                on_verdict=self._inject_plan_review_hint,
+            )
+        except Exception:  # pragma: no cover
+            logger.debug("[plan-review] 发射失败（不影响主链）", exc_info=True)
+
+    async def _inject_plan_review_hint(self, res: dict) -> None:
+        """计划审查提示：写进记忆，下一轮推理时生效（一期只有建议权）。"""
+        try:
+            from agentscope.message import Msg, TextBlock
+            from ..decision.hub_plan_review import review_hint
+
+            hint = review_hint(res)
+            if not hint:
+                return
+            await self.memory.add(
+                Msg(
+                    "system",
+                    [TextBlock(type="text", text=hint)],
+                    "system",
+                    name="coapis_plan_review_hint",
+                ),
+            )
+            logger.info(
+                "[plan-review] 计划提示已注入 action=%s",
+                str(res.get("action") or ""),
+            )
+        except Exception:  # pragma: no cover
+            logger.debug("plan-review hint injection skipped", exc_info=True)
 
     def _equip_lazy_plan_tools(self, reason: str) -> None:
         """Move the deferred plan tools into the toolkit (idempotent)."""

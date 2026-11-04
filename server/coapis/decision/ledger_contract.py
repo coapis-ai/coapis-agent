@@ -30,7 +30,8 @@ from .rubric import LEVELS as _LEVELS
 
 # 岗位 source 合法集合（写侧枚举，防岗位名漂移）
 SOURCES = frozenset({
-    "plan_gate", "skill_trigger", "tool_gate", "acceptance", "advisor",
+    "plan_gate", "plan_review", "skill_trigger", "tool_gate", "acceptance",
+    "advisor",
 })
 
 # 写入语义标记（zero_reason 列）取值：
