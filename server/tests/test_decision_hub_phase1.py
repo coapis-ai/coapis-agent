@@ -859,3 +859,98 @@ def test_retention_days_in_config_contract():
     assert cfg.normalized().ledger_retention_days == 7, "下限 7 天"
     cfg.ledger_retention_days = 99999
     assert cfg.normalized().ledger_retention_days == 3650, "上限 3650 天"
+
+
+# ---------- D-A（2026-11-05 拍板）：判官只认判官槽位 ----------
+#
+# 旧口径「判官没配就借用会话激活模型」的实测账单（dev 台账 184 行真判）：
+# 平均 4448ms、超时 105 行、熔断 24 行、预算吃光 61 行，损耗 44%，最坏一次
+# 16963ms。用户口径：「决策模型不可用 → 过程中自动忽略」。下面三条锁死新口径。
+
+
+def _hub_slot(provider_id: str = "", model: str = ""):
+    return DecisionHubConfig.from_dict(
+        {"judge_provider_id": provider_id, "judge_model": model},
+    ).normalized()
+
+
+class _JudgeProv:
+    base_url = "https://judge.test/v1/"
+    api_key = "sk-judge"
+
+    def __init__(self, model_ids=("judge-m",), model_type="chat") -> None:
+        self._ids = list(model_ids)
+        self._type = model_type
+
+    def list_models(self):
+        return list(self._ids)
+
+    @property
+    def models(self):
+        return [
+            type("M", (), {"id": i, "name": i, "model_type": self._type})()
+            for i in self._ids
+        ]
+
+
+def _patch_judge_provider(monkeypatch, prov):
+    from coapis.providers.provider_manager import ProviderManager
+
+    class _PM:
+        def get_provider(self, pid):
+            return prov
+
+    monkeypatch.setattr(
+        ProviderManager, "get_instance", classmethod(lambda cls: _PM()),
+    )
+
+
+def test_judge_slot_empty_means_no_judge(monkeypatch):
+    """槽位空 = 没有判官：会话激活模型再可用也不借。"""
+    from coapis.decision.resolver import get_judge_provider_config
+
+    _patch_slot(monkeypatch, ("prov-x", "model-x"))  # 对话模型完全可用
+    _patch_judge_provider(monkeypatch, _JudgeProv())
+    got = get_judge_provider_config(_hub_slot(), user_id="u1", agent_id="a1")
+    assert got is None, (
+        "D-A：未配置判官槽位时必须返回 None（判官不上岗、按规则直判），"
+        "不得回落借用会话激活模型：%r" % (got,)
+    )
+
+
+def test_judge_slot_configured_uses_that_model(monkeypatch):
+    """配了判官槽位就用它：provider_id/model 齐全，api_base 归一化好拼端点。"""
+    from coapis.decision.resolver import get_judge_provider_config
+
+    _patch_slot(monkeypatch, ("prov-x", "model-x"))
+    _patch_judge_provider(monkeypatch, _JudgeProv())
+    got = get_judge_provider_config(
+        _hub_slot("jp", "judge-m"), user_id="u1", agent_id="a1",
+    )
+    assert got is not None
+    assert (got["provider_id"], got["model"]) == ("jp", "judge-m")
+    assert got["api_base"] == "https://judge.test/v1"
+
+
+def test_judge_slot_pointing_to_missing_model_is_none(monkeypatch):
+    """槽位里的模型被删了 → None（判官不上岗），绝不回落到对话模型。"""
+    from coapis.decision.resolver import get_judge_provider_config
+
+    _patch_slot(monkeypatch, ("prov-x", "model-x"))
+    _patch_judge_provider(monkeypatch, _JudgeProv(model_ids=("other",)))
+    assert get_judge_provider_config(
+        _hub_slot("jp", "gone"), user_id="u1", agent_id="a1",
+    ) is None
+
+
+def test_judge_slot_pointing_to_embedding_model_is_none(monkeypatch):
+    """槽位里塞了嵌入模型 → None：宁可不判，也不拿嵌入模型当判官。"""
+    from coapis.decision.resolver import get_judge_provider_config
+
+    _patch_slot(monkeypatch, ("prov-x", "model-x"))
+    _patch_judge_provider(
+        monkeypatch, _JudgeProv(model_ids=("judge-m",), model_type="embedding"),
+    )
+    assert get_judge_provider_config(
+        _hub_slot("jp", "judge-m"), user_id="u1", agent_id="a1",
+    ) is None

@@ -212,24 +212,33 @@ def get_judge_provider_config(
     agent_id: str | None = None,
     out_source: dict | None = None,
 ) -> Optional[dict[str, Any]]:
-    """判官模型解析（v15 D1=A：固定轻量非思考模型优先）。
+    """判官模型解析：**只认判官槽位，不回落会话激活模型**（D-A 2026-11-05 拍板）。
 
-    hub 配置里 ``judge_provider_id`` + ``judge_model`` 都非空 → 判官固定用
-    该模型；任一为空、或该模型不可用（已删除/非 chat）→ 回落「会话激活
-    模型」链。判官固定模型解析失败只降级，不让任务卡死。
+    口径反转：v13 定的"判官没配就借用会话激活模型"实测是 4 秒级卡死的主犯。
+    dev 台账 184 行真判全是抄激活模型打出来的——判官档位 2000 ms 预算、
+    回合 6000 ms 预算全部打在对话模型上（deepseek-v4-flash-bailian），
+    结果 超时 105 行、熔断 24 行、预算吃光 61 行，真判率 40.8%、损耗 44%、
+    最坏一次 16963 ms。用户口径：「当决策模型不可用，过程中自动忽略」——
+    未配置就是没有判官，直接按规则判，不该拿用户的对话模型去赌一次判断。
+
+    ``judge_provider_id`` + ``judge_model`` 任一为空 → None（判官不上岗）；
+    配了但模型已删除/非 chat → None（配置坏了也直判，不借模型）。
+
+    ``user_id``/``agent_id`` 形参保留为兼容位（历史签名），不再参与解析。
     """
     pid = str(getattr(hub, "judge_provider_id", "") or "").strip()
     model = str(getattr(hub, "judge_model", "") or "").strip()
-    if pid and model:
-        cfg = build_provider_config(pid, model, out_source, source="judge_slot")
-        if cfg is not None:
-            return cfg
+    if not pid or not model:
+        return None
+    cfg = build_provider_config(pid, model, out_source, source="judge_slot")
+    if cfg is None:
         logger.warning(
-            "[DecisionHub] 判官固定模型 %s/%s 不可用，回落会话激活模型",
+            "[DecisionHub] 判官槽位里的模型 %s/%s 不可用（已删除/非 chat），"
+            "判官不上岗，按规则直判",
             pid,
             model,
         )
-    return get_judgment_provider_config(user_id, agent_id, out_source)
+    return cfg
 
 
 __all__ = [

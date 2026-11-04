@@ -210,11 +210,11 @@ def decision_stats(
                      f"WHERE {clause}"),
                 params,
             ).scalar() or 0
+            # 总数 = 台账全部行（含未配置判官的直判行）：D-A 之后 no_model 不算
+            # 一次判断，所以"真判次数"另用 by_source.judged 看。把总数收窄成
+            # 真判数会让"判断总数"在没配判官时恒为 0，页面看不出系统发生了什么。
             total_n = session.execute(
-                text(
-                    f"SELECT COUNT(*) FROM decision_events "
-                    f"WHERE {clause} AND hit_layer IN ({judged_set})"
-                ),
+                text(f"SELECT COUNT(*) FROM decision_events WHERE {clause}"),
                 params,
             ).scalar() or 0
     except Exception as exc:  # pragma: no cover
@@ -276,14 +276,15 @@ def get_config(request: Request) -> dict[str, Any]:
     """判官配置 + 当前生效的判断模型（面板必须显示"判官到底是谁"）。"""
     me, _role = _identity(request)
     agent_id = _active_agent_id(request, me)
-    # 判断模型的解析唯一归 resolver（plan_gate 里的同名函数已删——
-    # 两处各解一遍正是 v14 §0.3 抓到的"绕过配置"根因）
-    from coapis.decision.resolver import get_judgment_provider_config
+    # 判断模型的解析唯一归 resolver，且**只认判官槽位**（D-A 2026-11-05 拍板：
+    # 判官没配就是没有判官，不借会话激活模型）。面板显示的空判官 = 真实运行
+    # 状态：判官此时不上岗，五岗全部按规则直判。
+    from coapis.decision.resolver import get_judge_provider_config
     from coapis.decision import get_hub_config
 
     hub = get_hub_config()
     try:
-        slot = get_judgment_provider_config(me, agent_id) or {}
+        slot = get_judge_provider_config(hub, user_id=me, agent_id=agent_id) or {}
     except Exception:  # pragma: no cover - 槽位解析失败时只报配置
         slot = {}
     return {
@@ -294,6 +295,8 @@ def get_config(request: Request) -> dict[str, Any]:
         "judge": {
             "provider_id": str(slot.get("provider_id") or ""),
             "model": str(slot.get("model") or ""),
+            # 判官是否真的在岗：前端据此提示"未配置判官 = 全程规则直判"
+            "configured": bool(slot.get("provider_id") and slot.get("model")),
         },
         "agent_id": agent_id,
         "sources": list(_SOURCES),

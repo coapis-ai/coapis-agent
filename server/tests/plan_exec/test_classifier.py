@@ -112,22 +112,38 @@ class TestCalibration20(unittest.TestCase):
 
 
 class TestLiteJudgeDegradation(unittest.IsolatedAsyncioTestCase):
+    """判官不可用时必须保住规则结论，且绝不拿对话模型去顶判官（D-A）。
+
+    D-A 拍板后，判官槽位为空的判断在网关 L0 前置门就返回，模型一次都不调。
+    这两条过去是 mock plan_gate 里的薄委托函数（该函数已删——判档全部走网关，
+    委托函数是生产零调用的死代码，mock 它等于自证不存在）。
+    """
 
     async def test_no_provider_falls_back_to_rule_verdict(self):
+        from coapis.decision import gateway as gw
+
         cls = ComplexityClassifier(judge_enabled=True)
-        with mock.patch.object(plan_gate, "_get_judge_provider_config", return_value=None):
+        with mock.patch.object(
+            gw, "get_judge_provider_config", lambda *a, **k: None,
+        ):
             # rule layer says medium -> judge unavailable -> medium kept
-            self.assertEqual(await cls.classify_smart("查一下OA待审批事项，按部门统计数量"), MEDIUM)
+            self.assertEqual(
+                await cls.classify_smart("查一下OA待审批事项，按部门统计数量"), MEDIUM,
+            )
             # rule layer says simple -> straight-through, no judge call
             self.assertEqual(await cls.classify_smart("今天几点了？"), SIMPLE)
 
     async def test_judge_failure_keeps_rule_verdict(self):
+        from coapis.decision import gateway as gw
+
         cls = ComplexityClassifier(judge_enabled=True, judge_timeout=0.001)
         with mock.patch.object(
-            plan_gate, "_get_judge_provider_config",
-            return_value={"api_base": "http://127.0.0.1:1", "api_key": "none", "model": "x"},
+            gw, "get_judge_provider_config",
+            lambda *a, **k: {"provider_id": "p-none", "model": "m-none"},
         ):
-            self.assertEqual(await cls.classify_smart("查一下OA待审批事项，按部门统计数量"), MEDIUM)
+            self.assertEqual(
+                await cls.classify_smart("查一下OA待审批事项，按部门统计数量"), MEDIUM,
+            )
 
 
 if __name__ == "__main__":

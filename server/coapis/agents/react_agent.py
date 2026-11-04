@@ -2164,14 +2164,19 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             return 3.0
 
     def _skill_judge_model_name(self) -> str:
-        """本次兜底判会用到哪个模型（台账用；解析失败返回空串）。"""
+        """本次兜底判会用到哪个模型（台账用；未配置判官返回空串）。
+
+        D-A（2026-11-05 拍板）：口径与判官实际用的模型一致——只认判官槽位，
+        不报会话激活模型。空串 = 这一轮判官不上岗，台账里看得清清楚楚。
+        """
         try:
-            from ..decision import get_judgment_provider_config
+            from ..decision import get_judge_provider_config
 
             scope = self._decision_scope()
-            cfg = get_judgment_provider_config(
-                scope.get("user_id", ""),
-                scope.get("agent_id", ""),
+            cfg = get_judge_provider_config(
+                self._decision_hub(),
+                user_id=scope.get("user_id", ""),
+                agent_id=scope.get("agent_id", ""),
             )
             return str((cfg or {}).get("model") or "")
         except Exception:  # pragma: no cover

@@ -79,8 +79,13 @@ LAYER_PARSE_FAIL = "parse_fail"  # 返回了但解析不出结论
 # （成功或失败）。其余（rule/disabled/breaker_open/budget_cap/cache/
 # inflight/abstain）是"压根不需要判"——统计判官战绩必须把两类分开，
 # 否则免判行会把总数灌满，看不出判官到底有没有发生作用。
+#
+# D-A（2026-11-05 拍板）：``no_model`` 从白名单里摘出来。判官槽位空是
+# **配置状态**，不是"判官打输了一次"；留在白名单里会让未配置判官的每一轮
+# 都往熔断记一笔失败，配置一开立刻熔断。它现在由 L0 前置门在熔断计数与
+# 预算占用**之前**直判返回，台账仍记 hit_layer=no_model，不计战绩。
 JUDGED_LAYERS = (
-    LAYER_LLM, LAYER_LLM_SESSION, LAYER_NO_MODEL, LAYER_NOT_CHAT,
+    LAYER_LLM, LAYER_LLM_SESSION, LAYER_NOT_CHAT,
     LAYER_TIMEOUT, LAYER_TRANSPORT, LAYER_PARSE_FAIL, LAYER_ERROR,
 )
 
@@ -494,6 +499,22 @@ class JudgeGateway:
                 await self._ledger(purpose, reply, describe, **ids)
                 return reply
 
+        # --- L0 前置门：判官必须显式配置（D-A 2026-11-05 拍板）---
+        # 判官槽位（judge_provider_id + judge_model）任一为空、或槽里的模型
+        # 已删除/非 chat → 判官压根不上岗，直接拿规则结论返回。
+        # 位置刻意放在熔断与单轮预算**之前**：配置缺失属于"这里不需要判"，
+        # 计入熔断窗口会把"判官战绩"污染成配置问题，占预算则会让一次规则直判
+        # 吃掉整轮判断额度。dev 实测（抄激活模型的旧口径）：真判 184 行
+        # avg 4448ms → 超时 105 行、熔断 24 行、预算吃光 61 行，损耗 44%。
+        slot = get_judge_provider_config(
+            cfg, user_id=ids["user_id"], agent_id=ids["agent_id"],
+        )
+        if not slot or not slot.get("provider_id") or not slot.get("model"):
+            return await self._degrade(
+                purpose, LAYER_NO_MODEL, "未配置判断模型（判官槽位空），按规则直判",
+                rule_fallback, describe, elapsed, ids,
+            )
+
         # --- L0 前置门：熔断（近期连续失败就别再试） ---
         bkey = _breaker_key(purpose)
         if not _hub_breaker(bkey, cfg).allow(bkey):
@@ -570,7 +591,7 @@ class JudgeGateway:
                 self._run_llm(
                     purpose=purpose, system=system, user=user, parse=parse,
                     rule_fallback=rule_fallback, describe=describe,
-                    cfg=cfg, ckey=ckey, ids=ids,
+                    cfg=cfg, ckey=ckey, ids=ids, slot=slot,
                     on_late_verdict=on_late_verdict,
                 ),
             )
@@ -605,6 +626,7 @@ class JudgeGateway:
         cfg: DecisionHubConfig,
         ckey: str,
         ids: dict,
+        slot: Optional[dict[str, Any]] = None,
         on_late_verdict: Optional[Callable[[Any], Any]] = None,
     ) -> JudgeReply:
         """问模型这一段的全部失败分支都收在这里，**对外永不抛**。"""
@@ -618,15 +640,14 @@ class JudgeGateway:
                 purpose, layer, reason, rule_fallback, describe, elapsed, ids,
             )
 
-        # 模型槽位：判官固定模型槽（v15 D1=A）→ 会话激活模型（由 resolver
-        # 决定，网关不自己挑模型——绕过配置是 v14 明令禁止的）
-        slot = get_judge_provider_config(
-            cfg, user_id=ids["user_id"], agent_id=ids["agent_id"],
-        ) or {}
-        provider_id = str(slot.get("provider_id") or "")
-        model_id = str(slot.get("model") or "")
+        # 模型槽位由 judge() 的 L0 前置门解析好传进来（D-A：只认判官槽位，
+        # 未配置在 L0 就直判，压根走不到这里）。这里不重复解析——两处各解
+        # 一遍正是 v14 §0.3 抓到的"绕过配置"根因；走到这里还空，说明调用方
+        # 绕过了前置门直接调本函数，兜底弃权、不自己挑模型。
+        provider_id = str((slot or {}).get("provider_id") or "")
+        model_id = str((slot or {}).get("model") or "")
         if not provider_id or not model_id:
-            return await degrade(LAYER_NO_MODEL, "未配置可用的判断模型")
+            return await degrade(LAYER_NO_MODEL, "未配置判断模型（判官槽位空）")
 
         provider = self._get_provider(provider_id)
         if provider is None:

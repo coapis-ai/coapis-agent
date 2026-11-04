@@ -83,23 +83,6 @@ EFFORTS = ("minimal", "low", "medium", "high")
 _EFFORT_TTL_S = 300.0
 
 
-def _get_judge_provider_config(
-    user_id: str | None,
-    agent_id: str | None,
-) -> dict | None:
-    """取判官模型配置，返回 ``{api_base, api_key, model}`` 或 None。
-
-    v14：解析链统一在 ``coapis.decision.resolver``（会话激活模型优先），
-    这里只是一层薄委托，供判级调用点使用。
-
-    取不到就返回 None，调用方必须保留自己的规则结论——严禁抓"第一个
-    可用模型"兜底：把嵌入模型当判官就是这么发生的（v14 §4.4③）。
-    """
-    from coapis.decision.resolver import get_judgment_provider_config
-
-    return get_judgment_provider_config(user_id, agent_id)
-
-
 def _parse_level_and_effort(raw: str) -> tuple[str, str]:
     """复核输出 → (档位, 思考开支档)。
 

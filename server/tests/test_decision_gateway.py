@@ -157,7 +157,7 @@ def wire(monkeypatch, model, *, slot=_DEFAULT_SLOT, provider=None):
         slot = {"provider_id": "p1", "model": "m1"}
     monkeypatch.setattr(
         gw, "get_judge_provider_config",
-        lambda cfg=None, user_id=None, agent_id=None: dict(slot),
+        lambda cfg=None, user_id=None, agent_id=None, **_kw: dict(slot),
         raising=True,
     )
 
@@ -524,3 +524,91 @@ async def test_soft_timeout_degrades_then_background_rejudges(monkeypatch):
         r.get("hit_layer") == "llm" and r.get("complexity") == "complex" for r in rows
     ), rows
     assert any("软超时后台补记" in str(r.get("reason") or "") for r in rows), rows
+
+
+# ---------------- D-A（2026-11-05 拍板）：未配置判官 = 零成本直判 ----------------
+#
+# 口径反转的落点。旧口径「判官没配就借用会话激活模型」在 dev 台账留下 184 行
+# 真判（avg 4448ms → 超时 105 / 熔断 24 / 预算吃光 61，损耗 44%，最坏 16963ms），
+# 本质是拿用户的对话模型赌一次判断。新口径：判官槽位空 = 判官不上岗，在 L0
+# 前置门直接按规则返回，零调用、零耗时、不占预算、不进熔断。
+
+
+def _no_slot(monkeypatch):
+    """判官槽位置空（等价于用户没配决策模型）。"""
+    monkeypatch.setattr(
+        gw, "get_judge_provider_config", lambda *a, **k: None, raising=True,
+    )
+
+
+async def test_no_judge_slot_abstains_without_touching_model(monkeypatch):
+    """槽位空：规则直判、耗时近零、model 字段空、台账 hit_layer=no_model。"""
+    _no_slot(monkeypatch)
+    calls = {"n": 0}
+
+    def rule():
+        calls["n"] += 1
+        return "L1"
+
+    reply = await gw.get_judge_gateway().judge(
+        purpose="plan_gate", system="s", user="u",
+        parse=lambda t: "L3", rule_fallback=rule, hub=hub(), scope=SCOPE,
+    )
+    assert reply.hit_layer == gw.LAYER_NO_MODEL
+    assert reply.value == "L1" and calls["n"] == 1
+    assert not reply.model, "未配置判官时台账不能记着任何模型"
+    assert reply.latency_ms < 200, "配置缺失必须零成本直判，不许去撞模型"
+    from coapis.decision.bus import get_bus
+
+    rows = get_bus().rows
+    assert rows and rows[-1]["hit_layer"] == "no_model"
+    # 台账契约把空值写成哨兵 "none"；关键是绝不能记成某个真模型名（借模型
+    # 的旧口径就是在这列上留下 184 行对话模型，把判官战绩算成对话模型战绩）
+    assert str(rows[-1]["model"]) in ("", "none", "None", "NoneType")
+
+
+async def test_no_judge_slot_never_consumes_turn_budget(monkeypatch):
+    """模型岗额度只 1 次：未配置判官连判 3 次，次次直判，撞不到预算门。"""
+    _no_slot(monkeypatch)
+    h = hub(judge_max_calls_per_turn=1, judge_reserve_acceptance=0)
+    scope = {"user_id": "u1", "agent_id": "a1", "chat_id": "c77", "turn": 77}
+    layers = [
+        (await gw.get_judge_gateway().judge(
+            purpose="plan_gate", system="s", user="u",
+            parse=lambda t: "L3", rule_fallback=lambda: "L1", hub=h, scope=scope,
+        )).hit_layer
+        for _ in range(3)
+    ]
+    assert layers == [gw.LAYER_NO_MODEL] * 3, (
+        "配置缺失不该走到预算/熔断门前：%s" % layers
+    )
+
+
+async def test_no_judge_slot_does_not_pollute_breaker(monkeypatch):
+    """没配判官不能记成判断失败：否则判官一上线就被历史熔断掐死。"""
+    _no_slot(monkeypatch)
+    scope = {"user_id": "u1", "agent_id": "a1", "chat_id": "c78", "turn": 78}
+    for _ in range(5):
+        reply = await gw.get_judge_gateway().judge(
+            purpose="tool_gate", system="s", user="u",
+            parse=lambda t: "allow", rule_fallback=lambda: "ask",
+            hub=hub(), scope=scope,
+        )
+        assert reply.hit_layer == gw.LAYER_NO_MODEL
+    # 现在把判官配上：必须立刻真判，不能被前面 5 次「没模型」记成的失败熔断
+    model = FakeModel("allow")
+    wire(monkeypatch, model)
+    reply = await gw.get_judge_gateway().judge(
+        purpose="tool_gate", system="s", user="u",
+        parse=lambda t: "allow", rule_fallback=lambda: "ask",
+        hub=hub(), scope=scope,
+    )
+    assert reply.hit_layer == gw.LAYER_LLM, (
+        "未配置期间的直判被记成了失败，判官上线即熔断：%s" % reply.hit_layer
+    )
+    assert model.calls == 1
+
+
+def test_no_model_is_not_counted_as_a_judged_attempt():
+    """no_model 必须在真判断层白名单之外（配置状态 ≠ 判官败绩）。"""
+    assert gw.LAYER_NO_MODEL not in gw.JUDGED_LAYERS
