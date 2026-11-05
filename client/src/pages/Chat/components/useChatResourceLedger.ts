@@ -49,29 +49,39 @@ interface SharedEntry {
 const sharedCache = new Map<string, SharedEntry>();
 const sharedInflight = new Map<string, Promise<SharedEntry>>();
 
+/**
+ * 取某会话台账（共享缓存 + 在途去重），**带作用域**。
+ *
+ * v17 · F7：右侧栏上半区要「当前会话（跨聊天）」的资源、下半区要「当前聊天」
+ * 的 —— 同一条 API 的两个 scope。缓存键带上 scope，两个作用域各存各的，
+ * 绝不共用一份数据（一份数据两处用必然对不上账）。scope 缺省 "chat"，
+ * 老调用方一行不改、缓存键也不变。
+ */
 export function getChatResourcesShared(
   chatId: string,
   force = false,
+  scope: "chat" | "session" = "chat",
 ): Promise<SharedEntry> {
-  const hit = sharedCache.get(chatId);
+  const key = scope === "chat" ? chatId : `${chatId}|${scope}`;
+  const hit = sharedCache.get(key);
   if (!force && hit && Date.now() - hit.ts < SHARED_TTL_MS) {
     // 命中即回：把它重新放到 Map 尾部，维持「最近使用」顺序
-    sharedCache.delete(chatId);
-    sharedCache.set(chatId, hit);
+    sharedCache.delete(key);
+    sharedCache.set(key, hit);
     return Promise.resolve(hit);
   }
-  const pending = sharedInflight.get(chatId);
+  const pending = sharedInflight.get(key);
   if (pending) return pending;
 
   const p = chatApi
-    .listChatResources(chatId, SHARED_LIMIT, 0)
+    .listChatResources(chatId, SHARED_LIMIT, 0, "", scope)
     .then((res) => {
       const entry: SharedEntry = {
         items: res.items || [],
         total: res.total || 0,
         ts: Date.now(),
       };
-      sharedCache.set(chatId, entry);
+      sharedCache.set(key, entry);
       while (sharedCache.size > SHARED_MAX_CHATS) {
         const oldest = sharedCache.keys().next().value as string | undefined;
         if (oldest === undefined) break;
@@ -80,16 +90,25 @@ export function getChatResourcesShared(
       return entry;
     })
     .finally(() => {
-      sharedInflight.delete(chatId);
+      sharedInflight.delete(key);
     });
-  sharedInflight.set(chatId, p);
+  sharedInflight.set(key, p);
   return p;
 }
 
 /** 丢弃某会话的缓存（写入新资源后强制刷新用）；不传则清空。 */
 export function invalidateChatResourcesShared(chatId?: string): void {
-  if (chatId === undefined) sharedCache.clear();
-  else sharedCache.delete(chatId);
+  if (chatId === undefined) {
+    sharedCache.clear();
+    return;
+  }
+  // 缓存键可能带作用域后缀（`chatId|session`），同一会话的作用域一起清
+  for (const k of [...sharedCache.keys()]) {
+    if (k === chatId || k.startsWith(`${chatId}|`)) sharedCache.delete(k);
+  }
+  for (const k of [...sharedInflight.keys()]) {
+    if (k === chatId || k.startsWith(`${chatId}|`)) sharedInflight.delete(k);
+  }
 }
 
 export interface ChatResourceLedger {

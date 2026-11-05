@@ -1030,7 +1030,13 @@ class ResourceLedger:
         fetch_cap: int = 2000,
         include_deleted: bool = False,
         sort_by: str = "",
+        referrer_kind: str = "chat",
+        ref_ids: Optional[list[tuple[str, str]]] = None,
     ) -> list[dict]:
+        # v17 · F7（小蜜蜂 2026-11-05「右侧栏上半区=当前会话的资源」）：
+        # 同一套合并/排序口径也服务 **会话（session）作用域** —— 把
+        # ``referrer_kind`` 换成 "session"、``chat_id`` 传 session id 即可，
+        # 不另开第二条读路径（两套尺子=乱序的老毛病就是这么来的）。
         """本会话引用的资源，**已按 (kind, 规范路径) 合并成一行**。
 
         合并是必须的，不是锦上添花：台账历史上存在两种路径口径（文件钩子写
@@ -1045,17 +1051,28 @@ class ResourceLedger:
 
         Never raises (returns []).
         """
-        if not chat_id:
+        if not chat_id and not ref_ids:
             return []
+        pairs = (
+            list(ref_ids)
+            if ref_ids
+            else [(referrer_kind, chat_id)]
+        )
         try:
             with get_session() as s:
+                ref_cond = or_(
+                    *[
+                        (ResourceRef.referrer_kind == kind)
+                        & (ResourceRef.referrer_id == ref_id)
+                        for kind, ref_id in pairs
+                    ]
+                )
                 stmt = (
                     select(Resource, ResourceRef.role)
                     .join(ResourceRef, ResourceRef.resource_key == Resource.resource_key)
                     .where(Resource.owner_scope == owner_scope)
                     .where(Resource.owner_id == owner_id)
-                    .where(ResourceRef.referrer_kind == "chat")
-                    .where(ResourceRef.referrer_id == chat_id)
+                    .where(ref_cond)
                     .limit(fetch_cap)
                 )
                 # 软删行默认不出（与 memories 惯例一致）；会话面板要灰显
@@ -1152,6 +1169,107 @@ class ResourceLedger:
         if limit:
             rows = rows[:limit]
         return rows
+
+    def list_session_resources(
+        self,
+        *,
+        owner_scope: str,
+        owner_id: str,
+        session_id: str,
+        chat_ids: Optional[list[str]] = None,
+        limit: int = 20,
+        offset: int = 0,
+        include_deleted: bool = False,
+        sort_by: str = "",
+    ) -> list[dict]:
+        """Resources referenced by a whole **session** (all its chats).
+
+        v17 · F7：右侧栏上半区显示「当前会话」的资源 —— 会话是跨聊天的容器。
+        台账里会话级引用是 ``referrer_kind="session"``，但聊天级引用
+        （``"chat"``）更全，所以这里把两侧一起取：**session 引用 + 该会话下
+        各聊天的引用**，用同一个 ``_chat_resource_rows`` 合并排序，不另开
+        第二条读路径。永不抛错（返回 []）。
+        """
+        if not session_id and not chat_ids:
+            return []
+        rows = self._chat_resource_rows(
+            owner_scope=owner_scope,
+            owner_id=owner_id,
+            chat_id=session_id,
+            include_deleted=include_deleted,
+            sort_by=sort_by,
+            ref_ids=[("session", session_id)]
+            + [("chat", cid) for cid in (chat_ids or []) if cid],
+        )
+        if offset:
+            rows = rows[offset:]
+        if limit:
+            rows = rows[:limit]
+        return rows
+
+    def count_session_resources(
+        self,
+        *,
+        owner_scope: str,
+        owner_id: str,
+        session_id: str,
+        chat_ids: Optional[list[str]] = None,
+        include_deleted: bool = False,
+    ) -> int:
+        """会话作用域总数（与 ``list_session_resources`` 同一份合并口径）。"""
+        if not session_id and not chat_ids:
+            return 0
+        return len(
+            self._chat_resource_rows(
+                owner_scope=owner_scope,
+                owner_id=owner_id,
+                chat_id=session_id,
+                include_deleted=include_deleted,
+                ref_ids=[("session", session_id)]
+                + [("chat", cid) for cid in (chat_ids or []) if cid],
+            )
+        )
+
+    def update_activity(
+        self,
+        resource_key: str,
+        *,
+        updated_at: Optional[float] = None,
+        size: Optional[int] = None,
+        version: Optional[int] = None,
+    ) -> bool:
+        """外部改动（脚本重跑、编辑器保存、MCP 产出）后刷新台账时刻。
+
+        v17 · F8（小蜜蜂 2026-11-05 第 4 条「xlsx 生成了但会话资源里没有 /
+        更新时间不对」）：登记只在聊天侧发生，工作区里被脚本**重写**的文件
+        台账行还是旧时刻，面板按 updated_at 排序时它沉在底下，用户认定"没
+        生成"。这里把"文件真实 mtime/大小/版本"回写台账，**不新建行、不动
+        引用**；行不存在返回 False（交给 sweep 去发现）。永不抛错。
+        """
+        if not resource_key:
+            return False
+        try:
+            with get_session() as s:
+                # 表主键是自增 id，业务键才是 resource_key（唯一）——按业务键找
+                row = s.execute(
+                    select(Resource).where(Resource.resource_key == resource_key)
+                ).scalar_one_or_none()
+                if row is None:
+                    return False
+                stamp = float(updated_at) if updated_at else time.time()
+                if row.updated_at is None or float(row.updated_at) < stamp:
+                    row.updated_at = stamp
+                row.last_seen_at = stamp
+                if size is not None and int(size) != int(row.size_bytes or 0):
+                    # 内容真的换了 → 版本 +1（与 register 同一把尺子：
+                    # 同一份内容被反复引用不算新版）
+                    row.size_bytes = int(size)
+                    row.version = int(row.version or 1) + 1
+                s.commit()
+                return True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("resource activity update failed (ignored): %s", exc)
+            return False
 
     def count_resources(
         self,

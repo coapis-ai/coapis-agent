@@ -16,6 +16,9 @@ import type { ResourcePreviewRequest } from "./CoApisChatResourceBar";
 interface CoApisResourceDrawerProps {
   open: boolean;
   chatId?: string | null;
+  /** v17 · F4：作用域 —— "chat"=当前聊天；"session"=当前会话（跨聊天）。
+   *  由右侧资源条那块决定，抽屉标题跟着走，绝不"条显示会话、抽屉显示聊天"。 */
+  scope?: "chat" | "session";
   /** 台账写入后父组件自增，触发列表刷新。 */
   refreshSignal?: number;
   onClose: () => void;
@@ -27,6 +30,7 @@ interface CoApisResourceDrawerProps {
 export default function CoApisResourceDrawer({
   open,
   chatId,
+  scope = "chat",
   refreshSignal,
   onClose,
   onPreview,
@@ -35,13 +39,20 @@ export default function CoApisResourceDrawer({
   const { t } = useTranslation();
   // 父组件的 refreshSignal 只在台账写入时自增；用户手动刷新靠本地 tick
   const [tick, setTick] = useState(0);
+  // v17 · F5（小蜜蜂「左侧栏的组标题没有显示」）：标题 = 组标题 + 资源名，
+  // 一眼知道"这是哪一组"。上半区=当前会话，下半区=当前聊天。
+  const groupTitle =
+    scope === "session"
+      ? t("chat.resources.groupSession", "当前会话")
+      : t("chat.resources.groupChat", "当前聊天");
+  const winTitle = `${groupTitle} · ${t("chat.resources.drawerTitle", "会话资源")}`;
 
   return (
     <FloatingWindow
       open={open}
       storageKey="resourceWin"
       getContainer={getContainer}
-      label={t("chat.resources.drawerTitle", "会话资源")}
+      label={winTitle}
       closeTip={t("chat.resources.close", "关闭")}
       defaultWidth={480}
       defaultHeight={640}
@@ -52,8 +63,8 @@ export default function CoApisResourceDrawer({
       outsideIgnoreSelector="[data-coapis-res-trigger]"
       title={
         <>
-          <span className={styles["coapis-res-title"]}>
-            {t("chat.resources.drawerTitle", "会话资源")}
+          <span className={styles["coapis-res-title"]} title={winTitle}>
+            {winTitle}
           </span>
         </>
       }
@@ -72,6 +83,7 @@ export default function CoApisResourceDrawer({
     >
       <ChatSessionResources
         chatId={chatId ?? undefined}
+        scope={scope}
         refreshSignal={(refreshSignal ?? 0) + tick}
         onPreview={onPreview}
       />

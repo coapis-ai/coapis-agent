@@ -65,14 +65,18 @@ export const chatApi = {
     limit = 200,
     offset = 0,
     sortBy = "",
+    scope: "chat" | "session" = "chat",
   ): Promise<ChatResourceList> => {
-    const key = `${chatId}|${limit}|${offset}|${sortBy}`;
+    const key = `${chatId}|${limit}|${offset}|${sortBy}|${scope}`;
     const inflight = resourceInflight.get(key);
     if (inflight) return inflight;
     const req = request<ChatResourceList>(
       `/chats/${encodeURIComponent(chatId)}/resources?limit=${limit}&offset=${offset}` +
         // v17 · F7：表头排序透传给后端（排序在分页之前）。空=默认「最近引用在前」
-        (sortBy ? `&sort_by=${encodeURIComponent(sortBy)}` : ""),
+        (sortBy ? `&sort_by=${encodeURIComponent(sortBy)}` : "") +
+        // v17 · F7 作用域：session=整个会话（跨聊天）。默认 chat，不带参数
+        // 就是老请求，旧调用方与旧缓存键一概不变。
+        (scope && scope !== "chat" ? `&scope=${encodeURIComponent(scope)}` : ""),
     );
     const paged = req.then(
       (res) => {

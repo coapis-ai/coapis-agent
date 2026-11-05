@@ -35,6 +35,7 @@ import {
 } from "../../../../utils/webPreview";
 import { TAGGED_STATUSES } from "../CoApisChatResourceBar";
 import { displayName, shortDir } from "./helpers";
+import { formatResSize, formatResTime } from "./resourceFormat";
 import styles from "./index.module.less";
 
 /** 名称单元格里「可被截断」的那一个：省略号在尾部，标签优先占位。 */
@@ -84,34 +85,20 @@ function statusOf(item: ChatResourceItem): string {
 }
 
 /**
- * 统一时间格式化（v17 · F5）。
+ * 时间与体积的尺子只此一份：`./resourceFormat`（列表、资源条、顶栏共用）。
  *
- * 后端出参已定死成 **epoch 毫秒**，历史行是**秒**，老缓存里还有
- * `updated_at` 是"登记时刻"的行 —— 这里两把尺子都认：数值 > 1e11 当毫秒，
- * 否则当秒。旧实现固定 `t * 1000`，遇到毫秒就乘出 5 万年后的日期
- * （小蜜蜂 2026-11-05 第 1 条「更新时间显示成 5 万年后」）。
+ * 此前这里自己写了一份 toEpochMs/fmtTime/fmtSize —— 同一列在右侧资源条里
+ * 显示 "19:41"、在列表里显示 "2026/11/5 19:41:52"，两把尺子（小蜜蜂
+ * 2026-11-05 第 1 条「更新时间显示成 5 万年后」也是同一族问题）。
  */
-const toEpochMs = (ts?: number | string | null): number => {
-  const t = Number(ts);
-  if (!Number.isFinite(t) || t <= 0) return 0;
-  return t > 1e11 ? t : t * 1000;
-};
+const fmtTime = (ts?: number | string | null) => formatResTime(ts);
 
-const fmtTime = (ts?: number | string | null) => {
-  const ms = toEpochMs(ts);
-  return ms > 0 ? new Date(ms).toLocaleString() : "-";
-};
-
-const fmtSize = (n?: number | string | null) => {
-  const b = Number.isFinite(Number(n)) ? Number(n) : 0;
-  if (b <= 0) return "-";
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / 1024 / 1024).toFixed(1)} MB`;
-};
+const fmtSize = (n?: number | string | null) => formatResSize(n);
 
 interface Props {
   chatId: string | undefined;
+  /** v17 · F4：作用域 —— "chat"=本聊天（默认）；"session"=整个会话（跨聊天） */
+  scope?: "chat" | "session";
   /** 外部传入的刷新信号（本轮产出落台账后自增） */
   refreshSignal?: number;
   /** 预览走会话级抽屉（方案 §12.4 L1）；不传则退化为新窗口 */
@@ -131,6 +118,7 @@ interface Props {
  */
 const ChatSessionResources: React.FC<Props> = ({
   chatId,
+  scope = "chat",
   refreshSignal = 0,
   onPreview,
 }) => {
@@ -158,7 +146,8 @@ const ChatSessionResources: React.FC<Props> = ({
     }
     setLoading(true);
     chatApi
-      .listChatResources(chatId, PAGE_SIZE, offset, sort)
+      // v17 · F4：作用域透传 —— 抽屉跟着资源条那块的作用域走（"session"=整个会话）
+      .listChatResources(chatId, PAGE_SIZE, offset, sort, scope)
       .then((res) => {
         setItems(res.items || []);
         setTotal(res.total || 0);
@@ -168,7 +157,7 @@ const ChatSessionResources: React.FC<Props> = ({
         setTotal(0);
       })
       .finally(() => setLoading(false));
-  }, [chatId, offset, refreshSignal, sort, tick]);
+  }, [chatId, offset, refreshSignal, scope, sort, tick]);
 
   const rows = useMemo(() => {
     const kw = keyword.trim().toLowerCase();

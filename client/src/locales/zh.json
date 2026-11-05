@@ -2257,7 +2257,9 @@
       "statusArchived": "已归档",
       "statusDeleted": "已删除",
       "statusMissing": "已失效",
-      "close": "关闭"
+      "close": "关闭",
+      "groupSession": "当前会话",
+      "groupChat": "当前聊天"
     },
     "resourceGroupProduced": "生成",
     "resourceGroupReferenced": "引用",

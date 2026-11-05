@@ -61,6 +61,9 @@ import {
 } from "./components/useChatResourceLedger";
 import type { ChatResourceItem } from "../../api/modules/chat";
 import ChatSessionSidebar from "./components/ChatSessionSidebar";
+// v17 · F4：右侧 200px 资源条（上半区=当前会话，下半区=当前聊天）
+import CoApisResourceStrip from "./components/CoApisResourceStrip";
+import type { ResourceStripScope } from "./components/CoApisResourceStrip";
 import CoApisPreviewDrawer, {
   type PreviewSwitchItem,
   type PreviewTarget,
@@ -758,6 +761,8 @@ export default function ChatPage() {
   // 抽屉是页面级单例，气泡里的产出卡与资源条共用它。
   const [resourceRefresh, setResourceRefresh] = useState(0);
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
+  // v17 · F6：预览窗的**组标题**（这块资源属于谁：当前会话/当前聊天/左栏…）
+  const [previewGroup, setPreviewGroup] = useState<string>("");
 
   /**
    * 打开预览抽屉的唯一入口（L1 资源条 / L2 行内 chip / 正文链接 / 左栏会话资源共用）。
@@ -2051,6 +2056,10 @@ export default function ChatPage() {
   // 「查看全部」针对的是哪个会话。左栏展开的那一行未必是当前会话，抽屉必须
   // 跟着被点的那一行走，否则显示的是另一个会话的资源（方案 F1）。
   const [resourcesChatId, setResourcesChatId] = useState<string | null>(null);
+  // v17 · F4：抽屉对应的作用域 —— 资源条上半区（当前会话）传 "session"，
+  // 下半区（当前聊天）传 "chat"。抽屉与条必须同源，否则「查看全部」打开的
+  // 是另一份清单。
+  const [resourcesScope, setResourcesScope] = useState<ResourceStripScope>("chat");
   const ledgerMetaOf = ledger.metaOf;
 
   /** 本轮资源（消息 metadata）+ 台账 meta（大小/时间/版本/状态）合并 */
@@ -2667,6 +2676,43 @@ export default function ChatPage() {
               />
             </ChatErrorBoundary>
           </div>
+          {/* v17 · F4（小蜜蜂 2026-11-05「在会话窗口的右侧增加一列 200px 的宽度，
+              上半部分表示当前会话的内容，下面部分表示当前聊天」）：右侧资源条列。
+              上半区=当前会话（跨聊天，台账 scope=session）；下半区=当前聊天。
+              点条目 → 直接进预览抽屉；点「查看全部」→ L3 台账抽屉（作用域同源）。
+              数据只走共享台账缓存（useScopedResources），这里不发第二个请求。 */}
+          <aside className={styles.chatResourceRail}>
+            <CoApisResourceStrip
+              scope="session"
+              chatId={chatId}
+              maxItems={6}
+              onPreview={(target) => {
+                setPreviewGroup(t("chat.resources.groupSession", "当前会话"));
+                openPreview({ path: target.path, title: target.name });
+              }}
+              onOpenAll={() => {
+                setResourcesChatId(chatId ?? null);
+                setResourcesScope("session");
+                setResourcesOpen(true);
+              }}
+              refreshSignal={resourceRefresh}
+            />
+            <CoApisResourceStrip
+              scope="chat"
+              chatId={chatId}
+              maxItems={6}
+              onPreview={(target) => {
+                setPreviewGroup(t("chat.resources.groupChat", "当前聊天"));
+                openPreview({ path: target.path, title: target.name });
+              }}
+              onOpenAll={() => {
+                setResourcesChatId(chatId ?? null);
+                setResourcesScope("chat");
+                setResourcesOpen(true);
+              }}
+              refreshSignal={resourceRefresh}
+            />
+          </aside>
         </div>
         </div>
         </div>
@@ -2675,6 +2721,7 @@ export default function ChatPage() {
         <CoApisResourceDrawer
           open={resourcesOpen}
           chatId={resourcesChatId ?? chatId}
+          scope={resourcesScope}
           refreshSignal={resourceRefresh}
           onClose={() => {
             setResourcesOpen(false);
@@ -2683,6 +2730,12 @@ export default function ChatPage() {
           onPreview={(target) => {
             setResourcesOpen(false);
             setResourcesChatId(null);
+            // v17 · F6：预览窗组标题与抽屉作用域同源（条 → 抽屉 → 预览三处一把尺）
+            setPreviewGroup(
+              resourcesScope === "session"
+                ? t("chat.resources.groupSession", "当前会话")
+                : t("chat.resources.groupChat", "当前聊天"),
+            );
             openPreview({ path: target.path, title: target.name });
           }}
           // F1：会话资源抽屉与预览抽屉同一口径 —— 铺满主内容区，不铺满整窗
@@ -2697,6 +2750,7 @@ export default function ChatPage() {
         />
         <CoApisPreviewDrawer
           target={previewTarget}
+          groupTitle={previewGroup}
           onClose={() => setPreviewTarget(null)}
           // D3=C：预览窗锚定聊天主内容区内的真浮窗（可拖、可缩放），不再铺满整窗
           getContainer={() => mainAreaRef.current ?? document.body}

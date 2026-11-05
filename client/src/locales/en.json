@@ -2380,7 +2380,9 @@
       "statusArchived": "Archived",
       "statusDeleted": "Deleted",
       "statusMissing": "Missing",
-      "close": "Close"
+      "close": "Close",
+      "groupSession": "This session",
+      "groupChat": "This chat"
     },
     "resourceGroupProduced": "Produced",
     "resourceGroupReferenced": "Referenced",

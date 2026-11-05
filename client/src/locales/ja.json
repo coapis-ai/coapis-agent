@@ -1596,7 +1596,9 @@
       "statusArchived": "アーカイブ",
       "statusDeleted": "削除済み",
       "statusMissing": "無効",
-      "close": "閉じる"
+      "close": "閉じる",
+      "groupSession": "現在のセッション",
+      "groupChat": "現在のチャット"
     },
     "resourceGroupProduced": "生成",
     "resourceGroupReferenced": "参照",

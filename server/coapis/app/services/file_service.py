@@ -415,6 +415,7 @@ class FileService(ABC):
         category: str = "files",
         path: str = "/",
         limit: int = SEARCH_LIMIT,
+        order: str = "name",
     ) -> Tuple[List[FileInfo], int]:
         """Search files recursively under ``path``.
 
@@ -432,11 +433,14 @@ class FileService(ABC):
             category: File category
             path: 搜索起点（``/`` = 整个 category 子树）
             limit: 最多返回多少条
+            order: 排序尺子（``name``/``time``/``size``，前缀 ``-`` 倒序），
+                与 ``/list`` 同一份 ``sort_file_infos``。**先排序后截断** ——
+                否则 limit 截的是遍历顺序的前 N 条，"最新的 30 个"会整批消失。
 
         Returns:
-            ``(matches, total)``：上限内的命中列表（目录在前、按名排序）与
-            **命中总数**。``total > len(matches)`` 即表示被 ``limit`` 截断，
-            调用方据此渲染"还有 N 条"，不静默吞掉。
+            ``(matches, total)``：上限内的命中列表（目录在前、按 ``order``
+            排序）与**命中总数**。``total > len(matches)`` 即表示被 ``limit``
+            截断，调用方据此渲染"还有 N 条"，不静默吞掉。
         """
         pass
     
@@ -531,8 +535,58 @@ class LocalFileBackend(FileService):
                 parent_dir=path
             ))
         
+        # v17 · F8：列目录顺带把台账时刻/大小与磁盘对齐（脚本在聊天外重写
+        # 文件时，资源条按更新时间排序才不会把新文件沉底）。永不抛错。
+        self._ledger_reconcile_activity(username, files)
+
         # 排序走统一实现（与搜索同一份口径）
         return sort_file_infos(files, order)
+
+    def _ledger_reconcile_activity(
+        self,
+        username: str,
+        entries: List["FileInfo"],
+    ) -> None:
+        """把磁盘真实 mtime/大小回写台账（v17 · F8，小蜜蜂第 4 条）。
+
+        聊天侧登记台账后，文件常被脚本/MCP/编辑器**在聊天之外重写**：台账行
+        还是旧时刻与旧大小，资源条按 updated_at 排序时它沉在底下，用户认定
+        "生成了却看不到"。列表是用户看东西的那一面，所以在这里做一次对账：
+        谁的真实 mtime 比台账新，就把时刻/大小/版本刷上去。
+
+        - 只碰台账里**已登记**的行（`update_activity` 对不存在的 key 返回
+          False，不新建行）—— 新文件的登记仍归采集器管，职责不混。
+        - 目录跳过；单次列表最多对账 200 条，防大范围目录扫描拖慢列表。
+        - 台账不可用/异常一律忽略：列表不能因为台账挂掉。
+        """
+        try:
+            from ...foundation.resource_ledger import (
+                get_resource_ledger,
+                workspace_relative_path,
+            )
+
+            rl = get_resource_ledger()
+            touched = 0
+            for info in entries:
+                if not info.path or info.is_dir:
+                    continue
+                try:
+                    # 台账业务键 = "file:<工作区相对路径>"，与采集器同一口径
+                    rel = workspace_relative_path(str(info.path))
+                    key = f"file:{rel}"
+                    ok = rl.update_activity(
+                        key,
+                        updated_at=float(info.modified_at or 0) or None,
+                        size=int(info.size or 0) or None,
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    continue
+                if ok:
+                    touched += 1
+                    if touched >= 200:
+                        break
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("ledger activity reconcile skipped", exc_info=True)
     
     async def upload_file(
         self,
@@ -909,6 +963,7 @@ class LocalFileBackend(FileService):
         category: str = "files",
         path: str = "/",
         limit: int = SEARCH_LIMIT,
+        order: str = "name",
     ) -> Tuple[List[FileInfo], bool]:
         user_dir = self._get_user_dir(username, category)
         # 搜索起点同样过越权校验：传 ../other_user 必须 403，与 /list 同口径
@@ -957,8 +1012,6 @@ class LocalFileBackend(FileService):
                 except OSError:  # 断链 symlink、并发删除
                     continue
                 total += 1
-                if len(hits) >= limit:
-                    continue  # 达到上限后只计数不收集：计数不额外增加遍历成本
                 mime_type, _ = mimetypes.guess_type(name)
                 hits.append(FileInfo(
                     path=f"/{rel / name}",
@@ -973,8 +1026,11 @@ class LocalFileBackend(FileService):
             if capped:
                 break
 
-        # 目录在前、名字在后：与 /list 共用同一份排序实现
-        return sort_file_infos(hits, "name"), total
+        # 与 /list 共用同一份排序实现（目录在前 + name/time/size + `-` 倒序）。
+        # v17：排序在截断**之前**完成 —— 早先在遍历里凑满 limit 就停，截的是
+        # 遍历顺序的前 N 条，一旦调用方按更新时间排，"最新的 N 个"会整批看不见。
+        sorted_hits = sort_file_infos(hits, order)
+        return sorted_hits[:limit], total
     
     async def get_usage(
         self,

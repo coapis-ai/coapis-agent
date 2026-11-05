@@ -46,7 +46,6 @@ from ..services.file_service import (
     FileServiceFactory,
     FileInfo as ServiceFileInfo,
     SEARCH_LIMIT,
-    sort_file_infos,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,8 +213,12 @@ async def list_files(
     path: str = "/",
     category: str = "files",
     search: str = "",
-    sort_by: str = "name",
-    sort_order: str = "asc",
+    # 小蜜蜂 2026-11-05 第 3 条：「空间的文件没有按照更新时间排序」。此前默认
+    # sort_by=name（名字典序），刚生成的产物埋在列表中间。现默认按**更新时间
+    # 倒序**（time → FileInfo.modified_at = 文件真实 mtime；目录仍整体在前）。
+    # 前端点列头显式传 sort_by/sort_order 时以其为准，行为不变。
+    sort_by: str = "time",
+    sort_order: str = "desc",
     page: int = 1,
     page_size: int = 100,
     request: Request = None,
@@ -233,13 +236,15 @@ async def list_files(
     # 这里不再另写一个"只筛当前目录文件名"的过滤——同一功能只允许一条
     # 实现路径，两个入口的语义、排序、上限因此天然一致。
     if search:
+        # 尺子由调用方给（与 /search 同一默认），服务层排完再截断——端点不再
+        # 二次排序，"两个入口两把尺子"没有落脚处。
         service_files, hit_total = await file_service.search_files(
             username=username,
             query=search,
             category=category,
             path=path,
+            order=order,
         )
-        service_files = sort_file_infos(service_files, order)
     else:
         service_files = await file_service.list_files(
             username=username,
@@ -270,13 +275,17 @@ async def search_files(
     path: str = Query("/", description="Search subtree root"),
     category: str = Query("files", description="File category"),
     limit: int = Query(SEARCH_LIMIT, ge=1, le=SEARCH_LIMIT, description="Max hits"),
+    # 默认尺子与 /list 完全一致（更新时间倒序）：同一功能两条入口，搜索框
+    # 里刚生成的产物不能比列表里更靠后。显式传参时以参数为准。
+    sort_by: str = Query("time", description="排序列：time|name|size"),
+    sort_order: str = Query("desc", description="asc|desc"),
     request: Request = None,
 ):
     """搜索文件（递归子树）。
 
     与 `/list?search=` 共用服务层 `FileService.search_files` **同一份实现**：
     递归、匹配完整相对路径（`a/b` 能命中 `a/b.pptx`）、排除噪音目录
-    （`.trash`/`.temp`/`.git`…，与资源台账同一份口径）、目录在前按名排序。
+    （`.trash`/`.temp`/`.git`…，与资源台账同一份口径）、目录在前按同一尺子排序。
     命中达到 `limit` 时 `truncated=true`，不静默吞掉。
 
     响应形状与 `/list` 对齐（`items` 里是同一套 FileInfo），前端两个视图
@@ -284,8 +293,14 @@ async def search_files(
     """
     username = get_current_user(request)["username"]
     file_service = FileServiceFactory.get_service()
+    order = f"-{sort_by}" if sort_order == "desc" else sort_by
     hits, hit_total = await file_service.search_files(
-        username=username, query=keyword, category=category, path=path, limit=limit,
+        username=username,
+        query=keyword,
+        category=category,
+        path=path,
+        limit=limit,
+        order=order,
     )
     return {
         "items": [_service_info_to_file_info(f) for f in hits],

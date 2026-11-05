@@ -945,6 +945,36 @@ async def get_chat(
     }
 
 
+async def _chat_session_peers(request: Request, chat_id: str) -> tuple[str, list[str]]:
+    """返回 (session_id, 同一会话下的所有 chat_id)。
+
+    v17 · F7：会话作用域清单需要知道"这个聊天属于哪个会话、会话里还有哪些
+    聊天"。取不到就返回空 —— 调用方按空清单出空页，不抛错、不影响聊天页。
+    与聊天列表接口同一份数据源（ChatManager），避免另起一套会话索引。
+    """
+    cm = await _get_chat_manager(request)
+    spec = await cm.get_chat(chat_id)
+    session_id = (getattr(spec, "session_id", "") or "").strip() if spec else ""
+    if not session_id:
+        return "", []
+    user_id, _ = _get_current_user(request)
+    # 旧版 ChatManager 可能没有 list_chats：拿不到同伴聊天就只按 session 引用算，
+    # 不让右侧栏上半区因为管理器形状变化而整块空掉。
+    list_chats = getattr(cm, "list_chats", None)
+    if not callable(list_chats):
+        return session_id, []
+    try:
+        chats = await list_chats(user_id=user_id)
+    except Exception:  # pragma: no cover - defensive
+        return session_id, []
+    peers = [
+        c.id
+        for c in chats
+        if (getattr(c, "session_id", "") or "") == session_id and getattr(c, "id", "")
+    ]
+    return session_id, peers
+
+
 @router.get("/chats/{chat_id}/resources")
 @require_permission("chat:history")
 async def list_chat_resources(
@@ -952,12 +982,20 @@ async def list_chat_resources(
     chat_id: str,
     limit: int = Query(200, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    scope: str = Query(
+        "chat",
+        description="作用域：chat=本聊天（默认）；session=本会话（跨聊天，v17 · F7）",
+    ),
     sort_by: str = Query(
         "",
         description="表头排序列：updated_at|last_seen_at|name|size|version；空=最近引用在前",
     ),
 ) -> Dict[str, Any]:
     """会话资源清单（B2）：本会话引用/产出的文件与网页。
+
+    ``scope="session"``（v17 · F7，右侧栏上半区「当前会话」）：把
+    session 级引用与**该会话下所有聊天**的引用合并成一份清单，走同一个
+    合并/排序函数 —— 不另开第二条读路径，杜绝「两条路两把尺子」。
 
     权威源是资源台账（``resource_refs`` 按 chat 过滤），所以刷新页面、
     会话压缩、台账清扫之后清单都能还原——这正是「资源条」刷新后不丢的
@@ -983,25 +1021,49 @@ async def list_chat_resources(
         from ...foundation.resource_ledger import get_resource_ledger
 
         rl = get_resource_ledger()
-        rows = rl.list_resources_for_chat(
-            owner_scope="user",
-            owner_id=owner or username,
-            chat_id=chat_id,
-            limit=limit,
-            offset=offset,
-            include_deleted=True,
-            # v17 · F7（拍板 D4-A）：排序在台账侧、分页之前完成，非法值
-            # 自动回落「最近引用在前」。端点只透传，不自创尺子。
-            sort_by=sort_by,
-        )
-        # 总数与清单同一份合并口径（`count_resources_for_chat` 走同一个
-        # `_chat_resource_rows`）；排序不改变条数，故计数不传 sort_by。
-        total = rl.count_resources_for_chat(
-            owner_scope="user",
-            owner_id=owner or username,
-            chat_id=chat_id,
-            include_deleted=True,
-        )
+        if scope == "session":
+            # v17 · F7 会话作用域：session 级引用 + 会话内各聊天的引用，一次
+            # 合并算完（同一个 _chat_resource_rows，两把尺子的老毛病防住）。
+            session_id, peers = await _chat_session_peers(request, chat_id)
+            if not session_id and not peers:
+                return {"items": [], "total": 0, "limit": limit, "offset": offset}
+            rows = rl.list_session_resources(
+                owner_scope="user",
+                owner_id=owner or username,
+                session_id=session_id,
+                chat_ids=peers,
+                limit=limit,
+                offset=offset,
+                include_deleted=True,
+                sort_by=sort_by,
+            )
+            total = rl.count_session_resources(
+                owner_scope="user",
+                owner_id=owner or username,
+                session_id=session_id,
+                chat_ids=peers,
+                include_deleted=True,
+            )
+        else:
+            rows = rl.list_resources_for_chat(
+                owner_scope="user",
+                owner_id=owner or username,
+                chat_id=chat_id,
+                limit=limit,
+                offset=offset,
+                include_deleted=True,
+                # v17 · F7（拍板 D4-A）：排序在台账侧、分页之前完成，非法值
+                # 自动回落「最近引用在前」。端点只透传，不自创尺子。
+                sort_by=sort_by,
+            )
+            # 总数与清单同一份合并口径（`count_resources_for_chat` 走同一个
+            # `_chat_resource_rows`）；排序不改变条数，故计数不传 sort_by。
+            total = rl.count_resources_for_chat(
+                owner_scope="user",
+                owner_id=owner or username,
+                chat_id=chat_id,
+                include_deleted=True,
+            )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("chat %s resources skipped: %s", chat_id[:16], exc)
         rows, total = [], 0
@@ -1038,6 +1100,9 @@ async def list_chat_resources(
                 or row.get("last_seen_at")
                 or row.get("first_seen_at")
             ),
+            # 「最后出现」：台账里这条资源最近一次被引用的时刻。前端资源条
+            # 副行要显示它，台账本来就有这一列，别让它变成"未知"。
+            "last_seen_at": epoch_ms(row.get("last_seen_at")),
             "size": None,
             "exists": True,
         }

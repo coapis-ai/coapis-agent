@@ -857,3 +857,21 @@
   line-height: 1.5;
   color: rgba(0, 0, 0, 0.65);
 }
+
+/* ── 右侧 200px 资源条列（v17 · F4，小蜜蜂 2026-11-05）────────────────────
+   原话：「在会话窗口的右侧增加一列 200px 的宽度，上半部分表示当前会话的内容，
+   下面部分表示当前聊天」。固定 200px：不参与折叠、不被左栏挤压，内部自己滚。 */
+.chatResourceRail {
+  flex: 0 0 200px;
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px 6px;
+  overflow: hidden;
+  border-left: 1px solid var(--coapis-border, #ececec);
+  background: var(--coapis-fill, #fbfbfb);
+}

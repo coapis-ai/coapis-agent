@@ -151,6 +151,12 @@ export default function CoApisPreviewDrawer(props: {
   items?: PreviewSwitchItem[];
   /** D2：下拉选中某条 → 交回聊天页切换预览目标 */
   onSelect?: (item: PreviewSwitchItem) => void;
+  /**
+   * v17 · F6（小蜜蜂「预览窗上面是当前组标题，中间是当前预览窗（带标题）」）：
+   * 组标题 —— 从哪一块资源区打开的（当前会话 / 当前聊天 / 空间文件…）。
+   * 显示在标题上方一行小字，切换器下拉继续给"当前预览窗的标题"。
+   */
+  groupTitle?: string;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -159,7 +165,7 @@ export default function CoApisPreviewDrawer(props: {
   const [linkCopied, setLinkCopied] = useState(false);
   // 取内容失败后「重试」用：自增一下让加载 effect 重新跑一遍（加载逻辑内联在 effect 里）
   const [reloadTick, setReloadTick] = useState(0);
-  const { target, onClose, getContainer, items, onSelect } = props;
+  const { target, onClose, getContainer, items, onSelect, groupTitle } = props;
   const [loading, setLoading] = useState(false);
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -404,6 +410,17 @@ export default function CoApisPreviewDrawer(props: {
       bodyClassName={styles["coapis-preview-body-host"]}
       title={
         <>
+          {/* v17 · F6（小蜜蜂「预览窗上面是当前组标题，中间是当前预览窗（带标题）」）：
+              组标题 = 这块资源属于谁（当前会话 / 当前聊天 / 空间文件），
+              放在标题最前的小字位；标题本身仍是可切换的「当前预览窗标题」。 */}
+          {groupTitle ? (
+            <Text
+              type="secondary"
+              style={{ fontSize: 11, marginRight: 6, whiteSpace: "nowrap" }}
+            >
+              {groupTitle}
+            </Text>
+          ) : null}
           <FileText size={14} className={styles["coapis-preview-icon"]} />
           {switchOptions.length > 1 ? (
             <Select

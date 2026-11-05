@@ -1611,7 +1611,9 @@
       "statusArchived": "Архив",
       "statusDeleted": "Удалён",
       "statusMissing": "Недоступен",
-      "close": "Закрыть"
+      "close": "Закрыть",
+      "groupSession": "Текущая сессия",
+      "groupChat": "Текущий чат"
     },
     "resourceGroupProduced": "Создано",
     "resourceGroupReferenced": "Ссылки",
