@@ -24,7 +24,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button, Tooltip } from "antd";
-import { Maximize2, Minimize2, Pin, PinOff, X } from "lucide-react";
+import { Maximize2, Minimize2, Minus, Pin, PinOff, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import useIsMobile from "../../../hooks/useIsMobile";
 import styles from "./FloatingWindow.module.less";
@@ -32,6 +32,15 @@ import styles from "./FloatingWindow.module.less";
 export type FloatingRect = { x: number; y: number; w: number; h: number };
 
 const EDGES = ["n", "s", "e", "w", "nw", "ne", "sw", "se"] as const;
+
+/**
+ * 最小化后的窗高 = 只剩头部一行（v17 · F9）。
+ *
+ * 「最小化」不是「关掉」：文件看到一半要腾地方，一会儿还要回来。关窗等于把
+ * 选中的文件、滚动位置、转换视图全部清掉；最小化只收正文，头部留着当记号，
+ * 点一下原样还原 —— `rect` 全程不动，还原零漂移。
+ */
+const HEAD_H = 40;
 type Edge = (typeof EDGES)[number];
 
 export type FloatingWindowProps = {
@@ -156,6 +165,8 @@ export default function FloatingWindow({
 
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [maximized, setMaximized] = useState(false);
+  // v17 · F9：最小化（收正文、留头部）。与铺满互斥 —— 铺满时整窗已是全屏。
+  const [minimized, setMinimized] = useState(false);
   const [interacting, setInteracting] = useState(false);
   const [rect, setRect] = useState<FloatingRect>({
     x: 24,
@@ -169,6 +180,13 @@ export default function FloatingWindow({
   rectRef.current = rect;
   const prevRectRef = useRef<FloatingRect | null>(null);
   const hostRef = useRef<HTMLElement | null>(null);
+  // v17 · F9：Esc 处理器要读「当下」的开关态，闭包捕获读到的是旧值
+  const minimizedRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    minimizedRef.current = minimized;
+    onCloseRef.current = onClose;
+  }, [minimized, onClose]);
   const onMoveRef = useRef<((e: MouseEvent) => void) | null>(null);
   const endInteractionRef = useRef<(() => void) | null>(null);
 
@@ -192,6 +210,19 @@ export default function FloatingWindow({
     },
     [sizeKeys],
   );
+
+  /**
+   * 铺满 / 最小化两个开关的记忆（v17 · F9）。
+   *
+   * 位置尺寸早逐次落盘了，这两个开关没人记 —— 用户铺满看完一份长文档，
+   * 关掉再开又变回小窗，等于白铺（小蜜蜂：「记忆最近一次位置尺寸 +
+   * 铺满记忆」）。
+   */
+  const persistFlags = useCallback(() => {
+    if (!storageKey) return;
+    safeSet(`coapis.${storageKey}.max`, maximized ? "1" : "0");
+    safeSet(`coapis.${storageKey}.min`, minimized ? "1" : "0");
+  }, [storageKey, maximized, minimized]);
 
   /** 打开时的初始矩形：记忆值优先，越界夹回宿主可视范围。 */
   const initialRect = useCallback(
@@ -258,13 +289,19 @@ export default function FloatingWindow({
     document.body.style.cursor = "";
     setInteracting(false);
     persistRect(rectRef.current);
-  }, [persistRect]);
+    persistFlags();
+  }, [persistRect, persistFlags]);
+
+  useEffect(() => {
+    if (!open) return;
+    persistFlags();
+  }, [open, persistFlags]);
 
   const startDrag = useCallback(
     (e: React.MouseEvent, mode: "move" | Edge) => {
       const hostEl = hostRef.current;
       if (!hostEl) return;
-      if (maximized || isMobile || isEmbedded()) return;
+      if (maximized || minimized || isMobile || isEmbedded()) return;
       // 头部里的按钮/下拉/输入框（标了 data-nodrag 的元素）不参与拖移
       if (
         mode === "move" &&
@@ -322,6 +359,7 @@ export default function FloatingWindow({
   const toggleMaximize = useCallback(() => {
     const hostEl = hostRef.current;
     if (!hostEl) return;
+    setMinimized(false);
     setMaximized((m) => {
       if (!m) {
         prevRectRef.current = rectRef.current;
@@ -333,6 +371,15 @@ export default function FloatingWindow({
     });
   }, [clampRect]);
 
+  /**
+   * 最小化 / 还原（v17 · F9）。`rect` 完全不动 —— 位置与宽高原样保留，只把
+   * 渲染高度收成头部一行，还原时一寸不差回到原位。
+   */
+  const toggleMinimize = useCallback(() => {
+    setMaximized(false);
+    setMinimized((m) => !m);
+  }, []);
+
   /** 打开时解析宿主（position:static 时补 relative，浮窗才有定位参照），并落初始矩形。 */
   useEffect(() => {
     if (!open) return;
@@ -342,13 +389,32 @@ export default function FloatingWindow({
     if (getComputedStyle(el).position === "static") {
       el.style.position = "relative";
     }
-    setMaximized(false);
+    // v17 · F9：铺满 / 最小化跨开窗恢复（位置尺寸由 initialRect 已恢复）。
+    // 移动网页版与内嵌抽屉宿主本就整页铺满，不接管这两个记忆。
+    const memorized = !isMobile && !isEmbedded() && !!storageKey;
+    setMaximized(memorized && readNum(`coapis.${storageKey}.max`) === 1);
+    setMinimized(memorized && readNum(`coapis.${storageKey}.min`) === 1);
     if (isMobile || isEmbedded()) {
       setRect({ x: 0, y: 0, w: el.clientWidth, h: el.clientHeight });
     } else {
       setRect(initialRect(el));
     }
   }, [open, getContainer, initialRect, isMobile]);
+
+  /**
+   * v17 · F9：把"收起 / 铺满"**写**回记忆。此前 `coapis.<key>.min/.max`
+   * 只有读、没有写 —— 上面注释写着"跨开窗恢复"，实际每次开都回到默认态。
+   * 移动网页版与内嵌抽屉本就整页铺满，不参与这两个记忆。
+   */
+  useEffect(() => {
+    if (!open || isMobile || !storageKey) return;
+    try {
+      localStorage.setItem(`coapis.${storageKey}.min`, minimized ? "1" : "0");
+      localStorage.setItem(`coapis.${storageKey}.max`, maximized ? "1" : "0");
+    } catch {
+      /* 隐私模式禁存储：记忆退化为"本次会话内生效" */
+    }
+  }, [open, storageKey, isMobile, minimized, maximized]);
 
   /** 宿主尺寸变化（浏览器拉窄、左栏折叠）→ 夹回可视范围，避免窗口跑到看不见的地方。 */
   useEffect(() => {
@@ -374,7 +440,12 @@ export default function FloatingWindow({
   useEffect(() => {
     if (!open || !closeOnEsc || pinned) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // v17 · F9：最小化态下 Esc 先还原正文，第二下才关窗 —— 一按就关会把
+      // 用户选中的文件、滚动位置、转换视图一起清掉。读 ref（闭包里是旧值）。
+      if (e.key === "Escape") {
+        if (minimizedRef.current) setMinimized(false);
+        else onCloseRef.current();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -412,9 +483,11 @@ export default function FloatingWindow({
   );
 
   const freeform = !maximized && !isMobile && !isEmbedded();
-  const style: React.CSSProperties = freeform
-    ? { left: rect.x, top: rect.y, width: rect.w, height: rect.h }
-    : { left: 0, top: 0, width: "100%", height: "100%" };
+  const style: React.CSSProperties = !freeform
+    ? { left: 0, top: 0, width: "100%", height: "100%" }
+    : minimized
+    ? { left: rect.x, top: rect.y, width: rect.w, height: HEAD_H }
+    : { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
 
   if (!open) return null;
 
@@ -427,6 +500,7 @@ export default function FloatingWindow({
         styles.window,
         freeform ? styles.freeform : "",
         interacting ? styles.interacting : "",
+        minimized ? styles.minimized : "",
         className,
       ]
         .filter(Boolean)
@@ -434,6 +508,7 @@ export default function FloatingWindow({
       style={style}
     >
       {freeform &&
+        !minimized &&
         EDGES.map((edge) => (
           <span
             key={edge}
@@ -441,10 +516,20 @@ export default function FloatingWindow({
             onMouseDown={(e) => startDrag(e, edge)}
           />
         ))}
-      <div className={styles.header} onMouseDown={(e) => startDrag(e, "move")}>
-        <div className={styles["head-title"]} data-nodrag>
-          {title}
-        </div>
+      {/* v17 · F9（小蜜蜂 2026-11-05 第 6 条「顶部拖不动」的直接病灶）：
+          拖移热区 = 头部整行。**标题区此前挂着 `data-nodrag` 且 `flex:1 1 auto`
+          吃满头部剩余宽度** —— 鼠标显示 `move`，按下去 `startDrag` 立刻
+          `closest("[data-nodrag]")` 返回，等于整条头部 100% 不可拖。
+          现在标题区参与拖移，`data-nodrag` 只留给头部里的**交互控件**
+          （附加按钮区/下拉/输入框）。双击头部 = 铺满/还原。 */}
+      <div
+        className={styles.header}
+        onMouseDown={(e) => startDrag(e, "move")}
+        onDoubleClick={() => {
+          if (freeform && showMaximize) toggleMaximize();
+        }}
+      >
+        <div className={styles["head-title"]}>{title}</div>
         {extra ? (
           <div className={styles["head-extra"]} data-nodrag>
             {extra}
@@ -464,6 +549,30 @@ export default function FloatingWindow({
             />
           </Tooltip>
         ) : null}
+        {showMaximize && !isMobile && !isEmbedded() && (
+          <Tooltip
+            title={
+              minimized
+                ? t("chat.previewWinRestore", "还原窗口")
+                : t("chat.previewWinMinimize", "最小化")
+            }
+          >
+            <Button
+              type="text"
+              size="small"
+              className={`${styles["header-btn"]} ${
+                minimized ? styles["header-btn-on"] : ""
+              }`}
+              icon={<Minus size={14} />}
+              onClick={toggleMinimize}
+              aria-label={
+                minimized
+                  ? t("chat.previewWinRestore", "还原窗口")
+                  : t("chat.previewWinMinimize", "最小化")
+              }
+            />
+          </Tooltip>
+        )}
         {showMaximize && !isMobile && !isEmbedded() && (
           <Tooltip
             title={
@@ -493,10 +602,14 @@ export default function FloatingWindow({
           />
         </Tooltip>
       </div>
-      <div className={[styles.body, bodyClassName].filter(Boolean).join(" ")}>
-        {children}
-      </div>
-      {footer ? <div className={styles.footer}>{footer}</div> : null}
+      {/* v17 · F9：最小化只留头部一行。正文/页脚**不渲染**而不是 display:none
+          —— 预览窗正文里挂着图片和 iframe，display:none 照样占内存、照样发请求。 */}
+      {!minimized && (
+        <div className={[styles.body, bodyClassName].filter(Boolean).join(" ")}>
+          {children}
+        </div>
+      )}
+      {!minimized && footer ? <div className={styles.footer}>{footer}</div> : null}
     </div>,
     host ?? document.body,
   );

@@ -64,12 +64,15 @@ export const chatApi = {
     chatId: string,
     limit = 200,
     offset = 0,
+    sortBy = "",
   ): Promise<ChatResourceList> => {
-    const key = `${chatId}|${limit}|${offset}`;
+    const key = `${chatId}|${limit}|${offset}|${sortBy}`;
     const inflight = resourceInflight.get(key);
     if (inflight) return inflight;
     const req = request<ChatResourceList>(
-      `/chats/${encodeURIComponent(chatId)}/resources?limit=${limit}&offset=${offset}`,
+      `/chats/${encodeURIComponent(chatId)}/resources?limit=${limit}&offset=${offset}` +
+        // v17 · F7：表头排序透传给后端（排序在分页之前）。空=默认「最近引用在前」
+        (sortBy ? `&sort_by=${encodeURIComponent(sortBy)}` : ""),
     );
     const paged = req.then(
       (res) => {

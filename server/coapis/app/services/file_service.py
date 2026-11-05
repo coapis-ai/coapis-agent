@@ -308,7 +308,8 @@ class FileService(ABC):
         self,
         username: str,
         path: str,
-        category: str = "files"
+        category: str = "files",
+        soft: bool = False,
     ) -> bool:
         """Delete a file or directory.
         
@@ -316,7 +317,9 @@ class FileService(ABC):
             username: Username for data isolation
             path: File/directory path
             category: File category
-            
+            soft: v17 · F7（拍板 D2-B）软删——文件移入 .trash 并把台账
+                标记 deleted，不物理删除
+                
         Returns:
             True if deleted successfully
         """
@@ -758,20 +761,70 @@ class LocalFileBackend(FileService):
         self,
         username: str,
         path: str,
-        category: str = "files"
+        category: str = "files",
+        soft: bool = False,
     ) -> bool:
+        """删除工作区文件。
+
+        v17 · F7（拍板 D2-B）**软删**：``soft=True`` 时文件**不真删**，移进
+        本人工作区的 ``.trash/<日期>/<原名>``（照本仓库既有习惯，例
+        ``.trash/20261104/``），同时把资源台账标记为 ``deleted``——台账行
+        保留，「会话资源」里默认不再出现（要历史时显式带 include_deleted）。
+        为什么不能像旧版那样直接 ``unlink()``：台账是 append-only 的账，
+        文件被物理删掉之后行还在、状态永远对不上，「已删除」这一态就永远
+        显示不出来（小蜜蜂 2026-11-05 第 6 条：预览/下载/删除/状态四连）。
+
+        目录仍走硬删（目录不是台账对象，软删它只会让 .trash 变成迷宫）。
+        """
         user_dir = self._get_user_dir(username, category)
         target = self._resolve_path(user_dir, path)
-        
+
         if not target.exists():
             raise HTTPException(status_code=404, detail="Path not found")
-        
+
         if target.is_dir():
             shutil.rmtree(target)
-        else:
-            target.unlink()
-        
+            self._ledger_mark_deleted(username, path, category, present=False)
+            return True
+
+        if soft:
+            trash_dir = user_dir / ".trash" / time.strftime("%Y-%m-%d")
+            trash_dir.mkdir(parents=True, exist_ok=True)
+            dest = trash_dir / target.name
+            n = 1
+            while dest.exists():
+                dest = trash_dir / ("%s.%d" % (target.name, n))
+                n += 1
+            shutil.move(str(target), str(dest))
+            self._ledger_mark_deleted(username, path, category, present=True)
+            return True
+
+        target.unlink()
+        self._ledger_mark_deleted(username, path, category, present=False)
         return True
+
+    def _ledger_mark_deleted(
+        self,
+        username: str,
+        path: str,
+        category: str,
+        present: bool,
+    ) -> None:
+        """把台账状态标成 deleted（v17 · F7）。台账不可用/没登记过就跳过。"""
+        if category != "files":
+            return
+        try:
+            from ...foundation.resource_ledger import get_resource_ledger
+
+            get_resource_ledger().mark_status(
+                kind="file",
+                path=str(path),
+                status="deleted",
+                owner_scope="user",
+                owner_id=str(username),
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("ledger mark_status skipped for %s", path, exc_info=True)
     
     async def rename_file(
         self,

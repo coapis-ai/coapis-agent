@@ -305,23 +305,6 @@
     text-decoration: underline;
   }
 }
-
-.rowDl {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
-  border: none;
-  background: none;
-  padding: 0;
-  cursor: pointer;
-
-  &:hover {
-    color: #ff7f0a;
-  }
-}
-
 /* ── 预览抽屉（CoApisPreviewDrawer）────────────────────────────
    工具栏一行给出：类型标签 + 文件名 + 大小·时间 | 下载 / 铺满 / 关闭。
    此前抽屉只有「新窗口 + 关闭」，文件名被 ellipsis 吃掉，大小/时间全程没有。 */
@@ -468,11 +451,6 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-
-.rowDl {
-  white-space: nowrap;
-}
-
 /* 暗色：L2 行内 chip 此前在暗色下零定义（.rowName 用 color: inherit 继承到
    暗底上几乎看不见，.rowDl 是 0.45 的黑），补三条。 */
 :global(.dark) {
@@ -483,17 +461,93 @@
       color: #69b1ff;
     }
   }
-
-  .rowDl {
-    color: rgba(255, 255, 255, 0.5);
-
-    &:hover {
-      color: #ffb066;
-    }
-  }
-
-  .rowTag {
+.rowTag {
     background: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.6);
   }
+}
+
+/* ══ v17 · F8：左栏资源行改两行版式（小蜜蜂 2026-11-05 第 5 条）═══════
+   旧版式是一枚 chip：`flex-wrap: wrap` + 整串 ellipsis + 行内一枚 ↓。
+   窄面板下三件事同时发生 —— 扩展名先被吃掉（分不清 docx 还是 pdf）、
+   ↓ 把左栏变成下载栏、行里压根没有时间。
+   新版式：一行两排。第一排 主干(可截) + 扩展名(保尾)；第二排 大小 · 时间。
+   放在文件末尾：同特异性下后写优先，旧规则不用逐条挖。 */
+.list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 17px;
+}
+
+.row {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+}
+
+.rowName {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  max-width: 100%;
+  /* 关键：这一行**不再整体 ellipsis**。整体 ellipsis 是从右往左吃，
+     被吃掉的一定是扩展名。改为「主干截、扩展名保尾」。 */
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.rowStem {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowExt {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  opacity: 0.72;
+}
+
+.rowMeta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.rowMeta {
+  font-variant-numeric: tabular-nums;
 }

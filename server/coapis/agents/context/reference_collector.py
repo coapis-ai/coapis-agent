@@ -20,6 +20,14 @@
     write_file / edit_file / send_file_to_user  → file  (role=producer)
     read_file / doc_reader / grep_search / glob_search → file (role=reference)
     web_search / web_fetch / browser_use        → web   (role=reference)
+    execute_shell_command / 脚本 / MCP 工具      → file  (role=producer)  ← v17·F4
+
+v17 · F4（拍板 D3-A）补的第二条通路：智能体**调用脚本**产出的文件此前零登记
+——xlsx/csv/图表几乎全部由 ``execute_shell_command`` 里的 openpyxl/pandas/
+matplotlib 生成，而旧白名单只认 write_file/edit_file/send_file 三枚工具，
+于是「会话资源」天生缺整个办公格式（小蜜蜂 2026-11-05 第 4 条：「智能体
+调用的脚本中产生的文件也要采集」）。MCP 工具（工具名 ``mcp__*``）产出的
+文件走同一支。
 """
 
 from __future__ import annotations
@@ -49,7 +57,44 @@ FILE_PRODUCER_TOOLS = frozenset({"write_file", "edit_file", "send_file_to_user"}
 FILE_REFERENCE_TOOLS = frozenset(
     {"read_file", "doc_reader", "grep_search", "glob_search", "view_image"}
 )
+
 WEB_REFERENCE_TOOLS = frozenset({"web_search", "web_fetch", "browser_use"})
+
+#: **脚本/外部工具产出**（v17 · F4 · 拍板 D3-A）：这一支扫工具**输入与输出
+#: 文本里出现的路径**，命中「真实落盘 + 落在本人工作区」闸门就按 producer 登记。
+#:
+#: 为什么单独立一支：办公文件（xlsx/csv/docx/图表）绝大多数不是 write_file
+#: 写出来的，而是 ``execute_shell_command`` 里跑 openpyxl/pandas/matplotlib
+#: 生成的；旧白名单没有它们 → 台账天生缺整个办公格式（小蜜蜂 2026-11-05
+#: 第 4 条）。Skill 的脚本、MCP 工具（工具名 ``mcp__*``，见
+#: ``agents/workspace.py``）产出的文件同样走这一支。
+FILE_SCRIPT_PRODUCER_TOOLS = frozenset(
+    {
+        "execute_shell_command",
+        "execute_python_code",
+        "run_ipython_cell",
+        "run_ipython_cell_in_workdir",
+        "write_text_file",
+        "insert_text_file",
+    }
+)
+
+#: 脚本里「写出文件」的入参字段名（各运行时/SDK 叫法不一，一次扫全）。
+_SCRIPT_CODE_KEYS = ("command", "code", "script", "python_code", "cell")
+
+
+def is_script_producer_tool(tool_name: str) -> bool:
+    """这条工具调用要不要走「扫文本找产出文件」这一支。
+
+    MCP 工具名以 ``mcp__`` 开头（``agents/workspace.py`` 注册时加的固定前缀），
+    它返回什么形状的文件我们不知道，统一交给同一闸门处理即可：闸门只认
+    **落在本人工作区且 ``is_file()`` 为真**的路径，吹出来的路径进不来。
+    """
+    name = str(tool_name or "")
+    if name in FILE_SCRIPT_PRODUCER_TOOLS:
+        return True
+    return name.startswith("mcp__") or name.startswith("mcp_")
+
 
 #: 绝对路径形态：至少两段、以常见根目录开头（避免把 "a/b" 这种相对碎片当路径）。
 #: 交替项必须**长前缀在前**——``/app`` 排在 ``/apps`` 前会让 ``/apps/ai/...``
@@ -353,6 +398,108 @@ def collect_from_tool_call(
                         "ref": rel,
                         "title": Path(rel).name,
                         "role": role,
+                        "source": tool_name,
+                    }
+                )
+                if len(candidates) >= MAX_PER_CALL:
+                    break
+
+        elif is_script_producer_tool(tool_name):
+            # v17 · F4（拍板 D3-A）：脚本产出的文件走「扫文本」这一支。
+            #
+            # 脚本生成 xlsx/csv/图表时**通常不打印路径**（openpyxl 只
+            # ``wb.save(...)``），所以只扫工具输出会漏掉大部分产出——这里
+            # 连脚本正文一起扫。安全性由闸门保证：``_normalize_file_path``
+            # 要求 resolve 之后落在**当前用户工作区**且 ``is_file()`` 为真，
+            # 于是脚本里提到的临时路径、别的用户的路径、模型吹出来的路径
+            # 一律进不了台账；上限 MAX_PER_CALL 防刷屏（脚本里 import 十行
+            # 绝对路径不该刷出十条资源）。
+            paths: list[str] = []
+            for key in _SCRIPT_CODE_KEYS:
+                v = tool_input.get(key)
+                if isinstance(v, str) and v:
+                    paths.extend(_extract_file_paths(v, workspace))
+            for t in texts:
+                paths.extend(_extract_file_paths(t, workspace))
+            seen_local: set[str] = set()
+            for rel in paths:
+                if rel in seen_local:
+                    continue
+                seen_local.add(rel)
+                candidates.append(
+                    {
+                        "kind": "file",
+                        "ref": rel,
+                        "title": Path(rel).name,
+                        "role": "producer",
+                        "source": tool_name,
+                    }
+                )
+                if len(candidates) >= MAX_PER_CALL:
+                    break
+
+        elif is_script_producer_tool(tool_name):
+            # v17 · F4（拍板 D3-A）：脚本产出的文件走「扫文本」这一支。
+            #
+            # 脚本生成 xlsx/csv/图表时**通常不打印路径**（openpyxl 只
+            # ``wb.save(...)``），所以只扫工具输出会漏掉大部分产出——这里
+            # 连脚本正文一起扫。安全性由闸门保证：``_normalize_file_path``
+            # 要求 resolve 之后落在**当前用户工作区**且 ``is_file()`` 为真，
+            # 于是脚本里提到的临时路径、别的用户的路径、模型吹出来的路径
+            # 一律进不了台账；上限 MAX_PER_CALL 防刷屏（脚本里 import 十行
+            # 绝对路径不该刷出十条资源）。
+            paths: list[str] = []
+            for key in _SCRIPT_CODE_KEYS:
+                v = tool_input.get(key)
+                if isinstance(v, str) and v:
+                    paths.extend(_extract_file_paths(v, workspace))
+            for t in texts:
+                paths.extend(_extract_file_paths(t, workspace))
+            seen_local: set[str] = set()
+            for rel in paths:
+                if rel in seen_local:
+                    continue
+                seen_local.add(rel)
+                candidates.append(
+                    {
+                        "kind": "file",
+                        "ref": rel,
+                        "title": Path(rel).name,
+                        "role": "producer",
+                        "source": tool_name,
+                    }
+                )
+                if len(candidates) >= MAX_PER_CALL:
+                    break
+
+        elif is_script_producer_tool(tool_name):
+            # v17 · F4（拍板 D3-A）：脚本产出的文件走「扫文本」这一支。
+            #
+            # 脚本生成 xlsx/csv/图表时**通常不打印路径**（openpyxl 只
+            # wb.save(...)），所以只扫工具输出会漏掉大部分产出——这里连
+            # 脚本正文一起扫。安全性由闸门保证：_normalize_file_path 要求
+            # resolve 之后落在**当前用户工作区**且 is_file() 为真，于是
+            # 脚本里提到的临时路径、别的用户的路径、模型吹出来的路径一律
+            # 进不了台账；上限 MAX_PER_CALL 防刷屏（脚本里 import 十行绝对
+            # 路径不该刷出十条资源）。
+            script_paths: list[str] = []
+            for key in _SCRIPT_CODE_KEYS:
+                v = tool_input.get(key)
+                if isinstance(v, str) and v:
+                    script_paths.extend(_extract_file_paths(v, workspace))
+            for t in texts:
+                script_paths.extend(_extract_file_paths(t, workspace))
+            seen_script: set[str] = set()
+            for rel in script_paths:
+                if rel in seen_script:
+                    continue
+                seen_script.add(rel)
+                candidates.append(
+                    {
+                        "kind": "file",
+                        "ref": rel,
+                        "title": Path(rel).name,
+                        "role": "producer",
                         "source": tool_name,
                     }
                 )

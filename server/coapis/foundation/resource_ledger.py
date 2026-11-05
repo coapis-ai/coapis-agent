@@ -131,6 +131,55 @@ def workspace_relative_path(path: str, owner_dir: Optional[Path] = None) -> str:
     return f"files/{p}"
 
 
+
+#: v17 · F7（拍板 D4-A）：会话资源表可排序的列 → (取键函数, 是否倒序)。
+#: 默认口径**保持 last_seen_at 倒序**（本会话最近引用的排前面）——前端不传
+#: sort_by 时行为与旧版一字不差，只有表头被点击才换尺子。取键全走这张表，
+#: 传非法值自动回落默认，不给「传个 size 整表空」的机会。
+_CHAT_SORT_KEYS: dict[str, tuple] = {
+    "updated_at": (lambda r: float(r.get("updated_at") or 0), True),
+    "last_seen_at": (lambda r: float(r.get("last_seen_at") or 0), True),
+    "name": (lambda r: str(r.get("title") or r.get("path") or "").lower(), False),
+    "size": (lambda r: int(r.get("size") or r.get("size_bytes") or 0), True),
+    "version": (lambda r: int(r.get("version") or 1), True),
+}
+_CHAT_SORT_DEFAULT = _CHAT_SORT_KEYS["last_seen_at"]
+
+
+def epoch_ms(value: object) -> int | None:
+    """把台账里的 Float 秒 / 已是毫秒的数 / ISO 串统一成 **epoch 毫秒**。
+
+    v17 · F5 的出参口径函数。秒与毫秒用「是否越过 1e11」判别：1e11 秒是
+    公元 5138 年，1e11 毫秒是 2001 年 —— 现实时间戳不会跨过这条线，判别安全。
+    认不出来返回 None（前端显示 `-`），**不抛错**：台账读侧任何异常都不
+    能连累聊天。
+    """
+    import datetime as _dt
+
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        n = float(value)
+        if n <= 0:
+            return None
+        return int(n * 1000) if n < 1e11 else int(n)
+    if isinstance(value, _dt.datetime):
+        return int(value.timestamp() * 1000)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        n = float(text)
+        if n > 0:
+            return int(n * 1000) if n < 1e11 else int(n)
+    except ValueError:
+        pass
+    try:
+        return int(_dt.datetime.fromisoformat(text).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
 class ResourceLedger:
     def __init__(self, workspaces_dir: Optional[Path] = None) -> None:
         self._ws = Path(workspaces_dir) if workspaces_dir else WORKSPACES_DIR
@@ -229,9 +278,16 @@ class ResourceLedger:
                 ).scalar_one_or_none()
                 if res is None:
                     size = 0
+                    mtime = None
                     p = self._abs_path_kind(kind, owner_id, path)
                     if p is not None and p.exists():
-                        size = p.stat().st_size
+                        _st0 = p.stat()
+                        size = int(_st0.st_size)
+                        mtime = float(_st0.st_mtime)
+                    # v17 · F5（拍板 D5-A）：``updated_at`` 存**文件真实
+                    # mtime**（库内秒制）。文件此刻不存在 → 用登记时刻兜底；
+                    # 网页类没有 mtime，登记时刻即「首次引用时间」，这正是
+                    # 前端「更新时间」列要显示的口径。
                     s.add(
                         Resource(
                             resource_key=key,
@@ -247,27 +303,45 @@ class ResourceLedger:
                             fs_present=1,
                             first_seen_at=now,
                             last_seen_at=now,
-                            updated_at=now,
+                            updated_at=mtime if mtime is not None else now,
                         )
                     )
                 else:
+                    # v17 · F5 + F6（拍板 D5-A / D6-A）· 两条口径一起立：
+                    #
+                    # ① ``updated_at`` **只跟随文件真实 mtime**——被多引用一次
+                    #    不该跳到当下（实测台账 21 行里 18 行 updated_at 恰等于
+                    #    登记时刻）。刷新只动 ``last_seen_at``。
+                    # ② 版本推进 = **大小或 mtime** 变了（同一次 stat 就够，
+                    #    零额外 IO、不用加列）。旧实现只有「大小变了」一个判据，
+                    #    且取大小的那行是**坏的**：``self._resolve(abs_path,
+                    #    owner_id)`` 这个方法和变量都不存在 → 每次必抛 → size
+                    #    恒 None → 版本与大小**永远不更新**（实测 30/34 行
+                    #    version=1，xlsx 重存后仍显示 v1 → 小蜜蜂第 2 条）。
                     res.last_seen_at = now
-                    res.updated_at = now
-                    # 版本推进只在**内容真的换了**时发生：重新 stat 一次文件，
-                    # 大小与台账记录不同才算新版；同一份内容重复引用版本不动。
+                    fs_size = None
+                    fs_mtime = None
                     if kind == "file":
                         try:
-                            _p = self._resolve(abs_path, owner_id)
-                            _st = _p.stat() if _p is not None else None
-                            if _st is not None:
-                                size = int(_st.st_size)
+                            _p = self._abs_path_kind(kind, owner_id, path)
+                            if _p is not None and _p.is_file():
+                                _st = _p.stat()
+                                fs_size = int(_st.st_size)
+                                fs_mtime = float(_st.st_mtime)
                         except Exception:  # pragma: no cover - defensive
-                            size = None
-                    if size and res.size_bytes and size != res.size_bytes:
+                            fs_size = None
+                            fs_mtime = None
+                    _prev_updated = float(res.updated_at or 0)
+                    if fs_size is not None and int(fs_size) != int(res.size_bytes or 0):
                         res.version = int(res.version or 1) + 1
-                        res.size_bytes = size
-                    elif size and res.size_bytes != size:
-                        res.size_bytes = size
+                        res.size_bytes = int(fs_size)
+                    if fs_mtime is not None:
+                        # mtime 换了 = 内容被重写过，字节数一样也是新版。
+                        if _prev_updated and abs(fs_mtime - _prev_updated) > 1.0:
+                            res.version = int(res.version or 1) + 1
+                        res.updated_at = fs_mtime
+                    elif res.first_seen_at:
+                        res.updated_at = res.first_seen_at
                     if title:
                         res.title = title
                     elif not res.title and title_in:
@@ -900,7 +974,17 @@ class ResourceLedger:
                         .where(ResourceRef.referrer_id == chat_id)
                     )
                     stmt = stmt.where(Resource.resource_key.in_(ref_keys))
-                stmt = stmt.order_by(Resource.last_seen_at.desc()).limit(limit).offset(offset)
+                # v17 · F5（小蜜蜂第 3 条「排序不对，最新的在前面」）：排序必须与
+                # **显示的时间**同一把尺子。此前显示走 ``updated_at``（= 文件真实
+                # mtime，F5 拍板 D5-A），排序走 ``last_seen_at``（= 被引用/登记的
+                # 时刻）—— 一次重扫会把 last_seen_at 顶到当下，于是"刚生成 3 天
+                # 的 xlsx"排在"上周生成今天被引用"的 md 后面，用户看到的时序是乱的。
+                # 现在按 updated_at 倒序（"最新在前"），updated_at 为空的行退到
+                # 最后，同分再用 last_seen_at 稳定次序。
+                stmt = stmt.order_by(
+                    Resource.updated_at.desc().nullslast(),
+                    Resource.last_seen_at.desc(),
+                ).limit(limit).offset(offset)
                 rows = s.execute(stmt).scalars().all()
                 out = []
                 for r in rows:
@@ -945,6 +1029,7 @@ class ResourceLedger:
         chat_id: str,
         fetch_cap: int = 2000,
         include_deleted: bool = False,
+        sort_by: str = "",
     ) -> list[dict]:
         """本会话引用的资源，**已按 (kind, 规范路径) 合并成一行**。
 
@@ -1014,8 +1099,20 @@ class ResourceLedger:
                                 prev[field] = newer
                         elif newer and (not older or newer > older):
                             prev[field] = newer
+                # v17 · F7（拍板 D4-A）：表头可排序。**默认口径不变**
+                # （last_seen_at 倒序 = 本会话最近引用的排前面），只有前端
+                # 显式传 sort_by 才换尺子。排序键全部走 `_CHAT_SORT_KEYS`，
+                # 非法值回落默认——不给「传个 size 就整表空」的机会。
+                _key, _rev = _CHAT_SORT_KEYS.get(str(sort_by or ""), _CHAT_SORT_DEFAULT)
                 rows = list(merged.values())
-                rows.sort(key=lambda x: (x.get("last_seen_at") or 0), reverse=True)
+                rows.sort(key=lambda x, k=_key: (k(x)), reverse=_rev)
+                # v17 · F5：出参时间统一成 **epoch 毫秒**。
+                # 列里存的是 Float 秒（`to_dict` 只转原生类型），而扫盘回退那
+                # 一路给的是毫秒 —— 同一接口两种单位，前端按秒乘 1000 时扫盘
+                # 行直接显示成 5 万年后。存量行不动，只统一出参。
+                for row in rows:
+                    for _f in ("first_seen_at", "updated_at", "last_seen_at"):
+                        row[_f] = epoch_ms(row.get(_f))
                 return rows
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("chat resource list failed (ignored): %s", exc)
@@ -1030,6 +1127,7 @@ class ResourceLedger:
         limit: int = 200,
         offset: int = 0,
         include_deleted: bool = False,
+        sort_by: str = "",
     ) -> list[dict]:
         """Resources referenced by one chat, **with that chat's ref role**.
 
@@ -1047,6 +1145,7 @@ class ResourceLedger:
             owner_id=owner_id,
             chat_id=chat_id,
             include_deleted=include_deleted,
+            sort_by=sort_by,
         )
         if offset:
             rows = rows[offset:]

@@ -18,26 +18,19 @@ import { canInlinePreview } from "../../utils/webPreview";
 // 纯函数模块：不依赖 React、不依赖 api 层，方便单测与复用。
 
 /**
- * 预览抽屉能渲染的类型（与 CoApisPreviewDrawer 共用同一份判定）。
+ * v17 · F3：**这里不再有第二份「可预览」表**。
  *
- * 白名单必须与后端 `file_service.file_preview` 的能力对齐：后端已把
- * docx/xlsx/pptx 转成 markdown 吐回（type:text），所以前端不认这些后缀时
- * 会出现「后端能预览、前端只给下载」的口径分裂（2026-10-22 实测：产出卡
- * 点预览显示「该类型不支持在线预览」）。
+ * 此前本文件自维护一份 PREVIEWABLE_SUFFIXES，并主动剔除了 office 系；而
+ * webPreview.ts 另有一份 kind 判定 —— 两把尺子各量各的。后端早就把
+ * docx/xlsx/pptx/odt/ods/odp 转成 Markdown 以 type:text 吐回
+ * （file_service._OFFICE_PREVIEW_SUFFIXES），前端这张表把 office 拦在门外，
+ * 于是 L1 产出卡 / L2 资源条 / L3 会话资源 / 正文链接**四处同时**退化成
+ * 下载，用户点 docx 只吃到「该文件不支持预览」（小蜜蜂 2026-11-05 反馈
+ * 第 2、3 条；拍板 D2-A：抽屉内直接渲染后端给的 Markdown）。
+ *
+ * 现在预览能力只由 webPreview.canInlinePreview 一处说了算，并与后端那张
+ * 扩展名表同源对齐。
  */
-
-// 预览窗口方案 F2：白名单 = **能在页面里看懂**的类型。
-//
-// 此前把 docx/xlsx/pptx/odt 也放进来，抽屉里走的是「后端转 markdown」这条
-// 降级路径 —— 表格、排版、内嵌图片全丢，用户点开看到的是一坨残缺文本，
-// 这就是「布局很不友好」的直接来源。办公格式现在统一走**下载下拉**
-// （原件下载 + 转格式项），不再给一个看着像预览的东西。
-export const PREVIEWABLE_SUFFIXES = new Set([
-  ".md", ".markdown", ".txt", ".text", ".log", ".json", ".jsonl", ".yaml",
-  ".yml", ".toml", ".ini", ".cfg", ".conf", ".csv", ".tsv", ".py", ".js",
-  ".ts", ".tsx", ".jsx", ".css", ".sql", ".sh", ".bash", ".xml", ".rst",
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".pdf",
-]);
 
 export function pathSuffix(p: string): string {
   const m = /\.([A-Za-z0-9]{1,8})$/.exec(p || "");
@@ -45,8 +38,8 @@ export function pathSuffix(p: string): string {
 }
 
 export function isPreviewablePath(p: string): boolean {
-  // F2：单一闸门 —— 预览能力只由 webPreview.ts 的 canInlinePreview 决定，
-  // 避免两处后缀表各说各话（实测过：卡片可点、抽屉拒显）。
+  // v17 · F3：单一闸门 —— 预览能力只由 webPreview.ts 的 canInlinePreview
+  // 决定，本文件不再保存第二份扩展名表（两把尺子必然分裂）。
   return canInlinePreview(p);
 }
 

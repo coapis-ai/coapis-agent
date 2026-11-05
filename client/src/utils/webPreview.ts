@@ -65,18 +65,22 @@ const IMAGE_EXT = new Set([
 ]);
 const PDF_EXT = new Set(["pdf"]);
 const MARKDOWN_EXT = new Set(["md", "markdown", "mdx"]);
-/** Office 文档：预览端点转 markdown 后内联渲染 */
-const OFFICE_EXT = new Set([
-  "doc",
-  "docx",
-  "xls",
-  "xlsx",
-  "ppt",
-  "pptx",
-  "odt",
-  "ods",
-  "odp",
-]);
+/**
+ * Office 文档（v17 · F3）：**后端能解析**的那六个 —— 预览端点把它们转成
+ * Markdown 再以 `type:"text"` 吐回来，抽屉直接走 markdown 分支渲染。
+ *
+ * 这份名单与后端 `app/services/file_service.py:_OFFICE_PREVIEW_SUFFIXES`
+ * 必须一字不差：多一个扩展名，前端就会去请求一个后端解析不了的类型，
+ * 抽屉吃到的是 `{"type":"other"}` 元数据 = 一坨 JSON/空白；少一个扩展名，
+ * 后端明明能转的文件被前端拦在门外 = 用户吃到「不支持预览」。
+ */
+const OFFICE_EXT = new Set(["docx", "xlsx", "pptx", "odt", "ods", "odp"]);
+/**
+ * 旧二进制 Office（.doc/.xls/.ppt）：后端 preview 只给元数据（mime 命中
+ * msword/excel/powerpoint 直接 return "other"），前端拿到的是 JSON，
+ * 渲染出来就是乱码 —— 这一类**只给下载**，是后端能力的真实边界。
+ */
+const LEGACY_OFFICE_EXT = new Set(["doc", "xls", "ppt"]);
 const TEXT_EXT = new Set([
   "txt",
   "text",
@@ -137,9 +141,24 @@ export function getPreviewKind(p: string): PreviewKind {
   if (IMAGE_EXT.has(ext)) return "image";
   if (PDF_EXT.has(ext)) return "pdf";
   if (MARKDOWN_EXT.has(ext)) return "markdown";
-  if (OFFICE_EXT.has(ext)) return "office";
+  if (OFFICE_EXT.has(ext) || LEGACY_OFFICE_EXT.has(ext)) return "office";
   if (TEXT_EXT.has(ext)) return "text";
   return "unsupported";
+}
+
+/**
+ * 后端能不能把这份 office 文档转成 Markdown（v17 · F3）。
+ *
+ * 前端不得自己猜"office 一律能转"：`.doc/.xls/.ppt` 后端解析不了。
+ * 判定只由这张扩展名表说了算，与后端 `_OFFICE_PREVIEW_SUFFIXES` 同源。
+ */
+export function isOfficeConvertible(p: string): boolean {
+  return OFFICE_EXT.has(extOf(p));
+}
+
+/** 旧二进制 Office（只给下载，不给预览）。 */
+export function isLegacyOffice(p: string): boolean {
+  return LEGACY_OFFICE_EXT.has(extOf(p));
 }
 
 /** 预览类型 → 中文标签（资源条与资源 Tab 共用一份措辞）。 */
@@ -158,7 +177,7 @@ export const PREVIEW_KIND_LABEL: Record<PreviewKind, string> = {
  */
 export function myfilesUrl(
   relPath: string,
-  mode: "preview" | "download",
+  mode: "preview" | "download" | "delete",
   extra = "",
 ): string {
   const { category, path } = toMyfilesParams(relPath);
@@ -179,17 +198,25 @@ export function chatIdQuery(chatId?: string | number): string {
 }
 
 /**
- * 能在页面内**内联渲染**的类型（预览窗口方案 F2）。
+ * 能在页面内**内联渲染**的类型（预览窗口方案 F2，v17 · F3 收口）。
  *
- * 与 `isPreviewablePath` 的区别：后者是「后端 preview 端点答不答应」，
- * 前者是「抽屉里渲染出来用户看不看得懂」。office 系（docx/xlsx/pptx…）
- * 后端是转 markdown 再吐出来的，表格/排版/图片全丢，用户点开看到的是一坨
- * 残缺文本 —— 实测这就是「预览窗口布局很不友好」的来源之一。
- * 因此 office 系不进抽屉，直接进下载下拉（与 word/pdf 归到下载下拉的口径一致）。
+ * 与 `isPreviewablePath` 是同一把尺子（后者直接委托到这里），全前端**只此
+ * 一处**判定预览能力——此前 workspaceLinks 里另存了一份 PREVIEWABLE_SUFFIXES，
+ * 一处收窄让 L1 产出卡 / L2 资源条 / L3 会话资源 / 正文链接四处同时失效。
+ *
+ * office 系（docx/xlsx/pptx/odt/ods/odp）**进白名单**：后端预览端点早就在
+ * 把它们转成 Markdown 吐回来（file_service.py `_OFFICE_PREVIEW_SUFFIXES`），
+ * 前端此前主动关门 → 用户点 docx 只会吃到"该文件不支持预览"或一次下载。
+ * 小蜜蜂 2026-11-05 拍板 D2-A：抽屉内直接渲染那份 Markdown。
+ *
+ * 旧二进制 .doc/.xls/.ppt 后端解析不了 → 不给预览，走下载。
  */
 export function canInlinePreview(p: string): boolean {
   const kind = getPreviewKind(p);
-  return kind === "image" || kind === "pdf" || kind === "markdown" || kind === "text";
+  if (kind === "office") return isOfficeConvertible(p);
+  return (
+    kind === "image" || kind === "pdf" || kind === "markdown" || kind === "text"
+  );
 }
 
 /**
@@ -426,6 +453,33 @@ export async function downloadFile(
     await saveFile(myfilesUrl(out, "download"), `${name}.${target}`);
   } catch {
     await saveFile(myfilesUrl(p, "download"), name);
+  }
+}
+
+/**
+ * 删除一个工作区文件（v17 · F7 · 拍板 D2-B：会话资源侧默认走**软删**）。
+ *
+ * 后端 `DELETE /api/myfiles/delete?path=&category=&soft=1`：
+ *   - `soft=1` → 只把资源台账行标 `deleted_at` 并写一条 delete 事件，
+ *     **磁盘文件不动**（台账惯例：memories / resources 的删除都是软删）；
+ *   - 省略 soft → 与「我的空间」一致，直接删磁盘文件。
+ * 失败一律抛错，由调用方给提示 —— 绝不静默装作删掉了。
+ */
+export async function deleteWorkspaceFile(
+  displayPath: string,
+  opts: { soft?: boolean } = {},
+): Promise<void> {
+  const p = String(displayPath || "").trim();
+  if (!p) throw new Error("缺少文件路径");
+  const soft = opts.soft !== false;
+  // 复用与预览/下载同一条拼 URL 的路（category/path/identity 口径必须一致）
+  const url = myfilesUrl(p, "delete", `&soft=${soft ? 1 : 0}`);
+  const res = await fetch(url, { method: "DELETE", headers: authHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.ok === false) {
+    throw new Error(
+      String(data?.detail || data?.error || `HTTP ${res.status}`),
+    );
   }
 }
 

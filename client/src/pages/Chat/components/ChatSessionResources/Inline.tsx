@@ -16,11 +16,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderOpen } from "lucide-react";
 import {
+  canInlinePreview,
   downloadFile,
   getPreviewKind,
   previewFile,
   toLedgerRelPath,
 } from "../../../../utils/webPreview";
+import { formatResMeta, splitFileName } from "./resourceFormat";
 import type { ChatResourceItem } from "../../../../api/modules/chat";
 import { getChatResourcesShared } from "../useChatResourceLedger";
 import { displayName } from "./helpers";
@@ -153,38 +155,47 @@ export function ChatSessionResourcesInline({
             {rows.slice(0, PANEL_LIMIT).map((item) => {
               const rel = toLedgerRelPath(item.path);
               const name = displayName(item) || rel;
-              const previewable = rel
-                ? getPreviewKind(rel) !== "unsupported"
-                : false;
+              // v17 · F3：预览能力只由 canInlinePreview 一处说了算
+              // （此前这里看 `getPreviewKind !== "unsupported"`，抽屉看
+              // `canInlinePreview`，两张表必然分裂 → 行上写着"可预览"、
+              // 点进去抽屉说"不支持预览"）。
+              const previewable = rel ? canInlinePreview(rel) : false;
+              const { stem, ext } = splitFileName(name);
+              const meta = formatResMeta(item.size, item.updated_at);
               return (
                 <li
                   key={`${item.resource_key}:${item.version}`}
                   className={styles.row}
-                  title={rel || name}
+                  title={`${rel || name}${
+                    previewable
+                      ? ""
+                      : ` · ${t("chat.resDownloadOnly", "该格式无法在线预览，仅可下载")}`
+                  }`}
                 >
+                  {/* v17 · F8（小蜜蜂 2026-11-05 第 5 条，三件事一起收）：
+                      ① 行内**不再挂下载按钮** —— 一行一枚 ↓ 把左栏变成了
+                         下载栏，还与"点行=预览"抢语义；下载收进 L3 抽屉。
+                      ② 名称**拆两段**：主干可截、扩展名保尾。旧写法整串
+                         ellipsis 从右往左吃，面板一窄先被吃掉的就是 `.docx`，
+                         用户看到"报表-季度…"分不清格式。
+                      ③ 补第二行小字 **大小 · 时间** —— 左栏此前压根没有时间。 */}
                   <button
                     type="button"
                     className={styles.rowMain}
                     disabled={!rel}
                     onClick={() => openResource(item, onPreview)}
                   >
-                    <span className={styles.rowName}>{name}</span>
-                  </button>
-                  {rel && (
-                    <button
-                      type="button"
-                      className={styles.rowDl}
-                      title={t("chat.resource.download", "下载")}
-                      onClick={() => void downloadFile(rel, name)}
-                    >
-                      ↓
-                    </button>
-                  )}
-                  {!previewable && rel && (
-                    <span className={styles.rowTag} data-kind="plain">
-                      {t("chat.resource.noPreview", "仅下载")}
+                    <span className={styles.rowName}>
+                      <span className={styles.rowStem}>{stem}</span>
+                      {ext ? <span className={styles.rowExt}>{ext}</span> : null}
                     </span>
-                  )}
+                    <span className={styles.rowMeta}>
+                      {meta}
+                      {previewable
+                        ? null
+                        : ` · ${t("chat.resDownloadOnlyShort", "仅下载")}`}
+                    </span>
+                  </button>
                 </li>
               );
             })}

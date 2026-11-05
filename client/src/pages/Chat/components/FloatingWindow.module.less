@@ -152,9 +152,21 @@
   border-radius: 4px;
 }
 
-/* 自由浮窗时头部可拖移（铺满/窄屏/内嵌时不拖） */
+/* 自由浮窗时头部**整行**可拖移（铺满/窄屏/内嵌时不拖）。
+   v17 · F9：标题区此前 100% 挂着 data-nodrag，鼠标是 `move` 却拖不动 ——
+   热区与光标必须一致：能拖的地方给 move，控件给 default。 */
 .freeform .header {
   cursor: move;
+}
+
+.freeform .head-title {
+  cursor: move;
+}
+
+/* 头部里的控件不参与拖移 → 光标也不给「能拖」的暗示 */
+.header-btn,
+.head-extra {
+  cursor: default;
 }
 
 /* 标题区占满剩余空间，把附加按钮推到右侧 */
@@ -213,4 +225,18 @@
     border-radius: 0;
     box-shadow: none;
   }
+}
+
+/* ── v17 · F9：最小化（只剩头部一行）──────────────────────────────
+   高度由 JS 给（HEAD_H=40），这里只管两件：正文一律不可见、窗体不许溢出。
+   共用骨架 → 预览窗 / 资源抽屉 / 决策面板三窗同时生效（拍板 D5-A）。 */
+.minimized {
+  overflow: hidden;
+  /* 头部就是全部高度：正文/页脚/把手都不渲染（见 FloatingWindow.tsx），
+     这里兜一层，避免主题里给 body 定了最小高度把窗顶开。 */
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+.minimized .body {
+  display: none;
 }

@@ -73,7 +73,14 @@ interface SessionRowData {
   handleItemContextMenu: (sessionId: string, event: React.MouseEvent) => void;
   // 批次 B2：caret 长在标题行、面板在行下，展开态得从上层传下来
   expandedId: string | null;
-  onToggleExpand: (sessionId: string) => void;
+  /**
+   * v17 · F1：入参**只认后端 id**。
+   *
+   * 此前这条线上传的是前端 `session.id`（本地时间戳形态），而展开态、资源
+   * 面板取数、当前会话高亮三处全部按后端 UUID 记账 —— 一把尺子量两件事，
+   * 点 caret 就是把"前端 id"塞进"后端 id 的槽"，判定必然错位。
+   */
+  onToggleExpand: (backendId: string | null) => void;
 }
 
 /**
@@ -94,7 +101,22 @@ const SessionLine = React.memo(function SessionLine({
     ? getChannelLabel(channelKey, data.t)
     : undefined;
   const isEditing = data.editingSessionId === session.id;
-  const expanded = data.expandedId === session.id;
+  /**
+   * v17 · F1（拍板 D1-A）：caret **只挂当前会话那一行**。
+   *
+   * 三个坑一起收：
+   * 1. caret 此前只在 `extra` 存在时才渲染 → 用户一收起，caret 整枚消失，
+   *    再也点不开（第 1 条反馈里"收起后点不开"就是它）；
+   * 2. 展开位此前比对前端 `session.id`，与资源面板取数用的后端 UUID 两把
+   *    尺子打架 → 面板挂错行、或挂了不显示；
+   * 3. 逐行挂 caret = 左栏 20 行 20 个箭头，全是噪音（小蜜蜂："不要给我
+   *    非常多问题和尾巴"）。
+   * 现在 caret 常驻当前会话行（收起也在），展开位与资源面板同用后端 id。
+   */
+  const backendId = getBackendId(session);
+  const showCaret =
+    !!backendId && !!data.currentBackendId && backendId === data.currentBackendId;
+  const expanded = showCaret && data.expandedId === backendId;
 
   return (
     <div className={styles.lineWrap}>
@@ -124,10 +146,11 @@ const SessionLine = React.memo(function SessionLine({
         onEditCancel={data.handleEditCancel}
         onContextMenu={data.handleItemContextMenu}
         // 批次 B2：caret 挂在标题行末尾。原来它长在资源面板头部
-        // （"会话资源"标题 + caret），和会话本身割裂，已删。只有当前
-        // 会话有资源面板，caret 也就只出现在这一行。
+        // （"会话资源"标题 + caret），和会话本身割裂，已删。
+        // v17 · F1：判定改看 `showCaret`（当前会话行常驻一枚），不再看
+        // `extra` —— 看 extra 的话收起即无 caret，用户点不开第二回。
         expandSlot={
-          extra ? (
+          showCaret ? (
             <Tooltip
               title={
                 expanded
@@ -149,13 +172,13 @@ const SessionLine = React.memo(function SessionLine({
                 }
                 onClick={(e) => {
                   e.stopPropagation();
-                  data.onToggleExpand(session.id);
+                  data.onToggleExpand(backendId);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     e.stopPropagation();
-                    data.onToggleExpand(session.id);
+                    data.onToggleExpand(backendId);
                   }
                 }}
               >
@@ -247,6 +270,12 @@ interface ChatSessionDropdownProps {
 }
 
 /** Resolve the real backend UUID from an extended session (id may be a local timestamp) */
+/**
+ * 左栏展开位的会话记忆（v17 · F1）：刷新页面后保持用户上次的收起/展开选择，
+ * 别每次都把当前会话撑开——左栏首屏那 20 行里，展开面板比列表金贵。
+ */
+const EXPAND_STORE_KEY = "coapis.chat.sidebarExpandedId";
+
 const getBackendId = (session: ExtendedChatSession): string | null => {
   if (session.realId) return session.realId;
   const id = session.id;
@@ -313,27 +342,56 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
    */
   const offsetRef = useRef(0);
 
-  // ── 左栏展开位（B4）───────────────────────────────────────────────
-  // 资源下拉挂在「展开的那一行」下方，默认就是当前会话；点别的会话跟过去。
+  // ── 左栏展开位（B4 / v17 · F1）─────────────────────────────────────
+  // 资源下拉挂在「展开的那一行」下方，默认就是当前会话；点 caret 收起。
   // 一次只展开一行：多行同时展开会把左栏变成资源墙，列表就没法扫了。
-  const [expandedId, setExpandedId] = useState<string | null>(
-    props.currentBackendId ?? null,
-  );
+  // v17 · F1：展开位**只存后端 chat id**（资源面板就是按它取数的）；初值
+  // 优先取 sessionStorage，刷新后保持用户上次的收起/展开选择。
+  const [expandedId, setExpandedId] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem(EXPAND_STORE_KEY) || null;
+    } catch {
+      return null;
+    }
+  });
 
   /**
    * 展开位切换。入参是**后端 id**（不是前端 chatId）：展开态、资源面板、
-   * 高亮判定全部按后端 UUID 记账，传前端 id 会让面板挂在错误的行下。
+   * 高亮判定全部按后端 UUID 记账，传前端 id 会让面板挂在错误的行下
+   * （v17 · F1 实测：caret 点下去塞的是 `session.id`，判定必然错位）。
    */
   const handleToggleExpand = useCallback((backendId: string | null) => {
     if (!backendId) return;
     setExpandedId((prev) => (prev === backendId ? null : backendId));
   }, []);
 
-  // 当前会话变化（新建 / 切换 / 删除后回退）时，展开位跟着走
+  /** 展开位落地即写 sessionStorage（隐私模式会抛，忽略即可）。 */
   useEffect(() => {
-    if (props.variant === "sidebar" && props.currentBackendId) {
-      setExpandedId(props.currentBackendId);
+    try {
+      if (expandedId) sessionStorage.setItem(EXPAND_STORE_KEY, expandedId);
+      else sessionStorage.removeItem(EXPAND_STORE_KEY);
+    } catch {
+      /* localStorage/sessionStorage 在隐私模式下会抛 */
     }
+  }, [expandedId]);
+
+  /**
+   * 当前会话变化（新建 / 切换 / 删除后回退）时，展开位跟到当前会话。
+   *
+   * v17 · F1：只在**会话真的换了**时跟随，同一会话内不抢用户手动收起的
+   * 选择——旧写法每次 currentBackendId 变化（含列表刷新带来的同一 id 重渲染）
+   * 都无条件 setExpandedId，用户点了收起下一秒又被撑开。
+   */
+  const lastCurrentRef = useRef<string | null>(
+    props.currentBackendId ?? null,
+  );
+  useEffect(() => {
+    if (props.variant !== "sidebar") return;
+    const bid = props.currentBackendId ?? null;
+    if (!bid) return; // 新建会话暂挂前端临时 id：等后端 id 落地再跟随
+    if (bid === lastCurrentRef.current) return;
+    lastCurrentRef.current = bid;
+    setExpandedId(bid);
   }, [props.variant, props.currentBackendId]);
   const observerRef = useRef<ResizeObserver | null>(null);
 
@@ -660,10 +718,6 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   }, [contextMenuSessionId, localSessions, t, handleEditStart, handlePinToggle, handleDelete]);
 
   const isSidebar = props.variant === "sidebar";
-  const isCurrentSession = (session: ExtendedChatSession): boolean =>
-    props.currentBackendId
-      ? getBackendId(session) === props.currentBackendId
-      : session.id === currentSessionId;
 
   const rowHandlers = {
     sortedSessions,
@@ -772,14 +826,16 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
                     session={session}
                     data={rowHandlers}
                     extra={
+                      // v17 · F1：资源面板只挂在「caret 那一行」= 当前会话行，
+                      // 判定统一走后端 id。旧写法是
+                      //   `expandedId ? session.id===expandedId : isCurrentSession(session)`
+                      // ——收起时回落到"当前会话"，面板照样挂着 = 根本收不起来；
+                      // 展开时又拿前端 id 比后端 id，两把尺子必然错位。
                       props.renderItemExtra &&
-                      (expandedId
-                        ? session.id === expandedId
-                        : isCurrentSession(session))
-                        ? props.renderItemExtra(
-                            session,
-                            getBackendId(session),
-                          )
+                      expandedId &&
+                      expandedId === props.currentBackendId &&
+                      getBackendId(session) === expandedId
+                        ? props.renderItemExtra(session, expandedId)
                         : null
                     }
                   />

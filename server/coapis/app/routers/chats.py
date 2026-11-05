@@ -952,6 +952,10 @@ async def list_chat_resources(
     chat_id: str,
     limit: int = Query(200, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort_by: str = Query(
+        "",
+        description="表头排序列：updated_at|last_seen_at|name|size|version；空=最近引用在前",
+    ),
 ) -> Dict[str, Any]:
     """会话资源清单（B2）：本会话引用/产出的文件与网页。
 
@@ -986,7 +990,12 @@ async def list_chat_resources(
             limit=limit,
             offset=offset,
             include_deleted=True,
+            # v17 · F7（拍板 D4-A）：排序在台账侧、分页之前完成，非法值
+            # 自动回落「最近引用在前」。端点只透传，不自创尺子。
+            sort_by=sort_by,
         )
+        # 总数与清单同一份合并口径（`count_resources_for_chat` 走同一个
+        # `_chat_resource_rows`）；排序不改变条数，故计数不传 sort_by。
         total = rl.count_resources_for_chat(
             owner_scope="user",
             owner_id=owner or username,
@@ -996,6 +1005,8 @@ async def list_chat_resources(
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("chat %s resources skipped: %s", chat_id[:16], exc)
         rows, total = [], 0
+
+    from ...foundation.resource_ledger import epoch_ms  # v17 · F5
 
     # 角色按 ref 归属：本会话是 producer 就是产出，否则是引用。
     items: List[Dict[str, Any]] = []
@@ -1013,7 +1024,20 @@ async def list_chat_resources(
             "status": row.get("status"),
             "version": int(row.get("version") or 1),
             "deleted": bool(row.get("deleted_at")),
-            "updated_at": row.get("last_seen_at") or row.get("updated_at"),
+            # v17 · F5：出参统一 **epoch 毫秒**。台账列存 Float 秒，下面按
+            # 磁盘 stat 补齐那一路也给秒 —— 同一接口两把尺子，前端只能猜着
+            # 乘 1000（猜错就显示成 5 万年后）。这一版两条路一起定死成毫秒，
+            # 前端 `resourceFormat.toEpochMs` 秒/毫秒都认，历史行与老缓存不崩。
+            #
+            # v17 · F5（拍板 D5-A）：**只读台账的 updated_at**（= 文件真实
+            # mtime，登记时写死），不再被「本次请求现场 stat」改写——那一路
+            # 把时间口径变成「用户查看的时间」。取序 updated_at →
+            # last_seen_at → first_seen_at，兼容 F5 之前的历史行。
+            "updated_at": epoch_ms(
+                row.get("updated_at")
+                or row.get("last_seen_at")
+                or row.get("first_seen_at")
+            ),
             "size": None,
             "exists": True,
         }
@@ -1032,7 +1056,11 @@ async def list_chat_resources(
                 st = abs_p.stat() if abs_p is not None else None
                 if st is not None:
                     item["size"] = int(st.st_size)
-                    item["updated_at"] = st.st_mtime
+                    # v17 · F5（拍板 D5-A）：**这里不再用磁盘 mtime 改写
+                    # updated_at**。旧实现每刷新一次列表，「更新时间」就被刷
+                    # 成「用户看它的时间」——台账 21 行里 18 行的 updated_at
+                    # 恰好等于登记时刻，时间列全是假数。mtime 的落库口径在
+                    # resource_ledger.register()（登记时写死），列表只读台账。
                 item["exists"] = st is not None
             except Exception:  # pragma: no cover - defensive
                 pass

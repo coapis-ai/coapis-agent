@@ -209,8 +209,12 @@ def main():
               for r in rl.list_resources(owner_scope="user", owner_id="alice")))
     # 软删行被重新注册时复活
     rl.register(owner_scope="user", owner_id="alice", kind="file", path="report/doc.md")
+    # 按 path 精确取行 —— 不能按下标取"第一行"：那条断言把**排序尺子**
+    # 写进了测试（旧版按 last_seen_at 排，刚注册的行必然第一）。排序尺子已
+    # 改为与显示同源的 updated_at，本用例只关心"软删行复活成 draft 并回到默认清单"。
     check("软删后重新注册复活为 draft",
-          rl.list_resources(owner_scope="user", owner_id="alice")[0]["status"] == "draft")
+          [r for r in rl.list_resources(owner_scope="user", owner_id="alice")
+           if r["path"] == "files/report/doc.md"][0]["status"] == "draft")
 
     # ── stats ────────────────────────────────────────────────────────
     st = rl.stats(owner_scope="user", owner_id="alice")

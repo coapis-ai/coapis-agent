@@ -3,13 +3,16 @@ import {
   Button,
   Empty,
   Input,
+  message,
   Pagination,
+  Popconfirm,
   Select,
   Table,
   Tag,
   Tooltip,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import type { TableProps } from "antd";
 import {
   FileTextOutlined,
   GlobalOutlined,
@@ -18,6 +21,7 @@ import {
   DownloadOutlined,
   AimOutlined,
 } from "@ant-design/icons";
+import { Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { chatApi } from "../../../../api/modules/chat";
@@ -26,6 +30,7 @@ import {
   toLedgerRelPath,
   getPreviewKind,
   downloadFile,
+  deleteWorkspaceFile,
   previewFile,
 } from "../../../../utils/webPreview";
 import { TAGGED_STATUSES } from "../CoApisChatResourceBar";
@@ -78,11 +83,23 @@ function statusOf(item: ChatResourceItem): string {
   return item.status || "draft";
 }
 
-const fmtTime = (ts?: number | string | null) => {
+/**
+ * 统一时间格式化（v17 · F5）。
+ *
+ * 后端出参已定死成 **epoch 毫秒**，历史行是**秒**，老缓存里还有
+ * `updated_at` 是"登记时刻"的行 —— 这里两把尺子都认：数值 > 1e11 当毫秒，
+ * 否则当秒。旧实现固定 `t * 1000`，遇到毫秒就乘出 5 万年后的日期
+ * （小蜜蜂 2026-11-05 第 1 条「更新时间显示成 5 万年后」）。
+ */
+const toEpochMs = (ts?: number | string | null): number => {
   const t = Number(ts);
-  return Number.isFinite(t) && t > 0
-    ? new Date(t * 1000).toLocaleString()
-    : "-";
+  if (!Number.isFinite(t) || t <= 0) return 0;
+  return t > 1e11 ? t : t * 1000;
+};
+
+const fmtTime = (ts?: number | string | null) => {
+  const ms = toEpochMs(ts);
+  return ms > 0 ? new Date(ms).toLocaleString() : "-";
 };
 
 const fmtSize = (n?: number | string | null) => {
@@ -125,7 +142,13 @@ const ChatSessionResources: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [kind, setKind] = useState<string>("all");
   const [keyword, setKeyword] = useState("");
-  const [sort, setSort] = useState<string>("time_desc");
+  // v17 · F7（拍板 D4-A）：排序交给后端（台账在**分页之前**排全量），表头是
+  // 唯一控制点。取键与台账 `_CHAT_SORT_KEYS` 一一对应（name 升序、其余倒序），
+  // 默认按更新时间倒序（小蜜蜂 2026-11-05 第 6 条）。此前是"前端只排当前页
+  // 20 条"，等于在一个已经截断的窗口里比大小 —— 翻到第 2 页顺序就乱。
+  const [sort, setSort] = useState<string>("updated_at");
+  // 删除成功后重拉当前页的触发器
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!chatId) {
@@ -135,7 +158,7 @@ const ChatSessionResources: React.FC<Props> = ({
     }
     setLoading(true);
     chatApi
-      .listChatResources(chatId, PAGE_SIZE, offset)
+      .listChatResources(chatId, PAGE_SIZE, offset, sort)
       .then((res) => {
         setItems(res.items || []);
         setTotal(res.total || 0);
@@ -145,11 +168,11 @@ const ChatSessionResources: React.FC<Props> = ({
         setTotal(0);
       })
       .finally(() => setLoading(false));
-  }, [chatId, offset, refreshSignal]);
+  }, [chatId, offset, refreshSignal, sort, tick]);
 
   const rows = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
-    let out = items.filter(
+    const out = items.filter(
       (it) =>
         (kind === "all" || it.kind === kind) &&
         (!kw ||
@@ -157,17 +180,9 @@ const ChatSessionResources: React.FC<Props> = ({
           (it.path || "").toLowerCase().includes(kw) ||
           displayName(it).toLowerCase().includes(kw)),
     );
-    out = [...out].sort((a, b) => {
-      if (sort === "name") return displayName(a).localeCompare(displayName(b));
-      const at = (x: ChatResourceItem) =>
-        Number(x.updated_at ?? x.last_seen_at ?? 0) || 0;
-      const sz = (x: ChatResourceItem) => Number(x.size ?? 0) || 0;
-      if (sort === "size") return sz(b) - sz(a);
-      if (sort === "time_asc") return at(a) - at(b);
-      return at(b) - at(a);
-    });
+    // 顺序由后端定（见上）：这里只做类型/关键词筛选，不再自带第二把尺子
     return out;
-  }, [items, kind, keyword, sort]);
+  }, [items, kind, keyword]);
 
   const doPreview = (item: ChatResourceItem) => {
     if (item.kind === "web") {
@@ -199,6 +214,39 @@ const ChatSessionResources: React.FC<Props> = ({
     );
   };
 
+  /**
+   * 删除（v17 · F7）：会话资源侧走**软删** —— 台账行标 deleted_at、写一条
+   * delete 事件，磁盘文件保留（台账里 memories/resources 的删除历来软删，
+   * 硬删只留给「我的空间」，见拍板 D2-B）。删完重拉当前页，行立刻显示
+   * 「已删除」灰标；失败给明确提示，不静默。
+   */
+  const doDelete = async (item: ChatResourceItem) => {
+    try {
+      await deleteWorkspaceFile(item.path, { soft: true });
+      message.success(t("chat.resources.deleteDone"));
+      setTick((v) => v + 1);
+    } catch (err) {
+      message.error(
+        `${t("chat.resources.deleteFailed")}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  };
+
+  /**
+   * 表头排序（v17 · F7）：把列键透传给后端，由台账在全量数据上重排。
+   * 每个键方向定死（名称升序、时间/大小/版本倒序），点表头就是"换尺子"，
+   * 不做 antd 默认的三态循环 —— 那会让"按时间"在升序/取消之间漂。
+   */
+  const handleTableChange: NonNullable<
+    TableProps<ChatResourceItem>["onChange"]
+  > = (_pag, _filters, sorter) => {
+    const s = Array.isArray(sorter) ? sorter[0] : sorter;
+    const key = String(s?.columnKey ?? "");
+    if (s?.order && key && key !== sort) setSort(key);
+  };
+
   const columns: ColumnsType<ChatResourceItem> = [
     {
       title: "",
@@ -209,7 +257,11 @@ const ChatSessionResources: React.FC<Props> = ({
     {
       title: t("chat.resources.name"),
       key: "name",
+      // v17 · F7：表头即排序控件（点表头 → sort_by 交后端全量重排）。
       // 名称列自己管两行的省略（antd 的 ellipsis 只认单行，套两行会把目录那行裁掉）
+      sorter: true,
+      sortOrder: sort === "name" ? "ascend" : null,
+      showSorterTooltip: false,
       render: (_, item) => {
         const st = statusOf(item);
         const dead = st === "deleted" || st === "missing";
@@ -299,20 +351,43 @@ const ChatSessionResources: React.FC<Props> = ({
     },
     {
       title: t("chat.resources.time"),
-      key: "time",
+      key: "updated_at",
       width: 112,
+      // v17 · F5/F7：这一列就是**文件真实修改时间**（台账 updated_at），
+      // 表头点击 → 后端按同一字段全量重排；扫盘回退行才借 last_seen_at。
+      sorter: true,
+      sortOrder: sort === "updated_at" ? "descend" : null,
+      showSorterTooltip: false,
       render: (_, item) => fmtTime(item.updated_at || item.last_seen_at),
+    },
+    {
+      // v17 · F7：版本列（此前台账里一直有 version，界面从不显示 → 用户
+      // 看到"v1 的文件内容早变了"却无从判断）。口径见 file_ledger._apply_to_resource：
+      // 首次=1，内容（字节数/mtime）变了才 +1。
+      title: t("chat.resources.versionTitle"),
+      key: "version",
+      width: 56,
+      sorter: true,
+      sortOrder: sort === "version" ? "descend" : null,
+      showSorterTooltip: false,
+      render: (_, item) =>
+        item.kind === "file"
+          ? t("chat.resources.version", { n: Number(item.version ?? 1) || 1 })
+          : "-",
     },
     {
       title: t("chat.resources.size"),
       key: "size",
       width: 62,
+      sorter: true,
+      sortOrder: sort === "size" ? "descend" : null,
+      showSorterTooltip: false,
       render: (_, item) => fmtSize(item.size),
     },
     {
       title: t("chat.resources.actions"),
       key: "actions",
-      width: 88,
+      width: 112,
       render: (_, item) => {
         const st = statusOf(item);
         const dead = st === "deleted" || st === "missing";
@@ -353,6 +428,25 @@ const ChatSessionResources: React.FC<Props> = ({
                     onClick={() => doLocate(item)}
                   />
                 </Tooltip>
+                {/* v17 · F7：预览/下载/**删除**三个动作齐全（小蜜蜂第 6 条）。
+                    会话侧走软删（台账标 deleted_at，磁盘文件保留，可重新生成）；
+                    「我的空间」的硬删语义不动（拍板 D2-B）。二次确认。 */}
+                <Popconfirm
+                  title={t("chat.resources.deleteConfirm")}
+                  okText={t("common.confirm")}
+                  cancelText={t("common.cancel")}
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => doDelete(item)}
+                >
+                  <Tooltip title={t("chat.resources.delete")}>
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<Trash2 size={14} />}
+                    />
+                  </Tooltip>
+                </Popconfirm>
               </>
             ) : null}
           </span>
@@ -389,28 +483,15 @@ const ChatSessionResources: React.FC<Props> = ({
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
         />
-        <Select
-          size="small"
-          style={{ width: 120 }}
-          getPopupContainer={(node) =>
-            (node.parentElement as HTMLElement) ?? document.body
-          }
-          value={sort}
-          onChange={setSort}
-          options={[
-            { value: "time_desc", label: t("chat.resources.sortTimeDesc") },
-            { value: "time_asc", label: t("chat.resources.sortTimeAsc") },
-            { value: "name", label: t("chat.resources.sortName") },
-            { value: "size", label: t("chat.resources.sortSize") },
-          ]}
-        />
         <span className={styles.count}>
           {t("chat.resources.count", { n: total })}
         </span>
+        {/* v17 · F7：刷新此前写的是 `setOffset(0)` —— 已在第 1 页时是空操作，
+            按了等于没按。改成显式重拉当前页。 */}
         <Button
           size="small"
           icon={<ReloadOutlined />}
-          onClick={() => setOffset(0)}
+          onClick={() => setTick((v) => v + 1)}
         />
       </div>
       <Table
@@ -421,6 +502,8 @@ const ChatSessionResources: React.FC<Props> = ({
         columns={columns}
         dataSource={rows}
         pagination={false}
+        // v17 · F7：点表头 → 换尺子交后端全量重排（分页仍由下面这条 Pagination 管）
+        onChange={handleTableChange}
         locale={{
           emptyText: (
             <Empty

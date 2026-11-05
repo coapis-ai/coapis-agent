@@ -785,8 +785,20 @@ async def rename_file(
 
 @router.delete("/delete")
 @require_permission("chat:read")
-async def delete_file(path: str, category: str = "files", request: Request = None):
-    """删除文件/目录"""
+async def delete_file(
+    path: str,
+    category: str = "files",
+    soft: bool = False,
+    request: Request = None,
+):
+    """删除文件/目录。
+
+    v17 · F7（拍板 D2-B）：新增 ``soft`` 软删。**会话资源里的删除一律
+    soft=true** —— 台账是 append-only 的账，文件被物理删掉之后台账行还在、
+    状态永远对不上，「已删除」这一态就永远显示不出来（小蜜蜂 2026-11-05
+    第 6 条）。软删 = 文件移进本人 ``.trash/<日期>/`` + 台账 status=deleted。
+    旧调用不传 ``soft`` 时行为与旧版一字不差。
+    """
     username = get_current_user(request)["username"]
 
     file_service = FileServiceFactory.get_service()
@@ -795,13 +807,17 @@ async def delete_file(path: str, category: str = "files", request: Request = Non
             username=username,
             path=path,
             category=category,
+            soft=soft,
         )
     except Exception as e:
         if "not found" in str(e).lower():
             raise HTTPException(status_code=404, detail="文件/目录不存在")
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
 
-    return FileOperationResponse(success=True, message="删除成功")
+    return FileOperationResponse(
+        success=True,
+        message="已移入回收站" if soft else "删除成功",
+    )
 
 
 @router.post("/mkdir")

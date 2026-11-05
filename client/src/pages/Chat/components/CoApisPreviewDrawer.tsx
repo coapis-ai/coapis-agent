@@ -24,12 +24,14 @@ import { XMarkdown } from "@ant-design/x-markdown";
 import { getApiToken, getApiUrl } from "@/api/config";
 import FloatingWindow from "./FloatingWindow";
 import styles from "./CoApisPreviewDrawer.module.less";
+import { formatResSize, formatResTime } from "./ChatSessionResources/resourceFormat";
 import {
   canInlinePreview,
   copyDirectLink,
   convertTargetsFor,
   downloadFile,
   getPreviewKind,
+  isOfficeConvertible,
   previewSrcUrl,
 } from "../../../utils/webPreview";
 import { toMyfilesParams } from "../workspaceLinks";
@@ -89,6 +91,25 @@ function unwrapPreviewBody(raw: string): string {
     /* 不是合法 JSON：按原文显示 */
   }
   return raw;
+}
+
+/**
+ * 后端转换侧的截断标记（v17 · F3）。
+ *
+ * `_office_preview_text` 撞到 `_OFFICE_PREVIEW_MAX_CHARS`（64k 字符）时会带
+ * `preview_truncated:true` 回来。前端自己那两道尺子（字节数/行数）看的是
+ * 原始文件大小，看不见这条 —— 不接住的话，被砍过一半的 docx 正文会一字不
+ * 提地显示成"全文"。
+ */
+function isPreviewTruncatedFlag(raw: string): boolean {
+  const body = raw.trim();
+  if (!body.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(body);
+    return Boolean(parsed && parsed.preview_truncated);
+  } catch {
+    return false;
+  }
 }
 
 function myfilesUrl(
@@ -215,7 +236,11 @@ export default function CoApisPreviewDrawer(props: {
           if (!cancelled) setError(detail || `${resp.status}`);
           return;
         }
-        const raw = unwrapPreviewBody(await resp.text());
+        const rawText = await resp.text();
+        const raw = unwrapPreviewBody(rawText);
+        // v17 · F3：后端转换链自带截断（office 正文砍到 64k 字符），前端那两道
+        // 尺子看不见它 —— 接住这条标记，别把砍过的正文当全文显示。
+        const backendTruncated = isPreviewTruncatedFlag(rawText);
         if (target.size != null && target.size > MAX_INLINE_BYTES) {
           if (!cancelled) {
             setTruncated(true);
@@ -237,6 +262,7 @@ export default function CoApisPreviewDrawer(props: {
           }
           return;
         }
+        if (backendTruncated && !cancelled) setTruncated(true);
         if (!cancelled) setText(raw);
       } catch (e) {
         if (!cancelled) setError(String((e as Error)?.message || e));
@@ -297,10 +323,21 @@ export default function CoApisPreviewDrawer(props: {
     [path, title, converting, t],
   );
 
-  const isMd = MD_EXT.has(ext);
   // 预览类型（image/pdf/markdown/text/office/unsupported）：正文渲染分支与
   // 头部下载下拉共用这一口径。
   const kind = getPreviewKind(path);
+  /**
+   * 走「Markdown 渲染」这条分支的判定（v17 · F3 · 拍板 D2-A）。
+   *
+   * `.md` 之外，office 系（docx/xlsx/pptx/odt/ods/odp）也算 —— 后端预览端点
+   * 早就把它们转成 Markdown 以 `type:"text"` 吐回（file_service.py
+   * `_OFFICE_PREVIEW_SUFFIXES` + `_office_preview_text`），而前端主动关门：
+   * 旧代码对 office 只渲染一句「此格式需转换后预览」，但 `convertTargetsFor`
+   * 对 office 出**空数组** → 条件不成立 → 落到「该文件不支持预览」。
+   * 后端有内容、前端有渲染器，中间这道门把两者隔开 = 第 3 条反馈的真凶。
+   */
+  const officeRenderable = kind === "office" && isOfficeConvertible(path);
+  const isMd = MD_EXT.has(ext) || officeRenderable;
   // 注：原 §3.3 的 isText（复制全文门控）已随「复制」下移到 md 工具条而退役；
   // 转格式目标改由共享口径 convertTargetsFor 决定（只对 md/txt 出项）。
 
@@ -387,6 +424,19 @@ export default function CoApisPreviewDrawer(props: {
               </Text>
             </Tooltip>
           )}
+          {/* v17 · F6（小蜜蜂第 6 条）：预览窗此前**从不显示时间与大小** ——
+              `PreviewTarget.size/updatedAt` 两个字段早带了，只被拿去拼缓存键。
+              没有时间和大小，用户没法判断"我点开的是不是刚生成那一版"，
+              预览窗和资源窗在这一点上必须同源（共用 resourceFormat）。 */}
+          <Text
+            type="secondary"
+            style={{ fontSize: 11, marginLeft: 8, whiteSpace: "nowrap" }}
+          >
+            {formatResSize(target?.size) || "-"}
+            {" · "}
+            {formatResTime(target?.updatedAt)}
+            {truncated ? ` · ${t("chat.preview.truncatedMark", "已截断")}` : ""}
+          </Text>
         </>
       }
       extra={
@@ -561,21 +611,19 @@ export default function CoApisPreviewDrawer(props: {
             ) : (
               <Spin tip={t("chat.previewLoading", "加载中…")} />
             ))}
-          {kind === "office" &&
-            (convertTargets.length > 0 ? (
-              <div className={styles["coapis-preview-office"]}>
-                <Empty
-                  description={t(
-                    "chat.previewOfficeHint",
-                    "此格式需转换后预览，请在上方选择转换格式",
-                  )}
-                />
-              </div>
-            ) : (
-              <Empty
-                description={t("chat.previewNoPreview", "该文件不支持预览")}
-              />
-            ))}
+          {/* v17 · F3：office 系**只留旧格式**这一段说话。
+              docx/xlsx/pptx/odt/ods/odp 已并入上面的 markdown 分支（后端转好
+              了 Markdown，前端照渲染）；这里剩下的 .doc/.xls/.ppt 是后端
+              `_OFFICE_PREVIEW_SUFFIXES` 之外的真实边界——预览端点对它们只返回
+              元数据，硬渲染就是乱码，所以明说「请下载」。 */}
+          {kind === "office" && !officeRenderable && (
+            <Empty
+              description={t(
+                "chat.previewOfficeLegacy",
+                "旧版 Office 文件（.doc/.xls/.ppt）浏览器里解析不了，请下载后用 Office 打开",
+              )}
+            />
+          )}
           {kind === "pdf" &&
             (srcUrl ? (
               <iframe
@@ -586,11 +634,25 @@ export default function CoApisPreviewDrawer(props: {
             ) : (
               <Spin tip={t("chat.previewLoading", "加载中…")} />
             ))}
-          {kind === "markdown" &&
+          {(kind === "markdown" || officeRenderable) &&
             (rawView ? (
               <pre className={styles["coapis-preview-code"]}>{text}</pre>
             ) : (
               <div className={styles["coapis-preview-md"]}>
+                {/* v17 · F3：office 走的是「后端转 Markdown」这条降级路，
+                    表格/排版/内嵌图片会丢——必须把这话摆在明面上，不能让
+                    用户把渲染结果当成原件。 */}
+                {officeRenderable && (
+                  <Alert
+                    className={styles["coapis-preview-alert"]}
+                    type="info"
+                    showIcon
+                    message={t(
+                      "chat.previewOfficeHint",
+                      "Office 文档由后端转成 Markdown 后渲染：正文与表格可读，排版、图片与样式以原件为准（下载下拉可取原件）。",
+                    )}
+                  />
+                )}
                 <XMarkdown content={text ?? undefined} />
               </div>
             ))}

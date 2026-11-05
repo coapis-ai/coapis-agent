@@ -1115,6 +1115,20 @@ class LightContextManager(BaseContextManager):
         except Exception:
             logger.debug("web reference gate skipped", exc_info=True)
 
+        # v17 · F4（拍板 D7-A）：会话收尾补扫一次本人工作区。
+        # 脚本产出的文件（openpyxl/pandas 生成的 xlsx）在工具返回值里往往
+        # 一个字都没提，采集支拿不到；只有扫目录才能兜住。旧行为是「每天
+        # 03:00 扫一次」→ 白天生成的文件最长等 21 小时才进台账。这里在
+        # 每轮回复收尾时补一次**单用户**后台扫描（120 秒防抖 + daemon
+        # 线程，不挡回复），扫到的文件即补台账并挂最近活跃会话。
+        try:
+            from ...config.context import get_current_username
+            from ...foundation.file_ledger import schedule_turn_sweep
+
+            schedule_turn_sweep(get_current_username() or "")
+        except Exception:
+            logger.debug("turn sweep skipped", exc_info=True)
+
         try:
             memory_manager = agent.memory_manager
             if memory_manager is None:

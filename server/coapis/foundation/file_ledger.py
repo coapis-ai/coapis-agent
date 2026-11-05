@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timedelta
@@ -47,6 +48,56 @@ VALID_SOURCES = frozenset(
 PRODUCER_SOURCES = frozenset(
     {"write_file", "edit_file", "append_file", "convert"}
 )
+
+
+# ── v17 · F4（拍板 D3-A）：巡检补扫 → 资源台账 ──────────────────────
+
+#: 一轮巡检最多补登多少个文件。首轮巡检面对的是历史存量（dev 实测一轮
+#: 20+ 个），全量挂到「最近会话」会把陈年文件灌成该会话的产出。宁可让
+#: 夜间巡检逐日补齐，也不制造一坨假产出。
+_RECONCILE_SYNC_CAP = 50
+
+
+def _latest_chat_id(username: str) -> str | None:
+    """该用户**最近一条会话**的 chat_id；取不到返回 None。
+
+    巡检跑在后台线程里，没有请求上下文，只能读持久化的聊天仓库
+    (``workspaces/<user>/chat/chats.json``，按 updated_at 取最新)。
+    取不到就返回 None → 调用方退化成「只登记资源行、不挂会话 ref」：
+    台账行是 append-only 的，将来该文件被任何会话引用时会自动补 ref，
+    文件不会丢，也绝不影响巡检本身。
+    """
+    try:
+        import json
+        from datetime import datetime
+
+        chats_path = WORKSPACES_DIR / username / "chat" / "chats.json"
+        if not chats_path.is_file():
+            return None
+        data = json.loads(chats_path.read_text(encoding="utf-8"))
+        best_id: str | None = None
+        best_ts = -1.0
+        for chat in data.get("chats") or []:
+            if not isinstance(chat, dict):
+                continue
+            cid = str(chat.get("id") or "")
+            if not cid:
+                continue
+            raw = chat.get("updated_at") or chat.get("created_at")
+            ts = 0.0
+            if isinstance(raw, (int, float)):
+                ts = float(raw)
+            elif isinstance(raw, str) and raw:
+                try:
+                    ts = datetime.fromisoformat(raw.rstrip("Z")).timestamp()
+                except ValueError:
+                    ts = 0.0
+            if ts > best_ts:
+                best_ts = ts
+                best_id = cid
+        return best_id
+    except Exception:  # pragma: no cover - defensive
+        return None
 
 
 def role_for_source(source: str) -> str:
@@ -664,7 +715,47 @@ class FileLedgerService:
 
     # ── reconcile ─────────────────────────────────────────────────────
 
-    def reconcile(self) -> dict[str, int]:
+
+    def _sync_reconciled_files(self, username: str, rel_paths: list) -> int:
+        """巡检补扫出来的文件补登**资源台账**，并挂到该用户最近活跃的会话。
+
+        v17 · F4（拍板 D3-A）。旧行为：``reconcile()`` 只写 ``file_records``
+        （事件流/审计），**从不**调用资源台账 → 台账里 reconcile 来源恒 0 行，
+        「会话资源」永远看不到巡检发现的文件（dev 实测台账 34 行中 reconcile
+        0 行 → 小蜜蜂 2026-11-05 第 5 条）。
+        """
+        rel_paths = [r for r in (rel_paths or []) if r]
+        if not rel_paths:
+            return 0
+        batch = rel_paths[:_RECONCILE_SYNC_CAP]
+        chat_id = (
+            _latest_chat_id(username)
+            if username and username != "shared"
+            else None
+        )
+        synced = 0
+        for rel in batch:
+            try:
+                self._sync_resource(
+                    username,
+                    rel,
+                    chat_id=chat_id,
+                    source="reconcile",
+                    title=Path(rel).name,
+                )
+                synced += 1
+            except Exception:  # pragma: no cover - defensive
+                continue
+        if synced:
+            logger.info(
+                "reconcile -> resource ledger: %d file(s), chat=%s, user=%s",
+                synced,
+                (chat_id or "-")[:8],
+                username,
+            )
+        return synced
+
+    def reconcile(self, only_user: str | None = None) -> dict[str, int]:
         """Backfill ledger rows for files missing from the ledger.
 
         Scans every ``{ws}/*/files/**``; inserts one row per missing
@@ -680,6 +771,12 @@ class FileLedgerService:
                 if not user_dir.is_dir():
                     continue
                 username = user_dir.name
+                if only_user and username != only_user:
+                    # v17 · F4（拍板 D7-A）：会话收尾的补扫**只扫这一个用户**，
+                    # 绝不遍历全机工作区——每轮对话都全机扫一遍是造不出来也
+                    # 跑不动的（夜间全量巡检照旧保留，跨用户/共享根/失效标记
+                    # 只有它干得了）。
+                    continue
                 root = user_dir / "files"
                 if not root.is_dir():
                     continue
@@ -725,6 +822,13 @@ class FileLedgerService:
                             )
                         )
                 inserted += len(missing)
+                # v17 · F4（拍板 D3-A）：补扫出来的文件此前**只进 file_records**
+                # （事件流/审计），从不登记资源台账 → 「会话资源」永远看不到
+                # 它们（台账 34 行里 reconcile 0 行）。现在补扫即同步台账，
+                # 并挂到该用户最近活跃会话（找不到会话就只登记不挂 ref）。
+                self._sync_reconciled_files(
+                    username, [rel for rel, _size in missing]
+                )
             # Legacy shared root: WORKING_DIR/files (system/anonymous writes)
             shared_root = WORKING_DIR / "files"
             if shared_root.is_dir():
@@ -775,6 +879,58 @@ class FileLedgerService:
 # ── module-level convenience (singleton) ────────────────────────────────────
 
 _ledger: Optional[FileLedgerService] = None
+
+
+# ── v17 · F4（拍板 D7-A）：会话结束后的后台补扫 ────────────────────
+
+#: 同一用户两次补扫的最小间隔（秒）。对话密集时「每轮都扫」会把 CPU 耗在
+#: 遍历上；120 秒足够让「这一轮脚本产出的文件」在下一轮之前就进台账。
+_TURN_SWEEP_INTERVAL_SEC = 120.0
+
+_turn_sweep_state: dict[str, float] = {}
+_turn_sweep_lock = threading.Lock()
+
+
+def schedule_turn_sweep(username: str) -> None:
+    """**会话结束时**后台补扫该用户工作区（v17 · F4 · 拍板 D7-A）。
+
+    旧行为：巡检只在每天 03:00 跑一次 → 白天生成的文件最长要等 21 小时
+    才进台账（小蜜蜂 2026-11-05 第 5 条「巡检扫到即挂会话」的前提就是得
+    扫得勤）。这里在每轮对话收尾时补一次**单用户**扫描：
+
+    * 后台线程跑，不影响对话延迟；
+    * 同一用户 120 秒防抖（``_TURN_SWEEP_INTERVAL_SEC``）；
+    * 只扫 ``workspaces/<user>/files``（``reconcile(only_user=...)``）；
+    * 扫到未登记的文件 → 补 ``file_records`` + 同步资源台账并挂该用户
+      最近活跃会话（见 ``_sync_reconciled_files``）。
+
+    夜间全量巡检照旧保留。
+    """
+    name = str(username or "").strip()
+    if not name:
+        return
+    now = time.time()
+    with _turn_sweep_lock:
+        last = _turn_sweep_state.get(name, 0.0)
+        if now - last < _TURN_SWEEP_INTERVAL_SEC:
+            return
+        _turn_sweep_state[name] = now
+
+    def _run() -> None:
+        try:
+            get_file_ledger().reconcile(only_user=name)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("turn sweep failed for %s", name, exc_info=True)
+
+    try:
+        threading.Thread(
+            target=_run,
+            name="file-ledger-turn-sweep-%s" % name,
+            daemon=True,
+        ).start()
+    except Exception:  # pragma: no cover - defensive
+        pass
+
 
 
 def get_file_ledger() -> FileLedgerService:
