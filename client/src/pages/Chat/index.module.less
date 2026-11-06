@@ -28,6 +28,12 @@
   min-height: 0;
   display: flex;
   overflow: hidden;
+  // 容器查询基准（2026-11-06 修右侧栏遮挡输入框）：右侧栏按「聊天区实际可用宽度」
+  // 折叠，不按整屏宽度。实测 chromium 六档视口 1440/1280/1100/1000/920/860/800：
+  // 输入框有 300px 宽度地板，聊天区被压到 300 以下时输入框向右溢出，溢出的右半截
+  // 正压在右侧栏下方（右侧栏在 DOM 里排在聊天区之后 → 后绘制 → 盖在上面），
+  // 表现就是「知识库」按钮点不动。下面两条折叠规则以本容器宽度为准。
+  container-type: inline-size;
 }
 
 /* PC端工具栏侧边栏 */
@@ -102,6 +108,9 @@
 .chatMessagesArea {
   flex: 1;
   min-height: 0;
+  // 输入框宽度地板 300px（聊天库内部算的，实测 msgs 宽 342→输入框 310、msgs 242→仍是 300），
+  // 加本页 16px 上下内边距的横向留白，聊天区最低给到 320px 才不会让输入框溢出到右侧栏下。
+  min-width: 320px;
   height: 100%;
   width: 100%;
   overflow-y: auto;
@@ -874,4 +883,26 @@
   overflow: hidden;
   border-left: 1px solid var(--coapis-border, #ececec);
   background: var(--coapis-fill, #fbfbfb);
+  // 给资源条自身一个具名容器：窄屏时资源条自己收成图标条（见 CoApisResourceStrip.module.less）
+  container-name: qaw-rail;
+  container-type: inline-size;
+}
+
+/* 窄屏折叠（2026-11-06 修「右侧栏盖住输入框、知识库按钮点不动」）：
+   聊天区最低 320px + 右侧栏 200px = 520px。容器宽度不足 520px 时右侧栏收成 40px
+   图标条，只留「查看全部」入口——功能不消失，只是变窄，不再压住输入框。 */
+@container (max-width: 519px) {
+  .chatResourceRail {
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+  }
+}
+
+/* 极窄（容器 < 400px）时整条收起，聊天区独享宽度；会话资源在「我的空间」仍能找到。 */
+@container (max-width: 399px) {
+  .chatResourceRail {
+    display: none;
+  }
 }

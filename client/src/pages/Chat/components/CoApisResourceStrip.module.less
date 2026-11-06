@@ -164,3 +164,34 @@
     background: var(--coapis-hover-bg, rgba(0, 0, 0, 0.06));
   }
 }
+
+/* ---------- 窄屏折叠（2026-11-06 修「右侧栏盖住输入框、知识库按钮点不动」） ---------- */
+/* 外层右侧栏在窄屏收成 40px 图标条（容器名 qaw-rail 定义在 Chat/index.module.less
+   的 .chatResourceRail 上）。这里只保留「查看全部」一个入口——点开就是 L3 大面板，
+   标题/计数/条目全收进面板里：功能不消失，只是藏起来，且不再压住输入框。 */
+@container qaw-rail (max-width: 59px) {
+  .strip {
+    gap: 4px;
+    padding: 2px;
+  }
+
+  .head,
+  .list,
+  .empty {
+    display: none;
+  }
+
+  .foot {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+  }
+
+  .footBtn {
+    width: 100%;
+    min-height: 72px;
+    padding: 6px 2px;
+    writing-mode: vertical-rl;
+    letter-spacing: 3px;
+    font-size: 11px;
+  }
+}
