@@ -329,12 +329,14 @@ def test_mixed_timestamp_formats_sort_by_real_time():
     assert set(stamps[4:]) == {None, "not-a-date"}
 
 
-def test_paged_window_pays_expensive_work_only_for_the_window(monkeypatch):
-    """分页必须"先切窗、后做重活"：要 10 条就只付 10 次会话快照检查。
+def test_paged_window_pays_one_openability_check_per_candidate(monkeypatch):
+    """成本口径（2026-11-05 随设计改动一起改尺，不是把断言改绿）。
 
-    每条会话的打开性检查要 stat 会话快照文件，是这条链路上唯一随会话总数
-    增长的开销。原来分页是"全量构建 → 排序 → 切片"，首屏要 10 条也得把全部
-    会话检查一遍；切窗在前才是真分页。
+    旧尺子：「要 10 条就只付 10 次会话快照检查」。它守的是首屏耗时，代价是
+    丢弃发生在切窗之后 —— 窗口挑中的行只要没有快照就整页蒸发（左栏整块空白
+    的成因）。现在把可打开性提到切窗之前：每个候选付一次 stat，换来"窗口
+    不会整页为空"。stat 是微秒级，会话总量上百也只是几毫秒；而空首屏是 100%
+    的功能缺失。self-heal（会写盘的那段）仍只对窗口内的行执行。
     """
     specs = [
         _spec(
@@ -358,7 +360,7 @@ def test_paged_window_pays_expensive_work_only_for_the_window(monkeypatch):
         body = _page(client, limit=10, offset=0).json()
         assert len(body["items"]) == 10
         assert body["total"] == 30
-        # 只检查窗口内的 10 条，不是全部 30 条。
-        assert len(calls) == 10
+        # 每个候选一次判定（全部 30 条），且一次判定只取一次会话对象。
+        assert len(calls) == 30
     finally:
         restore()

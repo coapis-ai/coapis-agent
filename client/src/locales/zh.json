@@ -2280,7 +2280,9 @@
     "previewRendered": "渲染",
     "previewTruncated": "文件较大，这里只显示开头一段；完整内容请用「新窗口打开」或「下载」。",
     "previewWinMinimize": "最小化",
-    "previewWinRestore": "还原窗口"
+    "previewWinRestore": "还原窗口",
+    "emptyList": "当前智能体还没有会话",
+    "emptyListHint": "发一条消息就会出现在这里；切换智能体看各自的会话"
   },
   "security": {
     "parent": "设置",

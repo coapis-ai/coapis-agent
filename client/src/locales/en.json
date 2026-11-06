@@ -2403,7 +2403,9 @@
     "previewRendered": "Rendered",
     "previewTruncated": "The file is large — only the beginning is shown. Use “Open in new window” or “Download” for the full content.",
     "previewWinMinimize": "Minimize",
-    "previewWinRestore": "Restore window"
+    "previewWinRestore": "Restore window",
+    "emptyList": "No chats for this agent yet",
+    "emptyListHint": "Send a message and it shows up here; switch agents to see their chats"
   },
   "security": {
     "parent": "Settings",

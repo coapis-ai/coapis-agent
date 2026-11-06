@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Query, Path, Body, Response
 from fastapi.requests import Request
 from pydantic import BaseModel, ConfigDict
 
+from ...constant import is_user_agent_id
 from ..permissions.decorators import require_permission
 from ..runner.utils import agentscope_msg_to_message
 from ..runner.models import ChatUpdate
@@ -311,7 +312,9 @@ def _session_file_exists(
     have no evidence the snapshot is gone.  Treating that as "gone" would
     blank the whole sidebar the moment the session path is misconfigured —
     a far worse failure than listing a chat that opens empty.  Callers
-    must drop an entry only on an explicit ``False``.
+    must drop an entry only on an explicit ``False``.  The list's caller is
+    _chat_snapshot_present, and it asks about *both* chat_id and session_id
+    because that is the set of keys the history reader opens.
     """
     if session_obj is None or not session_id:
         return None
@@ -336,24 +339,100 @@ def _entry_age_too_old(entry: Dict[str, Any]) -> bool:
     return datetime.now(timezone.utc) - when > _CHAT_FILE_GRACE
 
 
+# ``agent_id`` values that mean "this row belongs to the user's own root
+# agent", i.e. the agent the UI calls ``user:{username}``.  Rows written
+# before the per-agent split carry these (or nothing at all) and sit in
+# ``workspaces/{username}/chat/chats.json``, and the history reader opens
+# them through that user's root session store — they are real history.
+_LEGACY_ROOT_AGENT_IDS = ("", "default", "global_default")
+
+
 def _agent_scope_match(entry_agent: str, agent_id: str) -> bool:
-    """Exact agent scoping for the sidebar list.
+    """Which rows belong in the sidebar for the requested agent.
 
     ``GET /chats?agent_id=X`` used to return *every* chat in the user's
     workspace, so a user's list mixed in chats owned by scene agents, the
     legacy ``default`` agent and empty agent ids.  Those chats open against
     a different agent than the one the UI is talking to, which is how the
-    "session does not exist" shells show up.  Only the requested agent's own
-    chats (or, for a legacy chat with no agent id, the default agent) are
-    listed.
+    "session does not exist" shells show up.
+
+    The legacy rows are the load-bearing exception, and dropping them is a
+    regression: rows with an empty/legacy ``agent_id`` are that workspace's
+    own root chats, opening through the root session store of the very
+    workspace the list request reads (``_get_chat_manager`` picks the
+    workspace **from the requested agent id**).  Matching only the literal
+    requested id hid 10 perfectly openable chats on the community dev
+    (measured 2026-11-05: 13 chats open with messages, 4 listed) — a user
+    reading "my history is gone".  So a legacy row is listed in a root
+    agent's list (``user:{username}``, ``default``, or no agent scope at
+    all) and never in a scene agent's list.
     """
     if not agent_id:
         return True
     if entry_agent == agent_id:
         return True
-    if not entry_agent and agent_id in ("", "default"):
-        return True
+    if entry_agent in _LEGACY_ROOT_AGENT_IDS:
+        return True if is_user_agent_id(agent_id) else agent_id in _LEGACY_ROOT_AGENT_IDS
     return False
+
+
+def _chat_is_openable(
+    spec,
+    request: Request,
+    username: str,
+    generating_ids: set,
+) -> bool:
+    """False only when the chat can be proven to open as an empty shell.
+
+    An index entry survives a session-snapshot wipe, a workspace move, a
+    channel rename; opening it fetches zero messages, so listing it is a
+    promise the app cannot keep.  Three conditions have to hold before a row
+    is dropped, and each one kills a class of false positives:
+
+    * **every key the reader would open is missing** — see
+      _chat_snapshot_present, which is the whole point of this helper;
+    * the chat is not generating — a reply in flight has no snapshot yet;
+    * the grace window has passed — a chat created seconds ago has had no
+      chance to write its first snapshot.
+
+    Used by the list builder *before* it slices a page, so a page is a window
+    into the openable set and not a window into rows that then evaporate.
+    """
+    if _chat_snapshot_present(spec, request, username):
+        return True
+    if spec.id in generating_ids:
+        return True
+    return not _entry_age_too_old(_normalize_chat_spec(spec))
+
+
+def _chat_snapshot_present(spec, request: Request, username: str) -> bool:
+    """Does a snapshot exist for **any** key the history reader would try?
+
+    ``GET /api/chats/{id}`` reads the conversation by **chat_id** first
+    (``get_session_state_dict(spec.id, …)``, then ``{username}_{chat_id}.json``
+    on disk), and only then falls back to the legacy session key.  Chats
+    created before chat_id became the session key carry a *shared* session_id
+    — on the enterprise dev every admin chat says ``session_id="console:admin"``
+    — so their snapshots live at ``admin_<chat_id>.json``: 30 openable chats
+    against 1 match by session_id.  A guard that stats only ``session_id``
+    therefore reports "no snapshot" for chats the reader opens perfectly
+    well, and the sidebar drops a user's entire history (that is exactly what
+    the 2026-11-05 "左栏历史聊天列表没了" report was).
+
+    So the guard asks the reader's question, not its own guess: try chat_id,
+    try session_id, and an openable row is one hit.  An unknown verdict
+    (``None``: no session store, path resolution raised) also keeps the row —
+    guessing "missing" there would empty the sidebar over a misconfiguration.
+    """
+    session_obj = _get_session_for_chat(spec, request)
+    user = getattr(session_obj, "user_id", "") or username
+    keys = [spec.id, spec.session_id]
+    verdicts = [
+        _session_file_exists(session_obj, key, user) for key in keys if key
+    ]
+    if not verdicts:
+        return True  # 没有任何可查的键 = 拿不准，保留
+    return True in verdicts or None in verdicts
 
 
 # ── Helper: normalize ChatSpec for frontend ────────────────────────────────
@@ -460,29 +539,25 @@ async def _build_chat_entries(
 
     Returns ``(entries, total)``: ``entries`` is the requested window of
     normalized dicts — the exact shape the frontend consumes — and ``total``
-    is the size of the *candidate* set (after agent scoping, before the
-    openability pass), which is what the sidebar needs to know when to stop
-    asking for more pages.
+    is the number of **openable** chats in the scope, which is what the
+    sidebar needs to know when to stop asking for more pages.
 
-    Two passes on purpose.  Pass 1 is pure in-memory work (scope filter, sort,
-    slice); pass 2 — the per-entry session-snapshot stat and self-healing —
-    runs **only on the window**.  Before that split a 10-row first paint paid
-    the filesystem cost of every chat in the workspace (92 on dev) for ten
-    rows of output.
+    Openability is decided in pass 1, *before* the slice, and ``total`` is
+    counted *after* it.  Both halves of that sentence are load-bearing: when
+    the drop ran in pass 2 (window only), every row the window picked out that
+    had no session snapshot vanished after the slice, and a first page whose
+    ten candidates were all stale came back as an empty list with
+    ``total=70`` — a sidebar with no rows and a footer claiming 70 chats.
+    Counting the candidate set (openability included) is what made the footer
+    lie about a list the user could never open.
+
+    Pass 2 keeps the per-entry work that must not run on a workspace-wide
+    scope (self-healing writes), so a 10-row first paint still touches ten
+    rows; openability adds one ``stat`` per candidate, which is the price of a
+    window that cannot come back empty.
     """
     cm = await _get_chat_manager(request, agent_id=agent_id)
     chats = await cm.list_chats(channel=channel)
-
-    # ── pass 1: scope → sort → window (cheap, in memory) ──────────
-    candidates = [
-        c
-        for c in chats
-        if _agent_scope_match(getattr(c, "agent_id", "") or "", agent_id)
-    ]
-    scope_dropped = len(chats) - len(candidates)
-    ordered = _sort_chat_specs(candidates)
-    total = len(ordered)
-    window = ordered[offset:] if limit is None else ordered[offset : offset + limit]
 
     # Get generating chat IDs from stream tracking
     generating_chat_ids = set()
@@ -494,34 +569,32 @@ async def _build_chat_entries(
     except Exception:
         pass
 
-    # ── pass 2: expensive per-entry work, window only ─────────────
+    # ── pass 1: scope → openability → sort → window ───────────────
     username, _ = _get_current_user(request)
+    candidates = [
+        c
+        for c in chats
+        if _agent_scope_match(getattr(c, "agent_id", "") or "", agent_id)
+    ]
+    scope_dropped = len(chats) - len(candidates)
+    openable = [
+        c
+        for c in candidates
+        if _chat_is_openable(c, request, username, generating_chat_ids)
+    ]
+    dropped = len(candidates) - len(openable)
+    ordered = _sort_chat_specs(openable)
+    total = len(ordered)
+    window = ordered[offset:] if limit is None else ordered[offset : offset + limit]
+
+    # ── pass 2: per-entry work, window only ───────────────────────
     result: List[Dict[str, Any]] = []
-    dropped = 0
     for c in window:
         entry = _normalize_chat_spec(c)
         is_generating = c.id in generating_chat_ids
         entry["generating"] = is_generating
-
-        # Openability: an index entry whose session snapshot is gone can
-        # only ever open as an empty shell.  Keep it out of the list once
-        # the grace window has passed (a chat created seconds ago has no
-        # snapshot yet and must stay visible).  An unknown verdict (None)
-        # keeps the entry — see _session_file_exists.
-        session_obj = _get_session_for_chat(c, request)
-        session_exists = _session_file_exists(
-            session_obj,
-            c.session_id or c.id,
-            getattr(session_obj, "user_id", "") or username,
-        )
-        entry["session_exists"] = session_exists is not False
-        if (
-            session_exists is False
-            and not is_generating
-            and _entry_age_too_old(entry)
-        ):
-            dropped += 1
-            continue
+        # Pass 1 already established openability for every row it kept.
+        entry["session_exists"] = True
 
         # Self-healing: clear stale "running" status when not generating
         if not is_generating and c.status == "running":

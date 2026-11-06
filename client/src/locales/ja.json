@@ -1702,7 +1702,9 @@
     "previewRendered": "レンダリング",
     "previewTruncated": "ファイルが大きいため冒頭のみ表示しています。全文は「新しいウィンドウで開く」または「ダウンロード」をご利用ください。",
     "previewWinMinimize": "最小化",
-    "previewWinRestore": "ウィンドウを復元"
+    "previewWinRestore": "ウィンドウを復元",
+    "emptyList": "このエージェントにはまだチャットがありません",
+    "emptyListHint": "メッセージを送るとここに表示されます。エージェントを切り替えるとそれぞれのチャットが見られます"
   },
   "security": {
     "parent": "設定",

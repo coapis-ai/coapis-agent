@@ -885,6 +885,25 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
             )}
           </>
         )}
+        {/* 空态必须说人话。左栏曾经整块空白：后端把打不开的行丢掉、前端把
+            页脚藏起来，两条叠起来用户读到的就是「我的会话全没了」。骨架屏
+            只覆盖取数中，取数回来是 0 行时必须留下可读的解释。 */}
+        {!listLoading && sortedSessions.length === 0 && (
+          <div className={styles.emptyList}>
+            <span className={styles.emptyListIcon} aria-hidden>
+              💬
+            </span>
+            <span className={styles.emptyListText}>
+              {t("chat.emptyList", "当前智能体还没有会话")}
+            </span>
+            <span className={styles.emptyListHint}>
+              {t(
+                "chat.emptyListHint",
+                "发一条消息就会出现在这里；切换智能体看各自的会话",
+              )}
+            </span>
+          </div>
+        )}
         <div className={styles.bottomGradient} />
       </div>
 
