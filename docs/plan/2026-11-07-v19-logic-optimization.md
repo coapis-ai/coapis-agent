@@ -188,7 +188,7 @@ B1–B5 全部落地。全量测试 **1449 passed / 1 skipped / 0 failed**；dev
 | 批次 | 项 | 落地位置 | 状态 |
 |---|---|---|---|
 | B1 | P0-1 Stage2 传参 TypeError | `react_agent._llm_classify_skills(query, restrict_names=…)`，调用点统一签名 | ✅ |
-| B1 | P0-2 双记账 / 软超时计失败 | gateway：软超时**不写台账也不计熔断连击**，后台补判**一次判只落一行**；`soft_ms_for(post)` 分岗软阈全链消费 | ✅ |
+| B1 | P0-2 双记账 / 软超时计失败 | gateway：软超时**不写台账也不计熔断连击**，后台补判**一次判只落一行**；`soft_ms_for(post)` 分岗软阈全链消费（dev 实测生效值：判档 4s / 技能 5s / 验收 12s / 工具闸 5s，默认 5s） | ✅ |
 | B1 | P0-3 兜底硬灌 8 技能 | `skills/manager.py`：`_fallback_cap`(默认2)+目录归一化去重+目录级缓存；新建 `permissions/skill_gate.py` 做技能权限单一来源 | ✅ |
 | B1 | P0-4 幽灵映射 | gateway `_note_ghost_skill`：映射到不存在的技能按"映射失败"记账+WARN，技能岗连击计入熔断 | ✅ |
 | B2 | P1-2 计划骨架进 memory | `react_agent`：骨架 `memory.add(marks=_MemoryMark.HINT)`，`_compress_context` 每轮 `_windowMsgToHint` 回灌 | ✅ |
