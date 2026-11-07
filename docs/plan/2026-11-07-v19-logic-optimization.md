@@ -182,13 +182,14 @@
 
 ## 六、落地状态（2026-11-07 收尾：先干完再提交）
 
-B1–B5 全部落地。全量测试 **1449 passed / 1 skipped / 0 failed**；dev 社区版已部署
-（版本号 1.2.13 未动，代码含 v19 全量）；生产未动。
+B1–B5 全部落地。全量测试 **1449 passed / 1 skipped / 0 failed**；dev 社区版与企业版
+均已部署，版本号 **1.2.14**（compose 里 `COAPIS_VERSION` 硬编码，重建容器生效）；
+**生产未动**。
 
 | 批次 | 项 | 落地位置 | 状态 |
 |---|---|---|---|
 | B1 | P0-1 Stage2 传参 TypeError | `react_agent._llm_classify_skills(query, restrict_names=…)`，调用点统一签名 | ✅ |
-| B1 | P0-2 双记账 / 软超时计失败 | gateway：软超时**不写台账也不计熔断连击**，后台补判**一次判只落一行**；`soft_ms_for(post)` 分岗软阈全链消费（dev 实测生效值：判档 4s / 技能 5s / 验收 12s / 工具闸 5s，默认 5s） | ✅ |
+| B1 | P0-2 双记账 / 软超时计失败 | gateway：软超时**不写台账也不计熔断连击**，后台补判**一次判只落一行**；`soft_ms_for(post)` 分岗软阈全链消费（**dev 容器实测生效值：判档/技能/工具闸/改道 2000ms、验收 12000ms**——持久化配置 `/apps/ai/coapis-dev/config/decision_hub.json` 里 `judge_soft_ms=2000` 覆盖代码默认 5000，且该文件**没有** `judge_soft_ms_post` 表，故分岗位表走代码默认；此前写的"判档 4s/技能 5s/工具闸 5s"是**宿主机代码默认值**，不是 dev 生效值，作废） | ✅ |
 | B1 | P0-3 兜底硬灌 8 技能 | `skills/manager.py`：`_fallback_cap`(默认2)+目录归一化去重+目录级缓存；新建 `permissions/skill_gate.py` 做技能权限单一来源 | ✅ |
 | B1 | P0-4 幽灵映射 | gateway `_note_ghost_skill`：映射到不存在的技能按"映射失败"记账+WARN，技能岗连击计入熔断 | ✅ |
 | B2 | P1-2 计划骨架进 memory | `react_agent`：骨架 `memory.add(marks=_MemoryMark.HINT)`，`_compress_context` 每轮 `_windowMsgToHint` 回灌 | ✅ |
@@ -196,7 +197,7 @@ B1–B5 全部落地。全量测试 **1449 passed / 1 skipped / 0 failed**；dev
 | B2 | P1-4 短关键词规则 | 判档词表补强 + 首行扫描 | ✅ |
 | B3 | P1-1 判官异步预判（D3） | `react_agent._start_judge_prefetch/_spawn_prefetch/_cancel_prefetch/_await_prefetch`：reply 开头**并行发起**判档+技能判官；关键词命中即取消技能预判；判档判出 simple 短路；消费处无预判**原路补判**；任务强引用 `_PREFETCH_TASKS` | ✅ |
 | B4 | P2-1 身份缺失单列（D7） | `ledger_contract.detect_origin` → `no_identity`；预检 KPI 分母剔除 test/no_identity | ✅ |
-| B4 | P2-2 阈值可配 + 长任务 | `advisor_min_iters`(默认8，>0 即长任务每 N 迭代一判)；`skill_min_score`/`skill_hit_cap` 全消费点接线；熔断探针超时 3s→**15s ≥ 最慢岗位软阈 12s**（新自检闸门会直说探针小于软阈=半开合不上） | ✅ |
+| B4 | P2-2 阈值可配 + 长任务 | `advisor_min_iters`(**代码默认 3**；dev 持久化配置写的是 **8**，容器实读到 8——改默认要改配置文件，不是改代码)；`skill_min_score`/`skill_hit_cap` 全消费点接线（`skill_hit_cap` 代码默认 **3**）；熔断探针超时 3s→**15s ≥ 最慢岗位软阈 12s**（新自检闸门会直说探针小于软阈=半开合不上；dev 配置文件实读 15.0，告警已消失） | ✅ |
 | B4 | P2-3 三档口径 | 预检脚本：真判=llm+cache、规则直判=rule*、弃权损耗=其余；`plan_review` 补进岗位标签（台账写入侧此前绕过契约） | ✅ |
 | B5 | 前端点名技能（D6） | `client/src/pages/Chat/components/ChatSkillPicker.tsx` 输入区胶囊 → `biz_params.skills`；后端 Phase0 直装、跳过关键词与判官、台账 `origin=user_picked` 单列不计命中率；zh/en/ja/ru 四语言 | ✅ |
 
