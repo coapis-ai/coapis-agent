@@ -27,6 +27,8 @@ from .decorators import (
     require_role,
     require_module_access,
 )
+from .skill_gate import AUDIT_SOURCE as SKILL_GATE_AUDIT_SOURCE
+from .skill_gate import skill_gate_audit
 
 __all__ = [
     "PermissionManager",
@@ -34,4 +36,6 @@ __all__ = [
     "require_permission",
     "require_role",
     "require_module_access",
+    "skill_gate_audit",
+    "SKILL_GATE_AUDIT_SOURCE",
 ]

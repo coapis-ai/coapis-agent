@@ -44,6 +44,7 @@ import {
   ChatDisplayConfigContext,
 } from "./components/SimplifiedResponseCard";
 import ChatDisplaySettings from "./components/ChatDisplaySettings";
+import ChatSkillPicker from "./components/ChatSkillPicker";
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
@@ -1353,6 +1354,14 @@ export default function ChatPage() {
   const chatWindowRef = useRef<HTMLDivElement>(null);
   const pendingClearHistoryRef = useRef(false);
   const requestSessionIdRef = useRef<string | null>(null);
+  // ⭐ v19 P1-5：本轮点名技能（ref 供 customFetch 读，state 供胶囊显示）。
+  // 只作用于一条消息——请求体组装完即清空，下一条消息不受牵连。
+  const pickedSkillsRef = useRef<string[]>([]);
+  const [pickedSkills, setPickedSkills] = useState<string[]>([]);
+  const setPickedSkillsBoth = (names: string[]) => {
+    pickedSkillsRef.current = names;
+    setPickedSkills(names);
+  };
   // ⭐ 方案2：请求级 ID + 取消上下文，避免旧请求流污染新会话
   const requestIdRef = useRef(0);
   const activeRequestIdRef = useRef<string | null>(null);
@@ -1858,11 +1867,22 @@ export default function ChatPage() {
           ...(fileRefs && { selected_files: fileRefs }),
           // ⭐ 嵌入式模式：场景ID传递到 biz_params 中（后端从 biz_params.scene_id 读取）
           ...(isEmbeddedMode && sceneId && { scene_id: sceneId }),
+          // ⭐ v19 P1-5：本轮点名的技能（只影响这一条消息，发出即清空）。
+          // 后端走"直装"路径：跳过关键词层与判官，台账 origin=user_picked。
+          ...(pickedSkillsRef.current.length > 0 && {
+            skills: [...pickedSkillsRef.current],
+          }),
         },
         // Pass chat_id (UUID) so backend can persist messages to the correct chat
         // instead of matching by session_id (which is shared across all console chats).
         chat_id: chatIdRef.current || undefined,
       };
+
+      // 点名技能只吃这一条：请求体已经带上，立刻清空，不会"粘"到下一条消息
+      if (pickedSkillsRef.current.length > 0) {
+        pickedSkillsRef.current = [];
+        setPickedSkills([]);
+      }
 
       // 🔍 调试：打印场景代入信息
       if (isEmbeddedMode && sceneId) {
@@ -2316,9 +2336,15 @@ export default function ChatPage() {
         // 模型芯片：放在语音按钮左侧（prefix 插槽里语音按钮先渲染，用 order:-1 排到它前面）
         prefix: (
           <div
-            style={{ display: "inline-flex", alignItems: "center", order: -1 }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, order: -1 }}
             data-testid="model-chip-affix"
           >
+            {/* v19 P1-5（拍板 D6）：本轮点名技能——判断层判错时的手动兜底 */}
+            <ChatSkillPicker
+              agentId={selectedAgent}
+              value={pickedSkills}
+              onChange={setPickedSkillsBoth}
+            />
             <ModelChips />
           </div>
         ),

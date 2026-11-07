@@ -34,6 +34,7 @@ import sqlalchemy as sa
 # 岗位名显示成中文，和台账治理文档一致；未知岗位原样显示（不许静默漏岗）。
 _LABELS = {
     "plan_gate": "判岗(ComplexityClassifier)",
+    "plan_review": "计划审查岗(v18 新岗)",
     "skill_router": "技能岗(预激活+意图)",
     "skill_trigger": "技能岗(预激活)",
     "skill_intent": "意图岗(并入技能岗)",
@@ -62,12 +63,16 @@ def _levels() -> tuple:
 
 
 def _origin_is_web() -> str:
-    """KPI 口径：测试造数不算数；origin 为空的历史行算真实流量。
+    """KPI 口径：测试造数不算数；身份缺失行不算真实流量。
 
     SQLite 里 ``origin=''`` 和 ``origin IS NULL`` 都要放过，PG 同理——所以
-    条件写成「不是 test」，比「等于 web」更稳（历史行没有 origin 值）。
+    条件写成「不是 test / no_identity」，比「等于 web」更稳（历史行没有
+    origin 值）。
+    v19 P2-1（D7 拍板）：``no_identity`` = chat_id 与 session_id 全空的判断，
+    既进不了闭环对账、也无法按会话归因，混进分母会让"真判率"这种数字根本
+    无法复核。宁可单独承认这批不知道是谁的，也不要拿它算成绩。
     """
-    return "(origin IS NULL OR origin <> 'test')"
+    return "(origin IS NULL OR origin NOT IN ('test', 'no_identity'))"
 
 
 def _rows(conn, sql):
@@ -124,9 +129,19 @@ def main() -> None:
             print(f"     {label:30s} {n:5d}")
 
         # ── 2 真判率（KPI 口径：模型真判 / 全部）─────────────────────
+        # v19 P2-3（D1 拍板口径）：真判 = 判官真打(llm) **加缓存命中(cache)**。
+        # 缓存命中是"同一判断已真打过一次"的复用，不是白判：算进损耗是冤枉，
+        # 再单独算一行真判是重复记账——合并进分子，分母不变。
         llm_n = int(_rows(conn, f"SELECT count(*) FROM decision_events WHERE hit_layer='llm' AND {kpi}")[0][0])
-        print(f"2 真判率(KPI)    :  {_pct(llm_n, kpi_total):5.1f}%  = {llm_n}/{kpi_total}"
-              "   目标 >60%（一期）")
+        cache_n = int(_rows(conn, f"SELECT count(*) FROM decision_events WHERE hit_layer='cache' AND {kpi}")[0][0])
+        true_n = llm_n + cache_n
+        rule_n = int(_rows(conn, f"SELECT count(*) FROM decision_events WHERE hit_layer IN ('rule','rule_fallback','rule_fast') AND {kpi}")[0][0])
+        print(f"2 真判率(KPI)    :  {_pct(true_n, kpi_total):5.1f}%  = {true_n}/{kpi_total}"
+              f"  (判官真打={llm_n} 缓存命中={cache_n})   目标 >60%（一期）")
+        # 三档口径（D1 的三把尺子）：真判 / 规则直判（零模型成本）/ 弃权损耗。
+        # 规则快判与规则兜底是"零成本判断"，既不算真判、也不算损耗。
+        print(f"   三档口径       : 真判 {true_n} · 规则直判 {rule_n} · "
+              f"弃权损耗 {kpi_total - true_n - rule_n}")
 
         # ── 3 损耗分布：熔断/超时/规则/解析失败/设计不判/失败 ────────
         keys = [

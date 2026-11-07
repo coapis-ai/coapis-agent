@@ -30,6 +30,28 @@ from typing import Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
+#: 幽灵技能引用（触发表指向已安装池里不存在的技能）只报一次，防日志刷屏。
+#: v19 P0-4：写死关键词表 50+ 条指向池外技能，dev 实测命中率 51%，全是空转。
+_ghost_skill_seen: set[str] = set()
+
+
+def _note_ghost_skill(tier: str, name: str) -> None:
+    """记录一次"触发表指向不存在的技能"（同名只报一次，不刷日志）。"""
+    key = f"{tier}:{name}"
+    if key in _ghost_skill_seen:
+        return
+    _ghost_skill_seen.add(key)
+    logger.info(
+        "[技能触发] 幽灵引用已丢弃：tier=%s 技能=%s（不在已安装技能池里）",
+        tier,
+        name,
+    )
+
+
+def ghost_skill_refs() -> frozenset[str]:
+    """已丢弃的幽灵引用集合（体检脚本用）。"""
+    return frozenset(_ghost_skill_seen)
+
 #: Hard cap for one skill's line in the system-prompt index (B0-4, 2026-10-17).
 #: Measured on dev: 17 skills × avg 234 chars of frontmatter description =
 #: **3,983 chars of system prompt on every turn**.  An index only has to say
@@ -473,7 +495,11 @@ class SkillManager:
     #: How many skills the no-match fallback may list.  Chosen so the index
     #: stays well under the full catalogue (19 skills on dev measured 2.1K
     #: chars of index) while still giving the model something to pick from.
-    FALLBACK_SKILL_CAP = 8
+    #: v19 P0-3（2026-11-07）：**8 → 1**。兜底的语义是"没命中给个提示"，不是
+    #: "塞一桌菜"——每个进列表的技能都会被装载层灌进每轮提示（实测约
+    #: 10.2 KB/技能），8 个 = ~80 KB 常驻，判官只能在"已有技能"里挑，真命中率
+    #: 被打到 3%（v19 实测：兜底硬灌 8 个技能，10.2KB×8=81.6KB 进每轮提示）。
+    FALLBACK_SKILL_CAP = 1
 
     _TRIGGER_MAP: Dict[str, List[str]] = {
         # Browser automation
@@ -655,16 +681,35 @@ class SkillManager:
                 continue
             for kw in skill.get("trigger_keywords") or []:
                 kw_low = str(kw).lower().strip()
-                if len(kw_low) >= 2 and kw_low in query_lower:
+                # v19 P1-4 短词口径：**1-2 词关键词不参与打分**。铁证是
+                # '设计'(2字)→'绘画'：中文 2 字词太泛，子串一撞就中，把不相关
+                # 技能顶进每轮提示（装载层随后灌全文）。3 字起才有区分度。
+                if len(kw_low) >= 3 and kw_low in query_lower:
                     _bump(name, 4)
 
         # Tier 2: hard-coded alias table.
-        for keyword, skill_names in self._TRIGGER_MAP.items():
-            if keyword in query_lower:
-                for sn in skill_names:
-                    found = self._find_skill_by_normalized_name(sn.replace("-", "_"))
-                    if found:
-                        _bump(found, 3)
+        # v19 P2-2 开关：这张写死表是触发链里唯一没人能维护的部分，参与与否
+        # 交给中枢配置（COAPIS_DECISION_SKILL_TIER2_ENABLED，默认开）。
+        if self._tier2_enabled():
+            for keyword, skill_names in self._TRIGGER_MAP.items():
+                if keyword in query_lower:
+                    # v19 P1-4 短词口径（写死表同样适用）：1-2 字中文别名当子串
+                    # 扫整句，'设计' 一句话就把 '绘画' 顶进提示。拉丁别名
+                    # （pdf/ppt/docx）天生短且特异，短词规则只管中文。
+                    if len(keyword) < 3 and not keyword.isascii():
+                        continue
+                    for sn in skill_names:
+                        found = self._find_skill_by_normalized_name(
+                            sn.replace("-", "_"),
+                        )
+                        if found:
+                            _bump(found, 3)
+                        else:
+                            # v19 P0-4 幽灵引用记账：表里写死的技能名不在已安装
+                            # 池里 = 命中了也装载不了任何东西。dev 实测这张表对
+                            # 池外技能的命中率 51%，全是空转，且过去**无任何痕迹**
+                            # ——技能岗效果永远对不上账。丢弃 + 一次性 INFO。
+                            _note_ghost_skill("tier2", sn)
 
         if scores:
             return sorted(scores, key=lambda n: (-scores[n], n))
@@ -683,7 +728,22 @@ class SkillManager:
                         " ".join(str(k) for k in skill.get("trigger_keywords") or []),
                     ]
                 ).lower().replace("-", "_")
-                hits = sum(1 for t in tokens if t in hay)
+                # v19 P1-4：1-2 字 token **要求与技能自己的词/名字完全相等**
+                # 才算命中，不再当子串扫 index_hint+description。中文 bigram
+                # （"新建"、"画个"）子串一撞就中，实测 '新建任务' 把 pdf 顶进
+                # 提示。3 字以上才允许子串命中。
+                exact = {
+                    str(k).lower().strip().replace("-", "_")
+                    for k in (skill.get("trigger_keywords") or [])
+                }
+                exact.add(name.lower().replace("-", "_"))
+                hay_norm = hay.replace("-", "_")
+                hits = sum(
+                    1
+                    for t in tokens
+                    if (len(t) >= 3 and t in hay_norm)
+                    or (len(t) == 2 and t in exact)
+                )
                 if hits:
                     scores[name] = hits
 
@@ -708,8 +768,44 @@ class SkillManager:
         # Prefer skills whose index line states *when* to use them: a skill
         # with no trigger sentence is one the model cannot select anyway.
         rest.sort(key=lambda n: (not self._skills[n].get("has_trigger"), len(n)))
-        picked = always + rest[: self.FALLBACK_SKILL_CAP]
-        return picked or enabled[: self.FALLBACK_SKILL_CAP]
+        cap = self._fallback_cap()
+        picked = self._dedupe_by_normalized(always + rest)[:cap]
+        return picked or self._dedupe_by_normalized(enabled)[:cap]
+
+    def _dedupe_by_normalized(self, names: List[str]) -> List[str]:
+        """按归一化名去重（v19 P1-4）：``pdf`` 与 ``pdf-2`` 这类同键条目
+        过去会各占一个兜底名额，等于把同一个技能塞两遍。"""
+        out: List[str] = []
+        seen = set()
+        for n in names:
+            key = str(n).replace("-", "_").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(n)
+        return out
+
+    def _fallback_cap(self) -> int:
+        """兜底技能条数（v19 P2-2 门槛配置化，默认 = FALLBACK_SKILL_CAP）。
+
+        兜底的每个技能名都会被装载层灌进每轮提示（实测约 10.2 KB/技能），
+        所以它是**成本旋钮**，不是"越多越保险"。
+        """
+        try:
+            from ..decision.config import get_hub_config
+
+            return int(get_hub_config().skill_fallback_cap)
+        except Exception:  # noqa: BLE001 - 配置读不到用类默认
+            return int(self.FALLBACK_SKILL_CAP)
+
+    def _tier2_enabled(self) -> bool:
+        """Tier2 写死关键词表是否参与打分（v19 P2-2，默认开）。"""
+        try:
+            from ..decision.config import get_hub_config
+
+            return bool(get_hub_config().skill_tier2_enabled)
+        except Exception:  # noqa: BLE001 - 配置读不到按默认（开）
+            return True
 
     def _find_skill_by_normalized_name(self, normalized: str) -> Optional[str]:
         """Find actual skill name from normalized version (handles - vs _)."""

@@ -43,6 +43,7 @@ from agentscope_runtime.engine.schemas.exception import (
 )
 
 from ..permissions.decorators import require_perm, require_permission
+from ..permissions.skill_gate import skill_gate_audit
 
 from ...agents.skills_hub import (
     SkillImportCancelled,
@@ -663,7 +664,7 @@ async def refresh_skills(request: Request) -> list[SkillSpec]:
     return [s for s in all_skills if s.source != "global"]
 
 
-@router.get("/hub/search", dependencies=[Depends(require_perm("skills:write"))])
+@router.get("/hub/search", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def search_hub(
     q: str = "",
     limit: int = 20,
@@ -681,7 +682,7 @@ async def search_hub(
     ]
 
 
-@router.get("/workspaces", dependencies=[Depends(require_perm("skills:write"))])
+@router.get("/workspaces", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def list_workspace_skill_sources() -> list[WorkspaceSkillSummary]:
     summaries: list[WorkspaceSkillSummary] = []
     workspaces = list_workspaces()
@@ -698,7 +699,7 @@ async def list_workspace_skill_sources() -> list[WorkspaceSkillSummary]:
     return summaries
 
 
-@router.post("/hub/install/start", response_model=HubInstallTask, dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/hub/install/start", response_model=HubInstallTask, dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def start_install_from_hub(
     request_body: HubInstallRequest,
     request: Request,
@@ -727,7 +728,7 @@ async def start_install_from_hub(
     return task
 
 
-@router.get("/hub/install/status/{task_id}", response_model=HubInstallTask, dependencies=[Depends(require_perm("skills:write"))])
+@router.get("/hub/install/status/{task_id}", response_model=HubInstallTask, dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def get_hub_install_status(task_id: str) -> HubInstallTask:
     task = await _hub_task_get(task_id)
     if task is None:
@@ -735,7 +736,7 @@ async def get_hub_install_status(task_id: str) -> HubInstallTask:
     return task
 
 
-@router.post("/hub/install/cancel/{task_id}", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/hub/install/cancel/{task_id}", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def cancel_hub_install(request: Request, task_id: str) -> dict[str, Any]:
     async with _hub_install_lock:
         task = _hub_install_tasks.get(task_id)
@@ -763,7 +764,7 @@ async def list_pool_skills(request: Request) -> list[PoolSkillSpec]:
     return _build_pool_skill_specs()
 
 
-@router.post("/pool/refresh", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/pool/refresh", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def refresh_pool_skills(request: Request) -> list[PoolSkillSpec]:
     """Force reconcile and return updated pool skill list."""
     reconcile_pool_manifest()
@@ -802,7 +803,10 @@ async def get_pool_builtin_notice(request: Request) -> BuiltinUpdateNotice:
     )
 
 
-@router.post("", dependencies=[Depends(require_perm("skills:read"))])
+@router.post(
+    "",
+    dependencies=[Depends(require_perm("skills:read")), Depends(skill_gate_audit("create"))],
+)
 async def create_skill(
     request: Request,
     body: CreateSkillRequest,
@@ -837,7 +841,15 @@ async def create_skill(
     return {"created": True, "name": created}
 
 
-@router.post("/upload", dependencies=[Depends(require_perm("skills:read"))])
+@router.post(
+    "/upload",
+    # 传技能包同样是"技能清单变更"（v19 P2-3）：这条原先只挂 skills:read
+    # 语义下，改动不落任何审计。
+    dependencies=[
+        Depends(require_perm("skills:read")),
+        Depends(skill_gate_audit("upload")),
+    ],
+)
 async def upload_skill_zip(
     request: Request,
     file: UploadFile = File(...),
@@ -944,7 +956,7 @@ async def export_skills(
     )
 
 
-@router.post("/pool/create", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/pool/create", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def create_pool_skill(request: Request, body: CreateSkillRequest) -> dict[str, Any]:
     try:
         created = SkillPoolService().create_skill(
@@ -969,7 +981,7 @@ async def create_pool_skill(request: Request, body: CreateSkillRequest) -> dict[
     return {"created": True, "name": created}
 
 
-@router.put("/pool/save", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/pool/save", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def save_pool_skill(request: Request, body: SavePoolSkillRequest) -> dict[str, Any]:
     """Save one pool skill.
 
@@ -996,7 +1008,7 @@ async def save_pool_skill(request: Request, body: SavePoolSkillRequest) -> dict[
     return result
 
 
-@router.post("/pool/upload-zip", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/pool/upload-zip", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def upload_skill_pool_zip(request: Request,
     file: UploadFile = File(...),
     target_name: str = "",
@@ -1033,7 +1045,7 @@ async def upload_skill_pool_zip(request: Request,
     return result
 
 
-@router.post("/pool/import", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/pool/import", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def import_skill_pool_from_hub(request: Request,
     body: HubInstallRequest,
 ) -> dict[str, Any]:
@@ -1059,7 +1071,7 @@ async def import_skill_pool_from_hub(request: Request,
     }
 
 
-@router.post("/pool/upload", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/pool/upload", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def upload_workspace_skill_to_pool(request: Request,
     body: UploadToPoolRequest,
 ) -> dict[str, Any]:
@@ -1287,7 +1299,7 @@ async def download_pool_skill_to_workspaces(request: Request,
     return {"downloaded": downloaded}
 
 
-@router.post("/pool/import-builtin", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/pool/import-builtin", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def import_pool_builtins(request: Request,
     body: ImportBuiltinRequest,
 ) -> dict[str, Any]:
@@ -1305,7 +1317,7 @@ async def import_pool_builtins(request: Request,
     return result
 
 
-@router.post("/pool/{skill_name}/update-builtin", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/pool/{skill_name}/update-builtin", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def update_pool_builtin(request: Request,
     skill_name: str,
     body: UpdateBuiltinRequest | None = Body(default=None),
@@ -1323,7 +1335,7 @@ async def update_pool_builtin(request: Request,
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.delete("/pool/{skill_name}", dependencies=[Depends(require_perm("skills:write"))])
+@router.delete("/pool/{skill_name}", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def delete_pool_skill(request: Request, skill_name: str) -> dict[str, Any]:
     deleted = SkillPoolService().delete_skill(skill_name)
     if not deleted:
@@ -1334,7 +1346,7 @@ async def delete_pool_skill(request: Request, skill_name: str) -> dict[str, Any]
     return {"deleted": True}
 
 
-@router.get("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
+@router.get("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def get_pool_skill_config(request: Request, skill_name: str) -> dict[str, Any]:
     manifest = read_skill_pool_manifest()
     entry = manifest.get("skills", {}).get(skill_name)
@@ -1343,7 +1355,7 @@ async def get_pool_skill_config(request: Request, skill_name: str) -> dict[str, 
     return {"config": entry.get("config", {})}
 
 
-@router.put("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def update_pool_skill_config(request: Request,
     skill_name: str,
     body: SkillConfigRequest,
@@ -1363,7 +1375,7 @@ async def update_pool_skill_config(request: Request,
     return {"updated": True}
 
 
-@router.delete("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
+@router.delete("/pool/{skill_name}/config", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def delete_pool_skill_config(request: Request, skill_name: str) -> dict[str, Any]:
     manifest_path = get_pool_skill_manifest_path()
 
@@ -1394,7 +1406,7 @@ def _validate_tags(tags: list[str]) -> list[str]:
     return cleaned
 
 
-@router.put("/pool/{skill_name}/tags", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/pool/{skill_name}/tags", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def update_pool_skill_tags(request: Request,
     skill_name: str,
     tags: list[str],
@@ -1409,7 +1421,7 @@ async def update_pool_skill_tags(request: Request,
     return {"updated": True, "tags": tags}
 
 
-@router.post("/batch-delete", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/batch-delete", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def batch_delete_skills(
     request: Request,
     skills: list[str],
@@ -1434,7 +1446,7 @@ async def batch_delete_skills(
     return {"results": results}
 
 
-@router.post("/pool/batch-delete", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/pool/batch-delete", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def batch_delete_pool_skills(request: Request,
     skills: list[str],
 ) -> dict[str, Any]:
@@ -1456,7 +1468,7 @@ async def batch_delete_pool_skills(request: Request,
     return {"results": results}
 
 
-@router.post("/batch-disable", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/batch-disable", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def batch_disable_skills(
     request: Request,
     skills: list[str],
@@ -1467,7 +1479,7 @@ async def batch_disable_skills(
     return {"results": results}
 
 
-@router.post("/batch-enable", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/batch-enable", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def batch_enable_skills(
     request: Request,
     skills: list[str],
@@ -1494,7 +1506,7 @@ async def batch_enable_skills(
     return {"results": results}
 
 
-@router.post("/{skill_name}/disable", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/{skill_name}/disable", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def disable_skill(
     request: Request,
     skill_name: str,
@@ -1510,7 +1522,7 @@ async def disable_skill(
     return {"disabled": True, **result}
 
 
-@router.post("/{skill_name}/enable", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/{skill_name}/enable", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def enable_skill(
     request: Request,
     skill_name: str,
@@ -1533,7 +1545,7 @@ async def enable_skill(
     return {"enabled": True, **result}
 
 
-@router.delete("/{skill_name}", dependencies=[Depends(require_perm("skills:write"))])
+@router.delete("/{skill_name}", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def delete_skill(
     request: Request,
     skill_name: str,
@@ -1566,7 +1578,7 @@ async def load_skill_file(
     return {"content": content}
 
 
-@router.put("/save", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/save", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def save_workspace_skill(
     request: Request,
     body: SaveSkillRequest,
@@ -1597,7 +1609,7 @@ async def save_workspace_skill(
     return result
 
 
-@router.put("/{skill_name}/channels", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/{skill_name}/channels", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def update_skill_channels_endpoint(
     request: Request,
     skill_name: str,
@@ -1617,7 +1629,7 @@ async def update_skill_channels_endpoint(
     return {"updated": True, "channels": channels}
 
 
-@router.put("/{skill_name}/tags", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/{skill_name}/tags", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def update_skill_tags(
     request: Request,
     skill_name: str,
@@ -1650,7 +1662,7 @@ async def get_skill_config_endpoint(
     return {"config": entry.get("config", {})}
 
 
-@router.put("/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/{skill_name}/config", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def update_skill_config_endpoint(
     request: Request,
     skill_name: str,
@@ -1676,7 +1688,7 @@ async def update_skill_config_endpoint(
     return {"updated": True}
 
 
-@router.delete("/{skill_name}/config", dependencies=[Depends(require_perm("skills:write"))])
+@router.delete("/{skill_name}/config", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def delete_skill_config_endpoint(
     request: Request,
     skill_name: str,
@@ -1724,7 +1736,7 @@ async def list_categories() -> list[dict[str, Any]]:
     return sorted(data.get("categories", []), key=lambda c: c.get("sort_order", 99))
 
 
-@router.post("/categories", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/categories", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def create_category(request: Request) -> dict[str, Any]:
     body = await request.json()
     key = body.get("key", "").strip()
@@ -1746,7 +1758,7 @@ async def create_category(request: Request) -> dict[str, Any]:
     return cat
 
 
-@router.put("/categories/{key}", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/categories/{key}", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def update_category(key: str, request: Request) -> dict[str, Any]:
     body = await request.json()
     data = _read_categories()
@@ -1763,7 +1775,7 @@ async def update_category(key: str, request: Request) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail=f"Category '{key}' not found")
 
 
-@router.delete("/categories/{key}", dependencies=[Depends(require_perm("skills:write"))])
+@router.delete("/categories/{key}", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def delete_category(key: str) -> dict[str, Any]:
     data = _read_categories()
     cats = data.get("categories", [])
@@ -1813,7 +1825,7 @@ async def get_skill_metric_detail(skill_name: str) -> dict[str, Any]:
     return metric
 
 
-@router.post("/metrics/refresh", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/metrics/refresh", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def refresh_skill_metrics() -> dict[str, Any]:
     """强制刷新效能指标缓存。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -1869,7 +1881,7 @@ async def get_skill_versions(skill_name: str) -> dict[str, Any]:
     }
 
 
-@router.post("/{skill_name}/rollback/{version}", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/{skill_name}/rollback/{version}", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def rollback_skill_version(
     skill_name: str,
     version: str,
@@ -1955,7 +1967,7 @@ async def get_skill_triggers(
     }
 
 
-@router.put("/{skill_name}/triggers", dependencies=[Depends(require_perm("skills:write"))])
+@router.put("/{skill_name}/triggers", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def update_skill_triggers(
     skill_name: str,
     request: Request,
@@ -2046,7 +2058,7 @@ async def analyze_skill_issues(skill_name: str) -> dict[str, Any]:
     }
 
 
-@router.post("/{skill_name}/improve/suggest", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/{skill_name}/improve/suggest", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def generate_skill_suggestion(
     skill_name: str,
     body: dict[str, Any] = None,
@@ -2111,7 +2123,7 @@ async def list_skill_suggestions(
     }
 
 
-@router.post("/suggestions/{suggestion_id}/approve", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/suggestions/{suggestion_id}/approve", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def approve_skill_suggestion(suggestion_id: str) -> dict[str, Any]:
     """审批通过技能改进建议。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -2161,7 +2173,7 @@ async def get_promotion_candidates() -> dict[str, Any]:
     }
 
 
-@router.post("/promotion/{skill_name}/approve", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/promotion/{skill_name}/approve", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def approve_promotion(skill_name: str) -> dict[str, Any]:
     """审批通过技能晋升为全局技能。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -2186,7 +2198,7 @@ async def approve_promotion(skill_name: str) -> dict[str, Any]:
     return {"success": True, "candidate": result}
 
 
-@router.post("/promotion/{skill_name}/reject", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/promotion/{skill_name}/reject", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def reject_promotion(skill_name: str) -> dict[str, Any]:
     """拒绝技能晋升。"""
     from coapis.skill_evolution.engine import get_evolution_engine
@@ -2215,7 +2227,7 @@ async def get_retirement_candidates() -> dict[str, Any]:
     }
 
 
-@router.post("/cross-agent/trigger-optimization", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/cross-agent/trigger-optimization", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def report_trigger_optimization(
     request: Request,
     body: dict[str, Any] = None,
@@ -2405,8 +2417,10 @@ async def debug_trigger_analysis(
                         elif desc:
                             summaries[name] = desc
         if summaries:
-            import asyncio
-            result = await classify_intent_llm(message, summaries, timeout=5.0)
+            # v19 P0-1：不传 timeout——尺子在判断网关（软阈值/硬超时/熔断/预算）。
+            # 此前这里传了签名里不存在的参数，TypeError 被下面的宽 except 吞成
+            # "error: ..."，诊断接口的 Stage2 结果一直是假的。
+            result = await classify_intent_llm(message, summaries)
             llm_classification = result if result else []
     except Exception as e:
         llm_classification = [f"error: {str(e)[:100]}"]
@@ -2434,7 +2448,7 @@ async def debug_trigger_analysis(
     }
 
 
-@router.post("/suggestions/{suggestion_id}/reject", dependencies=[Depends(require_perm("skills:write"))])
+@router.post("/suggestions/{suggestion_id}/reject", dependencies=[Depends(require_perm("skills:write")), Depends(skill_gate_audit())])
 async def reject_skill_suggestion(suggestion_id: str) -> dict[str, Any]:
     """拒绝技能改进建议。"""
     from coapis.skill_evolution.engine import get_evolution_engine

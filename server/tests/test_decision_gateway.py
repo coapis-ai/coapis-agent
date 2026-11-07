@@ -612,3 +612,66 @@ async def test_no_judge_slot_does_not_pollute_breaker(monkeypatch):
 def test_no_model_is_not_counted_as_a_judged_attempt():
     """no_model 必须在真判断层白名单之外（配置状态 ≠ 判官败绩）。"""
     assert gw.LAYER_NO_MODEL not in gw.JUDGED_LAYERS
+
+
+async def test_startup_turns_exempt_from_turn_budget(monkeypatch):
+    """v19 P2-2：启动期每轮**每个岗位的第一格判断**不许被池子闸砍掉。
+
+    一轮任务天然要用掉 判档1+门禁1+审查1+技能1+工具N+验收1，池子默认 6 格，
+    工具门禁一多就把后面的判断整批砍掉——实测 budget_cap 落点大半在 turn=0/1
+    的启动期岗位上：任务从第一步就没判断，判官形同事后点评。
+    口子只保"每轮每岗位第一格"；同一岗位本轮第二次起照旧受闸（防打转），
+    验收预留照管，N=0 完全关闭。
+    """
+    model = FakeModel("L2")
+    wire(monkeypatch, model)
+    h = hub(judge_max_calls_per_turn=2, judge_reserve_acceptance=0,
+            budget_exempt_turns=3, cache_ttl_s=0,
+            posts={"intent": True, "plan_gate": True, "skill_trigger": True})
+
+    seq = {"n": 0}
+
+    async def one(purpose, turn=0, chat="c-exempt"):
+        # 缓存键含 user 文本，测试逐次变文，避免"cache 命中"冒充"判断通过"
+        seq["n"] += 1
+        return await gw.get_judge_gateway().judge(
+            purpose=purpose, system="sys-" + purpose, user="u%d" % seq["n"],
+            parse=lambda t: True, rule_fallback=lambda: False,
+            describe=lambda v: "hit", hub=h,
+            scope={"user_id": "u1", "agent_id": "a1", "chat_id": chat, "turn": turn},
+        )
+
+    # 池子只有 2 格，启动期 3 个岗位的第一格全过（第 3 格是"放过"的那一格）
+    assert (await one("intent")).from_llm
+    assert (await one("plan_gate")).from_llm
+    assert (await one("skill_trigger")).from_llm, "启动期首格被池子闸砍掉"
+    assert model.calls == 3
+    # 同一岗位本轮第二次：不是首格 → 闸照常落
+    repeat = await one("skill_trigger")
+    assert repeat.hit_layer == gw.LAYER_BUDGET, "免闸只保首格，反复调用必须受闸"
+    # 非启动轮（turn≥N）同样用满池子后，第三格（新岗位首格）必须落闸：
+    # 证明口子只在启动期，不是"池子闸改名"
+    assert (await one("intent", turn=5, chat="c-late")).from_llm
+    assert (await one("plan_gate", turn=5, chat="c-late")).from_llm
+    late = await one("skill_trigger", turn=5, chat="c-late")
+    assert late.hit_layer == gw.LAYER_BUDGET, "免预算只限启动期"
+    assert model.calls == 5, "免预算不等于免记账"
+
+
+async def test_budget_exempt_zero_keeps_gate_strict(monkeypatch):
+    """budget_exempt_turns=0 是合法配置：闸门必须回到严格行为（配置不许是装饰）。"""
+    model = FakeModel("L2")
+    wire(monkeypatch, model)
+    h = hub(judge_max_calls_per_turn=1, judge_reserve_acceptance=0,
+            budget_exempt_turns=0, cache_ttl_s=0, posts={"intent": True})
+
+    async def one(tag):
+        return await gw.get_judge_gateway().judge(
+            purpose="intent", system="sys", user="u-" + tag,
+            parse=lambda t: True, rule_fallback=lambda: False,
+            describe=lambda v: "hit", hub=h, scope=SCOPE,
+        )
+
+    assert (await one("a")).from_llm
+    assert (await one("b")).hit_layer == gw.LAYER_BUDGET
+    assert model.calls == 1

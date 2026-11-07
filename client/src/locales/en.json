@@ -2405,7 +2405,13 @@
     "previewWinMinimize": "Minimize",
     "previewWinRestore": "Restore window",
     "emptyList": "No chats for this agent yet",
-    "emptyListHint": "Send a message and it shows up here; switch agents to see their chats"
+    "emptyListHint": "Send a message and it shows up here; switch agents to see their chats",
+    "skillPicker": {
+      "label": "Skills",
+      "picked": "Skills {{count}}",
+      "empty": "No skills available for this agent",
+      "tip": "Skills for this turn only: picked skills load directly, skipping keyword and judge matching (affects this message only)"
+    }
   },
   "security": {
     "parent": "Settings",

@@ -57,9 +57,6 @@ class _AgentStub:
     _decision_hub = CoApisAgent._decision_hub
     _decision_scope = CoApisAgent._decision_scope
     _llm_classify_skills = CoApisAgent._llm_classify_skills
-    _decision_hub = CoApisAgent._decision_hub
-    _decision_scope = CoApisAgent._decision_scope
-    _skill_llm_timeout_s = CoApisAgent._skill_llm_timeout_s
     _agent_id = ""
     _agent_config = None
     _user_id = ""
@@ -219,11 +216,45 @@ async def test_llm_classify_skills_no_candidates_skips_llm(monkeypatch):
     assert called is False
 
 
-def test_skill_llm_timeout_s_reads_config():
-    assert _AgentStub([], config={"llm_timeout_ms": 1500})._skill_llm_timeout_s() == 1.5
-    assert _AgentStub([], config={"llm_timeout_ms": 0})._skill_llm_timeout_s() == 0.5
-    assert _AgentStub([], config={})._skill_llm_timeout_s() == 3.0
-    assert _AgentStub([], config={"llm_timeout_ms": "abc"})._skill_llm_timeout_s() == 3.0
+def test_selector_guard_follows_hub_hard_budget(monkeypatch):
+    """v19 P0-1：调用方不许自带尺子——安全网只跟网关**硬熔断**挂钩。
+
+    旧实现从 agent 的 ``running_config.llm_timeout_ms``（会话模型超时，与判官
+    无关）自取一把尺子，与网关的软阈值/硬熔断/轮内预算三处并行；同一轮判断
+    有好几把尺子，是"真判率被绞掉"的成因之一。现在只有一把尺子：
+    ``coapis.decision.config``，调用方仅保留"网关万一失控"的兜底余量。
+    """
+    from coapis.decision import config as cfg_mod
+
+    sel = make_selector(meta("mail", "邮件收发"))
+    # 硬熔断（本地 3s / API 9s）→ 安全网取最宽那把保险丝 + 1 秒余量
+    monkeypatch.setattr(
+        cfg_mod, "get_hub_config",
+        lambda: cfg_mod.DecisionHubConfig.from_dict(
+            {"llm_timeout_ms_local": 3000, "llm_timeout_ms_api": 9000},
+        ).normalized(),
+    )
+    assert sel._llm_guard_s() == 10.0
+    # 保险丝更宽 → 安全网跟着更宽（绝不在网关额度到点前掐死真判断）
+    monkeypatch.setattr(
+        cfg_mod, "get_hub_config",
+        lambda: cfg_mod.DecisionHubConfig.from_dict(
+            {"llm_timeout_ms_local": 3000, "llm_timeout_ms_api": 12000},
+        ).normalized(),
+    )
+    assert sel._llm_guard_s() == 13.0
+    # 配置层炸了也不许把主链吊死：保守值
+    monkeypatch.setattr(
+        cfg_mod, "get_hub_config", lambda: (_ for _ in ()).throw(RuntimeError("no cfg")),
+    )
+    assert sel._llm_guard_s() == 12.0
+
+
+def test_agent_has_no_private_skill_ruler():
+    """尺子只有一把：agent 侧不得再有技能判超时方法（v19 P0-1 回归锁）。"""
+    assert not hasattr(CoApisAgent, "_skill_llm_timeout_s")
+    src = inspect.getsource(CoApisAgent._llm_classify_skills)
+    assert "timeout=" not in src.split('"""')[-1]
 
 
 # --------------------------------------------------------------------------
@@ -249,12 +280,24 @@ async def test_selector_llm_classify_async_match(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_selector_llm_classify_async_timeout(monkeypatch, caplog):
+    """兜底判卡住时安全网必须收口：返回 []，且日志留痕（不静默）。"""
     async def slow_llm(message, summaries, timeout=3.0, **_kw):
         await asyncio.sleep(5)
         return ["mail"]
 
+    from coapis.decision import config as cfg_mod
+
     monkeypatch.setattr(intent_classifier, "classify_intent_llm", slow_llm)
-    sel = make_selector(meta("mail", "邮件收发"), config={"llm_timeout_ms": 200})
+    # 尺子在网关：把硬熔断压到 200ms → 安全网 1.2s，卡 5 秒的判官必被掐掉
+    monkeypatch.setattr(
+        cfg_mod, "get_hub_config",
+        lambda: cfg_mod.DecisionHubConfig.from_dict(
+            {"llm_timeout_ms_local": 200, "llm_timeout_ms_api": 200},
+        ).normalized(),
+    )
+    sel = make_selector(meta("mail", "邮件收发"))
+    # 硬熔断 200ms 也留 0.5s 下限（判官最便宜的往返也要几百毫秒）→ 安全网 1.5s
+    assert sel._llm_guard_s() == 1.5
     with caplog.at_level(logging.WARNING):
         got = await sel._llm_classify("发邮件", None)
     assert got == []

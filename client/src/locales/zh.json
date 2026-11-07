@@ -2282,7 +2282,13 @@
     "previewWinMinimize": "最小化",
     "previewWinRestore": "还原窗口",
     "emptyList": "当前智能体还没有会话",
-    "emptyListHint": "发一条消息就会出现在这里；切换智能体看各自的会话"
+    "emptyListHint": "发一条消息就会出现在这里；切换智能体看各自的会话",
+    "skillPicker": {
+      "label": "指定技能",
+      "picked": "技能 {{count}}",
+      "empty": "该智能体暂无可用技能",
+      "tip": "本轮指定技能：选中的技能本轮直装，跳过关键词与判官（只影响这一条消息）"
+    }
   },
   "security": {
     "parent": "设置",

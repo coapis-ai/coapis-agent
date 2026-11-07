@@ -124,6 +124,10 @@ _COMPACTION_TASKS: set[asyncio.Task] = set()
 #: Live agents, so the slot count can see how many sessions are queued.
 _LIVE_AGENTS: "weakref.WeakSet" = weakref.WeakSet()
 
+#: v19 P1-1：判官预判任务的强引用（事件循环只存弱引用，没人持有会被 GC，
+#: 预判就变成碰运气——与后台补判同一个坑，见 gateway._BG_TASKS）。
+_PREFETCH_TASKS: set[asyncio.Task] = set()
+
 
 def compaction_slots() -> int:
     """How many compactions may run at once, from the current queue."""
@@ -537,6 +541,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self._namesake_strategy = namesake_strategy
         self._workspace_dir = workspace_dir or WORKING_DIR
         self._task_tracker = task_tracker
+        # v19 P1-5：本轮用户点名技能（biz_params.skills → meta → msg.metadata
+        # → runner 写入）。只作用本轮：agent 实例每轮新建，天然无需清理。
+        # 点名走"直装"路径，不进关键词/判官，台账 origin=user_picked 单列
+        # ——人工点名不许混进判断命中率，否则判官战绩被掺水。
+        self._picked_skills: list[str] = []
         self.plan_notebook = plan_notebook  # Connect PlanNotebook to agent
 
         # 计划审查岗（判断中枢二期）：计划一落地就看一眼「这计划做得下去吗」。
@@ -1186,6 +1195,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     "system",
                     name="coapis_plan_review_hint",
                 ),
+                # v19 P1-2：必须打 HINT 标记。上游 ReActAgent 用
+                # delete_by_mark(HINT) 清临时提示——不打标记 = 审查结论
+                # 永久留在历史里逐轮堆积（还会进压缩），与"生效一次"的设计相反。
+                marks=_MemoryMark.HINT,
             )
             logger.info(
                 "[plan-review] 计划提示已注入 action=%s",
@@ -1582,7 +1595,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 "\n\n本场景还配置了这些技能（按需触发，关键词命中时自动加载）："
                 + ", ".join(f"`{n}`" for n in overflow)
             )
-        return (
+        seg = (
             f"## ⭐ 本场景优先技能（强制优先，共 {len(core)} 项）\n\n"
             "以下技能是场景"
             + (f"「{scene_name}」" if scene_name else "")
@@ -1591,6 +1604,50 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             f"{body}"
             + overflow_line
         )
+        # ── v19 P1-3：注入体积必须有字节闸，且体积本身要可观测 ──────────
+        # 场景段每轮**逐轮重复**注入；MAX_SCENE_CORE_SKILLS 只数条数不数字节，
+        # 描述写长一点整段就膨胀（实测 dev 池 43 技能描述 27200 字）。
+        # 闸按整段字节算：超预算就按行丢弃（保序号靠前的技能——它们本来就是
+        # 场景排过优先级的），并告警留下体积，便于验收"注入体积 ≤ 预算"。
+        raw = len(seg.encode("utf-8"))
+        budget = int(self._scene_skill_byte_budget())
+        if raw > budget:
+            head = (
+                f"## ⭐ 本场景优先技能（强制优先，共 {len(core)} 项）\n\n"
+                "以下技能是场景"
+                + (f"「{scene_name}」" if scene_name else "")
+                + "专门配置的。当用户请求与其中任何技能相关时，**必须优先使用它们**，"
+                "不要绕开它们改用通用方式；若多个都相关，按上面的序号顺序优先。\n\n"
+            )
+            kept: list[str] = []
+            used = len(head.encode("utf-8")) + len(overflow_line.encode("utf-8"))
+            for ln in lines:
+                cost = len(ln.encode("utf-8")) + 1
+                if used + cost > budget:
+                    break
+                kept.append(ln)
+                used += cost
+            dropped = len(lines) - len(kept)
+            seg = (
+                head + "\n".join(kept) + overflow_line
+                + f"\n\n（因注入体积预算 {budget}B 上限，省略 {dropped} 项技能描述）"
+            )
+            logger.warning(
+                "[SkillInject] 场景核心段 %dB > 预算 %dB，丢弃 %d/%d 项（体积闸）",
+                raw, budget, dropped, len(lines),
+            )
+            raw = len(seg.encode("utf-8"))
+        # 体积进台账可见口径（技能触发事件带 injected_bytes）
+        self._scene_core_bytes = raw
+        return seg
+
+    def _scene_skill_byte_budget(self) -> int:
+        """场景核心技能段的注入体积预算（字节）。
+
+        v19 P1-3：这条预算是"逐轮重复注入"的天花板。默认 4KB —— 实测一轮
+        提示词约 15~20KB，场景段超过 4KB 时它自己就挤掉了对话上下文。
+        """
+        return 4096
 
     @staticmethod
     def _register_skill_summary(toolkit, skill_dir: Path) -> None:
@@ -1930,12 +1987,21 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             agent=ctx.get("agent_id", "default"),
         )
         try:
-            record_skill_trigger(
-                skill_name=skill_name,
-                matched_keywords=matched_keywords,
-                user=ctx.get("username", "unknown"),
-                agent=ctx.get("agent_id", "default"),
-            )
+            # v19 P2-2：台账必须说清"凭什么装的"。原先只有技能名+命中词，
+            # 关键词 Tier1 / Tier3 语义 / 判官 LLM / 用户点名四种命中在账上
+            # 长得一模一样，命中率统计无法复核。strategy 单列，点名单列。
+            # 点名（user_picked）由调用处自己记账并带 origin，这里跳过，
+            # 免得一次点名在台账里留下两条。
+            if trigger_method != "user_picked":
+                record_skill_trigger(
+                    skill_name=skill_name,
+                    matched_keywords=matched_keywords,
+                    user=ctx.get("username", "unknown"),
+                    agent=ctx.get("agent_id", "default"),
+                    strategy=str(trigger_method or ""),
+                    # v19 P1-3：注入体积要能在台账查到（场景核心段字节数）
+                    injected_bytes=int(getattr(self, "_scene_core_bytes", 0) or 0),
+                )
         except Exception:
             pass
         logger.info(
@@ -1982,6 +2048,67 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         ctx = getattr(self, "_request_context", None) or {}
         tracker = get_trigger_tracker()
         loaded = []
+
+        # ── v19 P1-5：用户点名技能 = 直装，跳过关键词与判官 ──────────────
+        # 「这条就用这几个技能」是口语化控制，判断层不该再猜一遍。
+        # 台账 strategy/origin = user_picked 单列：人工点名**不计入判断命中**，
+        # 否则"真判率"里掺着人点名的命中，判官战绩无法复核。
+        # 点名的技能不在池中 → 告警 + 留痕，绝不静默忽略（静默忽略是最难查的坑）。
+        picked = [
+            str(s).strip() for s in (getattr(self, "_picked_skills", None) or [])
+            if str(s).strip()
+        ][:3]
+        for name in picked:
+            entry = self._on_demand_skills.get(name)
+            if not entry:
+                record_skill_trigger(
+                    skill_name=name, matched_keywords=["__not_found__"],
+                    user=ctx.get("username", "unknown"), agent=self._agent_id,
+                    strategy="user_picked", origin="user_picked",
+                    candidates=len(self._on_demand_skills),
+                )
+                logger.warning(
+                    "[Skill] 用户点名技能「%s」不在技能池（池 %d 个），本轮忽略",
+                    name, len(self._on_demand_skills),
+                )
+                continue
+            s_dir, s_kw = entry
+            try:
+                if self._scan_and_register_skill(
+                    skill_name=name,
+                    skill_dir=s_dir,
+                    trigger_method="user_picked",
+                    matched_keywords=["user_picked"],
+                    user_message=user_message,
+                    tracker=tracker,
+                    ctx=ctx,
+                ):
+                    loaded.append(name)
+                    # 点名命中必须**在点名处**记账：这条台账是唯一能证明
+                    # "命中来自用户点名而非判断"的证据，不能依赖通用装载函数
+                    # 的内部记录（它记的是"装了什么"，不是"谁决定的"）。
+                    record_skill_trigger(
+                        skill_name=name, matched_keywords=["user_picked"],
+                        user=ctx.get("username", "unknown"),
+                        agent=ctx.get("agent_id", self._agent_id),
+                        strategy="user_picked", origin="user_picked",
+                        candidates=len(self._on_demand_skills),
+                        injected_bytes=int(getattr(self, "_scene_core_bytes", 0) or 0),
+                    )
+            except Exception as exc:  # noqa: BLE001 - 点名失败不许吊死主链
+                logger.warning("[Skill] 点名技能 %s 装载失败：%s", name, exc)
+        if loaded:
+            self._core_skills = list(dict.fromkeys(list(self._core_skills) + loaded))
+            logger.warning(
+                "[Skill] 本轮用户点名直装 %s（跳过关键词/判官，origin=user_picked）",
+                loaded,
+            )
+        if picked:
+            # 点过的技能退出候选池：同一条消息里同一个技能装两次是浪费，
+            # 更会让"命中来源"出现两条（一条 user_picked 一条 keyword），
+            # 判断命中率被虚增。退出后 Phase1/判官只看剩下的池子。
+            for name in picked:
+                self._on_demand_skills.pop(name, None)
 
         # ── Phase 1: Keyword matching (fast, zero LLM cost) ──
         from .utils.intent_classifier import classify_intent_keywords
@@ -2032,16 +2159,41 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # ── Phase 2: LLM classification (best-effort, for edge cases) ──
         # D3: LLM 兜底仅在关键词全空时触发，且候选集限定为场景声明的技能
         # （场景配置是天然先验，比全池 21 个候选更准、更省 token）。
+        # v19 P1-1 复用短路：关键词层已经命中就**取消**技能判官预判——一次
+        # 判断只留它必须付的那一次往返；判档判出 simple 的短请求同样不必
+        # 让判官挑技能（Tier1 关键词 + Tier3 语义命中都还在）。
+        if loaded:
+            self._cancel_prefetch("skill_trigger", f"关键词已命中 {loaded}")
         if not loaded:
-            _scene_candidates = list(
-                getattr(self._skill_selector, "scene_skills", []) or []
+            _prefetch_task = (getattr(self, "_prefetch_tasks", None) or {}).get(
+                "skill_trigger",
             )
-            if not _scene_candidates:
-                # 无场景声明时退回全池，保持原有行为
-                _scene_candidates = None
-            llm_matched_names = await self._llm_classify_skills(
-                user_message, restrict_names=_scene_candidates,
-            )
+            if (
+                self._prefetch_plan_level == "simple"
+                and _prefetch_task is not None
+                and _prefetch_task.done()
+            ):
+                # 判档说这轮是简单请求，且预判已有结论 → 不采用技能判官结果
+                self._cancel_prefetch(
+                    "skill_trigger", "判档 simple，短请求不启技能判官",
+                )
+                self._skill_trigger_reason = (
+                    "skipped_simple: 判档判出 simple，本轮只用规则层技能"
+                )
+                llm_matched_names = []
+            else:
+                _scene_candidates = list(
+                    getattr(self._skill_selector, "scene_skills", []) or []
+                )
+                if not _scene_candidates:
+                    # 无场景声明时退回全池，保持原有行为
+                    _scene_candidates = None
+                llm_matched_names = await self._await_prefetch(
+                    "skill_trigger",
+                    lambda: self._llm_classify_skills(
+                        user_message, restrict_names=_scene_candidates,
+                    ),
+                )
             logger.info(
                 "[TriggerDebug] LLM classification result: matched=%s",
                 llm_matched_names if llm_matched_names else "[]",
@@ -2155,13 +2307,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         else:
             logger.info("[TriggerDebug] No on-demand skills loaded for this message")
 
-    def _skill_llm_timeout_s(self) -> float:
-        """兜底判超时（秒），来自 skill 触发配置 ``llm_timeout_ms``，默认 3s。"""
-        cfg = getattr(self._skill_selector, "config", None) or {}
-        try:
-            return max(0.5, float(cfg.get("llm_timeout_ms", 3000)) / 1000.0)
-        except (TypeError, ValueError):
-            return 3.0
+    # v19 P0-1（已删）：原先这里有 ``_skill_llm_timeout_s`` —— 从 agent 的
+    # ``running_config.llm_timeout_ms``（那是**会话模型**的超时）另取一把尺子
+    # 给技能兜底判用。全仓零调用者，纯属私设尺子：同一轮判断在网关里吃
+    # 软阈值/硬熔断/轮内预算，在调用方又吃一把没人维护的 3 秒默认值。
+    # 尺子只有一把：``coapis.decision.config``（软阈值按岗位
+    # ``soft_ms_for``，硬超时按 ``effective_timeout_ms``）。
 
     def _skill_judge_model_name(self) -> str:
         """本次兜底判会用到哪个模型（台账用；未配置判官返回空串）。
@@ -4561,6 +4712,135 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                         parts.append(block.text)
         return "\n".join(parts).strip()
 
+    # ── v19 P1-1：判官异步预判（拍板 D3：主链允许"异步预判"）──────────
+    # 现状（dev 台账实测）：判档 avg 2841ms/max 8852ms、技能岗 avg 5321ms/
+    # max 12820ms，两处**串行** await → 用户干等的前摇 = 两判之和（8.1s 量级）。
+    # 改法：reply 一进来就把两判**并行发起**，与本轮本来就要做的前置工作
+    # （记忆语义检索、系统提示构建、钩子）重叠；消费处只 await 已经跑着的
+    # future。前摇从"两判之和"降为"两判较大者 − 前置工作时间"。
+    # 代价（D3 明说）：极短请求也会用掉一次判官额度 → 关键词命中即取消技能
+    # 预判（`_cancel_prefetch`），判档判出 simple 且关键词已命中则跳过技能判官。
+    def _start_judge_prefetch(self, msg: Msg | list[Msg] | None, query: str) -> None:
+        """并行发起判档与技能判官，结果挂在 self 上供消费处取。"""
+        self._prefetch_tasks = {}
+        self._prefetch_wait_ms = {}
+        self._prefetch_plan_level = None
+        try:
+            hub = self._decision_hub()
+        except Exception:  # 预判是加分项，中枢读不到就当没这功能
+            return
+        if not getattr(hub, "enabled", False):
+            return
+        gate_text = self._prepare_plan_gate(msg)
+        if gate_text is not None and hub.post_enabled("plan_gate"):
+            self._spawn_prefetch(
+                "plan_gate", self._classify_plan_level(gate_text),
+            )
+        if query and hub.post_enabled("skill_trigger"):
+            self._spawn_prefetch(
+                "skill_trigger",
+                self._prefetch_skill_names(query),
+            )
+
+    def _spawn_prefetch(self, key: str, coro: Any) -> None:
+        """后台任务要有强引用：事件循环只存弱引用，没人持有的任务会被 GC。"""
+        task = asyncio.create_task(coro)
+        _PREFETCH_TASKS.add(task)
+        task.add_done_callback(_PREFETCH_TASKS.discard)
+        if not isinstance(getattr(self, "_prefetch_tasks", None), dict):
+            self._prefetch_tasks = {}
+        self._prefetch_tasks[key] = task
+
+    def _cancel_prefetch(self, key: str, why: str = "") -> None:
+        """关键词层已命中 → 技能判官不必再判，取消以省一次判官往返。"""
+        tasks = getattr(self, "_prefetch_tasks", None)
+        task = (tasks or {}).get(key) if isinstance(tasks, dict) else None
+        if task is not None and not task.done():
+            task.cancel()
+            if why:
+                logger.info("[Prefetch] 取消 %s 预判：%s", key, why)
+        if isinstance(tasks, dict):
+            tasks.pop(key, None)
+
+    async def _await_prefetch(self, key: str, fallback: Any) -> Any:
+        """消费预判结果：已跑完几乎零前摇；没跑完就在网关软阈内等它。
+
+        ``fallback`` 是"没有预判可用时该怎么判"的协程工厂——预判缺失或
+        预判自身出问题时**原路补判**，绝不因为加了预判而少判一次。
+        """
+        task = (getattr(self, "_prefetch_tasks", None) or {}).get(key)
+        if task is None:
+            return await fallback()
+        started = time.perf_counter()
+        try:
+            result = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # 预判自身出问题 → 原路补判
+            logger.debug("[Prefetch] %s 预判失败，改走同步判断", key, exc_info=True)
+            return await fallback()
+        self._prefetch_wait_ms = getattr(self, "_prefetch_wait_ms", None)
+        if not isinstance(self._prefetch_wait_ms, dict):
+            self._prefetch_wait_ms = {}
+        self._prefetch_wait_ms[key] = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "[Prefetch] %s 预判到手（等待 %dms）",
+            key, self._prefetch_wait_ms[key],
+        )
+        return result
+
+    async def _prefetch_skill_names(self, query: str) -> list[str]:
+        """技能预判：候选集与 Phase2 同口径（场景声明优先，无场景退全池）。"""
+        restrict = list(getattr(self._skill_selector, "scene_skills", []) or [])
+        return await self._llm_classify_skills(
+            query, restrict_names=restrict or None,
+        )
+
+    def _prepare_plan_gate(self, msg: Msg | list[Msg] | None) -> str | None:
+        """判档前置：算出要判的文本 + 本轮工具闸记账清零。
+
+        返回 ``None`` 表示本轮不判档（无计划工具 / 已有活动计划 / 无文本）。
+        副作用与预判同一路：``_hub_goal`` 与工具闸记账必须在判断发起前就位，
+        否则验收岗与工具闸拿不到本轮目标。
+        """
+        notebook = getattr(self, "plan_notebook", None)
+        if notebook is None or getattr(notebook, "plan", None) is not None:
+            return None
+        text = self._gate_text(msg)
+        if not text:
+            return None
+        # 事中改道与验收都拿它当「用户要的东西」（v14 §3.4/§3.5）
+        self._hub_goal = text
+        # 本轮工具闸记账清零：每轮独立预算，判断本身不能变成循环（v14 §4.4④）
+        self._hub_tool_calls = []
+        return text
+
+    async def _classify_plan_level(self, text: str) -> str:
+        """判档一次（判则技能随工作区走，必须走 classify_smart）。"""
+        from .plan_gate import ComplexityClassifier
+
+        hub = self._decision_hub()
+        classifier = getattr(self, "_complexity_classifier", None)
+        if classifier is None:
+            classifier = ComplexityClassifier(
+                judge_enabled=(
+                    hub.enabled and hub.post_enabled("plan_gate")
+                ),
+                # 中枢说了算：推理型模型 1.5s 出不完思考，判官必败。
+                judge_timeout=float(hub.llm_timeout_ms) / 1000.0,
+                judge_max_tokens=int(hub.llm_max_tokens),
+            )
+            self._complexity_classifier = classifier
+        classifier.set_ledger_scope(self._decision_scope())
+        # 判则技能跟着工作区走（v14 §4.5）：判档 prompt 里的判则 =
+        # 内置判则 + 本工作区的判则技能，用户定制判则不需要改代码。
+        classifier.set_skills_dir(
+            str(Path(str(getattr(self, "_workspace_dir", "") or "")) / "skills"),
+        )
+        # 必须走 classify_smart：同步 classify() 不认 judge_enabled，
+        # 判级模型永远不会被咨询（v13 D1 的"跟随会话激活模型"落空）。
+        return await classifier.classify_smart(text)
+
     async def _maybe_arm_plan(self, msg: Msg | list[Msg] | None) -> None:
         """Hand a multi-step task its skeleton before the loop starts.
 
@@ -4580,43 +4860,24 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         Only when the plan tools are registered and no plan is active.  This
         injects the skeleton; the agent writes the plan itself.
         """
-        notebook = getattr(self, "plan_notebook", None)
-        if notebook is None or getattr(notebook, "plan", None) is not None:
+        text = self._prepare_plan_gate(msg)
+        if text is None:
             return
-        text = self._gate_text(msg)
-        if not text:
-            return
-        # 事中改道与验收都拿它当「用户要的东西」（v14 §3.4/§3.5）
-        self._hub_goal = text
-        # 本轮工具闸记账清零：每轮独立预算，判断本身不能变成循环（v14 §4.4④）
-        self._hub_tool_calls = []
         try:
-            from .plan_gate import COMPLEX, ComplexityClassifier
+            from .plan_gate import COMPLEX
 
             hub = self._decision_hub()
-            classifier = getattr(self, "_complexity_classifier", None)
-            if classifier is None:
-                classifier = ComplexityClassifier(
-                    judge_enabled=(
-                        hub.enabled and hub.post_enabled("plan_gate")
-                    ),
-                    # 中枢说了算：推理型模型 1.5s 出不完思考，判官必败。
-                    judge_timeout=float(hub.llm_timeout_ms) / 1000.0,
-                    judge_max_tokens=int(hub.llm_max_tokens),
-                )
-                self._complexity_classifier = classifier
-            classifier.set_ledger_scope(self._decision_scope())
-            # 判则技能跟着工作区走（v14 §4.5）：判档 prompt 里的判则 =
-            # 内置判则 + 本工作区的判则技能，用户定制判则不需要改代码。
-            classifier.set_skills_dir(
-                str(Path(str(getattr(self, "_workspace_dir", "") or "")) / "skills"),
+            if hub.enabled and not hub.post_enabled("plan_gate"):
+                # 岗位关闭：不判档，也不消费预判（预判侧同样不发起）
+                return
+            # v19 P1-1：优先吃 reply 开头就发起的预判，干等的时长挪到前置工作里
+            level = await self._await_prefetch(
+                "plan_gate", lambda: self._classify_plan_level(text),
             )
-            # 必须走 classify_smart：同步 classify() 不认 judge_enabled，
-            # 判级模型永远不会被咨询（v13 D1 的"跟随会话激活模型"落空）。
-            level = await classifier.classify_smart(text)
         except Exception:  # the gate must never break a reply
             logger.debug("Plan gate skipped", exc_info=True)
             return
+        self._prefetch_plan_level = level
         if level != COMPLEX:
             return
         await self.memory.add(
@@ -4724,6 +4985,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             await self.print(msg)
             return msg
 
+        # v19 P1-1（拍板 D3）：判官预判在这里**并行发起**。判档 avg 2.8s、
+        # 技能岗 avg 5.3s，原先两处串行 await，用户干等 8s 量级；现在两判同时
+        # 开跑，与下面本来就要做的记忆语义检索、系统提示构建、钩子重叠，
+        # 消费处（判档/技能 Phase2）只 await 已经跑着的 future。
+        self._start_judge_prefetch(msg, query or "")
+
         # Normal message processing
         logger.info("CoApisAgent.reply: max_iters=%s", self.max_iters)
 
@@ -4757,6 +5024,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # Intent-based skill loading: load on-demand skills matching user message
         if query:
             await self._load_on_demand_skills(query)
+
+        # v19 P1-1 遥测（验收标准 6：前摇 ms 可核对）：消费预判时**实际干等**
+        # 的毫秒。规则快判应为 0；判官真判由网关软阈封顶（判档 4s/技能 6s）。
+        _waits = getattr(self, "_prefetch_wait_ms", None) or {}
+        if _waits:
+            self._preroll_ms = max(int(v) for v in _waits.values())
+            logger.info(
+                "[Prefetch] 本轮前摇(ms) %s · 峰值 %dms（两判并行发起，"
+                "消费处只等已经跑着的 future）",
+                _waits, self._preroll_ms,
+            )
 
         # ── Hook: POST_DISPATCH ──
         try:

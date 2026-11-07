@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import uuid
 import time
+import types
 from datetime import datetime, timedelta
 
 import pytest
@@ -83,6 +84,19 @@ def client(tmp_path, monkeypatch):
     payload = {"id": "default", "name": "default", "running_config": {},
                "decision_hub": {}}
     (cfg_dir / "default.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    # v19 P2-3：PUT /decisions/config 挂了 judge:audit 闸门。权限模块没初始化
+    # 时闸门是 fail-closed 的 503（不是放行），所以测试必须把权限系统摆出来。
+    # 这里只提供"矩阵数据"（普通用户零授权），判定逻辑走真尺子
+    # （admin 直通 / 矩阵查表），闸门语义本身由真代码执行。
+    from coapis.app.permissions.manager import PermissionManager
+
+    monkeypatch.setattr(
+        PermissionManager, "_instance",
+        types.SimpleNamespace(
+            has_permission=lambda username, permission, role="user": role == "admin",
+        ),
+    )
 
     def _load(agent_id: str):
         from coapis.config.config import AgentProfileConfig
@@ -179,7 +193,9 @@ def test_config_get_shape(client):
 
 
 def test_config_put_persists_known_keys_only(client):
-    c, _holder, _cfg_dir = client
+    c, holder, _cfg_dir = client
+    # v19 P2-3：六岗配置是治理项，只有管理员能改（见 test_config_put_denied）
+    holder["user"], holder["role"] = "root", "admin"
     res = c.put("/api/decisions/config?agent_id=a1", json={
         "timeout_ms": 2500,
         "advisor_enabled": False,
@@ -216,7 +232,8 @@ def test_config_put_persists_known_keys_only(client):
 
 
 def test_config_put_reaches_hub_config(client):
-    c, _holder, _ = client
+    c, holder, _ = client
+    holder["user"], holder["role"] = "root", "admin"  # v19 P2-3：管理员才能写
     from coapis.decision.config import get_hub_config
 
     # 基线值不假设（各环境环境变量不同），只验"改了立刻变"
@@ -227,6 +244,28 @@ def test_config_put_reaches_hub_config(client):
     c.put("/api/decisions/config?agent_id=a1", json={"timeout_ms": 2600})
     assert get_hub_config().timeout_ms == 2600
     assert (before == 2100) is False
+
+
+def test_config_put_denied_for_non_admin(client):
+    """v19 P2-3：改判官配置改的是**整台部署**的判断行为，必须管理员 + 留痕。
+
+    原先任何登录用户 PUT /decisions/config 都能把判官总开关关掉、把技能岗
+    预算改成 1，落盘全局生效且零审计。闸门 = judge:audit（矩阵缺席即拒）。
+    """
+    c, holder, _ = client
+    res = c.put("/api/decisions/config?agent_id=default", json={"enabled": False})
+    assert res.status_code == 403, "普通用户不得改中枢配置"
+    assert "judge:audit" in res.json()["detail"]
+    # 拒绝必须真的没写下去（读的是本测试那份落盘文件，不碰全局缓存）
+    from coapis.decision.config import hub_config_path
+
+    path = hub_config_path()
+    saved = json.loads(path.read_text()) if path.exists() else {}
+    assert saved.get("enabled") is not False, "403 不许留下任何写入"
+    holder["user"], holder["role"] = "root", "admin"
+    assert c.put(
+        "/api/decisions/config?agent_id=default", json={"enabled": True},
+    ).status_code == 200
 
 
 

@@ -1977,6 +1977,35 @@ class AgentRunner(Runner):
             logger.warning(f"[MCP_DEBUG] ALL_TOOL_NAMES: {_all_names}")
             agent.set_console_output_enabled(enabled=False)
 
+            # ── v19 P1-5：本轮用户点名技能（biz_params.skills → meta → msg.metadata） ──
+            # 与 selected_files 同一条透传链。取到后交给 agent 在"命中即装"入口
+            # 直装（跳过关键词/判官），台账记 origin=user_picked 单列。
+            # 只作用本轮：agent 实例每轮新建（此处即新建），无需额外清理。
+            try:
+                _picked: list[str] = []
+                _src_msgs = msgs if isinstance(msgs, list) else []
+                if not _src_msgs and isinstance(request.input, list) and request.input:
+                    # meta 由通道写进原始 request.input，转换后可能丢失
+                    _src_msgs = request.input
+                for _m in _src_msgs:
+                    _md = getattr(_m, "metadata", None)
+                    if isinstance(_md, dict) and _md.get("picked_skills"):
+                        _picked = [
+                            str(s).strip()
+                            for s in (_md.get("picked_skills") or [])
+                            if isinstance(s, str) and str(s).strip()
+                        ][:3]
+                        if _picked:
+                            break
+                if _picked:
+                    agent._picked_skills = _picked
+                    logger.warning(
+                        "[Skill] 本轮用户点名技能=%s（跳过关键词/判官，台账 origin=user_picked）",
+                        _picked,
+                    )
+            except Exception as e:  # pragma: no cover - 防御性
+                logger.debug("Picked-skills extraction skipped: %s", e)
+
             # ToolManager: pre-equip the tool groups whose keywords match the
             # incoming query, so step 1 already carries the tools the task
             # needs. Step-1 only — the model's own reset_equipped_tools call

@@ -27,8 +27,12 @@ class SkillSelector:
         self,
         config: dict[str, Any] | None = None,
         scene_skills: list[str] | None = None,
+        scope: dict[str, Any] | None = None,
     ):
         self.config = config or {}
+        #: 台账作用域 ``{user_id, agent_id, chat_id, turn}``：Stage2 走判断网关时
+        #: 带身份入账。调用方（react_agent）每轮刷新；缺省=None 由 ContextVar 兜底。
+        self.scope: dict[str, Any] | None = scope
         # keyword (lowercase) → [skill_name, ...]
         self.keyword_index: dict[str, list[str]] = {}
         # skill_name → [keyword (lowercase), ...]
@@ -523,6 +527,31 @@ class SkillSelector:
                 skill_summaries[name] = desc
         return skill_summaries
 
+    def _llm_guard_s(self) -> float:
+        """调用方的**安全网**（秒），不是尺子。
+
+        v19 P0-1：超时归判断网关统一管（软阈值 + 自适应硬超时 + 熔断 + 轮内
+        预算），调用方**不许**自带 ``timeout=`` 传给网关。此前这里传的是签名里
+        根本不存在的参数，``TypeError`` 被下面的宽 ``except`` 吞掉 → 加载层
+        Stage2「意图驱动技能装载」从未成功过一次（容器内实测）。
+        这里只留一层"网关万一失控"的兜底：取网关自适应硬超时上限 + 余量。
+        """
+        try:
+            from coapis.decision.config import get_hub_config
+
+            cfg = get_hub_config()
+            hard_ms = max(
+                float(cfg.llm_timeout_ms_local),
+                float(cfg.llm_timeout_ms_api),
+                float(getattr(cfg, "llm_timeout_ms", 0.0)),
+            )
+            # 安全网按**硬熔断**算（判官的额度 + 1 秒余量），不跟软阈值挂钩：
+            # 软阈值管的是"主链等不等"，把它塞进安全网等于把"主链不等判官"
+            # 这条承诺改掉（软阈值 5s 时安全网会变 8s，主链被拖死）。
+            return max(hard_ms / 1000.0, 0.5) + 1.0
+        except Exception:  # noqa: BLE001 - 读不到配置用保守值，绝不炸主链
+            return 12.0
+
     async def _llm_classify(
         self,
         message: str,
@@ -539,19 +568,21 @@ class SkillSelector:
             logger.debug("LLM classification skipped: no skill summaries")
             return []
 
-        timeout = self._llm_timeout_s()
+        guard = self._llm_guard_s()
         try:
             from .intent_classifier import classify_intent_llm
 
             result = await asyncio.wait_for(
-                classify_intent_llm(message, skill_summaries, timeout=timeout),
-                timeout=timeout + 1.0,
+                classify_intent_llm(
+                    message, skill_summaries, scope=getattr(self, "scope", None),
+                ),
+                timeout=guard,
             )
             if result:
                 logger.info("LLM classified skills: %s", result)
             return result or []
         except asyncio.TimeoutError:
-            logger.warning("LLM classification timed out (>%.1fs)", timeout)
+            logger.warning("LLM classification timed out (>%.1fs)", guard)
             return []
         except Exception as e:
             logger.warning("LLM classification failed: %s", e)
@@ -581,9 +612,12 @@ class SkillSelector:
                 asyncio.get_running_loop()
             except RuntimeError:
                 # No running loop, safe to use asyncio.run()
-                timeout = self._llm_timeout_s()
+                # v19 P0-1：不传 timeout（尺子在判断网关里，调用方私自定尺子
+                # 是 Stage2 永久失效的源头）。
                 result = asyncio.run(
-                    classify_intent_llm(message, skill_summaries, timeout=timeout)
+                    classify_intent_llm(
+                        message, skill_summaries, scope=getattr(self, "scope", None),
+                    ),
                 )
                 if result:
                     logger.info("LLM classified skills: %s", result)

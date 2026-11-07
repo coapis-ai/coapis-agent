@@ -339,6 +339,14 @@ class BaseChannel(ABC):
                 msg.metadata = msg.metadata or {}
                 msg.metadata["selected_files"] = channel_meta["selected_files"]
                 logger.info(f"[DEBUG] Set msg.metadata to {msg.metadata}")
+            # ── v19 P1-5：用户点名技能透传（只作用于本轮） ──
+            if channel_meta.get("picked_skills"):
+                msg.metadata = msg.metadata or {}
+                msg.metadata["picked_skills"] = channel_meta["picked_skills"]
+                logger.info(
+                    "[Skill] 本轮用户点名技能 %s → msg.metadata.picked_skills",
+                    channel_meta["picked_skills"],
+                )
             # ── Scene ID: 场景智能体注入 ──
             if channel_meta.get("scene_id"):
                 msg.metadata = msg.metadata or {}

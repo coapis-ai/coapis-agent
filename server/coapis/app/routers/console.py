@@ -389,6 +389,22 @@ async def console_chat(
         native_payload["meta"]["selected_files"] = selected_files
         logger.info(f"Passing {len(selected_files)} file references through meta")
 
+    # ── v19 P1-5：逐条消息指定技能（biz_params.skills） ──
+    # 判官/关键词是"猜这条消息要什么技能"，用户点名是"我知道要什么技能"。
+    # 两条路必须分开记账（台账 origin=user_picked），否则命中率统计会把
+    # 人工点名算成判断命中，判官战绩被掺水。
+    # 上限 3：一条消息点名超过 3 个技能不叫"指定"，叫"全都要"——那正是
+    # 需要判断来解决的状况，不该由点名绕过判断层。
+    picked_skills = biz_params.get("skills", [])
+    if isinstance(picked_skills, list):
+        picked = [
+            str(s).strip() for s in picked_skills
+            if isinstance(s, str) and str(s).strip()
+        ][:3]
+        if picked:
+            native_payload["meta"]["picked_skills"] = picked
+            logger.info("本轮指定技能 %s（用户点名，跳过判断层）", picked)
+
     # ── Scene ID: 场景智能体（叠加到用户智能体） ──
     scene_id = biz_params.get("scene_id")
     if scene_id:

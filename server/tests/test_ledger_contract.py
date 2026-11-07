@@ -323,11 +323,22 @@ def test_unknown_source_still_written(monkeypatch):
         ("synthetic-x", "test"),
         ("550e8400-e29b-41d4-a716-446655440000", "web"),
         ("wecom:woETa-FAAA", "web"),
-        ("", "web"),
+        # v19 P2-1：chat_id 与 session_id 全空 = 不知道是谁的判断，单列
+        # no_identity（预检 KPI 把它剔出真判率分母，见 D7 拍板）。
+        ("", "no_identity"),
     ],
 )
 def test_detect_origin_by_id_shape(chat_id, expect):
     assert lc.detect_origin(chat_id, "") == expect
+
+
+def test_detect_origin_empty_both_is_no_identity():
+    """v19 P2-1：身份缺失单列，不再混进 web 拉高/拉低真判率。"""
+    assert lc.detect_origin("", "") == "no_identity"
+    assert lc.detect_origin("   ", None) == "no_identity"
+    # 任一侧有身份就不是 no_identity（session 侧是 e2e 合成会话 → test）
+    assert lc.detect_origin("", "e2e-run") == "test"
+    assert lc.detect_origin("", "c1") == "web"
 
 
 def test_detect_origin_uses_session_id_too():

@@ -76,7 +76,15 @@ def normalize_band(value: Any) -> tuple[str, str]:
 
 
 def detect_origin(chat_id: str, session_id: str) -> str:
-    """行来源：e2e/合成会话标 test，其余标 web（v14 §批次5 写侧）。"""
+    """行来源：test / no_identity / web（v14 §批次5 写侧，v19 P2-1 补身份缺失）。
+
+    v19 P2-1：chat_id 与 session_id 都空时单列 ``no_identity``。实测判官台账里有
+    66 行 chat_id/turn_id/user_id 全空——它们既进不了闭环对账、也无法按会话归因，
+    却一路混在真判率分母里，于是"真判率"这种数字根本无法复核。宁可承认这批不知道
+    是谁的，也不要拿它去算成绩。
+    """
+    if not str(chat_id or "").strip() and not str(session_id or "").strip():
+        return "no_identity"
     for ident in (chat_id, session_id):
         text = str(ident or "").strip().lower()
         if text.startswith(_TEST_ID_PREFIXES):

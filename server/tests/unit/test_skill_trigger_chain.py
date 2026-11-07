@@ -106,11 +106,13 @@ def test_empty_skill_dir_yields_empty_index(tmp_path):
 def test_query_cache_key_is_full_query_not_a_hash(tmp_path):
     """Keys used to be ``hash(query) % 10000``: one session could serve
     another session's skill set on a collision."""
-    write_skill(tmp_path, "xlsx", description="电子表格。")
+    write_skill(tmp_path, "xlsx", description="Excel 电子表格。")
     write_skill(tmp_path, "pdf", description="PDF 文档。")
     mgr = manager_with(tmp_path)
 
-    a = mgr.get_index_prompt(query="做个表格")
+    # v19 P1-4 之后命中词要够长（1-2 字 token 不再当子串扫描述），所以这里
+    # 用各自带 3+ 字命中词的查询来验证"缓存键=整句查询"。
+    a = mgr.get_index_prompt(query="做个excel")
     b = mgr.get_index_prompt(query="合并PDF")
     assert a != b
     assert "xlsx" in a and "pdf" not in a
@@ -128,9 +130,15 @@ def test_query_cache_is_bounded_lru(tmp_path):
 
 
 def test_broad_query_match_degrades_to_names_only(tmp_path):
-    """A match that catches everything must not re-inflate the index."""
+    """A match that catches everything must not re-inflate the index.
+
+    v19 P1-4 改了尺子（1-2 字 token 不再当子串扫 name/description——'数据'、
+    '分析' 这类短词一撞一大片，正是"广匹配"的成因），所以这里用**整词**
+    "数据分析"当描述来构造"一个匹配吃掉全部技能"的场景：广匹配发生时索引
+    必须退回纯名字行，绝不铺 13 条详情。
+    """
     for i in range(SkillManager.INDEX_DETAIL_CAP + 3):
-        write_skill(tmp_path, f"skill{i}", description="通用技能 数据 分析")
+        write_skill(tmp_path, f"skill{i}", description="通用技能 数据分析")
     mgr = manager_with(tmp_path)
     index = mgr.get_index_prompt(query="数据分析")
     assert len(mgr.match_skills_by_query("数据分析")) > SkillManager.INDEX_DETAIL_CAP

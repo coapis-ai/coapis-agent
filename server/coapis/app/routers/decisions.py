@@ -35,8 +35,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy import text
+
+from ..permissions import require_perm
+from ...decision.config import POSTS
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +47,10 @@ router = APIRouter(tags=["decisions"])
 
 _MAX_LIMIT = 200
 _DEFAULT_LIMIT = 50
-_SOURCES = ("plan_gate", "outcome", "skill_trigger", "advisor", "acceptance")
+# 台账里的 source = 岗位名（gateway 用 purpose 落账）+ 验收回灌的 "outcome"。
+# 原先硬写五岗，plan_review / tool_gate / intent 的行存在却筛不出来——
+# 治理页上"六岗配置"有六个岗，筛选项只有五个，对账口径天生缺角。
+_SOURCES = tuple(sorted(set(POSTS) | {"outcome"}))
 _OUTCOMES = ("hit", "miss", "pending")
 
 # 台账里"判了但没走成"的层——词表必须与 gateway 写入侧逐字一致
@@ -306,7 +312,16 @@ def get_config(request: Request) -> dict[str, Any]:
     }
 
 
-@router.put("/config")
+@router.put(
+    "/config",
+    # v19 P2-3 闸门：**六岗配置是治理项，不是人人可改的运行参数**。
+    # 原先任何登录用户 POST /decisions/config 都能把判官总开关关掉、把
+    # 技能岗位预算改成 1——改的是**整台部署**的判断行为（落盘
+    # decision_hub.json 全局生效），却连一次审计都不记。
+    # 权限矩阵里 "judge" 模块默认只有 admin 有 audit（模块缺席 = 拒绝，
+    # fail-closed），非管理员改配置直接 403，由管理员在权限页显式授权。
+    dependencies=[Depends(require_perm("judge:audit"))],
+)
 def put_config(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """改判官配置：落盘到部署级配置文件（重启后仍生效）并立即生效。
 

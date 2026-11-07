@@ -60,6 +60,15 @@ def _stub(notebook, memory):
     # 与真实智能体的 _decision_hub() 同形。
     stub._decision_hub = lambda: DecisionHubConfig.from_dict({})
     stub._maybe_arm_plan = lambda msg: CoPawAgent._maybe_arm_plan(stub, msg)
+    # v19 P1-1：判档拆成「前置准备 / 判断 / 消费预判」三段，桩要把新方法一并
+    # 绑上——否则 _maybe_arm_plan 落到不存在的方法上，测试全部哑弹。
+    stub._workspace_dir = ""
+    stub._prefetch_tasks = {}
+    stub._prefetch_wait_ms = {}
+    stub._prefetch_plan_level = None
+    stub._prepare_plan_gate = lambda msg: CoPawAgent._prepare_plan_gate(stub, msg)
+    stub._classify_plan_level = lambda text: CoPawAgent._classify_plan_level(stub, text)
+    stub._await_prefetch = lambda key, fb: CoPawAgent._await_prefetch(stub, key, fb)
     return stub
 
 

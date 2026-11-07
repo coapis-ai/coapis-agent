@@ -85,8 +85,24 @@ def record_skill_trigger(
     matched_keywords: list[str],
     user: str = "unknown",
     agent: str = "default",
+    strategy: str = "",
+    score: int = 0,
+    candidates: int = 0,
+    origin: str = "",
+    injected_bytes: int = 0,
 ) -> None:
-    """Append one skill-trigger record to the JSONL log."""
+    """Append one skill-trigger record to the JSONL log.
+
+    v19 P2-2：技能岗台账原先只有"装了哪个技能 + 命中词"，回答不了
+    "凭什么装的"——关键词 Tier1、Tier3 语义命中、判官 LLM、还是用户点名，
+    在账上长得一模一样，于是"真判率 42%"这种数字根本没法复核。
+    新增四个可复现字段（都可选，老调用点零改动）：
+      strategy  命中策略：keyword / tier3 / llm / user_picked / forced
+      score     命中得分（规则层打分，判官层为 0）
+      candidates 本轮候选技能数（量"在多大范围里选的"）
+      origin    来源单列：user_picked 表示**用户点名**，不算判断命中
+      injected_bytes 场景核心注入体积（P1-3 字节闸的可观测口径）
+    """
     entry = {
         "ts": _now_iso(),
         "event": "skill_trigger",
@@ -95,6 +111,16 @@ def record_skill_trigger(
         "user": user,
         "agent": agent,
     }
+    if strategy:
+        entry["strategy"] = strategy
+    if score:
+        entry["score"] = int(score)
+    if candidates:
+        entry["candidates"] = int(candidates)
+    if origin:
+        entry["origin"] = origin
+    if injected_bytes:
+        entry["injected_bytes"] = int(injected_bytes)
     _append(entry)
 
 

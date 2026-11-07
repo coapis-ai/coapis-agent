@@ -117,6 +117,30 @@ def _breaker_key(purpose: str) -> str:
     return f"{BREAKER_KEY}:{purpose}"
 
 
+#: 连续软超时计数（按岗位，v19 P0-2 ①）。
+#: 软阈值到点 = "主链等不起先走了"，判官仍在跑 —— 它不是判官的失败，
+#: 不该直接推熔断计数；但判官若**一直**慢到主链等不起，主链就该歇：
+#: 连续计数到 ``breaker_soft_streak`` 才按失败冷却，真判成功即清零。
+_soft_streaks: dict[str, int] = {}
+
+
+def _note_soft_timeout(bkey: str) -> int:
+    """记一次软超时，返回该岗位当前的连续软超时次数。"""
+    n = int(_soft_streaks.get(bkey, 0)) + 1
+    _soft_streaks[bkey] = n
+    return n
+
+
+def _reset_soft_streak(bkey: str) -> None:
+    """真判成功（或已触发冷却）后清零连续计数。"""
+    _soft_streaks.pop(bkey, None)
+
+
+def _soft_streak_of(bkey: str) -> int:
+    """当前连续软超时次数（体检用）。"""
+    return int(_soft_streaks.get(bkey, 0))
+
+
 def _hub_breaker(purpose_key: str, cfg: Any) -> CircuitBreaker:
     """取岗位闸门，并把阈值对齐到当前在途配置（v15 F6）。
 
@@ -561,6 +585,28 @@ class JudgeGateway:
             budget_reason = f"单轮判断预算用尽（{cap} 次）" + (
                 "" if is_acc else f"，验收预留 {reserve} 次"
             )
+        # v19 P2-2（启动期首格免池子闸）：一轮任务要用的判断数天然超过"池子"额度
+        # ——判档1 + 计划门禁1 + 计划审查1 + 技能触发1 + 工具门禁N + 验收1，
+        # 池子默认 6 格，工具门禁一多就把**后面**的判断整批砍掉。实测台账里
+        # budget_cap 落点大半落在 turn=0/1 的启动期岗位上：任务从第一步就没有判断，
+        # 全靠规则兜底走完，判官形同事后点评。
+        #
+        # 规则收窄成"只保每轮第一格"：某岗位**本轮第一次**判断（post_used==0）
+        # 在启动期（前 N 轮）不受池子闸限制。反复调用同一岗位（post_used>0）
+        # 照旧受闸——防打转的初衷一分不让；验收预留（acceptance reserve）也不动。
+        # N=0 即关闭这个口子，行为回到 v19 之前。
+        exempt = int(getattr(cfg, "budget_exempt_turns", 0) or 0)
+        if (
+            budget_reason
+            and exempt > 0
+            and 0 <= int(turn) < exempt
+            and post_used == 0
+        ):
+            logger.debug(
+                "[JudgeGateway] 启动期首格免池子闸：turn=%s purpose=%s 放过（%s）",
+                turn, purpose, budget_reason,
+            )
+            budget_reason = ""
         if budget_reason:
             return await self._degrade(
                 purpose, LAYER_BUDGET, budget_reason,
@@ -635,9 +681,12 @@ class JudgeGateway:
         def elapsed() -> int:
             return int((time.perf_counter() - started) * 1000)
 
-        async def degrade(layer: str, reason: str) -> JudgeReply:
+        async def degrade(
+            layer: str, reason: str, ledger: bool = True
+        ) -> JudgeReply:
             return await self._degrade(
                 purpose, layer, reason, rule_fallback, describe, elapsed, ids,
+                ledger=ledger,
             )
 
         # 模型槽位由 judge() 的 L0 前置门解析好传进来（D-A：只认判官槽位，
@@ -669,16 +718,15 @@ class JudgeGateway:
             0.01,
         )
         try:
-            # v14 §批次3 软超时：主链最多等判官 judge_soft_ms（默认 4 秒）；
-            # 超时**不是判官的终点**——任务转后台跑完，成功样本走正常入账
-            # 路径（台账/缓存/breaker），主链拿降级版先走。硬超时 timeout
-            # （F1 自适应）退居后台任务的保险丝。此前"判官本地 2.5-4.2s /
-            # 远端 4.5-9.3s vs 主链等 2.6s"是真判率被绞肉机绞掉的真因
-            # （v14 P5：真判率 19% 大半是超时熔断，不是判官不行）。
-            soft_ms = float(getattr(cfg, "judge_soft_ms", 4000.0))
+            # v14 §批次3 软超时：**按岗位**取软阈值（v19 P1-2）——原先一把
+            # judge_soft_ms 量七岗，判档岗在计划生成前（有人在等）吃小预算，
+            # 技能/工具/改道/验收在整轮里（幕后）该吃大预算；一把尺子量七岗
+            # 是真判率被绞肉机绞掉的真因（v14 P5：真判率 19% 大半是超时熔断，
+            # 不是判官不行）。台账里的 timeout 行因此是"按岗位预算的诚实结果"。
+            soft_ms = cfg.soft_ms_for(purpose)
             if purpose == "acceptance":
                 # 验收岗在幕后：整轮交付跑完才触发，没有任何人等它的结论。
-                # 拿"主链最多等 4 秒"量它 = 把唯一能判交付的岗位判成恒弃权；
+                # 拿"主链最多等 N 秒"量它 = 把唯一能判交付的岗位判成恒弃权；
                 # 验收的 verdict 是判档行 outcome 的唯一来源，弃权即闭环 0 行
                 # （dev 实测 180/182 行 pending 的直接成因）。单独给预算。
                 soft_ms = float(getattr(cfg, "judge_soft_ms_acceptance", 12000.0))
@@ -725,10 +773,39 @@ class JudgeGateway:
                 # 迟到回填就成了碰运气。
                 _BG_TASKS.add(bg)
                 bg.add_done_callback(_BG_TASKS.discard)
-                breaker.record_failure(bkey)
+                # v19 P0-2 ①：主链**软阈值**到点不是判官的失败——判官还在跑，
+                # 成功样本照常入账（后台补判）。把"慢"记成"坏"是 dev 实测
+                # "真判率 30% 时 breaker 持续开"的成因：判官本地 2.5-15s、
+                # 软阈值 2s，按失败计数必然把熔断推开，之后整轮判断全灭。
+                # 只有一直慢到主链等不起（连续 N 次软超时）才按失败冷却。
+                # **例外**：软阈值被硬熔断夹到等于硬阈值时（soft_s == hard_s），
+                # 到点就是硬熔断——判官的额度用完了，这就是失败，照常计数。
+                hard_capped = soft_s >= hard_s - 1e-9
+                if hard_capped:
+                    breaker.record_failure(bkey)
+                    _reset_soft_streak(bkey)
+                    return await degrade(
+                        LAYER_TIMEOUT,
+                        f"判断超时（硬熔断 {hard_s:.1f}s，模型 {model_id}）",
+                    )
+                streak = _note_soft_timeout(bkey)
+                soft_streak = max(int(getattr(cfg, "breaker_soft_streak", 5)), 1)
+                if streak >= soft_streak:
+                    _reset_soft_streak(bkey)
+                    breaker.record_failure(bkey)
+                    logger.warning(
+                        "[决策中枢] %s 连续 %d 次软超时（软阈值 %.1fs），"
+                        "本岗位熔断冷却 %.0fs",
+                        purpose, streak, soft_s, breaker.cooldown_s(bkey),
+                    )
+                # v19 P0-2 ②：软阈值这一手**不写台账**——这一判没有终态，
+                # 台账等后台补判出真结论（llm / 解析失败 / 硬熔断）再落一行。
+                # 此前"软阈值一行 + 补判一行"= 一次判记两行，对账把一次判断
+                # 算成两条样本（v19 实测：双记账 16 对推开熔断）。
                 return await degrade(
                     LAYER_TIMEOUT,
                     f"判断超时（软阈值 {soft_s:.1f}s，判官后台补判中，模型 {model_id}）",
+                    ledger=False,
                 )
         except Exception as exc:
             # 完整 traceback 记 warning（进日志）——只记 debug 等于故障隐身。
@@ -750,6 +827,7 @@ class JudgeGateway:
             return await degrade(LAYER_PARSE_FAIL, "判断结果解析失败")
 
         breaker.record_success(bkey)
+        _reset_soft_streak(bkey)
         put_cached_judgment(ckey, value)
         reply = JudgeReply(
             value=value,
@@ -805,6 +883,23 @@ class JudgeGateway:
                 purpose,
                 hard_s,
             )
+            # v19 P0-2 ②：这一判到此有了**终态**（被硬熔断掐死），台账补一行。
+            # 主链软阈值那一手不落账，台账只在此刻落唯一一行——判官到底判没
+            # 判成，对账只看这一行。
+            await self._ledger(
+                purpose,
+                JudgeReply(
+                    value=None,
+                    hit_layer=LAYER_TIMEOUT,
+                    source="rule",
+                    reason=f"判断超时（硬熔断 {hard_s:.1f}s，后台补判被掐停）",
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                    model=model_id,
+                    ok=False,
+                ),
+                describe,
+                **ids,
+            )
             return
         except Exception as exc:  # noqa: BLE001 - 补判失败只留日志
             logger.warning(
@@ -812,6 +907,20 @@ class JudgeGateway:
                 purpose,
                 type(exc).__name__,
                 exc,
+            )
+            await self._ledger(
+                purpose,
+                JudgeReply(
+                    value=None,
+                    hit_layer=LAYER_TRANSPORT,
+                    source="rule",
+                    reason=f"判断链路故障：{type(exc).__name__}: {exc}",
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                    model=model_id,
+                    ok=False,
+                ),
+                describe,
+                **ids,
             )
             return
         value = None
@@ -829,8 +938,24 @@ class JudgeGateway:
         breaker = _hub_breaker(bkey, get_hub_config())
         if value is None:
             breaker.record_failure(bkey)
+            # 终态 = 判官回了但解析不出结论：台账落这一行（主链没落账）。
+            await self._ledger(
+                purpose,
+                JudgeReply(
+                    value=None,
+                    hit_layer=LAYER_PARSE_FAIL,
+                    source="rule",
+                    reason="判断结果解析失败（软超时后台补判）",
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                    model=model_id,
+                    ok=False,
+                ),
+                describe,
+                **ids,
+            )
             return
         breaker.record_success(bkey)
+        _reset_soft_streak(bkey)
         put_cached_judgment(ckey, value)
         reply = JudgeReply(
             value=value,
@@ -889,8 +1014,15 @@ class JudgeGateway:
         describe: Optional[Callable[[Any], str]],
         elapsed: Callable[[], int],
         ids: dict,
+        ledger: bool = True,
     ) -> JudgeReply:
-        """拿不到结论时的统一出口：规则值 + 台账，绝不空手而归。"""
+        """拿不到结论时的统一出口：规则值 + 台账，绝不空手而归。
+
+        ``ledger=False`` 用于"判官还在跑、这一判没有终态"的场合（v19 P0-2）：
+        主链软阈值到点先走时判断并没有失败——台账要等判官出终态（真判 /
+        解析失败 / 硬熔断）再落**那一行**。此前软阈值先写一行 timeout、
+        后台补判再写一行 llm，一次判记两行，对账把同一次判断算成两条样本。
+        """
         value: Any = None
         if rule_fallback is not None:
             try:
@@ -906,7 +1038,8 @@ class JudgeGateway:
             latency_ms=elapsed(),
             ok=value is not None,
         )
-        await self._ledger(purpose, reply, describe, **ids)
+        if ledger:
+            await self._ledger(purpose, reply, describe, **ids)
         return reply
 
     # ---------------- 台账 ----------------
