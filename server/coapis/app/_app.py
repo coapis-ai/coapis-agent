@@ -1004,9 +1004,14 @@ def read_root():
 
 @app.get("/api/version")
 def get_version():
-    """Return the current application version (public-safe payload)."""
+    """Return the current application version (public-safe payload).
+
+    ``edition`` 复用既有唯一真源 ``COAPIS_EDITION``（企业镜像 ENV=enterprise，
+    社区未设 → 默认 community），供前端做版本屏蔽；不引入任何新变量。
+    """
     return {
         "version": __version__,
+        "edition": os.getenv("COAPIS_EDITION", "community"),
     }
 
 
