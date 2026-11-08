@@ -873,6 +873,37 @@ class AgentCore:
 
         return "\n".join(parts)
 
+    def _register_memory_citations(self) -> None:
+        """把本轮实际注入的沉淀记忆挂到引用溯源卡片（kind=memory）。
+
+        卡片是"系统替我做了什么"的可见性入口：注入了就必须让用户看见，
+        并且能一路走到治理页撤销。延迟导入避免 agents → app 的循环依赖。
+        """
+        try:
+            fm = self.foundation_manager
+            if fm is None:
+                return
+            items = getattr(fm, "last_injected_items", None) or []
+            if not items:
+                return
+            from ...app.runner.runner import _enrich_citations_ctx
+
+            sink = _enrich_citations_ctx.get()
+            if sink is None:
+                return
+            for it in items:
+                sink.append({
+                    "kind": "memory",
+                    "kb_id": "",
+                    "resource_id": f"memory:{it.get('id')}",
+                    "doc_title": it.get("title") or (it.get("content") or "")[:40],
+                    "snippet": (it.get("content") or "")[:140],
+                    "relevance": float(it.get("score") or 0.0),
+                })
+            logger.debug("CoApis: %d memory citation(s) registered", len(items))
+        except Exception:
+            logger.debug("CoApis: memory citation skipped", exc_info=True)
+
     def _build_full_system_prompt(
         self,
         skills: Any,
@@ -900,9 +931,17 @@ class AgentCore:
 
         # Foundation memory injection (only on initial request)
         if self.foundation_manager and is_initial:
-            context = self.foundation_manager.build_context(is_initial=True, query=query)
+            context = self.foundation_manager.build_context(
+                is_initial=True,
+                query=query,
+                user_id=self.config.get("username", "")
+                or getattr(memory, "_username", "")
+                or "",
+                agent_id=self.config.get("id", "") or "",
+            )
             if context:
                 parts.append(f"\n[FOUNDATION MEMORY]\n{context}")
+            self._register_memory_citations()
 
         # Skills index — on-demand loading based on query
         if skills:

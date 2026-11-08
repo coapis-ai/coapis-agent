@@ -2,10 +2,15 @@
 """记忆台账（统一长期记忆）G0 契约 + 集成测试。
 
 覆盖：
-  A. 契约层：MemoryRepository ABC 12 方法面、全同步、不完整子类不可实例化、
-     factory 注入/getter/reset 行为；
-  B. 集成层：SqlaMemoryRepository 增删改查/去重/分页/软删/合并/相似/统计/
-     dream outcome upsert（临时 SQLite 库，独立运行）。
+  A. 契约层：MemoryRepository ABC 16 方法面（12 基础 + restore +
+     list_injection_candidates + list_for_governance + count_for_governance）、
+     全同步、不完整子类不可实例化、factory 注入/getter/reset 行为；
+  B. 集成层：SqlaMemoryRepository 增删改查/去重/分页/软删/撤销恢复/合并/
+     相似/统计/dream outcome upsert（临时 SQLite 库，独立运行）。
+
+v3 知识沉淀（方案 2026-11-07 社区版知识沉淀 v3）新增：``session_id`` 列
+（撤销与注入要能追到来源会话）、``restore``（撤销的撤销）、注入候选与
+治理列表（含已撤销）。接口面变化必须在这里钉住。
 
 独立运行：python tests/test_memory_repository.py
 """
@@ -47,11 +52,13 @@ def _stub_agentscope_runtime():
 EXPECTED_METHODS = {
     "add", "update_importance", "merge", "delete", "hard_delete",
     "get", "list_entries", "count", "find_similar", "stats", "record_outcome",
+    "restore", "list_injection_candidates", "list_for_governance",
+    "count_for_governance",
 }
 
 
 class _FakeMemoryRepository:
-    """Complete fake for factory injection tests (implements all 12)."""
+    """Complete fake for factory injection tests (implements all 15)."""
 
     def add(self, entry):
         return 1
@@ -68,11 +75,23 @@ class _FakeMemoryRepository:
     def hard_delete(self, entry_id):
         return True
 
-    def get(self, entry_id):
+    def get(self, entry_id, *, include_archived=False):
         return None
+
+    def restore(self, entry_id):
+        return True
 
     def list_entries(self, **kw):
         return []
+
+    def list_injection_candidates(self, **kw):
+        return []
+
+    def list_for_governance(self, **kw):
+        return []
+
+    def count_for_governance(self, **kw):
+        return 0
 
     def count(self, **kw):
         return 0
@@ -90,9 +109,9 @@ class _FakeMemoryRepository:
 def test_contract():
     from coapis.foundation.memory_repository import MemoryEntry, MemoryRepository
 
-    # 1. ABC 方法面 == 12
+    # 1. ABC 方法面 == 15（v3 新增 restore/注入候选/治理列表/治理计数）
     abstracts = set(MemoryRepository.__abstractmethods__)
-    check("ABC 恰有 12 个抽象方法", abstracts == EXPECTED_METHODS,
+    check("ABC 恰有 15 个抽象方法", abstracts == EXPECTED_METHODS,
           f"got {sorted(abstracts)}")
 
     # 2. 全同步（def，非 async def）
@@ -113,14 +132,17 @@ def test_contract():
     except TypeError:
         check("不完整子类实例化应抛 TypeError", True)
 
-    # 4. MemoryEntry to_dict/from_dict 往返
+    # 4. MemoryEntry to_dict/from_dict 往返（v3：+session_id = 15 键）
     e = MemoryEntry(id=7, scope="user", user_id="u1", category="fact",
-                    title="t", content="c", importance=0.8)
+                    title="t", content="c", importance=0.8, session_id="s-7")
     d = e.to_dict()
     e2 = MemoryEntry.from_dict({"id": 7, "scope": "user", "user_id": "u1",
                                 "category": "fact", "title": "t", "content": "c",
-                                "importance": 0.8, "unexpected": 1})
-    check("MemoryEntry to_dict 含 14 键", len(d) == 14, f"got {len(d)}")
+                                "importance": 0.8, "session_id": "s-7",
+                                "unexpected": 1})
+    check("MemoryEntry to_dict 含 15 键（含 session_id）", len(d) == 15, f"got {len(d)}")
+    check("MemoryEntry to_dict 带 session_id", d.get("session_id") == "s-7", f"got {d.get('session_id')}")
+    check("MemoryEntry from_dict 往返 session_id", e2.session_id == "s-7")
     check("MemoryEntry from_dict 忽略未知键", e2.id == 7 and e2.importance == 0.8)
 
     # 5. factory 注入 / getter / reset
@@ -275,6 +297,41 @@ def test_integration():
           repo.count(user_id="u1") == before_u1 + 1,
           f"{repo.count(user_id='u1')} vs {before_u1}+1")
     check("u1 的行归属未被 u2 改写", repo.get(b1).user_id == "u1")
+
+    # 11. v3 知识沉淀：session_id 通路 / 撤销-恢复 / 注入候选 / 治理列表
+    s1 = repo.add(MemoryEntry(scope="user", user_id="u1", category="notes",
+                              title="n1", content="记下来的内容v3abc",
+                              importance=1.0, source="user_note",
+                              session_id="chat-u1-1"))
+    check("session_id 写入并读回", repo.get(s1).session_id == "chat-u1-1",
+          f"got {repo.get(s1).session_id}")
+    s2 = repo.add(MemoryEntry(scope="workspace", user_id="", category="best_practices",
+                              title="shared1", content="共享层内容v3def",
+                              importance=0.9, source="promote_shared"))
+    cand = repo.list_injection_candidates(user_id="u1", limit=50)
+    cand_ids = {c.id for c in cand}
+    check("注入候选含本人条目", s1 in cand_ids, f"got {sorted(cand_ids)[:5]}")
+    check("注入候选含共享层条目", s2 in cand_ids, f"got {sorted(cand_ids)[:5]}")
+    check("注入候选不含他人条目", b2 not in cand_ids)
+
+    gov = repo.list_for_governance(user_id="u1", limit=100)
+    gov_ids = {g["id"] for g in gov}
+    check("治理列表含本人条目", s1 in gov_ids)
+    check("治理列表含共享层条目", s2 in gov_ids)
+    check("治理计数 ≥ 列表可见数",
+          repo.count_for_governance(user_id="u1") >= len(gov_ids))
+
+    check("撤销生效（软删）", repo.delete(s1) and repo.get(s1) is None)
+    check("撤销后治理列表仍可见（含 deleted_at）",
+          any(g["id"] == s1 and g["archived"] for g in repo.list_for_governance(user_id="u1")))
+    check("撤销后不进注入候选",
+          s1 not in {c.id for c in repo.list_injection_candidates(user_id="u1", limit=50)})
+    check("撤销后不进注入候选(共享层)",
+          s1 not in {c.id for c in repo.list_injection_candidates(user_id="u2", limit=50)})
+    check("恢复可行", repo.restore(s1) and repo.get(s1) is not None)
+    check("恢复后重回注入候选",
+          s1 in {c.id for c in repo.list_injection_candidates(user_id="u1", limit=50)})
+    check("未撤销条目 restore 返回 False", repo.restore(s2) is False)
 
     reset_engine()
 

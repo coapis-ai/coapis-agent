@@ -578,12 +578,11 @@ class Workspace:
                     FlowConfig,
                 )
                 from ...foundation.foundation_manager import FoundationManager
-                foundation_dir = WORKSPACES_DIR / "foundation"
-                if not foundation_dir.exists():
-                    foundation_dir = evo_dir.parent / "foundation"
-                foundation_mgr = None
-                if foundation_dir.exists():
-                    foundation_mgr = FoundationManager(foundation_dir)
+                from ...foundation import knowledge_export
+                # 选址（方案 v3 #1）：统一落在运行时可写持久目录，
+                # 不再用 WORKSPACES_DIR/evo_dir 派生路径（历史上有两条尺子）。
+                foundation_dir = knowledge_export.foundation_root()
+                foundation_mgr = FoundationManager(foundation_dir)
                 self.knowledge_flow = KnowledgeFlow(
                     data_dir=str(evo_dir),
                     foundation_manager=foundation_mgr,

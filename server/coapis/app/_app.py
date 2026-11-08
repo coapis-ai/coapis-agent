@@ -382,6 +382,15 @@ async def lifespan(  # pylint: disable=too-many-statements,too-many-statements
         RepositoryFactory.initialize(edition=edition, data_dir=DATA_DIR)
         logger.debug(f"RepositoryFactory initialized ({'Enterprise' if edition == 'enterprise' else 'Community'} edition)")
 
+    # 知识投影（方案 v3）：DB 是唯一真相层，knowledge_base/ 是导出物。
+    # 开机全量导出一次（幂等、清孤儿），让 kb 面与台账对齐。
+    try:
+        from ..foundation import knowledge_export
+
+        logger.debug("Knowledge projection: %s", knowledge_export.export_from_db(force=True))
+    except Exception:
+        logger.warning("Initial knowledge projection failed", exc_info=True)
+
     # Start token usage manager background tasks
     logger.debug("Starting TokenUsageManager background tasks...")
     from ..token_usage import get_token_usage_manager

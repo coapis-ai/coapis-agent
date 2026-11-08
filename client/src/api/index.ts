@@ -28,6 +28,7 @@ import { languageApi } from "./modules/language";
 import { backupApi } from "./modules/backup";
 import { cleanupApi } from "./modules/cleanup";
 import { knowledgeApi } from "./modules/knowledge";
+import { memoryApi } from "./modules/memory";
 
 // Generic HTTP methods for direct API calls
 export const api = {
@@ -104,6 +105,9 @@ export const api = {
 
   // Knowledge Base
   ...knowledgeApi,
+
+  // Memory 知识沉淀（记下来 / 治理列表 / 撤销·恢复）
+  ...memoryApi,
 };
 
 export default api;

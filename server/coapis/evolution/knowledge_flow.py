@@ -77,8 +77,11 @@ class FlowConfig:
     professional_to_foundation_min_confidence: float = 0.85
 
     # Auto-promotion settings
-    auto_promote_enabled: bool = False
-    require_review: bool = True
+    # 决策 D4（晋升全自动）：准入/生效/淘汰由机器做，人只做事后撤销。
+    # 历史上 auto_promote_enabled=False + require_review=True 的组合让
+    # "自动晋升"成为死配置（0 条 flow），审核通路又因审核者缺失而必 500。
+    auto_promote_enabled: bool = True
+    require_review: bool = False
 
     # Flow rate limits
     max_flows_per_hour: int = 10
@@ -277,7 +280,10 @@ class KnowledgeFlow:
         # Get relevant foundation memories
         if categories:
             for category in categories:
-                entries = self.foundation_manager.search_knowledge(category, limit=5)
+                # 注意：search_knowledge 第一个位置参数是查询文本，分类必须走关键字
+                entries = self.foundation_manager.search_knowledge(
+                    "", category=category, limit=5,
+                )
                 synced.extend(entries)
         else:
             # Sync all recent foundation memories

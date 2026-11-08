@@ -697,7 +697,8 @@ class CronManager:
         """Dream step 4: promote timeline events to memories (design section 6).
 
         Candidates: signal_type in {decision, preference, goal},
-        importance >= 0.6, created within 7 days, promoted_at IS NULL.
+        importance >= ``KNOWLEDGE_PROMOTE_MIN_IMPORTANCE``, created within
+        ``KNOWLEDGE_PROMOTE_DAYS`` days, promoted_at IS NULL.
         Each is written into the ledger with source="timeline"; successful
         rows are stamped ``promoted_at`` — the sole basis for promotion
         de-duplication (repeated dream runs never re-promote).
@@ -717,7 +718,16 @@ class CronManager:
 
         mem_repo = RepositoryFactory.get_memory_repository()
         tl = RepositoryFactory.get_memory_timeline_repository()
-        candidates = tl.promotion_candidates(user_id=user_id)
+        # 准入尺子走 constant（COAPIS_KNOWLEDGE_PROMOTE_MIN_IMPORTANCE /
+        # _DAYS），不拿仓库默认值当现状——历史上这两个数硬编码在 timeline 默认
+        # 参数里，环境变量形同虚设。
+        from ...constant import KNOWLEDGE_PROMOTE_DAYS, KNOWLEDGE_PROMOTE_MIN_IMPORTANCE
+
+        candidates = tl.promotion_candidates(
+            user_id=user_id,
+            min_importance=KNOWLEDGE_PROMOTE_MIN_IMPORTANCE,
+            max_age_days=KNOWLEDGE_PROMOTE_DAYS,
+        )
 
         # Existing same-user memory pool for near-duplicate detection
         # (batch 3 weak semantics; D2 threshold 0.85).
@@ -774,6 +784,7 @@ class CronManager:
                 content=content,
                 source="timeline",
                 importance=imp,
+                session_id=c.get("session_id"),
             ))
             ok_ids.append(int(c["id"]))
             # Track the freshly-added row so later candidates can dedupe.
@@ -782,12 +793,28 @@ class CronManager:
             ), cand_vec))
         if ok_ids:
             tl.mark_promoted(ok_ids, time.time())
+            # 晋升落库后的收尾（方案 v3）：刷新文件投影 + 高分条目进共享层。
+            # 历史缺口：晋升 100% 停在 scope=user，共享层 0 行 —— 平台宣传的
+            # "共同进化"从来没有共享层；文件台账与 DB 也从未对齐。
+            self._after_memory_promotion()
         if reinforced:
             logger.info(
                 "Promotion reinforced %d near-duplicate(s) for user=%s",
                 reinforced, user_id,
             )
         return len(ok_ids)
+
+    def _after_memory_promotion(self) -> None:
+        """晋升落库后的收尾：刷新文件投影 + 高分条目晋升到共享层。"""
+        try:
+            from ...foundation import knowledge_export
+
+            stats = knowledge_export.export_from_db()
+            logger.debug("Knowledge projection: %s", stats)
+            shared = knowledge_export.promote_to_shared()
+            logger.info("Shared-layer promotion: %s", shared)
+        except Exception:
+            logger.warning("post-promotion knowledge hook failed", exc_info=True)
 
     async def _cleanup_callback(self) -> None:
         """Run scheduled data cleanup — hot→warm→cold lifecycle for all users."""

@@ -10,13 +10,14 @@ import {
   ExclamationCircleOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import { SparkCopyLine } from "@agentscope-ai/icons";
+import { SparkCopyLine, SparkStarLine } from "@agentscope-ai/icons";
 import { usePlugins } from "../../plugins/PluginContext";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import sessionApi from "./sessionApi";
 import defaultConfig, { getDefaultConfig } from "./OptionsPanel/defaultConfig";
 import { chatApi } from "../../api/modules/chat";
+import { createMemoryNote } from "../../api/modules/memory";
 import api from "@/api";
 import { getApiUrl } from "../../api/config";
 import { buildAuthHeaders } from "../../api/authHeaders";
@@ -1679,6 +1680,40 @@ export default function ChatPage() {
     [t],
   );
 
+  /**
+   * 「记下来」：把这条助手回复沉淀成长期记忆（importance=1.0，立刻可被注入）。
+   * 取文走复制按钮同一通道 extractCopyableText（只取 assistant 正文）。它取不到
+   * 正文时会回退成 JSON 序列化，那种内容进记忆是污染，这里识别掉当空处理。
+   */
+  const handleNoteIt = useCallback(
+    async (response: CopyableResponse) => {
+      let content = extractCopyableText(response).trim();
+      if (content.startsWith("{") && content.endsWith("}")) {
+        try {
+          JSON.parse(content);
+          content = "";
+        } catch {
+          /* 正文里恰好含花括号：正常内容，保留 */
+        }
+      }
+      if (!content) {
+        message.warning(t("chat.noteFailed"));
+        return;
+      }
+      try {
+        await createMemoryNote({
+          content,
+          session_id: chatIdRef.current || window.currentSessionId || "",
+          agent_id: selectedAgent || "",
+        });
+        message.success(t("chat.noteSaved"));
+      } catch (e: any) {
+        message.error(e?.message || t("chat.noteFailed"));
+      }
+    },
+    [t, selectedAgent],
+  );
+
   const customFetch = useCallback(
     async (data: {
       input?: Array<Record<string, unknown>>;
@@ -2588,6 +2623,17 @@ export default function ChatPage() {
               void copyResponse(data);
             },
           },
+          {
+            icon: (
+              <span title={t("chat.noteIt")}>
+                <SparkStarLine />
+              </span>
+            ),
+            tooltip: t("chat.noteIt"),
+            onClick: ({ data }: { data: CopyableResponse }) => {
+              void handleNoteIt(data);
+            },
+          },
         ],
         replace: true,
       },
@@ -2595,6 +2641,7 @@ export default function ChatPage() {
   }, [
     customFetch,
     copyResponse,
+    handleNoteIt,
     handleFileUpload,
     t,
     isDark,

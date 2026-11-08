@@ -1710,7 +1710,10 @@
       "picked": "スキル {{count}}",
       "empty": "このエージェントに利用可能なスキルがありません",
       "tip": "今回のターンだけ有効：選んだスキルは直接読み込まれ、キーワードと判定をスキップします（この1通のみに影響）"
-    }
+    },
+    "noteIt": "記録する",
+    "noteSaved": "長期記憶に保存しました",
+    "noteFailed": "記録に失敗しました"
   },
   "security": {
     "parent": "設定",
@@ -2304,10 +2307,33 @@
     "approved": "承認済み",
     "rejected": "却下済み",
     "experiences": "経験リスト",
+    "knowledgeTitle": "知識の蓄積",
+    "knowledgeHint": "「記録」で保存した項目は importance=1.0 で直ちに注入に参加し、機械昇格の項目は importance≤0.7 です。取り消すと注入されず、復元できます。",
+    "knowledgeScopeUser": "自分",
+    "knowledgeScopeShared": "共有",
+    "knowledgeRevoked": "取り消し済み",
+    "knowledgeUndo": "取り消す",
+    "knowledgeRestore": "復元",
+    "knowledgeSourceTimeline": "機械昇格",
+    "knowledgeSourceNote": "自分の記録",
+    "knowledgeSourcePromote": "共有昇格",
+    "knowledgeColContent": "内容",
+    "knowledgeColImportance": "重要度",
+    "knowledgeColSource": "出所",
+    "knowledgeColTime": "時刻",
+    "knowledgeColScope": "範囲",
+    "knowledgeEmpty": "まだ蓄積項目がありません",
+    "knowledgeLedgerTotal": "蓄積項目",
+    "knowledgeLedgerActive": "有効",
+    "knowledgeLedgerRevoked": "取り消し済み",
+    "knowledgeUndoFailed": "取り消しに失敗しました",
+    "knowledgeRestoreFailed": "復元に失敗しました",
     "common": {
       "all": "すべて",
       "refresh": "更新"
-    }
+    },
+    "knowledgeUndoConfirm": "この知識を取り消しますか？取り消し後は注入されず、復元できます。",
+    "knowledgeRestoreConfirm": "この知識を復元しますか？復元後は再び注入されます。"
   },
   "resourcePicker": {
     "noModels": "選択可能なモデルはありません",

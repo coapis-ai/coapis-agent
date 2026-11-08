@@ -92,6 +92,12 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
+
+    // v3 知识沉淀：本轮注入的记忆条目（可就地撤销）
+    .kb-citation-memory .kb-citation-top .kb-citation-undo {
+      flex-shrink: 0;
+      color: #1677ff;
+    }
   }
 }
 
@@ -122,6 +128,10 @@
       background: rgba(255, 255, 255, 0.03);
       color: rgba(255, 255, 255, 0.65);
       border-left-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .kb-citation-memory .kb-citation-top .kb-citation-undo {
+      color: #69b1ff;
     }
   }
 }

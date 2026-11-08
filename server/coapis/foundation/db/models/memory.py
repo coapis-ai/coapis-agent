@@ -34,6 +34,9 @@ class Memory(BaseRow):
     title: Mapped[Optional[str]] = mapped_column(Text)
     content: Mapped[Optional[str]] = mapped_column(Text)
     source: Mapped[Optional[str]] = mapped_column(Text)
+    #: 溯源：这条记忆来自哪次会话（0023）。晋升链自带（时间线行上有），
+    #: 聊天侧"记下来"也自带。存量行为 NULL，不回填。
+    session_id: Mapped[Optional[str]] = mapped_column(Text)
     dedup_key: Mapped[Optional[str]] = mapped_column(Text)
     importance: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     created_at: Mapped[Optional[float]] = mapped_column(Float)
@@ -45,4 +48,5 @@ class Memory(BaseRow):
         Index("ix_memories_scope_user", "scope", "user_id"),
         Index("ix_memories_category", "category"),
         Index("ix_memories_created", "created_at"),
+        Index("ix_memories_session", "session_id"),
     )

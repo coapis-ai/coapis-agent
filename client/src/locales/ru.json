@@ -1725,7 +1725,10 @@
       "picked": "Навыки {{count}}",
       "empty": "Для этого агента навыки недоступны",
       "tip": "Только для этого сообщения: выбранные навыки загружаются напрямую, минуя ключевые слова и судью"
-    }
+    },
+    "noteIt": "Сохранить",
+    "noteSaved": "Сохранено в долговременную память",
+    "noteFailed": "Не удалось сохранить"
   },
   "security": {
     "parent": "Настройки",
@@ -2319,10 +2322,33 @@
     "approved": "Принят",
     "rejected": "Отклонён",
     "experiences": "Список опытов",
+    "knowledgeTitle": "Копилка знаний",
+    "knowledgeHint": "Записи, сохранённые кнопкой «Сохранить», получают importance=1.0 и сразу участвуют в подстановке; записи, продвинутые автоматом, остаются на importance≤0.7. Отмена прекращает подстановку, запись можно восстановить.",
+    "knowledgeScopeUser": "Мои",
+    "knowledgeScopeShared": "Общие",
+    "knowledgeRevoked": "Отменено",
+    "knowledgeUndo": "Отменить",
+    "knowledgeRestore": "Восстановить",
+    "knowledgeSourceTimeline": "Автопродвижение",
+    "knowledgeSourceNote": "Моя запись",
+    "knowledgeSourcePromote": "Общее продвиж.",
+    "knowledgeColContent": "Содержание",
+    "knowledgeColImportance": "Важность",
+    "knowledgeColSource": "Источник",
+    "knowledgeColTime": "Время",
+    "knowledgeColScope": "Область",
+    "knowledgeEmpty": "Пока нет записей",
+    "knowledgeLedgerTotal": "Записи",
+    "knowledgeLedgerActive": "Активные",
+    "knowledgeLedgerRevoked": "Отозванные",
+    "knowledgeUndoFailed": "Не удалось отозвать",
+    "knowledgeRestoreFailed": "Не удалось восстановить",
     "common": {
       "all": "Все",
       "refresh": "Обновить"
-    }
+    },
+    "knowledgeUndoConfirm": "Отменить эту запись? Она перестанет подставляться в контекст; можно восстановить.",
+    "knowledgeRestoreConfirm": "Восстановить эту запись? Она снова будет подставляться в контекст."
   },
   "resourcePicker": {
     "noModels": "Нет доступных моделей",

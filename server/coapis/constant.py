@@ -199,6 +199,55 @@ def is_agents_dir_scoped(agent_id: str) -> bool:
 #: Max length of a username / agent key (filesystem + header friendly).
 AGENT_KEY_MAX_LEN = 64
 
+# ── 知识沉淀（方案 v3：记忆层 = 长期记忆 = 知识沉淀，同一件事）──────────
+# 决策 D4：晋升全自动 —— 准入/生效/淘汰由机器做，人只做事后撤销。
+# 晋升尺子集中在这里，改环境变量即可调节奏，不必改代码。
+
+#: 晋升准入：低于此重要度的候选不晋升（原硬编码 0.6）
+KNOWLEDGE_PROMOTE_MIN_IMPORTANCE: float = EnvVarLoader.get_float(
+    "COAPIS_KNOWLEDGE_PROMOTE_MIN_IMPORTANCE", 0.6, min_value=0.0,
+)
+
+#: 晋升准入：出现天数下限（原硬编码 7 天）
+KNOWLEDGE_PROMOTE_DAYS: int = EnvVarLoader.get_int(
+    "COAPIS_KNOWLEDGE_PROMOTE_DAYS", 7, min_value=1,
+)
+
+#: 晋升配额 D-3：单用户单分类条数上限，超则按 importance 淘汰最弱
+KNOWLEDGE_CATEGORY_QUOTA: int = EnvVarLoader.get_int(
+    "COAPIS_KNOWLEDGE_CATEGORY_QUOTA", 300, min_value=10,
+)
+
+#: 机器维护日志的来源标记：这些行是运行台账（dream 每轮写的
+#: ``status=success; reason=consolidated``），不是知识。它们留在台账里可被治理
+#: 列表看见/撤销，但**不进注入段、不进文件投影**——否则注入位被机器日志占满、
+#: 知识库目录里全是运行日志。导出与自检用同一个尺子，避免"每轮启动都重建"。
+KNOWLEDGE_NOISE_SOURCES: frozenset = frozenset(
+    x.strip() for x in os.environ.get("COAPIS_KNOWLEDGE_NOISE_SOURCES", "dream").split(",")
+    if x.strip()
+)
+
+#: 共享层每轮晋升上限：一轮 dream 最多往 workspace 共享层推这么多条，
+#: 防止一次批量把共享层灌满、把个性化记忆挤出注入位
+KNOWLEDGE_GLOBAL_TOP_K: int = EnvVarLoader.get_int(
+    "COAPIS_KNOWLEDGE_GLOBAL_TOP_K", 20, min_value=0,
+)
+
+#: 启动注入：查询无关，按 importance 取前 N 条（0 = 关闭注入）
+KNOWLEDGE_INJECT_TOP_N: int = EnvVarLoader.get_int(
+    "COAPIS_KNOWLEDGE_INJECT_TOP_N", 6, min_value=0,
+)
+
+#: 启动注入：注入段字符上限（含标记与标题，硬截断）
+KNOWLEDGE_INJECT_MAX_CHARS: int = EnvVarLoader.get_int(
+    "COAPIS_KNOWLEDGE_INJECT_MAX_CHARS", 1200, min_value=120,
+)
+
+#: 运行时相关性下限：低于此分的记忆不进注入段（省 token，省得明明白白）
+KNOWLEDGE_INJECT_MIN_SCORE: float = EnvVarLoader.get_float(
+    "COAPIS_KNOWLEDGE_INJECT_MIN_SCORE", 0.05, min_value=0.0,
+)
+
 #: Characters that must never appear in a username or agent key.  Covers path
 #: separators, the id namespace separator ``:``, bracket/quote forms used by
 #: legacy display-name pollution, and anything a shell/URL/JSON layer would

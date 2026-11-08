@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Table, Tag, Button, Space, Tabs, Alert, Spin, Select, message, Modal, Input, Progress, Empty } from 'antd';
+import { Card, Row, Col, Statistic, Table, Tag, Button, Space, Tabs, Alert, Spin, Select, message, Modal, Input, Progress, Empty, Popconfirm } from 'antd';
 import {
   ThunderboltOutlined,
   GlobalOutlined,
@@ -15,6 +15,7 @@ import {
   DeleteOutlined,
   BarChartOutlined,
   SearchOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '@/contexts/UserContext';
@@ -39,6 +40,10 @@ import {
   type FoundationEntry,
 } from '@/api/modules/multi_layer_evolution';
 import { skillApi } from '@/api/modules/skill';
+import {
+  listMemoryKnowledge, undoMemoryKnowledge, restoreMemoryKnowledge,
+  type MemoryKnowledgeItem,
+} from '@/api/modules/memory';
 import styles from './index.module.css';
 
 export default function MultiLayerEvolutionPage() {
@@ -101,6 +106,12 @@ export default function MultiLayerEvolutionPage() {
       key: 'foundation',
       label: <><DatabaseOutlined /> {t('evolution.foundation', '全局知识库')}</>,
       children: <FoundationTab isAdmin={isAdmin} />,
+    },
+    {
+      // v3 知识沉淀治理入口：「记下来」+ 机器晋升条目的撤销/恢复
+      key: 'knowledge-ledger',
+      label: <><BookOutlined /> {t('evolution.knowledgeTitle', '知识沉淀')}</>,
+      children: <KnowledgeLedgerTab />,
     },
   ];
 
@@ -997,6 +1008,188 @@ function PromotionRetirement() {
           <Table dataSource={retirementCandidates} columns={retirementColumns} rowKey="skill_name" size="small" pagination={false} />
         </div>
       )}
+    </div>
+  );
+}
+
+// =================================================================
+// Knowledge Ledger Tab（v3 知识沉淀：「记下来」+ 机器晋升的治理入口）
+// =================================================================
+
+/** epoch 秒 → 本地时间（本页其余时间列同款写法）。 */
+function formatLedgerTime(v: number): string {
+  if (!v) return '-';
+  return new Date(v * 1000).toLocaleString('zh-CN');
+}
+
+function KnowledgeLedgerTab() {
+  const { t } = useTranslation();
+  const [items, setItems] = useState<MemoryKnowledgeItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const fetchLedger = async () => {
+    setLoading(true);
+    try {
+      const data = await listMemoryKnowledge({ scope: 'all', include_archived: true, limit: 200 });
+      setItems(data.items || []);
+      setTotal(data.total || 0);
+    } catch (e: any) {
+      message.error(e.message || t('evolution.fetchFailed', '获取知识沉淀失败'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLedger();
+  }, []);
+
+  const handleUndo = async (id: number) => {
+    try {
+      await undoMemoryKnowledge(id);
+      message.success(t('evolution.knowledgeUndo', '撤销'));
+      fetchLedger();
+    } catch (e: any) {
+      message.error(e.message || t('evolution.knowledgeUndoFailed', '撤销失败'));
+    }
+  };
+
+  const handleRestore = async (id: number) => {
+    try {
+      await restoreMemoryKnowledge(id);
+      message.success(t('evolution.knowledgeRestore', '恢复'));
+      fetchLedger();
+    } catch (e: any) {
+      message.error(e.message || t('evolution.knowledgeRestoreFailed', '恢复失败'));
+    }
+  };
+
+  const ledgerColumns = [
+    {
+      title: t('evolution.knowledgeColScope', '范围'),
+      dataIndex: 'scope',
+      key: 'scope',
+      width: 90,
+      render: (v: string) => {
+        if (v === 'user') return <Tag color="blue">{t('evolution.knowledgeScopeUser', '本人')}</Tag>;
+        if (v === 'workspace') return <Tag color="geekblue">{t('evolution.knowledgeScopeShared', '共享')}</Tag>;
+        return <Tag>{v}</Tag>;
+      },
+    },
+    {
+      title: t('evolution.knowledgeColContent', '内容'),
+      dataIndex: 'content',
+      key: 'content',
+      render: (v: string) => (
+        <div
+          title={v}
+          style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {v}
+        </div>
+      ),
+    },
+    {
+      title: t('evolution.knowledgeColImportance', '重要度'),
+      dataIndex: 'importance',
+      key: 'importance',
+      width: 90,
+      render: (v: number) => (
+        <span style={{ color: (v ?? 0) >= 1 ? '#52c41a' : '#1677ff' }}>{(v ?? 0).toFixed(2)}</span>
+      ),
+    },
+    {
+      title: t('evolution.knowledgeColSource', '来源'),
+      dataIndex: 'source',
+      key: 'source',
+      width: 110,
+      render: (v: string) => {
+        const map: Record<string, { color: string; label: string }> = {
+          timeline: { color: 'purple', label: t('evolution.knowledgeSourceTimeline', '机器晋升') },
+          user_note: { color: 'green', label: t('evolution.knowledgeSourceNote', '我记的') },
+          promote_shared: { color: 'cyan', label: t('evolution.knowledgeSourcePromote', '共享晋升') },
+        };
+        return <Tag color={map[v]?.color || 'default'}>{map[v]?.label || v}</Tag>;
+      },
+    },
+    {
+      title: t('evolution.knowledgeColTime', '时间'),
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 170,
+      render: (v: number) => formatLedgerTime(v),
+    },
+    {
+      title: t('common.actions', '操作'),
+      key: 'actions',
+      width: 120,
+      render: (_: any, record: MemoryKnowledgeItem) =>
+        record.archived ? (
+          <Popconfirm
+            title={t('evolution.knowledgeRestoreConfirm', '恢复这条沉淀？')}
+            onConfirm={() => handleRestore(record.id)}
+          >
+            <Button size="small" icon={<CheckCircleOutlined />}>
+              {t('evolution.knowledgeRestore', '恢复')}
+            </Button>
+          </Popconfirm>
+        ) : (
+          <Popconfirm
+            title={t('evolution.knowledgeUndoConfirm', '撤销这条沉淀？撤销后不再注入。')}
+            onConfirm={() => handleUndo(record.id)}
+          >
+            <Button size="small" danger icon={<CloseCircleOutlined />}>
+              {t('evolution.knowledgeUndo', '撤销')}
+            </Button>
+          </Popconfirm>
+        ),
+    },
+  ];
+
+  return (
+    <div>
+      <Alert
+        type="info"
+        showIcon
+        message={t(
+          'evolution.knowledgeHint',
+          '「记下来」的条目 importance=1.0，立刻参与注入；机器晋升的条目 importance≤0.7。撤销后不再注入，可恢复。',
+        )}
+        style={{ marginBottom: 16 }}
+      />
+
+      <Row justify="space-between" style={{ marginBottom: 16 }}>
+        <Col>
+          <Space>
+            <Tag color="blue">{t('evolution.knowledgeLedgerTotal', '沉淀条目')} {total}</Tag>
+            <Tag color="green">{t('evolution.knowledgeLedgerActive', '生效中')} {items.filter((i) => !i.archived).length}</Tag>
+            <Tag color="red">{t('evolution.knowledgeLedgerRevoked', '已撤销')} {items.filter((i) => i.archived).length}</Tag>
+          </Space>
+        </Col>
+        <Col>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchLedger}>
+            {t('common.refresh', '刷新')}
+          </Button>
+        </Col>
+      </Row>
+
+      <Table
+        columns={ledgerColumns}
+        dataSource={items}
+        rowKey="id"
+        loading={loading}
+        locale={{ emptyText: t('evolution.knowledgeEmpty', '还没有沉淀条目') }}
+        scroll={{ x: 900 }}
+        size="small"
+        pagination={{ pageSize: 20, showSizeChanger: true }}
+      />
     </div>
   );
 }

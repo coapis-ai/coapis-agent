@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 # Copyright 2026 蜜蜂 & CoApis Contributors
 #
 # This program is free software: you can redistribute it and/or modify
@@ -7,291 +6,299 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Foundation layer manager for hierarchical agent architecture.
+"""基础层记忆管理模块（v3：数据库是唯一真相层）。
 
-管理基础层内容，包括:
-- 核心价值观 (core_principles.md)
-- 通用思考模式 (thinking_patterns.md)
-- 全局知识库 (knowledge_base/)
-- 组织级记忆 (organizational_memory/)
+**真相层 = ``memories`` 表。** 磁盘上的 ``knowledge_base/`` 只是投影
+（``knowledge_export`` 全量幂等重建的导出物），供 kb 面发现与人工审阅，
+**永远不是数据源**。
+
+写入只有三条通道，都写 DB 并立刻刷新投影：
+
+* 跨 Agent 晋升 → ``add_principle``（scope=workspace，全 workspace 共享）
+* 进化/聊天侧条目 → ``add_memory``（接受注入层或仓库层条目）
+* 用户"记下来" → ``add_note``（importance=1.0）
+
+注入只有一条通道：``select_memories_for_injection`` → ``build_context``，
+尺子用 ``agents.resources.contract.score_match``（与 kb 面同一把，含 CJK 二元组）。
+
+人工审核岗已按"晋升全自动"铁律下线：机器决定准入/生效/淘汰，人只做
+**事后可撤销**（软删 ``deleted_at``），撤销后该条既不进注入也不进投影。
 """
+
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-from dataclasses import dataclass
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ..constant import (
+    KNOWLEDGE_CATEGORY_QUOTA,
+    KNOWLEDGE_INJECT_MAX_CHARS,
+    KNOWLEDGE_INJECT_MIN_SCORE,
+    KNOWLEDGE_INJECT_TOP_N,
+    KNOWLEDGE_NOISE_SOURCES,
+)
+from . import knowledge_export
 from .memory_entry import MemoryEntry
-from .memory_injector import MemoryInjector, InjectionResult
+from .memory_injector import MemoryInjector
 from .memory_quota import MemoryQuota
+from .memory_repository import MemoryEntry as RepoMemoryEntry
+from .memory_repository import ScopeType
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class PendingMemory:
-    """待审核的记忆条目。"""
-    entry: MemoryEntry
-    submitted_by: str
-    submitted_at: datetime
-    status: str = "pending"  # pending | approved | rejected
-    review_comment: str = ""
-
-
 class FoundationManager:
-    """基础层管理器。
+    """管理思维框架、共享知识与记忆注入。
 
-    职责:
-    1. 加载基础记忆（核心价值观 + 思考模式）
-    2. 管理全局知识库
-    3. 处理记忆审核流程
-    4. 提供记忆检索接口
-
-    Attributes:
-        foundation_dir: 基础层根目录
-        quota: 容量配额
-        injector: 记忆注入器
+    Args:
+        foundation_dir: 记忆层根目录（运行时可写，实测
+            ``WORKING_DIR/foundation``）。传代码目录会在容器重建时把写入清零，
+            调用方负责传对（``agents/workspace.py``）。
+        memory_repo: 注入用仓库实现（测试可替换）；默认走 ``RepositoryFactory``。
     """
 
-    def __init__(self, foundation_dir: str | Path):
+    def __init__(self, foundation_dir: str, memory_repo: Any = None):
         self.foundation_dir = Path(foundation_dir)
+        # 投影目录（只读导出物，允许被覆盖）
+        self.knowledge_dir = self.foundation_dir / "knowledge_base"
+
+        self._memory_repo = memory_repo
         self.quota = MemoryQuota()
         self.injector = MemoryInjector(self.quota)
 
-        # 缓存
         self._core_memory_cache: str | None = None
         self._thinking_patterns_cache: str | None = None
+        self._knowledge_index_cache: dict | None = None
 
-        # 待审核队列
-        self._pending_memories: list[PendingMemory] = []
-
-        # 注入状态追踪（防止基础记忆重复注入）
-        self._core_injected: bool = False
-
-        # 确保目录结构存在
-        self._ensure_directory_structure()
-
-    def reset_injection_state(self) -> None:
-        """
-        重置注入状态（新会话时调用）。
-
-        注意: 新会话时应调用此方法重置状态，
-        然后调用 build_context(is_initial=True) 重新注入基础记忆。
-        """
         self._core_injected = False
-        # Performance: clear caches for new session
-        self._initial_context_cache = None
-        self._knowledge_index_cache = None
+        self._initial_injected = False
+        self._last_injection_time: datetime | None = None
+        self._injection_count = 0
+        #: 本轮实际注入的条目（引用溯源卡片用它回填）
+        self._last_injected_items: list[dict[str, Any]] = []
+
+        self._ensure_directory_structure()
+        self._seed_static_templates()
+
+    # ── 基础设施 ────────────────────────────────────────────────────
+
+    @property
+    def memory_repo(self) -> Any:
+        """记忆仓库（懒取，取不到返回 None）。
+
+        ``RepositoryFactory`` 未初始化时回落到 SQLite 实现；两条都失败时返回
+        ``None``，调用方**必须**判空——记忆层坏了不能把聊天带崩。
+        """
+        if self._memory_repo is None:
+            try:
+                from .repository_factory import RepositoryFactory
+
+                self._memory_repo = RepositoryFactory.get_memory_repository()
+            except Exception:
+                logger.debug("Foundation repo: factory unavailable", exc_info=True)
+                try:
+                    from .memory_repository_impl import SqlaMemoryRepository
+
+                    self._memory_repo = SqlaMemoryRepository()
+                except Exception:
+                    logger.debug("Foundation repo: sqlite impl unavailable", exc_info=True)
+                    self._memory_repo = None
+        return self._memory_repo
 
     def _ensure_directory_structure(self) -> None:
-        """确保基础层目录结构完整。"""
-        dirs = [
-            self.foundation_dir / "knowledge_base" / "general" / "coding",
-            self.foundation_dir / "knowledge_base" / "general" / "research",
-            self.foundation_dir / "knowledge_base" / "general" / "design",
-            self.foundation_dir / "knowledge_base" / "system" / "architecture",
-            self.foundation_dir / "knowledge_base" / "system" / "lessons",
-            self.foundation_dir / "shared_skills",
-        ]
+        """建目录骨架（幂等）。分类子目录由投影自己建，这里不预设。"""
+        self.knowledge_dir.mkdir(parents=True, exist_ok=True)
+        (self.foundation_dir / "shared_skills").mkdir(parents=True, exist_ok=True)
 
-        for d in dirs:
-            d.mkdir(parents=True, exist_ok=True)
+    def _seed_static_templates(self) -> None:
+        """把仓库内的思维框架复制进运行时记忆层（存在即跳过）。"""
+        if self.foundation_dir != knowledge_export.foundation_root():
+            return  # 传的不是运行时根目录（测试/临时目录），不写模板
+        try:
+            knowledge_export.ensure_static_templates()
+        except Exception:
+            logger.debug("Foundation template seeding failed", exc_info=True)
 
-        # Performance: cache knowledge index in memory
-        self._knowledge_index_cache: dict[str, Any] | None = None
-        self._initial_context_cache: str | None = None
+    def reset_injection_state(self) -> None:
+        """重置注入状态（新会话开始时调用）。"""
+        self._core_injected = False
+        self._initial_injected = False
+        self._last_injection_time = None
+        self._injection_count = 0
+        self._last_injected_items = []
 
-    # =========================================================================
-    # 基础记忆加载
-    # =========================================================================
+    @property
+    def last_injected_items(self) -> list[dict[str, Any]]:
+        """本轮实际注入的条目（引用溯源卡片用它回填）。"""
+        return self._last_injected_items
+
+    # ── 静态框架（仓库模板，非真相层） ──────────────────────────────
 
     def load_core_principles(self) -> str:
-        """加载核心价值观。"""
-        if self._core_memory_cache:
+        """加载核心原则（``core_principles.md``）。"""
+        if self._core_memory_cache is not None:
             return self._core_memory_cache
 
         path = self.foundation_dir / "core_principles.md"
         if path.exists():
             self._core_memory_cache = path.read_text(encoding="utf-8")
             return self._core_memory_cache
-
-        logger.warning("core_principles.md not found")
         return ""
 
     def load_thinking_patterns(self) -> str:
-        """加载通用思考模式。"""
-        if self._thinking_patterns_cache:
+        """加载思维模式（``thinking_patterns.md``）。"""
+        if self._thinking_patterns_cache is not None:
             return self._thinking_patterns_cache
 
         path = self.foundation_dir / "thinking_patterns.md"
         if path.exists():
             self._thinking_patterns_cache = path.read_text(encoding="utf-8")
             return self._thinking_patterns_cache
-
-        logger.warning("thinking_patterns.md not found")
         return ""
 
-    def load_core_memory(self) -> str:
-        """
-        加载完整的基础记忆。
+    # ── 投影读侧（kb 面 / 知识索引） ────────────────────────────────
 
-        返回核心价值观 + 思考模式的组合，
-        始终注入，不受思路改变影响。
-        """
-        principles = self.load_core_principles()
-        patterns = self.load_thinking_patterns()
-
-        if principles and patterns:
-            return f"{principles}\n\n{patterns}"
-        return principles or patterns
-
-    def clear_cache(self) -> None:
-        """清除缓存（文件更新后调用）。"""
-        self._core_memory_cache = None
-        self._thinking_patterns_cache = None
-
-    # =========================================================================
-    # 知识库管理
-    # =========================================================================
-
-    def load_knowledge_index(self) -> dict[str, Any]:
-        """加载知识索引（带缓存）。"""
+    def load_knowledge_index(self) -> dict:
+        """读取投影索引（``knowledge_base/index.json``）。"""
         if self._knowledge_index_cache is not None:
             return self._knowledge_index_cache
 
-        index_path = self.foundation_dir / "knowledge_base" / "index.json"
+        index_path = self.knowledge_dir / "index.json"
         if index_path.exists():
-            self._knowledge_index_cache = json.loads(index_path.read_text(encoding="utf-8"))
-            return self._knowledge_index_cache
-        self._knowledge_index_cache = {"categories": [], "entries": []}
+            try:
+                self._knowledge_index_cache = json.loads(
+                    index_path.read_text(encoding="utf-8"),
+                )
+                return self._knowledge_index_cache
+            except (json.JSONDecodeError, OSError):
+                logger.warning("Knowledge index load failed: %s", index_path)
+        self._knowledge_index_cache = {"version": 1, "entries": []}
         return self._knowledge_index_cache
 
-    def save_knowledge_index(self, index: dict[str, Any]) -> None:
-        """保存知识索引。"""
-        index_path = self.foundation_dir / "knowledge_base" / "index.json"
-        index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    def save_knowledge_index(self, index: dict) -> None:
+        """写投影索引（仅供投影层自测/外部工具用；正常由导出负责）。"""
+        self._knowledge_index_cache = index
+        self.knowledge_dir.mkdir(parents=True, exist_ok=True)
+        index_path = self.knowledge_dir / "index.json"
+        tmp = index_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(index_path)
 
-    def search_knowledge(self, query: str, category: str | None = None) -> list[MemoryEntry]:
+    def search_knowledge(
+        self,
+        query: str = "",
+        category: str | None = None,
+        limit: int = 20,
+    ) -> list[MemoryEntry]:
+        """在投影里检索知识（同一把尺子：``score_match``）。
+
+        注意调用方历史上传的是 ``search_knowledge(category, limit=5)``
+        （进化层向下同步），所以 ``limit`` 必须是关键字参数、第一位当查询用。
         """
-        在知识库中搜索相关记忆（关键词匹配）。
+        from ..agents.resources.contract import score_match
 
-        Args:
-            query: 搜索查询
-            category: 可选的分类过滤
-
-        Returns:
-            相关记忆条目列表（按优先级排序）
-        """
-        return self._search_with_keywords(query, category)
-
-    def _search_with_keywords(self, query: str, category: str | None = None) -> list[MemoryEntry]:
-        """关键词匹配搜索。"""
         index = self.load_knowledge_index()
-        results = []
-
-        for entry_data in index.get("entries", []):
-            entry = MemoryEntry.from_dict(entry_data)
-
-            # 分类过滤
-            if category and entry.category != category:
+        results: list[MemoryEntry] = []
+        q = (query or "").strip()
+        scored: list[tuple[float, dict]] = []
+        for item in index.get("entries", []):
+            if category and item.get("category") != category:
                 continue
-
-            # 关键词匹配（查询词在内容中）
-            if query.lower() in entry.content.lower():
-                entry.access()
-                results.append(entry)
-
-        # 按优先级排序
-        results.sort(key=lambda e: e.priority_score, reverse=True)
+            text = f"{item.get('title', '')} {item.get('content', '')}"
+            scored.append((score_match(q, text) if q else 1.0, item))
+        scored.sort(key=lambda kv: kv[0], reverse=True)
+        for score, item in scored[: max(1, int(limit))]:
+            if q and score <= 0:
+                continue
+            results.append(MemoryEntry.from_dict(item))
         return results
 
-    # =========================================================================
-    # 记忆审核流程
-    # =========================================================================
+    # ── 写入侧（唯一真相 = DB） ─────────────────────────────────────
 
-    def submit_memory_for_review(
-        self,
-        entry: MemoryEntry,
-        submitted_by: str,
-    ) -> str:
+    @staticmethod
+    def _dedup_key(content: str) -> str:
+        return hashlib.sha256((content or "").strip().encode("utf-8")).hexdigest()[:32]
+
+    @staticmethod
+    def _title_from(content: str) -> str:
+        return (content or "").strip()[:60]
+
+    def export_projection(self, force: bool = False) -> dict[str, Any]:
+        """刷新文件投影（失败只记日志——投影坏了不影响主流程）。"""
+        try:
+            stats = knowledge_export.export_from_db(force=force)
+            self.clear_cache()
+            logger.info("Knowledge projection: %s", stats)
+            return stats
+        except Exception:
+            logger.warning("Knowledge projection failed", exc_info=True)
+            return {"error": "projection_failed"}
+
+    def _write_memory(self, entry: RepoMemoryEntry) -> int | None:
+        """写一行记忆并刷新投影。返回行 id，失败返回 None。"""
+        repo = self.memory_repo
+        if repo is None:
+            logger.warning("Foundation write skipped (no memory repo): source=%s", entry.source)
+            return None
+        if not entry.dedup_key:
+            entry.dedup_key = self._dedup_key(entry.content or entry.title or "")
+        try:
+            new_id = repo.add(entry)
+        except Exception:
+            logger.warning("Foundation memory write failed: source=%s", entry.source, exc_info=True)
+            return None
+        self.enforce_category_quota(entry)
+        self.export_projection()
+        return new_id
+
+    def enforce_category_quota(self, entry: RepoMemoryEntry) -> int:
+        """单用户单分类配额（D-3）：超限按 importance 归档最弱的。
+
+        淘汰 = 归档（软删 ``deleted_at``），不是物理删除——撤销与审计都还看得见。
+        只用仓库既有方法（list_entries + delete），不给 ABC 加新面。
         """
-        提交记忆待审核。
-
-        Args:
-            entry: 记忆条目
-            submitted_by: 提交者
-
-        Returns:
-            审核 ID
-        """
-        pending = PendingMemory(
-            entry=entry,
-            submitted_by=submitted_by,
-            submitted_at=datetime.now(),
-        )
-        self._pending_memories.append(pending)
-        return pending.entry.id
-
-    def approve_memory(self, memory_id: str, comment: str = "") -> bool:
-        """
-        批准记忆入库。
-
-        Args:
-            memory_id: 记忆 ID
-            comment: 审核意见
-
-        Returns:
-            True 如果找到并批准
-        """
-        for pending in self._pending_memories:
-            if pending.entry.id == memory_id:
-                pending.status = "approved"
-                pending.review_comment = comment
-
-                # 提升到基础记忆
-                pending.entry.memory_type = "core"
-                pending.entry.confirm()
-
-                # 保存到知识库
-                self._save_to_knowledge_base(pending.entry)
-
-                return True
-
-        return False
-
-    def reject_memory(self, memory_id: str, comment: str = "") -> bool:
-        """
-        拒绝记忆。
-
-        Args:
-            memory_id: 记忆 ID
-            comment: 拒绝理由
-
-        Returns:
-            True 如果找到并拒绝
-        """
-        for pending in self._pending_memories:
-            if pending.entry.id == memory_id:
-                pending.status = "rejected"
-                pending.review_comment = comment
-                return True
-
-        return False
-
-    def get_pending_memories(self) -> list[PendingMemory]:
-        """获取待审核记忆列表。"""
-        return [p for p in self._pending_memories if p.status == "pending"]
+        quota = int(KNOWLEDGE_CATEGORY_QUOTA or 0)
+        if quota <= 0:
+            return 0
+        repo = self.memory_repo
+        if repo is None:
+            return 0
+        try:
+            rows = repo.list_entries(
+                scope=entry.scope,
+                user_id=entry.user_id or "",
+                category=entry.category,
+                limit=quota + 100,
+            )
+        except Exception:
+            logger.debug("Category quota read failed", exc_info=True)
+            return 0
+        if len(rows) <= quota:
+            return 0
+        rows.sort(key=lambda r: (float(r.importance or 0.0), r.id or 0))
+        evicted = 0
+        for row in rows[: len(rows) - quota]:
+            if row.id is None:
+                continue
+            try:
+                if repo.delete(row.id):
+                    evicted += 1
+            except Exception:
+                logger.debug("Category quota evict failed (id=%s)", row.id, exc_info=True)
+        if evicted:
+            logger.info(
+                "Category quota evicted: scope=%s user=%s cat=%s quota=%d -> %d archived",
+                entry.scope, entry.user_id or "-", entry.category, quota, evicted,
+            )
+        return evicted
 
     def add_principle(
         self,
@@ -300,240 +307,402 @@ class FoundationManager:
         source_users: list[str] | None = None,
         category: str = "general",
         review_reason: str = "",
-    ) -> MemoryEntry:
-        """
-        添加全局基础原则（由跨 Agent 进化引擎晋升调用）。
+        session_id: str | None = None,
+    ) -> int | None:
+        """添加基础原则（跨 Agent 晋升 → workspace 共享层）。
 
-        Args:
-            principle: 提炼的核心原则
-            source_entry: 来源经验条目（可选）
-            source_users: 来源用户列表（可选）
-            category: 分类
-            review_reason: 评审理由
+        历史上这条通路是崩的：它写的是文件台账，且构造 ``MemoryEntry`` 时传了
+        ``source=`` 这种注入层条目没有的参数（TypeError）。现在只写 DB 一行。
+        """
+        content = (principle or "").strip()
+        if not content:
+            logger.debug("add_principle: empty principle ignored")
+            return None
+
+        importance = self._importance_from_entry(source_entry)
+        agent_id = (
+            getattr(source_entry, "source_agent", None)
+            or getattr(source_entry, "agent_id", None)
+        )
+        title = self._title_from(content)
+        users = ",".join((source_users or [])[:5])
+        logger.info(
+            "add_principle: category=%s users=%s reason=%s",
+            category, users or "-", review_reason or "-",
+        )
+
+        entry = RepoMemoryEntry(
+            scope=ScopeType.WORKSPACE,
+            user_id="",
+            agent_id=agent_id,
+            category=category,
+            title=title,
+            content=content,
+            source="cross_agent_evolution",
+            dedup_key=self._dedup_key(content),
+            importance=importance,
+            session_id=session_id or getattr(source_entry, "session_id", None),
+        )
+        new_id = self._write_memory(entry)
+        logger.info(
+            "add_principle: %s (id=%s, importance=%.2f)", title, new_id, importance,
+        )
+        return new_id
+
+    @staticmethod
+    def _importance_from_entry(source_entry: Any) -> float:
+        """晋升强度取高：置信度 / 重要性 / 管理员确认，三者取最大。"""
+        cands = [0.8]  # 人工审核已下线，机器晋升默认 0.8
+        for attr in ("confidence", "importance", "priority_score"):
+            v = getattr(source_entry, attr, None)
+            if isinstance(v, (int, float)):
+                cands.append(float(v))
+        if source_entry is not None and (
+            getattr(source_entry, "admin_confirmed", False)
+            or getattr(source_entry, "status", "") == "promoted"
+        ):
+            cands.append(0.9)
+        return max(0.0, min(1.0, max(cands)))
+
+    def add_memory(self, entry: Any) -> int | None:
+        """接受一条记忆并落库（兼容注入层 / 仓库层 / 进化层三种字段集）。
+
+        历史上调用方传的是 ``foundation.memory_entry.MemoryEntry``，而本类
+        **没有** ``add_memory`` → AttributeError → 审核通过必 500。这里做
+        写入侧收敛：按名字逐个认字段，认不出的忽略，落 DB。
+        """
+        if isinstance(entry, RepoMemoryEntry):
+            return self._write_memory(entry)
+
+        content = str(getattr(entry, "content", "") or "").strip()
+        if not content:
+            logger.debug("add_memory: empty entry ignored")
+            return None
+
+        importance = self._importance_from_entry(entry)
+        scope = ScopeType.AGENT if getattr(entry, "source_agent", "") else ScopeType.USER
+        new_entry = RepoMemoryEntry(
+            scope=str(getattr(entry, "scope", scope) or scope),
+            user_id=str(getattr(entry, "source_user", getattr(entry, "user_id", "")) or ""),
+            agent_id=getattr(entry, "source_agent", None) or None,
+            category=str(getattr(entry, "category", "general") or "general"),
+            title=self._title_from(content),
+            content=content,
+            source=str(getattr(entry, "source", "evolution") or "evolution"),
+            dedup_key=self._dedup_key(content),
+            importance=importance,
+            session_id=(
+                getattr(entry, "source_session", None)
+                or getattr(entry, "session_id", None)
+            ),
+        )
+        logger.debug(
+            "add_memory: mapped source=%s type=%s",
+            new_entry.source, getattr(entry, "memory_type", "?"),
+        )
+        return self._write_memory(new_entry)
+
+    def add_note(
+        self,
+        content: str,
+        user_id: str,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        category: str = "notes",
+    ) -> int | None:
+        """"记下来"：用户显式要求沉淀的一条记忆（importance=1.0）。
+
+        用户亲手点的条目是全库最强的信号，所以给满权重、不参与机器门槛。
+        """
+        text = (content or "").strip()
+        if not text:
+            return None
+        return self._write_memory(RepoMemoryEntry(
+            scope=ScopeType.USER,
+            user_id=user_id,
+            agent_id=agent_id,
+            category=category,
+            title=self._title_from(text),
+            content=text,
+            source="user_note",
+            dedup_key=self._dedup_key(text),
+            importance=1.0,
+            session_id=session_id,
+        ))
+
+    def get_recent_memories(self, limit: int = 10) -> list[MemoryEntry]:
+        """最近沉淀的记忆（转成注入层条目，供进化层向下同步）。"""
+        repo = self.memory_repo
+        if repo is None:
+            return []
+        out: list[MemoryEntry] = []
+        try:
+            for scope in (ScopeType.USER, ScopeType.AGENT, ScopeType.WORKSPACE):
+                rows = repo.list_entries(scope=scope, user_id="", limit=limit)
+                for row in rows:
+                    out.append(MemoryEntry(
+                        id=f"mem-{row.id}",
+                        content=row.content or "",
+                        memory_type="core",
+                        category=row.category,
+                        tags=[str(row.scope), row.category],
+                        priority_score=float(row.importance or 0.0),
+                        created_at=datetime.fromtimestamp(row.created_at or time.time()),
+                        last_accessed_at=datetime.fromtimestamp(row.updated_at or time.time()),
+                        source_agent=row.agent_id or "",
+                        source_user=row.user_id or "",
+                        source_session=row.session_id or "",
+                    ))
+        except Exception:
+            logger.debug("get_recent_memories failed", exc_info=True)
+            return []
+        out.sort(key=lambda e: e.priority_score, reverse=True)
+        return out[: max(1, int(limit))]
+
+    # ── 注入（v3 的核心缺口：165 条沉淀此前对智能体完全隐形） ──────
+
+    def select_memories_for_injection(
+        self,
+        query: str = "",
+        user_id: str = "",
+        agent_id: str | None = None,
+        top_n: int | None = None,
+        max_chars: int | None = None,
+        min_score: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """挑要注入的记忆：相关性（同一把尺子）× importance，配额裁剪。
 
         Returns:
-            创建的 MemoryEntry
+            ``[{id, title, content, importance, score, scope, category, source,
+            session_id}, ...]``，综合分降序；条数 ≤ ``KNOWLEDGE_INJECT_TOP_N``，
+            正文总字符 ≤ ``KNOWLEDGE_INJECT_MAX_CHARS``。
         """
-        from .memory_entry import MemoryEntry
+        repo = self.memory_repo
+        if repo is None:
+            return []
 
-        # 构建内容：包含原则 + 来源信息
-        content_parts = [f"【晋升原则】{principle}"]
-        if source_entry:
-            content_parts.append(f"来源经验: {getattr(source_entry, 'content', '')}")
-        if source_users:
-            content_parts.append(f"来源用户: {', '.join(source_users[:5])}")
-        if review_reason:
-            content_parts.append(f"评审理由: {review_reason}")
+        top_n = int(top_n if top_n is not None else KNOWLEDGE_INJECT_TOP_N)
+        max_chars = int(max_chars if max_chars is not None else KNOWLEDGE_INJECT_MAX_CHARS)
+        min_score = float(min_score if min_score is not None else KNOWLEDGE_INJECT_MIN_SCORE)
+        if top_n <= 0 or max_chars <= 0:
+            # 引用账本与本轮注入必须同源：不注入就要清空，否则 citation 回填
+            # 会拿到上一轮的条目（跨会话串味）。
+            self._last_injected_items = []
+            return []
+        if not user_id and not agent_id:
+            # 系统级调用（cron/心跳）没有归属用户：不灌共享知识，免得每条系统
+            # 提示词都带上团队记忆，噪声且不可控。
+            self._last_injected_items = []
+            return []
 
-        content = "\n".join(content_parts)
+        from ..agents.resources.contract import score_match
 
-        entry = MemoryEntry(
-            content=content,
-            category=category,
-            source="cross_agent_evolution",
-            tags=["promoted", "global_principle"],
-        )
+        q = (query or "").strip()
+        try:
+            rows = repo.list_injection_candidates(
+                user_id=user_id or "", agent_id=agent_id, limit=max(top_n * 5, 30),
+            )
+        except Exception:
+            logger.debug("Injection candidates load failed", exc_info=True)
+            return []
 
-        # 检查配额
-        if not self.quota.can_add(category):
-            # 配额满时淘汰最低优先级条目
-            self._evict_lowest_priority(category)
-        
-        # 保存到知识库
-        self._save_to_knowledge_base(entry)
+        scored: list[tuple[float, Any]] = []
+        for row in rows:
+            # 机器维护日志（source=dream 的 status=success 那类）不是知识，不占
+            # 注入位。与文件投影共用 KNOWLEDGE_NOISE_SOURCES 这一把尺子。
+            if str(row.source or "") in KNOWLEDGE_NOISE_SOURCES:
+                continue
+            imp = float(row.importance or 0.0)
+            if q:
+                rel = score_match(q, f"{row.title or ''} {row.content or ''}")
+                if rel < min_score:
+                    continue
+                score = rel * 0.7 + imp * 0.3
+            else:
+                score = imp
+            scored.append((score, row))
+        scored.sort(key=lambda kv: kv[0], reverse=True)
 
-        # 清除缓存
-        self._core_memory_cache = None
-        self._initial_context_cache = None
+        picked: list[dict[str, Any]] = []
+        budget = max_chars
+        for score, row in scored:
+            if len(picked) >= top_n:
+                break
+            content = (row.content or "").strip()
+            if not content or len(content) > budget:
+                continue
+            budget -= len(content)
+            picked.append({
+                "id": row.id,
+                "title": row.title or self._title_from(content),
+                "content": content,
+                "importance": imp,
+                "score": round(score, 4),
+                "scope": str(row.scope),
+                "category": row.category,
+                "source": row.source or "",
+                "session_id": row.session_id or "",
+            })
+        # 引用账本与本轮注入同源：谁调这个函数，谁拿到的就是这一批（citation
+        # 回填读 last_injected_items，不能只在 build_context 里记账）。
+        self._last_injected_items = list(picked)
+        if picked:
+            logger.info(
+                "Memory injection picked: %d of %d candidates (query=%r, chars_left=%d)",
+                len(picked), len(rows), q[:24], budget,
+            )
+        return picked
 
-        logger.info(
-            "FoundationManager: added promoted principle (id=%s, category=%s, content=%s)",
-            entry.id[:8], category, principle[:50],
-        )
+    @staticmethod
+    def render_injection_section(items: list[dict[str, Any]]) -> str:
+        """注入段文本（引用溯源卡片同源回填）。"""
+        if not items:
+            return ""
+        lines = [
+            "## 已沉淀记忆",
+            "",
+            "以下为长期记忆中与当前任务最相关的条目（机器晋升，用户可撤销）：",
+            "",
+        ]
+        for i, it in enumerate(items, 1):
+            title = (it.get("title") or "").strip()
+            body = (it.get("content") or "").strip()
+            lines.append(f"{i}. {title}" if title else f"{i}. {body[:80]}")
+            lines.append(f"   {body}")
+        lines.append("")
+        return "\n".join(lines)
 
-        return entry
-
-    def _evict_lowest_priority(self, category: str) -> None:
-        """淘汰指定分类中最低优先级的条目。"""
-        index = self.load_knowledge_index()
-        entries = index.get("entries", [])
-
-        # 找到该分类中优先级最低的条目
-        category_entries = [e for e in entries if e.get("category") == category]
-        if not category_entries:
-            return
-
-        # 按 priority_score 排序，找到最低的
-        category_entries.sort(key=lambda e: e.get("priority_score", 0))
-        evicted = category_entries[0]
-
-        # 从索引中移除
-        index["entries"].remove(evicted)
-        self.save_knowledge_index(index)
-
-        # 删除文件
-        category_dir = self.foundation_dir / "knowledge_base" / "general" / category
-        entry_file = category_dir / f"{evicted.get('id', '')}.json"
-        if entry_file.exists():
-            entry_file.unlink()
-
-        logger.info(
-            "FoundationManager: evicted lowest priority entry (id=%s, score=%.2f)",
-            evicted.get("id", "")[:8], evicted.get("priority_score", 0),
-        )
-
-    def _save_to_knowledge_base(self, entry: MemoryEntry) -> None:
-        """将记忆保存到知识库。"""
-        index = self.load_knowledge_index()
-        index["entries"].append(entry.to_dict())
-        self.save_knowledge_index(index)
-
-        # 同时保存到分类目录
-        category_dir = self.foundation_dir / "knowledge_base" / "general" / entry.category
-        category_dir.mkdir(parents=True, exist_ok=True)
-
-        entry_file = category_dir / f"{entry.id}.json"
-        entry_file.write_text(json.dumps(entry.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-
-    # =========================================================================
-    # 记忆注入（核心接口）
-    # =========================================================================
+    # ── 上下文构建 ──────────────────────────────────────────────────
 
     def build_context(
         self,
-        query: str,
-        short_term_memory: str = "",
-        category: str | None = None,
         is_initial: bool = False,
+        query: str = "",
+        user_id: str = "",
+        agent_id: str | None = None,
     ) -> str:
-        """
-        统一的上下文构建接口（推荐集成层使用此方法）。
+        """构建记忆上下文（静态框架 + 开局注入的沉淀记忆）。"""
+        parts: list[str] = []
 
-        自动管理基础记忆注入状态，避免重复注入：
-        - 如果 is_initial=True 或基础记忆未注入 → 调用 build_initial_context
-        - 否则 → 调用 build_incremental_context
-
-        Args:
-            query: 用户查询
-            short_term_memory: 短期记忆（对话上下文）
-            category: 可选的分类过滤
-            is_initial: 是否为初始调用（新会话时设为 True）
-
-        Returns:
-            上下文字符串
-
-        Example:
-            # 新会话
-            ctx = fm.build_context("你好", is_initial=True)
-            # 后续对话
-            ctx = fm.build_context("继续上一个话题", short_term_memory="...")
-        """
-        if is_initial or not self._core_injected:
-            # 初始注入：包含基础记忆
-            result = self.build_initial_context(query, category)
+        if is_initial and not self._core_injected:
+            core = self.load_core_principles()
+            patterns = self.load_thinking_patterns()
+            if core:
+                parts.append(f"# 基础原则\n{core}")
+            if patterns:
+                parts.append(f"# 思维模式\n{patterns}")
             self._core_injected = True
-            return result
-        else:
-            # 增量注入：不包含基础记忆
-            return self.build_incremental_context(query, short_term_memory, category)
+            self._injection_count += 1
+
+        if is_initial and not self._initial_injected:
+            picked = self.select_memories_for_injection(
+                query=query, user_id=user_id, agent_id=agent_id,
+            )
+            section = self.render_injection_section(picked)
+            if section:
+                parts.append(section)
+            self._last_injected_items = picked
+            self._initial_injected = True
+
+        if parts:
+            self._last_injection_time = datetime.now()
+
+        return "\n\n".join(parts) if parts else ""
 
     def build_initial_context(
         self,
-        query: str,
-        category: str | None = None,
+        role: str = "user",
+        user_id: str = "",
+        agent_id: str | None = None,
     ) -> str:
-        """
-        构建初始上下文（Agent 初始化时调用一次）。
+        """构建首轮上下文（静态框架 + 知识库概览 + 沉淀记忆）。"""
+        parts: list[str] = []
 
-        包含基础记忆 + 相关长期记忆，注入到 system prompt。
-        后续对话不再重复注入基础记忆，只追加增量。
+        core = self.load_core_principles()
+        if core:
+            parts.append(f"# 基础原则\n{core}")
 
-        注意: 推荐使用 build_context(is_initial=True) 替代直接调用此方法。
+        entries = self.load_knowledge_index().get("entries", [])
+        if entries:
+            parts.append(f"# 知识库概览 ({len(entries)} 条)")
+            cats: dict[str, int] = {}
+            for e in entries:
+                cat = e.get("category", "general")
+                cats[cat] = cats.get(cat, 0) + 1
+            for cat, cnt in sorted(cats.items(), key=lambda kv: -kv[1]):
+                parts.append(f"- {cat}: {cnt} 条")
 
-        Args:
-            query: 初始查询（用于检索相关长期记忆）
-            category: 可选的分类过滤
+        section = self.render_injection_section(
+            self.select_memories_for_injection(user_id=user_id, agent_id=agent_id),
+        )
+        if section:
+            parts.append(section)
 
-        Returns:
-            完整的系统提示词（基础记忆 + 长期记忆）
-        """
-        # Performance: cache initial context per query
-        cache_key = f"{query}::{category}"
-        if hasattr(self, '_initial_context_cache') and self._initial_context_cache:
-            if cache_key in self._initial_context_cache:
-                return self._initial_context_cache[cache_key]
+        return "\n\n".join(parts) if parts else ""
 
-        # 1. 基础记忆（始终注入）
-        core_memory = self.load_core_memory()
+    def build_incremental_context(self, query: str = "") -> str:
+        """构建增量上下文（按查询相关性）。"""
+        from ..agents.resources.contract import score_match
 
-        # 2. 相关长期记忆（基于 query 检索）
-        relevant_entries = self.search_knowledge(query, category)
-        long_term_memories = [e.content for e in relevant_entries]
+        q = (query or "").strip()
+        relevant = []
+        for item in self.load_knowledge_index().get("entries", []):
+            text = f"{item.get('title', '')} {item.get('content', '')}"
+            if q and score_match(q, text) > 0:
+                relevant.append(item)
+        relevant = relevant[:5]
 
-        # 3. 组合
-        parts = [core_memory]
-        if long_term_memories:
-            parts.append("\n## 相关经验\n" + "\n\n".join(long_term_memories))
+        parts: list[str] = []
+        for item in relevant:
+            parts.append(f"## {item.get('title', '无标题')}")
+            parts.append(item.get("content", ""))
+        return "\n\n".join(parts) if parts else ""
 
-        result = "\n\n".join(parts)
-
-        # Cache the result
-        if not hasattr(self, '_initial_context_cache') or self._initial_context_cache is None:
-            self._initial_context_cache = {}
-        self._initial_context_cache[cache_key] = result
-        return result
-
-    def build_incremental_context(
-        self,
-        query: str,
-        short_term_memory: str = "",
-        category: str | None = None,
-    ) -> str:
-        """
-        构建增量上下文（后续对话调用，不重复注入基础记忆）。
-
-        基础记忆已在初始上下文注入，
-        后续对话只注入增量部分（长期记忆 + 短期记忆 + 当前查询）。
-
-        注意: 推荐使用 build_context(is_initial=False) 替代直接调用此方法。
-
-        Args:
-            query: 当前用户查询
-            short_term_memory: 短期记忆（对话上下文）
-            category: 可选的分类过滤
-
-        Returns:
-            增量上下文（不含基础记忆）
-        """
-        parts = []
-
-        # 1. 相关长期记忆（基于 query 检索）
-        relevant_entries = self.search_knowledge(query, category)
-        if relevant_entries:
-            parts.append("\n## 相关经验\n" + "\n\n".join(e.content for e in relevant_entries))
-
-        # 2. 短期记忆（对话上下文）
-        if short_term_memory:
-            parts.append(f"\n## 对话上下文\n{short_term_memory}")
-
-        # 3. 当前查询
-        parts.append(f"\n## 当前任务\n{query}")
-
-        return "\n\n".join(parts)
-
-    # =========================================================================
-    # 统计信息
-    # =========================================================================
+    # ── 统计 / 缓存 ─────────────────────────────────────────────────
 
     def get_stats(self) -> dict[str, Any]:
-        """获取基础层统计信息。"""
-        index = self.load_knowledge_index()
-        pending = self.get_pending_memories()
-
+        """记忆层统计（DB 真相 + 投影状态 + 注入计数）。"""
+        repo = self.memory_repo
+        ledger: dict[str, Any] = {}
+        if repo is not None:
+            try:
+                ledger = repo.stats(user_id="")
+            except Exception:
+                logger.debug("Ledger stats failed", exc_info=True)
         return {
-            "core_memory_size": len(self.load_core_memory()),
-            "knowledge_entries": len(index.get("entries", [])),
-            "pending_reviews": len(pending),
-            "quota": self.quota.to_dict(),
-            "injection_usage": self.injector.get_usage(),
+            "core_memory_loaded": self._core_memory_cache is not None,
+            "knowledge_entries": len(self.load_knowledge_index().get("entries", [])),
+            "core_injected": self._core_injected,
+            "injection_count": self._injection_count,
+            "ledger": ledger,
+            "projection": knowledge_export.verify_projection(),
         }
+
+    def clear_cache(self) -> None:
+        """清缓存（投影刷新后调用，避免读到旧 index）。"""
+        self._core_memory_cache = None
+        self._thinking_patterns_cache = None
+        self._knowledge_index_cache = None
+
+
+__all__ = ["FoundationManager", "get_foundation_manager"]
+
+
+_shared_manager: FoundationManager | None = None
+
+
+def get_foundation_manager(foundation_dir: str | None = None) -> FoundationManager:
+    """进程内共享的 FoundationManager（读侧/注入侧用）。
+
+    Workspace 各自持有实例（注入状态按 Agent 隔离），但聊天侧需要一条不依赖
+    workspace 生命周期的读取通路，故提供单例；单例只做读与导出，不做业务写。
+    """
+    global _shared_manager
+    if _shared_manager is None or (
+        foundation_dir is not None
+        and Path(foundation_dir) != _shared_manager.foundation_dir
+    ):
+        _shared_manager = FoundationManager(
+            foundation_dir or knowledge_export.foundation_root(),
+        )
+    return _shared_manager

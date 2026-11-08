@@ -31,8 +31,14 @@ _SCAN_HEAD_BYTES = 2000
 
 
 def _kb_root() -> Path:
-    """知识库根目录（与 FoundationManager 的 foundation_dir 一致）。"""
-    return Path(__file__).resolve().parents[2] / "foundation" / "knowledge_base"
+    """知识库根目录（= 记忆层投影目录，与 FoundationManager 选址同源）。
+
+    历史上传的是代码目录 ``server/coapis/foundation/knowledge_base``，
+    而写入落在运行时目录 —— 两把尺子导致 kb 面永远看不到新沉淀。
+    """
+    from ...foundation import knowledge_export
+
+    return knowledge_export.global_knowledge_dir()
 
 
 def _md_files(root: Path) -> list[Path]:

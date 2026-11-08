@@ -59,6 +59,8 @@ class MemoryEntry:
     created_at: Optional[float] = None
     updated_at: Optional[float] = None
     deleted_at: Optional[float] = None
+    #: 溯源（迁移 0023）：这条记忆来自哪次会话。晋升链自带，聊天侧"记下来"自带。
+    session_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -76,6 +78,7 @@ class MemoryEntry:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "deleted_at": self.deleted_at,
+            "session_id": self.session_id,
         }
 
     @classmethod
@@ -85,7 +88,7 @@ class MemoryEntry:
 
 
 class MemoryRepository(ABC):
-    """Abstract base class for memory repositories (12-method surface)."""
+    """Abstract base class for memory repositories (15-method surface)."""
 
     # ── write ──
 
@@ -116,11 +119,22 @@ class MemoryRepository(ABC):
     def hard_delete(self, entry_id: int) -> bool:
         """Physically remove the row (admin escape hatch)."""
 
+    @abstractmethod
+    def restore(self, entry_id: int) -> bool:
+        """Undo a soft delete (clears ``deleted_at``); False if not archived.
+
+        治理页的「撤销归档」——人是事后撤销者，不是审批者。
+        """
+
     # ── read ──
 
     @abstractmethod
-    def get(self, entry_id: int) -> Optional[MemoryEntry]:
-        """Alive entry by id, or None."""
+    def get(self, entry_id: int, *, include_archived: bool = False) -> Optional[MemoryEntry]:
+        """Entry by id, or None.
+
+        ``include_archived=True`` 时软删记录也返回 —— 治理页撤销前要先看清
+        「这条是谁的、在不在」，权限判断不能只看活着的行。
+        """
 
     @abstractmethod
     def list_entries(
@@ -157,6 +171,44 @@ class MemoryRepository(ABC):
     @abstractmethod
     def stats(self, *, scope: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Aggregate counts: total / by_category / by_source / avg_importance."""
+
+    # ── 知识沉淀（方案 v3）──
+
+    @abstractmethod
+    def list_injection_candidates(
+        self,
+        *,
+        user_id: str,
+        agent_id: Optional[str] = None,
+        limit: int = 300,
+    ) -> List[MemoryEntry]:
+        """本用户可注入的存活记忆全集（注入尺子的候选池）。
+
+        口径 = 用户面 ∪ 自己拥有的智能体面 ∪ 全局面。全局面默认进池（它是
+        机器晋升出来的公共知识，不是别人私有的），个人面严格隔离。
+        """
+
+    @abstractmethod
+    def list_for_governance(
+        self,
+        *,
+        user_id: str,
+        scope: str | None = None,
+        include_archived: bool = True,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """治理列表：本人条目 + 共享层条目，含已撤销（``deleted_at``）记录。
+
+        返回扁平 dict（治理页直接吃）：``id/scope/user_id/agent_id/session_id/
+        category/title/content/importance/source/created_at/updated_at/
+        deleted_at/archived``。``include_archived`` 默认 True —— "事后撤销"
+        必须配"事后看得见"，否则撤销等于失忆。
+        """
+
+    @abstractmethod
+    def count_for_governance(self, *, user_id: str, scope: str | None = None) -> int:
+        """:meth:`list_for_governance` 的总数（分页页脚用）。"""
 
     # ── dream integration ──
 

@@ -246,7 +246,30 @@
     "refresh": "Refresh",
     "refreshing": "Refreshing...",
     "refreshSuccess": "Refreshed successfully",
-    "refreshFailed": "Failed to refresh"
+    "refreshFailed": "Failed to refresh",
+    "knowledgeTitle": "Knowledge Notes",
+    "knowledgeHint": "Notes saved via “Save to memory” have importance=1.0 and join injection immediately; machine-promoted entries stay at importance≤0.7. Revoking stops injection and can be restored.",
+    "knowledgeScopeUser": "Mine",
+    "knowledgeScopeShared": "Shared",
+    "knowledgeRevoked": "Revoked",
+    "knowledgeUndo": "Revoke",
+    "knowledgeRestore": "Restore",
+    "knowledgeSourceTimeline": "Auto-promoted",
+    "knowledgeSourceNote": "Saved by me",
+    "knowledgeSourcePromote": "Shared promotion",
+    "knowledgeColContent": "Content",
+    "knowledgeColImportance": "Importance",
+    "knowledgeColSource": "Source",
+    "knowledgeColTime": "Time",
+    "knowledgeColScope": "Scope",
+    "knowledgeEmpty": "No knowledge items yet",
+    "knowledgeLedgerTotal": "Items",
+    "knowledgeLedgerActive": "Active",
+    "knowledgeLedgerRevoked": "Revoked",
+    "knowledgeUndoFailed": "Failed to revoke",
+    "knowledgeRestoreFailed": "Failed to restore",
+    "knowledgeUndoConfirm": "Revoke this knowledge item? It stops being injected and can be restored.",
+    "knowledgeRestoreConfirm": "Restore this knowledge item? It will be injected again."
   },
   "debug": {
     "title": "Debug",
@@ -2411,7 +2434,10 @@
       "picked": "Skills {{count}}",
       "empty": "No skills available for this agent",
       "tip": "Skills for this turn only: picked skills load directly, skipping keyword and judge matching (affects this message only)"
-    }
+    },
+    "noteIt": "Save to memory",
+    "noteSaved": "Saved to long-term memory",
+    "noteFailed": "This reply has no text to record"
   },
   "security": {
     "parent": "Settings",

@@ -250,7 +250,30 @@
     "refresh": "刷新",
     "refreshing": "刷新中...",
     "refreshSuccess": "刷新成功",
-    "refreshFailed": "刷新失败"
+    "refreshFailed": "刷新失败",
+    "knowledgeTitle": "知识沉淀",
+    "knowledgeHint": "「记下来」的条目 importance=1.0，立刻参与注入；机器晋升的条目 importance≤0.7。撤销后不再注入，可恢复。",
+    "knowledgeScopeUser": "本人",
+    "knowledgeScopeShared": "共享",
+    "knowledgeRevoked": "已撤销",
+    "knowledgeUndo": "撤销",
+    "knowledgeRestore": "恢复",
+    "knowledgeSourceTimeline": "机器晋升",
+    "knowledgeSourceNote": "我记的",
+    "knowledgeSourcePromote": "共享晋升",
+    "knowledgeColContent": "内容",
+    "knowledgeColImportance": "重要度",
+    "knowledgeColSource": "来源",
+    "knowledgeColTime": "时间",
+    "knowledgeColScope": "范围",
+    "knowledgeEmpty": "还没有沉淀条目",
+    "knowledgeLedgerTotal": "沉淀条目",
+    "knowledgeLedgerActive": "生效中",
+    "knowledgeLedgerRevoked": "已撤销",
+    "knowledgeUndoFailed": "撤销失败",
+    "knowledgeRestoreFailed": "恢复失败",
+    "knowledgeUndoConfirm": "确定撤销这条沉淀？撤销后不再注入，可恢复。",
+    "knowledgeRestoreConfirm": "确定恢复这条沉淀？恢复后重新参与注入。"
   },
   "debug": {
     "title": "调试",
@@ -2288,7 +2311,10 @@
       "picked": "技能 {{count}}",
       "empty": "该智能体暂无可用技能",
       "tip": "本轮指定技能：选中的技能本轮直装，跳过关键词与判官（只影响这一条消息）"
-    }
+    },
+    "noteIt": "记下来",
+    "noteSaved": "已记入长期记忆",
+    "noteFailed": "记录失败"
   },
   "security": {
     "parent": "设置",

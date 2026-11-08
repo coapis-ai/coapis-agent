@@ -14,7 +14,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from .db.engine import get_session_factory
 from .db.models.memory import Memory
@@ -110,6 +110,7 @@ class SqlaMemoryRepository(MemoryRepository):
                 source=entry.source,
                 dedup_key=entry.dedup_key,
                 importance=float(entry.importance if entry.importance is not None else 0.5),
+                session_id=entry.session_id,
                 created_at=entry.created_at or now,
                 updated_at=now,
                 deleted_at=None,
@@ -159,7 +160,12 @@ class SqlaMemoryRepository(MemoryRepository):
             row = s.get(Memory, int(entry_id))
             if row is None or row.deleted_at is not None:
                 return False
-            row.deleted_at = time.time()
+            now = time.time()
+            row.deleted_at = now
+            # 归档是行变更：必须推进 updated_at，投影签名（count + max(updated_at)）
+            # 才知道集合变了，才会把这条从文件里清掉。与时间线 add() 的
+            # "revive = 更新" 同一口径。
+            row.updated_at = now
             s.commit()
             return True
 
@@ -173,13 +179,27 @@ class SqlaMemoryRepository(MemoryRepository):
             s.commit()
             return True
 
-    # ── read ──
-
-    def get(self, entry_id: int) -> Optional[MemoryEntry]:
+    def restore(self, entry_id: int) -> bool:
         sf = get_session_factory()
         with sf() as s:
             row = s.get(Memory, int(entry_id))
-            if row is None or row.deleted_at is not None:
+            if row is None or row.deleted_at is None:
+                return False
+            now = time.time()
+            row.deleted_at = None
+            row.updated_at = now
+            s.commit()
+            return True
+
+    # ── read ──
+
+    def get(self, entry_id: int, *, include_archived: bool = False) -> Optional[MemoryEntry]:
+        sf = get_session_factory()
+        with sf() as s:
+            row = s.get(Memory, int(entry_id))
+            if row is None:
+                return None
+            if row.deleted_at is not None and not include_archived:
                 return None
             return self._to_entry(row)
 
@@ -296,6 +316,97 @@ class SqlaMemoryRepository(MemoryRepository):
                 "avg_importance": round(float(avg_imp), 3) if avg_imp is not None else 0.0,
             }
 
+    # ── 知识沉淀（方案 v3）──
+
+    def list_injection_candidates(
+        self,
+        *,
+        user_id: str,
+        agent_id: Optional[str] = None,
+        limit: int = 300,
+    ) -> List[MemoryEntry]:
+        sf = get_session_factory()
+        with sf() as s:
+            mine = and_(
+                Memory.scope.in_([ScopeType.USER, ScopeType.AGENT]),
+                Memory.user_id == (user_id or ""),
+            )
+            if agent_id:
+                mine = or_(
+                    mine,
+                    and_(Memory.scope == ScopeType.AGENT, Memory.agent_id == agent_id,
+                         Memory.user_id == (user_id or "")),
+                )
+            stmt = (
+                select(Memory)
+                .where(Memory.deleted_at.is_(None))
+                .where(or_(mine, Memory.scope == ScopeType.WORKSPACE))
+                .order_by(Memory.importance.desc(), Memory.created_at.desc(),
+                          Memory.id.asc())
+                .limit(max(1, min(int(limit), 1000)))
+            )
+            return [self._to_entry(r) for r in s.scalars(stmt).all()]
+
+    def _governance_cond(self, *, user_id: str, scope: str | None):
+        """治理可见集：本人全部条目（含已撤销）+ 共享层条目。"""
+        mine = Memory.user_id == (user_id or "")
+        shared = Memory.scope == ScopeType.WORKSPACE
+        if scope == ScopeType.USER:
+            return mine
+        if scope == ScopeType.WORKSPACE:
+            return shared
+        return or_(mine, shared)
+
+    def list_for_governance(
+        self,
+        *,
+        user_id: str,
+        scope: str | None = None,
+        include_archived: bool = True,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """治理列表：本人 + 共享层，含已撤销记录（撤销必须看得见）。"""
+        sf = get_session_factory()
+        with sf() as s:
+            stmt = select(Memory).where(self._governance_cond(user_id=user_id, scope=scope))
+            if not include_archived:
+                stmt = stmt.where(Memory.deleted_at.is_(None))
+            stmt = (
+                stmt.order_by(Memory.importance.desc(), Memory.created_at.desc(), Memory.id.asc())
+                .offset(max(0, int(offset)))
+                .limit(max(1, min(int(limit), 500)))
+            )
+            out: list[dict[str, Any]] = []
+            for r in s.scalars(stmt).all():
+                out.append({
+                    "id": r.id,
+                    "scope": r.scope,
+                    "user_id": r.user_id or "",
+                    "agent_id": r.agent_id or "",
+                    "session_id": r.session_id or "",
+                    "category": r.category,
+                    "title": r.title,
+                    "content": r.content,
+                    "importance": float(r.importance or 0.0),
+                    "source": r.source or "",
+                    "created_at": r.created_at,
+                    "updated_at": r.updated_at,
+                    "deleted_at": r.deleted_at,
+                    "archived": r.deleted_at is not None,
+                })
+            return out
+
+    def count_for_governance(self, *, user_id: str, scope: str | None = None) -> int:
+        sf = get_session_factory()
+        with sf() as s:
+            stmt = (
+                select(func.count())
+                .select_from(Memory)
+                .where(self._governance_cond(user_id=user_id, scope=scope))
+            )
+            return int(s.scalar(stmt) or 0)
+
     # ── dream integration ──
 
     def record_outcome(self, *, user_id: str, day: str, status: str,
@@ -374,4 +485,5 @@ class SqlaMemoryRepository(MemoryRepository):
             created_at=row.created_at,
             updated_at=row.updated_at,
             deleted_at=row.deleted_at,
+            session_id=row.session_id,
         )

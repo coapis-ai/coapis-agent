@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from ..constant import AGENTS_DIR, WORKSPACES_DIR
+from ..foundation import knowledge_export
 
 logger = logging.getLogger(__name__)
 
@@ -787,8 +788,10 @@ class Workspace:
         config = {**config, **core_config}
 
         # Initialize FoundationManager (hierarchical memory)
-        # Use global foundation directory for all agents
-        foundation_dir = Path(__file__).parent.parent / "foundation"
+        # 选址（方案 v3 #1）：记忆层根目录必须落在**运行时可写持久目录**。
+        # 历史上传的是代码目录 server/coapis/foundation，镜像重建即被覆盖
+        # —— 所有晋升成果静默清零。
+        foundation_dir = knowledge_export.foundation_root()
         self.foundation_manager = FoundationManager(foundation_dir=foundation_dir)
         logger.info(f"FoundationManager initialized for agent: {self.agent_id}")
 
@@ -798,8 +801,8 @@ class Workspace:
             foundation_manager=self.foundation_manager,
             data_dir=self.data_dir,
             config=FlowConfig(
-                auto_promote_enabled=False,
-                require_review=True,
+                auto_promote_enabled=True,
+                require_review=False,
             ),
         )
 
