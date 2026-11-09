@@ -54,7 +54,6 @@ import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import CoApisKbCitations from "./components/CoApisKbCitations";
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
 import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
-import CoApisDecisionPanel from "./components/CoApisDecisionPanel";
 import {
   useChatResourceLedger,
   ledgerKey,
@@ -2099,8 +2098,6 @@ export default function ChatPage() {
     return out;
   }, [ledger.items]);
   const [resourcesOpen, setResourcesOpen] = useState(false);
-  // 判断中枢浮窗（v14 §5.2）：台账 + 判官开关
-  const [decisionsOpen, setDecisionsOpen] = useState(false);
   // 「查看全部」针对的是哪个会话。左栏展开的那一行未必是当前会话，抽屉必须
   // 跟着被点的那一行走，否则显示的是另一个会话的资源（方案 F1）。
   const [resourcesChatId, setResourcesChatId] = useState<string | null>(null);
@@ -2205,7 +2202,6 @@ export default function ChatPage() {
             )}
             onPreview={(target) => openPreview(target)}
             onShowAll={() => setResourcesOpen((v) => !v)}
-            onJudgment={() => setDecisionsOpen((v) => !v)}
             onLocate={handleLocateResource}
           />
         ),
@@ -2778,13 +2774,8 @@ export default function ChatPage() {
           // F1：会话资源抽屉与预览抽屉同一口径 —— 铺满主内容区，不铺满整窗
           getContainer={() => mainAreaRef.current ?? document.body}
         />
-        {/* 判断中枢浮窗（v14 §5.2 / U 批）：判官台账 + 开关，与资源抽屉同构 */}
-        <CoApisDecisionPanel
-          open={decisionsOpen}
-          chatId={chatId}
-          onClose={() => setDecisionsOpen(false)}
-          getContainer={() => mainAreaRef.current ?? document.body}
-        />
+        {/* v24（小蜜蜂 2026-11-09 第 3 条）：聊天页不再有「判断」入口——它是审计
+            日志，不是资源。判断台账与判官开关搬到「我的空间 · 判断台账」。 */}
         <CoApisPreviewDrawer
           target={previewTarget}
           groupTitle={previewGroup}

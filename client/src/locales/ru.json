@@ -47,7 +47,8 @@
     "total": "Всего {{count}}",
     "clear": "Очистить",
     "paste": "Вставить",
-    "saveFailed": "Не удалось сохранить"
+    "saveFailed": "Не удалось сохранить",
+    "all": "Все"
   },
   "chunkError": {
     "title": "Не удалось загрузить страницу",
@@ -1636,7 +1637,8 @@
       "viewEmptyOther": "Записей других источников нет",
       "refKindChat": "чат",
       "refKindSession": "сессия",
-      "refKindAgent": "агент"
+      "refKindAgent": "агент",
+      "toggleFilterTip": "Только эта группа"
     },
     "resourceGroupProduced": "Создано",
     "resourceGroupReferenced": "Ссылки",
@@ -2458,6 +2460,17 @@
       "colTime": "Обновлено",
       "refresh": "Обновить",
       "unownedList": "Чужие рабочие области (только отчёт, без изменений)"
+    },
+    "tabJudgment": "Журнал решений",
+    "judgment": {
+      "title": "Журнал решений (7 дней)",
+      "scope": "Только ваши сессии",
+      "statTip": "Решений · с моделью · деградация · ср. время",
+      "judged": "С моделью",
+      "degraded": "Деградация",
+      "noStats": "За 7 дней решений нет.",
+      "list": "Записи решений",
+      "empty": "Записей решений пока нет"
     }
   },
   "decision": {
@@ -2482,11 +2495,25 @@
       "judgment": "Суждение",
       "layer": "Источник",
       "cost": "Время/Стоимость",
-      "rate": "Оценка"
+      "rate": "Оценка",
+      "outcome": "Итог"
     },
     "source.judge_slot": "слот судьи",
     "source.decision_slot": "управление моделями · решающая модель",
     "source.agent_default": "модель по умолчанию агента",
-    "source.global_default": "глобальная модель по умолчанию"
+    "source.global_default": "глобальная модель по умолчанию",
+    "goJudgeSlot": "Слот судьи",
+    "outcome": {
+      "hit": "Попадание",
+      "miss": "Промах"
+    },
+    "outcomePending": "Ожидает подтверждения",
+    "sourcePlanGate": "Шлюз плана",
+    "sourceOutcome": "Подтверждение итога",
+    "sourceSkillTrigger": "Триггер навыка",
+    "sourceAdvisor": "Корректировка",
+    "sourceAcceptance": "Приёмка",
+    "sourceCache": "Кэш решений",
+    "sourceHub": "Центр решений"
   }
 }

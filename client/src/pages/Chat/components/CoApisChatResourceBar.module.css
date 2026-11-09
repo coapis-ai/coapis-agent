@@ -32,6 +32,8 @@
   flex-wrap: wrap;
 }
 
+/* v24（小蜜蜂 2026-11-09 第 2 条）：chip 从「计数标签」升级成「筛子」，
+   所以要有可点的样子——手型 + hover 变色 + 选中态描边。 */
 .group-chip {
   display: inline-flex;
   align-items: center;
@@ -41,6 +43,23 @@
   background: rgba(0, 0, 0, 0.05);
   color: rgba(0, 0, 0, 0.6);
   font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.group-chip:hover {
+  background: rgba(22, 119, 255, 0.1);
+  color: #1677ff;
+}
+
+.group-chip-active,
+.group-chip-active:hover {
+  background: rgba(22, 119, 255, 0.14);
+  border-color: #1677ff;
+  color: #1677ff;
+  font-weight: 600;
 }
 
 .spacer {

@@ -1107,6 +1107,12 @@ async def list_chat_resources(
         if view not in ("chat", "other", "all"):
             view = "chat"
 
+        # v24（小蜜蜂 2026-11-09 第 4 条）：聊天侧**不显示已删除的资源**。
+        # 台账的 delete 是软删（只打 deleted_at，磁盘文件原地不动）。此前
+        # 下面 6 处全部 include_deleted=True，于是「已删除」的行照样进左栏
+        # 下拉和答案条：行是灰的、点不开、下载 404，用户读成「东西坏了」。
+        # 软删行此后只在「我的空间 · 资源台账」管理面可见（那条路走
+        # resource_ledger 的独立读面 + 状态筛选，不受本处影响）。
         if scope == "session":
             # v17 · F7 会话作用域：session 级引用 + 会话内各聊天的引用，一次
             # 合并算完（同一个 _chat_resource_rows，两把尺子的老毛病防住）。
@@ -1120,7 +1126,7 @@ async def list_chat_resources(
                 chat_ids=peers,
                 limit=limit,
                 offset=offset,
-                include_deleted=True,
+                include_deleted=False,
                 sort_by=sort_by,
             )
             total = rl.count_session_resources(
@@ -1128,7 +1134,7 @@ async def list_chat_resources(
                 owner_id=owner or username,
                 session_id=session_id,
                 chat_ids=peers,
-                include_deleted=True,
+                include_deleted=False,
             )
         elif view in ("other", "all"):
             # v20 · W5（拍板 D4）：「其他来源」= 会话级 + 智能体级引用里，
@@ -1145,7 +1151,7 @@ async def list_chat_resources(
                 agent_ids=[f"user:{username}"],
                 limit=limit,
                 offset=offset,
-                include_deleted=True,
+                include_deleted=False,
                 sort_by=sort_by,
             )
             total = rl.count_chat_view_resources(
@@ -1156,7 +1162,7 @@ async def list_chat_resources(
                 session_id=session_id,
                 peer_ids=peers,
                 agent_ids=[f"user:{username}"],
-                include_deleted=True,
+                include_deleted=False,
             )
         else:
             rows = rl.list_resources_for_chat(
@@ -1165,7 +1171,7 @@ async def list_chat_resources(
                 chat_id=chat_id,
                 limit=limit,
                 offset=offset,
-                include_deleted=True,
+                include_deleted=False,
                 # v17 · F7（拍板 D4-A）：排序在台账侧、分页之前完成，非法值
                 # 自动回落「最近引用在前」。端点只透传，不自创尺子。
                 sort_by=sort_by,
@@ -1176,7 +1182,7 @@ async def list_chat_resources(
                 owner_scope="user",
                 owner_id=owner or username,
                 chat_id=chat_id,
-                include_deleted=True,
+                include_deleted=False,
             )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("chat %s resources skipped: %s", chat_id[:16], exc)

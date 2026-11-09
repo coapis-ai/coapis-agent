@@ -52,7 +52,8 @@
     "paste": "粘贴",
     "yes": "是",
     "no": "否",
-    "saveFailed": "保存失败"
+    "saveFailed": "保存失败",
+    "all": "全部"
   },
   "chunkError": {
     "title": "页面加载失败",
@@ -2305,7 +2306,8 @@
       "viewEmptyOther": "其他来源暂无记录",
       "refKindChat": "聊天引用",
       "refKindSession": "会话引用",
-      "refKindAgent": "智能体引用"
+      "refKindAgent": "智能体引用",
+      "toggleFilterTip": "只看这一组"
     },
     "resourceGroupProduced": "生成",
     "resourceGroupReferenced": "引用",
@@ -2980,6 +2982,17 @@
       "colTime": "更新时间",
       "refresh": "刷新",
       "unownedList": "非用户工作区（只报告，不动）"
+    },
+    "tabJudgment": "判断台账",
+    "judgment": {
+      "title": "判断台账（近 7 天）",
+      "scope": "只统计你自己的会话",
+      "statTip": "判断次数 · 真判 · 降级 · 平均耗时",
+      "judged": "真判",
+      "degraded": "降级",
+      "noStats": "近 7 天没有判断记录。",
+      "list": "判断记录",
+      "empty": "还没有判断记录"
     }
   },
   "monitoring": {
@@ -3111,11 +3124,25 @@
       "judgment": "判断",
       "layer": "怎么来的",
       "cost": "耗时/花费",
-      "rate": "打分"
+      "rate": "打分",
+      "outcome": "结果"
     },
     "source.judge_slot": "判官槽位",
     "source.decision_slot": "模型管理·决策模型",
     "source.agent_default": "该智能体默认模型",
-    "source.global_default": "全局默认模型"
+    "source.global_default": "全局默认模型",
+    "goJudgeSlot": "去判官槽位",
+    "outcome": {
+      "hit": "命中",
+      "miss": "未命中"
+    },
+    "outcomePending": "待回执",
+    "sourcePlanGate": "立项闸",
+    "sourceOutcome": "完成回执",
+    "sourceSkillTrigger": "技能触发",
+    "sourceAdvisor": "事中改道",
+    "sourceAcceptance": "完成验收",
+    "sourceCache": "判断缓存",
+    "sourceHub": "判断中枢"
   }
 }

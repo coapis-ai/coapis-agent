@@ -45,6 +45,7 @@ import {
   LinkOutlined,
   EyeOutlined,
   DatabaseOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -54,6 +55,7 @@ import AgentIdentityPanel from './AgentIdentityPanel';
 // 资源台账管理面（v20 · W2）：台账从 v17 起只有机器看得见，这一页给用户筛/
 // 定稿/巡检/归位的入口。
 import LedgerPanel from './LedgerPanel';
+import JudgmentPanel from './JudgmentPanel';
 // 会话侧的预览抽屉（B4）在这里复用：我的空间预览弹窗 2026-06-28 被移除后，
 // 文件只能下载不能看，产出文件的体验断在「我的空间」这一头。
 import CoApisPreviewDrawer, { type PreviewTarget } from '../Chat/components/CoApisPreviewDrawer';
@@ -112,6 +114,7 @@ const CATEGORIES = [
   { key: 'files', label: '文件', icon: <FolderOutlined /> },
   { key: 'agents', label: '智能体', icon: <RobotOutlined /> },
   { key: 'ledger', label: '资源台账', labelKey: 'myspace.tabLedger', icon: <DatabaseOutlined /> },
+  { key: 'judgment', label: '判断台账', labelKey: 'myspace.tabJudgment', icon: <AuditOutlined /> },
 ] as const;
 
 // ═══════════════════════════════════════════════════════════
@@ -249,8 +252,8 @@ const MySpacePage: React.FC = () => {
   }, []);
 
   const loadFiles = useCallback(async (path: string = currentPath) => {
-    // 台账 tab 不列文件树：category 白名单里没有 'ledger'，发过去必被后端拒。
-    if (activeCategory === 'ledger') return;
+    // 台账/判断 tab 不列文件树：category 白名单里没有这两个，发过去必被后端拒。
+    if (activeCategory === 'ledger' || activeCategory === 'judgment') return;
     setLoading(true);
     try {
       const query = new URLSearchParams({ path, category: activeCategory }).toString();
@@ -323,6 +326,8 @@ const MySpacePage: React.FC = () => {
   }, [locateName]);
 
   useEffect(() => {
+    // 判断台账是自取数的独立面板，不参与文件空间任何取数。
+    if (activeCategory === 'judgment') return;
     loadFiles();
     loadUsage();
     loadConfig();
@@ -841,7 +846,7 @@ const MySpacePage: React.FC = () => {
       />
 
       {/* 顶部工具栏 (仅文件 tab) */}
-      {activeCategory !== 'agents' && activeCategory !== 'ledger' && (
+      {activeCategory !== 'agents' && activeCategory !== 'ledger' && activeCategory !== 'judgment' && (
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <Breadcrumb items={breadcrumbItems} />
         
@@ -1061,7 +1066,14 @@ const MySpacePage: React.FC = () => {
       {activeCategory === 'ledger' && (
         <LedgerPanel />
       )}
-      {activeCategory !== 'agents' && activeCategory !== 'ledger' && (
+      {/* 判断台账（v24）：判官的审计日志 + 开关。此前入口挂在聊天「会话资源」
+          条上，和资源混在一起；它是审计，不是资源，搬到我的空间。 */}
+      {activeCategory === 'judgment' && (
+        <div className="page-content" style={{ padding: '16px' }}>
+          <JudgmentPanel />
+        </div>
+      )}
+      {activeCategory !== 'agents' && activeCategory !== 'ledger' && activeCategory !== 'judgment' && (
         <div className="page-content" style={{ padding: '16px' }}>
           {viewMode === 'list' && (
             <List

@@ -2,29 +2,38 @@ import { request } from "../request";
 
 /** 判断中枢（v14 §5.2 / U 批）：台账可见 + 配置可改。 */
 
+/**
+ * 台账行的字段名**逐一对齐后端 SELECT 的真实列**（v24）：
+ * `event_id, created_at, user_id, agent_id, chat_id, turn, source, complexity,
+ *  action, judgment, reason, hit_layer, model, latency_ms, cost, tokens,
+ *  outcome, rating, input_hash`。
+ *
+ * 此前这里写的是 `ts / tokens_in / tokens_out / model_id / provider_id /
+ * fallback_reason / thinking / engine`——库里没有这些列，接口回来是
+ * undefined，于是时间列恒显「-」、判由永远看不见、模型列全空。
+ * 接口写错不等于有数据，尺子以库为准。
+ */
 export interface DecisionEventResponse {
   event_id: string;
-  ts: string;
+  /** float epoch 秒（写入侧用 time.time()），不是 datetime 字符串 */
+  created_at: number;
   user_id: string;
   agent_id: string;
   chat_id: string | null;
   turn: number | null;
   source: string;
+  complexity: string | null;
   action: string;
   judgment: string | null;
-  confidence: number | null;
+  reason: string | null;
+  hit_layer: string | null;
+  model: string | null;
   latency_ms: number | null;
   cost: number | null;
-  tokens_in: number | null;
-  tokens_out: number | null;
-  model_id: string | null;
-  provider_id: string | null;
-  hit_layer: string | null;
-  fallback_reason: string | null;
-  thinking: number | null;
-  engine: string | null;
+  tokens: number | null;
   outcome: string | null;
   rating: number | null;
+  input_hash: string | null;
 }
 
 export interface DecisionListResponse {
@@ -38,6 +47,8 @@ export interface DecisionListResponse {
 export interface DecisionSourceStat {
   source: string;
   n: number;
+  /** 真判断次数（规则/闸门/开关关闭这类「压根不需要判」不计入） */
+  judged: number;
   llm: number;
   degraded: number;
   timeouts: number;

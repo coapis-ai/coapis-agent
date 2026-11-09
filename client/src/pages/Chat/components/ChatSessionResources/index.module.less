@@ -1,7 +1,12 @@
-/* 会话资源（批次 D2）：挂在左栏当前会话节点下方，紧凑、不抢会话列表的视觉 */
+/* 会话资源（批次 D2）：挂在左栏当前会话节点下方，紧凑、不抢会话列表的视觉
+   v24（小蜜蜂 2026-11-09 第 1/3 条）：**与上方会话卡片同宽、同左边线**。
+   此前 margin-left 14 + border 2 + padding-left 10 = 26px 左边距，右侧还留
+   8px 空隙，量出来卡片 283px / 资源面板 198px，名字比会话标题低一截，
+   右边又短一截。现在左边只留 border 2 + padding 4 = 6px（会话项自身
+   padding-left 8px，视觉同一条线），右边不留空隙。 */
 .panel {
-  margin: 0 0 6px 14px;
-  padding: 6px 8px 6px 10px;
+  margin: 0 0 6px 0;
+  padding: 6px 8px 6px 4px;
   border-left: 2px solid rgba(0, 0, 0, 0.08);
   background: rgba(0, 0, 0, 0.02);
   border-radius: 0 8px 8px 0;

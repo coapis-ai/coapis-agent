@@ -52,7 +52,8 @@
     "paste": "Paste",
     "yes": "Yes",
     "no": "No",
-    "saveFailed": "Save failed"
+    "saveFailed": "Save failed",
+    "all": "All"
   },
   "chunkError": {
     "title": "Failed to load page",
@@ -2428,7 +2429,8 @@
       "viewEmptyOther": "No other-source records",
       "refKindChat": "chat",
       "refKindSession": "session",
-      "refKindAgent": "agent"
+      "refKindAgent": "agent",
+      "toggleFilterTip": "Only this group"
     },
     "resourceGroupProduced": "Produced",
     "resourceGroupReferenced": "Referenced",
@@ -2959,6 +2961,17 @@
       "colTime": "Updated",
       "refresh": "Refresh",
       "unownedList": "Non-user workspaces (reported only, untouched)"
+    },
+    "tabJudgment": "Judgment ledger",
+    "judgment": {
+      "title": "Judgment ledger (last 7 days)",
+      "scope": "Your own sessions only",
+      "statTip": "Judgments · judged · degraded · avg time",
+      "judged": "Judged",
+      "degraded": "Degraded",
+      "noStats": "No judgment records in the last 7 days.",
+      "list": "Judgment records",
+      "empty": "No judgment records yet"
     }
   },
   "monitoring": {
@@ -3091,11 +3104,25 @@
       "judgment": "Judgment",
       "layer": "Source",
       "cost": "Latency/Cost",
-      "rate": "Rating"
+      "rate": "Rating",
+      "outcome": "Outcome"
     },
     "source.judge_slot": "judge slot",
     "source.decision_slot": "model management · decision model",
     "source.agent_default": "this agent's default model",
-    "source.global_default": "global default model"
+    "source.global_default": "global default model",
+    "goJudgeSlot": "Judge slot",
+    "outcome": {
+      "hit": "Hit",
+      "miss": "Miss"
+    },
+    "outcomePending": "Awaiting receipt",
+    "sourcePlanGate": "Plan gate",
+    "sourceOutcome": "Outcome receipt",
+    "sourceSkillTrigger": "Skill trigger",
+    "sourceAdvisor": "Mid-run advisor",
+    "sourceAcceptance": "Acceptance",
+    "sourceCache": "Judgment cache",
+    "sourceHub": "Judgment hub"
   }
 }

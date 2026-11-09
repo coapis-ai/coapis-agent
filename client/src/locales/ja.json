@@ -47,7 +47,8 @@
     "total": "合計 {{count}} 件",
     "clear": "クリア",
     "paste": "貼り付け",
-    "saveFailed": "保存に失敗しました"
+    "saveFailed": "保存に失敗しました",
+    "all": "すべて"
   },
   "chunkError": {
     "title": "ページの読み込みに失敗しました",
@@ -1621,7 +1622,8 @@
       "viewEmptyOther": "他の出所の記録はありません",
       "refKindChat": "チャット",
       "refKindSession": "セッション",
-      "refKindAgent": "エージェント"
+      "refKindAgent": "エージェント",
+      "toggleFilterTip": "このグループのみ"
     },
     "resourceGroupProduced": "生成",
     "resourceGroupReferenced": "参照",
@@ -2443,6 +2445,17 @@
       "colTime": "更新日時",
       "refresh": "更新",
       "unownedList": "ユーザー以外の作業領域（報告のみ・変更なし）"
+    },
+    "tabJudgment": "判断台帳",
+    "judgment": {
+      "title": "判断台帳（直近7日）",
+      "scope": "自分のセッションのみ",
+      "statTip": "判断数 · 実判断 · 降格 · 平均時間",
+      "judged": "実判断",
+      "degraded": "降格",
+      "noStats": "直近7日に判断記録がありません。",
+      "list": "判断記録",
+      "empty": "判断記録はまだありません"
     }
   },
   "decision": {
@@ -2467,11 +2480,25 @@
       "judgment": "判断",
       "layer": "取得元",
       "cost": "所要/費用",
-      "rate": "評価"
+      "rate": "評価",
+      "outcome": "結果"
     },
     "source.judge_slot": "判定スロット",
     "source.decision_slot": "モデル管理・判断モデル",
     "source.agent_default": "このエージェントの既定モデル",
-    "source.global_default": "グローバル既定モデル"
+    "source.global_default": "グローバル既定モデル",
+    "goJudgeSlot": "判断モデル枠",
+    "outcome": {
+      "hit": "命中",
+      "miss": "未命中"
+    },
+    "outcomePending": "受領待ち",
+    "sourcePlanGate": "計画ゲート",
+    "sourceOutcome": "完了受領",
+    "sourceSkillTrigger": "スキル起動",
+    "sourceAdvisor": "実行中アドバイス",
+    "sourceAcceptance": "完了検収",
+    "sourceCache": "判断キャッシュ",
+    "sourceHub": "判断ハブ"
   }
 }

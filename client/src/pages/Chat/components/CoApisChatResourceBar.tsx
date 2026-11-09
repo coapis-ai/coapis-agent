@@ -82,14 +82,15 @@ interface Props {
   onPreview?: (req: ResourcePreviewRequest) => void;
   /** 「查看全部」→ 打开会话资源抽屉（L3） */
   onShowAll?: () => void;
-  /** 「判断」→ 打开判断中枢浮窗（v14 §5.2：本轮判断台账 + 判官开关） */
-  onJudgment?: () => void;
   /** 「定位到消息」：滚到产出这条资源的那一轮（方案 §3.2 产出动作） */
   onLocate?: (messageId: string) => void;
 }
 
 /** 每组最多 8 行，其余折叠成「展开其余 N 项」（方案 §3.2 L2）。 */
 const GROUP_CAP = 8;
+
+/** chip 筛子：两组同看 / 只看引用 / 只看产出。 */
+type Tab = "all" | "reference" | "produced";
 
 /**
  * 本轮资源条（方案 §3.2 L2 / §12.4）
@@ -103,11 +104,24 @@ const CoApisChatResourceBar: React.FC<Props> = ({
   items,
   onPreview,
   onShowAll,
-  onJudgment,
   onLocate,
 }) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  // v24（小蜜蜂 2026-11-09 第 2 条）：「引用 / 产出」两颗 chip 自己就是筛子——
+  // 点一下只看这一组（并自动展开），再点一下回到两组同看。此前 chip 只是
+  // 计数标签，必须整块展开后在两堆里自己找，用户说「有点乱」。
+  const [tab, setTab] = useState<Tab>("all");
+
+  const toggleTab = (next: Exclude<Tab, "all">) => {
+    if (tab === next && expanded) {
+      setTab("all");
+      setExpanded(false);
+    } else {
+      setTab(next);
+      setExpanded(true);
+    }
+  };
 
   const produced = useMemo(
     () => items.filter((i) => i.role === "producer" || i.role === "export"),
@@ -179,6 +193,9 @@ const CoApisChatResourceBar: React.FC<Props> = ({
     source: "produced" | "reference",
   ) => {
     if (!list.length) return null;
+    // v24（小蜜蜂 2026-11-09 第 2 条）：chip 选中哪一组，就只渲染那一组；
+    // 「all」= 两组同看（默认，也是「收起/展开」整块开关的口径）。
+    if (tab !== "all" && tab !== source) return null;
     const shown = expanded ? list : list.slice(0, GROUP_CAP);
     const rest = list.length - shown.length;
     return (
@@ -270,13 +287,46 @@ const CoApisChatResourceBar: React.FC<Props> = ({
         <span className={styles.title}>
           <AppstoreOutlined /> {t("chat.resources.barTitle", "会话资源")}
         </span>
+        {/* v24（小蜜蜂 2026-11-09 第 2 条）：chip 就是筛子——点一下只看这一组
+            （并自动展开），再点一下回到两组同看。计数为 0 的一组**不出现这颗
+            chip**：旧口径「引用 0」也画出来，用户点了没反应，读成坏了。 */}
         <span className={styles.groups}>
-          <span className={styles.groupChip}>
-            {t("chat.resources.reference")} {referenced.length}
-          </span>
-          <span className={styles.groupChip}>
-            {t("chat.resources.produced")} {produced.length}
-          </span>
+          {referenced.length > 0 && (
+            <span
+              role="button"
+              tabIndex={0}
+              className={`${styles.groupChip} ${tab === "reference" ? styles.groupChipActive : ""}`}
+              title={t("chat.resources.toggleFilterTip", "只看这一组")}
+              aria-pressed={tab === "reference"}
+              onClick={() => toggleTab("reference")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleTab("reference");
+                }
+              }}
+            >
+              {t("chat.resources.reference")} {referenced.length}
+            </span>
+          )}
+          {produced.length > 0 && (
+            <span
+              role="button"
+              tabIndex={0}
+              className={`${styles.groupChip} ${tab === "produced" ? styles.groupChipActive : ""}`}
+              title={t("chat.resources.toggleFilterTip", "只看这一组")}
+              aria-pressed={tab === "produced"}
+              onClick={() => toggleTab("produced")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleTab("produced");
+                }
+              }}
+            >
+              {t("chat.resources.produced")} {produced.length}
+            </span>
+          )}
         </span>
         <span className={styles.spacer} />
         <a className={styles.collapse} onClick={() => setExpanded((v) => !v)}>
@@ -297,17 +347,6 @@ const CoApisChatResourceBar: React.FC<Props> = ({
             data-coapis-res-trigger=""
           >
             {t("chat.resources.viewAll", "查看全部")}
-          </a>
-        )}
-        {onJudgment && (
-          <a
-            className={styles.showAll}
-            onClick={onJudgment}
-            /* 本轮判断台账入口（v14 §5.2）：判没判、判成什么，一轮一行 */
-            title={t("decision.entryTip", "本轮判断台账")}
-            data-coapis-res-trigger=""
-          >
-            {t("decision.entry", "判断")}
           </a>
         )}
       </div>
