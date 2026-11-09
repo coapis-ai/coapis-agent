@@ -97,8 +97,6 @@ const fmtSize = (n?: number | string | null) => formatResSize(n);
 
 interface Props {
   chatId: string | undefined;
-  /** v17 · F4：作用域 —— "chat"=本聊天（默认）；"session"=整个会话（跨聊天） */
-  scope?: "chat" | "session";
   /** 外部传入的刷新信号（本轮产出落台账后自增） */
   refreshSignal?: number;
   /** 预览走会话级抽屉（方案 §12.4 L1）；不传则退化为新窗口 */
@@ -118,7 +116,6 @@ interface Props {
  */
 const ChatSessionResources: React.FC<Props> = ({
   chatId,
-  scope = "chat",
   refreshSignal = 0,
   onPreview,
 }) => {
@@ -146,8 +143,9 @@ const ChatSessionResources: React.FC<Props> = ({
     }
     setLoading(true);
     chatApi
-      // v17 · F4：作用域透传 —— 抽屉跟着资源条那块的作用域走（"session"=整个会话）
-      .listChatResources(chatId, PAGE_SIZE, offset, sort, scope)
+      // v23（2026-11-09 拍板）：跨聊天汇总下线 —— 抽屉固定看当前聊天。
+      // 后端 scope=session 参数保留不动（社区版公共契约），前端不再请求。
+      .listChatResources(chatId, PAGE_SIZE, offset, sort, "chat")
       .then((res) => {
         setItems(res.items || []);
         setTotal(res.total || 0);
@@ -157,7 +155,7 @@ const ChatSessionResources: React.FC<Props> = ({
         setTotal(0);
       })
       .finally(() => setLoading(false));
-  }, [chatId, offset, refreshSignal, scope, sort, tick]);
+  }, [chatId, offset, refreshSignal, sort, tick]);
 
   const rows = useMemo(() => {
     const kw = keyword.trim().toLowerCase();

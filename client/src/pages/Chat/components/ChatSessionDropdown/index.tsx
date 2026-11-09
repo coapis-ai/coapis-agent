@@ -275,6 +275,12 @@ interface ChatSessionDropdownProps {
  * 别每次都把当前会话撑开——左栏首屏那 20 行里，展开面板比列表金贵。
  */
 const EXPAND_STORE_KEY = "coapis.chat.sidebarExpandedId";
+// v23（2026-11-09 拍板）：两个哨兵值，只存在于 sessionStorage 与本组件状态，
+// 不会与真实会话 id 撞车（后端 id 是 uuid 形态）。
+//   EXPAND_COLLAPSED —— 用户显式收起过：刷新后继续尊重，不再自动展开。
+//   EXPAND_AUTO      —— 从没表过态：交给「首条消息即展开」的时机落位。
+const EXPAND_COLLAPSED = "__collapsed__";
+const EXPAND_AUTO = "__auto__";
 
 const getBackendId = (session: ExtendedChatSession): string | null => {
   if (session.realId) return session.realId;
@@ -347,11 +353,15 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   // 一次只展开一行：多行同时展开会把左栏变成资源墙，列表就没法扫了。
   // v17 · F1：展开位**只存后端 chat id**（资源面板就是按它取数的）；初值
   // 优先取 sessionStorage，刷新后保持用户上次的收起/展开选择。
+  // v23（2026-11-09 拍板）：初值三态——具体会话号 / 收起哨兵 / 未定。
+  // 旧实现取不到就收起（null），配合下面持久化处的 removeItem，导致「手动收起后
+  // 一刷新又自动展开」；现在未定交给首条消息时机，收起写哨兵、刷新不反弹。
   const [expandedId, setExpandedId] = useState<string | null>(() => {
     try {
-      return sessionStorage.getItem(EXPAND_STORE_KEY) || null;
+      const saved = sessionStorage.getItem(EXPAND_STORE_KEY);
+      return saved === null ? EXPAND_AUTO : saved;
     } catch {
-      return null;
+      return EXPAND_AUTO;
     }
   });
 
@@ -367,11 +377,15 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
 
   /** 展开位落地即写 sessionStorage（隐私模式会抛，忽略即可）。 */
   useEffect(() => {
-    try {
-      if (expandedId) sessionStorage.setItem(EXPAND_STORE_KEY, expandedId);
-      else sessionStorage.removeItem(EXPAND_STORE_KEY);
-    } catch {
-      /* localStorage/sessionStorage 在隐私模式下会抛 */
+    if (expandedId === EXPAND_AUTO) {
+      // 未定：清记录，交给首条消息时机
+      sessionStorage.removeItem(EXPAND_STORE_KEY);
+    } else if (expandedId) {
+      sessionStorage.setItem(EXPAND_STORE_KEY, expandedId);
+    } else {
+      // v23：显式收起写哨兵。原来这里 removeItem，刷新后初值取不到 → 又被当成
+      // 首屏默认，正是「收起后一刷新又展开」的成因。
+      sessionStorage.setItem(EXPAND_STORE_KEY, EXPAND_COLLAPSED);
     }
   }, [expandedId]);
 
@@ -391,8 +405,23 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
     if (!bid) return; // 新建会话暂挂前端临时 id：等后端 id 落地再跟随
     if (bid === lastCurrentRef.current) return;
     lastCurrentRef.current = bid;
+    // v23（2026-11-09 拍板）：切会话 / 新建仍自动展开（原有行为保留）。展开位
+    // 跟过去即清除收起哨兵——收起只作用于当时那个会话，不波及后续会话。
     setExpandedId(bid);
   }, [props.variant, props.currentBackendId]);
+
+  // v23（2026-11-09 拍板）：右栏整列下线后，左栏当前会话行的资源列表默认展开，
+  // 时机取「首条消息即展开」——从没表过态（未定）时，一旦当前会话出现在侧栏会话
+  // 列表里就展开它的资源行。列表来自后端会话记录，而记录在首次发送时才建立（见上
+  // 面跟随 effect 里的空会话说明），故「出现在列表里」等价于「首条消息已发出」；
+  // 空会话保持收起，首屏视觉与今天一致。信号取现成数据，不新增接口。
+  useEffect(() => {
+    if (props.variant !== "sidebar") return;
+    if (expandedId !== EXPAND_AUTO) return;
+    const bid = props.currentBackendId ?? null;
+    if (!bid) return;
+    if (localSessions.some((s) => getBackendId(s) === bid)) setExpandedId(bid);
+  }, [expandedId, localSessions, props.variant, props.currentBackendId]);
   const observerRef = useRef<ResizeObserver | null>(null);
 
   /** Callback ref: attach a ResizeObserver whenever the wrapper DOM node appears */

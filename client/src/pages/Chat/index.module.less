@@ -867,42 +867,7 @@
   color: rgba(0, 0, 0, 0.65);
 }
 
-/* ── 右侧 200px 资源条列（v17 · F4，小蜜蜂 2026-11-05）────────────────────
-   原话：「在会话窗口的右侧增加一列 200px 的宽度，上半部分表示当前会话的内容，
-   下面部分表示当前聊天」。固定 200px：不参与折叠、不被左栏挤压，内部自己滚。 */
-.chatResourceRail {
-  flex: 0 0 200px;
-  width: 200px;
-  min-width: 200px;
-  max-width: 200px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  padding: 8px 6px;
-  overflow: hidden;
-  border-left: 1px solid var(--coapis-border, #ececec);
-  background: var(--coapis-fill, #fbfbfb);
-  // 给资源条自身一个具名容器：窄屏时资源条自己收成图标条（见 CoApisResourceStrip.module.less）
-  container-name: qaw-rail;
-  container-type: inline-size;
-}
-
-/* 窄屏折叠（2026-11-06 修「右侧栏盖住输入框、知识库按钮点不动」）：
-   聊天区最低 320px + 右侧栏 200px = 520px。容器宽度不足 520px 时右侧栏收成 40px
-   图标条，只留「查看全部」入口——功能不消失，只是变窄，不再压住输入框。 */
-@container (max-width: 519px) {
-  .chatResourceRail {
-    flex: 0 0 40px;
-    width: 40px;
-    min-width: 40px;
-    max-width: 40px;
-  }
-}
-
-/* 极窄（容器 < 400px）时整条收起，聊天区独享宽度；会话资源在「我的空间」仍能找到。 */
-@container (max-width: 399px) {
-  .chatResourceRail {
-    display: none;
-  }
-}
+/* v23（2026-11-09 拍板）：右侧 200px 资源条列整列下线。
+   它与左栏选中会话后的展开面板、气泡末尾的本轮资源条三层同义（同接口、同作用域、
+   同缓存），常驻 200px 还换来「栏盖住输入框与知识库按钮」的窄屏补丁（原 519px/399px
+   两个容器查询随列一起删除）。资源入口收敛为：左栏会话行展开面板 + 气泡本轮条。 */

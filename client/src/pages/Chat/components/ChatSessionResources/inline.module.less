@@ -15,7 +15,9 @@
   margin: 2px 0 0 2px;
   padding: 0 0 0 2px;
   border-left: 1px solid rgba(0, 0, 0, 0.08);
-  max-height: 168px;
+  /* v23（2026-11-09 拍板）：左栏资源列表默认常驻展开，限高 168 → 240
+     （可见行 5.3 → 7.6 行）。上限仍在：单会话最多渲染 40 条，超出滚动。 */
+  max-height: 240px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -286,7 +288,8 @@
   align-items: center;
   gap: 4px;
   min-width: 0;
-  max-width: 220px;
+  /* v23：左栏加宽到 300px 后同步放宽文件名截断阈值（220 → 256）。 */
+  max-width: 256px;
   border: none;
   background: none;
   padding: 0;

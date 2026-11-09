@@ -1,7 +1,9 @@
 /* 固定左栏（批次 D1）：与聊天区同级的常驻列，不是浮层 */
 .sidebar {
-  width: 260px;
-  flex: 0 0 260px;
+  /* v23（2026-11-09 拍板）：右栏整列下线后左栏 260 → 300，给常驻展开的资源面板
+     腾出宽度（面板可用宽 208 → 248）。腾出来的宽度来自右栏那 200px，聊天区仍净赚。 */
+  width: 300px;
+  flex: 0 0 300px;
   display: flex;
   flex-direction: column;
   min-height: 0;

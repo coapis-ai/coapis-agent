@@ -2404,7 +2404,6 @@
       "statusDeleted": "Deleted",
       "statusMissing": "Missing",
       "close": "Close",
-      "groupSession": "This session",
       "groupChat": "This chat"
     },
     "resourceGroupProduced": "Produced",

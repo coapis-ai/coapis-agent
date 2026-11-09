@@ -52,8 +52,6 @@ import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
 import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import CoApisKbCitations from "./components/CoApisKbCitations";
-// 合并后只剩一张卡（「本轮资源」），产出卡组件下线，这里只保留它的资源类型。
-import type { LiveResource } from "./components/CoApisChatResources";
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
 import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
 import CoApisDecisionPanel from "./components/CoApisDecisionPanel";
@@ -61,11 +59,8 @@ import {
   useChatResourceLedger,
   ledgerKey,
 } from "./components/useChatResourceLedger";
-import type { ChatResourceItem } from "../../api/modules/chat";
+import type { ChatResourceItem, LiveResource } from "../../api/modules/chat";
 import ChatSessionSidebar from "./components/ChatSessionSidebar";
-// v17 · F4：右侧 200px 资源条（上半区=当前会话，下半区=当前聊天）
-import CoApisResourceStrip from "./components/CoApisResourceStrip";
-import type { ResourceStripScope } from "./components/CoApisResourceStrip";
 import CoApisPreviewDrawer, {
   type PreviewSwitchItem,
   type PreviewTarget,
@@ -2111,10 +2106,6 @@ export default function ChatPage() {
   // 「查看全部」针对的是哪个会话。左栏展开的那一行未必是当前会话，抽屉必须
   // 跟着被点的那一行走，否则显示的是另一个会话的资源（方案 F1）。
   const [resourcesChatId, setResourcesChatId] = useState<string | null>(null);
-  // v17 · F4：抽屉对应的作用域 —— 资源条上半区（当前会话）传 "session"，
-  // 下半区（当前聊天）传 "chat"。抽屉与条必须同源，否则「查看全部」打开的
-  // 是另一份清单。
-  const [resourcesScope, setResourcesScope] = useState<ResourceStripScope>("chat");
   const ledgerMetaOf = ledger.metaOf;
 
   /** 本轮资源（消息 metadata）+ 台账 meta（大小/时间/版本/状态）合并 */
@@ -2139,8 +2130,20 @@ export default function ChatPage() {
     window.setTimeout(() => card.classList.remove("coapis-locate-flash"), 1600);
   }, []);
 
+  // 流式本轮资源入参：两套字段词汇都要吃 —— 实时 completed 事件用
+  // {url|source, type, name}，台账/持久化用 {path, kind, title}。
+  // v23 右栏与「本轮产出」卡下线后，本类型是流式事件在本页的唯一落点。
+  type RoundResourceInput = Partial<LiveResource> & {
+    path?: string;
+    url?: string;
+    source?: string;
+    type?: string;
+    kind?: string;
+    name?: string;
+  };
+
   const roundItems = useCallback(
-    (raw?: LiveResource[], messageId?: string): ChatResourceItem[] => {
+    (raw?: RoundResourceInput[], messageId?: string): ChatResourceItem[] => {
       if (!raw?.length) return [];
       const out: ChatResourceItem[] = [];
       const seen = new Set<string>();
@@ -2511,7 +2514,8 @@ export default function ChatPage() {
             const _kbCites = (payload as any).citations;
             const _turnRes = (payload as any).resources;
             // ⭐ 会话资源（B1/B2）：本轮读到的网页 / 写到工作区的文件，同样
-            // 挂顶层，由 response.append 的 CoApisChatResources 消费。
+            // 挂顶层，由 response.append 插槽消费（v23 起消费者是气泡末尾的
+            // 「本轮资源条」CoApisChatResourceBar —— 产出卡与右栏已下线）。
             if (Array.isArray(_turnRes) && _turnRes.length > 0) {
               // 台账是权威底账：本轮结束后刷一次会话资源条，让清单与
               // 气泡里的增量对齐（fire-and-forget，失败不影响消息）。
@@ -2749,43 +2753,12 @@ export default function ChatPage() {
               />
             </ChatErrorBoundary>
           </div>
-          {/* v17 · F4（小蜜蜂 2026-11-05「在会话窗口的右侧增加一列 200px 的宽度，
-              上半部分表示当前会话的内容，下面部分表示当前聊天」）：右侧资源条列。
-              上半区=当前会话（跨聊天，台账 scope=session）；下半区=当前聊天。
-              点条目 → 直接进预览抽屉；点「查看全部」→ L3 台账抽屉（作用域同源）。
-              数据只走共享台账缓存（useScopedResources），这里不发第二个请求。 */}
-          <aside className={styles.chatResourceRail}>
-            <CoApisResourceStrip
-              scope="session"
-              chatId={chatId}
-              maxItems={6}
-              onPreview={(target) => {
-                setPreviewGroup(t("chat.resources.groupSession", "当前会话"));
-                openPreview({ path: target.path, title: target.name });
-              }}
-              onOpenAll={() => {
-                setResourcesChatId(chatId ?? null);
-                setResourcesScope("session");
-                setResourcesOpen(true);
-              }}
-              refreshSignal={resourceRefresh}
-            />
-            <CoApisResourceStrip
-              scope="chat"
-              chatId={chatId}
-              maxItems={6}
-              onPreview={(target) => {
-                setPreviewGroup(t("chat.resources.groupChat", "当前聊天"));
-                openPreview({ path: target.path, title: target.name });
-              }}
-              onOpenAll={() => {
-                setResourcesChatId(chatId ?? null);
-                setResourcesScope("chat");
-                setResourcesOpen(true);
-              }}
-              refreshSignal={resourceRefresh}
-            />
-          </aside>
+          {/* v23 · 右侧资源条整列下线（2026-11-09 拍板）：它与左栏选中会话后的展开面
+              板、气泡末尾的本轮资源条三层同义——同一接口、同一作用域、同一份缓存，上半
+              区（scope=session，跨聊天汇总）已确认砍掉。常驻 200px 换来的还有「栏盖住
+              输入框与知识库按钮」的一串窄屏补丁。资源入口收敛为两处：左栏会话行展开面
+              板（含「查看全部」抽屉）、气泡末尾本轮条。栏样式、取数钩子 useScopedResources
+              与组件 CoApisResourceStrip 一并删除。 */}
         </div>
         </div>
         </div>
@@ -2794,7 +2767,6 @@ export default function ChatPage() {
         <CoApisResourceDrawer
           open={resourcesOpen}
           chatId={resourcesChatId ?? chatId}
-          scope={resourcesScope}
           refreshSignal={resourceRefresh}
           onClose={() => {
             setResourcesOpen(false);
@@ -2804,11 +2776,8 @@ export default function ChatPage() {
             setResourcesOpen(false);
             setResourcesChatId(null);
             // v17 · F6：预览窗组标题与抽屉作用域同源（条 → 抽屉 → 预览三处一把尺）
-            setPreviewGroup(
-              resourcesScope === "session"
-                ? t("chat.resources.groupSession", "当前会话")
-                : t("chat.resources.groupChat", "当前聊天"),
-            );
+            // v23：跨聊天作用域下线，预览窗组标题恒为「会话资源」
+            setPreviewGroup(t("chat.resourcesTitle", "会话资源"));
             openPreview({ path: target.path, title: target.name });
           }}
           // F1：会话资源抽屉与预览抽屉同一口径 —— 铺满主内容区，不铺满整窗
