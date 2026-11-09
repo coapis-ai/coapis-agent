@@ -1107,11 +1107,21 @@ class LightContextManager(BaseContextManager):
         # 会话引用闸门（D2-A）：搜索结果里的链接只有被正文真正引用才算引用。
         # 必须放在最前面 —— 下面 memory_manager 为空会提前 return。
         try:
-            from .reference_collector import _iter_text_chunks, finalize_web_references
+            from .reference_collector import (
+                _iter_text_chunks,
+                _workspace_root,
+                finalize_media_references,
+                finalize_web_references,
+            )
+            from ...config.context import get_current_username as _gc
 
             body = "\n".join(_iter_text_chunks(output))
             if body:
                 finalize_web_references(body)
+                # v20 · W5：正文里的媒体链接（`![](media/x.png)` /
+                # `/files/preview/…`）按 producer 进台账——生成图片/图表
+                # 只在回复正文出现时也要被资源条看见。
+                finalize_media_references(body, _workspace_root(_gc()))
         except Exception:
             logger.debug("web reference gate skipped", exc_info=True)
 

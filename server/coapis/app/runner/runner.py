@@ -106,6 +106,38 @@ def _take_turn_resources() -> list:
         return []
 
 
+def _session_backfill_resources(chat_id: str, username: str) -> None:
+    """会话收尾补扫（v20 · W4）：补登本轮生成但未登记的资源。
+
+    技能脚本 / MCP / shell 生成的文件走不到采集钩子（v17 实测 64% 引用
+    隐形）。补扫只登记新文件、带 25s 去抖与 200 文件上限，任何异常都
+    吞掉——资源条是锦上添花，completed 事件是刚需。同步版给 await 位点
+    （to_thread 里跑），生成器位点用 _session_backfill_resources_task。
+    """
+    try:
+        if not chat_id or not username:
+            return
+        from ...foundation.resource_ledger import get_resource_ledger
+
+        get_resource_ledger().backfill_chat_session(
+            chat_id=chat_id, username=username
+        )
+    except Exception:
+        logger.debug("session backfill skipped", exc_info=True)
+
+
+async def _session_backfill_resources_task(chat_id: str, username: str) -> None:
+    """补扫的异步壳：扫盘挪进线程，绝不平淡生成器里的 event loop。"""
+    try:
+        import asyncio
+
+        asyncio.create_task(
+            _session_backfill_resources_task(chat_id, username)
+        )
+    except Exception:
+        logger.debug("session backfill task skipped", exc_info=True)
+
+
 def _turn_resources_from_ledger(chat_id: str, username: str) -> list:
     """完成事件里的资源清单改从台账取（B2 兜底）。
 
@@ -830,6 +862,11 @@ class AgentRunner(Runner):
                     # 而请求侧 user_id 常是渠道名（wecom:xxx）或 default。
                     # 此处曾误写未定义的全局名 username → NameError 被下面的
                     # except Exception 吞成空列表 → 资源条恒空。
+                    asyncio.create_task(
+                        _session_backfill_resources_task(
+                            chat.id, effective_user_id
+                        )
+                    )
                     _turn_res = _turn_resources_from_ledger(
                         chat.id, effective_user_id,
                     )
@@ -888,6 +925,11 @@ class AgentRunner(Runner):
                     assistant_msg = Msg(name="assistant", content=[TextBlock(text=assistant_text)], role="assistant")
                     # 刷新回放：兜底路径同样带上本轮资源/来源（方案 §12.2）
                     try:
+                        asyncio.create_task(
+                            _session_backfill_resources_task(
+                                chat.id, effective_user_id
+                            )
+                        )
                         _fb_res = _turn_resources_from_ledger(
                             chat.id, effective_user_id,
                         )
@@ -1226,6 +1268,9 @@ class AgentRunner(Runner):
                     # 文件，挂到 completed 响应事件，前端渲染「产出卡 + 资源条」。
                     try:
                         _cid, _uname = _resolve_turn_identity(request)
+                        asyncio.create_task(
+                            _session_backfill_resources_task(_cid, _uname)
+                        )
                         _turn_res = _turn_resources_from_ledger(_cid, _uname) or _take_turn_resources()
                         if _turn_res:
                             event.resources = _turn_res
@@ -1270,6 +1315,9 @@ class AgentRunner(Runner):
                     pass
                 try:
                     _cid, _uname = _resolve_turn_identity(request)
+                    asyncio.create_task(
+                        _session_backfill_resources_task(_cid, _uname)
+                    )
                     _turn_res = _turn_resources_from_ledger(_cid, _uname) or _take_turn_resources()
                     if _turn_res:
                         _fallback.resources = _turn_res

@@ -1142,6 +1142,7 @@ async def list_chat_resources(
         rows, total = [], 0
 
     from ...foundation.resource_ledger import epoch_ms  # v17 · F5
+    from ...foundation.resource_category import resolve_category  # v20 · W1
 
     # 角色按 ref 归属：本会话是 producer 就是产出，否则是引用。
     items: List[Dict[str, Any]] = []
@@ -1152,6 +1153,10 @@ async def list_chat_resources(
         item = {
             "resource_key": row.get("resource_key"),
             "kind": kind,
+            # v20 · W1：类别（图标/筛选的唯一尺子）。迁移 0024 未跑到的
+            # 存量行 category 为空，现场换算兜底。
+            "category": row.get("category")
+            or resolve_category(kind, path),
             "path": path,
             "title": row.get("title") or (path.rsplit("/", 1)[-1] if kind == "file" else path),
             "role": role,

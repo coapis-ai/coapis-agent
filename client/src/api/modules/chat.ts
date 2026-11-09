@@ -48,6 +48,27 @@ export interface ChatResourceList {
   limit: number;
 }
 
+/**
+ * 流式期间 SSE 推送的文件事件形状（聊天页据此在气泡内挂「本轮资源条」）。
+ *
+ * 原住在「本轮产出」卡 CoApisChatResources 里；右栏与该卡下线后迁到此处，
+ * 字段与后端台账一一对应，与上面的 ChatResourceItem 是两套形状（后者是台账
+ * 行，本类型是流式事件），不可互换。
+ */
+export interface LiveResource {
+  resource_id?: string;
+  resource_kind: string;
+  source: string;
+  status: string;
+  title: string;
+  file_name?: string | null;
+  file_ext?: string | null;
+  file_size?: number | null;
+  updated_at?: number | null;
+  /** 仅 source="upload" 时有值；引用态徽标据此区分。 */
+  scene_name?: string | null;
+}
+
 /** 在途的会话资源请求（批次 B4 并发合并用），落地即摘除 */
 const resourceInflight = new Map<string, Promise<ChatResourceList>>();
 

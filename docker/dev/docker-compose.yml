@@ -37,7 +37,7 @@ services:
       - PYTHONPATH=/app
       # 日志时间戳用本地时区：容器默认 UTC，运维读日志要自己 +8
       - TZ=Asia/Shanghai
-      - COAPIS_VERSION=1.2.15
+      - COAPIS_VERSION=1.2.16
       - COAPIS_WORKING_DIR=/apps/ai/coapis
       - COAPIS_WORKSPACES_DIR=/apps/ai/coapis/workspaces
       - COAPIS_SHARED_RUNTIME_DIR=/apps/ai/coapis/shared_runtime
@@ -94,23 +94,11 @@ services:
       retries: 3
       start_period: 10s
 
-  # ── 测试一次性服务 ──
-  # 跑全量测试的唯一合规入口：全程走 docker compose，不碰运行中的 server 容器。
-  #   docker compose -f docker-compose.yml run --no-deps test
-  # profiles 保证 `up -d` 不会把它带起来；compose v2 的 `run` 默认跑完即删容器
-  # （无需 --rm），所以不会堆积。仓库根整树只读挂载到 /repo，测试文件里
-  # Path(__file__).parents[2] 之类相对定位才能解析到真实的 /repo/scripts
-  # （从 /app 跑会解析成不存在的 /app/scripts）。
-  test:
-    image: coapis-agent:latest
-    profiles: ["test"]
-    volumes:
-      - ../../:/repo:ro
-    working_dir: /repo
-    environment:
-      - PYTHONPATH=/repo/server
-      - COAPIS_WORKING_DIR=/tmp/coapis-test
-    command: python -m pytest -q -p no:cacheprovider
+  # ── 测试服务：已删除（2026-11-09，见 MEMORY 十六/二十一条）──
+  # 此服务从设计上就跑不了测试：镜像 ENTRYPOINT=entrypoint.sh 不看参数直 exec uvicorn，
+  # command 被吞 → compose run 永久 attach 到常驻服务器容器 = 卡死 + 堆积 test-run 容器；
+  # 且镜像内无 pytest。测试唯一入口 = 宿主 .venv-test（run_full_suite.sh / run_regression.sh，
+  # 后台+轮询日志）；功能验证 = dev 已部署环境的 API(4300) 与浏览器。不要再加回来。
 
 networks:
   frontend-dev:

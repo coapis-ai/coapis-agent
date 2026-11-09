@@ -48,6 +48,7 @@ from .db.models.resources import (
     ResourceRef,
     make_resource_key,
 )
+from .resource_category import resolve_category
 from .db.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,7 @@ class ResourceLedger:
                             owner_scope=owner_scope,
                             owner_id=owner_id,
                             kind=kind,
+                            category=resolve_category(kind, path),
                             path=path,
                             title=title_in or None,
                             status="draft",
@@ -319,6 +321,13 @@ class ResourceLedger:
                     #    恒 None → 版本与大小**永远不更新**（实测 30/34 行
                     #    version=1，xlsx 重存后仍显示 v1 → 小蜜蜂第 2 条）。
                     res.last_seen_at = now
+                    # v20 · W1：存量行 category 懒补（迁移 0024 未跑、或行比
+                    # 列老时现场换算一次）。换算失败保持原值，不影响主流程。
+                    try:
+                        if not getattr(res, "category", None):
+                            res.category = resolve_category(kind, path)
+                    except Exception:  # pragma: no cover - defensive
+                        pass
                     fs_size = None
                     fs_mtime = None
                     if kind == "file":
@@ -506,7 +515,303 @@ class ResourceLedger:
             logger.debug("resource ledger mark_status failed (ignored): %s", exc)
             return False
 
+    # ── 治理写面（v20 · W3/W6 · 拍板 D1/D5）──────────────────────────
+    # 端点只准调这里，不准在 router 里摸 FS/摸列——尺子留在 ledger。
+
+    def list_owned(
+        self, *, resource_key: str, owner_scope: str, owner_id: str
+    ) -> list[Resource]:
+        """同一资源的全部台账行（双 key 历史行一并返回，治理操作要一起改）。"""
+        with get_session() as s:
+            rows = s.execute(
+                select(Resource)
+                .where(Resource.owner_scope == owner_scope)
+                .where(Resource.owner_id == owner_id)
+                .where(
+                    Resource.resource_key.in_(
+                        self._sibling_keys(s, resource_key, owner_scope, owner_id)
+                    )
+                )
+            ).scalars().all()
+            return list(rows)
+
+    def _sibling_keys(
+        self, s, resource_key: str, owner_scope: str, owner_id: str
+    ) -> list[str]:
+        """同一 (owner, kind, 规范路径) 的所有 key。
+
+        台账存量里同一文件可能有 ``files/x`` 与 ``x`` 两种口径的两行（合并
+        规则见 _chat_resource_rows 注释）——治理操作只改一行会让另一行变成
+        指向已不存在路径的幽灵行。按 (owner, kind, 工作区相对路径) 归拢。
+        """
+        base = s.execute(
+            select(Resource).where(Resource.resource_key == resource_key)
+        ).scalar_one_or_none()
+        if base is None:
+            return [resource_key]
+        owner_dir = self._ws / owner_id
+        norm = (
+            workspace_relative_path(base.path, owner_dir)
+            if base.kind == "file"
+            else base.path
+        )
+        rows = s.execute(
+            select(Resource).where(
+                Resource.owner_scope == owner_scope,
+                Resource.owner_id == owner_id,
+                Resource.kind == base.kind,
+            )
+        ).scalars().all()
+        keys = []
+        for r in rows:
+            rn = (
+                workspace_relative_path(r.path, owner_dir)
+                if r.kind == "file"
+                else r.path
+            )
+            if rn == norm:
+                keys.append(r.resource_key)
+        keys.append(resource_key)
+        return sorted(set(keys))
+
+    def soft_delete(
+        self, *, resource_key: str, owner_scope: str, owner_id: str
+    ) -> dict:
+        """软删台账行（**永不碰文件系统**，拍板 D1）。同资源所有兄弟行一起软删。"""
+        try:
+            now = time.time()
+            with get_session() as s:
+                rows = s.execute(
+                    select(Resource)
+                    .where(Resource.owner_scope == owner_scope)
+                    .where(Resource.owner_id == owner_id)
+                    .where(
+                        Resource.resource_key.in_(
+                            self._sibling_keys(
+                                s, resource_key, owner_scope, owner_id
+                            )
+                        )
+                    )
+                ).scalars().all()
+                if not rows:
+                    return {"ok": False, "reason": "资源不存在"}
+                for r in rows:
+                    r.status = "deleted"
+                    r.deleted_at = now
+                return {"ok": True, "rows": len(rows)}
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("resource soft_delete failed (ignored): %s", exc)
+            return {"ok": False, "reason": "内部错误"}
+
+    def set_status_guarded(
+        self,
+        *,
+        resource_key: str,
+        owner_scope: str,
+        owner_id: str,
+        status: str,
+    ) -> dict:
+        """带 owner 校验的状态流转（转正式/转草稿/归档）。
+
+        端点直接调 mark_status 是不行的：resource_key 是可猜的 sha256，
+        治理端点必须证明"这行是你的"。兄弟行一起改，理由同 _sibling_keys。
+        """
+        try:
+            if status not in VALID_STATUSES:
+                return {"ok": False, "reason": "状态不合法"}
+            with get_session() as s:
+                rows = s.execute(
+                    select(Resource)
+                    .where(Resource.owner_scope == owner_scope)
+                    .where(Resource.owner_id == owner_id)
+                    .where(
+                        Resource.resource_key.in_(
+                            self._sibling_keys(
+                                s, resource_key, owner_scope, owner_id
+                            )
+                        )
+                    )
+                ).scalars().all()
+                if not rows:
+                    return {"ok": False, "reason": "资源不存在"}
+                for r in rows:
+                    r.status = status
+                    r.updated_at = time.time()
+                    if status == "deleted":
+                        r.deleted_at = time.time()
+                    elif status != "deleted":
+                        # 转正式/转草稿把软删恢复（与 register 复活逻辑一致）。
+                        r.deleted_at = None
+                return {"ok": True, "rows": len(rows), "status": status}
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("resource set_status_guarded failed (ignored): %s", exc)
+            return {"ok": False, "reason": "内部错误"}
+
+    def move_to_files(
+        self, *, resource_key: str, owner_scope: str, owner_id: str
+    ) -> dict:
+        """把 media/ 下的文件**物理移到 files/**（拍板 D5：允许移动，永不删除）。
+
+        安全边界（全部在 ledger 里守，端点不碰 FS）：
+          - 只动 file 类；路径必须落在**本人工作区**内（_resolve_file_path
+            带越界防护），且当前口径在 ``media/``（工作区相对）；
+          - 目标名冲突加 ``(n)`` 后缀，不覆盖任何既有文件；
+          - 兄弟台账行一起换 path；FS 移动失败 → 台账不动（两边不分叉）。
+        """
+        try:
+            if owner_scope != "user" or not owner_id:
+                return {"ok": False, "reason": "只支持用户资源"}
+            with get_session() as s:
+                rows = s.execute(
+                    select(Resource)
+                    .where(Resource.owner_scope == owner_scope)
+                    .where(Resource.owner_id == owner_id)
+                    .where(
+                        Resource.resource_key.in_(
+                            self._sibling_keys(
+                                s, resource_key, owner_scope, owner_id
+                            )
+                        )
+                    )
+                ).scalars().all()
+                file_rows = [r for r in rows if r.kind == "file"]
+                if not file_rows:
+                    return {"ok": False, "reason": "只有文件可以移动"}
+                owner_dir = self._ws / owner_id
+                rels = [
+                    workspace_relative_path(r.path, owner_dir) for r in file_rows
+                ]
+                if not all(str(x).startswith("media/") for x in rels):
+                    return {"ok": False, "reason": "只有聊天生成的媒体文件可以移动"}
+                rel = rels[0]
+                src = self._resolve_file_path(owner_id, rel)
+                if src is None or not src.is_file():
+                    return {"ok": False, "reason": "文件已不存在"}
+                # 越界防护：_resolve_file_path 是存在性回退解析，不做包含性
+                # 校验——这里必须自证源文件真在本人工作区内，否则 media/ 前缀
+                # 配上 ../ 就能把别人的文件搬进我的工作区。
+                try:
+                    src.resolve().relative_to(owner_dir.resolve())
+                except ValueError:
+                    return {"ok": False, "reason": "路径越界"}
+                name = src.name.replace("/", "").replace("\\", "")
+                stem, dot, suffix = name.partition(".")
+                files_dir = owner_dir / "files"
+                files_dir.mkdir(parents=True, exist_ok=True)
+                target = files_dir / name
+                n = 1
+                while target.exists():
+                    n += 1
+                    target = files_dir / (f"{stem}({n}){dot}{suffix}" if dot else f"{name}({n})")
+                try:
+                    import shutil
+
+                    shutil.move(str(src), str(target))
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug("resource move_to_files FS failed: %s", exc)
+                    return {"ok": False, "reason": "移动失败"}
+                new_rel = "files/" + target.name
+                new_key = make_resource_key(owner_scope, owner_id, "file", new_rel)
+                for r in file_rows:
+                    r.path = new_rel
+                    r.category = resolve_category("file", new_rel)
+                    r.updated_at = time.time()
+                    r.last_seen_at = time.time()
+                return {
+                    "ok": True,
+                    "path": new_rel,
+                    "resource_key": new_key,
+                    "rows": len(file_rows),
+                }
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("resource move_to_files failed (ignored): %s", exc)
+            return {"ok": False, "reason": "内部错误"}
+
     # ── sweep (FS → DB, one-way) ─────────────────────────────────────
+
+    def backfill_chat_session(
+        self, *, chat_id: str, username: str, recent_seconds: float = 3600.0
+    ) -> int:
+        """会话收尾补扫（v20 · W4）：把工作区里**新出现、没登记过**的文件补进
+        台账并挂到本会话。
+
+        为什么需要：登记钩子只认**白名单工具**的出入参，技能脚本 / MCP 工具 /
+        子代理在 shell 里生成的文件走不到钩子（v17 实测引用面 64% 隐形）；
+        每日全量 sweep 在夜里才跑——用户当时就要看到。会话收尾扫一遍本人
+        工作区、只认 ``recent_seconds`` 内 mtime 的新文件，成本 O(新文件)。
+
+        纪律：
+          - **只登记，永不删除/移动**——扫描发现不了"该删"，删除是治理动作；
+          - 去抖：同一会话 ``_SESSION_BACKFILL_COOLDOWN`` 秒内只跑一次（连续
+            多条消息不重复扫盘）；
+          - 上限 ``_SESSION_BACKFILL_CAP`` 个文件，防止一次扫爆；
+          - 全程 try/except——补扫失败绝不影响 completed 事件透出。
+        """
+        try:
+            if not chat_id or not username:
+                return 0
+            now = time.time()
+            last = _SESSION_BACKFILL_AT.get(chat_id, 0.0)
+            if now - last < _SESSION_BACKFILL_COOLDOWN:
+                return 0
+            _SESSION_BACKFILL_AT[chat_id] = now
+            root = self._ws / username
+            if not root.is_dir():
+                return 0
+            registered = 0
+            scanned = 0
+            try:
+                files = list(root.rglob("*"))
+            except OSError:
+                return 0
+            for f in files:
+                if scanned >= _SESSION_BACKFILL_CAP:
+                    break
+                try:
+                    if not f.is_file():
+                        continue
+                    rel = f.relative_to(root).as_posix()
+                    parts = PurePosixPath(rel).parts
+                    if parts and NOISE_DIR_PARTS.intersection(parts[:-1]):
+                        continue
+                    # 只认本轮时间窗内的新文件（会话收尾语义）。
+                    if now - float(f.stat().st_mtime) > recent_seconds:
+                        continue
+                except OSError:
+                    continue
+                scanned += 1
+                ws_rel = workspace_relative_path(rel, root)
+                key = make_resource_key("user", username, "file", ws_rel)
+                with get_session() as s:
+                    exists = s.execute(
+                        select(Resource.resource_key)
+                        .where(Resource.resource_key == key)
+                    ).scalar_one_or_none()
+                if exists is not None:
+                    continue
+                k = self.register(
+                    owner_scope="user",
+                    owner_id=username,
+                    kind="file",
+                    path=ws_rel,
+                    source="sweep",
+                    path_form="workspace",
+                )
+                if not k:
+                    continue
+                self.attach_ref(
+                    resource_key=k,
+                    referrer_kind="chat",
+                    referrer_id=chat_id,
+                    role="producer",
+                )
+                registered += 1
+            return registered
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(
+                "session backfill skipped for chat %s: %s", chat_id[:16], exc
+            )
+            return 0
 
     def _files_root_index(self, owner_id: str) -> dict:
         """``basename → [(rel, abs, size, mtime)]``：该用户 files 根下所有可当"新位置"的文件。
@@ -946,6 +1251,7 @@ class ResourceLedger:
         owner_id: str,
         kind: Optional[str] = None,
         status: Optional[str] = None,
+        category: Optional[str] = None,
         chat_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
@@ -955,6 +1261,9 @@ class ResourceLedger:
         ``chat_id`` filters through ``resource_refs`` (the only source of
         reference truth) instead of a denormalised column: a resource shows up
         for a chat only if that chat actually references it.
+
+        ``category``（v20 · W1）按类别过滤；值不合法直接当没传——过滤参数
+        永远不可能让列表变空得莫名其妙。
         """
         try:
             with get_session() as s:
@@ -967,6 +1276,8 @@ class ResourceLedger:
                     stmt = stmt.where(Resource.kind == kind)
                 if status:
                     stmt = stmt.where(Resource.status == status)
+                if category:
+                    stmt = stmt.where(Resource.category == category)
                 if chat_id:
                     ref_keys = (
                         select(ResourceRef.resource_key)
@@ -1278,6 +1589,7 @@ class ResourceLedger:
         owner_id: str,
         kind: Optional[str] = None,
         status: Optional[str] = None,
+        category: Optional[str] = None,
         chat_id: Optional[str] = None,
     ) -> int:
         """Total matching rows (pre-pagination). Filters mirror ``list_resources``.
@@ -1297,6 +1609,8 @@ class ResourceLedger:
                     stmt = stmt.where(Resource.kind == kind)
                 if status:
                     stmt = stmt.where(Resource.status == status)
+                if category:
+                    stmt = stmt.where(Resource.category == category)
                 if chat_id:
                     ref_keys = (
                         select(ResourceRef.resource_key)
@@ -1321,25 +1635,43 @@ class ResourceLedger:
                 ).scalars().all()
                 by_status: dict[str, int] = {}
                 by_kind: dict[str, int] = {}
+                by_category: dict[str, int] = {}
                 orphans = 0
                 for r in rows:
                     by_status[r.status] = by_status.get(r.status, 0) + 1
                     by_kind[r.kind] = by_kind.get(r.kind, 0) + 1
+                    # v20 · W1：类别分布。列缺失（迁移未跑）时现算，保证
+                    # 统计面在回填完成前也给真数字。
+                    cat = getattr(r, "category", None) or resolve_category(
+                        r.kind, r.path
+                    )
+                    by_category[cat] = by_category.get(cat, 0) + 1
                     if self._count_refs(s, r.resource_key) == 0:
                         orphans += 1
                 return {
                     "total": len(rows),
                     "by_status": by_status,
                     "by_kind": by_kind,
+                    "by_category": by_category,
                     "orphans": orphans,
                     "fs_missing": sum(1 for r in rows if r.fs_present == 0),
                 }
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("resource ledger stats failed (ignored): %s", exc)
-            return {"total": 0, "by_status": {}, "by_kind": {}, "orphans": 0, "fs_missing": 0}
+            return {
+                "total": 0, "by_status": {}, "by_kind": {},
+                "by_category": {}, "orphans": 0, "fs_missing": 0,
+            }
 
 
 _LEDGER: Optional[ResourceLedger] = None
+
+# ── 会话收尾补扫去抖（v20 · W4）───────────────────────────────────
+# 进程级：补扫是尽力而为的实时兜底，不需要跨重启记忆——重启后第一条
+# 消息收尾就扫，正是最该扫的时候。
+_SESSION_BACKFILL_AT: dict[str, float] = {}
+_SESSION_BACKFILL_COOLDOWN = 25.0
+_SESSION_BACKFILL_CAP = 200
 
 
 def get_resource_ledger() -> ResourceLedger:

@@ -60,6 +60,33 @@ FILE_REFERENCE_TOOLS = frozenset(
 
 WEB_REFERENCE_TOOLS = frozenset({"web_search", "web_fetch", "browser_use"})
 
+# ── v20 · W5：生成媒体识别（统一尺子）──────────────────────────────
+#
+# 三把尺子的会师点（方案 v20 缺口 5「36% 引用隐形」的后端半边）：
+#   前端  client/src/components/Chat/mediaType.ts   image/video/audio 表
+#   后端  agents/model_factory.py 的媒体扩展名（formatter 认的集合）
+#   本表  采集侧识别「这一轮产出了媒体」—— 三表逐字对齐由
+#         tests/test_reference_collector.py 的对账用例钉死，防漂移。
+# 扩展名口径 = mediaType.ts 的 IMAGE/VIDEO/AUDIO 并集（采集识别用并集即可，
+# formatter 约束由 mediaType.ts 自己保证，不在这里二次发明）。
+MEDIA_IMAGE_EXTS = frozenset({"png", "jpg", "jpeg", "gif", "webp"})
+MEDIA_VIDEO_EXTS = frozenset(
+    {"mp4", "webm", "mpeg", "mov", "avi", "mkv"}
+)
+MEDIA_AUDIO_EXTS = frozenset(
+    {"wav", "mp3", "m4a", "aac", "ogg", "opus", "flac", "amr", "amr-wb"}
+)
+MEDIA_EXTS = MEDIA_IMAGE_EXTS | MEDIA_VIDEO_EXTS | MEDIA_AUDIO_EXTS
+
+#: 带媒体扩展名的裸 URL（允许带查询串——签名外链常见）。
+#: markdown 链接沿用下方既有的 `_MD_LINK_RE`（命名组版），不新造第二把。
+_MEDIA_URL_RE = re.compile(
+    r"https?://[^\s\)\]\"'<>]+\.(?:"
+    + "|".join(sorted(MEDIA_EXTS))
+    + r")(?:\?[^\s\)\]\"'<>]*)?",
+    re.IGNORECASE,
+)
+
 #: **脚本/外部工具产出**（v17 · F4 · 拍板 D3-A）：这一支扫工具**输入与输出
 #: 文本里出现的路径**，命中「真实落盘 + 落在本人工作区」闸门就按 producer 登记。
 #:
@@ -326,6 +353,58 @@ def _extract_urls(text: str) -> list[tuple[str, str]]:
     return out
 
 
+def _media_ext_of(u: str) -> str:
+    """URL 的路径段扩展名（查询串/片段不参与）。"""
+    tail = (u or "").split("#", 1)[0].split("?", 1)[0]
+    return tail.rsplit(".", 1)[-1].lower() if "." in tail else ""
+
+
+def _scan_media(
+    texts: list[str], workspace: Optional[Path], source: str
+) -> list[dict]:
+    """从工具输出里识别**媒体链接**（v20 · W5 · 统一尺子）。
+
+    只认带媒体扩展名的 URL（`MEDIA_EXTS` = mediaType.ts 三表并集）：
+      - 指向我方服务器 /files/preview 的本地媒体 → 解析回工作区相对路径，
+        文件真实存在才登记（producer）——生成图表/图片由此进台账；
+      - 其余带媒体扩展名的外链 → web 引用（第三方图床/签名链接）。
+    路径存在性沿用 `_normalize_file_path` 的本人工作区闸门，模型吹出来的
+    假路径进不来。
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for t in texts:
+        for m in _MEDIA_URL_RE.finditer(t or ""):
+            url = _clean_url(m.group(0))
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            if "/files/preview/" in url:
+                tail = url.split("/files/preview/", 1)[1]
+                rel = _normalize_file_path(tail, workspace)
+                if rel:
+                    out.append(
+                        {
+                            "kind": "file",
+                            "ref": rel,
+                            "title": Path(rel).name,
+                            "role": "producer",
+                            "source": source,
+                        }
+                    )
+            elif _media_ext_of(url) in MEDIA_EXTS:
+                out.append(
+                    {
+                        "kind": "web",
+                        "ref": url,
+                        "title": url,
+                        "role": "reference",
+                        "source": source,
+                    }
+                )
+    return out
+
+
 # ── 采集主入口 ──────────────────────────────────────────────────────
 
 
@@ -540,6 +619,24 @@ def collect_from_tool_call(
                         "source": tool_name,
                     }
                 )
+
+        elif not any(
+            tool_name in s
+            for s in (
+                FILE_PRODUCER_TOOLS,
+                FILE_REFERENCE_TOOLS,
+                WEB_REFERENCE_TOOLS,
+            )
+        ) and not is_script_producer_tool(tool_name):
+            # v20 · W5：生成媒体识别。`generate_media_using_shell` 这类媒体
+            # 工具不在任何白名单里（工具名随 MCP 前缀多变，白名单追不上），
+            # 按**内容**识别：输出里带媒体扩展名的链接 → 落在我方工作区的
+            # 按 producer 进台账（图片/视频卡片由此而来），外链按 web 引用。
+            # 已在白名单的工具不重复扫——read_file 读图早有 view_image 支、
+            # 脚本产图由脚本支的路径扫描负责，重复登记会互相抢角色。
+            for item in _scan_media(texts, workspace, tool_name):
+                candidates.append(item)
+
         else:
             return added
 
@@ -648,6 +745,59 @@ def finalize_web_references(body_text: str) -> int:
             kept,
             len(pending),
         )
+    return kept
+
+
+def finalize_media_references(body_text: str, workspace: Optional[Path]) -> int:
+    """正文媒体闸门（v20 · W5）：回复正文里的媒体链接进台账。
+
+    模型把生成的图表以 `![xx](media/x.png)` 或 `![](/files/preview/…)` 写进
+    正文时，工具输出侧可能一个字都没提（图是回复阶段拼的）；这一闸把**正文
+    引用的本地媒体**按 producer 登记，前端图片卡片/资源条由此与台账同源。
+    外链媒体交给 `_scan_media`（工具输出侧）与 web 闸门，这里不重复。
+    路径闸门同 `_normalize_file_path`：必须落在本人工作区且真实存在。
+    """
+    turn = _turn_resources_ctx.get()
+    if turn is None or not body_text:
+        return 0
+    kept = 0
+    seen: set[str] = set()
+    md_targets: list[tuple[str, str]] = []
+    for m in _MD_LINK_RE.finditer(body_text):
+        md_targets.append((m.group("url"), m.group("title")))
+    md_targets.extend(
+        (u, "") for u in re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", body_text)
+    )
+    for raw, title in md_targets:
+        url = _clean_url(raw)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        tail = (
+            url.split("/files/preview/", 1)[1]
+            if "/files/preview/" in url
+            else url
+        )
+        if tail.startswith(("http://", "https://")):
+            continue
+        rel = _normalize_file_path(tail, workspace)
+        if not rel:
+            continue
+        if _media_ext_of(rel) not in MEDIA_EXTS and "/media/" not in f"/{rel}":
+            continue
+        item = {
+            "kind": "file",
+            "ref": rel,
+            "title": (title.strip() or Path(rel).name),
+            "role": "producer",
+            "source": "reply",
+        }
+        if not turn.add(item):
+            continue
+        _ledger_register(item, chat_id=turn.chat_id, username=turn.username)
+        kept += 1
+    if kept:
+        logger.info("media reply gate: registered %d media from reply", kept)
     return kept
 
 

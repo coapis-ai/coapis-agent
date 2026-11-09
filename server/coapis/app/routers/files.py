@@ -1008,6 +1008,11 @@ async def session_dir(
 async def list_resources(
     kind: Optional[str] = Query(None, description="按类型过滤: file/db/kb/mcp/web"),
     status: Optional[str] = Query(None, description="按状态过滤: draft/official/orphan/archived"),
+    category: Optional[str] = Query(
+        None,
+        description="按类别过滤（v20·W1）: doc/sheet/slide/pdf/image/media/archive/"
+        "code/web/chat_record/db_record/kb_entry/mcp_tool/other",
+    ),
     chat_id: Optional[str] = Query(
         None,
         description="按会话过滤：经 resource_refs 反查该会话引用过的资源（不读冗余列）",
@@ -1017,15 +1022,19 @@ async def list_resources(
     request: Request = None,
 ):
     """资源清单（每资源一行，含引用者计数）。软删行不出现。"""
+    from ...foundation.resource_category import VALID_CATEGORIES
     from ...foundation.resource_ledger import get_resource_ledger
 
     username = get_current_user(request)["username"]
     ledger = get_resource_ledger()
+    # 非法类别当没传：过滤参数永远不可能让列表"莫名其妙变空"。
+    cat = category if category in VALID_CATEGORIES else None
     items = ledger.list_resources(
         owner_scope="user",
         owner_id=username,
         kind=kind,
         status=status,
+        category=cat,
         chat_id=chat_id,
         limit=limit,
         offset=offset,
@@ -1037,9 +1046,71 @@ async def list_resources(
         owner_id=username,
         kind=kind,
         status=status,
+        category=cat,
         chat_id=chat_id,
     )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/resources/categories")
+@require_permission("chat:read")
+async def resource_categories(request: Request):
+    """类别注册表快照（v20 · W1）：类别 → 扩展名归属，供排障与一致性核对。"""
+    from ...foundation.resource_category import CATEGORY_ORDER, VALID_CATEGORIES
+
+    return {"categories": list(CATEGORY_ORDER), "valid": sorted(VALID_CATEGORIES)}
+
+
+class ResourceGovernanceBody(BaseModel):
+    """台账治理动作（v20 · W3/W6 · 拍板 D1）。
+
+    ``publish`` 转正式 / ``to_draft`` 转草稿 / ``archive`` 归档 /
+    ``delete`` 软删（**永不碰文件系统**）/ ``move`` 把 media/ 的聊天生成
+    文件物理移到 files/（唯一允许的 FS 写操作，带越界防护）。
+    """
+
+    action: str
+
+
+@router.patch("/resources/{resource_key}")
+@require_permission("chat:write")
+async def govern_resource(
+    resource_key: str, body: ResourceGovernanceBody, request: Request = None
+):
+    """台账行治理。owner 校验在 ledger 内做——key 是 sha256，可猜不可信。"""
+    from ...foundation.resource_ledger import get_resource_ledger
+
+    username = get_current_user(request)["username"]
+    ledger = get_resource_ledger()
+    action = str(body.action or "").strip().lower()
+    if action == "publish":
+        out = ledger.set_status_guarded(
+            resource_key=resource_key, owner_scope="user",
+            owner_id=username, status="official",
+        )
+    elif action == "to_draft":
+        out = ledger.set_status_guarded(
+            resource_key=resource_key, owner_scope="user",
+            owner_id=username, status="draft",
+        )
+    elif action == "archive":
+        out = ledger.set_status_guarded(
+            resource_key=resource_key, owner_scope="user",
+            owner_id=username, status="archived",
+        )
+    elif action == "delete":
+        out = ledger.soft_delete(
+            resource_key=resource_key, owner_scope="user", owner_id=username
+        )
+    elif action == "move":
+        out = ledger.move_to_files(
+            resource_key=resource_key, owner_scope="user", owner_id=username
+        )
+    else:
+        out = {"ok": False, "reason": "动作不合法"}
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("reason") or "失败")
+    return out
 
 
 @router.get("/resources/stats")

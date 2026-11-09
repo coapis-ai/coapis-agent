@@ -53,6 +53,17 @@ VALID_REFERRER_KINDS = frozenset({"session", "chat", "agent", "user", "scene"})
 #: Referrer roles.
 VALID_ROLES = frozenset({"reference", "producer", "consumer"})
 
+#: 类别尺子在 ``foundation/resource_category.py``（v20 · W1）：kind 回答
+#: "从哪个子系统来"，category 回答"用户手里这是个什么东西"。列由 register
+#: 写入，换算函数全仓唯一（``resolve_category``）。
+VALID_CATEGORIES = frozenset(
+    {
+        "doc", "sheet", "slide", "pdf", "image", "media", "archive",
+        "code", "web", "chat_record", "db_record", "kb_entry",
+        "mcp_tool", "other",
+    }
+)
+
 
 def make_resource_key(owner_scope: str, owner_id: str, kind: str, path: str) -> str:
     """Stable resource identity. **Owner is a component** (see module docstring).
@@ -75,6 +86,10 @@ class Resource(BaseRow):
     owner_scope: Mapped[str] = mapped_column(Text, nullable=False)
     owner_id: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
+    #: v20 · W1：类别（resolve_category 换算）。迁移 0024。
+    category: Mapped[str] = mapped_column(
+        Text, nullable=False, default="other", server_default=text("'other'")
+    )
     path: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
@@ -106,6 +121,7 @@ class Resource(BaseRow):
     __table_args__ = (
         Index("idx_resources_owner", "owner_scope", "owner_id"),
         Index("idx_resources_kind", "kind"),
+        Index("idx_resources_category", "category"),
         Index("idx_resources_status", "status"),
         Index("idx_resources_fs", "fs_present"),
     )
