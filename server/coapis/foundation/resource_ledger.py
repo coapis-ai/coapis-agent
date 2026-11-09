@@ -34,7 +34,7 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 
 from ..constant import WORKSPACES_DIR
 from .db.engine import get_session
@@ -64,6 +64,12 @@ NOISE_DIR_PARTS = frozenset({
 #: 工作区根下从来不是用户的目录（系统产物）。评测沙箱、agent 工作区、已删除
 #: 账号的残留由 ``_known_usernames()`` 判定，这里只硬挡系统目录。
 NON_USER_WORKSPACE_DIRS = frozenset({"system"})
+
+#: 归位（散文件搬家，v20 · W6 · 拍板 D4）不许碰的工作区根目录：代码与日志、
+#: 系统沙箱。点开头目录（``.memory`` / ``.trash`` / ``.temp`` …）由
+#: ``move_to_inbox`` 里的"点开头一律拒"规则覆盖，不必在这里枚举。
+#: 治理动作的输入来自前端勾选，**必须**假定它可以被恶意构造。
+NON_MOVABLE_ROOT_DIRS = frozenset({"scripts", "logs", "system"})
 
 #: 单次补扫最多登记多少个文件（防止一次巡检写爆数据库）。
 BACKFILL_CAP = 5000
@@ -179,6 +185,21 @@ def epoch_ms(value: object) -> int | None:
         return int(_dt.datetime.fromisoformat(text).timestamp() * 1000)
     except ValueError:
         return None
+
+
+def _source_match(source: str):
+    """来源筛选（v20 · W2 管理页）：整词命中，或按 ``X:`` 前缀命中带后缀的来源。
+
+    台账里产出类来源写作 ``turn:msg_abc``，管理页的「本轮产出」只传 ``turn``：
+    精确相等会让这一档**永远筛出空列表**——正是"筛选条件一加，列表莫名变空"
+    那个反复返工的坑。所以口径定为：等于 ``X``，或以 ``X:`` 开头，都算命中。
+    LIKE 里的 ``%`` / ``_`` 先转义，防用户输入把匹配范围放大。
+    """
+    esc = str(source).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return or_(
+        Resource.source == source,
+        Resource.source.like(f"{esc}:%", escape="\\"),
+    )
 
 
 class ResourceLedger:
@@ -727,7 +748,254 @@ class ResourceLedger:
             logger.debug("resource move_to_files failed (ignored): %s", exc)
             return {"ok": False, "reason": "内部错误"}
 
-    # ── sweep (FS → DB, one-way) ─────────────────────────────────────
+    # ── v20 · W6：散文件治理（归位到 files/_inbox/，拍板 D4） ──────────
+
+    def _has_live_row(self, owner_id: str, path: str) -> bool:
+        """该归属者是否已有一条**活**台账记录指向这个路径（files/ 口径）。
+
+        归位要分清两种文件：「散文件」（工作区根下、没有 files/ 位置）与「已在位
+        登记的文件」。后者归位无事可做——它是聊天正在引用的活资源，被前端勾一下
+        就搬家等于**把引用源挪了位置**（用户视角=文件凭空消失）。
+        """
+        try:
+            with get_session() as session:
+                row = (
+                    session.query(Resource.resource_key)
+                    .filter(
+                        and_(
+                            Resource.owner_scope == "user",
+                            Resource.owner_id == (owner_id or ""),
+                            Resource.path == str(path),
+                            Resource.status != "deleted",
+                        )
+                    )
+                    .first()
+                )
+                return row is not None
+        except Exception as exc:  # 不许静默：查不到就报，别让"在位文件"被搬走
+            logger.warning("resource in-place 检查失败: %s", exc)
+            return False
+
+    def move_to_inbox(self, *, owner_id: str, paths: list[str]) -> dict:
+        """把工作区里的**散文件**归位到 ``files/_inbox/``，台账与引用跟着搬家。
+
+        拍板 D4：目标目录 ``files/_inbox/``（不新建目录、不进 media）；散文件来源
+        是工作区根与 media/ 之外的目录。巡检只报告不搬（铁律"永不删除 FS 文件"），
+        搬是用户在管理页上的**显式动作**。
+
+        台账口径（与 ``_relocate_missing`` 一字同，不新造语义）：``resource_key``
+        含路径，路径一变 key 就变，所以搬家时**迁 refs**——只改 path 不迁 refs
+        等于把这条资源的会话引用全清空。新位置已有台账行时**合并**（refs 迁过去、
+        重复引用丢弃、旧行删除），保证"同一文件在台账里永远只有一行"。台账里
+        本来没有这行（纯散文件）就按巡检口径补登记（``source='reconcile'``）。
+
+        安全边界：永不删除文件内容；只在**本人工作区**内移动（拒绝绝对路径与
+        ``..`` 越界）；``.trash`` 等系统目录不碰；已在 ``files/_inbox/`` 的不
+        重复搬；目录不搬；目标重名加 ``(n)`` 后缀，绝不覆盖既有文件；FS 移动
+        失败就完全不动台账（两边不分叉）。永不抛错（异常一律进 ``failed``）。
+        """
+        out: dict = {"moved": [], "skipped": [], "failed": []}
+        try:
+            owner_id = str(owner_id or "").strip()
+            if not owner_id:
+                return {"ok": False, "reason": "缺少归属用户"}
+            owner_dir = self._ws / owner_id
+            if not owner_dir.is_dir():
+                return {"ok": False, "reason": "工作区不存在"}
+            inbox = owner_dir / "files" / "_inbox"
+            for raw in list(paths or []):
+                rel = str(raw or "").strip().lstrip("/")
+                if not rel:
+                    out["failed"].append({"path": raw, "reason": "空路径"})
+                    continue
+                if rel.startswith("files/_inbox/"):
+                    out["skipped"].append({"path": rel, "reason": "已在收件箱"})
+                    continue
+                src = self._resolve_file_path(owner_id, rel)
+                if src is None:
+                    out["failed"].append({"path": raw, "reason": "路径越界"})
+                    continue
+                if not src.is_file():
+                    # 巡检报告里的路径是 **files/ 相对的**（"notes.md" 指的就是
+                    # files/notes.md），管理页要能直接把报告喂进来：两种写法都收，
+                    # 按存在性判定，不做猜。
+                    alt = self._resolve_file_path(owner_id, f"files/{rel}")
+                    if alt is not None and alt.is_file():
+                        rel = f"files/{rel}"
+                        src = alt
+                try:
+                    relp = src.resolve().relative_to(owner_dir.resolve())
+                except ValueError:
+                    out["failed"].append({"path": rel, "reason": "越出工作区"})
+                    continue
+                if any(p in NOISE_DIR_PARTS for p in relp.parts):
+                    out["skipped"].append(
+                        {"path": rel, "reason": "系统目录(.trash/.temp)"}
+                    )
+                    continue
+                # 系统目录硬挡（拍板 D4）：`.memory` 这类系统产物不在
+                # NOISE_DIR_PARTS 里，同样绝不许被扫进收件箱——归位只针对
+                # "用户散落的文件"，不针对系统数据。点开头的目录一并拒。
+                head = relp.parts[0]
+                if head.startswith(".") or head in NON_MOVABLE_ROOT_DIRS:
+                    out["failed"].append({"path": rel, "reason": "系统目录不许动"})
+                    continue
+                # 已经在 files/ 里登记着的文件不是散文件：它在位，归位无事可做。
+                # 工作区根下的登记文件**是**归位对象——那正是"散文件"的定义。
+                # 判据用**台账路径**（files/ 口径），不看输入怎么写。
+                if relp.parts[0] == "files" and relp.parts[:2] != ("files", "_inbox"):
+                    if self._has_live_row(owner_id, str(relp)):
+                        out["skipped"].append(
+                            {"path": rel, "reason": "已在 files/ 登记，不是散文件"}
+                        )
+                        continue
+                if relp.parts[:2] == ("files", "_inbox"):
+                    # 已经在收件箱里（巡检报告写的是 files/ 相对路径时也会走到这）
+                    out["skipped"].append({"path": rel, "reason": "已在收件箱"})
+                    continue
+                if not src.is_file():
+                    out["failed"].append({"path": rel, "reason": "文件不存在"})
+                    continue
+                name = src.name.replace("/", "").replace("\\", "")
+                if not name:
+                    out["failed"].append({"path": rel, "reason": "文件名非法"})
+                    continue
+                stem, dot, suffix = name.partition(".")
+                try:
+                    inbox.mkdir(parents=True, exist_ok=True)
+                    target = inbox / name
+                    n = 1
+                    while target.exists():
+                        n += 1
+                        target = inbox / (
+                            f"{stem}({n}){dot}{suffix}" if dot else f"{name}({n})"
+                        )
+                    import shutil
+
+                    shutil.move(str(src), str(target))
+                except Exception as exc:  # pragma: no cover - defensive
+                    out["failed"].append(
+                        {"path": rel, "reason": f"移动失败: {str(exc)[:120]}"}
+                    )
+                    continue
+                new_rel = f"files/_inbox/{target.name}"
+                ledger_state = self._reledger_moved_file(
+                    owner_id=owner_id,
+                    old_rel=str(relp).replace("\\", "/"),
+                    src_abs=src,
+                    new_rel=new_rel,
+                )
+                out["moved"].append(
+                    {"path": rel, "to": new_rel, "ledger": ledger_state}
+                )
+            out["ok"] = True
+            out["moved_count"] = len(out["moved"])
+            return out
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("resource move_to_inbox failed: %s", exc)
+            return {"ok": False, "reason": str(exc)[:200]}
+
+    def _reledger_moved_file(
+        self,
+        *,
+        owner_id: str,
+        old_rel: str,
+        src_abs,
+        new_rel: str,
+    ) -> str:
+        """搬家后台账怎么跟着走：``merged`` / ``moved`` / ``registered`` / ``none``。
+
+        全部口径复用 ``_relocate_missing``（key 含路径 → 迁 refs；同位置已有行
+        就合并成一行），台账里没有这行就按巡检口径补登记（reconcile）。
+        """
+        try:
+            old_path = canonical_file_path(old_rel, form="workspace")
+            new_path = canonical_file_path(new_rel, form="workspace")
+            old_key = make_resource_key("user", owner_id, "file", old_path)
+            new_key = make_resource_key("user", owner_id, "file", new_path)
+            size = 0
+            mtime = time.time()
+            try:
+                stat = Path(new_rel and (self._ws / owner_id / new_rel))
+                if stat.is_file():
+                    st = stat.stat()
+                    size = int(st.st_size)
+                    mtime = st.st_mtime
+            except Exception:  # noqa: BLE001
+                pass
+            now = time.time()
+            with get_session() as s:
+                old_row = s.execute(
+                    select(Resource).where(Resource.resource_key == old_key)
+                ).scalar_one_or_none()
+                if old_row is None:
+                    # 台账里本来没有：按巡检口径补登记（不新造语义）。
+                    try:
+                        from .file_ledger import get_file_ledger
+
+                        get_file_ledger()._sync_reconciled_files(owner_id, [new_rel])
+                        return "registered"
+                    except Exception:  # noqa: BLE001
+                        return "none"
+                new_row = s.execute(
+                    select(Resource).where(Resource.resource_key == new_key)
+                ).scalar_one_or_none()
+                old_refs = list(
+                    s.execute(
+                        select(ResourceRef).where(
+                            ResourceRef.resource_key == old_key
+                        )
+                    ).scalars().all()
+                )
+                if new_row is not None:
+                    # 合并：旧行 refs 迁到新行（同 referrer+role 去重），旧行删除。
+                    taken = {
+                        (r.referrer_kind, r.referrer_id, r.role)
+                        for r in s.execute(
+                            select(ResourceRef).where(
+                                ResourceRef.resource_key == new_key
+                            )
+                        ).scalars().all()
+                    }
+                    for ref in old_refs:
+                        if (ref.referrer_kind, ref.referrer_id, ref.role) in taken:
+                            continue
+                        taken.add((ref.referrer_kind, ref.referrer_id, ref.role))
+                        s.add(ResourceRef(
+                            resource_key=new_key,
+                            referrer_kind=ref.referrer_kind,
+                            referrer_id=ref.referrer_id,
+                            role=ref.role,
+                            created_at=ref.created_at,
+                        ))
+                    s.delete(new_row)
+                    s.flush()
+                    old_row.resource_key = new_key
+                    target_row = old_row
+                    state = "merged"
+                else:
+                    for ref in old_refs:
+                        ref.resource_key = new_key
+                    target_row = old_row
+                    # key 含路径：行本体也必须换 key，否则 refs 迁到了一个没有行的
+                    # key 上（引用变孤儿）。与 _relocate_missing 一字同。
+                    target_row.resource_key = new_key
+                    state = "moved"
+                target_row.path = new_path
+                target_row.title = Path(new_path).name
+                target_row.category = resolve_category("file", new_path)
+                target_row.size_bytes = size
+                target_row.fs_present = 1
+                target_row.version = int(target_row.version or 1) + 1
+                target_row.updated_at = now
+                target_row.last_seen_at = mtime
+                if target_row.deleted_at is not None:
+                    target_row.deleted_at = None
+                return state
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("resource 搬家后台账跟进失败: %s", exc)
+            return "none"
+
 
     def backfill_chat_session(
         self, *, chat_id: str, username: str, recent_seconds: float = 3600.0
@@ -1253,6 +1521,8 @@ class ResourceLedger:
         status: Optional[str] = None,
         category: Optional[str] = None,
         chat_id: Optional[str] = None,
+        source: Optional[str] = None,
+        q: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
@@ -1264,6 +1534,11 @@ class ResourceLedger:
 
         ``category``（v20 · W1）按类别过滤；值不合法直接当没传——过滤参数
         永远不可能让列表变空得莫名其妙。
+
+        ``source`` / ``q``（v20 · W2 台账管理页）：按来源筛（hook / turn:* /
+        backfill / reconcile），以及在名称与路径里做不区分大小写的关键词匹配。
+        出参的 ``first_seen_at`` / ``updated_at`` / ``last_seen_at`` 一律是
+        **epoch 毫秒**（一把尺子：与聊天资源端点、前端 fmtMs 同口径）。
         """
         try:
             with get_session() as s:
@@ -1278,6 +1553,16 @@ class ResourceLedger:
                     stmt = stmt.where(Resource.status == status)
                 if category:
                     stmt = stmt.where(Resource.category == category)
+                if source:
+                    stmt = stmt.where(_source_match(str(source).strip()))
+                needle = str(q or "").strip().lower()
+                if needle:
+                    stmt = stmt.where(
+                        or_(
+                            func.lower(Resource.title).like(f"%{needle}%"),
+                            func.lower(Resource.path).like(f"%{needle}%"),
+                        )
+                    )
                 if chat_id:
                     ref_keys = (
                         select(ResourceRef.resource_key)
@@ -1301,6 +1586,9 @@ class ResourceLedger:
                 for r in rows:
                     d = r.to_dict()
                     d["ref_count"] = self._count_refs(s, r.resource_key)
+                    # 一把尺子：台账出参的时间一律 epoch 毫秒（管理页直接显示）
+                    for _f in ("first_seen_at", "updated_at", "last_seen_at"):
+                        d[_f] = epoch_ms(d.get(_f))
                     out.append(d)
                 return out
         except Exception as exc:  # pragma: no cover - defensive
@@ -1343,6 +1631,8 @@ class ResourceLedger:
         sort_by: str = "",
         referrer_kind: str = "chat",
         ref_ids: Optional[list[tuple[str, str]]] = None,
+        with_ref_kinds: bool = False,
+        exclude_ref_kinds: Optional[set[str]] = None,
     ) -> list[dict]:
         # v17 · F7（小蜜蜂 2026-11-05「右侧栏上半区=当前会话的资源」）：
         # 同一套合并/排序口径也服务 **会话（session）作用域** —— 把
@@ -1359,6 +1649,12 @@ class ResourceLedger:
           - ``ref_count``：各 key 的引用数求和
           - 时间：取最新
         ``fetch_cap`` 是防御性上限（合并需要全量行，不能先分页再合并）。
+
+        v20 · W5（拍板 D4「其他来源」分组）：``with_ref_kinds=True`` 时每行多出
+        ``ref_kinds``（这一行被哪些口径引用过：chat / session / agent）；
+        ``exclude_ref_kinds={"chat"}`` 把**被本会话任何聊天引用过的行整行剔除**
+        ——「本聊天」与「其他来源」互斥，同一行不在两个分组里重复出现。过滤发生
+        在合并之后、分页之前，分页与总数不会因分组错位。
 
         Never raises (returns []).
         """
@@ -1379,7 +1675,11 @@ class ResourceLedger:
                     ]
                 )
                 stmt = (
-                    select(Resource, ResourceRef.role)
+                    select(
+                        Resource,
+                        ResourceRef.role,
+                        ResourceRef.referrer_kind,
+                    )
                     .join(ResourceRef, ResourceRef.resource_key == Resource.resource_key)
                     .where(Resource.owner_scope == owner_scope)
                     .where(Resource.owner_id == owner_id)
@@ -1392,7 +1692,7 @@ class ResourceLedger:
                     stmt = stmt.where(Resource.deleted_at.is_(None))
                 owner_dir = self._ws / owner_id
                 merged: dict[tuple[str, str], dict] = {}
-                for r, role in s.execute(stmt).all():
+                for r, role, ref_kind in s.execute(stmt).all():
                     d = r.to_dict()
                     kind = str(d.get("kind") or "")
                     raw = str(d.get("path") or "")
@@ -1410,9 +1710,11 @@ class ResourceLedger:
                     if prev is None:
                         d["ref_count"] = self._count_refs(s, r.resource_key)
                         d["role"] = role
+                        d["ref_kinds"] = {ref_kind}
                         merged[key] = d
                         continue
                     # 同资源另一行：角色取强、引用数求和、时间取新
+                    prev.setdefault("ref_kinds", set()).add(ref_kind)
                     if self._CHAT_ROLE_PRIORITY.get(
                         role, 9
                     ) < self._CHAT_ROLE_PRIORITY.get(prev["role"], 9):
@@ -1433,6 +1735,14 @@ class ResourceLedger:
                 # 非法值回落默认——不给「传个 size 就整表空」的机会。
                 _key, _rev = _CHAT_SORT_KEYS.get(str(sort_by or ""), _CHAT_SORT_DEFAULT)
                 rows = list(merged.values())
+                if exclude_ref_kinds:
+                    # v20 · W5：「其他来源」= 本会话的聊天一个都没引用过的行。
+                    blocked = set(exclude_ref_kinds)
+                    rows = [
+                        m
+                        for m in rows
+                        if not (m.get("ref_kinds") or set()) & blocked
+                    ]
                 rows.sort(key=lambda x, k=_key: (k(x)), reverse=_rev)
                 # v17 · F5：出参时间统一成 **epoch 毫秒**。
                 # 列里存的是 Float 秒（`to_dict` 只转原生类型），而扫盘回退那
@@ -1441,6 +1751,11 @@ class ResourceLedger:
                 for row in rows:
                     for _f in ("first_seen_at", "updated_at", "last_seen_at"):
                         row[_f] = epoch_ms(row.get(_f))
+                    # ref_kinds 内部是 set（不可 JSON 化）：要就给列表，不要就删净。
+                    if with_ref_kinds:
+                        row["ref_kinds"] = sorted(row.get("ref_kinds") or [])
+                    else:
+                        row.pop("ref_kinds", None)
                 return rows
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("chat resource list failed (ignored): %s", exc)
@@ -1541,6 +1856,138 @@ class ResourceLedger:
             )
         )
 
+    # ── v20 · W5：资源抽屉的「本聊天 / 其他来源」两视图 ──────────────
+
+    def _chat_view_ref_ids(
+        self,
+        *,
+        chat_id: str,
+        session_id: str = "",
+        peer_ids: Optional[list[str]] = None,
+        agent_ids: Optional[list[str]] = None,
+    ) -> list[tuple[str, str]]:
+        """一个聊天的全部引用口径：本聊天 + 同会话各聊天 + 会话 + 智能体。
+
+        智能体级引用的 referrer_id 形如 ``user:<username>``（写入方是
+        reference_collector），由调用方按当前用户传入。
+        """
+        ref_ids: list[tuple[str, str]] = (
+            [("chat", chat_id)] if chat_id else []
+        )
+        ref_ids += [("chat", cid) for cid in (peer_ids or []) if cid]
+        if session_id:
+            ref_ids.append(("session", session_id))
+        ref_ids += [("agent", a) for a in (agent_ids or []) if a]
+        return ref_ids
+
+    def list_chat_view_resources(
+        self,
+        *,
+        owner_scope: str,
+        owner_id: str,
+        chat_id: str,
+        view: str = "chat",
+        session_id: str = "",
+        peer_ids: Optional[list[str]] = None,
+        agent_ids: Optional[list[str]] = None,
+        limit: int = 200,
+        offset: int = 0,
+        include_deleted: bool = True,
+        sort_by: str = "",
+    ) -> list[dict]:
+        """资源抽屉的视图档位（v20 · W5，拍板 D4）。
+
+        - ``chat`` ：本聊天引用（与 ``list_resources_for_chat`` 同一把尺子）；
+        - ``all``  ：本聊天 + 会话 + 智能体引用，每行带 ``ref_kinds``；
+        - ``other``：**只有**会话/智能体引用、本会话任何聊天都没引用过的行。
+
+        三档共用 ``_chat_resource_rows`` 这一条读路径；合并与分组过滤之后才分页，
+        总数与清单同源（``count_chat_view_resources``）。永不抛错（返回 []）。
+        """
+        view = (view or "chat").strip().lower()
+        if view not in ("chat", "other", "all"):
+            view = "chat"  # 非法取值当默认，永不因参数把清单变空
+        if view == "chat":
+            if not chat_id:
+                return []
+            rows = self._chat_resource_rows(
+                owner_scope=owner_scope,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                include_deleted=include_deleted,
+                sort_by=sort_by,
+                ref_ids=[("chat", chat_id)],
+            )
+        else:
+            ref_ids = self._chat_view_ref_ids(
+                chat_id=chat_id,
+                session_id=session_id,
+                peer_ids=peer_ids,
+                agent_ids=agent_ids,
+            )
+            if not ref_ids:
+                return []
+            rows = self._chat_resource_rows(
+                owner_scope=owner_scope,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                include_deleted=include_deleted,
+                sort_by=sort_by,
+                ref_ids=ref_ids,
+                with_ref_kinds=True,
+                exclude_ref_kinds={"chat"} if view == "other" else None,
+            )
+        if offset:
+            rows = rows[offset:]
+        if limit:
+            rows = rows[:limit]
+        return rows
+
+    def count_chat_view_resources(
+        self,
+        *,
+        owner_scope: str,
+        owner_id: str,
+        chat_id: str,
+        view: str = "chat",
+        session_id: str = "",
+        peer_ids: Optional[list[str]] = None,
+        agent_ids: Optional[list[str]] = None,
+        include_deleted: bool = True,
+    ) -> int:
+        """与 ``list_chat_view_resources`` **同一份合并口径**的总数。"""
+        view = (view or "chat").strip().lower()
+        if view not in ("chat", "other", "all"):
+            view = "chat"
+        if view == "chat":
+            ref_ids: list[tuple[str, str]] = (
+                [("chat", chat_id)] if chat_id else []
+            )
+            exclude: Optional[set[str]] = None
+            kinds = False
+        else:
+            ref_ids = self._chat_view_ref_ids(
+                chat_id=chat_id,
+                session_id=session_id,
+                peer_ids=peer_ids,
+                agent_ids=agent_ids,
+            )
+            exclude = {"chat"} if view == "other" else None
+            kinds = True
+        if not ref_ids:
+            return 0
+        return len(
+            self._chat_resource_rows(
+                owner_scope=owner_scope,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                include_deleted=include_deleted,
+                ref_ids=ref_ids,
+                with_ref_kinds=kinds,
+                exclude_ref_kinds=exclude,
+            )
+        )
+
     def update_activity(
         self,
         resource_key: str,
@@ -1591,6 +2038,8 @@ class ResourceLedger:
         status: Optional[str] = None,
         category: Optional[str] = None,
         chat_id: Optional[str] = None,
+        source: Optional[str] = None,
+        q: Optional[str] = None,
     ) -> int:
         """Total matching rows (pre-pagination). Filters mirror ``list_resources``.
 
@@ -1611,6 +2060,16 @@ class ResourceLedger:
                     stmt = stmt.where(Resource.status == status)
                 if category:
                     stmt = stmt.where(Resource.category == category)
+                if source:
+                    stmt = stmt.where(_source_match(str(source).strip()))
+                needle = str(q or "").strip().lower()
+                if needle:
+                    stmt = stmt.where(
+                        or_(
+                            func.lower(Resource.title).like(f"%{needle}%"),
+                            func.lower(Resource.path).like(f"%{needle}%"),
+                        )
+                    )
                 if chat_id:
                     ref_keys = (
                         select(ResourceRef.resource_key)

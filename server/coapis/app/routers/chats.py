@@ -1063,6 +1063,14 @@ async def list_chat_resources(
         "",
         description="表头排序列：updated_at|last_seen_at|name|size|version；空=最近引用在前",
     ),
+    view: str = Query(
+        "chat",
+        description=(
+            "v20 · W5 抽屉视图：chat=本聊天引用（默认，与老行为一字不差）；"
+            "other=**只有**会话/智能体引用、本会话任何聊天都没引用过的行；"
+            "all=全部引用（每行带 ref_kinds）"
+        ),
+    ),
 ) -> Dict[str, Any]:
     """会话资源清单（B2）：本会话引用/产出的文件与网页。
 
@@ -1094,6 +1102,11 @@ async def list_chat_resources(
         from ...foundation.resource_ledger import get_resource_ledger
 
         rl = get_resource_ledger()
+        # 视图取值归一（v20 · W5）：非法值当 chat，永不因为参数把清单变空。
+        view = (view or "chat").strip().lower()
+        if view not in ("chat", "other", "all"):
+            view = "chat"
+
         if scope == "session":
             # v17 · F7 会话作用域：session 级引用 + 会话内各聊天的引用，一次
             # 合并算完（同一个 _chat_resource_rows，两把尺子的老毛病防住）。
@@ -1115,6 +1128,34 @@ async def list_chat_resources(
                 owner_id=owner or username,
                 session_id=session_id,
                 chat_ids=peers,
+                include_deleted=True,
+            )
+        elif view in ("other", "all"):
+            # v20 · W5（拍板 D4）：「其他来源」= 会话级 + 智能体级引用里，
+            # 本会话任何聊天都没引用过的资源。读面仍走台账同一条合并路径
+            # （_chat_resource_rows），不另开第二条读路径；每行带 ref_kinds。
+            session_id, peers = await _chat_session_peers(request, chat_id)
+            rows = rl.list_chat_view_resources(
+                owner_scope="user",
+                owner_id=owner,
+                chat_id=chat_id,
+                view=view,
+                session_id=session_id,
+                peer_ids=peers,
+                agent_ids=[f"user:{username}"],
+                limit=limit,
+                offset=offset,
+                include_deleted=True,
+                sort_by=sort_by,
+            )
+            total = rl.count_chat_view_resources(
+                owner_scope="user",
+                owner_id=owner,
+                chat_id=chat_id,
+                view=view,
+                session_id=session_id,
+                peer_ids=peers,
+                agent_ids=[f"user:{username}"],
                 include_deleted=True,
             )
         else:
@@ -1181,6 +1222,8 @@ async def list_chat_resources(
             # 「最后出现」：台账里这条资源最近一次被引用的时刻。前端资源条
             # 副行要显示它，台账本来就有这一列，别让它变成"未知"。
             "last_seen_at": epoch_ms(row.get("last_seen_at")),
+            # v20 · W5：这一行被哪些口径引用过（chat/session/agent）。
+            "ref_kinds": list(row.get("ref_kinds") or []),
             "size": None,
             "exists": True,
         }

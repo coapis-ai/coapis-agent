@@ -39,6 +39,8 @@ export interface ChatResourceItem {
   deleted?: boolean;
   /** 产出这条资源的那条消息 id（L2「定位到消息」用；引用类没有） */
   messageId?: string;
+  /** v20 · W5：这一行被哪些口径引用过（chat/session/agent），view=all|other 时给出 */
+  ref_kinds?: string[];
 }
 
 export interface ChatResourceList {
@@ -87,8 +89,9 @@ export const chatApi = {
     offset = 0,
     sortBy = "",
     scope: "chat" | "session" = "chat",
+    view: "chat" | "other" | "all" = "chat",
   ): Promise<ChatResourceList> => {
-    const key = `${chatId}|${limit}|${offset}|${sortBy}|${scope}`;
+    const key = `${chatId}|${limit}|${offset}|${sortBy}|${scope}|${view}`;
     const inflight = resourceInflight.get(key);
     if (inflight) return inflight;
     const req = request<ChatResourceList>(
@@ -97,7 +100,10 @@ export const chatApi = {
         (sortBy ? `&sort_by=${encodeURIComponent(sortBy)}` : "") +
         // v17 · F7 作用域：session=整个会话（跨聊天）。默认 chat，不带参数
         // 就是老请求，旧调用方与旧缓存键一概不变。
-        (scope && scope !== "chat" ? `&scope=${encodeURIComponent(scope)}` : ""),
+        (scope && scope !== "chat" ? `&scope=${encodeURIComponent(scope)}` : "") +
+        // v20 · W5（拍板 D4）：视图。chat=本聊天引用（老行为）；other=会话/智能体
+        // 引用里本会话任何聊天都没引用过的；all=全部。默认 chat 不带参数。
+        (view && view !== "chat" ? `&view=${encodeURIComponent(view)}` : ""),
     );
     const paged = req.then(
       (res) => {

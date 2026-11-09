@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/myfiles", tags=["MySpace"])
 
+#: 台账来源词表（v20 · W2 管理页下拉）：``turn`` 覆盖 ``turn:msg_xxx`` 全部产出。
+#: 词表外的值一律当没传——筛选参数绝不能让列表"莫名变空"（历次返工的重灾区）。
+LEDGER_SOURCE_TOKENS = frozenset({"hook", "turn", "backfill", "reconcile"})
+
 # All myfiles endpoints require at least "user" role
 # This prevents low-level roles from accessing file management
 
@@ -1017,6 +1021,15 @@ async def list_resources(
         None,
         description="按会话过滤：经 resource_refs 反查该会话引用过的资源（不读冗余列）",
     ),
+    source: Optional[str] = Query(
+        None,
+        description="按来源过滤（v20·W2）: hook/turn:* /backfill/reconcile。"
+        "非法值当没传。",
+    ),
+    q: Optional[str] = Query(
+        None,
+        description="关键词（v20·W2）：在名称与路径里做不区分大小写的包含匹配",
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     request: Request = None,
@@ -1029,6 +1042,10 @@ async def list_resources(
     ledger = get_resource_ledger()
     # 非法类别当没传：过滤参数永远不可能让列表"莫名其妙变空"。
     cat = category if category in VALID_CATEGORIES else None
+    # 来源同理：只认四个词（turn 含 turn:xxx 前缀），其它一律当没传。
+    # 管理页的下拉传"turn"要看全部本轮产出，精确相等会筛出空列表。
+    src = (source or "").strip()
+    src_ok = src if (src in LEDGER_SOURCE_TOKENS or src.startswith("turn:")) else None
     items = ledger.list_resources(
         owner_scope="user",
         owner_id=username,
@@ -1036,6 +1053,8 @@ async def list_resources(
         status=status,
         category=cat,
         chat_id=chat_id,
+        source=src_ok,
+        q=(q or "").strip() or None,
         limit=limit,
         offset=offset,
     )
@@ -1048,6 +1067,8 @@ async def list_resources(
         status=status,
         category=cat,
         chat_id=chat_id,
+        source=src_ok,
+        q=(q or "").strip() or None,
     )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -1143,3 +1164,44 @@ async def resource_sweep(
     report = get_resource_ledger().sweep(full=full, backfill=backfill)
     logger.info("resource sweep by admin: %s", {k: v for k, v in report.items() if not isinstance(v, list)})
     return report
+
+
+class ResourceInboxBody(BaseModel):
+    """散文件归位（v20 · W6 · 拍板 D4）。
+
+    ``paths`` 为工作区相对路径清单（巡检报告的 ``unledgered_list`` 原样回传）；
+    ``owner_id`` **仅管理员**可指定他人，普通用户一律归位自己的工作区。
+    """
+
+    paths: List[str]
+    owner_id: Optional[str] = None
+
+
+@router.post("/resources/inbox")
+@require_permission("chat:write")
+async def resources_to_inbox(body: ResourceInboxBody, request: Request = None):
+    """把散文件搬进 ``files/_inbox/``，台账与引用跟着搬家（**永不删除文件**）。
+
+    巡检只报告散文件、从不搬（铁律）；搬家是用户在管理页上的显式动作。
+    越界路径 / 系统目录 / 目录本身进 ``failed``，不算成功。
+    """
+    from ...foundation.resource_ledger import get_resource_ledger
+
+    user = get_current_user(request)
+    username = str(user.get("username") or "")
+    is_admin = str(user.get("role") or "") == "admin"
+    # 归属：非管理员永远只能动自己的工作区；管理员可代他人归位。
+    owner = str(body.owner_id or "").strip() if is_admin else username
+    owner = owner or username
+    paths = [str(p) for p in (body.paths or []) if str(p).strip()]
+    if not paths:
+        raise HTTPException(status_code=400, detail="没有要归位的路径")
+    out = get_resource_ledger().move_to_inbox(owner_id=owner, paths=paths)
+    if not out.get("ok", True):
+        raise HTTPException(status_code=400, detail=out.get("reason") or "归位失败")
+    logger.info(
+        "resource inbox by %s: moved=%s skipped=%s failed=%s",
+        username, len(out.get("moved") or []), len(out.get("skipped") or []),
+        len(out.get("failed") or []),
+    )
+    return out

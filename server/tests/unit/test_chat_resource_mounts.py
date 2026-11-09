@@ -167,9 +167,12 @@ def test_l3_entry_not_in_header():
 
 
 def test_direct_link_not_tokenized():
-    """直链不得把 JWT 拼进 URL（方案 §12.3）。"""
+    """直链不得把 JWT 拼进 URL（方案 §12.3）。
+
+    v23（2026-11-09 拍板）下线了「本轮产出」卡与右侧资源条，清单只剩本轮条与
+    L3 抽屉两处读台账 —— 守卫跟着实况走，不守一个已经删掉的组件。
+    """
     for rel in (
-        "pages/Chat/components/CoApisChatResources.tsx",
         "pages/Chat/components/CoApisChatResourceBar.tsx",
         "pages/Chat/components/ChatSessionResources/index.tsx",
     ):
@@ -196,18 +199,36 @@ def test_status_vocabulary_matches_backend(rel: str):
 
 
 def test_producer_card_fields_match_design():
-    """L1 产出卡字段按方案 §3.2：名称 + 大小·时间 + 预览/下载/转格式 + 版本徽标。
+    """本轮条（方案 §3.2 L2）字段：名称 + 来源标签 + 状态标签 + 预览/下载。
 
-    软删项灰显并标注「已删除」（R3），用后端真实词 statusDeleted。
+    v23（2026-11-09 拍板）把「本轮产出」卡（CoApisChatResources.tsx）与右侧
+    资源条整列下线，产出/引用的呈现收敛为「答案气泡末尾本轮条 + 左栏会话资源
+    + L3 抽屉」三层。原守卫锁的是那个卡的文件名，卡没了守卫就红——现在锁
+    **实况里真正承担这些字段的本轮条**，要求一条不减：名称、软删灰显、预览、
+    下载、状态标签用后端真实词表（含「已删除」）。
     """
-    src = _code_only(_read("pages/Chat/components/CoApisChatResources.tsx"))
-    for token in ("styles.meta", "styles.itemDead", "styles.name",
-                  "styles.versionTag", "chat.resources.preview",
-                  "chat.resources.download", "chat.resources.convert",
-                  "chat.resources.statusDeleted"):
-        assert token in src, f"L1 产出卡缺方案要求的 {token}"
+    src = _code_only(_read("pages/Chat/components/CoApisChatResourceBar.tsx"))
+    for token in ("styles.name", "styles.rowDead", "styles.tag",
+                  "STATUS_META", "TAGGED_STATUSES",
+                  "chat.resources.preview", "chat.resources.download",
+                  "statusDeleted"):
+        assert token in src, f"本轮条缺方案要求的 {token}"
     for word in FAKE_VOCAB:
-        assert f'"{word}"' not in src, f"L1 产出卡残留前端自造状态词 {word}"
+        assert f'"{word}"' not in src, f"本轮条残留前端自造状态词 {word}"
+
+
+def test_retired_layers_stay_retired():
+    """v23 下线的三层里的「本轮产出卡 / 右侧资源条 / 跨聊天汇总条」不得复活。
+
+    下线时这三个组件的源码已删除，聊天页里连 import 都不该留下——留着就是
+    「代码在、数据空」的老毛病换了个马甲。守卫锁死这一点，防止日后顺手加回来。
+    """
+    chat = _read("pages/Chat/index.tsx")
+    for dead in ("CoApisChatResources", "CoApisResourceStrip", "CoApisChatSidePanel"):
+        assert dead not in _code_only(chat), f"Chat 页残留已下线组件 {dead} 的引用"
+        assert not (CLIENT / "pages/Chat/components" / f"{dead}.tsx").exists(), (
+            f"已下线的 {dead}.tsx 又出现了"
+        )
 
 
 # ── 生产端 ───────────────────────────────────────────────────────────

@@ -44,12 +44,16 @@ import {
   MinusCircleOutlined,
   LinkOutlined,
   EyeOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { api, getApiUrl } from '@/api';
 import { buildAuthHeaders } from '@/api/authHeaders';
 import AgentIdentityPanel from './AgentIdentityPanel';
+// 资源台账管理面（v20 · W2）：台账从 v17 起只有机器看得见，这一页给用户筛/
+// 定稿/巡检/归位的入口。
+import LedgerPanel from './LedgerPanel';
 // 会话侧的预览抽屉（B4）在这里复用：我的空间预览弹窗 2026-06-28 被移除后，
 // 文件只能下载不能看，产出文件的体验断在「我的空间」这一头。
 import CoApisPreviewDrawer, { type PreviewTarget } from '../Chat/components/CoApisPreviewDrawer';
@@ -103,10 +107,12 @@ function decorateFileItems(
 }
 
 // MySpace 类别定义（技能已有独立菜单，不在此重复）
+// `labelKey` 存在时走 i18n（新 tab 都要这样，别再硬编码中文）。
 const CATEGORIES = [
   { key: 'files', label: '文件', icon: <FolderOutlined /> },
   { key: 'agents', label: '智能体', icon: <RobotOutlined /> },
-];
+  { key: 'ledger', label: '资源台账', labelKey: 'myspace.tabLedger', icon: <DatabaseOutlined /> },
+] as const;
 
 // ═══════════════════════════════════════════════════════════
 // 工具函数
@@ -243,6 +249,8 @@ const MySpacePage: React.FC = () => {
   }, []);
 
   const loadFiles = useCallback(async (path: string = currentPath) => {
+    // 台账 tab 不列文件树：category 白名单里没有 'ledger'，发过去必被后端拒。
+    if (activeCategory === 'ledger') return;
     setLoading(true);
     try {
       const query = new URLSearchParams({ path, category: activeCategory }).toString();
@@ -782,7 +790,7 @@ const MySpacePage: React.FC = () => {
     label: (
       <Space size={4}>
         {cat.icon}
-        <span>{cat.label}</span>
+        <span>{'labelKey' in cat && cat.labelKey ? t(cat.labelKey) : cat.label}</span>
       </Space>
     ),
   }));
@@ -833,7 +841,7 @@ const MySpacePage: React.FC = () => {
       />
 
       {/* 顶部工具栏 (仅文件 tab) */}
-      {activeCategory !== 'agents' && (
+      {activeCategory !== 'agents' && activeCategory !== 'ledger' && (
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <Breadcrumb items={breadcrumbItems} />
         
@@ -1050,7 +1058,10 @@ const MySpacePage: React.FC = () => {
       {activeCategory === 'agents' && (
         <AgentIdentityPanel />
       )}
-      {activeCategory !== 'agents' && (
+      {activeCategory === 'ledger' && (
+        <LedgerPanel />
+      )}
+      {activeCategory !== 'agents' && activeCategory !== 'ledger' && (
         <div className="page-content" style={{ padding: '16px' }}>
           {viewMode === 'list' && (
             <List
