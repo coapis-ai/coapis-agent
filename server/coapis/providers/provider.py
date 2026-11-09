@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Type
+from urllib.parse import urlparse
+
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
@@ -32,6 +34,54 @@ if TYPE_CHECKING:
 
 # Model type enumeration
 ModelType = Literal["chat", "embedding", "rerank", "audio", "vision"]
+
+
+_LOCAL_HOSTS = {
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "::1",
+    "host.docker.internal",
+    "host.containers.internal",
+    "host.minikube.internal",
+}
+_LOCAL_PORTS = (11434, 8080, 8081, 8082, 8000)  # ollama / vLLM / llama.cpp
+
+
+def is_local_endpoint(base_url: Any) -> bool:
+    """端点是否指向**本地/内网的自托管推理服务**（ollama、vLLM、llama.cpp…）。
+
+    用途只有一个：**判断中枢给判官排超时预算**（本地链路跑思考模型 5~15 秒，
+    远端 API 通常 1~3 秒，见 ``decision/resolver.is_local_base_url``，它委托到
+    本函数，全项目一份尺子）。
+
+    2026-11-09 拍板后，本判定**不再参与 Key**：空 Key 由提供商层无条件兜成
+    ``"EMPTY"``（见 ``OpenAIProvider.effective_api_key``），端点要不要鉴权由
+    服务器自己裁决。原因：这个函数本质是**猜**网络位置（私网 IP 段 +
+    ``.local/.internal`` + 常见推理端口），内网域名（如 ``llm-gw.corp.com``）
+    猜不到，拿它当 Key 闸门会误杀能跑的内网模型。
+
+    与元数据 ``require_api_key`` 无关——实测 a3 ``http://172.16.6.241:8083/v1``
+    不带任何 Authorization 头就是 HTTP 200，但元数据写着 ``require_api_key=true``。
+    """
+    raw = str(base_url or "").strip()
+    if not raw:
+        return False
+    parsed = urlparse(raw if "//" in raw else f"//{raw}")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host in _LOCAL_HOSTS or host.startswith("127."):
+        return True
+    # RFC1918 内网段 + 链路本地：自托管服务常跑在局域网机器上
+    parts = host.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        a, b = int(parts[0]), int(parts[1])
+        if a in (10, 127) or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168):
+            return True
+    if host.endswith(".local") or host.endswith(".internal"):
+        return True
+    return parsed.port in _LOCAL_PORTS
 
 
 class ModelInfo(BaseModel):

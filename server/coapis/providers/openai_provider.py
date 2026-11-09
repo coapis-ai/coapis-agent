@@ -58,17 +58,12 @@ class OpenAIProvider(Provider):
     def _client(self, timeout: float = 5) -> AsyncOpenAI:
         """Create AsyncOpenAI client.
 
-        When api_key is empty and require_api_key=False, pass None to avoid
-        OpenAI SDK converting empty string to "none" (which causes 403 errors
-        with vLLM and other local inference servers).
+        Key 永远非空（见 ``effective_api_key``）：空 Key 兜成 ``"EMPTY"``，
+        端点自己决定要不要理它。SDK 从不会因为"没 Key"拒建客户端。
         """
-        # When api_key is empty and require_api_key=False, use "EMPTY" to avoid
-        # OpenAI SDK converting None/"" to "none" (which causes 403 with vLLM).
-        # vLLM accepts "EMPTY" as the unauthenticated API key.
-        api_key = self.api_key if self.api_key or self.require_api_key else "EMPTY"
         return AsyncOpenAI(
             base_url=self.base_url,
-            api_key=api_key,
+            api_key=self.effective_api_key(),
             timeout=timeout,
         )
 
@@ -213,6 +208,28 @@ class OpenAIProvider(Provider):
                 f"Unknown exception when connecting to model '{model_id}'",
             )
 
+    def effective_api_key(self) -> str:
+        """交给 OpenAI 兼容客户端的 Key：有 Key 用 Key，空 Key 一律兜成 ``"EMPTY"``。
+
+        2026-11-09 实测根因（openai 3.40.0）：``api_key=""`` 与 ``None`` 一样
+        被 SDK 拒建客户端——
+        ``OpenAIError: Missing credentials. Please pass an api_key, ...``，
+        异常抛在建模阶段（流还没开始），被包装成一条没有 content 的 message，
+        前端看不到任何提示，表现为"聊天 0 回复"。
+
+        所以 **Key 只在提供商层解决**，聊天链路不判断 Key（小蜜蜂拍板）：
+        客户端永远拿到一个非空 Key，端点要不要鉴权由**服务器自己裁决**。
+        - 自托管（vLLM / ollama / 内网网关，如 a3 ``http://172.16.6.241:8083/v1``
+          不带 Authorization 头就是 HTTP 200）：忽略 Key 值，照跑。
+        - 真要鉴权的公网端点：回 401/403，变成一条正常的 API 错误（有
+          content、前端可见），不再静默。
+
+        过去这里用 ``require_api_key`` 元数据、后来又用"端点是否在内网"来
+        猜鉴权需求，两把尺子都会误杀（元数据默认 True；内网域名白名单猜不全），
+        已废弃。
+        """
+        return self.api_key or "EMPTY"
+
     def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
         from .openai_chat_model_compat import OpenAIChatModelCompat
 
@@ -244,11 +261,16 @@ class OpenAIProvider(Provider):
                 ),
             }
 
-        # When api_key is empty and require_api_key=False, use "EMPTY" to avoid
-        # OpenAI SDK converting None/"" to "none" (causes 403 with vLLM).
-        # vLLM accepts "EMPTY" as the unauthenticated API key.
-        effective_api_key = (
-            self.api_key if self.api_key or self.require_api_key else "EMPTY"
+        # Key 只在提供商层解决（拍板 2026-11-09）：空 Key 兜成 "EMPTY"，
+        # 鉴权与否由端点自己裁决。诊断日志不打印 Key 明文。
+        effective_api_key = self.effective_api_key()
+        logger.debug(
+            "chat model key resolved: provider=%s base=%s stored_key_len=%d "
+            "key_used=%s",
+            getattr(self, "provider_id", None) or getattr(self, "name", "?"),
+            self.base_url,
+            len(self.api_key or ""),
+            "EMPTY(placeholder)" if effective_api_key == "EMPTY" else "set",
         )
         return OpenAIChatModelCompat(
             model_name=model_id,

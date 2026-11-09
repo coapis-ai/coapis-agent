@@ -1527,7 +1527,17 @@
     "updateModelFailed": "Failed to update model",
     "noConfiguredModels": "No configured models yet",
     "typeFilterPlaceholder": "Filter by type",
-    "defaultModelCleared": "Default model cleared"
+    "defaultModelCleared": "Default model cleared",
+    "effectiveBarAgent": "Agent-level override (wins over global default)",
+    "effectiveBarGlobal": "Global default model",
+    "effectiveBarEffective": "Actually used",
+    "effectiveBarSourceAgent": "agent-level",
+    "effectiveBarSourceGlobal": "global default",
+    "effectiveBarEndpoint": "Endpoint",
+    "effectiveBarClear": "Clear override, use global default",
+    "overrideCleared": "Agent-level override cleared; chat falls back to the global default model",
+    "effectiveBarOverrideHint": "Chat is using the agent-level override, which wins over the default model set above. Click \"Clear override\" to make the default model effective.",
+    "effectiveBarNoModelHint": "No model is active (both agent-level and global default are empty), so chat will return nothing. Set a default model first."
   },
   "agentConfig": {
     "title": "Configuration",

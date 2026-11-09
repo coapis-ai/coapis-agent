@@ -1394,7 +1394,17 @@
     "updateModelFailed": "更新模型失败",
     "noConfiguredModels": "暂无已配置模型",
     "typeFilterPlaceholder": "按类型筛选",
-    "defaultModelCleared": "默认模型已清空"
+    "defaultModelCleared": "默认模型已清空",
+    "effectiveBarAgent": "智能体级覆盖（优先于全局默认）",
+    "effectiveBarGlobal": "全局默认模型",
+    "effectiveBarEffective": "实际生效",
+    "effectiveBarSourceAgent": "智能体级",
+    "effectiveBarSourceGlobal": "全局默认",
+    "effectiveBarEndpoint": "端点",
+    "effectiveBarClear": "清除覆盖，回落全局默认",
+    "overrideCleared": "已清除智能体级覆盖，聊天回落到全局默认模型",
+    "effectiveBarOverrideHint": "聊天走的是「智能体级覆盖」，它优先于你在上方设置的默认模型；要让默认模型真正生效，点「清除覆盖」。",
+    "effectiveBarNoModelHint": "当前没有任何生效模型（智能体级与全局默认都是空的），聊天不会有任何回复。请先设置默认模型。"
   },
   "agentConfig": {
     "title": "运行配置",

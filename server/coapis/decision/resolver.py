@@ -40,27 +40,14 @@ def is_local_base_url(base_url: Any) -> bool:
 
     本地链路（ollama、vLLM）跑思考模型要 5~15 秒，远端 API 通常 1~3 秒。
     判官超时按链路给预算，靠的就是这个判定。
+
+    2026-11-09 起委托给 ``providers.provider.is_local_endpoint``，全项目一份
+    内网判定。**本判定只用于超时预算，不参与 Key**（小蜜蜂拍板：Key 归提供商层，
+    聊天与判官都不预判"有没有 Key"）。
     """
-    raw = str(base_url or "").strip()
-    if not raw:
-        return False
-    parsed = urlparse(raw if "//" in raw else f"//{raw}")
-    host = (parsed.hostname or "").lower()
-    if not host:
-        return False
-    if host in _LOCAL_HOSTS:
-        return True
-    if host.startswith("127."):
-        return True
-    # RFC1918 内网段 + 链路本地：小蜜蜂的 vLLM 跑在局域网机器上
-    parts = host.split(".")
-    if len(parts) == 4 and all(p.isdigit() for p in parts):
-        a, b = int(parts[0]), int(parts[1])
-        if a in (10, 127) or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168):
-            return True
-    if host.endswith(".local") or host.endswith(".internal"):
-        return True
-    return parsed.port in _LOCAL_PORTS
+    from ..providers.provider import is_local_endpoint
+
+    return is_local_endpoint(base_url)
 
 
 def is_ollama_base_url(base_url: Any) -> bool:

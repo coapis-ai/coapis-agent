@@ -1070,7 +1070,17 @@
     "judgeModelNone": "未設定：判定は行わずルールで直接判断します",
     "goManageModels": "モデル管理を開く",
     "defaultModelSaved": "デフォルトモデルを保存しました",
-    "defaultModelCleared": "デフォルトモデルを解除しました"
+    "defaultModelCleared": "デフォルトモデルを解除しました",
+    "effectiveBarAgent": "エージェントレベルの上書き（グローバル既定より優先）",
+    "effectiveBarGlobal": "グローバル既定モデル",
+    "effectiveBarEffective": "実際に使用される",
+    "effectiveBarSourceAgent": "エージェント",
+    "effectiveBarSourceGlobal": "グローバル既定",
+    "effectiveBarEndpoint": "エンドポイント",
+    "effectiveBarClear": "上書きを解除しグローバル既定へ",
+    "overrideCleared": "エージェントレベルの上書きを解除しました。グローバル既定モデルを使います",
+    "effectiveBarOverrideHint": "チャットはエージェントレベルの上書きを使用しています。上書きを解除すると既定モデルが適用されます。",
+    "effectiveBarNoModelHint": "有効なモデルがありません（エージェントレベルとグローバル既定がともに空）。先に既定モデルを設定してください。"
   },
   "agentConfig": {
     "title": "設定",

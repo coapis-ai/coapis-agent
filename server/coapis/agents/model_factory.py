@@ -1046,6 +1046,11 @@ def create_model_and_formatter(
                 message=f"Provider '{model_slot.provider_id}' not found.",
             )
 
+        # 2026-11-09 拍板（小蜜蜂）：聊天链路**不判断 API Key**。
+        # Key 是提供商层的配置细节，空 Key 由 OpenAIProvider.effective_api_key
+        # 兜成 "EMPTY" 交给端点自己裁决；内网自托管模型没有 Key 是常态，
+        # 在聊天里预判"有没有 Key"只会误杀能跑的模型。聊天只认"配置正确可用"
+        # = 提供商存在 + 槽位有模型，判不过就是上面这道存在性检查。
         model = provider.get_chat_model_instance(model_slot.model)
         provider_id = model_slot.provider_id
     else:

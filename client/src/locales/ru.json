@@ -1085,7 +1085,17 @@
     "judgeModelNone": "Не настроена: судья не работает, решает правило",
     "goManageModels": "Открыть управление моделями",
     "defaultModelSaved": "Модель по умолчанию сохранена",
-    "defaultModelCleared": "Модель по умолчанию снята"
+    "defaultModelCleared": "Модель по умолчанию снята",
+    "effectiveBarAgent": "Переопределение уровня агента (приоритетнее глобального)",
+    "effectiveBarGlobal": "Глобальная модель по умолчанию",
+    "effectiveBarEffective": "Фактически используется",
+    "effectiveBarSourceAgent": "уровень агента",
+    "effectiveBarSourceGlobal": "глобальная",
+    "effectiveBarEndpoint": "Эндпоинт",
+    "effectiveBarClear": "Снять переопределение",
+    "overrideCleared": "Переопределение снято: чат использует глобальную модель по умолчанию",
+    "effectiveBarOverrideHint": "Чат использует переопределение уровня агента, оно важнее модели по умолчанию. Нажмите «Снять переопределение».",
+    "effectiveBarNoModelHint": "Активных моделей нет (и уровень агента, и глобальная пусты). Сначала задайте модель по умолчанию."
   },
   "agentConfig": {
     "title": "Конфигурация",

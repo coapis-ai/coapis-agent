@@ -45,7 +45,7 @@ import {
   ChatDisplayConfigContext,
 } from "./components/SimplifiedResponseCard";
 import ChatDisplaySettings from "./components/ChatDisplaySettings";
-import ChatSkillPicker from "./components/ChatSkillPicker";
+// 2026-11-09 拍板：聊天输入框不挂「指定技能」入口（组件保留在 components/ChatSkillPicker.tsx）
 import { useChatDisplayFromUser } from "../../hooks/useChatDisplayFromUser";
 import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
@@ -1353,11 +1353,9 @@ export default function ChatPage() {
   // ⭐ v19 P1-5：本轮点名技能（ref 供 customFetch 读，state 供胶囊显示）。
   // 只作用于一条消息——请求体组装完即清空，下一条消息不受牵连。
   const pickedSkillsRef = useRef<string[]>([]);
-  const [pickedSkills, setPickedSkills] = useState<string[]>([]);
-  const setPickedSkillsBoth = (names: string[]) => {
-    pickedSkillsRef.current = names;
-    setPickedSkills(names);
-  };
+  // 2026-11-09 拍板：输入框不挂「指定技能」入口，这里只保留发送后清场的状态机
+  // （技能执行链路本身保留：payload.skills 仍支持，只是 UI 不再提供点名入口）
+  const [, setPickedSkills] = useState<string[]>([]);
   // ⭐ 方案2：请求级 ID + 取消上下文，避免旧请求流污染新会话
   const requestIdRef = useRef(0);
   const activeRequestIdRef = useRef<string | null>(null);
@@ -2377,12 +2375,9 @@ export default function ChatPage() {
             style={{ display: "inline-flex", alignItems: "center", gap: 6, order: -1 }}
             data-testid="model-chip-affix"
           >
-            {/* v19 P1-5（拍板 D6）：本轮点名技能——判断层判错时的手动兜底 */}
-            <ChatSkillPicker
-              agentId={selectedAgent}
-              value={pickedSkills}
-              onChange={setPickedSkillsBoth}
-            />
+            {/* 2026-11-09 小蜜蜂拍板：聊天输入框不要「指定技能」入口，已摘挂载。
+                组件与技能执行链路保留（client/src/pages/Chat/components/ChatSkillPicker.tsx），
+                需要时再显式挂回。 */}
             <ModelChips />
           </div>
         ),

@@ -232,10 +232,15 @@ async def update_model_prefs(
 # ── 模型解析逻辑 ─────────────────────────────────────────────────────────
 
 def _slot_is_valid(provider_id: str, model: str) -> bool:
-    """偏好指向的 (provider, model) 当前是否可用。
+    """偏好指向的 (provider, model) 配置是否齐全。
 
-    provider 被删除/禁用、或模型被移出列表时返回 False，供上层回退，
-    不抛错——偏好失效不能让聊天链路崩。
+    provider 被删除/禁用、模型被移出列表时返回 False，供上层回退，不抛错——
+    偏好失效不能让聊天链路崩。
+
+    判据只有"配置在不在"这一把尺子（2026-11-09 小蜜蜂拍板）：**不判断 API
+    Key**。内网自托管模型没有 Key 是常态，Key 归提供商层处理（空 Key 兜成
+    "EMPTY"）。在这里判 Key 的后果是：用户选的无 Key 模型被判"无效"，偏好
+    被静默作废，聊天偷偷换成别的模型——比报错更糟。
     """
     if not provider_id or not model:
         return False
@@ -294,9 +299,22 @@ def resolve_chat_model_slot(
 
             agent_model = load_agent_config(agent_id).active_model
             if agent_model and agent_model.provider_id and agent_model.model:
-                if out_source is not None:
-                    out_source["source"] = "agent_default"
-                return agent_model.provider_id, agent_model.model
+                # 2026-11-09 拍板 D1（治本，不是止血）：智能体级槽位也必须过
+                # "能不能跑"这道关。过去这一层连存在性都不查，一个空壳/无 Key
+                # 的槽位可以把已经配好的全局默认**劫持**掉：页面上默认模型完好，
+                # 聊天走的是死槽位 → 0 回复。槽位不能用就如实回落全局默认并告警。
+                if not _slot_is_valid(agent_model.provider_id, agent_model.model):
+                    logger.warning(
+                        "Agent %s active_model %s/%s 不可用（缺 Key 或模型已移除），"
+                        "回落全局默认。",
+                        agent_id,
+                        agent_model.provider_id,
+                        agent_model.model,
+                    )
+                else:
+                    if out_source is not None:
+                        out_source["source"] = "agent_default"
+                    return agent_model.provider_id, agent_model.model
         except Exception:
             pass
 
@@ -306,6 +324,14 @@ def resolve_chat_model_slot(
 
         global_slot = ProviderManager.get_instance().get_active_model()
         if global_slot and global_slot.provider_id and global_slot.model:
+            if not _slot_is_valid(global_slot.provider_id, global_slot.model):
+                logger.error(
+                    "全局默认模型 %s/%s 不可用（缺 Key 或模型已移除）——聊天将没有可用模型，"
+                    "请到模型管理选一个能跑的模型。",
+                    global_slot.provider_id,
+                    global_slot.model,
+                )
+                return None
             if out_source is not None:
                 out_source["source"] = "global_default"
             return global_slot.provider_id, global_slot.model

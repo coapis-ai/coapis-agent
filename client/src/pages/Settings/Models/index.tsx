@@ -88,7 +88,13 @@ const ModelsPage: React.FC = () => {
       );
     } catch (error) {
       console.error("Failed to set default model:", error);
-      message.error(t("models.failedToSave"));
+      // 2026-11-09 拍板 D2/F4：后端的校验结论（如"该提供商没有 API Key"）
+      // 必须原样显示。之前一律压成"保存失败"，小蜜蜂看不到为什么不能存。
+      message.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t("models.failedToSave"),
+      );
     }
   };
 

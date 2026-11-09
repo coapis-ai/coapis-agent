@@ -270,6 +270,10 @@ def _validate_model_slot(
                 f"Model '{model_id}' not found in provider '{provider_id}'."
             ),
         )
+    # 2026-11-09 拍板（小蜜蜂）：这里**不判断 API Key**。
+    # Key 是提供商层的配置细节，聊天/激活都不该预判"有没有 Key"——内网自托管
+    # 模型（vLLM/ollama/网关）没有 Key 是常态，空 Key 由提供商层兜成 "EMPTY"
+    # 交给端点裁决。校验只管"配置对不对"：提供商在不在、模型在不在列表里。
 
 
 def _enforce_window_gate(
@@ -313,6 +317,12 @@ async def _load_agent_model(
     workspace = await get_agent_for_request(request, agent_id=agent_id)
     agent_config = load_agent_config(workspace.agent_id)
     active = agent_config.active_model
+    # 2026-11-09 拍板 D1/F5（实测根因）：槽位里没有模型 = **没有智能体级覆盖**，
+    # 必须回落到全局默认。旧写法把空槽原样返回，调用方（get_active_models 的
+    # effective 语义、聊天取模型）都把它当成"智能体级已配置"，于是全局默认被
+    # 一个空槽劫持：a3/A3 空壳清成空槽后，聊天仍然取不到任何模型 → 0 回复。
+    if active is not None and not (active.model or "").strip():
+        return None
     if active and not active.provider_id and active.model:
         # agent.json 只写了 model、没写 provider_id（历史数据/手工编辑）。
         # 前端发消息前有闸门要求 provider_id 非空，空值会弹"未配置模型"
@@ -376,10 +386,19 @@ async def configure_provider(
     # Ownership check: non-admin users can only modify their own or global providers
     role = getattr(request.state, "role", "user")
     username = getattr(request.state, "username", "anonymous")
-    if role != "admin":
-        provider_info = await manager.get_provider_info(provider_id)
-        if provider_info and provider_info.is_custom and provider_info.owner and provider_info.owner != username:
-            raise HTTPException(status_code=403, detail="无权修改他人的 Provider")
+    existing = await manager.get_provider_info(provider_id)
+    if existing is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Provider '{provider_id}' not found",
+        )
+    if role != "admin" and existing.is_custom and existing.owner and existing.owner != username:
+        raise HTTPException(status_code=403, detail="无权修改他人的 Provider")
+
+    # 2026-11-09 拍板（小蜜蜂）：保存时**不拦"要 Key 但 Key 为空"**。
+    # 内网自托管模型（vLLM/ollama/网关）压根不需要 Key，元数据的
+    # require_api_key 默认就是 True——拦保存等于把合法配置挡在门外。
+    # Key 归提供商层管：空 Key 由提供商兜成 "EMPTY"，鉴权与否由端点裁决。
 
     updates = {
         "api_key": body.api_key,
@@ -901,6 +920,68 @@ async def get_active_models(
     return ActiveModelsInfo(active_llm=global_model)
 
 
+@router.get(
+    "/effective",
+    summary="Reconcile the model a chat turn will actually use",
+)
+@require_permission("models:read")
+async def get_effective_model(
+    request: Request,
+    manager: ProviderManager = Depends(get_provider_manager),
+) -> dict:
+    """说清"这一轮聊天实际会走哪个模型"：智能体级覆盖 / 全局默认 / 真正生效的那个。
+
+    2026-11-09 实测根因：生效语义是「智能体级优先、全局默认兜底」
+    （见 get_active_models 的 effective 分支），而模型管理页只露出全局默认
+    那一层。admin 工作区里 10 月遗留的 a3/A3 —— 端点 172.16.6.241:28080 已
+    连接拒绝 —— 一路劫持页面设置，聊天 0 回复且页面毫无提示。这个接口把三层
+    摊开在同一屏，外加端点。
+
+    这里**不判 Key**（小蜜蜂拍板）：只报"存没存 Key"的事实，不给结论。
+    """
+    target_agent_id: str | None = None
+    agent_model: ModelSlotConfig | None = None
+    try:
+        workspace = await get_agent_for_request(request)
+        target_agent_id = workspace.agent_id
+        agent_model = await _load_agent_model(request, target_agent_id)
+    except (HTTPException, OSError, ValueError, TypeError, AppBaseException) as exc:
+        logger.warning(
+            "effective-model: failed to resolve agent model: %s",
+            exc,
+            exc_info=True,
+        )
+
+    global_model = manager.get_active_model()
+    effective = agent_model or global_model
+    provider = None
+    if effective is not None and effective.provider_id:
+        provider = manager.get_provider(effective.provider_id)
+
+    return {
+        "agent_id": target_agent_id,
+        "agent_model": agent_model.model_dump() if agent_model else None,
+        "global_model": global_model.model_dump() if global_model else None,
+        "effective_model": effective.model_dump() if effective else None,
+        "effective_source": (
+            "agent" if agent_model else ("global" if global_model else "none")
+        ),
+        "provider_label": (
+            getattr(provider, "label", "") or getattr(provider, "name", "")
+            if provider
+            else None
+        ),
+        "base_url": getattr(provider, "base_url", "") if provider else "",
+        # 只报"有没有存 Key"这个事实，不给"能不能跑"的结论（2026-11-09 拍板：
+        # Key 不参与可用性判定，聊天/保存都不预判）。
+        "api_key_present": (
+            bool((getattr(provider, "api_key", "") or "").strip())
+            if provider
+            else False
+        ),
+    }
+
+
 @router.put(
     "/active",
     response_model=ActiveModelsInfo,
@@ -937,6 +1018,9 @@ async def set_active_model(
                 detail="Permission system unavailable.",
             )
         # B1: refuse a model whose window cannot host a CoApis request.
+        # 2026-11-09 拍板 D2/F3：先过槽位校验（提供商存在 + 模型存在 + Key 就绪），
+        # 全局激活这条路径此前只做窗口闸门，空 Key 的提供商能一路绿灯写进配置。
+        _validate_model_slot(manager, body.provider_id, body.model)
         _enforce_window_gate(manager, body.provider_id, body.model)
         try:
             await manager.activate_model(body.provider_id, body.model)
@@ -958,6 +1042,49 @@ async def set_active_model(
             status_code=400,
             detail="agent_id is required when scope is 'agent'",
         )
+
+    # 2026-11-09 拍板 D2/F5：空 model = 清除智能体级覆盖，回落到全局默认。
+    # 生效语义是"智能体级优先、全局默认兜底"（见 get_active_models），但模型
+    # 管理页此前只暴露全局默认那一层：admin 工作区里 10 月遗留的 a3/A3 一直
+    # 劫持页面设置，页面上既看不见也没有地方清掉 —— 这就是"默认模型配得好
+    # 好的、聊天却不走"的那把暗尺子。
+    if not body.model.strip():
+        try:
+            workspace = await get_agent_for_request(
+                request,
+                agent_id=body.agent_id,
+            )
+            agent_config = load_agent_config(workspace.agent_id)
+            # 这里不能置 None：config.py 里 active_model 的序列化走
+            # ``dict(**args, exclude_none=True)``，None 会被整个剔掉，而
+            # JsonRegistryStore.update 是**合并写**——没写这个键，agent.json 里
+            # 的旧值就原样留着（实测：置 None 后 a3/A3 依然在册，聊天照旧）。
+            # 写一个空槽进去才会真正覆盖它。
+            agent_config.active_model = ModelSlotConfig()
+            save_agent_config(workspace.agent_id, agent_config)
+            schedule_agent_reload(request, workspace.agent_id)
+        except (
+            HTTPException,
+            OSError,
+            ValueError,
+            TypeError,
+            AppBaseException,
+        ) as exc:
+            logger.warning(
+                "Failed to clear agent-level model override: %s",
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to clear agent-level model override",
+            ) from exc
+        logger.info(
+            "Cleared agent-level model override for %s; falling back to "
+            "global default",
+            workspace.agent_id,
+        )
+        return ActiveModelsInfo(active_llm=manager.get_active_model())
 
     _validate_model_slot(manager, body.provider_id, body.model)
     # B1: refuse a model whose window cannot host a CoApis request.  A model
@@ -1424,17 +1551,26 @@ async def set_default_model(
                 "status": "ok",
                 "message": f"Default {body.model_type} slot cleared",
             }
+        # 2026-11-09 拍板 D2/F3：先校验提供商/模型存在且 API Key 就绪，
+        # 再落盘。之前默认槽位这条写入路径**没有任何校验**（激活槽位有
+        # _validate_model_slot，这里没有），空 Key、不存在的模型都能写进
+        # default_models.json，页面绿灯、聊天 0 回复。
+        _validate_model_slot(manager, body.provider_id, body.model_id)
         manager.set_default_model(
             model_type=body.model_type,
             provider_id=body.provider_id,
             model_id=body.model_id,
         )
-        
+
         return {
             "status": "ok",
             "message": f"Default {body.model_type} model set to "
             f"{body.provider_id}/{body.model_id}",
         }
+    except HTTPException:
+        # 校验结论（404/400 + 中文提示）必须原样给前端，不能被下面
+        # 的 str(e) 压成一个笼统的 400。
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,
