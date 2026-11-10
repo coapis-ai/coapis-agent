@@ -42,14 +42,15 @@ export default function CoApisResourceDrawer({
   const groupTitle = t("chat.resources.groupChat", "当前聊天");
   const winTitle = `${groupTitle} · ${t("chat.resources.drawerTitle", "会话资源")}`;
 
+  // v25 第 3 条「宽度/显示完全」：默认 480 时浮窗实测 504px，主区有
+  // 1040px 可用，名字列被压到 124px → 文件名全被截断成两行。默认宽度
+  // 提到 760（名字列约 380px）。
+  // storageKey 同时升版：FloatingWindow 把用户拖过的尺寸存在
+  // localStorage，老尺寸会盖住新默认值——换 key 才等于「按新默认重来」。
+  // （JSX 属性列表里不能放 `{/* */}`——那是表达式容器，tsc 直接 TS1005。）
   return (
     <FloatingWindow
       open={open}
-      {/* v25 第 3 条「宽度/显示完全」：默认 480 时浮窗实测 504px，主区有
-          1040px 可用，名字列被压到 124px → 文件名全被截断成两行。默认宽度
-          提到 760（名字列约 380px）。
-          storageKey 同时升版：FloatingWindow 把用户拖过的尺寸存在
-          localStorage，老尺寸会盖住新默认值——换 key 才等于「按新默认重来」。 */}
       storageKey="resourceWin.v25"
       getContainer={getContainer}
       label={winTitle}

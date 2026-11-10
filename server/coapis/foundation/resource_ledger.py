@@ -1602,6 +1602,7 @@ class ResourceLedger:
         owner_id: str,
         chat_id: str,
         include_deleted: bool = False,
+        role_group: str = "",
     ) -> int:
         """Count of **distinct resources** referenced by one chat.
 
@@ -1614,11 +1615,17 @@ class ResourceLedger:
                 owner_id=owner_id,
                 chat_id=chat_id,
                 include_deleted=include_deleted,
+                role_group=role_group,
             )
         )
 
     #: 同一资源多条引用时取哪个角色显示（越靠前越"强"：产出 > 附件 > 导出 > 引用）
     _CHAT_ROLE_PRIORITY = {"producer": 0, "attachment": 1, "export": 2, "reference": 3}
+
+    #: v25 · P3「引用 / 产出」筛选的唯一尺子：哪些角色算「产出」。
+    #: 与前端「本轮产出」条的分组口径一字不差（role==producer|export 即产出，
+    #: 其余即引用）——筛选尺子与显示尺子是同一把，不会出现「筛出来对不上标签」。
+    _CHAT_ROLE_PRODUCED = frozenset({"producer", "export"})
 
     def _chat_resource_rows(
         self,
@@ -1633,6 +1640,7 @@ class ResourceLedger:
         ref_ids: Optional[list[tuple[str, str]]] = None,
         with_ref_kinds: bool = False,
         exclude_ref_kinds: Optional[set[str]] = None,
+        role_group: str = "",
     ) -> list[dict]:
         # v17 · F7（小蜜蜂 2026-11-05「右侧栏上半区=当前会话的资源」）：
         # 同一套合并/排序口径也服务 **会话（session）作用域** —— 把
@@ -1735,6 +1743,19 @@ class ResourceLedger:
                 # 非法值回落默认——不给「传个 size 就整表空」的机会。
                 _key, _rev = _CHAT_SORT_KEYS.get(str(sort_by or ""), _CHAT_SORT_DEFAULT)
                 rows = list(merged.values())
+                # v25 · P3（抽屉「引用 / 产出」筛选）：合并之后、分页之前过滤。
+                # 先分页再过滤会让「共 N 条」与页内条数错位（老毛病）。
+                if role_group in ("produced", "reference"):
+                    want_produced = role_group == "produced"
+                    rows = [
+                        m
+                        for m in rows
+                        if (
+                            str(m.get("role") or "reference")
+                            in self._CHAT_ROLE_PRODUCED
+                        )
+                        == want_produced
+                    ]
                 if exclude_ref_kinds:
                     # v20 · W5：「其他来源」= 本会话的聊天一个都没引用过的行。
                     blocked = set(exclude_ref_kinds)
@@ -1771,6 +1792,7 @@ class ResourceLedger:
         offset: int = 0,
         include_deleted: bool = False,
         sort_by: str = "",
+        role_group: str = "",
     ) -> list[dict]:
         """Resources referenced by one chat, **with that chat's ref role**.
 
@@ -1789,6 +1811,7 @@ class ResourceLedger:
             chat_id=chat_id,
             include_deleted=include_deleted,
             sort_by=sort_by,
+            role_group=role_group,
         )
         if offset:
             rows = rows[offset:]
@@ -1807,6 +1830,7 @@ class ResourceLedger:
         offset: int = 0,
         include_deleted: bool = False,
         sort_by: str = "",
+        role_group: str = "",
     ) -> list[dict]:
         """Resources referenced by a whole **session** (all its chats).
 
@@ -1824,6 +1848,7 @@ class ResourceLedger:
             chat_id=session_id,
             include_deleted=include_deleted,
             sort_by=sort_by,
+            role_group=role_group,
             ref_ids=[("session", session_id)]
             + [("chat", cid) for cid in (chat_ids or []) if cid],
         )
@@ -1841,6 +1866,7 @@ class ResourceLedger:
         session_id: str,
         chat_ids: Optional[list[str]] = None,
         include_deleted: bool = False,
+        role_group: str = "",
     ) -> int:
         """会话作用域总数（与 ``list_session_resources`` 同一份合并口径）。"""
         if not session_id and not chat_ids:
@@ -1851,6 +1877,7 @@ class ResourceLedger:
                 owner_id=owner_id,
                 chat_id=session_id,
                 include_deleted=include_deleted,
+                role_group=role_group,
                 ref_ids=[("session", session_id)]
                 + [("chat", cid) for cid in (chat_ids or []) if cid],
             )
@@ -1894,6 +1921,7 @@ class ResourceLedger:
         offset: int = 0,
         include_deleted: bool = True,
         sort_by: str = "",
+        role_group: str = "",
     ) -> list[dict]:
         """资源抽屉的视图档位（v20 · W5，拍板 D4）。
 
@@ -1916,6 +1944,7 @@ class ResourceLedger:
                 chat_id=chat_id,
                 include_deleted=include_deleted,
                 sort_by=sort_by,
+                role_group=role_group,
                 ref_ids=[("chat", chat_id)],
             )
         else:
@@ -1933,6 +1962,7 @@ class ResourceLedger:
                 chat_id=chat_id,
                 include_deleted=include_deleted,
                 sort_by=sort_by,
+                role_group=role_group,
                 ref_ids=ref_ids,
                 with_ref_kinds=True,
                 exclude_ref_kinds={"chat"} if view == "other" else None,
@@ -1954,6 +1984,7 @@ class ResourceLedger:
         peer_ids: Optional[list[str]] = None,
         agent_ids: Optional[list[str]] = None,
         include_deleted: bool = True,
+        role_group: str = "",
     ) -> int:
         """与 ``list_chat_view_resources`` **同一份合并口径**的总数。"""
         view = (view or "chat").strip().lower()
@@ -1982,6 +2013,7 @@ class ResourceLedger:
                 owner_id=owner_id,
                 chat_id=chat_id,
                 include_deleted=include_deleted,
+                role_group=role_group,
                 ref_ids=ref_ids,
                 with_ref_kinds=kinds,
                 exclude_ref_kinds=exclude,

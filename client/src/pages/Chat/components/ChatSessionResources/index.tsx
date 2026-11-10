@@ -6,6 +6,7 @@ import {
   message,
   Pagination,
   Popconfirm,
+  Segmented,
   Select,
   Table,
   Tag,
@@ -127,6 +128,11 @@ const ChatSessionResources: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [kind, setKind] = useState<string>("all");
   const [keyword, setKeyword] = useState("");
+  // v25 · P3（小蜜蜂 2026-11-09 第 2 条「引用 / 产出各看各的」）：抽屉补
+  // 「引用 / 产出」筛选。与左栏下拉、本轮资源条同一把尺子（producer/export
+  // 算产出，其余算引用）。筛选在**后端、分页之前**做 —— 前端只筛当前页会让
+  // 「共 N 条」与页内条数错位，那是左栏老毛病，不在这里重犯。
+  const [role, setRole] = useState<"all" | "produced" | "reference">("all");
   // v17 · F7（拍板 D4-A）：排序交给后端（台账在**分页之前**排全量），表头是
   // 唯一控制点。取键与台账 `_CHAT_SORT_KEYS` 一一对应（name 升序、其余倒序），
   // 默认按更新时间倒序（小蜜蜂 2026-11-05 第 6 条）。此前是"前端只排当前页
@@ -145,7 +151,15 @@ const ChatSessionResources: React.FC<Props> = ({
     chatApi
       // v23（2026-11-09 拍板）：跨聊天汇总下线 —— 抽屉固定看当前聊天。
       // 后端 scope=session 参数保留不动（社区版公共契约），前端不再请求。
-      .listChatResources(chatId, PAGE_SIZE, offset, sort, "chat")
+      .listChatResources(
+        chatId,
+        PAGE_SIZE,
+        offset,
+        sort,
+        "chat",
+        "chat",
+        role === "all" ? "" : role,
+      )
       .then((res) => {
         setItems(res.items || []);
         setTotal(res.total || 0);
@@ -155,7 +169,7 @@ const ChatSessionResources: React.FC<Props> = ({
         setTotal(0);
       })
       .finally(() => setLoading(false));
-  }, [chatId, offset, refreshSignal, sort, tick]);
+  }, [chatId, offset, refreshSignal, sort, tick, role]);
 
   const rows = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -469,6 +483,23 @@ const ChatSessionResources: React.FC<Props> = ({
           placeholder={t("chat.resources.searchPlaceholder")}
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
+        />
+        {/* v25 · P3（小蜜蜂第 2 条）：「引用 / 产出」在抽屉里各看各的。
+            此前抽屉只有类型 + 关键词，产出/引用只在行尾挂个绿标签，想只看
+            产出得自己数。左栏下拉与本轮条早就有这层筛选，抽屉是最后一处缺的
+            —— 三处现在共用台账里同一把尺子（producer/export 即产出）。 */}
+        <Segmented
+          size="small"
+          value={role}
+          options={[
+            { value: "all", label: t("chat.resources.roleAll") },
+            { value: "produced", label: t("chat.resources.roleProduced") },
+            { value: "reference", label: t("chat.resources.roleReference") },
+          ]}
+          onChange={(v) => {
+            setRole(v as "all" | "produced" | "reference");
+            setOffset(0); // 换了筛选口径就回第 1 页，避免停在不存在的页
+          }}
         />
         <span className={styles.count}>
           {t("chat.resources.count", { n: total })}

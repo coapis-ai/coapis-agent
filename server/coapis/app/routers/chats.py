@@ -1071,6 +1071,14 @@ async def list_chat_resources(
             "all=全部引用（每行带 ref_kinds）"
         ),
     ),
+    role: str = Query(
+        "",
+        description=(
+            "v25 · P3 抽屉「引用 / 产出」筛选：produced=只出产出（role 为 "
+            "producer/export 的行）；reference=只出引用；空=全部。"
+            "过滤在合并之后、分页之前，总数与清单同源"
+        ),
+    ),
 ) -> Dict[str, Any]:
     """会话资源清单（B2）：本会话引用/产出的文件与网页。
 
@@ -1106,6 +1114,10 @@ async def list_chat_resources(
         view = (view or "chat").strip().lower()
         if view not in ("chat", "other", "all"):
             view = "chat"
+        # v25 · P3：角色分组归一（非法值当「全部」，绝不因参数把清单变空）。
+        role_group = (role or "").strip().lower()
+        if role_group not in ("produced", "reference"):
+            role_group = ""
 
         # v24（小蜜蜂 2026-11-09 第 4 条）：聊天侧**不显示已删除的资源**。
         # 台账的 delete 是软删（只打 deleted_at，磁盘文件原地不动）。此前
@@ -1128,6 +1140,7 @@ async def list_chat_resources(
                 offset=offset,
                 include_deleted=False,
                 sort_by=sort_by,
+                role_group=role_group,
             )
             total = rl.count_session_resources(
                 owner_scope="user",
@@ -1135,6 +1148,7 @@ async def list_chat_resources(
                 session_id=session_id,
                 chat_ids=peers,
                 include_deleted=False,
+                role_group=role_group,
             )
         elif view in ("other", "all"):
             # v20 · W5（拍板 D4）：「其他来源」= 会话级 + 智能体级引用里，
@@ -1153,6 +1167,7 @@ async def list_chat_resources(
                 offset=offset,
                 include_deleted=False,
                 sort_by=sort_by,
+                role_group=role_group,
             )
             total = rl.count_chat_view_resources(
                 owner_scope="user",
@@ -1163,6 +1178,7 @@ async def list_chat_resources(
                 peer_ids=peers,
                 agent_ids=[f"user:{username}"],
                 include_deleted=False,
+                role_group=role_group,
             )
         else:
             rows = rl.list_resources_for_chat(
@@ -1175,6 +1191,9 @@ async def list_chat_resources(
                 # v17 · F7（拍板 D4-A）：排序在台账侧、分页之前完成，非法值
                 # 自动回落「最近引用在前」。端点只透传，不自创尺子。
                 sort_by=sort_by,
+                # v25 · P3：「引用 / 产出」筛选在台账侧、分页之前完成，
+                # 总数与清单走同一个 role_group（分页与筛选不会错位）。
+                role_group=role_group,
             )
             # 总数与清单同一份合并口径（`count_resources_for_chat` 走同一个
             # `_chat_resource_rows`）；排序不改变条数，故计数不传 sort_by。
@@ -1183,6 +1202,7 @@ async def list_chat_resources(
                 owner_id=owner or username,
                 chat_id=chat_id,
                 include_deleted=False,
+                role_group=role_group,
             )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("chat %s resources skipped: %s", chat_id[:16], exc)

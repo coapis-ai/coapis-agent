@@ -51,7 +51,15 @@ VALID_STATUSES = frozenset({"draft", "official", "orphan", "archived", "deleted"
 VALID_REFERRER_KINDS = frozenset({"session", "chat", "agent", "user", "scene"})
 
 #: Referrer roles.
-VALID_ROLES = frozenset({"reference", "producer", "consumer"})
+#:
+#: v25 · P3（2026-11-10）：白名单必须与**读侧/前端同一把尺子**。此前这里只有
+#: reference/producer/consumer，而 ``resource_ledger._CHAT_ROLE_PRODUCED`` 与
+#: 前端 ``chat.ts`` 的 role 类型都声明了 ``export``（``_CHAT_ROLE_PRIORITY``
+#: 还有 ``attachment``）——写入侧 ``attach_ref`` 按本白名单**直接丢行**，
+#: 于是「导出件」永远进不了台账，前端「产出」侧那条筛选尺子筛的是空气。
+VALID_ROLES = frozenset(
+    {"reference", "producer", "consumer", "attachment", "export"}
+)
 
 #: 类别尺子在 ``foundation/resource_category.py``（v20 · W1）：kind 回答
 #: "从哪个子系统来"，category 回答"用户手里这是个什么东西"。列由 register

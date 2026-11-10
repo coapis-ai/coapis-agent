@@ -2126,7 +2126,7 @@
       "title": "Chats",
       "collapse": "Collapse sidebar",
       "expand": "Show chat list",
-      "showAll": "View all",
+      "showAll": "All chat resources",
       "showAllTitle": "Open the full resource list",
       "noResources": "No resources in this chat"
     },
@@ -2434,7 +2434,10 @@
       "refKindChat": "chat",
       "refKindSession": "session",
       "refKindAgent": "agent",
-      "toggleFilterTip": "Click to expand or collapse this group"
+      "toggleFilterTip": "Click to expand or collapse this group",
+      "roleAll": "All",
+      "roleProduced": "Produced",
+      "roleReference": "References"
     },
     "resourceGroupProduced": "Produced",
     "resourceGroupReferenced": "Referenced",

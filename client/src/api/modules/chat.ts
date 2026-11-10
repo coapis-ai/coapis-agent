@@ -90,8 +90,9 @@ export const chatApi = {
     sortBy = "",
     scope: "chat" | "session" = "chat",
     view: "chat" | "other" | "all" = "chat",
+    role: "produced" | "reference" | "" = "",
   ): Promise<ChatResourceList> => {
-    const key = `${chatId}|${limit}|${offset}|${sortBy}|${scope}|${view}`;
+    const key = `${chatId}|${limit}|${offset}|${sortBy}|${scope}|${view}|${role}`;
     const inflight = resourceInflight.get(key);
     if (inflight) return inflight;
     const req = request<ChatResourceList>(
@@ -103,7 +104,10 @@ export const chatApi = {
         (scope && scope !== "chat" ? `&scope=${encodeURIComponent(scope)}` : "") +
         // v20 · W5（拍板 D4）：视图。chat=本聊天引用（老行为）；other=会话/智能体
         // 引用里本会话任何聊天都没引用过的；all=全部。默认 chat 不带参数。
-        (view && view !== "chat" ? `&view=${encodeURIComponent(view)}` : ""),
+        (view && view !== "chat" ? `&view=${encodeURIComponent(view)}` : "") +
+        // v25 · P3：「引用 / 产出」筛选。筛选在后端、分页之前做，总数与清单
+        // 同源；默认空（全部），老调用方与老缓存键不变。
+        (role ? `&role=${encodeURIComponent(role)}` : ""),
     );
     const paged = req.then(
       (res) => {

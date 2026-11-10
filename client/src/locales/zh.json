@@ -2027,7 +2027,7 @@
       "title": "会话",
       "collapse": "收起左栏",
       "expand": "展开会话列表",
-      "showAll": "查看全部",
+      "showAll": "会话全部资源",
       "showAllTitle": "打开完整资源列表"
     },
     "sessionResources": {
@@ -2311,9 +2311,12 @@
       "refKindChat": "聊天引用",
       "refKindSession": "会话引用",
       "refKindAgent": "智能体引用",
-      "toggleFilterTip": "点击展开 / 收起这一组"
+      "toggleFilterTip": "点击展开 / 收起这一组",
+      "roleAll": "全部",
+      "roleProduced": "产出",
+      "roleReference": "引用"
     },
-    "resourceGroupProduced": "生成",
+    "resourceGroupProduced": "产出",
     "resourceGroupReferenced": "引用",
     "sessionMissing": "这条会话没有可回放的内容：索引里有记录，但会话文件不存在（迁移遗留的空壳）。直接发消息即可开始新对话。",
     "previewClose": "关闭预览",

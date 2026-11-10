@@ -1441,7 +1441,7 @@
       "title": "Диалоги",
       "collapse": "Свернуть панель",
       "expand": "Показать диалоги",
-      "showAll": "Показать все",
+      "showAll": "Все ресурсы чата",
       "showAllTitle": "Открыть полный список ресурсов"
     },
     "sessionResources": {
@@ -1642,7 +1642,10 @@
       "refKindChat": "чат",
       "refKindSession": "сессия",
       "refKindAgent": "агент",
-      "toggleFilterTip": "Нажмите, чтобы развернуть или свернуть эту группу"
+      "toggleFilterTip": "Нажмите, чтобы развернуть или свернуть эту группу",
+      "roleAll": "Все",
+      "roleProduced": "Создано",
+      "roleReference": "Ссылки"
     },
     "resourceGroupProduced": "Создано",
     "resourceGroupReferenced": "Ссылки",

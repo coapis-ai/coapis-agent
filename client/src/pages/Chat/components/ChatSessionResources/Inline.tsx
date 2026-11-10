@@ -18,7 +18,6 @@ import { FolderOpen } from "lucide-react";
 import {
   canInlinePreview,
   downloadFile,
-  getPreviewKind,
   previewFile,
   toLedgerRelPath,
 } from "../../../../utils/webPreview";
@@ -34,8 +33,18 @@ import styles from "./inline.module.less";
  * 台账给文件类资源登记的 `kind` 恒为 "file"（foundation/file_ledger.py），
  * 按 report/pdf/image 这类名字分「生成/引用」会全部落进引用组——用户要的两组
  * 必须来自后端的 role（producer=本次会话产出，reference=读进来的）。
+ *
+ * v25 · P2（第 1 条「和聊天界面里类似」）：产出 = producer **或 export**。
+ * 本轮资源条的筛选（CoApisChatResourceBar:510）、L3 抽屉的绿标签
+ * （ChatSessionResources/index.tsx）、台账 v25 新增的 role 筛选，三处都是
+ * `producer|export`；左栏此前只认 producer → 导出（export）行在左栏落进
+ * 「引用」组、在抽屉里顶着绿色「产出」标签，同一行两处口径打架。
  */
-const PRODUCER_ROLE = "producer";
+const PRODUCED_ROLES: ReadonlySet<string> = new Set(["producer", "export"]);
+
+/** 与上面这把尺子同源的判定（左栏分组 / 计数共用）。 */
+const isProducedRole = (role?: string): boolean =>
+  PRODUCED_ROLES.has(role || "");
 
 /** 面板内最多渲染的行数：多于这个数走「查看全部」进抽屉，不在左栏堆。 */
 const PANEL_LIMIT = 40;
@@ -60,23 +69,40 @@ interface ChatSessionResourcesInlineProps {
 /**
  * 行内预览：优先用页面级回调（聊天页的预览抽屉），没有就退到全局预览器，
  * 再不行退化成下载。三层兜底，左栏不会出现"点了没反应"。
+ *
+ * v25 · P2（小蜜蜂 2026-11-09 第 1 条「和聊天界面里类似」）三处收口：
+ *  ① 网页类（kind=web）的 `path` 是 URL：此前当成「我的空间相对路径」喂给预览
+ *     抽屉 → 抽屉按扩展名判类型判不出 → 点开是空白页。本轮资源条与 L3 抽屉
+ *     对网页类都是 `window.open`，左栏补齐同一行为。
+ *  ② 标签与动作用**同一把尺子**：行尾写「仅下载」的行，点开必须真的下载。
+ *     尺子取 `canInlinePreview` —— 预览抽屉自己的开门条件就是这一把
+ *     （CoApisPreviewDrawer.tsx:200），v17 · F3 定的也是它。此前标签用它、
+ *     动作无条件进抽屉，`.doc/.xls/.ppt` 这类标签写「仅下载」点开却开抽屉。
+ *  ③ 名字用 `displayName`（含扩展名）：与抽屉/本轮条一字不差（此前用
+ *     `item.title`，台账历史行登记的是 `Path(p).stem`，扩展名被抹掉）。
  */
 function openResource(
   item: ChatResourceItem,
   onPreview?: (path: string, title: string) => void,
 ): void {
+  const title = displayName(item) || item.path;
+  if (item.kind === "web") {
+    if (/^https?:\/\//i.test(item.path)) {
+      window.open(item.path, "_blank", "noopener,noreferrer");
+    }
+    return;
+  }
   const rel = toLedgerRelPath(item.path);
   if (!rel) return;
-  const title = displayName(item) || rel;
+  if (!canInlinePreview(rel)) {
+    void downloadFile(rel, title, item.kind);
+    return;
+  }
   if (onPreview) {
     onPreview(rel, title);
     return;
   }
-  if (getPreviewKind(rel) !== "unsupported") {
-    previewFile(rel, title);
-    return;
-  }
-  void downloadFile(rel, title);
+  void previewFile(rel, title);
 }
 
 export function ChatSessionResourcesInline({
@@ -87,6 +113,12 @@ export function ChatSessionResourcesInline({
 }: ChatSessionResourcesInlineProps) {
   const { t } = useTranslation();
   const [items, setItems] = useState<ChatResourceItem[]>([]);
+  // v25 · P5（第 3 条「计数口径」）：折叠行的数字用**后端 total**，不是面板
+  // 渲染条数。面板上限 PANEL_LIMIT=40、共享缓存上限 200，超过就切片；此前
+  // 「查看全部 · N」取 items.length → 台账有 55 条时左栏写 40、抽屉写 55、
+  // 本轮条写 55，同一个数三处不一（小蜜蜂 2026-11-06 第 1 条量出来的老毛病，
+  // 当时只把「去重」统一了，切片这层没管）。
+  const [total, setTotal] = useState(0);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const lastKeyRef = useRef<number | null>(null);
@@ -94,6 +126,7 @@ export function ChatSessionResourcesInline({
   const load = useCallback(async (force = false) => {
     if (!chatId) {
       setItems([]);
+      setTotal(0);
       return;
     }
     try {
@@ -101,9 +134,11 @@ export function ChatSessionResourcesInline({
       // 面板从同一份结果里切片，不再各发一次 limit=40 / limit=200。
       const entry = await getChatResourcesShared(chatId, force);
       setItems(entry.items.slice(0, PANEL_LIMIT));
+      setTotal(entry.total ?? entry.items.length);
     } catch {
       // 资源是附属信息，取不到不该在左栏报错——静默降级为空面板。
       setItems([]);
+      setTotal(0);
     }
   }, [chatId]);
 
@@ -122,8 +157,8 @@ export function ChatSessionResourcesInline({
     bodyRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [chatId, items.length]);
 
-  const produced = items.filter((it) => it.role === PRODUCER_ROLE);
-  const referenced = items.filter((it) => it.role !== PRODUCER_ROLE);
+  const produced = items.filter((it) => isProducedRole(it.role));
+  const referenced = items.filter((it) => !isProducedRole(it.role));
 
   const toggleGroup = useCallback((key: string) => {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -218,7 +253,7 @@ export function ChatSessionResourcesInline({
           <>
             {renderGroup(
               "produced",
-              t("chat.resourceGroupProduced", "生成"),
+              t("chat.resourceGroupProduced", "产出"),
               produced,
             )}
             {renderGroup(
@@ -243,7 +278,10 @@ export function ChatSessionResourcesInline({
         >
           <FolderOpen size={11} />
           <span>
-            {t("chat.sidebar.showAll", "查看全部")} · {items.length}
+            {/* v25 · P5：数字 = 后端 total（与 L3 抽屉「共 N 条」、本轮条
+                「会话全部资源 · N」同一把尺子）；面板内的分组计数是切片后
+                的计数，两者不是一回事。 */}
+            {t("chat.sidebar.showAll", "会话全部资源")} · {total}
           </span>
         </button>
       )}

@@ -1426,7 +1426,7 @@
       "title": "会話",
       "collapse": "左欄を閉じる",
       "expand": "会話一覧を開く",
-      "showAll": "すべて表示",
+      "showAll": "チャット全体のリソース",
       "showAllTitle": "完全なリソースリストを開く"
     },
     "sessionResources": {
@@ -1627,9 +1627,12 @@
       "refKindChat": "チャット",
       "refKindSession": "セッション",
       "refKindAgent": "エージェント",
-      "toggleFilterTip": "クリックでこのグループを展開 / 折りたたむ"
+      "toggleFilterTip": "クリックでこのグループを展開 / 折りたたむ",
+      "roleAll": "すべて",
+      "roleProduced": "成果物",
+      "roleReference": "参照"
     },
-    "resourceGroupProduced": "生成",
+    "resourceGroupProduced": "成果物",
     "resourceGroupReferenced": "参照",
     "capability": {
       "imageAndVideo": "画像と動画の認識に対応",
