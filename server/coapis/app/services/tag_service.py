@@ -64,24 +64,54 @@ class TagService:
         self._community_repo = None
 
         # Check if enterprise repository is available
-        if is_enterprise_installed():
-            try:
-                from ...foundation.repository_factory import RepositoryFactory
-                if RepositoryFactory.is_initialized():
-                    self._enterprise_repo = RepositoryFactory.get_tag_repository()
+        #
+        # 选仓判据 = **版本 + 仓储能力**，不是「企业包能否 import」。
+        # is_enterprise_installed() 判的是包在不在：社区镜像同样打包
+        # coapis/enterprise/ 源码，因此在社区版里恒为 True，旧写法遂把
+        # SqliteTagRepository 当企业版 PG 仓使用，按 PG 契约调用
+        # list_tags(tag_type=..., parent_id=..., show_in_menu=...)，并对 dict 行做
+        # db_tag.type 属性访问：
+        #   TypeError: list_tags() got an unexpected keyword argument 'tag_type'
+        #   AttributeError: 'dict' object has no attribute 'type'
+        # → 标签管理页、工作台左侧菜单（/api/scenes/workbench/menu）全线 500
+        # （2026-11-10 dev 实测）。社区版改走 _load_tags_from_db / _save_tags_to_db，
+        # 真相源仍是 SQLite 表，tags.json 只作只读备份。
+        try:
+            from ...foundation.repository_factory import RepositoryFactory
+            if RepositoryFactory.is_initialized():
+                repo = RepositoryFactory.get_tag_repository()
+                edition = RepositoryFactory.get_edition()
+                if repo is not None and edition == "enterprise" and self._is_pg_tag_repo(repo):
+                    self._enterprise_repo = repo
                     logger.info("TagService using Enterprise PostgreSQL tag repository")
-            except Exception as e:
-                logger.warning(f"Failed to get enterprise tag repository: {e}, falling back to JSON")
-        else:
-            # Community edition M1: SQLite tag repository
-            try:
-                from ...foundation.repository_factory import RepositoryFactory
-                if (RepositoryFactory.is_initialized()
-                        and RepositoryFactory.get_edition() == "community"):
-                    self._community_repo = RepositoryFactory.get_tag_repository()
-                    logger.info("TagService using community SQLite tag repository")
-            except Exception as e:
-                logger.warning(f"Failed to get community tag repository: {e}, falling back to JSON")
+                elif repo is not None:
+                    self._community_repo = repo
+                    logger.info(
+                        "TagService using community SQLite tag repository (%s, edition=%s)",
+                        type(repo).__name__, edition,
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to get tag repository: {e}, falling back to JSON")
+
+        # 启动自检：判成企业版分支就必须具备 PG 契约方法，缺一个直接拒绝启动，
+        # 把「用户打开页面才炸」提前到「启动即暴露」。
+        if self._enterprise_repo is not None:
+            missing = [m for m in ("list_tags", "get_tag", "save_tag", "delete_tag")
+                       if not hasattr(self._enterprise_repo, m)]
+            if missing:
+                raise RuntimeError(
+                    f"tag repository 缺 PG 契约方法 {missing}"
+                    f"(type={type(self._enterprise_repo).__name__})，拒绝按企业版分支运行"
+                )
+
+    @staticmethod
+    def _is_pg_tag_repo(repo) -> bool:
+        """PG 仓特征：list_tags 以 tag_type / parent_id / show_in_menu 关键字过滤。"""
+        try:
+            import inspect
+            return "tag_type" in inspect.signature(repo.list_tags).parameters
+        except (TypeError, ValueError):
+            return False
     
     def _load_tags(self) -> List[TagConfig]:
         """Load tags from file or enterprise repository.
@@ -153,7 +183,14 @@ class TagService:
         """
         try:
             rows = self._community_repo.get_all()
-            return [TagConfig(**row) for row in rows]
+            tags = []
+            for row in rows:
+                # 软删（deleted_at 非空）的标签不得回到列表：get_all 不做软删过滤，
+                # 直接返回会让已删标签在管理页与工作台菜单里复活。
+                if row.get("deleted_at"):
+                    continue
+                tags.append(TagConfig(**row))
+            return tags
         except Exception as e:
             logger.error(f"Failed to load tags from SQLite: {e}")
             return []

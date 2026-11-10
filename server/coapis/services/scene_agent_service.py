@@ -99,25 +99,44 @@ class SceneAgentService:
         self._enterprise_repo = None
         self._community_repo = None
 
-        # Check if enterprise repository is available
-        if is_enterprise_installed():
-            try:
-                from ..foundation.repository_factory import RepositoryFactory
-                if RepositoryFactory.is_initialized():
-                    self._enterprise_repo = RepositoryFactory.get_scene_repository()
+        # 选仓判据 = **版本 + 仓储能力**，不是「企业包能否 import」。
+        # is_enterprise_installed() 判的是包在不在：社区镜像同样打包了
+        # coapis/enterprise/ 源码，因此它在社区版里恒为 True，旧写法遂把
+        # SqliteSceneRepository 当企业版 PG 仓使用，去调 PG 专属的
+        # get_scene_by_id / create_scene / update_scene → AttributeError，
+        # 前端表现为「进入场景失败」（2026-11-10 dev 实测：enter / 场景详情 /
+        # 场景编辑全线 500，error_id 68b75b45 等）。
+        try:
+            from ..foundation.repository_factory import RepositoryFactory
+            if RepositoryFactory.is_initialized():
+                repo = RepositoryFactory.get_scene_repository()
+                edition = RepositoryFactory.get_edition()
+                if edition == "enterprise" and hasattr(repo, "get_scene_by_id"):
+                    self._enterprise_repo = repo
                     logger.info("SceneAgentService using Enterprise PostgreSQL scene repository")
-            except Exception as e:
-                logger.warning(f"Failed to get enterprise scene repository: {e}, falling back to JSON")
-        else:
-            # Community edition M1: SQLite scene repository
-            try:
-                from ..foundation.repository_factory import RepositoryFactory
-                if (RepositoryFactory.is_initialized()
-                        and RepositoryFactory.get_edition() == "community"):
-                    self._community_repo = RepositoryFactory.get_scene_repository()
-                    logger.info("SceneAgentService using community SQLite scene repository")
-            except Exception as e:
-                logger.warning(f"Failed to get community scene repository: {e}, falling back to JSON")
+                elif repo is not None:
+                    self._community_repo = repo
+                    logger.info(
+                        "SceneAgentService using community SQLite scene repository "
+                        "(%s, edition=%s)", type(repo).__name__, edition,
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to get scene repository: {e}, falling back to JSON")
+
+        # 启动自检（F2·防再犯）：判成企业版分支就必须具备 PG 契约方法，缺一个
+        # 直接拒绝启动并写清原因——把「用户点击才炸」提前到「启动即暴露」。
+        if self._enterprise_repo is not None:
+            missing = [
+                m for m in ("get_scene_by_id", "get_scene", "create_scene",
+                            "update_scene", "delete_scene")
+                if not hasattr(self._enterprise_repo, m)
+            ]
+            if missing:
+                raise RuntimeError(
+                    "scene repository 缺 PG 契约方法 "
+                    f"{missing}（edition={RepositoryFactory.get_edition()}, "
+                    f"type={type(self._enterprise_repo).__name__}），拒绝按企业版分支运行"
+                )
         
         # Ensure directories exist (for agent storage)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -127,6 +146,25 @@ class SceneAgentService:
     # Scene Configuration Management
     # -------------------------------------------------------------------------
     
+    # 仓储列可为 NULL，而 SceneConfig 这些字段声明为非空 str —— 映射时必须落回默认值，
+    # 否则 Pydantic 校验当场炸（列表/详情接口 500）。
+    _SCENE_STR_DEFAULTS = {
+        "name": "", "icon": "📝", "description": "", "short_description": "",
+        "system_prompt": "", "welcome_message": "", "category": "", "status": "active",
+    }
+
+    def _dto_to_scene_config(self, dto: dict) -> SceneConfig:
+        """仓储投影 → 前端契约 SceneConfig：只认契约字段，None 落回默认值。"""
+        keys = set(SceneConfig.model_fields)
+        payload = {k: v for k, v in dto.items() if k in keys}
+        for field, default in self._SCENE_STR_DEFAULTS.items():
+            if payload.get(field) is None:
+                payload[field] = default
+        for field in ("tag_ids", "skills", "tags"):
+            if payload.get(field) is None:
+                payload[field] = []
+        return SceneConfig(**payload)
+
     def _validate_skill_names(self, skills: list[str]) -> list[str]:
         """B0.2: 写入校验 —— 场景声明的技能必须真实存在于技能池。
 
@@ -197,7 +235,13 @@ class SceneAgentService:
         if category:
             scenes = [s for s in scenes if s.category == category]
         if tag:
-            scenes = [s for s in scenes if tag in s.tags]
+            # 前端传的是标签 ID（工作台左侧菜单项），而 `tags` 是历史关键词字段
+            # （存的是「会议/纪要」这类中文词）。只比 `tags` 会让按标签筛选恒为空，
+            # 因此同时认 primary_tag_id / tag_ids，并保留关键词兼容。
+            scenes = [
+                s for s in scenes
+                if s.primary_tag_id == tag or tag in s.tag_ids or tag in s.tags
+            ]
         
         return SceneListResponse(scenes=scenes, total=len(scenes))
 
@@ -218,30 +262,34 @@ class SceneAgentService:
             scenes = []
             for db_scene in db_scenes:
                 # Convert SQLAlchemy model to Pydantic SceneConfig
-                scene_config = SceneConfig(
-                    id=db_scene.id,
-                    name=getattr(db_scene, 'name', ''),
-                    icon=getattr(db_scene, 'icon', None),
-                    description=getattr(db_scene, 'description', None) or '',
-                    short_description=getattr(db_scene, 'short_description', None) or '',
-                    primary_tag_id=getattr(db_scene, 'primary_tag_id', None),
-                    tag_ids=getattr(db_scene, 'tag_ids', []) or [],
-                    skills=getattr(db_scene, 'skills', []) or [],
-                    system_prompt=getattr(db_scene, 'system_prompt', None) or '',
-                    welcome_message=getattr(db_scene, 'welcome_message', None) or '',
-                    status=db_scene.status if hasattr(db_scene, 'status') else "active",
-                    category=getattr(db_scene, 'category', None),
-                    created_at=self._parse_dt(getattr(db_scene, 'created_at', None)).isoformat(),
-                    updated_at=self._parse_dt(getattr(db_scene, 'updated_at', None)).isoformat(),
-                    created_by=getattr(db_scene, 'created_by', None),
-                    usage_count=getattr(db_scene, 'usage_count', 0),
-                )
-                scenes.append(scene_config)
+                scenes.append(self._dto_to_scene_config({
+                    "id": db_scene.id,
+                    "name": getattr(db_scene, 'name', ''),
+                    "icon": getattr(db_scene, 'icon', None),
+                    "description": getattr(db_scene, 'description', None) or '',
+                    "short_description": getattr(db_scene, 'short_description', None) or '',
+                    "primary_tag_id": getattr(db_scene, 'primary_tag_id', None),
+                    "tag_ids": getattr(db_scene, 'tag_ids', []) or [],
+                    "skills": getattr(db_scene, 'skills', []) or [],
+                    "system_prompt": getattr(db_scene, 'system_prompt', None) or '',
+                    "welcome_message": getattr(db_scene, 'welcome_message', None) or '',
+                    "status": db_scene.status if hasattr(db_scene, 'status') else "active",
+                    "category": getattr(db_scene, 'category', None),
+                    "created_at": self._parse_dt(getattr(db_scene, 'created_at', None)).isoformat(),
+                    "updated_at": self._parse_dt(getattr(db_scene, 'updated_at', None)).isoformat(),
+                    "created_by": getattr(db_scene, 'created_by', None),
+                    "usage_count": getattr(db_scene, 'usage_count', 0),
+                }))
             
             return SceneListResponse(scenes=scenes, total=len(scenes))
         except Exception as e:
-            logger.error(f"Failed to list scenes from repository: {e}")
-            # Fallback to JSON storage
+            # 收紧（D4）：带标签筛选时**绝不**静默回落全量。旧写法把 TypeError
+            # （如给 SQLite 仓传 PG 专属的 primary_tag_id）吞成「返回全部场景」，
+            # 前端表现为筛选控件失效却毫无报错（2026-11-10 实测 ?tag=office-common
+            # 返回 total=57=全量）。全量回落只在无筛选时保留，作为可读性兜底。
+            logger.error("Failed to list scenes from repository: %s", e, exc_info=True)
+            if primary_tag_id:
+                raise
             scenes_file = self._load_scenes_file()
             return SceneListResponse(scenes=scenes_file.scenes, total=len(scenes_file.scenes))
     
@@ -260,25 +308,25 @@ class SceneAgentService:
                 return None
             
             # Convert SQLAlchemy model to Pydantic SceneConfig
-            scene_config = SceneConfig(
-                id=db_scene.id,
-                name=getattr(db_scene, 'name', ''),
-                icon=getattr(db_scene, 'icon', None),
-                description=getattr(db_scene, 'description', None) or '',
-                short_description=getattr(db_scene, 'short_description', None) or '',
-                primary_tag_id=getattr(db_scene, 'primary_tag_id', None),
-                tag_ids=getattr(db_scene, 'tag_ids', []) or [],
-                skills=getattr(db_scene, 'skills', []) or [],
-                system_prompt=getattr(db_scene, 'system_prompt', None) or '',
-                welcome_message=getattr(db_scene, 'welcome_message', None) or '',
-                status=db_scene.status if hasattr(db_scene, 'status') else "active",
-                category=getattr(db_scene, 'category', None),
-                created_at=self._parse_dt(getattr(db_scene, 'created_at', None)).isoformat(),
-                updated_at=self._parse_dt(getattr(db_scene, 'updated_at', None)).isoformat(),
-                created_by=getattr(db_scene, 'created_by', None),
-                usage_count=getattr(db_scene, 'usage_count', 0),
-            )
-            return scene_config
+            # （走 _dto_to_scene_config：category 等企业侧列可以为 NULL）
+            return self._dto_to_scene_config({
+                "id": db_scene.id,
+                "name": getattr(db_scene, 'name', ''),
+                "icon": getattr(db_scene, 'icon', None),
+                "description": getattr(db_scene, 'description', None) or '',
+                "short_description": getattr(db_scene, 'short_description', None) or '',
+                "primary_tag_id": getattr(db_scene, 'primary_tag_id', None),
+                "tag_ids": getattr(db_scene, 'tag_ids', []) or [],
+                "skills": getattr(db_scene, 'skills', []) or [],
+                "system_prompt": getattr(db_scene, 'system_prompt', None) or '',
+                "welcome_message": getattr(db_scene, 'welcome_message', None) or '',
+                "status": db_scene.status if hasattr(db_scene, 'status') else "active",
+                "category": getattr(db_scene, 'category', None),
+                "created_at": self._parse_dt(getattr(db_scene, 'created_at', None)).isoformat(),
+                "updated_at": self._parse_dt(getattr(db_scene, 'updated_at', None)).isoformat(),
+                "created_by": getattr(db_scene, 'created_by', None),
+                "usage_count": getattr(db_scene, 'usage_count', 0),
+            })
         
         scenes_file = self._load_scenes_file()
         for scene in scenes_file.scenes:
@@ -890,12 +938,16 @@ class SceneAgentService:
         列），因此必须先投影到前端契约字段再构造 SceneConfig。
         """
         if self._community_repo is not None:
-            return ScenesFile(scenes=self._community_repo.get_all())
+            # 逐行过 _dto_to_scene_config：SQLite 的 category 等列可以为 NULL，
+            # 而 SceneConfig 对应字段是非空 str——旧写法直接 SceneConfig(**row)，
+            # 遇到 NULL 列即 ValidationError，整条场景链路（列表/详情/进入）500。
+            return ScenesFile(scenes=[
+                self._dto_to_scene_config(dto) for dto in self._community_repo.get_all()
+            ])
 
         if self._enterprise_repo is not None:
-            keys = set(SceneConfig.model_fields)
             scenes = [
-                SceneConfig(**{k: v for k, v in dto.items() if k in keys})
+                self._dto_to_scene_config(dto)
                 for dto in self._enterprise_repo.get_all()
             ]
             return ScenesFile(scenes=scenes)
