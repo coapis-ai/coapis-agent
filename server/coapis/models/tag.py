@@ -26,7 +26,7 @@ Tag types:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
@@ -135,6 +135,34 @@ class TagListResponse(BaseModel):
     """Response model for listing tags."""
     tags: List[TagConfig] = Field(default_factory=list, description="Tag list")
     total: int = Field(default=0, description="Total count")
+
+
+class TagUsageItem(BaseModel):
+    """按场景引用量排序的标签条目（管理页 Top 引用）。"""
+    id: str = Field(..., description="Tag ID")
+    name: str = Field(..., description="Tag name")
+    icon: Optional[str] = Field(default=None, description="Tag icon")
+    scene_count: int = Field(default=0, description="Scenes referencing this tag")
+
+
+class TagStatsResponse(BaseModel):
+    """标签台账（管理页概览 + 健康度自检）。
+
+    2026-11-10：前端一直有 `/api/admin/tags/stats` 的探测需求，后端只有
+    `/api/admin/tags` 列表，路由缺失 → 404。这里补齐契约，并把「有多少标签
+    真的被场景用上」暴露出来——零引用标签与悬空父级是标签体系腐化的信号。
+    """
+    total: int = Field(default=0, description="标签总数（不含软删）")
+    by_type: Dict[str, int] = Field(default_factory=dict, description="按类型计数")
+    enabled: int = Field(default=0, description="启用数")
+    disabled: int = Field(default=0, description="停用数")
+    in_menu: int = Field(default=0, description="进入工作台菜单的启用标签数")
+    with_children: int = Field(default=0, description="有子标签的标签数")
+    dangling_parent: int = Field(default=0, description="parent_id 指向不存在标签的数量")
+    scenes_scanned: int = Field(default=0, description="参与统计的场景数（不含已删除）")
+    referenced: int = Field(default=0, description="被至少一个场景引用的标签数")
+    unused: int = Field(default=0, description="零场景引用的标签数")
+    top_used: List[TagUsageItem] = Field(default_factory=list, description="引用量 Top 5")
 
 
 class TagTreeItem(BaseModel):

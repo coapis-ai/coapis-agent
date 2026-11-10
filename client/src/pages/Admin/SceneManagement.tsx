@@ -47,6 +47,9 @@ const SceneManagement: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingScene, setEditingScene] = useState<SceneConfig | null>(null);
   const [filterTag, setFilterTag] = useState<string>('all');
+  // 状态筛选：管理端列表**默认含停用与已删除**（管理员要能看见并恢复），
+  // 所以必须给一个显式筛子，否则「列表里怎么有已删除的」会一直被当成 bug。
+  const [filterStatus, setFilterStatus] = useState<string>('all');
   const [form] = Form.useForm();
   const [skillOptions, setSkillOptions] = useState<{ label: string; value: string }[]>([]);
 
@@ -59,12 +62,15 @@ const SceneManagement: React.FC = () => {
     return map;
   }, [tags]);
 
-  // Filter scenes by tag
+  // Filter scenes by tag and status
   const filteredScenes = useMemo(() => {
-    if (filterTag === 'all') {
-      return scenes;
-    }
     return scenes.filter(scene => {
+      if (filterStatus !== 'all' && (scene.status || 'active') !== filterStatus) {
+        return false;
+      }
+      if (filterTag === 'all') {
+        return true;
+      }
       // Check primary_tag_id
       if (scene.primary_tag_id === filterTag) {
         return true;
@@ -75,7 +81,17 @@ const SceneManagement: React.FC = () => {
       }
       return false;
     });
-  }, [scenes, filterTag]);
+  }, [scenes, filterTag, filterStatus]);
+
+  // 状态计数（用于筛子上的数字，让「有多少已删除」一眼可见）
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { active: 0, disabled: 0, deleted: 0 };
+    scenes.forEach(scene => {
+      const key = scene.status || 'active';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return counts;
+  }, [scenes]);
 
   // Get category tags for filter dropdown
   const categoryTags = useMemo(() => {
@@ -478,11 +494,24 @@ const SceneManagement: React.FC = () => {
               })),
             ]}
           />
-          {filterTag !== 'all' && (
-            <Button onClick={() => setFilterTag('all')}>重置</Button>
+          <span style={{ fontWeight: 500, marginLeft: 12 }}>状态：</span>
+          <Select
+            value={filterStatus}
+            onChange={setFilterStatus}
+            style={{ width: 170 }}
+            options={[
+              { label: '全部状态', value: 'all' },
+              { label: `启用 (${statusCounts.active})`, value: 'active' },
+              { label: `停用 (${statusCounts.disabled})`, value: 'disabled' },
+              { label: `已删除 (${statusCounts.deleted})`, value: 'deleted' },
+            ]}
+          />
+          {(filterTag !== 'all' || filterStatus !== 'all') && (
+            <Button onClick={() => { setFilterTag('all'); setFilterStatus('all'); }}>重置</Button>
           )}
           <span style={{ color: '#999', fontSize: 12, marginLeft: 16 }}>
-            共 {filteredScenes.length} 个场景
+            共 {filteredScenes.length} 个场景（全库 {scenes.length}：启用 {statusCounts.active} /
+            停用 {statusCounts.disabled} / 已删除 {statusCounts.deleted}）
           </span>
         </Space>
         

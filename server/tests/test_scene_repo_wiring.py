@@ -275,3 +275,139 @@ class TestEnterpriseFlow:
         svc = SceneAgentService(data_dir=enterprise.data_dir)
         assert svc.get_scene("s-1").category == ""
         assert svc.list_scenes().scenes[0].category == ""
+
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 3. UserSceneService：同款「版本 + 能力」尺子 + 软删场景不进推荐
+#    （2026-11-10 补：此前该服务 0 测试覆盖，社区版曾把 SQLite 仓当 PG 仓调）
+#
+# ⚠️ 两条铁律，都是这轮踩出来的：
+# 1. **绝不**往工厂解析出的共享库（宿主上是 /root/.coapis/system/coapis.db）写/删。
+#    上一版夹具做「清空场景表」，把那个库里测试期迁移出来的 12 条场景真删了。
+# 2. 宿主 .venv-test 里 `RepositoryFactory.initialize(edition="community")` 会因
+#    `coapis.foundation.db_engine` 只存在于合并命名空间（dev 容器）而 ImportError，
+#    于是「依赖工厂初始化」的测试在宿主=跳过=没跑。所以这里全部用桩件注入工厂，
+#    宿主与容器都真跑，且不碰任何真实库。
+# ---------------------------------------------------------------------------
+
+from coapis.services.user_scene_service import UserSceneService
+
+
+class StubUserSceneRepo:
+    """用户场景配置仓储桩：本服务只用到 get/save。"""
+
+    def __init__(self, stored=None):
+        self._stored = dict(stored or {})
+
+    def get(self, user_id):
+        return self._stored.get(user_id)
+
+    def save(self, config):
+        self._stored[config.get("user_id")] = config
+
+
+class StubSceneRepo:
+    """系统场景仓储桩：get_all 原样返回（含软删/停用），复刻真实仓储行为。"""
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def get_all(self):
+        return list(self._rows)
+
+
+class RepoMissingSave:
+    """能力不全的用户场景仓储桩（缺 save）。"""
+
+    def get(self, user_id):
+        return None
+
+
+def _scene(scene_id: str, status: str) -> dict:
+    return {"id": scene_id, "name": scene_id, "description": "d", "status": status}
+
+
+def _wire_factory(monkeypatch, us_repo, scene_repo, edition="community"):
+    """把桩件塞进工厂：不建库、不迁移，只测服务的选仓判据与状态过滤。"""
+    monkeypatch.setattr(
+        RepositoryFactory, "is_initialized", staticmethod(lambda: True), raising=False)
+    monkeypatch.setattr(
+        RepositoryFactory, "get_edition", staticmethod(lambda: edition), raising=False)
+    monkeypatch.setattr(
+        RepositoryFactory, "get_user_scene_repository",
+        staticmethod(lambda: us_repo), raising=False)
+    monkeypatch.setattr(
+        RepositoryFactory, "get_scene_repository",
+        staticmethod(lambda: scene_repo), raising=False)
+
+
+class TestUserSceneServiceRepoSelection:
+    def test_community_log_names_the_truth(self, tmp_path, monkeypatch, caplog):
+        """社区版日志必须写「community SQLite」，不得写「enterprise PostgreSQL」。
+
+        旧写法用 is_enterprise_installed() 判仓：社区镜像同样打包 enterprise/
+        源码，它在社区版恒为 True → 拿到 SQLite 仓却按企业分支走，日志写着
+        "using enterprise PostgreSQL repositories"，把排查方向整个带偏
+        （2026-11-10「进入场景失败」排查时就被它骗过）。
+        """
+        import logging
+        caplog.set_level(logging.INFO, logger="coapis.services.user_scene_service")
+        _wire_factory(monkeypatch, StubUserSceneRepo(), StubSceneRepo([]), "community")
+        svc = UserSceneService(str(tmp_path / "coapis"))
+        assert isinstance(svc._us_repo, StubUserSceneRepo)
+        lines = [
+            r.getMessage() for r in caplog.records
+            if "UserSceneService using" in r.getMessage()
+        ]
+        assert len(lines) == 1
+        assert "community SQLite repositories" in lines[0]
+        assert "enterprise PostgreSQL" not in lines[0]
+        assert "edition=community" in lines[0]
+
+    def test_enterprise_log_reports_enterprise(self, tmp_path, monkeypatch, caplog):
+        """企业版日志按 edition 说话，且带上真实仓储类名。"""
+        import logging
+        caplog.set_level(logging.INFO, logger="coapis.services.user_scene_service")
+        _wire_factory(monkeypatch, StubUserSceneRepo(), StubSceneRepo([]), "enterprise")
+        svc = UserSceneService(str(tmp_path / "coapis"))
+        assert isinstance(svc._scene_repo, StubSceneRepo)
+        lines = [
+            r.getMessage() for r in caplog.records
+            if "UserSceneService using" in r.getMessage()
+        ]
+        assert lines and "enterprise PostgreSQL repositories" in lines[0]
+        assert "edition=enterprise" in lines[0]
+
+    def test_soft_deleted_and_disabled_scenes_never_recommended(self, tmp_path, monkeypatch):
+        """仓储 get_all() 不带状态过滤，服务层必须剔掉软删/停用场景。
+
+        否则「已删除的场景」继续出现在推荐位与我的场景里（产品上等于没删）。
+        """
+        rows = [_scene("s-alive", "active"), _scene("s-gone", "deleted"),
+                _scene("s-off", "disabled")]
+        _wire_factory(monkeypatch, StubUserSceneRepo(), StubSceneRepo(rows))
+        svc = UserSceneService(str(tmp_path / "coapis"))
+        assert {s["id"] for s in svc.get_all_scenes()} == {"s-alive"}
+        assert {s["id"] for s in svc.get_recommended_scenes("u1")} == {"s-alive"}
+
+    def test_capability_guard_falls_back_to_json(self, tmp_path, monkeypatch, caplog):
+        """能力自检：仓储缺本服务要用的方法 → 退回 JSON 兜底，不给用户 500。"""
+        import logging
+        caplog.set_level(logging.WARNING, logger="coapis.services.user_scene_service")
+        _wire_factory(monkeypatch, RepoMissingSave(), StubSceneRepo([]))
+        svc = UserSceneService(str(tmp_path / "coapis"))
+        assert svc._us_repo is None
+        assert svc._scene_repo is None
+        warnings = [
+            r.getMessage() for r in caplog.records
+            if "lack contract methods" in r.getMessage()
+        ]
+        assert warnings and "user_scene=RepoMissingSave" in warnings[0]
+        assert svc.get_user_scenes("u1").get("enabled_scenes") == []

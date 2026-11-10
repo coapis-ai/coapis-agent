@@ -34,6 +34,21 @@ import { getApiToken } from '../../api/config';
 const { Option } = Select;
 const { TextArea } = Input;
 
+// 标签台账（GET /api/admin/tags/stats）——引用维度由后端按场景现算
+interface TagStats {
+  total: number;
+  by_type: Record<string, number>;
+  enabled: number;
+  disabled: number;
+  in_menu: number;
+  with_children: number;
+  dangling_parent: number;
+  scenes_scanned: number;
+  referenced: number;
+  unused: number;
+  top_used: { id: string; name: string; icon?: string; scene_count: number }[];
+}
+
 // Tag types
 // - menu: 独立菜单项（如聊天、我的空间、知识库）
 // - dimension: 维度分组（如工作场景），可展开显示分类子菜单
@@ -67,6 +82,7 @@ interface TagListResponse {
 
 const TagManagement: React.FC = () => {
   const [tags, setTags] = useState<TagConfig[]>([]);
+  const [stats, setStats] = useState<TagStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTag, setEditingTag] = useState<TagConfig | null>(null);
@@ -112,6 +128,20 @@ const TagManagement: React.FC = () => {
     }
   }, [modalVisible, editingTag, form]);
 
+  const loadStats = async () => {
+    // 台账是锦上添花：取不到就安静地不显示，绝不因此让标签列表页报错
+    try {
+      const res = await fetch('/api/admin/tags/stats', {
+        headers: { Authorization: `Bearer ${getApiToken()}` },
+      });
+      if (res.ok) {
+        setStats(await res.json());
+      }
+    } catch (error) {
+      console.warn('Failed to load tag stats:', error);
+    }
+  };
+
   const loadTags = async () => {
     try {
       setLoading(true);
@@ -135,6 +165,7 @@ const TagManagement: React.FC = () => {
       
       // Auto-expand all dimension tags
       setExpandedRowKeys(dims.map(d => d.id));
+      loadStats();
     } catch (error) {
       console.error('Failed to load tags:', error);
       message.error('加载标签失败');
@@ -533,6 +564,46 @@ const TagManagement: React.FC = () => {
           </Button>
         </Space>
       </div>
+
+      {stats && (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: '#fafafa',
+            border: '1px solid #f0f0f0',
+            borderRadius: 6,
+            fontSize: 12,
+            color: '#666',
+            display: 'flex',
+            gap: 16,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span>
+            标签共 <b style={{ color: '#262626' }}>{stats.total}</b> 个
+            （启用 {stats.enabled} / 停用 {stats.disabled}）
+          </span>
+          <span>
+            入工作台菜单 <b style={{ color: '#262626' }}>{stats.in_menu}</b> 个
+          </span>
+          <span>
+            被 {stats.scenes_scanned} 个场景引用：在用{' '}
+            <b style={{ color: '#262626' }}>{stats.referenced}</b> 个 / 零引用{' '}
+            <b style={{ color: stats.unused > 0 ? '#d4380d' : '#262626' }}>{stats.unused}</b> 个
+          </span>
+          {stats.dangling_parent > 0 && (
+            <span style={{ color: '#d4380d' }}>
+              悬空父级 {stats.dangling_parent} 个（父标签已删，子标签不会出现在菜单树）
+            </span>
+          )}
+          {stats.top_used.length > 0 && (
+            <span>
+              引用最多：{stats.top_used.map(t => `${t.icon || ''}${t.name} ${t.scene_count}`).join(' · ')}
+            </span>
+          )}
+        </div>
+      )}
 
       <Table
         columns={columns}

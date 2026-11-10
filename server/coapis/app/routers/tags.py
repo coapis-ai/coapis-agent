@@ -38,8 +38,11 @@ from ...models.tag import (
     TagCreateRequest,
     TagUpdateRequest,
     TagListResponse,
+    TagStatsResponse,
     TagTreeItem,
 )
+from .scenes import get_scene_service
+from ...services.scene_agent_service import SceneAgentService
 from ..services.tag_service import TagService
 from ..auth import get_current_user
 from ..permissions.decorators import require_perm, require_permission
@@ -138,6 +141,44 @@ async def get_menu_tags(
     except Exception as e:
         logger.error(f"Failed to get menu tags: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# 标签台账（计数 + 引用健康度）
+#
+# ⚠️ 路由顺序铁律：本路由必须注册在 `/{tag_id}` **之前**。FastAPI 按注册顺序匹配，
+# 写在后面时 "stats" 会被当成标签 ID 落进 get_tag → 404。2026-11-10 实测
+# `/api/admin/tags/stats` 恒 404 的根因就是这条路由压根没实现。
+# ---------------------------------------------------------------------------
+
+@router.get("/stats", response_model=TagStatsResponse,
+            dependencies=[Depends(require_perm("tag:read"))])
+async def get_tag_stats(
+    service: TagService = Depends(get_tag_service),
+    scene_service: SceneAgentService = Depends(get_scene_service),
+) -> TagStatsResponse:
+    """标签台账：总数/类型分布/启用停用/入菜单 + 引用健康度。
+
+    引用维度由场景侧现算：遍历未删除场景，按 primary_tag_id + tag_ids 记一次引用
+    （同一场景对同一标签只记一次，避免主标签重复计入）。已删除场景不计入引用——
+    否则软删场景会把「零引用标签」洗白成「有引用」。
+    """
+    response = scene_service.list_scenes()
+    refs: dict[str, int] = {}
+    scanned = 0
+    for scene in response.scenes:
+        if getattr(scene, "status", "active") == "deleted":
+            continue
+        scanned += 1
+        tag_ids = set()
+        primary = getattr(scene, "primary_tag_id", None)
+        if primary:
+            tag_ids.add(primary)
+        tag_ids.update(t for t in (getattr(scene, "tag_ids", None) or []) if t)
+        for tid in tag_ids:
+            refs[tid] = refs.get(tid, 0) + 1
+
+    return TagStatsResponse(**service.get_tag_stats(scene_refs=refs, scenes_scanned=scanned))
 
 
 @router.get("/{tag_id}", response_model=TagConfig)

@@ -9,19 +9,15 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
-try:
-    from ..enterprise_plugin import is_enterprise_installed
-except ImportError:
-    is_enterprise_installed = lambda: False
-
 logger = logging.getLogger(__name__)
 
 
 class UserSceneService:
     """用户场景服务
 
-    社区版：SQLite 仓储（工厂已初始化时）或 JSON 文件兜底。
-    企业版：PostgreSQL 仓储，经 RepositoryFactory 注入（与 TagService 同款模式）。
+    仓储选择按 **版本 + 仓储能力**（见 __init__ 注释，与 SceneAgentService /
+    TagService 同一把尺子）：企业版用 PostgreSQL 仓储，社区版用 M1 域D 的
+    SQLite 仓储；工厂未初始化（如单测）或能力不满足时退回 JSON 文件兜底。
     """
     
     def __init__(self, data_dir: str):
@@ -30,28 +26,47 @@ class UserSceneService:
         self.scenes_file = self.data_dir / "scenes.json"
         self._us_repo = None
         self._scene_repo = None
-        if is_enterprise_installed():
-            # 企业版：PostgreSQL 仓储
-            try:
-                from ..foundation.repository_factory import RepositoryFactory
-                if RepositoryFactory.is_initialized():
-                    self._us_repo = RepositoryFactory.get_user_scene_repository()
-                    self._scene_repo = RepositoryFactory.get_scene_repository()
-                    logger.info("UserSceneService using enterprise PostgreSQL repositories")
-            except Exception as e:
-                logger.warning(f"Failed to get enterprise user-scene repositories: {e}, falling back to JSON")
-        else:
-            # M1 域D：社区版 SQLite 仓储
-            try:
-                from ..foundation.repository_factory import RepositoryFactory
-                if (RepositoryFactory.is_initialized()
-                        and RepositoryFactory.get_edition() == "community"):
-                    self._us_repo = RepositoryFactory.get_user_scene_repository()
-                    self._scene_repo = RepositoryFactory.get_scene_repository()
-            except Exception:
-                # 工厂未初始化（如单测） → 回退 JSON 路径
-                self._us_repo = None
-                self._scene_repo = None
+        # 选仓判据 = **版本 + 仓储能力**，不是「企业包能否 import」。
+        # 与 SceneAgentService / TagService 同批治理（2026-11-10「进入场景失败」
+        # 根因）：社区镜像同样打包 coapis/enterprise/ 源码，is_enterprise_installed()
+        # 在社区版恒为 True，旧写法因此走「企业版」分支把 SQLite 仓当 PG 仓，
+        # 日志还写着 "using enterprise PostgreSQL repositories" —— 排查时指错方向。
+        try:
+            from ..foundation.repository_factory import RepositoryFactory
+            if RepositoryFactory.is_initialized():
+                edition = RepositoryFactory.get_edition()
+                us_repo = RepositoryFactory.get_user_scene_repository()
+                scene_repo = RepositoryFactory.get_scene_repository()
+                # 能力自检：本服务只用到用户配置的 get/save 与系统场景的 get_all。
+                # 缺任一方法 → 退回 JSON 兜底，绝不让「用户点开才 500」发生。
+                missing = []
+                if us_repo is not None and not all(
+                        hasattr(us_repo, m) for m in ("get", "save")):
+                    missing.append(f"user_scene={type(us_repo).__name__}")
+                if scene_repo is not None and not hasattr(scene_repo, "get_all"):
+                    missing.append(f"scene={type(scene_repo).__name__}")
+                if missing:
+                    logger.warning(
+                        "UserSceneService repositories lack contract methods %s "
+                        "(edition=%s) -> falling back to JSON files",
+                        ", ".join(missing), edition,
+                    )
+                else:
+                    self._us_repo = us_repo
+                    self._scene_repo = scene_repo
+                    logger.info(
+                        "UserSceneService using %s (user_scene=%s, scene=%s, edition=%s)",
+                        "enterprise PostgreSQL repositories" if edition == "enterprise"
+                        else "community SQLite repositories",
+                        type(us_repo).__name__ if us_repo is not None else "None",
+                        type(scene_repo).__name__ if scene_repo is not None else "None",
+                        edition,
+                    )
+        except Exception as e:
+            logger.warning(
+                f"Failed to get user-scene repositories: {e}, falling back to JSON")
+            self._us_repo = None
+            self._scene_repo = None
 
     def _load_user_scenes(self) -> Dict[str, Any]:
         """加载用户场景数据"""
@@ -142,17 +157,30 @@ class UserSceneService:
         self._save_user_scenes(data)
         return True
     
+    @staticmethod
+    def _filter_usable_scenes(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """剔除已删除/停用场景。
+
+        仓储层 ``get_all()`` 不带状态过滤（SQLite 实现等价于 ``list_scenes()``），
+        软删场景会原样返回 → 推荐位把已删除场景端给用户。过滤统一放这里，
+        仓储与 JSON 两条数据源口径一致。
+        """
+        return [
+            s for s in scenes
+            if (s.get("status") or "active") not in ("deleted", "disabled")
+        ]
+
     def get_all_scenes(self) -> List[Dict[str, Any]]:
-        """获取所有系统场景"""
+        """获取所有系统场景（不含已删除/停用）"""
         if self._scene_repo is not None:
-            return self._scene_repo.get_all()
+            return self._filter_usable_scenes(self._scene_repo.get_all())
         if not self.scenes_file.exists():
             return []
-        
+
         with open(self.scenes_file, 'r', encoding='utf-8') as f:
             scenes_data = json.load(f)
-        
-        return scenes_data.get('scenes', [])
+
+        return self._filter_usable_scenes(scenes_data.get('scenes', []))
     
     def get_recommended_scenes(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """根据用户偏好推荐场景"""

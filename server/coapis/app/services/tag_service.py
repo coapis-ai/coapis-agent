@@ -25,7 +25,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 
 from ...models.tag import (
     TagType,
@@ -1039,3 +1039,58 @@ class TagService:
         return category_items
     
 
+    def get_tag_stats(
+        self,
+        scene_refs: Optional[Dict[str, int]] = None,
+        scenes_scanned: int = 0,
+    ) -> Dict[str, Any]:
+        """标签台账：计数 + 健康度（悬空父级、零引用）。
+
+        2026-11-10：管理页有取台账的需求，后端只有列表路由 → `/stats` 恒 404。
+        台账不只图个方便：**零引用标签**与**悬空 parent_id** 是标签体系腐化的
+        两个可量化信号（标签越堆越多、没人用、父子指向空），必须给管理面看见。
+
+        Args:
+            scene_refs: tag_id -> 引用它且未删除的场景数。引用关系只有场景服务
+                知道，故由路由层算好传入；服务层不反向依赖场景服务（避免循环导入）。
+            scenes_scanned: 参与统计的场景数（不含已删除）。
+
+        Returns:
+            与 TagStatsResponse 同构的字典。
+        """
+        tags = self._load_tags()
+        ids = {t.id for t in tags}
+
+        by_type: Dict[str, int] = {}
+        for tag in tags:
+            key = tag.type.value if hasattr(tag.type, "value") else str(tag.type)
+            by_type[key] = by_type.get(key, 0) + 1
+
+        refs = scene_refs or {}
+        child_ids = {t.parent_id for t in tags if t.parent_id}
+        # 悬空父级：parent_id 指着不存在（含已软删）的标签——菜单树上表现为子标签
+        # 凭空消失，用户只会以为「标签丢了」。
+        dangling = sum(1 for t in tags if t.parent_id and t.parent_id not in ids)
+
+        top_used = sorted(
+            (
+                {"id": t.id, "name": t.name, "icon": t.icon, "scene_count": refs[t.id]}
+                for t in tags
+                if refs.get(t.id)
+            ),
+            key=lambda x: (-x["scene_count"], x["id"]),
+        )[:5]
+
+        return {
+            "total": len(tags),
+            "by_type": by_type,
+            "enabled": sum(1 for t in tags if t.enabled),
+            "disabled": sum(1 for t in tags if not t.enabled),
+            "in_menu": sum(1 for t in tags if t.enabled and t.show_in_menu),
+            "with_children": len(child_ids & ids),
+            "dangling_parent": dangling,
+            "scenes_scanned": scenes_scanned,
+            "referenced": sum(1 for t in tags if refs.get(t.id)),
+            "unused": sum(1 for t in tags if not refs.get(t.id)),
+            "top_used": top_used,
+        }

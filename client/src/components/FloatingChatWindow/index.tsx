@@ -4,6 +4,7 @@ import { Spin, message } from 'antd';
 import type { SceneConfig, EnterSceneResponse } from '../../pages/Workbench/types';
 import styles from './index.module.less';
 import { getApiToken } from '../../api/config';
+import { parseApiError } from '../../lib/apiError';
 import { ChatWrapper } from '../ChatWrapper';
 import ChatPage from '../../pages/Chat';
 
@@ -166,7 +167,9 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
       });
 
       if (!response.ok) {
-        throw new Error('Failed to enter scene');
+        // 透传后端文案 + 状态码 + error_id：用户报「进入场景失败」时，
+        // 控制台直接给出后端真实原因与日志可对齐的编号，不再靠猜。
+        throw new Error(await parseApiError(response, '进入场景失败'));
       }
 
       const data: EnterSceneResponse = await response.json();
@@ -183,7 +186,9 @@ const FloatingChatWindow: React.FC<FloatingChatWindowProps> = ({
       message.success(`已进入场景: ${scene.name}`);
     } catch (error) {
       console.error('Failed to enter scene:', error);
-      message.error('进入场景失败');
+      const friendly =
+        error instanceof Error && error.message ? error.message : '进入场景失败';
+      message.error(friendly);
     } finally {
       setLoading(false);
     }
