@@ -701,6 +701,41 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   onSessionListUpdated: ((sessions: IAgentScopeRuntimeWebUISession[]) => void) | null = null;
 
   /**
+   * 会话列表变化的**多订阅**通道（v25 · 2026-11-10）。
+   *
+   * 上面那根 `onSessionListUpdated` 是**单槽**：谁后赋值谁生效。Chat/index.tsx
+   * 在挂载 effect 里占着它做 React 同步，左栏（ChatSessionDropdown）想同步
+   * 「新建会话/改名/生成完成」就只能去抢同一个槽 —— 抢到了 Chat 页那边瞎，
+   * 抢不到左栏瞎，卸载顺序还决定谁赢。
+   *
+   * 注册制不抢槽：每个消费者自己订阅、自己拿回注销函数，通知一次全到。
+   * 老槽保持原样，现有消费者零改动。
+   */
+  private _listListeners = new Set<(sessions: IAgentScopeRuntimeWebUISession[]) => void>();
+
+  /** 订阅会话列表变化，返回注销函数（组件卸载时调用）。 */
+  addSessionListListener(
+    cb: (sessions: IAgentScopeRuntimeWebUISession[]) => void,
+  ): () => void {
+    this._listListeners.add(cb);
+    return () => {
+      this._listListeners.delete(cb);
+    };
+  }
+
+  /** 统一通知点：单槽 + 全部订阅者。 */
+  private _notifySessionList(sessions: IAgentScopeRuntimeWebUISession[]): void {
+    this.onSessionListUpdated?.(sessions);
+    for (const cb of this._listListeners) {
+      try {
+        cb(sessions);
+      } catch (err) {
+        console.warn("[sessionApi] session list listener error:", err);
+      }
+    }
+  }
+
+  /**
    * Called when a newly created session's realId (backend UUID) is resolved
    * during createSession(). Consumers (Chat/index.tsx) use this to update
    * chatIdRef so that the first message is sent with the correct chat_id.
@@ -832,7 +867,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       this._sessions.push(session);
     }
     // Notify React so components (e.g. ChatSessionHeader) re-render
-    this.onSessionListUpdated?.(this._sessions);
+    this._notifySessionList(this._sessions);
   }
 
   /**
@@ -976,7 +1011,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
 
         // Notify React so the sidebar re-renders with updated names
         this._lastListResult = result;
-        this.onSessionListUpdated?.(result);
+        this._notifySessionList(result);
         this._sessionListLoaded = true;
         return result;
       } catch (err) {
@@ -1370,7 +1405,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       this.updateWindowVariables(newSession);
       this._sessions.unshift(newSession);
       // Notify React so sidebar and header update immediately
-      this.onSessionListUpdated?.(this._sessions);
+      this._notifySessionList(this._sessions);
 
       // Write the backend UUID back to the input object for the caller
       if (session) {
@@ -1466,7 +1501,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
           }
 
           // Trigger UI refresh via callbacks
-          this.onSessionListUpdated?.(this._sessions);
+          this._notifySessionList(this._sessions);
         }
       } catch (err) {
         // Transient errors are expected (network blips); just log and retry

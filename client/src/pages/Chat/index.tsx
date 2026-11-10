@@ -1544,7 +1544,12 @@ export default function ChatPage() {
         chatApi
           .attachChatFiles(_localId, realId)
           .then((r) => {
-            if (r.updated > 0) refreshSessionFiles();
+            if (r.updated > 0) {
+              refreshSessionFiles();
+              // v25：补写成功也要叫左栏下拉重取——左栏那一眼是在 chatId 变化
+              // 当刻就发请求的，比这条补写更早返回就是空面板，之后没人叫它重取。
+              setResourceRefresh((n) => n + 1);
+            }
           })
           .catch((e) => console.warn("[ledger] attach-chat failed:", e));
       }
@@ -2017,6 +2022,10 @@ export default function ChatPage() {
         onSuccess({ url: res.url });
         // 上传已带 chat_id，刷新台账让「本会话文件」立刻能看到它
         refreshSessionFiles();
+        // v25：左栏「会话资源」下拉与 L3 抽屉吃的是 resourceRefresh 这根信号
+        // （原来只有「本轮响应带 resources」才自增，见下面 2513 处）。上传的
+        // 文件不触发它 → 上传完下拉还是旧的，用户以为没传上去。
+        setResourceRefresh((n) => n + 1);
         // 目录/台账缓存随之失效，菜单下次打开读到新文件
         invalidateCascade();
       } catch (e) {

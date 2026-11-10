@@ -159,7 +159,12 @@ export const chatApi = {
       getApiUrl("/myfiles/records/attach-chat"),
       {
         method: "POST",
-        headers: buildAuthHeaders(),
+        // ⚠️ v25 修（2026-11-10 实测 422）：这个接口是裸 fetch，不是 request()
+        // 助手。`buildAuthHeaders()` 按约定只给 Authorization/X-Agent-Id，
+        // Content-Type 要调用方自己带。缺了它，浏览器发的是 text/plain，
+        // FastAPI 直接判 "Field required body" → 422，新会话的台账永远挂不上
+        // chat_id，「本会话文件」就是空的（会话资源下拉一片空白）。
+        headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, chat_id: chatId }),
       },
     );

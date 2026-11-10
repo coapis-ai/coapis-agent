@@ -497,6 +497,79 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
     [],
   );
 
+  /**
+   * 渲染同步用的镜像 ref：订阅回调里要读最新的列表与当前会话，不能靠闭包
+   * 里的旧值（订阅 effect 只跑一次，闭包会永远停在挂载那一刻）。
+   */
+  const localSessionsRef = useRef<ExtendedChatSession[]>([]);
+  useEffect(() => {
+    localSessionsRef.current = localSessions;
+  }, [localSessions]);
+  const currentBackendIdRef = useRef<string | null>(props.currentBackendId ?? null);
+  useEffect(() => {
+    currentBackendIdRef.current = props.currentBackendId ?? null;
+  }, [props.currentBackendId]);
+
+  /**
+   * v25（2026-11-10）：后端会话列表一变，左栏立刻同步。
+   *
+   * 治的是「新建会话后 caret 整枚消失」：新建走的是聊天页那条链
+   * （sessionApi.createSession → 通知 → 路由跳到 /chat/<新uuid>），左栏这份
+   * 列表是自己分页拉的，没人叫它重取 → 列表里没有新会话那一行，而 caret 只挂
+   * 「当前会话那一行」，行都不在，caret 就恒为 0，会话资源下拉点不开。
+   *
+   * 同步只做两件窄事，**不整表替换**：
+   *  1. 当前会话那一行不在列表里 → 补到最前（caret 挂得上、页脚 total +1）；
+   *  2. 已加载窗口内的行 → 同步名称/置顶/生成中/时间（改名、自动改名、生成完成）。
+   * 整表替换会把分页打废：offset 按页推进，一次塞进 100 条后「加载更多」去重
+   * 完长度不变，看起来就是卡住 —— 那是 B5 明确要躲的坑。
+   */
+  useEffect(() => {
+    if (props.variant !== "sidebar") return;
+    return sessionApi.addSessionListListener((sessions) => {
+      const incoming = sessions as unknown as ExtendedChatSession[];
+      const prev = localSessionsRef.current;
+      if (prev.length === 0) return; // 首屏归 loadSessions 管，这里不抢
+      const want = currentBackendIdRef.current;
+      let changed = false;
+      const next = prev.map((row) => {
+        const b = getBackendId(row);
+        if (!b) return row;
+        const fresh = incoming.find((x) => getBackendId(x) === b);
+        if (!fresh) return row;
+        if (
+          row.name === fresh.name &&
+          row.pinned === fresh.pinned &&
+          row.generating === fresh.generating &&
+          row.updatedAt === fresh.updatedAt
+        ) {
+          return row;
+        }
+        changed = true;
+        return {
+          ...row,
+          name: fresh.name,
+          pinned: fresh.pinned,
+          generating: fresh.generating,
+          updatedAt: fresh.updatedAt,
+        };
+      });
+      let added = 0;
+      if (want && !next.some((row) => getBackendId(row) === want)) {
+        const fresh = incoming.find((x) => getBackendId(x) === want);
+        if (fresh) {
+          next.unshift(fresh);
+          added = 1;
+        }
+      }
+      if (!changed && !added) return;
+      localSessionsRef.current = next;
+      setLocalSessions(next);
+      setSessions(next as never);
+      if (added) setTotal((t) => t + 1);
+    });
+  }, [props.variant, setSessions]);
+
   /** 拉一页会话。append=false 首屏/刷新（整表替换）；true 触底追加。 */
   const loadSessions = useCallback(
     async (opts?: { append?: boolean }) => {
