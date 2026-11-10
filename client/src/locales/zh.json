@@ -2238,6 +2238,10 @@
       "empty": "本轮没有资源",
       "more": "还有 {{n}} 项未加载",
       "barTitle": "会话资源",
+      "barTitleRound": "本轮资源",
+      "viewAllSession": "会话全部资源",
+      "viewAllTip": "打开本会话全部资源（含历史轮次）",
+      "showRest": "其余 {{n}} 项",
       "expand": "展开",
       "collapse": "收起",
       "refresh": "刷新",
@@ -2307,7 +2311,7 @@
       "refKindChat": "聊天引用",
       "refKindSession": "会话引用",
       "refKindAgent": "智能体引用",
-      "toggleFilterTip": "只看这一组"
+      "toggleFilterTip": "点击展开 / 收起这一组"
     },
     "resourceGroupProduced": "生成",
     "resourceGroupReferenced": "引用",

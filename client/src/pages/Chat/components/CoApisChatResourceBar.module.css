@@ -8,6 +8,12 @@
   margin-bottom: 6px;
   font-size: 12px;
   line-height: 1.5;
+  /* v25（小蜜蜂 2026-11-10 第 3 条「宽度」）：原来**没有任何宽度约束**，
+     实测铺满整个气泡 620px（气泡 620/639），一行只有 2~5 个文件时右侧全空。
+     收窄到 420px 与聊天气泡内的卡片群同量级，宽 = 内容边界，不再虚胖。
+     min-width: 0 让 flex 子项可收缩（窄屏/抽屉里不被内容撑破）。 */
+  max-width: 420px;
+  min-width: 0;
 }
 
 .header {
@@ -28,7 +34,9 @@
 .groups {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  /* v25 第 3 条「chip 间距」：实测两 chip 之间只有 6px、chip 内边距 6px，
+     两颗挤成一片。间距提到 10px、内边距 8px，各自是一颗独立的按钮。 */
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -37,8 +45,8 @@
 .group-chip {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 0 6px;
+  gap: 4px;
+  padding: 0 8px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.05);
   color: rgba(0, 0, 0, 0.6);
@@ -46,7 +54,38 @@
   cursor: pointer;
   user-select: none;
   border: 1px solid transparent;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+/* chip 上的数量（v25：数字用等宽字体 + 略深色，与文字分开，读成「引用 3」
+   而不是「引用3」） */
+.chip-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.group-chip-active .chip-count,
+.group-chip-active:hover .chip-count {
+  color: #1677ff;
+}
+
+/* chip 上的下拉符号：展开时转 180°（v25 第 1 条——下拉符号长在 chip 上，
+   chip 自己就是这一组的展开/收起开关） */
+.chip-caret {
+  font-size: 9px;
+  color: rgba(0, 0, 0, 0.35);
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.chip-caret[data-open="true"] {
+  transform: rotate(0deg);
+  color: #1677ff;
 }
 
 .group-chip:hover {
@@ -174,24 +213,18 @@
   margin-top: 4px;
 }
 
-.group-head {
+/* v25：组头改成一行灰字提示「引用 · 3」。旧版是「引用 [3]」带药丸计数，
+   与头部 chip 的「引用 3」重复（同一个面板两把标签）。 */
+.group-hint {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 0, 0, 0.45);
   margin-bottom: 2px;
 }
 
-.group-count {
-  padding: 0 5px;
-  border-radius: 7px;
-  background: rgba(0, 0, 0, 0.06);
-  font-size: 10px;
-}
-
-.expand,
-.collapse {
+.expand {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -200,13 +233,6 @@
   cursor: pointer;
 }
 
-.collapse {
-  margin-right: 10px;
-  white-space: nowrap;
-  color: rgba(0, 0, 0, 0.55);
-}
-
-.expand:hover,
-.collapse:hover {
+.expand:hover {
   color: #1677ff;
 }

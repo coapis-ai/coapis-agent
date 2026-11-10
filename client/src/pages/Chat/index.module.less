@@ -47,7 +47,7 @@
   flex-direction: column;
   overflow: hidden;
   transition: all 0.3s ease;
-  
+
   // 暗色主题
   :global(.dark-mode) & {
     background: var(--bg-color, #141414);
@@ -76,7 +76,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  
+
   :global(.dark-mode) & {
     background: var(--bg-color, #141414);
   }
@@ -750,7 +750,8 @@
 /* ── Tool Card Compact Styles ── */
 :global {
   /* Always show the arrow (">详情") on tool call cards */
-  .coapis-operate-card.coapis-operate-card-collapsed .coapis-operate-card-header-arrow,
+  .coapis-operate-card.coapis-operate-card-collapsed
+    .coapis-operate-card-header-arrow,
   .coapis-operate-card:hover .coapis-operate-card-header-arrow {
     opacity: 1 !important;
   }
@@ -769,17 +770,20 @@
   }
 
   /* Tool input/output block headers: compact */
-  .coapis-operate-card-tool-call-block .coapis-operate-card-tool-call-block-header {
+  .coapis-operate-card-tool-call-block
+    .coapis-operate-card-tool-call-block-header {
     padding: 2px 6px !important;
     min-height: 22px !important;
   }
 
-  .coapis-operate-card-tool-call-block .coapis-operate-card-tool-call-block-title {
+  .coapis-operate-card-tool-call-block
+    .coapis-operate-card-tool-call-block-title {
     font-size: 11px !important;
   }
 
   /* Tool input/output content: reduce padding */
-  .coapis-operate-card-tool-call-block .coapis-operate-card-tool-call-block-content {
+  .coapis-operate-card-tool-call-block
+    .coapis-operate-card-tool-call-block-content {
     padding: 2px 6px !important;
     font-size: 11px !important;
     max-height: 120px !important;
@@ -830,10 +834,15 @@
 
       /* 批次 C2「资源条对齐」：资源条此前继承气泡内容宽度，实测左缩进
          210px、右缩进 110px，与消息列左边缘对不齐，像浮在正文里的一块。
-         flex column 里用 stretch + 100% 让它与正文同宽、左边缘齐平。 */
+         flex column 里用 stretch + 100% 让它与正文同宽、左边缘齐平。
+
+         v25（小蜜蜂 2026-11-10 第 3 条「宽度」）：上面这条 C2 的优先级
+         （[class*=…]>[data-…] = 0,2,0）**压过**组件里 .bar 的 max-width，
+         实测把条钉成气泡全宽 620px——一行 2~5 个文件时右半屏全是空的。
+         宽度上限收敛到 420px，左边缘仍与正文齐平（stretch 不变）。 */
       align-self: stretch;
       width: auto;
-      max-width: 100%;
+      max-width: min(100%, 420px);
       box-sizing: border-box;
     }
 

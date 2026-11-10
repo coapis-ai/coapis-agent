@@ -1554,6 +1554,10 @@
       "empty": "今回のリソースはありません",
       "more": "他 {{n}} 件未読込",
       "barTitle": "セッションのリソース",
+      "barTitleRound": "このターンのリソース",
+      "viewAllSession": "セッション全体のリソース",
+      "viewAllTip": "このセッションの全リソース（以前のターンを含む）を開く",
+      "showRest": "他 {{n}} 件",
       "expand": "展開",
       "collapse": "折りたたむ",
       "refresh": "更新",
@@ -1623,7 +1627,7 @@
       "refKindChat": "チャット",
       "refKindSession": "セッション",
       "refKindAgent": "エージェント",
-      "toggleFilterTip": "このグループのみ"
+      "toggleFilterTip": "クリックでこのグループを展開 / 折りたたむ"
     },
     "resourceGroupProduced": "生成",
     "resourceGroupReferenced": "参照",

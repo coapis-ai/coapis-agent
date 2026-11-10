@@ -9,14 +9,10 @@ import {
   EyeOutlined,
   FileTextOutlined,
   GlobalOutlined,
-  RightOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { ChatResourceItem } from "../../../api/modules/chat";
-import {
-  displayName,
-  stemName,
-} from "./ChatSessionResources/helpers";
+import { displayName, stemName } from "./ChatSessionResources/helpers";
 import {
   toLedgerRelPath,
   getPreviewKind,
@@ -107,20 +103,21 @@ const CoApisChatResourceBar: React.FC<Props> = ({
   onLocate,
 }) => {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
   // v24（小蜜蜂 2026-11-09 第 2 条）：「引用 / 产出」两颗 chip 自己就是筛子——
   // 点一下只看这一组（并自动展开），再点一下回到两组同看。此前 chip 只是
   // 计数标签，必须整块展开后在两堆里自己找，用户说「有点乱」。
+  //
+  // v25（小蜜蜂 2026-11-10 第 1 条）：**下拉符号长在 chip 上**，chip 自己就是
+  // 展开/收起的开关，所以整块那个「展开 / 收起」按钮删掉——同一个面板上两个
+  // 开关（chip 能展开、右侧「展开」也能展开）是重复控件，用户读成两件事。
+  // `tab === "all"` 即收起态（只剩标题 + 两颗 chip + 查看全部）。
   const [tab, setTab] = useState<Tab>("all");
+  // 组内超过 GROUP_CAP 时，「展开其余 N 项」放开这一组的截断
+  const [noCap, setNoCap] = useState(false);
 
   const toggleTab = (next: Exclude<Tab, "all">) => {
-    if (tab === next && expanded) {
-      setTab("all");
-      setExpanded(false);
-    } else {
-      setTab(next);
-      setExpanded(true);
-    }
+    setTab((cur) => (cur === next ? "all" : next));
+    setNoCap(false);
   };
 
   const produced = useMemo(
@@ -193,16 +190,19 @@ const CoApisChatResourceBar: React.FC<Props> = ({
     source: "produced" | "reference",
   ) => {
     if (!list.length) return null;
-    // v24（小蜜蜂 2026-11-09 第 2 条）：chip 选中哪一组，就只渲染那一组；
-    // 「all」= 两组同看（默认，也是「收起/展开」整块开关的口径）。
-    if (tab !== "all" && tab !== source) return null;
-    const shown = expanded ? list : list.slice(0, GROUP_CAP);
+    // v25（小蜜蜂 2026-11-10 第 1 条）：**一次只渲染 chip 点开的这一组**，
+    // 收起态（tab==="all"）什么都不渲染。原来「两组同看」要额外一个整块
+    // 「展开」按钮，等于三个开关（chip、展开、查看全部）管一件事。
+    if (tab !== source) return null;
+    const shown = noCap ? list : list.slice(0, GROUP_CAP);
     const rest = list.length - shown.length;
     return (
       <div className={styles.group}>
-        <div className={styles.groupHead}>
-          {label}
-          <span className={styles.groupCount}>{list.length}</span>
+        {/* v25：删掉组头「引用 3 / 产出 2」——同一行上面已有那颗带角标的 chip，
+            组头是第二把标签，用户读成「两个引用」。（chip 上就写着名字和数量）
+            两行小字改为行首灰字提示，只在展开时出现一次：见 .groupHint */}
+        <div className={styles.groupHint}>
+          {label} · {list.length}
         </div>
         {shown.map((item) => {
           const st = resourceStatusOf(item);
@@ -220,14 +220,19 @@ const CoApisChatResourceBar: React.FC<Props> = ({
               >
                 {displayName(item) || item.path}
               </span>
-              <Tag className={styles.tag} color={source === "produced" ? "green" : "blue"}>
+              <Tag
+                className={styles.tag}
+                color={source === "produced" ? "green" : "blue"}
+              >
                 {source === "produced"
                   ? t("chat.resources.produced")
                   : t("chat.resources.reference")}
               </Tag>
               {TAGGED_STATUSES.has(st) ? (
                 <Tag className={styles.tag} color={STATUS_META[st]?.color}>
-                  {t(`chat.resources.${STATUS_META[st]?.label ?? "statusDraft"}`)}
+                  {t(
+                    `chat.resources.${STATUS_META[st]?.label ?? "statusDraft"}`,
+                  )}
                 </Tag>
               ) : null}
               {source === "produced" && item.messageId && onLocate ? (
@@ -239,17 +244,20 @@ const CoApisChatResourceBar: React.FC<Props> = ({
                 </Tooltip>
               ) : null}
               <span className={styles.actions}>
-                <Tooltip title={dead ? t("chat.resources.statusMissing") : t("chat.resources.preview")}>
+                <Tooltip
+                  title={
+                    dead
+                      ? t("chat.resources.statusMissing")
+                      : t("chat.resources.preview")
+                  }
+                >
                   <EyeOutlined
                     onClick={() => !dead && doPreview(item)}
                     style={{ cursor: dead ? "not-allowed" : "pointer" }}
                   />
                 </Tooltip>
                 {item.kind === "file" && !dead ? (
-                  <Dropdown
-                    menu={downloadMenu(item)}
-                    trigger={["click"]}
-                  >
+                  <Dropdown menu={downloadMenu(item)} trigger={["click"]}>
                     <Tooltip title={t("chat.resources.download")}>
                       <DownloadOutlined style={{ cursor: "pointer" }} />
                     </Tooltip>
@@ -260,10 +268,13 @@ const CoApisChatResourceBar: React.FC<Props> = ({
           );
         })}
         {rest > 0 && (
-          <a className={styles.expand} onClick={() => setExpanded(true)}>
-            {t("chat.resources.expandRest", {
+          <a className={styles.expand} onClick={() => setNoCap(true)}>
+            {/* v25：原名「展开其余 N 项」——chip 上已经有下拉开关了，同一个面板
+                里出现第二个「展开」，用户不知道哪个管什么。这里只做一件事：
+                放开「每组最多 8 行」的限制，名字改成不带「展开」字样。 */}
+            {t("chat.resources.showRest", {
               n: rest,
-              defaultValue: "展开其余 {{n}} 项",
+              defaultValue: "其余 {{n}} 项",
             })}
           </a>
         )}
@@ -276,6 +287,44 @@ const CoApisChatResourceBar: React.FC<Props> = ({
   // 「定位到消息」的 DOM 锚点：本条资源条属于哪一轮，就标在哪
   const anchorMessageId = produced.find((i) => i.messageId)?.messageId;
 
+  /**
+   * v25 的 chip：名字 + 数量 + ▾。**chip 就是这一组的展开/收起开关**，
+   * 展开态由 chip 自己高亮（旧版是右侧一个独立的「展开」按钮管两组，
+   * 与 chip 各说各话——这就是小蜜蜂说的「有点乱」）。
+   * 计数为 0 的一组不出现这颗 chip（v24 口径：点了没反应的 chip 读成坏了）。
+   */
+  const renderChip = (
+    key: Exclude<Tab, "all">,
+    label: string,
+    count: number,
+  ) => {
+    if (count === 0) return null;
+    const open = tab === key;
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        className={`${styles.groupChip} ${open ? styles.groupChipActive : ""}`}
+        title={t("chat.resources.toggleFilterTip", "点击展开 / 收起这一组")}
+        aria-expanded={open}
+        onClick={() => toggleTab(key)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleTab(key);
+          }
+        }}
+      >
+        {label}
+        <b className={styles.chipCount}>{count}</b>
+        <DownOutlined
+          className={styles.chipCaret}
+          data-open={open ? "true" : "false"}
+        />
+      </span>
+    );
+  };
+
   return (
     <div
       className={styles.bar}
@@ -284,75 +333,49 @@ const CoApisChatResourceBar: React.FC<Props> = ({
     >
       {/* 折叠态：单行摘要（方案：默认折叠，单行 28px） */}
       <div className={styles.header}>
+        {/* v25（小蜜蜂 2026-11-10 第 1 条引的原始诉求）：这一条挂的是**本轮**
+            的引用与产出，名字必须自己说清楚——旧名「会话资源」让人以为整会话
+            都在这儿，与左栏那个会话级下拉撞名，才是「分裂感」的根。 */}
         <span className={styles.title}>
-          <AppstoreOutlined /> {t("chat.resources.barTitle", "会话资源")}
+          <AppstoreOutlined /> {t("chat.resources.barTitleRound", "本轮资源")}
         </span>
-        {/* v24（小蜜蜂 2026-11-09 第 2 条）：chip 就是筛子——点一下只看这一组
-            （并自动展开），再点一下回到两组同看。计数为 0 的一组**不出现这颗
-            chip**：旧口径「引用 0」也画出来，用户点了没反应，读成坏了。 */}
         <span className={styles.groups}>
-          {referenced.length > 0 && (
-            <span
-              role="button"
-              tabIndex={0}
-              className={`${styles.groupChip} ${tab === "reference" ? styles.groupChipActive : ""}`}
-              title={t("chat.resources.toggleFilterTip", "只看这一组")}
-              aria-pressed={tab === "reference"}
-              onClick={() => toggleTab("reference")}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggleTab("reference");
-                }
-              }}
-            >
-              {t("chat.resources.reference")} {referenced.length}
-            </span>
+          {renderChip(
+            "reference",
+            t("chat.resources.reference"),
+            referenced.length,
           )}
-          {produced.length > 0 && (
-            <span
-              role="button"
-              tabIndex={0}
-              className={`${styles.groupChip} ${tab === "produced" ? styles.groupChipActive : ""}`}
-              title={t("chat.resources.toggleFilterTip", "只看这一组")}
-              aria-pressed={tab === "produced"}
-              onClick={() => toggleTab("produced")}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggleTab("produced");
-                }
-              }}
-            >
-              {t("chat.resources.produced")} {produced.length}
-            </span>
+          {renderChip(
+            "produced",
+            t("chat.resources.produced"),
+            produced.length,
           )}
         </span>
         <span className={styles.spacer} />
-        <a className={styles.collapse} onClick={() => setExpanded((v) => !v)}>
-          {expanded ? (
-            <DownOutlined />
-          ) : (
-            <RightOutlined />
-          )}
-          {expanded
-            ? t("chat.resources.collapse", "收起")
-            : t("chat.resources.expand", "展开")}
-        </a>
+        {/* v25：「展开 / 收起」删除——开关已在 chip 上（重复控件）。这里只留
+            会话级入口，名字带「会话」与上面的「本轮」成对，用户一眼分得清。 */}
         {onShowAll && (
           <a
             className={styles.showAll}
             onClick={onShowAll}
+            title={t(
+              "chat.resources.viewAllTip",
+              "打开本会话全部资源（含历史轮次）",
+            )}
             /* 抽屉「点外面就关」认这个标记：入口自己 toggle，抢关会关掉又立刻重开 */
             data-coapis-res-trigger=""
           >
-            {t("chat.resources.viewAll", "查看全部")}
+            {t("chat.resources.viewAllSession", "会话全部资源")}
           </a>
         )}
       </div>
-      {expanded && (
+      {tab !== "all" && (
         <>
-          {renderGroup(t("chat.resources.groupReference"), referenced, "reference")}
+          {renderGroup(
+            t("chat.resources.groupReference"),
+            referenced,
+            "reference",
+          )}
           {renderGroup(t("chat.resources.groupProduced"), produced, "produced")}
         </>
       )}

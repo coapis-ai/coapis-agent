@@ -28,6 +28,11 @@ INLINE_LESS = (
 CHAT_INDEX = REPO / "client" / "src" / "pages" / "Chat" / "index.tsx"
 MYSPACE = REPO / "client" / "src" / "pages" / "MySpace" / "index.tsx"
 JUDGMENT = REPO / "client" / "src" / "pages" / "MySpace" / "JudgmentPanel.tsx"
+ZH_LOC = REPO / "client" / "src" / "locales" / "zh.json"
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def _chat_resources_fn() -> str:
@@ -88,15 +93,52 @@ def test_judgment_ledger_lives_in_myspace():
     assert "AuditOutlined" in panel
 
 
-def test_chat_resource_bar_chips_are_filters():
-    """chip 必须可点、有选中态、空组不出现（问题 2）。"""
-    bar = BAR.read_text(encoding="utf-8")
-    css = BAR_CSS.read_text(encoding="utf-8")
-    assert "const toggleTab" in bar and "toggleTab(" in bar
-    assert bar.count('role="button"') >= 2, "chip 必须真的可点"
-    assert "groupChipActive" in bar and ".group-chip-active" in css
-    assert "referenced.length > 0 &&" in bar and "produced.length > 0 &&" in bar
-    assert 'if (tab !== "all" && tab !== source) return null;' in bar
+def test_chat_resource_bar_chips_are_filters() -> None:
+    """v25：chip 就是这一组的开关（名字 + 数量 + ▾），收起态不渲染任何列表。
+
+    小蜜蜂 2026-11-09 说「下拉直接放在引用、产出上面，各自点击展示各自的」。
+    v24 做成「chip 筛子 + 右侧展开按钮」，2026-11-10 复盘发现真问题：同一个
+    面板里 **三个开关（chip / 展开 / 查看全部）管一件事**，chip 与展开各说
+    各话。v25 收敛为：chip 自己带 ▾，点一下展开这一组、再点收起；独立的
+    「展开/收起」按钮删除；「查看全部」改名「会话全部资源」。
+
+    源码级断言：本仓库前端无测试运行器，形状锁在这里。
+    """
+    comp = _read(BAR)
+    css = _read(BAR_CSS)
+    zh = _read(ZH_LOC)
+
+    # ① 一次只渲染 chip 点开的那一组（tab === "all" 收起态什么都不渲染）
+    assert "if (tab !== source) return null;" in comp
+    # ② 组列表只在 chip 展开时渲染
+    assert '{tab !== "all" && (' in comp
+    # ③ 单一状态机：tab 三态 + noCap（放开「每组最多 8 行」的限制）
+    assert 'const [tab, setTab] = useState<Tab>("all")' in comp
+    assert "const [noCap, setNoCap] = useState(false)" in comp
+    assert "toggleTab" in comp
+    # ④ chip 上带下拉符号，展开时转 180°
+    assert "styles.chipCaret" in comp
+    assert 'data-open={open ? "true" : "false"}' in comp
+    assert "chip-caret" in css
+    assert 'chip-caret[data-open="true"]' in css
+    # ⑤ 计数为 0 的组不出现这颗 chip；空组不渲染
+    assert "if (count === 0) return null;" in comp
+    assert "if (!list.length) return null;" in comp
+    # ⑥ 展开态高亮由 chip 自己表达
+    assert "styles.groupChipActive" in comp
+    # ⑦ 会话级入口在头部
+    assert "onShowAll" in comp
+    # ⑧ 无「判断」入口（判官审计不外显）
+    assert "judge" not in comp
+    # ⑨ v25：面板里不得再有第二个展开开关，也不得有组头（与 chip 重复）
+    assert "styles.collapse" not in comp
+    assert "styles.groupHead" not in comp
+    # ⑩ v25 命名口径：本轮资源 / 会话全部资源
+    assert 't("chat.resources.barTitleRound"' in comp
+    assert 't("chat.resources.viewAllSession"' in comp
+    assert '"barTitleRound": "本轮资源"' in zh
+    assert '"viewAllSession": "会话全部资源"' in zh
+
 
 
 def test_left_panel_indent_is_flush_with_card():

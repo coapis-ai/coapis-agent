@@ -2361,6 +2361,10 @@
       "empty": "No resources in this round",
       "more": "{{n}} more not loaded",
       "barTitle": "Session resources",
+      "barTitleRound": "This turn's resources",
+      "viewAllSession": "All session resources",
+      "viewAllTip": "Open all resources of this session, including earlier turns",
+      "showRest": "{{n}} more",
       "expand": "Expand",
       "collapse": "Collapse",
       "refresh": "Refresh",
@@ -2430,7 +2434,7 @@
       "refKindChat": "chat",
       "refKindSession": "session",
       "refKindAgent": "agent",
-      "toggleFilterTip": "Only this group"
+      "toggleFilterTip": "Click to expand or collapse this group"
     },
     "resourceGroupProduced": "Produced",
     "resourceGroupReferenced": "Referenced",

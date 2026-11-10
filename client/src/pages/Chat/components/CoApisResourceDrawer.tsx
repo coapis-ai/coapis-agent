@@ -45,13 +45,18 @@ export default function CoApisResourceDrawer({
   return (
     <FloatingWindow
       open={open}
-      storageKey="resourceWin"
+      {/* v25 第 3 条「宽度/显示完全」：默认 480 时浮窗实测 504px，主区有
+          1040px 可用，名字列被压到 124px → 文件名全被截断成两行。默认宽度
+          提到 760（名字列约 380px）。
+          storageKey 同时升版：FloatingWindow 把用户拖过的尺寸存在
+          localStorage，老尺寸会盖住新默认值——换 key 才等于「按新默认重来」。 */}
+      storageKey="resourceWin.v25"
       getContainer={getContainer}
       label={winTitle}
       closeTip={t("chat.resources.close", "关闭")}
-      defaultWidth={480}
-      defaultHeight={640}
-      minWidth={360}
+      defaultWidth={760}
+      defaultHeight={620}
+      minWidth={380}
       minHeight={320}
       onClose={onClose}
       closeOnClickOutside

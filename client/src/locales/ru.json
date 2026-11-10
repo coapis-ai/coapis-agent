@@ -1569,6 +1569,10 @@
       "empty": "В этом раунде ресурсов нет",
       "more": "Ещё {{n}} не загружено",
       "barTitle": "Ресурсы сессии",
+      "barTitleRound": "Ресурсы этого хода",
+      "viewAllSession": "Все ресурсы сессии",
+      "viewAllTip": "Открыть все ресурсы этой сессии, включая предыдущие ходы",
+      "showRest": "Ещё {{n}}",
       "expand": "Развернуть",
       "collapse": "Свернуть",
       "refresh": "Обновить",
@@ -1638,7 +1642,7 @@
       "refKindChat": "чат",
       "refKindSession": "сессия",
       "refKindAgent": "агент",
-      "toggleFilterTip": "Только эта группа"
+      "toggleFilterTip": "Нажмите, чтобы развернуть или свернуть эту группу"
     },
     "resourceGroupProduced": "Создано",
     "resourceGroupReferenced": "Ссылки",
