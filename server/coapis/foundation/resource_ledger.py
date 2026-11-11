@@ -48,18 +48,20 @@ from .db.models.resources import (
     ResourceRef,
     make_resource_key,
 )
-from .resource_category import resolve_category
+from .resource_category import (
+    DELIVERABLE_ROOTS,
+    NOISE_DIR_PARTS,
+    is_system_path,
+    resolve_category,
+)
 from .db.models.user import User
 
 logger = logging.getLogger(__name__)
 
-#: 噪音目录：里面的东西不是用户的"资源"。``.trash`` 是软删归档、``.temp`` 是
-#: 脚本暂存。补扫/巡检与消费面补扫共用这一份定义，避免两边口径漂移。
-#: （实测 dev：1242 条 unledgered 里 298 条来自 ``.trash``/``.temp``。）
-NOISE_DIR_PARTS = frozenset({
-    ".trash", ".temp", ".git", "__pycache__", "node_modules", "venv",
-    ".venv", "site-packages", ".ipynb_checkpoints",
-})
+#: 噪音目录（``.trash``/``.temp``/``.git``/…）的定义已上移到
+#: ``resource_category.NOISE_DIR_PARTS``（v26 · F1）：它既是巡检排除项，也是
+#: "系统路径"判据的一条，两处必须同一把尺子。这里 re-export 保持
+#: ``file_service``/``file_adapter`` 的既有导入不动。
 
 #: 工作区根下从来不是用户的目录（系统产物）。评测沙箱、agent 工作区、已删除
 #: 账号的残留由 ``_known_usernames()`` 判定，这里只硬挡系统目录。
@@ -74,10 +76,23 @@ NON_MOVABLE_ROOT_DIRS = frozenset({"scripts", "logs", "system"})
 #: 单次补扫最多登记多少个文件（防止一次巡检写爆数据库）。
 BACKFILL_CAP = 5000
 
-#: 台账行"文件已消失"多久后软删（秒）。巡检每天 03:00 跑一次，取 36h ≈ 两个
-#: 巡检周期：一次看不见可能只是文件正在被移动/写入中途，两次都看不见才算真没了。
-#: 软删只写 ``deleted_at``，**永不删 FS 文件**（沿用 sweep 铁律）。
-LEDGER_MISSING_TTL_SEC = 36 * 3600
+#: 台账行"文件已消失"多久后软删（秒）。
+#:
+#: v26 · F4（拍板 D6）：**36h → 2h**。旧值是跟着"巡检每天 03:00 跑一次"
+#: 定的（两个巡检周期），于是幽灵行最长要在资源条里挂 36 小时才消失——
+#: 小蜜蜂 2026-11-10 看到的"显示不存在/未生成"就是这段时间。巡检改为
+#: 30 分钟一轮（见 ``file_ledger.start_file_ledger_maintenance``），尺子
+#: 跟着改成 2h ≈ 4 轮：一轮看不见可能只是文件正在被移动/写入中途，连续
+#: 4 轮都看不见才算真没了。软删只写 ``deleted_at``，**永不删 FS 文件**。
+LEDGER_MISSING_TTL_SEC = 2 * 3600
+
+#: 清理动作的**扫描**上限（v26 · F3 补，2026-11-11 实测逼出来的）。
+#: 巡检里几个清理函数原先共用 `cap`（`sweep` 传的是**报告**上限 200）当扫描
+#: 上限：实测 dev 台账 323 条可见 file 行，8 条系统路径行全排在第 272–322
+#: 位，`limit(200)` 根本扫不到 → 巡检报 `system_expired: 0`，存量永远清不掉
+#: （报告口径当扫描口径用 = 尾部盲区）。清理是纯内存判据、不碰 FS，扫全表
+#: 只多一次 SELECT；报告列表仍按 `cap` 截断，两头各自分寸。
+LEDGER_SCAN_CAP = 5000
 
 
 def title_from_path(kind: str, path: str) -> str:
@@ -112,8 +127,11 @@ def canonical_file_path(path: str, *, form: str = "workspace") -> str:
     return p
 
 
-#: 已带工作区分类前缀的路径。
-WS_TOP_DIRS = ("files/", "media/", "output/", "downloads/", "uploads/")
+#: 已带工作区分类前缀的路径。v26 · F1：名单由 ``resource_category.
+#: DELIVERABLE_ROOTS`` 提供——前端分桶、补扫口径、系统路径尺子**同一份**。
+#: 带尾斜杠是给 ``startswith`` 用的：不带斜杠会把 ``filesystem/x.md``
+#: 认成 ``files`` 桶。
+WS_TOP_DIRS = tuple(f"{d}/" for d in sorted(DELIVERABLE_ROOTS))
 
 
 def workspace_relative_path(path: str, owner_dir: Optional[Path] = None) -> str:
@@ -288,6 +306,17 @@ class ResourceLedger:
                 # 统一口径后再算 key：采集器的 ``files/x`` 与钩子的 ``x`` 必须
                 # 落到同一行，否则同一文件在台账里分裂成两条记录。
                 path = canonical_file_path(path, form=path_form)
+                # 写入侧闸门（v26 · F1 收口，2026-11-11 dev 实测逼出来的）：
+                # 读面装了筛子，登记入口没闸——平台自己的写动作（会话目录锁
+                # ``files/.session_dirs.json``、启动标记 ``files/.bootstrap_
+                # completed``、心跳/记忆文件 ``files/MEMORY.md``…）照样把行
+                # 造出来，巡检刚软删完，下次启动 ``register`` 命中同一
+                # ``resource_key`` 又把 ``deleted_at`` 抹回 None（**复活**）。
+                # 实测 dev：08:47 清掉的 8 行在 08:53 重启后全部复活。尺子只
+                # 装在读面 = 一边清一边造。闸门装在这个唯一的登记入口，系统
+                # 路径进不了台账，读面那道筛子退化成兜底。
+                if is_system_path(path, kind="file", bare_top_file_ok=True):
+                    return ""
             if not owner_id or not path:
                 return ""
             key = make_resource_key(owner_scope, owner_id, kind, path)
@@ -398,13 +427,22 @@ class ResourceLedger:
         referrer_kind: str,
         referrer_id: str,
         role: str = "reference",
+        turn_id: str = "",
     ) -> bool:
-        """Attach a referrer. Idempotent (unique key). Never raises."""
+        """Attach a referrer. Idempotent (unique key). Never raises.
+
+        ``turn_id``（v26 · F5）：chat 引用带轮号，「本轮」面按轮筛。引用行
+        有唯一键（资源×引用者），同一文件在一个会话里只有一行——所以
+        turn_id 记的是**首次触及**它的那一轮：第 1 轮产出、第 2 轮改写的
+        文件归属第 1 轮。这是唯一键下的诚实简化（本轮面 = 本轮首次进入
+        台账的资源），不做"每轮一行"的膨胀。
+        """
         try:
             if referrer_kind not in VALID_REFERRER_KINDS or role not in VALID_ROLES:
                 return False
             if not resource_key or not referrer_id:
                 return False
+            tid = str(turn_id or "").strip()
             with get_session() as s:
                 res = s.execute(
                     select(Resource).where(Resource.resource_key == resource_key)
@@ -424,13 +462,23 @@ class ResourceLedger:
                             referrer_kind=referrer_kind,
                             referrer_id=referrer_id,
                             role=role,
+                            turn_id=tid or None,
                             created_at=time.time(),
                         )
                     )
-                elif role == "producer" and existing.role != "producer":
-                    # 口径只升不降：同一文件先被引用、后被本会话写出时，
-                    # 这条引用就是「产出」。降口径会把已交付的产物说成引用。
-                    existing.role = "producer"
+                else:
+                    upgraded = False
+                    if role == "producer" and existing.role != "producer":
+                        # 口径只升不降：同一文件先被引用、后被本会话写出时，
+                        # 这条引用就是「产出」。降口径会把已交付的产物说成引用。
+                        existing.role = "producer"
+                        upgraded = True
+                    # 轮号只补空，不覆盖已有值（首次触及的轮号是事实）。
+                    if tid and not (existing.turn_id or ""):
+                        existing.turn_id = tid
+                        upgraded = True
+                    if not upgraded:
+                        pass
                 # orphan → draft on re-reference (frozen lifecycle).
                 if res.status == "orphan":
                     res.status = "draft"
@@ -1049,6 +1097,21 @@ class ResourceLedger:
                     continue
                 scanned += 1
                 ws_rel = workspace_relative_path(rel, root)
+                # v26 · F2（拍板 D1/D2）：**补扫只认交付目录**。
+                #
+                # 旧口径是"工作区根下 rglob 全扫 + 噪音目录之外全收"，于是
+                # ``HEARTBEAT.md``（平台心跳文件）、``memory/2026-11-08.md``
+                # （每日笔记）、``.skills/*/SKILL.md``（技能定义）都会入账，
+                # 还一律挂 producer（实测 dev：source=backfill 的"产出"308 行，
+                # 其中 .temp/probe_*.py 81 行）。会话收尾把"最近一小时被改动
+                # 过的文件"当产出，等于拿文件系统当证据——智能体读过的平台
+                # 文件、跑过的探针，全成了"给你的文件"。
+                #
+                # 尺子（``is_system_path``，全仓唯一）在这一道闸门生效：
+                # 交付目录（files//media//output//downloads//uploads）之外、
+                # 噪音目录之内，一律不补扫。
+                if is_system_path(ws_rel):
+                    continue
                 key = make_resource_key("user", username, "file", ws_rel)
                 with get_session() as s:
                     exists = s.execute(
@@ -1148,7 +1211,7 @@ class ResourceLedger:
                     Resource.fs_present == 0,
                     Resource.deleted_at.is_(None),
                 )
-                .limit(cap)
+                .limit(LEDGER_SCAN_CAP)
             ).scalars().all()
             indices: dict[str, dict] = {}
             for res in rows:
@@ -1252,7 +1315,7 @@ class ResourceLedger:
                     Resource.fs_present == 0,
                     Resource.deleted_at.is_(None),
                 )
-                .limit(cap)
+                .limit(LEDGER_SCAN_CAP)
             ).scalars().all()
             for res in rows:
                 if res.updated_at is None:
@@ -1271,6 +1334,54 @@ class ResourceLedger:
                     }
                 )
         return {"expired": len(expired), "expired_list": expired[:50]}
+
+    def _expire_system_paths(self, *, cap: int = 500) -> dict:
+        """把"根本不是用户资源"的台账行软删（v26 · F3，拍板 D1）。
+
+        起因：台账里存量着大量这类行（实测 dev 113 条可见行里只有 46% 合格）——
+        ``/var/log/….log`` 52 行、``/tmp/probe_*.py`` 11 行、``HEARTBEAT.md``
+        8 行、``.skills/*/SKILL.md`` 16 行、``.temp/probe_*.py`` 81 行。
+        ``_expire_missing`` 抓不到它们：判据是 ``fs_present=0``，而这些文件
+        **FS 真实存在**（心跳文件、技能定义就在盘上），巡检查不出幽灵。
+
+        所以判据换成正本：``resource_category.is_system_path``（F1 那把尺子）。
+        动作只软删（``deleted_at`` 置位、``status='deleted'``），**永不删 FS
+        文件**；台账历史行保留在库（管理面带 ``include_deleted=True`` 可见），
+        会话/本轮清单不再出现。
+
+        只动 ``kind='file'`` 且 ``owner_scope='user'`` 的行——web/db/kb/mcp
+        四类不是文件，交给各自口径（拍板 D2）。
+        """
+        expired: list[dict] = []
+        now = time.time()
+        with get_session() as s:
+            rows = s.execute(
+                select(Resource)
+                .where(
+                    Resource.kind == "file",
+                    Resource.owner_scope == "user",
+                    Resource.deleted_at.is_(None),
+                )
+                .limit(LEDGER_SCAN_CAP)
+            ).scalars().all()
+            for res in rows:
+                # 与读面同一把尺子：存量裸路径先换算成工作区相对形式再判
+                # （裸路径 "x.md" 的文件在 files/ 里 → files/x.md，合格）。
+                owner_dir = self._ws / str(res.owner_id)
+                norm = workspace_relative_path(str(res.path), owner_dir)
+                if not is_system_path(norm):
+                    continue
+                res.deleted_at = now
+                res.status = "deleted"
+                res.updated_at = now
+                expired.append(
+                    {
+                        "owner_id": res.owner_id,
+                        "path": norm,
+                        "fs_present": int(res.fs_present or 0),
+                    }
+                )
+        return {"system_expired": len(expired), "system_expired_list": expired[:50]}
 
     def _backfill_titles(self, cap: int = 5000) -> int:
         """给存量空标题补文件名（实测 dev 347 行里 94 行标题为空）。"""
@@ -1299,6 +1410,7 @@ class ResourceLedger:
         full: bool = False,
         backfill: bool = False,
         relocate: bool = True,
+        titles: bool = True,
         expire_after: Optional[float] = None,
     ) -> dict:
         """Reconcile the ledger against the filesystem. **Never deletes files.**
@@ -1310,6 +1422,11 @@ class ResourceLedger:
           ``resource_refs`` 一起迁（``relocate=False`` 关闭）
         * ``expired`` — fs_missing 行超过 ``expire_after`` 秒（默认两个巡检周期）
           仍看不见 → 软删台账行，资源条不再挂死链；**永不删 FS 文件**
+        * ``system_expired`` — 路径根本不是用户资源的行（交付目录之外/噪音目录
+          之内/绝对路径，判据 ``is_system_path``，v26 · F3）→ 软删台账行。
+          这类行 ``fs_present=1``，``expired`` 那一条抓不到它们
+        * ``titles``（参数）— 关掉标题补齐：30 分钟一轮的轻量巡检用
+          （补标题要读文件正文前几行，是巡检里最重的一段，留给每日全量轮）
         * ``titled`` — 空标题补上文件名的行数（钩子登记不传标题的存量）
         * ``orphans`` — resources with zero refs (status moved to orphan)
         * ``unledgered`` — files on FS with no ledger row **and a real user owner**
@@ -1436,7 +1553,7 @@ class ResourceLedger:
                 if relocate:
                     rep = self._relocate_missing(cap=cap)
                     report["relocated"] = rep["relocated"]
-                    report["relocated_list"] = rep["relocated_list"]
+                    report["relocated_list"] = rep["relocated_list"][:cap]
             except Exception:
                 logger.exception("ledger: 台账跟随移动失败")
             try:
@@ -1449,11 +1566,22 @@ class ResourceLedger:
                     cap=cap,
                 )
                 report["expired"] = rep["expired"]
-                report["expired_list"] = rep["expired_list"]
+                report["expired_list"] = rep["expired_list"][:cap]
             except Exception:
                 logger.exception("ledger: 台账失效判定失败")
             try:
-                report["titled"] = self._backfill_titles()
+                # v26 · F3（拍板 D1）：巡检负责把存量"系统路径"行清出台账。
+                rep = self._expire_system_paths(cap=cap)
+                report["system_expired"] = rep["system_expired"]
+                report["system_expired_list"] = rep["system_expired_list"][:cap]
+            except Exception:
+                logger.exception("ledger: 台账系统路径清理失败")
+            try:
+                # 补标题要读文件正文前几行，是巡检里最重的一段——由
+                # ``titles`` 单独控制（轻量巡检轮传 titles=False）。
+                # 默认 True：手动 sweep() 的行为不变。
+                if titles:
+                    report["titled"] = self._backfill_titles()
             except Exception:
                 logger.exception("ledger: 台账标题补齐失败")
 
@@ -1603,11 +1731,13 @@ class ResourceLedger:
         chat_id: str,
         include_deleted: bool = False,
         role_group: str = "",
+        turn_id: str = "",
     ) -> int:
         """Count of **distinct resources** referenced by one chat.
 
         与 ``list_resources_for_chat`` 同一份合并口径 —— 计数与清单必须同源，
         否则前端资源条会出现「折叠行写 17、展开只有 12 条」。
+        ``turn_id``（v26 · F5）同样透传：本轮的计数与本轮的清单同一把尺子。
         """
         return len(
             self._chat_resource_rows(
@@ -1616,6 +1746,7 @@ class ResourceLedger:
                 chat_id=chat_id,
                 include_deleted=include_deleted,
                 role_group=role_group,
+                turn_id=turn_id,
             )
         )
 
@@ -1641,6 +1772,7 @@ class ResourceLedger:
         with_ref_kinds: bool = False,
         exclude_ref_kinds: Optional[set[str]] = None,
         role_group: str = "",
+        turn_id: str = "",
     ) -> list[dict]:
         # v17 · F7（小蜜蜂 2026-11-05「右侧栏上半区=当前会话的资源」）：
         # 同一套合并/排序口径也服务 **会话（session）作用域** —— 把
@@ -1682,6 +1814,12 @@ class ResourceLedger:
                         for kind, ref_id in pairs
                     ]
                 )
+                # v26 · F5（拍板 D5）：**「本轮」与「会话」从此分尺**。
+                # 旧口径下采集器只写 chat 级引用，「本轮产出」按 chat 查=
+                # 该会话全部历史行；本轮补扫/钩子写的行与上一轮的行混在一起。
+                # 引用行带上 turn_id 后，本轮面按轮筛，会话面照旧按 chat 筛。
+                if turn_id:
+                    ref_cond = ref_cond & (ResourceRef.turn_id == turn_id)
                 stmt = (
                     select(
                         Resource,
@@ -1713,6 +1851,26 @@ class ResourceLedger:
                         else raw
                     )
                     d["path"] = norm
+                    # v26 · F1/F4（拍板 D1/D6）：**读面兜底过滤**（两把尺子）。
+                    #
+                    # ① 系统路径尺子：台账存量里有大量"根本不是用户资源"的行
+                    #    （实测 dev：/var/log/….log 52 行、/tmp/probe_*.py 11 行、
+                    #    HEARTBEAT.md 8 行、.skills/*/SKILL.md 16 行、
+                    #    .temp/probe_*.py 81 行）。采集侧（F1）拦住新增，巡检
+                    #    （F3）软删存量；巡检跑过之前，读面自己把它们挡在 UI
+                    #    之外。判据用尺子本尊 ``is_system_path``，不抄规则。
+                    # ② FS 已消失的行不进聊天侧清单：巡检软删要等 TTL
+                    #    （F4 后 2h），UI 不该陪它等 2 小时（小蜜蜂
+                    #    2026-11-10：「显示不存在/未生成」的幽灵行）。显式
+                    #    include_deleted=True 的台账管理面不受此限。
+                    if kind == "file" and is_system_path(norm):
+                        continue
+                    if not include_deleted and int(d.get("fs_present") or 0) == 0:
+                        continue
+                    # v26 · F2：存量裸路径行（``raw`` 是 `a.txt` 这种）换算后
+                    # 补标题 —— 老行 title 是 stem 或空，UI 看不出文件类型。
+                    if norm != raw and not (d.get("title") or ""):
+                        d["title"] = norm.rsplit("/", 1)[-1]
                     key = (kind, norm)
                     prev = merged.get(key)
                     if prev is None:
@@ -1793,6 +1951,7 @@ class ResourceLedger:
         include_deleted: bool = False,
         sort_by: str = "",
         role_group: str = "",
+        turn_id: str = "",
     ) -> list[dict]:
         """Resources referenced by one chat, **with that chat's ref role**.
 
@@ -1803,6 +1962,9 @@ class ResourceLedger:
         **resource**（同资源多口径的存量行已合并），carrying the strongest role
         this chat has on it.
 
+        ``turn_id``（v26 · F5）只给「本轮」面：传了就只看这一轮的引用；会话面
+        （前端资源条/左栏）不传，口径不变。
+
         Never raises (returns []).
         """
         rows = self._chat_resource_rows(
@@ -1812,6 +1974,7 @@ class ResourceLedger:
             include_deleted=include_deleted,
             sort_by=sort_by,
             role_group=role_group,
+            turn_id=turn_id,
         )
         if offset:
             rows = rows[offset:]

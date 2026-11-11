@@ -147,9 +147,19 @@ class ResourceRef(BaseRow):
     role: Mapped[str] = mapped_column(
         Text, nullable=False, default="reference", server_default=text("'reference'")
     )
+    #: 轮号（v26 · F5，拍板 D5）：``referrer_kind="chat"`` 的行带上"哪一轮"。
+    #:
+    #: 为什么需要：采集器旧口径只写 chat 级引用，于是「本轮产出」只能按 chat
+    #: 查 = 该会话全部历史行——本轮补扫/文件钩子写的行与上一轮的文件混在
+    #: 一起（实测 dev 一个会话 122 行里，本轮真正产出的只有 4 个文件）。
+    #: 「本轮」按 turn_id 筛，「会话」按 chat_id 筛，两把尺子各归各位。
+    #: 存量行为 NULL = 未知轮号：**只出现在会话面，不出现在本轮面**
+    #: （未知不等于本轮，诚实比凑数重要）。
+    turn_id: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[float]] = mapped_column(Float)
 
     __table_args__ = (
         Index("idx_resource_refs_key", "resource_key"),
         Index("idx_resource_refs_referrer", "referrer_kind", "referrer_id"),
+        Index("idx_resource_refs_turn", "referrer_kind", "referrer_id", "turn_id"),
     )

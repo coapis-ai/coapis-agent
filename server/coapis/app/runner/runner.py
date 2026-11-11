@@ -21,6 +21,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
+from collections import OrderedDict
 from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Coroutine
@@ -84,17 +86,59 @@ _CHAT_STATE_EPOCH: dict[str, int] = {}
 _enrich_citations_ctx: ContextVar[list] = ContextVar("enrich_citations", default=[])
 
 
-def _begin_turn_resources(chat_id: str, username: str) -> None:
+#: 每个会话"当前轮"的轮号（v26 · F5，拍板 D5）。
+#:
+#: 为什么是模块字典而不是 ContextVar：采集器侧写台账、runner 侧读台账**不在
+#: 同一个 asyncio 上下文**里（ContextVar 跨侧恒空——上面 B2 的注释就是这次
+#: 实测的结论）。轮号要跨侧可见，字典 + chat_id 作键是最笨也最稳的办法：
+#: 同一会话同一时刻只跑一轮，键天然唯一。容量 FIFO 封顶，防无界增长。
+_TURN_ID_BY_CHAT: "OrderedDict[str, str]" = OrderedDict()
+_TURN_ID_CACHE_MAX = 512
+
+
+def _remember_turn_id(chat_id: str, turn_id: str) -> None:
+    """记录会话当前轮号（FIFO 封顶）。"""
+    key = str(chat_id or "")
+    if not key:
+        return
+    _TURN_ID_BY_CHAT[key] = str(turn_id or "")
+    _TURN_ID_BY_CHAT.move_to_end(key)
+    while len(_TURN_ID_BY_CHAT) > _TURN_ID_CACHE_MAX:
+        _TURN_ID_BY_CHAT.popitem(last=False)
+
+
+def _current_turn_id(chat_id: str) -> str:
+    """会话当前轮号；查不到返回空串（本轮面退化为会话面口径，不猜）。"""
+    return _TURN_ID_BY_CHAT.get(str(chat_id or ""), "")
+
+
+def _begin_turn_resources(chat_id: str, username: str) -> str:
     """Start the per-turn resource collector (会话引用与产出资源 · B1).
 
     Fire-and-forget: a broken collector must never break the reply.
+
+    返回本轮轮号（采集不可用时为 ""）。v26 · F5：轮号在这里生成，采集器写
+    台账引用时带上它，收尾读台账时按它筛——"本轮产出"从此只看本轮触及的
+    资源，不再把整个会话的历史行当本轮。
     """
+    turn_id = uuid.uuid4().hex[:16]
+    _remember_turn_id(chat_id, turn_id)
+    try:
+        # 同一条 ContextVar 链（chat_id 实测跨得过去）：文件钩子
+        # （agents/tools/file_io → file_ledger.record_file_event）写台账引用时
+        # 也要带轮号——它是 write_file/edit_file 入账的**主路径**。
+        from ...config.session_context import set_current_turn_id
+
+        set_current_turn_id(turn_id)
+    except Exception:
+        logger.debug("turn id context not set", exc_info=True)
     try:
         from ...agents.context.reference_collector import begin_turn
 
-        begin_turn(chat_id=chat_id, username=username)
+        begin_turn(chat_id=chat_id, username=username, turn_id=turn_id)
     except Exception:
         logger.debug("turn resource collector not started", exc_info=True)
+    return turn_id
 
 
 def _take_turn_resources() -> list:
@@ -159,6 +203,11 @@ def _turn_resources_from_ledger(chat_id: str, username: str) -> list:
             chat_id=chat_id,
             limit=60,
             offset=0,
+            # v26 · F5（拍板 D5）：**本轮面按轮筛**。旧实现按 chat 查=该会话
+            # 全部历史行——本轮面板里混着前几轮的文件、已被后续轮改写的
+            # 文件、补扫挂进来的历史文件（实测 dev 一个会话 122 行里本轮
+            # 真产出只有 4 个）。轮号查不到时退回会话口径，不猜轮号。
+            turn_id=_current_turn_id(chat_id),
         )
     except Exception:
         logger.debug("turn resources skipped for chat %s", chat_id[:16], exc_info=True)

@@ -30,11 +30,16 @@
     kb_entry    知识条目
     mcp_tool    MCP 工具
     other       兜底（未知扩展名一律进这里，不丢）
+
+第二把尺子（v26 · F1，文件末尾）：``is_system_path`` —— 回答"这条路径**根本
+不该是资源**吗"。类别回答"这是什么东西"，系统路径尺子回答"用户手里有没有
+这个东西"。采集闸门、会话收尾补扫、巡检、读面过滤共用它。
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 #: 类别枚举。台账 ``category`` 列、`GET /resources?category=`、stats 分组
@@ -234,3 +239,121 @@ def registry_snapshot() -> dict[str, dict[str, object]]:
         }
         for cat in CATEGORY_ORDER
     }
+
+
+# ── 系统路径尺子（v26 · F1，2026-11-10）───────────────────────────────
+#
+# 起因（小蜜蜂 2026-11-10）：聊天资源条里出现了**根本不存在于用户工作区**
+# 的文件，甚至还有 ``MEMORY.md``/``HEARTBEAT.md``/``SKILL.md`` 这类平台
+# 自己的运行时文件。实测 dev 台账 113 条可见行里只有 46% 合格：
+#   - 52  = /var/log/….log（区外绝对路径）
+#   - 11  = /tmp/probe_*.py
+#   - 8   = HEARTBEAT.md（平台心跳文件）
+#   - 16  = .skills/*/SKILL.md（技能定义）
+#   - 81  = .temp/probe_*.py（会话收尾补扫把 1 小时内改动的文件**全**标成
+#     producer，探针脚本因此成批入账）
+# 根因不是"路径写错"，是**全仓没有"什么算用户的资源"这把尺子**：采集器
+# 只判"落在工作区内 + is_file()"，sweep 只判"FS 存在"。
+#
+# 尺子只写这一处（v20 §1.5 的教训：抄一份规则就是第二把尺子）。采集闸门、
+# 会话收尾补扫、巡检补扫、读面过滤**全部调用本函数**。
+
+
+#: 噪音目录：里面的东西不是用户的"资源"。``.trash`` 是软删归档、``.temp`` 是
+#: 脚本暂存。补扫/巡检与消费面补扫共用这一份定义，避免两边口径漂移。
+#: （实测 dev：1242 条 unledgered 里 298 条来自 ``.trash``/``.temp``。）
+#: v26 · F1：本定义从 ``resource_ledger`` 上移到这里——噪音目录既是巡检
+#: 排除项，也是"系统路径"判据的一条，两处必须同一把尺子。
+NOISE_DIR_PARTS = frozenset({
+    ".trash", ".temp", ".git", "__pycache__", "node_modules", "venv",
+    ".venv", "site-packages", ".ipynb_checkpoints",
+})
+
+#: 工作区根下"用户拿得到"的目录（交付区）。与前端分桶口径
+#: （``resource_ledger.WS_TOP_DIRS``）逐项一致：前端认哪几段能预览/下载，
+#: 尺子就认哪几段能当资源，两边不能各有名单。
+DELIVERABLE_ROOTS = frozenset(
+    {"files", "media", "output", "downloads", "uploads"}
+)
+
+#: 平台自身的约定文件（SOUL.md/AGENTS.md 写死的运行时文件）。
+#: 判定本身由"首段不在交付目录"这条结构规则完成，这张名单的作用是让规则
+#: **说得清、测得住**（回归测试逐条点名），不是判定必需的条件。
+PLATFORM_FILE_NAMES = frozenset({
+    "MEMORY.md", "PROFILE.md", "SOUL.md", "AGENTS.md", "HEARTBEAT.md",
+    "HEARTBEAT.local.md", "BOOTSTRAP.md", "SKILL.md",
+})
+
+#: 绝对路径 / 家目录 / URI 形态（台账统一口径是**工作区相对**，出现这些即越界）。
+_ABSOLUTEISH_RE = re.compile(r"^(?:[A-Za-z]+://|[A-Za-z]:[\\/]|~|/)")
+
+#: 隐藏段前缀（v26 · F1 补，2026-11-11 实测逼出来的）：交付目录**里面**的
+#: 点开头条目是平台/工具的状态文件，不是用户手里的东西——实测 dev 台账里
+#: 挂着 ``files/.session_dirs.json``、``files/.session_dirs.lock``（会话目录
+#: 锁）、``media/docs/.nojekyll``（站点构建产物），``.session_dirs.lock`` 还是
+#: 0 字节。``NOISE_DIR_PARTS`` 是逐条点名的名单，这条是它的一般式：**任何**
+#: 点开头的段（目录或文件）都不算用户资源。
+HIDDEN_SEGMENT_PREFIX = "."
+
+
+def is_system_path(
+    path: str, *, kind: str = "file", bare_top_file_ok: bool = False
+) -> bool:
+    """这条路径是不是"平台自己的文件"——**不是**用户手里的资源。
+
+    输入是台账/采集器的**工作区相对**口径（``files/...``、``media/...``）；
+    存量裸路径（files 根相对的 ``x.md``）请先过
+    ``resource_ledger.workspace_relative_path`` 换算，两侧同一把尺子。
+
+    判 True 的一律不是用户资源：不进采集、不进补扫、不进会话资源清单，
+    巡检会把已有的台账行软删（``deleted_at`` 置位，**永不删 FS 文件**）。
+
+    规则（自上而下，先命中先返回）：
+      1. 非 file 类（web/db/kb/mcp）不判——它们不是文件，交给各自口径；
+      2. 空路径、绝对路径、``~`` 开头、URI 形态：台账口径是工作区相对，
+         出现这些就是越界（实测有 /tmp、/var/log、仓库内 SKILL.md）；
+      3. 任一段命中噪音目录（``.trash``/``.temp``/``.git``/``__pycache__``…），
+         或任一段以 ``.`` 开头（交付区里的平台状态文件
+         ``files/.session_dirs.json``、``media/docs/.nojekyll`` 这类）；
+      4. 首段不在交付目录（files/media/output/downloads/uploads）——这一条
+         同时覆盖工作区根的 MEMORY.md/HEARTBEAT.md、技能目录
+         （``.skills/…``/``skills/…/SKILL.md``）、memory/ 日记、scripts/、logs/；
+      5. 命中 ``PLATFORM_FILE_NAMES`` 的**根层**文件（防御：交付区里的同名
+         文件是用户自己的产物，不在此列）。
+    """
+    if str(kind or "").strip().lower() != "file":
+        return False
+    p = str(path or "").replace("\\", "/").strip()
+    if not p:
+        return True
+    if _ABSOLUTEISH_RE.match(p):
+        return True
+    # URI 混在路径里（v26 · F1 补，2026-11-11 dev 实测）：台账里躺着一条
+    # ``http://www.baidu.com/link?url=…`` 当 **file** 行——采集器把网页链接
+    # 当成文件登记了。整段前缀尺子看不见它（前缀是 ``files/``），所以按
+    # "路径里出现 scheme" 直接判系统：链接是链接，不是用户手里的文件。
+    if "://" in p:
+        return True
+    p = p.lstrip("./")
+    parts = PurePosixPath(p).parts
+    if not parts:
+        return True
+    if any(seg in NOISE_DIR_PARTS for seg in parts):
+        return True
+    # 任何点开头的段（``files/.session_dirs.json``、``media/docs/.nojekyll``…）
+    # 都是平台/工具状态，不是用户交付物——``NOISE_DIR_PARTS`` 的一般式。
+    if any(str(seg).startswith(HIDDEN_SEGMENT_PREFIX) for seg in parts):
+        return True
+    # 工作区根上的**散文件**（``loose.md`` 这种没有目录前缀的一段名）：读面
+    # 不算交付物（聊天里不该露），但**登记闸门必须放行**——台账要认识它，
+    # 资源治理的"归位收件箱"才能把它请进 ``files/_inbox/``。闸门一刀切会把
+    # 归位功能打死（2026-11-11 全量回归 ``test_resource_govern_api`` 2 红）。
+    if bare_top_file_ok and len(parts) == 1:
+        return False
+    if parts[0] not in DELIVERABLE_ROOTS:
+        return True
+    # 交付区内部出现平台约定文件（files/MEMORY.md 这类）：只在"直接位于
+    # 交付区根"时判系统，深层目录里的同名文件按用户产物处理。
+    if len(parts) == 2 and parts[1] in PLATFORM_FILE_NAMES:
+        return True
+    return False

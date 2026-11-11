@@ -242,6 +242,7 @@ def _ledger_record(abs_path: str, source: str) -> None:
             get_current_agent_id,
             get_current_chat_id,
             get_current_session_id,
+            get_current_turn_id,
         )
         from ...foundation.file_ledger import record_file_event
 
@@ -250,6 +251,10 @@ def _ledger_record(abs_path: str, source: str) -> None:
             abs_path,
             session_id=get_current_session_id(),
             chat_id=get_current_chat_id(),
+            # v26 · F5：这条钩子是 write_file/edit_file 入账的**主路径**
+            # （实测本轮 4 个文件全走它，采集器侧 ContextVar 跨侧恒空），
+            # 所以轮号必须在这里透传，否则「本轮产出」按轮筛会筛出 0 条。
+            turn_id=get_current_turn_id(),
             agent_id=get_current_agent_id(),
             source=source,
             # 登记**文件名含扩展名**。此前登记的是 stem（`a.txt` → `a`），

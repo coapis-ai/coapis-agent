@@ -159,6 +159,9 @@ class TurnResources:
 
     chat_id: str = ""
     username: str = ""
+    #: 本轮轮号（v26 · F5，拍板 D5）：写进 ``resource_refs.turn_id``。
+    #: 「本轮」按它过滤，「会话」按 chat_id——两把尺子从此分开。
+    turn_id: str = ""
     items: list[dict] = field(default_factory=list)
     seen: set[str] = field(default_factory=set)
     #: 搜索/输出里出现过的链接候选，等正文闸门裁决（见 finalize_web_references）
@@ -180,9 +183,15 @@ _turn_resources_ctx: ContextVar[Optional[TurnResources]] = ContextVar(
 )
 
 
-def begin_turn(chat_id: str, username: str) -> None:
+def begin_turn(chat_id: str, username: str, turn_id: str = "") -> None:
     """Start collecting for this turn (called by the runner before execution)."""
-    _turn_resources_ctx.set(TurnResources(chat_id=str(chat_id or ""), username=str(username or "")))
+    _turn_resources_ctx.set(
+        TurnResources(
+            chat_id=str(chat_id or ""),
+            username=str(username or ""),
+            turn_id=str(turn_id or ""),
+        )
+    )
 
 
 def get_turn_resources() -> Optional[TurnResources]:
@@ -303,6 +312,24 @@ def _normalize_file_path(raw: str, workspace: Optional[Path]) -> Optional[str]:
         return None
     if not p.is_file():
         return None
+    # v26 · F1（拍板 D1）：**系统路径尺子在这一道闸门生效**。
+    #
+    # 此前闸门只判两件事——"落在本用户工作区内" + "is_file()"。平台自己的
+    # 运行时文件恰好两条全过：``HEARTBEAT.md`` 就在工作区根、技能定义就在
+    # ``.skills/`` 下，于是 ``read_file`` 一次就入账，而且"FS 真实存在"，
+    # 巡检永远查不出它是幽灵（实测 dev：HEARTBEAT.md 8 行 +
+    # ``.skills/*/SKILL.md`` 16 行 + ``.temp/probe_*.py`` 81 行 +
+    # ``memory/2026-11-08.md`` 2 行都是这么进台账的）。
+    #
+    # 尺子本体全仓唯一：``foundation/resource_category.is_system_path``。
+    try:
+        from ...foundation.resource_category import is_system_path
+
+        if is_system_path(str(rel)):
+            logger.debug("资源采集跳过系统路径: %s", rel)
+            return None
+    except Exception:  # pragma: no cover - defensive
+        pass
     return str(rel)
 
 
@@ -517,74 +544,6 @@ def collect_from_tool_call(
                 if len(candidates) >= MAX_PER_CALL:
                     break
 
-        elif is_script_producer_tool(tool_name):
-            # v17 · F4（拍板 D3-A）：脚本产出的文件走「扫文本」这一支。
-            #
-            # 脚本生成 xlsx/csv/图表时**通常不打印路径**（openpyxl 只
-            # ``wb.save(...)``），所以只扫工具输出会漏掉大部分产出——这里
-            # 连脚本正文一起扫。安全性由闸门保证：``_normalize_file_path``
-            # 要求 resolve 之后落在**当前用户工作区**且 ``is_file()`` 为真，
-            # 于是脚本里提到的临时路径、别的用户的路径、模型吹出来的路径
-            # 一律进不了台账；上限 MAX_PER_CALL 防刷屏（脚本里 import 十行
-            # 绝对路径不该刷出十条资源）。
-            paths: list[str] = []
-            for key in _SCRIPT_CODE_KEYS:
-                v = tool_input.get(key)
-                if isinstance(v, str) and v:
-                    paths.extend(_extract_file_paths(v, workspace))
-            for t in texts:
-                paths.extend(_extract_file_paths(t, workspace))
-            seen_local: set[str] = set()
-            for rel in paths:
-                if rel in seen_local:
-                    continue
-                seen_local.add(rel)
-                candidates.append(
-                    {
-                        "kind": "file",
-                        "ref": rel,
-                        "title": Path(rel).name,
-                        "role": "producer",
-                        "source": tool_name,
-                    }
-                )
-                if len(candidates) >= MAX_PER_CALL:
-                    break
-
-        elif is_script_producer_tool(tool_name):
-            # v17 · F4（拍板 D3-A）：脚本产出的文件走「扫文本」这一支。
-            #
-            # 脚本生成 xlsx/csv/图表时**通常不打印路径**（openpyxl 只
-            # wb.save(...)），所以只扫工具输出会漏掉大部分产出——这里连
-            # 脚本正文一起扫。安全性由闸门保证：_normalize_file_path 要求
-            # resolve 之后落在**当前用户工作区**且 is_file() 为真，于是
-            # 脚本里提到的临时路径、别的用户的路径、模型吹出来的路径一律
-            # 进不了台账；上限 MAX_PER_CALL 防刷屏（脚本里 import 十行绝对
-            # 路径不该刷出十条资源）。
-            script_paths: list[str] = []
-            for key in _SCRIPT_CODE_KEYS:
-                v = tool_input.get(key)
-                if isinstance(v, str) and v:
-                    script_paths.extend(_extract_file_paths(v, workspace))
-            for t in texts:
-                script_paths.extend(_extract_file_paths(t, workspace))
-            seen_script: set[str] = set()
-            for rel in script_paths:
-                if rel in seen_script:
-                    continue
-                seen_script.add(rel)
-                candidates.append(
-                    {
-                        "kind": "file",
-                        "ref": rel,
-                        "title": Path(rel).name,
-                        "role": "producer",
-                        "source": tool_name,
-                    }
-                )
-                if len(candidates) >= MAX_PER_CALL:
-                    break
-
         elif tool_name in WEB_REFERENCE_TOOLS:
             # 闸门（D2-A）：只有智能体**显式访问**的页面（web_fetch / browser_use
             # 传了 url）算"真引用"，立即登记；web_search 返回的十条链接只是候选
@@ -644,7 +603,12 @@ def collect_from_tool_call(
             if not turn.add(item):
                 continue
             added.append(item)
-            _ledger_register(item, chat_id=chat_id, username=username)
+            _ledger_register(
+                item,
+                chat_id=chat_id,
+                username=username,
+                turn_id=turn.turn_id,
+            )
 
         if added:
             logger.debug(
@@ -737,7 +701,12 @@ def finalize_web_references(body_text: str) -> int:
             item["title"] = title
         if not turn.add(item):
             continue
-        _ledger_register(item, chat_id=turn.chat_id, username=turn.username)
+        _ledger_register(
+            item,
+            chat_id=turn.chat_id,
+            username=turn.username,
+            turn_id=turn.turn_id,
+        )
         kept += 1
     if kept:
         logger.info(
@@ -794,14 +763,25 @@ def finalize_media_references(body_text: str, workspace: Optional[Path]) -> int:
         }
         if not turn.add(item):
             continue
-        _ledger_register(item, chat_id=turn.chat_id, username=turn.username)
+        _ledger_register(
+            item,
+            chat_id=turn.chat_id,
+            username=turn.username,
+            turn_id=turn.turn_id,
+        )
         kept += 1
     if kept:
         logger.info("media reply gate: registered %d media from reply", kept)
     return kept
 
 
-def _ledger_register(item: dict, *, chat_id: str, username: str) -> None:
+def _ledger_register(
+    item: dict,
+    *,
+    chat_id: str,
+    username: str,
+    turn_id: str = "",
+) -> None:
     """Register in the resource ledger and attach the chat as referrer."""
     try:
         from ...foundation.resource_ledger import get_resource_ledger
@@ -826,6 +806,11 @@ def _ledger_register(item: dict, *, chat_id: str, username: str) -> None:
                 referrer_kind="chat",
                 referrer_id=chat_id,
                 role=item.get("role", "reference"),
+                # v26 · F5（拍板 D5）：chat 引用带轮号。台账从此能区分
+                # "本轮"与"会话"——旧行为把两者都记成 chat 引用，
+                # `_turn_resources_from_ledger` 只能按 chat 查全量，
+                # 「本轮产出」里混着前几轮的文件。
+                turn_id=turn_id,
             )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("ledger register skipped: %s", exc)

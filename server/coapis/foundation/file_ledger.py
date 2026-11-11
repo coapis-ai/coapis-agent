@@ -142,6 +142,7 @@ class FileLedgerService:
         session_id: Optional[str] = None,
         chat_id: Optional[str] = None,
         agent_id: Optional[str] = None,
+        turn_id: Optional[str] = None,
         status: Optional[str] = None,
         source: str = "other",
         title: Optional[str] = None,
@@ -184,6 +185,10 @@ class FileLedgerService:
                     referrer_kind="chat",
                     referrer_id=chat_id,
                     role=_role,
+                    # v26 · F5（拍板 D5）：轮号落引用行。这条钩子是
+                    # write_file/edit_file 入账的**主路径**（实测 dev 本轮
+                    # 产出的文件全走它），轮号从 runner 经 ContextVar 透传。
+                    turn_id=str(turn_id or ""),
                 )
             if agent_id:
                 rl.attach_ref(
@@ -205,6 +210,7 @@ class FileLedgerService:
         session_id: Optional[str] = None,
         chat_id: Optional[str] = None,
         agent_id: Optional[str] = None,
+        turn_id: Optional[str] = None,
         source: str = "other",
         title: Optional[str] = None,
     ) -> bool:
@@ -251,6 +257,7 @@ class FileLedgerService:
                 session_id=session_id,
                 chat_id=chat_id,
                 agent_id=agent_id,
+                turn_id=turn_id,
                 source=source if source in VALID_SOURCES else "other",
                 title=title,
             )
@@ -947,14 +954,19 @@ def record_file_event(
     session_id: Optional[str] = None,
     chat_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    turn_id: Optional[str] = None,
     source: str = "other",
     title: Optional[str] = None,
 ) -> bool:
-    """Fire-and-forget ledger hook (never raises)."""
+    """Fire-and-forget ledger hook (never raises).
+
+    ``turn_id``（v26 · F5）：这条钩子是 write_file/edit_file 入账的**主路径**，
+    轮号透传到 ``resource_refs.turn_id``，「本轮产出」才按得开轮号筛。
+    """
     try:
         return get_file_ledger().record(
             username, abs_path, session_id=session_id, chat_id=chat_id,
-            agent_id=agent_id, source=source, title=title,
+            agent_id=agent_id, turn_id=turn_id, source=source, title=title,
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("file ledger event failed (ignored): %s", exc)
@@ -983,43 +995,81 @@ def record_parse_event(
         return False
 
 
-async def start_file_ledger_maintenance(hour: int = 3) -> None:
-    """Initial reconcile at startup, then a daily sweep at local ``hour:00``.
+#: 轻量巡检节拍（秒）。v26 · F4（拍板 D6）：巡检从"每天一轮"改成
+#: "每 tick 一轮轻量 + 每天 hour:00 一轮全量"。
+_LEDGER_TICK_SEC = 1800.0
+
+
+async def start_file_ledger_maintenance(
+    hour: int = 3, tick_sec: float = _LEDGER_TICK_SEC
+) -> None:
+    """启动全量对账 → 每 ``tick_sec`` 一轮轻量巡检 → 每天 hour:00 一轮全量。
 
     Runs forever; every iteration is individually guarded so a failure
-    can never kill the loop. Each iteration runs the file-ledger reconcile
-    **and** the resource-contract sweep (FS→DB, one direction, never deletes
-    FS files) so ``resources.fs_present`` / orphan status stay true without
-    an admin having to call the sweep endpoint. ``backfill=True`` also registers
-    legacy files that predate the ledger (台账上线前的存量) — only for owners
-    that really exist in the users table; agent workspaces / eval sandboxes are
-    reported as ``unowned`` and left alone.
+    can never kill the loop.
+
+    v26 · F4 之前只有"每天 hour:00 一轮全量"。后果（实测）：台账行
+    ``fs_present=0`` 要等最长 36 小时（TTL ≈ 两个巡检周期）才软删，会话资源
+    条里"显示不存在/未生成"的幽灵行就是这么挂出来的；"根本不是用户资源"的
+    行（``HEARTBEAT.md``/技能 ``SKILL.md``/``/tmp`` 探针）更要等到天荒地老。
+    现在每 30 分钟核查一次存在性并做失效软删 + 系统路径软删，TTL 跟着降到
+    2h（≈4 轮）。
+
+    两类轮的分工：
+      * 轻量轮：台账行存在性核查 + 移动跟随 + 失效软删 + 系统路径软删。
+        不扫 FS 根、不补录存量、不补标题（``sweep`` 里最重的三段）。
+      * 全量轮（每天 hour:00）：reconcile（FS→台账对账）+
+        ``sweep(full=True, backfill=True)``，含存量补录与标题补齐。
+        ``backfill=True`` 只为真实存在的用户补登（agent 工作区/评测沙箱记为
+        ``unowned`` 不动）。
+
+    全部动作幂等 + 软删，**永不删 FS 文件**；都跑在线程池里，不阻塞事件循环。
     """
-    while True:
+    async def _reconcile() -> None:
         try:
             loop = asyncio.get_running_loop()
             res = await loop.run_in_executor(None, get_file_ledger().reconcile)
             logger.info("file ledger reconcile: %s", res)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("file ledger reconcile failed: %s", exc)
+
+    async def _sweep(
+        *, full: bool, backfill: bool, titles: bool, tag: str
+    ) -> None:
         try:
             loop = asyncio.get_running_loop()
             from .resource_ledger import get_resource_ledger
 
             rep = await loop.run_in_executor(
-                None, lambda: get_resource_ledger().sweep(full=True, backfill=True)
+                None,
+                lambda: get_resource_ledger().sweep(
+                    full=full, backfill=backfill, titles=titles
+                ),
             )
             logger.info(
-                "resource sweep: %s",
+                "resource sweep(%s): %s",
+                tag,
                 {k: v for k, v in rep.items() if not isinstance(v, list)},
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("resource sweep failed: %s", exc)
-        now = datetime.now()
-        nxt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-        if nxt <= now:
-            nxt += timedelta(days=1)
+
+    # 启动即全量（reconcile 之后补录才有台账行可对）。
+    await _reconcile()
+    await _sweep(full=True, backfill=True, titles=True, tag="startup")
+    last_full_day = datetime.now().date()
+
+    while True:
         try:
-            await asyncio.sleep((nxt - now).total_seconds())
+            await asyncio.sleep(max(60.0, float(tick_sec)))
         except asyncio.CancelledError:
             raise
+        now = datetime.now()
+        if int(hour) == now.hour and now.date() != last_full_day:
+            await _reconcile()
+            await _sweep(full=True, backfill=True, titles=True, tag="daily")
+            last_full_day = now.date()
+        else:
+            await _sweep(
+                full=False, backfill=False, titles=False, tag="light"
+            )

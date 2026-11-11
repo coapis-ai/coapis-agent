@@ -97,6 +97,12 @@ _USERNAME: ContextVar[Optional[str]] = ContextVar(
 _CHAT_ID: ContextVar[Optional[str]] = ContextVar(
     "eater_chat_id", default=None,
 )
+#: 本轮轮号（v26 · F5）：runner 开轮时写入，文件钩子/采集器写台账引用时带上它，
+#: 「本轮产出」才真能按轮筛。与 chat_id 同一套传递机制（实测 chat_id 这条链
+#: 跨得过去，轮号就照同一条链走）。
+_TURN_ID: ContextVar[Optional[str]] = ContextVar(
+    "eater_turn_id", default=None,
+)
 
 
 # ── Bulk set / clear ─────────────────────────────────────────────────
@@ -277,6 +283,21 @@ def set_current_username(username: Optional[str]) -> None:
 def get_current_chat_id() -> Optional[str]:
     """Get the current request's chat ID (UUID from frontend)."""
     return _CHAT_ID.get()
+
+
+def get_current_turn_id() -> Optional[str]:
+    """本轮轮号（v26 · F5）：runner 开轮时写入，写台账引用时带上它。
+
+    与 chat_id 走同一条传递链——实测这条链跨得过去（文件钩子拿得到
+    chat_id），轮号就照同一条链走；「本轮产出」从此按轮筛，
+    不再把整个会话的历史行当本轮。
+    """
+    return _TURN_ID.get()
+
+
+def set_current_turn_id(turn_id: Optional[str]) -> None:
+    """Set the turn id for the current async context (v26 · F5)."""
+    _TURN_ID.set(turn_id)
 
 
 def set_current_chat_id(chat_id: Optional[str]) -> None:
