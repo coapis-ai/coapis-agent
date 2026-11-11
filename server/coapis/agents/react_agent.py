@@ -5216,6 +5216,34 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         except Exception as _acc_err:  # pragma: no cover
             logger.info("[Accept] 验收发射跳过: %s", _acc_err)
 
+        # ── 自检验收（v27 · 拍板 D3）────────────────────────────────
+        # 判官岗位离线时，验收回填链整条停摆——dev 七天台账实证：outcome 100%
+        # 停在 pending，「本轮算不算交付」在台账里是空白，档位命中率读不出来。
+        # 补一条不依赖判官的路：让**本轮的会话模型**按同一张验收清单自评，结论
+        # 只写台账 + 回填档位，不改回答、不拦动作、不加动作。判官在岗时不抢话
+        # （外部验收优先）；自评连建议权都没有——考生给自己打分只能看趋势，
+        # 不能据此改道。发射即忘，主链零占用（详见 decision/selfcheck.py）。
+        try:
+            from ..decision.selfcheck import fire_selfcheck as _fire_sc
+
+            _sc_hub = self._decision_hub()
+            if (
+                _sc_hub is not None
+                and getattr(_sc_hub, "selfcheck_enabled", False)
+                and not self._skill_judge_model_name()
+            ):
+                _fire_sc(
+                    query=str(query or ""),
+                    answer=(response.get_text_content()
+                            if response is not None else "") or "",
+                    model=self.model,
+                    scope=self._decision_scope(),
+                    hub=_sc_hub,
+                    skills=self._on_demand_skill_summaries,
+                )
+        except Exception as _sc_err:  # pragma: no cover
+            logger.info("[SelfCheck] 自评发射跳过: %s", _sc_err)
+
         return response
 
     async def interrupt(self, msg: Msg | list[Msg] | None = None) -> None:

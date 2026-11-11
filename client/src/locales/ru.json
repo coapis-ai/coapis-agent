@@ -2519,7 +2519,7 @@
     "sourceSkillTrigger": "Триггер навыка",
     "sourceAdvisor": "Корректировка",
     "sourceAcceptance": "Приёмка",
-    "sourceCache": "Кэш решений",
+    "sourceToolGate": "Фильтр инструментов",    "sourceSelfcheck": "Самооценка модели",    "sourceCache": "Кэш решений",
     "sourceHub": "Центр решений"
   }
 }

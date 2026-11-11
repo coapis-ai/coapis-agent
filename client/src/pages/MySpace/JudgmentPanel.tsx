@@ -60,6 +60,12 @@ const SOURCE_KEYS: Record<string, string> = {
   outcome: 'sourceOutcome',
   skill_trigger: 'sourceSkillTrigger',
   advisor: 'sourceAdvisor',
+  // 工具闸（v27 护栏扩充后，这一岗是台账里产出最多的一岗，筛选里不能缺）
+  tool_gate: 'sourceToolGate',
+  // 主模型自评（v27 · 拍板 D3）：判官不在岗时的替代验收。单列一个来源，是为了
+  // 让「自己给自己打分」和「判官外部验收」在台账里分得开——混在一起算命中率
+  // 就是自欺。
+  selfcheck: 'sourceSelfcheck',
   acceptance: 'sourceAcceptance',
   cache: 'sourceCache',
   hub: 'sourceHub',

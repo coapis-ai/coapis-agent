@@ -2504,7 +2504,7 @@
     "sourceSkillTrigger": "スキル起動",
     "sourceAdvisor": "実行中アドバイス",
     "sourceAcceptance": "完了検収",
-    "sourceCache": "判断キャッシュ",
+    "sourceToolGate": "ツールゲート",    "sourceSelfcheck": "メインモデル自己評価",    "sourceCache": "判断キャッシュ",
     "sourceHub": "判断ハブ"
   }
 }

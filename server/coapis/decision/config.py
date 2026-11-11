@@ -140,6 +140,18 @@ DEFAULTS = {
     "advisor_min_iters": 3,
     # 验收喂给判官的交付文本上限（字）。交付越长越贵，摘要足够判。
     "acceptance_max_chars": 4000,
+    # ── 自检验收（v27 · 拍板 D3）──────────────────────────────────
+    # dev 七天台账：验收 0 行真判、outcome 全票 pending——判官岗位离线时，
+    # 「本轮算不算交付」这件事在台账里是空白。自检验收补这块空白：让**本轮的
+    # 主模型**按同一张验收清单自评，结论只进台账 + 回填档位，不改回答、不拦
+    # 动作、不加动作。自评不是判官，别拿它当外部验收用（自己给自己打分，
+    # 只能看趋势，不能当闸）。false = 整条熄火。
+    "selfcheck_enabled": True,
+    # 自评在轮尾后台跑，不占主链时间、不占判官轮内预算，所以用独立尺子：
+    # 会话模型调用超过这个毫秒数就放弃这一判（宁缺不拖）。
+    "selfcheck_timeout_ms": 20000,
+    # 回答短于这个字数不自评：寒暄/确认类交付判了只产垃圾行。
+    "selfcheck_min_answer_chars": 80,
     # 预算豁免轮数：前 N 轮不吃思考预算降级。
     "budget_exempt_turns": 5,
     # 台账保留天数：判断日志只进台账、不进记忆管道，因此**必须**有出口，
@@ -364,6 +376,10 @@ class DecisionHubConfig:
     advisor_every_iters: int = 6
     advisor_min_iters: int = 3
     acceptance_max_chars: int = 4000
+    # 自检验收（v27 · 拍板 D3）——见 DEFAULTS 同名字段的注释。
+    selfcheck_enabled: bool = True
+    selfcheck_timeout_ms: int = 20000
+    selfcheck_min_answer_chars: int = 80
     # v19 P2-2 接线（消费点：decision/gateway.py 轮内池子闸）：启动期前 N 轮，
     # 每个岗位**本轮第一格**判断不吃轮内池子闸——判档/计划门禁/计划审查/技能触发
     # 全落在前几轮，池子默认 6 格，工具门禁一多就把启动期判断整批砍掉
@@ -548,6 +564,14 @@ class DecisionHubConfig:
         self.acceptance_max_chars = min(
             max(int(self.acceptance_max_chars), 500), 40000,
         )
+        # 自评尺子夹取（v27 · 拍板 D3）：低于 2s 的自评基本判不出东西（模型还
+        # 没开始想就超时），高于 60s 会在轮尾拖出一长串后台调用。宁缺不拖。
+        self.selfcheck_timeout_ms = min(
+            max(int(self.selfcheck_timeout_ms), 2000), 60000,
+        )
+        self.selfcheck_min_answer_chars = min(
+            max(int(self.selfcheck_min_answer_chars), 20), 2000,
+        )
         self.budget_exempt_turns = min(max(int(self.budget_exempt_turns), 0), 64)
         # 保留期下限 7 天：低于一周的判断日志撑不住复盘校准岗的对照。
         self.ledger_retention_days = min(max(int(self.ledger_retention_days), 7), 3650)
@@ -579,6 +603,9 @@ class DecisionHubConfig:
             "advisor_every_iters": int(self.advisor_every_iters),
             "advisor_min_iters": int(self.advisor_min_iters),
             "acceptance_max_chars": int(self.acceptance_max_chars),
+            "selfcheck_enabled": bool(self.selfcheck_enabled),
+            "selfcheck_timeout_ms": int(self.selfcheck_timeout_ms),
+            "selfcheck_min_answer_chars": int(self.selfcheck_min_answer_chars),
             "timeout_s": float(self.llm_timeout_ms) / 1000.0,
             "timeout_ms_local": float(self.llm_timeout_ms_local),
             "timeout_ms_api": float(self.llm_timeout_ms_api),

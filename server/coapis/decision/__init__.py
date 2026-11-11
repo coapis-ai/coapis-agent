@@ -32,6 +32,8 @@ from .gateway import (
 )
 from .hub_acceptance import fire_acceptance, judge_acceptance
 from .hub_advisor import advise, build_digest, fire_advisor, should_advise
+# 自检验收（v27 · 拍板 D3）：判官不在岗时由本轮会话模型自评，只记账不改道。
+from .selfcheck import fire_selfcheck, judge_selfcheck, parse_selfcheck
 from .resolver import get_judgment_provider_config
 from .rubric import JSON_ONLY as JSON_ONLY
 from .rubric import rubric_for
@@ -83,6 +85,10 @@ __all__ = [
     "JSON_ONLY",
     "fire_acceptance",
     "judge_acceptance",
+    # 自检验收（拍板 D3）
+    "fire_selfcheck",
+    "judge_selfcheck",
+    "parse_selfcheck",
     "fire_advisor",
     "advise",
     "should_advise",

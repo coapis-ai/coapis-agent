@@ -67,6 +67,109 @@ _LOUD_TOOLS = frozenset(
 #: 同一工具同一参数连续第几次算原地打转
 _LOOP_HITS = 3
 
+# ─── v27 · 拍板 D2：确定性护栏扩充 ─────────────────────────────────────────
+# Why: dev 七天台账实证——在线判官真判 22%、真判中位 4.2s、峰值 16.9s，撞在
+#   15s 硬熔断上；而工具闸 7 天 101 行全部来自「规则命中」。结论很清楚：这一层
+#   真正拦得住东西的是**规则**，不是模型。所以把护栏做成确定性的：零延迟、零
+#   token、100% 可复现、可单测；模型只在规则没把握时补位（一期只提示不拦）。
+
+#: 破坏性命令模式 ``(人话标签, 正则)``——命中即提示「先确认」，一期不拦。
+#: 取值原则：只收「删了回不来」的动作。普通 ``rm file``、``ls``、``git status``
+#: 一律不报，报多了提示就变成噪音（台账实测 60% 的行是 no_model 空转）。
+_DANGER_RULES: tuple[tuple[str, str], ...] = (
+    ("rm 递归/强制删除", r"\brm\b[^\n]*\s-\w*[rf]"),
+    ("mkfs 格式化", r"\bmkfs(\.|\s)"),
+    ("dd 直写设备", r"\bdd\b[^\n]*\bof="),
+    ("fork 炸弹", r":\(\)\s*\{[^}]*\}\s*;\s*:"),
+    ("删表/清表", r"\b(drop\s+(table|database)|truncate\s+table)\b"),
+    ("git 强推覆盖远端", r"\bgit\b[^\n]*\bpush\b[^\n]*(--force\b|-f\b)"),
+    ("git 硬重置", r"\bgit\b[^\n]*\breset\b[^\n]*--hard"),
+    ("git 清空工作区", r"\bgit\b[^\n]*\bclean\b[^\n]*-[a-z]*f"),
+    ("compose down 连数据卷删", r"docker\s+compose\s+down[^\n]*-v"),
+    ("管道执行远程脚本", r"\b(curl|wget)\b[^\n]*\|\s*(ba|z)?sh\b"),
+    ("关机/重启", r"\b(shutdown|reboot|poweroff)\b"),
+    ("批量杀进程", r"\b(pkill|killall)\b"),
+    ("递归改权限/777", r"\bchmod\b[^\n]*(-R\b|\b777\b)"),
+    ("重定向写系统目录", r">\s*/(etc|boot|usr|bin|sbin|sys|proc|dev)/"),
+)
+
+#: 敏感写入路径 ``(人话标签, 正则)``——只收密钥/系统/容器编排这类越界目标。
+#: 业务代码里的 ``token``/``secret`` 字样不算（那是正常开发，报了就是噪音）。
+_SENSITIVE_RULES: tuple[tuple[str, str], ...] = (
+    ("环境变量文件", r"(/|\")\.env(\.[\w.-]+)?\b"),
+    ("密钥/证书文件", r"\.(pem|key|p12|pfx|jks)\b"),
+    ("SSH 私钥/授权表", r"(id_rsa|id_ed25519|authorized_keys|\.ssh/)"),
+    ("版本库内部对象", r"\.git/"),
+    ("系统配置目录", r"(^|[\s\"'(])/etc/"),
+    ("容器编排文件", r"docker-compose[\w.-]*\.ya?ml\b"),
+)
+
+#: 连续几次只读探查算「只读空转」（含本次）。低于这个数属正常调查，不报。
+_READ_SPIN_HITS = 8
+
+#: 本轮第几次动作后开始提醒收敛（工具闸单轮上限 12 次，见 react_agent）
+_STEP_BUDGET_HINT = 10
+
+
+def _match_rule(text: str, rules: tuple[tuple[str, str], ...]) -> str:
+    """在参数摘要里找第一条命中的护栏模式，返回人话标签（没命中给空串）。"""
+    for label, pattern in rules:
+        try:
+            if re.search(pattern, text, re.I):
+                return label
+        except re.error:  # pragma: no cover - 模式写错时的自保
+            logger.debug("[工具闸] 护栏正则异常: %s", pattern, exc_info=True)
+    return ""
+
+
+def danger_label(digest: str) -> str:
+    """破坏性命令识别（纯函数，给单测用）。
+
+    Args:
+        digest: 工具参数摘要（:func:`args_digest` 的形状）。
+
+    Returns:
+        命中的人话标签（如 ``"rm 递归/强制删除"``）；没命中给空串。
+    """
+    return _match_rule(str(digest or ""), _DANGER_RULES)
+
+
+def sensitive_label(tool_name: str, digest: str) -> str:
+    """敏感写入目标识别（纯函数，给单测用）。
+
+    Args:
+        tool_name: 工具名（只有 ``write_file``/``edit_file`` 会检）。
+        digest: 参数摘要。
+
+    Returns:
+        命中的人话标签；没命中给空串。
+    """
+    if tool_name not in ("write_file", "edit_file"):
+        return ""
+    return _match_rule(str(digest or ""), _SENSITIVE_RULES)
+
+
+def read_spin_hits(tool_name: str, recent: Sequence[tuple[str, str]]) -> int:
+    """连续只读次数（含本次），算「只读空转」用（纯函数，给单测用）。
+
+    Args:
+        tool_name: 本次工具名。
+        recent: 最近 ``(工具名, 摘要)`` 序列（时间顺序）。
+
+    Returns:
+        从本次往前数、连续落在 :data:`CHEAP_TOOLS` 里的次数。本次不是只读
+        工具就是 0（说明已经在动手了，不算空转）。
+    """
+    if tool_name not in CHEAP_TOOLS:
+        return 0
+    hits = 1
+    for name, _dig in reversed(list(recent or [])):
+        if name in CHEAP_TOOLS:
+            hits += 1
+        else:
+            break
+    return hits
+
 #: 参数摘要上限（字）
 _ARGS_CHARS = 220
 #: 提示词里目标摘要上限（字）
@@ -147,6 +250,12 @@ def rule_fast(
 ) -> dict[str, Any] | None:
     """规则层有把握的结论（走网关 ``rule_fast``，命中就不问模型、不占预算）。
 
+    六条规则，按把握从大到小排（v27 D2 扩充后全部零模型、零延迟、可单测）：
+    ① 原地打转（同工具同参数连续第 3 次）② 破坏性命令（:data:`_DANGER_RULES`）
+    ③ 越界写入敏感目标（:data:`_SENSITIVE_RULES`）④ 无目标动破坏性动作
+    ⑤ 只读空转（连续 :data:`_READ_SPIN_HITS` 次只读）⑥ 预算护栏（本轮
+    :data:`_STEP_BUDGET_HINT` 次动作后提醒收敛）。全部只提示不拦。
+
     Args:
         tool_name: 本次工具名。
         digest: 本次参数摘要。
@@ -164,10 +273,40 @@ def rule_fast(
             "why": f"同一工具同一参数连续第 {hits + 1} 次（原地打转）",
             "tool": "",
         }
+    # v27 D2：确定性护栏。顺序按「把握从大到小」——破坏性动作与越界写入是
+    # 一眼能判的事，不该花 4 秒问一个真判率 22% 的模型。
+    danger = danger_label(digest)
+    if danger:
+        return {
+            "verdict": "reroute",
+            "why": f"破坏性动作「{danger}」：先讲清目标与影响，确认后再动手",
+            "tool": "",
+        }
+    sensitive = sensitive_label(tool_name, digest)
+    if sensitive:
+        return {
+            "verdict": "reroute",
+            "why": f"写入敏感目标「{sensitive}」：越界改动前先确认归属与影响",
+            "tool": "",
+        }
     if tool_name in _LOUD_TOOLS and not str(goal or "").strip():
         return {
             "verdict": "reroute",
             "why": "没有明确目标就动破坏性动作",
+            "tool": "",
+        }
+    spin = read_spin_hits(tool_name, recent)
+    if spin >= _READ_SPIN_HITS:
+        return {
+            "verdict": "reroute",
+            "why": f"连续 {spin} 次只读探查没有产出：收敛到动手改或给出结论",
+            "tool": "",
+        }
+    steps = len(list(recent or [])) + 1
+    if steps >= _STEP_BUDGET_HINT:
+        return {
+            "verdict": "reroute",
+            "why": f"本轮已 {steps} 次动作（单轮上限 12），预算将尽：先交付结论再补细节",
             "tool": "",
         }
     return None

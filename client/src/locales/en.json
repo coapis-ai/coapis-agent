@@ -3128,6 +3128,8 @@
     "sourceSkillTrigger": "Skill trigger",
     "sourceAdvisor": "Mid-run advisor",
     "sourceAcceptance": "Acceptance",
+    "sourceSelfcheck": "Self-check",
+    "sourceToolGate": "Tool gate",
     "sourceCache": "Judgment cache",
     "sourceHub": "Judgment hub"
   }

@@ -32,6 +32,10 @@ from .rubric import LEVELS as _LEVELS
 SOURCES = frozenset({
     "plan_gate", "plan_review", "skill_trigger", "tool_gate", "acceptance",
     "advisor",
+    # v27 · 拍板 D3：自检验收。主模型按同一张验收清单自评，只进台账 + 回填
+    # 档位。单列一个来源，是为了让看板能把「自己给自己打分」和「判官外部验收」
+    # 分开算——两者混在一起，命中率就再也读不出判官水平。
+    "selfcheck",
 })
 
 # 写入语义标记（zero_reason 列）取值：
