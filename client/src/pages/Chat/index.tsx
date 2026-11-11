@@ -2708,20 +2708,10 @@ export default function ChatPage() {
           <div ref={mainAreaRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
         <div className={styles.chatContentArea}>
           
-          {/* 批次 A2「空壳兜底」：索引里有这条会话、会话文件不在 ——
-              后端 getChat 报 session_missing。此前前端什么都不显示，
-              用户看到的是一个空白聊天页，只能靠猜。给一句解释。 */}
-          {currentSessionData?.sessionMissing && (
-            <div className={styles.sessionMissingTip}>
-              <ExclamationCircleOutlined style={{ color: "#faad14" }} />
-              <span>
-                {t(
-                  "chat.sessionMissing",
-                  "这条会话没有可回放的内容：索引里有记录，但会话文件不存在。直接发消息即可开始新对话。",
-                )}
-              </span>
-            </div>
-          )}
+          {/* 空壳会话（索引里有、会话文件不在）不再往聊天区插提示条：
+              这条会话本身就是「可以直接发消息」的空聊天页，插一句系统自述
+              既无样式也打扰阅读（2026-11-11 小蜜蜂拍板消除）。后端
+              session_missing 标记与日志保留，只作诊断，前端不消费。 */}
 
           {/* 聊天区域 */}
           <div
