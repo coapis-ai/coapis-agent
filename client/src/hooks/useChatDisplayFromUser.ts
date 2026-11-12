@@ -29,6 +29,8 @@ function prefsToChatDisplay(prefs: UserPreferences): ChatDisplayConfig {
     autoScroll: cd?.autoScroll ?? DEFAULT_CHAT_DISPLAY_CONFIG.autoScroll,
     fontSize: cd?.fontSize ?? DEFAULT_CHAT_DISPLAY_CONFIG.fontSize,
     codeTheme: cd?.codeTheme ?? DEFAULT_CHAT_DISPLAY_CONFIG.codeTheme,
+    // 2026-11-12 拍板：统一单模式，displayMode/chat_display_mode 不再消费
+    hideThinking: cd?.hideThinking ?? DEFAULT_CHAT_DISPLAY_CONFIG.hideThinking,
   };
 }
 
@@ -46,6 +48,7 @@ function chatDisplayToPrefs(cfg: ChatDisplayConfig): Partial<UserPreferences> {
     chat_auto_scroll: cfg.autoScroll ? 1 : 0,
     chat_font_size: cfg.fontSize,
     chat_code_theme: cfg.codeTheme,
+    chat_hide_thinking: cfg.hideThinking ? 1 : 0,
   };
 }
 

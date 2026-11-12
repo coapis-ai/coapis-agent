@@ -13,11 +13,16 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Collapse, Tag, Space, Typography } from 'antd';
 import {
+  CaretRightFilled,
   CheckCircleOutlined,
+  CloseCircleOutlined,
+  StopOutlined,
   LoadingOutlined,
-  RightOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useChatDisplayConfig } from './SimplifiedResponseCard';
+import { toolRunningLabel, toolStepLabel } from './toolLabels';
 
 const { Text } = Typography;
 
@@ -420,21 +425,68 @@ function generateSummary(toolName: string, input: Record<string, any>): string {
 interface StatusIndicatorProps {
   loading: boolean;
   elapsed: number;
+  failed?: boolean;
+  aborted?: boolean;
+  /** 运行中动作文案（按工具类别给，如「读取中/写入中/检索中」） */
+  runningText?: string;
 }
 
-const StatusIndicator: React.FC<StatusIndicatorProps> = ({ loading, elapsed }) => {
+const StatusIndicator: React.FC<StatusIndicatorProps> = ({
+  loading,
+  elapsed,
+  failed,
+  aborted,
+  runningText,
+}) => {
+  const { t } = useTranslation();
+
   if (loading) {
     return (
-      <Space size={4} style={{ flexShrink: 0 }}>
-        <LoadingOutlined style={{ color: '#1890ff', fontSize: 12 }} />
-        <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
-          {elapsed > 0 ? `${elapsed}s` : ''}
+      <Space size={6}>
+        <LoadingOutlined style={{ fontSize: 14, color: '#1677ff' }} spin />
+        {elapsed > 0 && (
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {`${elapsed}s`}
+          </Text>
+        )}
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {runningText || t('chat.tool.running', '执行中')}
         </Text>
       </Space>
     );
   }
+
+  if (failed) {
+    return (
+      <Space size={4}>
+        <CloseCircleOutlined style={{ fontSize: 12, color: '#ff4d4f' }} />
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {t('chat.tool.failed', '失败')}
+        </Text>
+      </Space>
+    );
+  }
+
+  if (aborted) {
+    return (
+      <Space size={4}>
+        <StopOutlined style={{ fontSize: 12, color: '#faad14' }} />
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {t('chat.tool.aborted', '已中止')}
+        </Text>
+      </Space>
+    );
+  }
+
   return (
-    <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12, flexShrink: 0 }} />
+    <Space size={4}>
+      <CheckCircleOutlined style={{ fontSize: 14, color: '#52c41a' }} />
+      {elapsed > 0 && (
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {`${elapsed}s`}
+        </Text>
+      )}
+    </Space>
   );
 };
 
@@ -470,6 +522,8 @@ function formatOutput(output: string | undefined): { text: string; isLong: boole
 
 const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => {
   const { isDark } = useTheme();
+  const { t, i18n } = useTranslation();
+  const displayCfg = useChatDisplayConfig();
   const content = data.content;
   if (!content || content.length === 0) return null;
 
@@ -478,6 +532,8 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
   const argumentsStr = content[0]?.data?.arguments;
   const outputStr = content[1]?.data?.output;
   const loading = data.status === 'in_progress';
+  const failed = data.status === 'failed' || data.status === 'rejected';
+  const aborted = data.status === 'canceled';
 
   // 解析输入参数
   const inputObj = useMemo(() => {
@@ -531,8 +587,23 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
     }
   }, [loading]);
 
-  // 构建标题
-  const titleText = serverLabel ? `${serverLabel} / ${toolName}` : toolName;
+  // 构建标题（D5 拍板：中文动词走 toolLabels SSOT，原始工具名保留在后，双语跟随界面语言）
+  const zhVerb = toolStepLabel(toolName, i18n.language);
+  // 标题只说人话（2026-11-12 用户拍板）：中文环境用中文动词收尾，不再拖英文工具名尾巴；
+  // MCP 工具保留服务器名，否则看不出在调哪个系统。
+  const titleText =
+    zhVerb && zhVerb !== toolName
+      ? (serverLabel ? `${zhVerb} · ${serverLabel}` : zhVerb)
+      : serverLabel
+        ? `${serverLabel} / ${toolName}`
+        : toolName;
+
+  // 展开态尺子（2026-11-12 用户拍板）：统一收起——只有运行中临时展开，完成即收起。
+  // manualOpen 为 null 表示用户从没手动开合过，此时完全跟随运行状态；
+  // 用户一旦手动开合，之后一律以用户的为准，机器不再抢状态。
+  const hasDetails = Boolean(argumentsStr || outputStr) && !displayCfg.hideDetails;
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+  const activeKey = hasDetails && (manualOpen ?? loading) ? ['1'] : [];
 
   return (
     <div
@@ -552,10 +623,12 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
           ghost
           size="small"
           expandIconPosition="end"
+          activeKey={activeKey}
+          onChange={(keys) => setManualOpen((keys as string[]).length > 0)}
           expandIcon={({ isActive }) => (
-            <RightOutlined
+            <CaretRightFilled
               rotate={isActive ? 90 : 0}
-              style={{ fontSize: 11, color: '#999', padding: '4px 0' }}
+              style={{ fontSize: 18, color: '#8c8c8c', padding: '4px 2px' }}
             />
           )}
           items={[
@@ -588,7 +661,13 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
 
                   {/* 状态指示器 */}
                   <div style={{ marginLeft: 'auto', marginRight: 8 }}>
-                    <StatusIndicator loading={loading} elapsed={elapsed} />
+                    <StatusIndicator
+                      loading={loading}
+                      elapsed={elapsed}
+                      failed={failed}
+                      aborted={aborted}
+                      runningText={toolRunningLabel(toolName, i18n.language)}
+                    />
                   </div>
                 </div>
               ),
@@ -605,7 +684,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                   {argumentsStr && (
                     <div style={{ marginBottom: outputStr ? 8 : 0 }}>
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        输入:
+                        {t('chat.tool.params', '参数')}:
                       </Text>
                       <pre
                         style={{
@@ -638,10 +717,10 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                   {outputStr && (
                     <div>
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        输出:
+                        {t('chat.tool.output', '输出')}:
                         {isOutputLong && (
                           <Tag style={{ marginLeft: 4, fontSize: 10, background: themeColors.tagBg, color: themeColors.textSecondary }}>
-                            已截断
+                            {t('chat.tool.truncated', '已截断')}
                           </Tag>
                         )}
                       </Text>
@@ -692,7 +771,13 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
             {titleText}
           </Text>
           <div style={{ marginLeft: 'auto' }}>
-            <StatusIndicator loading={loading} elapsed={elapsed} />
+            <StatusIndicator
+              loading={loading}
+              elapsed={elapsed}
+              failed={failed}
+              aborted={aborted}
+              runningText={toolRunningLabel(toolName, i18n.language)}
+            />
           </div>
         </div>
       )}

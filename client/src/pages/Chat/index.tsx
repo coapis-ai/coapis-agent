@@ -51,6 +51,7 @@ import EnhancedToolCallCard from "./components/EnhancedToolCallCard";
 import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
 import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
+import { useVendorLabels } from "./components/vendorLabels";
 import CoApisKbCitations from "./components/CoApisKbCitations";
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
 import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
@@ -182,6 +183,14 @@ const _ENHANCED_TOOL_NAMES = [
   'get_token_usage',
   'view_image', 'view_video', 'desktop_screenshot',
   'list_agents',
+  // 2026-11-12 补齐：这些工具在真实会话里会跑，此前没注册 → 落到厂商原生卡片，
+  // 标题就是裸的英文工具名，中文界面里像外语。尺子 = 后端 /api/tools 的注册工具表。
+  'view_text_file', 'write_text_file', 'insert_text_file', 'list_files',
+  'append_file', 'execute_python_code', 'code_exec', 'convert_file',
+  'doc_reader', 'web_fetch', 'git_ops', 'install_dependency',
+  'cron_scheduler', 'todo_tool', 'tool_stats', 'skill_manager', 'materialize_skill',
+  'resource_search', 'session_search', 'record_daily_memory', 'recall_history',
+  'update_subtask_state', 'finish_subtask', 'reset_equipped_tools', 'use_metadataskill',
 ];
 const _enhancedToolRenderConfig: Record<string, React.FC<any>> = {};
 for (const name of _ENHANCED_TOOL_NAMES) {
@@ -1575,7 +1584,7 @@ export default function ChatPage() {
   // Setup multimodal capabilities tracking via custom hook
 
   // Refresh chat when selectedAgent changes, preserving last active chat per agent
-  const { setLastChatId, getLastChatId } = useAgentStore();
+  const { setLastChatId } = useAgentStore();
   const prevSelectedAgentRef = useRef(selectedAgent);
   useEffect(() => {
     const prevAgent = prevSelectedAgentRef.current;
@@ -1605,65 +1614,25 @@ export default function ChatPage() {
       // Clear cached session list so it re-fetches for the new agent
       sessionApi.invalidateSessionList();
 
-      // Restore last chat ID for the agent we're switching to
-      const restored = getLastChatId(selectedAgent);
-      // ⭐ 场景聊天的chat_id以"scene-"开头，不应该从localStorage恢复
-      // 场景聊天的chat_id是固定的：scene-{scene_id}-{user_id}，由enter_scene API管理
-      if (restored && !restored.startsWith("scene-")) {
-        console.log(`[Agent Switch] Restoring chat ${restored} for agent ${selectedAgent}`);
-        // Validate that this chat belongs to the current user AND agent before restoring
-        // This prevents cross-user and cross-agent data leakage from stale localStorage data
-        (async () => {
-          try {
-            const chatSpec = await chatApi.getChat(restored, { agent_id: selectedAgent });
-            // Import getCurrentUsername dynamically to avoid circular deps
-            const { getCurrentUsername } = await import("../../api/config");
-            const currentUser = getCurrentUsername();
-            const chatAgentId = chatSpec.agent_id || "";
-            
-            // Validate both user_id and agent_id
-            if (chatSpec.user_id !== currentUser || chatAgentId !== selectedAgent) {
-              console.warn(
-                `Chat ${restored} belongs to user=${chatSpec.user_id}/agent=${chatAgentId}, ` +
-                `not user=${currentUser}/agent=${selectedAgent}, clearing`
-              );
-              setLastChatId(selectedAgent, "");
-              // ⭐ 嵌入式模式：不跳转URL
-              if (!isEmbeddedMode) {
-                navigateRef.current("/chat", { replace: true });
-              }
-            } else {
-              // Valid chat, proceed with restore
-              console.log(`[Agent Switch] Restored chat ${restored} successfully`);
-              // ⭐ 嵌入式模式：不跳转URL
-              if (!isEmbeddedMode) {
-                navigateRef.current(`/chat/${restored}`, { replace: true });
-              }
-              sessionApi.preferredChatId = restored;
-            }
-          } catch (error) {
-            // Chat not found or access denied, clear stale data
-            console.warn(`Failed to verify chat ${restored}, clearing:`, error);
-            setLastChatId(selectedAgent, "");
-            // ⭐ 嵌入式模式：不跳转URL
-            if (!isEmbeddedMode) {
-              navigateRef.current("/chat", { replace: true });
-            }
-          }
-        })();
-      } else {
-        console.log(`[Agent Switch] No saved chat for agent ${selectedAgent}, starting fresh`);
-        // ⭐ 嵌入式模式：不跳转URL
-        if (!isEmbeddedMode) {
-          navigateRef.current("/chat", { replace: true });
-        }
+      // Default selection policy (2026-11-12): switching an agent opens the
+      // agent's NEWEST chat (max updated_at), handled by ChatSessionInitializer.
+      // The previous behavior restored the last visited chat from localStorage,
+      // which surfaced "the last chat" as the default instead of the newest.
+      // lastChatId is still saved above (kept for future "resume" affordances).
+      console.log(`[Agent Switch] Opening newest chat for agent ${selectedAgent}`);
+      // ⭐ 嵌入式模式：不跳转URL
+      if (!isEmbeddedMode) {
+        navigateRef.current("/chat", { replace: true });
       }
       // Don't clear lastSessionIdRef - let the new session initialize naturally
       
       setRefreshKey((prev) => prev + 1);
     }
     prevSelectedAgentRef.current = selectedAgent;
-  }, [selectedAgent, setLastChatId, getLastChatId]);
+  }, [selectedAgent, setLastChatId]);
+
+  // 厂商写死英文标题（思考卡片）的显示层本地化（见 components/vendorLabels.ts）
+  useVendorLabels();
 
   const copyResponse = useCallback(
     async (response: CopyableResponse) => {
@@ -2606,6 +2575,9 @@ export default function ChatPage() {
       },
       response: {
         append: chatAppendSlots,
+        // 2026-11-12 拍板：统一为单一显示模式 —— 始终用 SDK 原生 ResponseCard
+        // （中文动词标签/思考自动收起/计划徽标等增强在卡片内部生效）。
+        // 简洁模式（CoApisSimpleResponse）已删除，不再提供双模式切换。
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
@@ -2617,12 +2589,16 @@ export default function ChatPage() {
       },
       actions: {
         list: [
+          // 厂商的 list 是「替换语义」（lib/.../Response/Actions.js: options.list || [内置复制]）：
+          // 自定义列表一给，内置复制就没了——2026-11-12 用户拍板要回「复制正文」，
+          // 这里显式排第一，顺序与厂商默认一致：复制 + 收藏两个按钮。
           {
             icon: (
-              <span title={t("common.copy")}>
+              <span title={t("chat.tool.copyResponse", "复制正文")}>
                 <SparkCopyLine />
               </span>
             ),
+            tooltip: t("chat.tool.copyResponse", "复制正文"),
             onClick: ({ data }: { data: CopyableResponse }) => {
               void copyResponse(data);
             },
@@ -2639,7 +2615,39 @@ export default function ChatPage() {
             },
           },
         ],
-        replace: true,
+        // tokens 的「Input / Output」也是厂商写死的英文（Actions.js 里的 Usage）。
+        // right 是厂商给的正牌注入口，这里换成界面语言的「输入 / 输出」，
+        // 数字口径与厂商完全一致，只是标签跟随语言。
+        right: [
+          {
+            render: ({ data }: { data: CopyableResponse }) => {
+              const usage = (data as { usage?: { input_tokens?: number; output_tokens?: number } })
+                ?.usage;
+              const inputTokens = usage?.input_tokens ?? 0;
+              const outputTokens = usage?.output_tokens ?? 0;
+              if (!inputTokens && !outputTokens) return null;
+              const fmt = (n?: number) => {
+                if (!n) return 0;
+                return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n;
+              };
+              // 厂商的 Bubble.Footer 公开类型只收 left/right 两个 ReactElement（data/style
+              // 是它内部用的），这里直接用同款排版自己渲染，字号与厂商一致。
+              return (
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ant-color-text-quaternary)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {`${t("chat.tool.params", "输入")}：${fmt(inputTokens)}`}
+                  {`  ${t("chat.tool.output", "输出")}：${fmt(outputTokens)}`}
+                </span>
+              );
+            },
+          },
+        ],
+        replace: false,
       },
     } as unknown as IAgentScopeRuntimeWebUIOptions;
   }, [

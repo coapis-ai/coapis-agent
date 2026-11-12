@@ -97,12 +97,47 @@ const ChatSessionInitializer: React.FC<ChatSessionInitializerProps> = ({
     // ── No chatId in URL: auto-select latest session or create a fresh one ──
     // This handles first load (/chat) and agent switch (navigates to /chat).
     if (!chatId) {
-      if (sessions.length > 0 && !currentSessionIdRef.current) {
-        const latest = sessions[0]; // sessions are sorted newest-first
+      if (sessions.length > 0) {
+        // Default selection yardstick = chat with max(updated_at) — the
+        // newest row of the update-time-descending list. The library's
+        // initial auto-select takes the list HEAD (pinned chats sort
+        // first), which is NOT necessarily the newest chat; agent
+        // switching used to restore the last visited chat as well.
+        const stamp = (s: any): number => {
+          const raw = s?.updatedAt ?? s?.createdAt;
+          if (!raw) return 0;
+          const t = Date.parse(String(raw));
+          return Number.isFinite(t) ? t : 0;
+        };
+        let latest = sessions[0];
+        let best = -Infinity;
+        for (const s of sessions) {
+          const t = stamp(s);
+          if (t > best) {
+            best = t;
+            latest = s;
+          }
+        }
         const targetId = (latest as any).realId || latest.id;
-        console.log(`[ChatSessionInitializer] no chatId, auto-selecting latest: id=${targetId}`);
-        skipNextSessionSelectedRef.current = true;
-        setCurrentSessionId(targetId);
+        const current = currentSessionIdRef.current;
+        if (!current) {
+          console.log(`[ChatSessionInitializer] no chatId, auto-selecting newest: id=${targetId}`);
+          skipNextSessionSelectedRef.current = true;
+          setCurrentSessionId(targetId);
+        } else {
+          const currentEntry = sessions.find(
+            (s) => s.id === current || (s as any).realId === current,
+          );
+          // A freshly created (temporary "ts-") chat must never be overridden.
+          if (currentEntry && currentEntry.id.startsWith("ts-")) return;
+          // Correct a pinned-head / stale auto-selection to the newest chat.
+          if (current !== targetId) {
+            console.log(`[ChatSessionInitializer] no chatId, correcting auto-select ${current} -> newest ${targetId}`);
+            skipNextSessionSelectedRef.current = true;
+            setCurrentSessionId(targetId);
+          }
+        }
+        return;
       } else if (
         sessions.length === 0 &&
         !currentSessionIdRef.current &&

@@ -113,6 +113,31 @@ const ChatDisplaySettings: React.FC<ChatDisplaySettingsProps> = ({
       width={400}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* 2026-11-12 拍板：统一单模式，「显示模式」开关已移除 */}
+
+        <Divider style={{ margin: '8px 0' }} />
+
+        {/* 隐藏思考（2026-11-12 D2 拍板：只留折叠条，点击可展开） */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Space>
+              <EyeOutlined />
+              <span>{t('chat.settings.hideThinking.label', { defaultValue: '隐藏思考过程' })}</span>
+            </Space>
+            <Switch
+              checked={config.hideThinking}
+              onChange={(checked) => updateConfig('hideThinking', checked)}
+            />
+          </div>
+          <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+            {t('chat.settings.hideThinkingDesc', {
+              defaultValue: '开启后思考过程只保留一条折叠条，点击可展开查看',
+            })}
+          </div>
+        </div>
+
+        <Divider style={{ margin: '8px 0' }} />
+
         {/* 内容显示 */}
         <div>
           <div style={{ fontWeight: 500, marginBottom: 8, color: '#666' }}>
@@ -140,12 +165,12 @@ const ChatDisplaySettings: React.FC<ChatDisplaySettingsProps> = ({
         {/* 交互 */}
         <div>
           <div style={{ fontWeight: 500, marginBottom: 8, color: '#666' }}>
-            {t('chat.settings.section.interaction', { defaultValue: '交互' })}
+            {t('chat.settings.interaction.title', { defaultValue: '交互' })}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Space>
               <VerticalAlignBottomOutlined />
-              <span>{t('chat.settings.autoScroll', { defaultValue: '自动滚动' })}</span>
+              <span>{t('chat.settings.autoScroll.label', { defaultValue: '自动滚动' })}</span>
             </Space>
             <Switch
               checked={config.autoScroll}
@@ -164,14 +189,14 @@ const ChatDisplaySettings: React.FC<ChatDisplaySettingsProps> = ({
         {/* 外观 */}
         <div>
           <div style={{ fontWeight: 500, marginBottom: 8, color: '#666' }}>
-            {t('chat.settings.section.appearance', { defaultValue: '外观' })}
+            {t('chat.settings.appearance.title', { defaultValue: '外观' })}
           </div>
           
           {/* 字体大小 */}
           <div style={{ marginBottom: 12 }}>
             <Space style={{ marginBottom: 8 }}>
               <FontSizeOutlined />
-              <span>{t('chat.settings.fontSize', { defaultValue: '字体大小' })}</span>
+              <span>{t('chat.settings.fontSize.title', { defaultValue: '字体大小' })}</span>
             </Space>
             <Radio.Group
               value={config.fontSize}
@@ -192,7 +217,7 @@ const ChatDisplaySettings: React.FC<ChatDisplaySettingsProps> = ({
           <div>
             <Space style={{ marginBottom: 8 }}>
               <CodeOutlined />
-              <span>{t('chat.settings.codeTheme', { defaultValue: '代码主题' })}</span>
+              <span>{t('chat.settings.codeTheme.title', { defaultValue: '代码主题' })}</span>
             </Space>
             <Radio.Group
               value={config.codeTheme}

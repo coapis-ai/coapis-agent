@@ -13,6 +13,15 @@ export interface ChatDisplayConfig {
   fontSize: 'small' | 'normal' | 'large';
   /** 代码主题 */
   codeTheme: 'light' | 'dark';
+  /**
+   * 显示模式（2026-11-12 D1 拍板）：
+     /**
+   * 隐藏思考内容（2026-11-12 D2 拍板）：
+   * true = 思考过程只保留折叠条（默认收起，用户点击可展开），
+   * false = 思考条按加载状态自动展开/收起。
+   * 与后端扁平字段 chat_hide_thinking 双向同步。
+   */
+  hideThinking: boolean;
 }
 
 export const DEFAULT_CHAT_DISPLAY_CONFIG: ChatDisplayConfig = {
@@ -20,6 +29,7 @@ export const DEFAULT_CHAT_DISPLAY_CONFIG: ChatDisplayConfig = {
   autoScroll: true,
   fontSize: 'normal',
   codeTheme: 'dark',
+  hideThinking: false,
 };
 
 const STORAGE_KEY = 'coapis_chat_display_config';

@@ -1386,7 +1386,8 @@
       "sectionAdmin": "管理",
       "chatHideDetails": "詳細を非表示",
       "chatHideDetailsDesc": "ツール呼び出しの詳細、ファイル一覧、計画実行の過程を非表示にします",
-      "userManagement": "ユーザー管理"
+      "userManagement": "ユーザー管理",
+      "sectionNotifications": "通知とポップアップ"
     },
     "help": {
       "title": "ヘルプ",
@@ -1406,6 +1407,18 @@
     },
     "sessionsCenter": {
       "title": "セッション"
+    },
+    "updateNotice": {
+      "newVersion": "新しいバージョン",
+      "tooltip": "アップデート：v{{version}}",
+      "detailTitle": "アップデート詳細",
+      "title": "アップデートのお知らせ",
+      "silence72": "72時間通知しない",
+      "view": "更新を見る",
+      "autoPopupLabel": "アップデート自動ポップアップ",
+      "restoreNow": "通知を再開",
+      "silencedUntil": "{{until}} まで通知オフ",
+      "noticeDesc": "新しいバージョンで一度だけ自動通知。オフ時はヘッダーのアイコンのみ表示"
     }
   },
   "theme": {
@@ -1470,7 +1483,12 @@
       "plan": {
         "description": "構造化された計画を作成し、タスクをサブタスクに分解します"
       },
-      "stop": "実行中のタスクを停止します"
+      "stop": {
+        "description": "実行中のタスクを停止します"
+      },
+      "model": {
+        "description": "AI モデルを切り替えます"
+      }
     },
     "attachments": {
       "tooltip": "ドキュメント、画像、動画、音声など、様々な形式に対応。1ファイルあたり最大{{limit}}MB",
@@ -1480,7 +1498,8 @@
       "multimodalDisabled": "現在のモデルはファイルアップロードに対応していません",
       "multimodalWarning": "現在のモデルにマルチモーダル機能が検出されていません。画像や動画が正しく処理されない場合があります",
       "imageOnlyAccept": "現在のモデルは画像ファイルのみ対応しています",
-      "imageOnlyWarning": "現在のモデルは画像のみ対応しています。動画などの非画像ファイルは正しく処理されない場合があります"
+      "imageOnlyWarning": "現在のモデルは画像のみ対応しています。動画などの非画像ファイルは正しく処理されない場合があります",
+      "fileExists": "ファイルは既に存在します。名前を変更して再試行してください"
     },
     "search": {
       "title": "チャットを検索",
@@ -1695,6 +1714,11 @@
         "label": "思考過程を非表示",
         "tooltip": "思考過程/推論チェーンを非表示"
       },
+      "showThinking": {
+        "label": "思考内容を表示",
+        "desc": "オフにすると思考過程は折りたたみバー 1 本になり、クリックで展開できます"
+      },
+      "hideThinkingDesc": "オンにすると思考過程を完全に非表示、オフにすると深い思考カードを通常どおり表示します",
       "hideToolCall": {
         "label": "ツール呼び出しを非表示",
         "tooltip": "ツール呼び出し詳細カードを非表示"
@@ -1715,7 +1739,13 @@
       "showTokenCounts": {
         "label": "Token 数を表示"
       },
-      "title": "チャット表示設定"
+      "title": "チャット表示設定",
+      "hideDetails": "詳細を隠す",
+      "hideDetailsDesc": "ツール呼び出しと実行手順を折りたたみ、最終回答のみ表示します",
+      "autoScrollDesc": "メッセージは自動的に最下部へスクロールします",
+      "section": {
+        "content": "コンテンツ表示"
+      }
     },
     "previewClose": "プレビューを閉じる",
     "previewConvert": "変換",
@@ -1744,7 +1774,36 @@
     },
     "noteIt": "記録する",
     "noteSaved": "長期記憶に保存しました",
-    "noteFailed": "記録に失敗しました"
+    "noteFailed": "記録に失敗しました",
+    "deepThinking": "深い思考",
+    "deepThinkingCollapsed": "思考は折りたたまれています · 展開",
+    "simple": {
+      "thinking": "思考",
+      "step": "ステップ {{n}}",
+      "statusRunning": "実行中",
+      "statusDone": "完了",
+      "statusFailed": "失敗",
+      "running": "実行中",
+      "params": "パラメータ",
+      "output": "出力",
+      "copy": "テキストをコピー",
+      "copied": "コピーしました",
+      "file": "ファイル"
+    },
+    "tool": {
+      "running": "実行中",
+      "reading": "読み込み中",
+      "writing": "書き込み中",
+      "searching": "検索中",
+      "copyResponse": "回答をコピー",
+      "done": "完了",
+      "failed": "失敗",
+      "aborted": "中断",
+      "params": "入力",
+      "output": "出力",
+      "truncated": "省略済み"
+    },
+    "resourcesTitle": "セッションリソース"
   },
   "security": {
     "parent": "設定",
@@ -2504,7 +2563,9 @@
     "sourceSkillTrigger": "スキル起動",
     "sourceAdvisor": "実行中アドバイス",
     "sourceAcceptance": "完了検収",
-    "sourceToolGate": "ツールゲート",    "sourceSelfcheck": "メインモデル自己評価",    "sourceCache": "判断キャッシュ",
+    "sourceToolGate": "ツールゲート",
+    "sourceSelfcheck": "メインモデル自己評価",
+    "sourceCache": "判断キャッシュ",
     "sourceHub": "判断ハブ"
   }
 }

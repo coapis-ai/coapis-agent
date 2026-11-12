@@ -880,3 +880,30 @@
    它与左栏选中会话后的展开面板、气泡末尾的本轮资源条三层同义（同接口、同作用域、
    同缓存），常驻 200px 还换来「栏盖住输入框与知识库按钮」的窄屏补丁（原 519px/399px
    两个容器查询随列一起删除）。资源入口收敛为：左栏会话行展开面板 + 气泡本轮条。 */
+
+/* ===== 厂商写死英文标题的显示层本地化（2026-11-12 用户拍板）=====
+   思考卡片的标题是厂商编译期写死的（@agentscope-ai/chat/lib/.../Response/Reasoning.js
+   里 title="Thinking"），options 没有注入口。它只是显示文字，不值得为它动依赖
+   （不引 patch-package、不改 node_modules），所以只在显示层换字：厂商原文压到 0 号字，
+   标题文字由 ::before 用 CSS 变量渲染，变量由 components/vendorLabels.ts 随界面语言
+   写入 —— 切语言立刻跟着变。
+   认卡片的依据是图标（实测 DOM 里没有任何 *thinking* 类名可用，且 spark 图标渲染成
+   单个 class `spark-icon-spark-<name>-line`，不能写成 .spark-memory-line）：思考卡用
+   SparkMemoryLine（完成）/ SparkLoadingLine（运行中），厂商工具卡用别的图标，
+   不会误伤。:has() 不命中的老浏览器退回厂商原文，功能不受影响。 */
+:global(.coapis-operate-card:has([class*="spark-memory-line"])),
+:global(.coapis-operate-card:has([class*="spark-loading-line"])) {
+  :global(.coapis-operate-card-header-title) {
+    /* 厂商样式表里这条是 font-size:12px !important，所以这里必须同样带 !important
+       （同为 !important 时比特异度：本条 0-2-0 > 厂商 0-1-0，本条胜出）。 */
+    font-size: 0 !important;
+    line-height: 0 !important;
+
+    &::before {
+      content: var(--coapis-thinking-label, 'Thinking');
+      font-size: 13px;
+      line-height: 1.5;
+      font-weight: 500;
+    }
+  }
+}

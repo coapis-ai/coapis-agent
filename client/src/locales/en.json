@@ -1903,10 +1903,23 @@
       "sectionAdmin": "Administration",
       "chatHideDetails": "Hide Details",
       "chatHideDetailsDesc": "Hide tool call details, file lists and plan execution progress",
-      "userManagement": "User Management"
+      "userManagement": "User Management",
+      "sectionNotifications": "Notifications & Popups"
     },
     "sessionsCenter": {
       "title": "Sessions"
+    },
+    "updateNotice": {
+      "newVersion": "New version available",
+      "tooltip": "Update: v{{version}}",
+      "detailTitle": "Update details",
+      "title": "Update available",
+      "silence72": "Silence for 72 hours",
+      "view": "View update",
+      "autoPopupLabel": "Auto popup for updates",
+      "restoreNow": "Resume reminders",
+      "silencedUntil": "Muted until {{until}}",
+      "noticeDesc": "You will be notified once per new version; when off, only the update icon in the header appears"
     }
   },
   "userprofile": {
@@ -2257,6 +2270,11 @@
         "label": "Hide Thinking Process",
         "tooltip": "Hide thinking/reasoning chain"
       },
+      "showThinking": {
+        "label": "Show thinking content",
+        "desc": "When off, the thinking process collapses into a single bar you can expand"
+      },
+      "hideThinkingDesc": "On: thinking is hidden entirely. Off: the deep-thinking card shows normally",
       "hideFooter": {
         "label": "Hide Footer",
         "tooltip": "Hide token count, timestamp, model name"
@@ -2300,7 +2318,13 @@
       },
       "timezone": "Time zone",
       "timezoneGlobal": "Follow global setting",
-      "timezoneDesc": "Changes the “today” and time wording your agent sees"
+      "timezoneDesc": "Changes the “today” and time wording your agent sees",
+      "hideDetails": "Hide details",
+      "hideDetailsDesc": "Collapse tool calls and execution steps; show only the final reply",
+      "autoScrollDesc": "Messages scroll to the bottom automatically",
+      "section": {
+        "content": "Content"
+      }
     },
     "header": {
       "switchSession": "Switch session",
@@ -2468,7 +2492,36 @@
     },
     "noteIt": "Save to memory",
     "noteSaved": "Saved to long-term memory",
-    "noteFailed": "This reply has no text to record"
+    "noteFailed": "This reply has no text to record",
+    "deepThinking": "Deep thinking",
+    "deepThinkingCollapsed": "Thinking collapsed · expand",
+    "simple": {
+      "thinking": "Thinking",
+      "step": "Step {{n}}",
+      "statusRunning": "Running",
+      "statusDone": "Done",
+      "statusFailed": "Failed",
+      "running": "Running",
+      "params": "Parameters",
+      "output": "Output",
+      "copy": "Copy text",
+      "copied": "Copied",
+      "file": "File"
+    },
+    "tool": {
+      "running": "Running",
+      "reading": "Reading",
+      "writing": "Writing",
+      "searching": "Searching",
+      "copyResponse": "Copy response",
+      "done": "Completed",
+      "failed": "Failed",
+      "aborted": "Aborted",
+      "params": "Input",
+      "output": "Output",
+      "truncated": "truncated"
+    },
+    "resourcesTitle": "Session resources"
   },
   "security": {
     "parent": "Settings",

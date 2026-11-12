@@ -1769,10 +1769,23 @@
       "sectionAdmin": "管理",
       "chatHideDetails": "隐藏细节",
       "chatHideDetailsDesc": "隐藏工具调用详情、文件列表和计划执行过程",
-      "userManagement": "用户管理"
+      "userManagement": "用户管理",
+      "sectionNotifications": "通知与弹窗"
     },
     "sessionsCenter": {
       "title": "会话中心"
+    },
+    "updateNotice": {
+      "newVersion": "发现新版本",
+      "tooltip": "版本更新：v{{version}}",
+      "detailTitle": "版本更新详情",
+      "title": "版本更新提示",
+      "silence72": "72 小时内不提醒",
+      "view": "查看更新",
+      "autoPopupLabel": "版本更新自动弹窗",
+      "restoreNow": "恢复提醒",
+      "silencedUntil": "已免打扰至 {{until}}",
+      "noticeDesc": "发现新版本时自动提示一次；关闭后仅在顶栏出现更新图标时提醒"
     }
   },
   "userprofile": {
@@ -2071,7 +2084,12 @@
       "plan": {
         "description": "创建结构化计划，将任务分解为多个子任务"
       },
-      "stop": "终止当前正在执行的任务"
+      "stop": {
+        "description": "终止当前正在执行的任务"
+      },
+      "model": {
+        "description": "切换 AI 模型"
+      }
     },
     "attachments": {
       "tooltip": "支持文档、图片、视频、音频等多种格式，单文件不超过 {{limit}}MB",
@@ -2081,7 +2099,8 @@
       "multimodalDisabled": "当前模型不支持文件上传",
       "multimodalWarning": "当前模型未检测到多模态能力，图片或视频可能无法被正确处理",
       "imageOnlyAccept": "当前模型仅支持图片文件",
-      "imageOnlyWarning": "当前模型仅检测到图片支持，视频等非图片文件可能无法被正确处理"
+      "imageOnlyWarning": "当前模型仅检测到图片支持，视频等非图片文件可能无法被正确处理",
+      "fileExists": "文件已存在，请重命名后重试"
     },
     "capability": {
       "imageAndVideo": "支持图片和视频识别",
@@ -2128,6 +2147,11 @@
         "label": "隐藏思考过程",
         "tooltip": "隐藏思考过程/推理链"
       },
+      "showThinking": {
+        "label": "显示思考内容",
+        "desc": "关闭后，思考过程只保留一条折叠条，点击可展开"
+      },
+      "hideThinkingDesc": "开启后思考过程整体隐藏；关闭则正常展示深度思考卡片",
       "hideFooter": {
         "label": "隐藏页脚信息",
         "tooltip": "隐藏 token 统计、时间戳、模型名"
@@ -2171,7 +2195,13 @@
       },
       "timezone": "时区",
       "timezoneGlobal": "跟随全局配置",
-      "timezoneDesc": "影响智能体看到的“今天”与时间表述"
+      "timezoneDesc": "影响智能体看到的“今天”与时间表述",
+      "hideDetails": "隐藏细节",
+      "hideDetailsDesc": "收起工具调用与执行过程，只显示最终回复",
+      "autoScrollDesc": "消息会自动滚动到底部",
+      "section": {
+        "content": "内容显示"
+      }
     },
     "newChatTitle": "新聊天",
     "chatHistory": "聊天历史",
@@ -2345,7 +2375,36 @@
     },
     "noteIt": "记下来",
     "noteSaved": "已记入长期记忆",
-    "noteFailed": "记录失败"
+    "noteFailed": "记录失败",
+    "deepThinking": "深度思考",
+    "deepThinkingCollapsed": "思考已收起 · 展开",
+    "simple": {
+      "thinking": "思考",
+      "step": "步骤 {{n}}",
+      "statusRunning": "执行中",
+      "statusDone": "完成",
+      "statusFailed": "失败",
+      "running": "执行中",
+      "params": "参数",
+      "output": "输出",
+      "copy": "复制正文",
+      "copied": "已复制",
+      "file": "文件"
+    },
+    "tool": {
+      "running": "执行中",
+      "reading": "读取中",
+      "writing": "写入中",
+      "searching": "检索中",
+      "copyResponse": "复制正文",
+      "done": "已完成",
+      "failed": "失败",
+      "aborted": "已中止",
+      "params": "输入",
+      "output": "输出",
+      "truncated": "已截断"
+    },
+    "resourcesTitle": "会话资源"
   },
   "security": {
     "parent": "设置",

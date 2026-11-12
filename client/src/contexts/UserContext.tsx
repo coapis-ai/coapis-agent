@@ -27,6 +27,7 @@ interface UserPreferences {
     hideFooter?: boolean;
     hideSystemMessages?: boolean;
     showTimestamps?: boolean;
+    displayMode?: string;
     autoScroll?: boolean;
     fontSize?: 'small' | 'normal' | 'large';
     codeTheme?: 'light' | 'dark';
@@ -37,6 +38,7 @@ interface UserPreferences {
   chat_hide_footer?: number;
   chat_hide_system_messages?: number;
   chat_show_timestamps?: number;
+  chat_display_mode?: string;
   chat_auto_scroll?: number;
   chat_font_size?: string;
   chat_code_theme?: string;

@@ -8,6 +8,7 @@ import {
   AppstoreOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import ChatPlanEntry from "../ChatPlanEntry";
 import styles from "./index.module.less";
 
 interface ChatSessionHeaderProps {
@@ -115,6 +116,9 @@ const ChatSessionHeader: React.FC<ChatSessionHeaderProps> = ({
       {/* 注：会话资源入口不在顶栏硬加按钮（方案 §3.2 的 L3 入口为资源条「全部」
           与「+」菜单），顶栏保持精简。 */}
       <div className={styles.rightSection}>
+        {/* 任务计划入口：右上角工具条首位（「显示设置」在头像下拉里，这里是最靠右的常驻位）。
+            组件自包含 —— 当前智能体未启用计划功能时自身返回 null，不占位。 */}
+        <ChatPlanEntry />
         {isEmbeddedMode && (
           <>
             {/* 钉子：浮窗固定（开=点击外部不关闭），位于「关闭」左边 */}

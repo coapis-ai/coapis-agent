@@ -75,14 +75,18 @@ def _get_workspace(manager, agent_id: str, username: str):
 
 def _read_plan_from_agent_json(workspace) -> bool:
     """Read plan.enabled directly from agent.json on disk, bypassing any
-    in-memory cache.  Falls back to workspace.config if file read fails."""
+    in-memory cache.  Falls back to workspace.config if file read fails.
+
+    默认开（2026-11-12 D4 拍板）：未显式配置过的 agent 视为开启；
+    用户通过 PUT /plan/config 显式关闭后写盘 plan.enabled=false，尊重选择。
+    """
     try:
         agent_json = os.path.join(str(workspace.workspace_dir), "agent.json")
         with open(agent_json, "r", encoding="utf-8") as f:
             data = json.load(f)
         plan_section = data.get("plan")
         if isinstance(plan_section, dict):
-            return bool(plan_section.get("enabled", False))
+            return bool(plan_section.get("enabled", True))
     except Exception:
         pass
     # Fallback: use workspace.config
@@ -90,10 +94,10 @@ def _read_plan_from_agent_json(workspace) -> bool:
         cfg = workspace.config
         plan_cfg = getattr(cfg, "plan", None)
         if plan_cfg:
-            return bool(getattr(plan_cfg, "enabled", False))
+            return bool(getattr(plan_cfg, "enabled", True))
     except Exception:
         pass
-    return False
+    return True
 
 
 def _normalize_plan_data(raw: dict) -> dict:

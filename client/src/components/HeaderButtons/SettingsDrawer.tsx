@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Drawer,
@@ -21,6 +22,13 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useUser } from '../../contexts/UserContext';
 import { languageApi } from '../../api/modules/language';
 import { useChatDisplayFromUser } from '../../hooks/useChatDisplayFromUser';
+import {
+  isNoticeEnabled,
+  setNoticeEnabled,
+  getSilenceUntil,
+  silenceFor,
+  clearSilence,
+} from '../../lib/updateNotice';
 
 const { Text } = Typography;
 
@@ -94,6 +102,9 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   const { themeMode, setThemeMode } = useTheme();
   // 聊天显示走统一桥接钩子：读后端嵌套偏好，写 localStorage + 后端
   const { displayConfig, updateDisplayConfig } = useChatDisplayFromUser();
+  // 通知与弹窗：浏览器本地状态（单一实现在 lib/updateNotice）
+  const [noticeEnabled, setNoticeEnabledState] = useState(() => isNoticeEnabled());
+  const [silenceUntil, setSilenceUntil] = useState(() => getSilenceUntil());
 
   const changeLang = (lang: string) => {
     i18n.changeLanguage(lang);
@@ -104,6 +115,12 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   const toggleHideDetails = (checked: boolean) => {
     updateDisplayConfig('hideDetails', checked);
   };
+
+  const toggleShowThinking = (checked: boolean) => {
+    // UI 是「显示思考内容」，存储字段是 hideThinking（后端 chat_hide_thinking）
+    updateDisplayConfig('hideThinking', !checked);
+  };
+
 
   const displayName = user?.display_name || user?.username || 'User';
   const curLang = (i18n.resolvedLanguage || i18n.language || 'zh')
@@ -218,6 +235,72 @@ export default function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       >
         {t('header.profile.chatHideDetailsDesc', {
           defaultValue: '隐藏工具调用详情、文件列表和计划执行过程',
+        })}
+      </Text>
+
+      {/* 显示思考内容 — Switch = hideThinking 取反；后端字段 chat_hide_thinking */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <Switch
+          size='small'
+          checked={!displayConfig.hideThinking}
+          onChange={(checked) => toggleShowThinking(checked)}
+        />
+        <span>
+          {t('chat.settings.showThinking.label', {
+            defaultValue: '显示思考内容',
+          })}
+        </span>
+      </div>
+      <Text type='secondary' style={{ fontSize: 12 }}>
+        {t('chat.settings.showThinking.desc', {
+          defaultValue: '关闭后，思考过程只保留一条折叠条，点击可展开',
+        })}
+      </Text>
+
+
+      <Divider style={{ margin: '16px 0' }} />
+
+      {/* ── 通知与弹窗 ───────────────────────────
+          版本更新弹窗的开关与免打扰收纳在这里（唯一设置入口）；
+          状态存浏览器本地（lib/updateNotice）——更新作用于本机安装包，
+          属浏览器级状态，不占后端用户偏好字段。 */}
+      <SectionTitle>
+        {t('header.profile.sectionNotifications', { defaultValue: '通知与弹窗' })}
+      </SectionTitle>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Switch size='small' checked={noticeEnabled} onChange={(checked) => {
+          setNoticeEnabled(checked);
+          setNoticeEnabledState(checked);
+        }} />
+        <span>
+          {t('header.updateNotice.autoPopupLabel', { defaultValue: '版本更新自动弹窗' })}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        {silenceUntil > Date.now() ? (
+          <>
+            <Button size='small' onClick={() => {
+              clearSilence();
+              setSilenceUntil(0);
+            }}>
+              {t('header.updateNotice.restoreNow', { defaultValue: '恢复提醒' })}
+            </Button>
+            <Text type='secondary' style={{ fontSize: 12 }}>
+              {t('header.updateNotice.silencedUntil', {
+                defaultValue: '已免打扰至 {{until}}',
+                until: new Date(silenceUntil).toLocaleString(),
+              })}
+            </Text>
+          </>
+        ) : (
+          <Button size='small' onClick={() => setSilenceUntil(silenceFor(72 * 3600 * 1000))}>
+            {t('header.updateNotice.silence72', { defaultValue: '72 小时内不提醒' })}
+          </Button>
+        )}
+      </div>
+      <Text type='secondary' style={{ fontSize: 12 }}>
+        {t('header.updateNotice.noticeDesc', {
+          defaultValue: '发现新版本时自动提示一次；关闭后仅在顶栏出现更新图标时提醒',
         })}
       </Text>
 

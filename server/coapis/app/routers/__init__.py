@@ -59,6 +59,7 @@ from .settings import router as settings_router
 from .plugins import router as plugins_router
 from .backup import router as backup_router
 from .plan import router as plan_router
+from .update_api import router as update_router
 from .decisions import router as decisions_router
 from .config_router import router as config_router_ext
 from .health import router as health_router
@@ -142,6 +143,8 @@ router.include_router(settings_router)
 router.include_router(plugins_router)
 router.include_router(backup_router)
 router.include_router(plan_router)
+# 版本更新查询（只读、永不阻断、服务器侧 6h 缓存；方案 v16 F7）
+router.include_router(update_router)
 # 判断中枢：台账可见 + 配置可改（v14 §5.2 / U 批）
 router.include_router(decisions_router, prefix="/decisions")
 

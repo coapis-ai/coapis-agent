@@ -1007,6 +1007,26 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
             const [preferred] = this._sessions.splice(idx, 1);
             this._sessions.unshift(preferred);
           }
+        } else if (!/\/chat\/[^/?#]+/.test(window.location.pathname)) {
+          // Default selection policy (2026-11-12): when no chat is designated
+          // by the URL, the library list HEAD = chat with max(updated_at).
+          // The library's useMount auto-selects sessionList[0]; with the
+          // backend order (pinned chats sort first) a pinned chat would win
+          // the default slot over the genuinely newest chat.
+          let bestIdx = -1;
+          let bestTs = -Infinity;
+          this._sessions.forEach((s, i) => {
+            const raw = (s as ExtendedSession).updatedAt ?? (s as any).createdAt;
+            const t = raw ? Date.parse(String(raw)) : 0;
+            if (Number.isFinite(t) && t > bestTs) {
+              bestTs = t;
+              bestIdx = i;
+            }
+          });
+          if (bestIdx > 0) {
+            const [newest] = this._sessions.splice(bestIdx, 1);
+            this._sessions.unshift(newest);
+          }
         }
 
         // Notify React so the sidebar re-renders with updated names
