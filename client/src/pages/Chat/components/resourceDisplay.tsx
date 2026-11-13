@@ -18,7 +18,7 @@ import {
   DatabaseOutlined,
   FileExcelOutlined,
   FileImageOutlined,
-  FileOutlined,
+
   FilePdfOutlined,
   FilePptOutlined,
   FileTextOutlined,
@@ -28,7 +28,7 @@ import {
   VideoCameraOutlined,
 } from "@ant-design/icons";
 import type { ChatResourceItem } from "../../../api/modules/chat";
-import { CATEGORY_ICON, resolveCategory } from "./resourceCategory";
+import { resolveCategory } from "./resourceCategory";
 
 /**
  * 类别 → 图标组件（键集必须与 resourceCategory 的 CATEGORY_ICON 一致，测试钉住）。
@@ -110,7 +110,7 @@ export function categoryIconOf(item: ChatResourceItem, size?: number): ReactNode
 export type ResourceSource = "produced" | "kb" | "web" | "reference";
 
 export function sourceOf(item: ChatResourceItem): ResourceSource {
-  if (item.role === "producer" || item.metadata?.export === true) return "produced";
+  if (item.role === "producer" || item.role === "export") return "produced";
   if (item.kind === "kb") return "kb";
   if (item.kind === "web") return "web";
   return "reference";
