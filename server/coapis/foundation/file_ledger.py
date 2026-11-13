@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 #: Recognized write sources (anything else is stored as ``other``).
 VALID_SOURCES = frozenset(
-    {"upload", "write_file", "edit_file", "append_file", "convert", "reconcile"}
+    {"upload", "write_file", "edit_file", "append_file", "send_file", "convert", "reconcile"}
 )
 
 #: 台账口径：哪些写入来源算「这个会话产出了它」（producer），其余算引用。

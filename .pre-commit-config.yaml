@@ -1,0 +1,19 @@
+# 门禁三件套之一（B0）：提交前本地钩子。
+# 只在开发机生效——CI（GitHub Actions）不跑 pre-commit，容器构建更不碰，
+# 这是"门禁不进容器"的边界（实施方案 §10）。装法：pip install pre-commit && pre-commit install
+# 目标：把 v26 前"修完 100 测试红"式的低级错误（语法/风格/脏导入）挡在提交前。
+repos:
+  - repo: local
+    hooks:
+      - id: flake8
+        name: flake8（沿用 setup.cfg 口径）
+        entry: .venv/bin/python -m flake8 --config=setup.cfg
+        language: system
+        types: [python]
+        exclude: ^(server/alembic/|server/_vendor/|\.venv)
+      - id: black
+        name: black --check
+        entry: .venv/bin/python -m black --check --skip-string-normalization --line-length 100
+        language: system
+        types: [python]
+        exclude: ^(server/alembic/|server/_vendor/|\.venv)

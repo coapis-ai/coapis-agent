@@ -7,9 +7,13 @@ import {
   DownloadOutlined,
   DownOutlined,
   EyeOutlined,
-  FileTextOutlined,
-  GlobalOutlined,
 } from "@ant-design/icons";
+import {
+  categoryIconOf,
+  SOURCE_COLOR,
+  SOURCE_LABEL_KEY,
+  sourceOf,
+} from "./resourceDisplay";
 import { useTranslation } from "react-i18next";
 import type { ChatResourceItem } from "../../../api/modules/chat";
 import { displayName, stemName } from "./ChatSessionResources/helpers";
@@ -21,14 +25,6 @@ import {
   previewFile,
 } from "../../../utils/webPreview";
 import styles from "./CoApisChatResourceBar.module.css";
-
-const KIND_ICON: Record<string, React.ReactNode> = {
-  file: <FileTextOutlined />,
-  web: <GlobalOutlined />,
-  kb: <FileTextOutlined style={{ color: "#722ed1" }} />,
-  mcp: <FileTextOutlined style={{ color: "#fa8c16" }} />,
-  db: <FileTextOutlined style={{ color: "#13c2c2" }} />,
-};
 
 /** 状态词表（与 L3 完全一致，方案 §3.2 / §12.4 验收项 1） */
 const STATUS_META: Record<string, { label: string; color: string }> = {
@@ -234,26 +230,23 @@ const CoApisChatResourceBar: React.FC<Props> = ({
         {shown.map((item) => {
           const st = resourceStatusOf(item);
           const dead = st === "deleted" || st === "missing";
+          // 来源标签逐条判定（引用组里能分出「知识库 / 网页 / 引用」三类）
+          const src = sourceOf(item);
           return (
             <div
               key={`${item.kind}:${item.path}`}
               className={`${styles.row} ${dead ? styles.rowDead : ""}`}
               title={item.path}
             >
-              <span className={styles.kind}>{KIND_ICON[item.kind]}</span>
+              <span className={styles.kind}>{categoryIconOf(item)}</span>
               <span
                 className={styles.name}
                 onClick={() => !dead && doPreview(item)}
               >
                 {displayName(item) || item.path}
               </span>
-              <Tag
-                className={styles.tag}
-                color={source === "produced" ? "green" : "blue"}
-              >
-                {source === "produced"
-                  ? t("chat.resources.produced")
-                  : t("chat.resources.reference")}
+              <Tag className={styles.tag} color={SOURCE_COLOR[src]}>
+                {t(SOURCE_LABEL_KEY[src])}
               </Tag>
               {TAGGED_STATUSES.has(st) ? (
                 <Tag className={styles.tag} color={STATUS_META[st]?.color}>

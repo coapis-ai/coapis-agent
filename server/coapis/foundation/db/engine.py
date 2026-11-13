@@ -35,6 +35,7 @@ from typing import Optional
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session, sessionmaker
 
 _lock = threading.Lock()
@@ -101,8 +102,13 @@ def _create_engine(url: str) -> Engine:
     max_overflow = _env_pool_int("COAPIS_DB_MAX_OVERFLOW", 10)
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
+        # SQLite 用文件锁串行化写入；QueuePool 的 pool_size/max_overflow
+        # 语义对 sqlite 无意义且会触发 SQLA 参数错误（2026-11-13 实测），
+        # 故 sqlite 走 StaticPool（单连接共享），PG 分支保持连接池参数。
         engine = create_engine(
-            url, pool_size=pool_size, max_overflow=max_overflow, **kwargs
+            url,
+            poolclass=StaticPool,
+            **kwargs,
         )
 
         @event.listens_for(engine, "connect")

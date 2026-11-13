@@ -38,3 +38,10 @@ jobs:
         run: |
           cd client
           npx tsc --noEmit
+
+      # B0 地基（2026-11-13）：前端契约锁。gate 的是 test:run，覆盖率只出报告不卡门槛
+      # —— 前端的真实覆盖率尺子在后端，两处都卡门槛是双重自杀。
+      - name: Vitest 契约锁
+        run: |
+          cd client
+          npm run test:run
