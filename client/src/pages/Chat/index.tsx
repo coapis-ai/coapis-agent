@@ -52,7 +52,8 @@ import C2AToolCard, { setUrlNavigate } from "@coapis-c2a/renderer/C2AToolCard";
 import { openExternalUrl } from "@/utils/externalNav";
 import CoApisDeepThinking from "./components/CoApisDeepThinking";
 import { useVendorLabels } from "./components/vendorLabels";
-import CoApisKbCitations from "./components/CoApisKbCitations";
+// 2026-11-13 拍板：知识库引用独立卡下线注册（组件文件 components/CoApisKbCitations
+// 保留未删）。引用统一并入「本轮资源」，与产出资源共用同一预览窗。
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
 import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
 import {
@@ -2153,18 +2154,8 @@ export default function ChatPage() {
   /** 响应气泡末尾插槽（方案 §3.2 L2 / §12.3）：产出卡 + 本轮资源条 */
   const chatAppendSlots = useMemo(
     () => [
-      {
-        id: "kb-citations",
-        order: 10,
-        render: ({ data }: { data: any }) => (
-          <CoApisKbCitations
-            data={{
-              citations:
-                data?.citations ?? data?.metadata?.metadata?.kb_citations,
-            }}
-          />
-        ),
-      },
+      // 知识库引用独立卡（id: kb-citations）已下线注册：引用改走统一资源台账，
+      // 与产出资源同列「本轮资源」、共用同一预览窗。组件文件按拍板保留未删。
       {
         // 本轮资源条（方案 §3.2 L2）：答案气泡末尾，引用/产出分组，
         // 每组 8 行 +「展开其余 N 项」，尾部「查看全部」开 L3 抽屉。
@@ -2581,7 +2572,8 @@ export default function ChatPage() {
       },
       cards: {
         DeepThinking: CoApisDeepThinking,
-        KbCitations: CoApisKbCitations,
+        // 2026-11-13 拍板：知识库引用独立卡下线注册（组件文件保留未删），
+        // 引用统一走「本轮资源」与同一预览窗。
       },
       customToolRenderConfig: {
         ..._enhancedToolRenderConfig,

@@ -520,6 +520,29 @@ function formatOutput(output: string | undefined): { text: string; isLong: boole
 // EnhancedToolCallCard 主组件
 // ---------------------------------------------------------------------------
 
+/**
+ * 展开态尺子（SSOT，2026-11-12 用户拍板 / B0 契约锁）
+ * ---------------------------------------------------------------------------
+ * 规则只有一条：**只有运行中临时展开，完成即收起**；
+ * `manualOpen === null` 表示用户从没手动开合过 → 完全跟随运行状态；
+ * 用户一旦手动开合，之后一律以用户的为准，机器不再抢状态。
+ *
+ * 抽成纯函数的原因：这条规则是这个组件唯一的"状态机"，之前只能靠肉眼看
+ * 渲染结果来验收。测试要钉住它，就得让它脱离 React 也能被调用。
+ * 组件里的调用点必须走这里，不要再写第二份等价表达式。
+ */
+export function computeCardActiveKey({
+  hasDetails,
+  loading,
+  manualOpen,
+}: {
+  hasDetails: boolean;
+  loading: boolean;
+  manualOpen: boolean | null;
+}): string[] {
+  return hasDetails && (manualOpen ?? loading) ? ["1"] : [];
+}
+
 const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => {
   const { isDark } = useTheme();
   const { t, i18n } = useTranslation();
@@ -603,7 +626,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
   // 用户一旦手动开合，之后一律以用户的为准，机器不再抢状态。
   const hasDetails = Boolean(argumentsStr || outputStr) && !displayCfg.hideDetails;
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const activeKey = hasDetails && (manualOpen ?? loading) ? ['1'] : [];
+  const activeKey = computeCardActiveKey({ hasDetails, loading, manualOpen });
 
   return (
     <div

@@ -83,7 +83,38 @@ interface Props {
 }
 
 /** 每组最多 8 行，其余折叠成「展开其余 N 项」（方案 §3.2 L2）。 */
-const GROUP_CAP = 8;
+export const GROUP_CAP = 8;
+
+/**
+ * 资源行尺子（SSOT / B0 契约锁）
+ * ---------------------------------------------------------------------------
+ * 一、按角色二分：`producer` / `export` 进「产出」，其余（consumer / 未标）
+ *     进「引用」。二分只认 `item.role`，不认 kind —— kind 决定图标与预览通道。
+ * 二、分组上限：收起态每段最多 `GROUP_CAP` 行，超出折叠成「展开其余 N 项」；
+ *     放开态（点了「展开其余」）显示全部，否则筛完 30 条只能看到 8 条。
+ *
+ * 抽成纯函数是为了让测试钉住这两条尺子（v24 的 chip / 缩进缺陷就是因为
+ * 这两条规则只能靠肉眼验收，才逃逸了三轮）。组件调用点必须走这里。
+ */
+export function splitResourcesByRole(items: ChatResourceItem[]): {
+  produced: ChatResourceItem[];
+  referenced: ChatResourceItem[];
+} {
+  const produced = items.filter(
+    (i) => i.role === "producer" || i.role === "export",
+  );
+  const referenced = items.filter(
+    (i) => i.role !== "producer" && i.role !== "export",
+  );
+  return { produced, referenced };
+}
+
+export function visibleRowsFor(
+  list: ChatResourceItem[],
+  noCap: boolean,
+): ChatResourceItem[] {
+  return noCap ? list : list.slice(0, GROUP_CAP);
+}
 
 /** chip 筛子：两组同看 / 只看引用 / 只看产出。 */
 type Tab = "all" | "reference" | "produced";
@@ -120,12 +151,8 @@ const CoApisChatResourceBar: React.FC<Props> = ({
     setNoCap(false);
   };
 
-  const produced = useMemo(
-    () => items.filter((i) => i.role === "producer" || i.role === "export"),
-    [items],
-  );
-  const referenced = useMemo(
-    () => items.filter((i) => i.role !== "producer" && i.role !== "export"),
+  const { produced, referenced } = useMemo(
+    () => splitResourcesByRole(items),
     [items],
   );
 
@@ -194,7 +221,7 @@ const CoApisChatResourceBar: React.FC<Props> = ({
     // 收起态（tab==="all"）什么都不渲染。原来「两组同看」要额外一个整块
     // 「展开」按钮，等于三个开关（chip、展开、查看全部）管一件事。
     if (tab !== source) return null;
-    const shown = noCap ? list : list.slice(0, GROUP_CAP);
+    const shown = visibleRowsFor(list, noCap);
     const rest = list.length - shown.length;
     return (
       <div className={styles.group}>
