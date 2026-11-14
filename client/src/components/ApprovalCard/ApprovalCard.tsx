@@ -75,7 +75,10 @@ function actionErrorMessage(error: unknown): string {
   if (typeof detail === "string" && detail.trim()) {
     return detail;
   }
-  return t("approval.resolveFailed", "Approval action failed, please retry");
+  // Module scope has no `t` (it comes from the useTranslation hook), so the
+  // fallback is plain text; every real rejection from the backend already
+  // arrives as a localized `detail`.
+  return "Approval action failed, please retry";
 }
 
 export function ApprovalCard(props: ApprovalCardProps) {
