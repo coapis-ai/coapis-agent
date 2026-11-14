@@ -2854,6 +2854,7 @@
     "approveFailed": "Failed to approve",
     "cancelTask": "Cancel Task",
     "denyFailed": "Failed to deny",
+    "resolveFailed": "Approval action failed, please retry",
     "expiredTitle": "Approval expired",
     "expiredHint": "This approval timed out. The tool was not executed.",
     "expiredDesc": "Ask for the same operation again and approve the new card right away.",

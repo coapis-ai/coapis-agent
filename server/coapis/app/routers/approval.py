@@ -63,6 +63,26 @@ class ApprovalListResponse(BaseModel):
     count: int
 
 
+def actor_from_request(request: Request, *, channel: str = "console") -> Any:
+    """Build the approval actor for an HTTP request (B2 identity boundary).
+
+    Identity comes from the authenticated request, never from a body field
+    the client controls; ``channel`` records which surface the decision was
+    made on.  Returns an ``ApprovalActor`` with ``source="http"``, which the
+    service checks against the record's owner.
+    """
+    from ..approvals import ApprovalActor
+    from .chats import _get_current_user
+
+    user_id, is_admin = _get_current_user(request)
+    return ApprovalActor(
+        user_id=user_id,
+        is_admin=is_admin,
+        channel=channel,
+        source="http",
+    )
+
+
 @router.post(
     "/approve",
     response_model=ApprovalActionResponse,
@@ -118,11 +138,29 @@ async def post_approval_approve(
             detail="Root session mismatch: cannot approve other session trees",
         )
 
+    # Identity check (B2), deliberately *after* the session-scope 403 above:
+    # the record's owner (or an admin) is the only one who may decide.
+    from ..approvals import FORBIDDEN_MESSAGE, identity_check
+
+    actor = actor_from_request(request)
+    deny = identity_check(pending, actor)
+    if deny is not None:
+        logger.warning(
+            "Approval %s refused on resolve: %s",
+            body.request_id[:16],
+            deny,
+        )
+        raise HTTPException(status_code=403, detail=FORBIDDEN_MESSAGE)
+
     # Resolve the Future — only when an agent is still waiting on it.
     resolved, state = await svc.resolve_live(
         body.request_id,
         ApprovalDecision.APPROVED,
+        actor=actor,
     )
+
+    if state == "forbidden":
+        raise HTTPException(status_code=403, detail=FORBIDDEN_MESSAGE)
 
     if state == "stale":
         # The waiting agent already gave up (timeout / cancelled). Promising
@@ -211,11 +249,28 @@ async def post_approval_deny(
             detail="Root session mismatch: cannot approve other session trees",
         )
 
+    # Identity check (B2), after the session-scope 403 above.
+    from ..approvals import FORBIDDEN_MESSAGE, identity_check
+
+    actor = actor_from_request(request)
+    deny_reason = identity_check(pending, actor)
+    if deny_reason is not None:
+        logger.warning(
+            "Approval %s refused on deny: %s",
+            body.request_id[:16],
+            deny_reason,
+        )
+        raise HTTPException(status_code=403, detail=FORBIDDEN_MESSAGE)
+
     # Resolve the Future — only when an agent is still waiting on it.
     resolved, state = await svc.resolve_live(
         body.request_id,
         ApprovalDecision.DENIED,
+        actor=actor,
     )
+
+    if state == "forbidden":
+        raise HTTPException(status_code=403, detail=FORBIDDEN_MESSAGE)
 
     if state == "stale":
         # Denying a record nobody waits on is harmless; report it honestly.

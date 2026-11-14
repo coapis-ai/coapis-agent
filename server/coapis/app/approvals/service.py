@@ -43,10 +43,84 @@ _GC_MAX_COMPLETED = 500
 _GC_PENDING_MAX_AGE_SECONDS = 1800.0
 _GC_MAX_PENDING = 200
 
+# Actor sources accepted by :func:`_identity_check`.  ``internal`` is the
+# approval system itself (expiry / GC), ``card_callback`` is the WeCom card
+# callback whose binding was already validated by the channel layer, and
+# ``agent`` is the waiting coroutine closing its own future.  Everything
+# else — HTTP requests and control commands — must carry a real identity.
+ACTOR_INTERNAL = "internal"
+ACTOR_CARD_CALLBACK = "card_callback"
+ACTOR_AGENT = "agent"
+TRUSTED_ACTOR_SOURCES = frozenset({ACTOR_INTERNAL, ACTOR_CARD_CALLBACK, ACTOR_AGENT})
+
+#: Single user-facing text for every identity rejection (D11 一刀a).
+FORBIDDEN_MESSAGE = "无权操作此审批"
+
 
 # ------------------------------------------------------------------
 # Data model
 # ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ApprovalActor:
+    """Who is operating on an approval.
+
+    Carried explicitly at every call site — the system never infers an
+    identity from ambient context variables.  ``source`` marks where the
+    request came from: ``http``, ``control_command``, ``card_callback``,
+    ``internal`` or ``agent``; only the first two require a full identity.
+    """
+
+    user_id: str = ""
+    is_admin: bool = False
+    channel: str = ""
+    source: str = ""
+
+
+def _identity_check(pending: Any, actor: Any) -> str | None:
+    """Return ``None`` to allow, or a reason code to reject.
+
+    Identity is enforced **inside** the resolve entry points, not in the
+    routers: an internal caller that forgets to pass an actor is denied
+    rather than silently trusted, which is what keeps a cross-user
+    approval from being resolved by accident.
+    """
+    if actor is None:
+        return "missing_actor"
+    source = str(getattr(actor, "source", "") or "")
+    if source in TRUSTED_ACTOR_SOURCES:
+        return None
+    owner = str(getattr(pending, "owner_user_id", "") or "")
+    if not owner:
+        # Legacy ledgers written before ownership existed.  Denying beats
+        # guessing: the user re-issues the approval in their own session.
+        return "unowned_record"
+    actor_user = str(getattr(actor, "user_id", "") or "")
+    if not actor_user:
+        return "missing_identity"
+    actor_channel = str(getattr(actor, "channel", "") or "")
+    pending_channel = str(getattr(pending, "channel", "") or "")
+    if actor_channel and pending_channel and actor_channel != pending_channel:
+        return "channel_mismatch"
+    if actor_user == owner:
+        return None
+    if bool(getattr(actor, "is_admin", False)):
+        # Admin override is allowed but must leave a trace (审计日志).
+        logger.info(
+            "approval admin override: request_id=%s owner=%s actor=%s "
+            "source=%s",
+            pending.request_id,
+            owner,
+            actor_user,
+            source,
+        )
+        return None
+    return "not_owner"
+
+
+#: Public alias — routers use it to answer 403 before calling resolve.
+identity_check = _identity_check
 
 
 @dataclass
@@ -69,6 +143,11 @@ class PendingApproval:
     findings_count: int = 0
     severity: str = "medium"  # For frontend display
     extra: dict[str, Any] = field(default_factory=dict)
+    #: Ownership axis of the identity boundary (B2).  Written by
+    #: :meth:`create_pending` from the requesting user; rows restored from a
+    #: ledger written before ownership existed carry an empty owner, and the
+    #: identity check refuses those instead of guessing.
+    owner_user_id: str = ""
 
 
 # ------------------------------------------------------------------
@@ -218,6 +297,7 @@ class ApprovalService:
             findings_count=result.findings_count,
             severity=result.max_severity.value,
             extra=dict(extra or {}),
+            owner_user_id=user_id,
         )
 
         async with self._lock:
@@ -241,10 +321,19 @@ class ApprovalService:
         self,
         request_id: str,
         decision: ApprovalDecision,
+        *,
+        actor: ApprovalActor | None = None,
     ) -> PendingApproval | None:
-        """Resolve pending approval by setting Future result."""
+        """Resolve pending approval by setting Future result.
+
+        *actor* states **who** is acting (B2 identity boundary).  The check
+        lives here rather than in the routers on purpose: a caller that
+        forgets the actor is denied instead of silently trusted, and the
+        agent-side, card-callback and expiry paths stay open by declaring
+        ``source="internal"`` / ``"card_callback"`` / ``"agent"``.
+        """
         async with self._lock:
-            pending = self._pending.pop(request_id, None)
+            pending = self._pending.get(request_id)
             if pending is None:
                 logger.warning(
                     "Approval request %s not found (already resolved?)",
@@ -252,6 +341,20 @@ class ApprovalService:
                 )
                 return None
 
+            reason = _identity_check(pending, actor)
+            if reason is not None:
+                # One unified user-facing outcome for every identity
+                # rejection; the log carries the machine-readable reason.
+                logger.warning(
+                    "Approval %s refused: %s (source=%s actor=%s)",
+                    request_id[:8],
+                    reason,
+                    getattr(actor, "source", ""),
+                    getattr(actor, "user_id", ""),
+                )
+                return None
+
+            self._pending.pop(request_id, None)
             pending.status = decision.value
             pending.resolved_at = time.time()
 
@@ -277,6 +380,8 @@ class ApprovalService:
         self,
         request_id: str,
         decision: ApprovalDecision,
+        *,
+        actor: ApprovalActor | None = None,
     ) -> tuple[PendingApproval | None, str]:
         """Resolve *request_id* only if an agent is still waiting on it.
 
@@ -288,16 +393,29 @@ class ApprovalService:
                         agent gave up long ago. Approving it would only
                         produce a "✅ 已批准，正在执行" message that nothing
                         backs up — which is exactly symptom 3.
+        ``forbidden`` — *actor* may not act on this record (B2 identity
+                        boundary); nothing was changed.
         """
         async with self._lock:
             self._expire_stale_locked(time.time())
             pending = self._pending.get(request_id)
             if pending is None:
                 return None, "not_found"
+            if _identity_check(pending, actor) is not None:
+                logger.warning(
+                    "Approval %s refused: identity check failed "
+                    "(source=%s actor=%s)",
+                    request_id[:8],
+                    getattr(actor, "source", ""),
+                    getattr(actor, "user_id", ""),
+                )
+                return None, "forbidden"
             if pending.status != "pending" or pending.future.done():
                 return pending, "stale"
 
-        resolved = await self.resolve_request(request_id, decision)
+        resolved = await self.resolve_request(request_id, decision, actor=actor)
+        if resolved is None:
+            return None, "not_found"
         return resolved, "ok"
 
     async def get_pending_by_session(
@@ -515,7 +633,11 @@ class ApprovalService:
             )
         except asyncio.TimeoutError:
             decision = ApprovalDecision.TIMEOUT
-            await self.resolve_request(request_id, decision)
+            await self.resolve_request(
+                request_id,
+                decision,
+                actor=ApprovalActor(source=ACTOR_INTERNAL),
+            )
 
         return decision
 
@@ -558,6 +680,38 @@ class ApprovalService:
                 cancelled,
                 tool_call_id,
                 session_id[:8],
+            )
+        return cancelled
+
+    async def cancel_by_chat(
+        self,
+        chat_id: str,
+        actor: ApprovalActor | None,
+        *,
+        reason: str = "chat_closed",
+    ) -> int:
+        """Cancel every approval left over in **one chat** (B2-③).
+
+        Three explicit dimensions: the *chat_id* passed by the caller (never
+        read from a context variable), the record's channel, and the actor's
+        identity.  Records owned by someone else are skipped — this is the
+        end-of-tool-call sweep, not an admin tool.
+        """
+        if not chat_id:
+            return 0
+        cancelled = 0
+        async with self._lock:
+            for request_id, pending in list(self._pending.items()):
+                if str(pending.extra.get("chat_id", "")) != chat_id:
+                    continue
+                if _identity_check(pending, actor) is not None:
+                    continue
+                cancelled += self._expire_stale_locked(pending, reason)
+        if cancelled:
+            logger.info(
+                "Cancelled %d leftover approval(s) for chat %s",
+                cancelled,
+                chat_id,
             )
         return cancelled
 

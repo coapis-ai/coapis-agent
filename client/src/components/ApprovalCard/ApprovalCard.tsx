@@ -62,6 +62,22 @@ function initialRemainingMs(
   return Math.max(0, timeoutSeconds * 1000 - elapsedMs);
 }
 
+/**
+ * Extract a user-facing reason from an approval request failure.
+ *
+ * The backend answers every identity rejection with one sentence
+ * ("无权操作此审批"); surfacing it verbatim keeps the card honest about why
+ * nothing happened instead of leaving a button that silently resets.
+ */
+function actionErrorMessage(error: unknown): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })
+    ?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+  return t("approval.resolveFailed", "Approval action failed, please retry");
+}
+
 export function ApprovalCard(props: ApprovalCardProps) {
   const {
     requestId,
@@ -85,6 +101,9 @@ export function ApprovalCard(props: ApprovalCardProps) {
   const { t } = useTranslation();
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [loading, setLoading] = useState<"approve" | "deny" | null>(null);
+  // B2: identity rejections (403) must reach the user. Silently swallowing
+  // them left people clicking a card that never moved.
+  const [actionError, setActionError] = useState<string | null>(null);
   const [selfExpired, setSelfExpired] = useState(
     () => initialRemainingMs(remainingSeconds, timeoutSeconds, createdAt) <= 0,
   );
@@ -114,10 +133,14 @@ export function ApprovalCard(props: ApprovalCardProps) {
 
   const handleApprove = async () => {
     setLoading("approve");
+    setActionError(null);
     try {
       await onApprove(requestId);
     } catch (error) {
       console.error("Approve failed:", error);
+      // 403 "无权操作此审批" and friends must be visible on the card:
+      // a silent catch is how a dead card stays dead.
+      setActionError(actionErrorMessage(error));
     } finally {
       setLoading(null);
     }
@@ -125,14 +148,34 @@ export function ApprovalCard(props: ApprovalCardProps) {
 
   const handleDeny = async () => {
     setLoading("deny");
+    setActionError(null);
     try {
       await onDeny(requestId);
     } catch (error) {
       console.error("Deny failed:", error);
+      setActionError(actionErrorMessage(error));
     } finally {
       setLoading(null);
     }
   };
+
+  // Renders at the card footer: the reason a click did nothing.
+  const actionErrorNode = actionError ? (
+    <div
+      style={{
+        marginTop: 8,
+        padding: "6px 10px",
+        borderRadius: 8,
+        fontSize: 13,
+        lineHeight: 1.5,
+        color: "#b45309",
+        background: "#fffbeb",
+        border: "1px solid #fde68a",
+      }}
+    >
+      {actionError}
+    </div>
+  ) : null;
 
   // Countdown, anchored to the mount instant plus the server's remaining
   // time. Reaching zero flips the card into its terminal state instead of
@@ -353,6 +396,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
           {t("approval.approve", "Approve")}
         </Button>
       </div>
+      {actionErrorNode}
     </Card>
   );
 }

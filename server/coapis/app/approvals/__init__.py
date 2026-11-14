@@ -18,13 +18,19 @@
 """Approval service exports."""
 
 from .service import (
+    ApprovalActor,
     ApprovalService,
+    FORBIDDEN_MESSAGE,
     PendingApproval,
     get_approval_service,
+    identity_check,
 )
 
 __all__ = [
+    "ApprovalActor",
     "ApprovalService",
+    "FORBIDDEN_MESSAGE",
     "PendingApproval",
     "get_approval_service",
+    "identity_check",
 ]

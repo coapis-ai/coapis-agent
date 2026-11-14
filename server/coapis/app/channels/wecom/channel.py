@@ -823,7 +823,7 @@ class WecomChannel(BaseChannel):
         agent can continue.  Sends a confirmation message to the user.
         """
         import re as _re
-        from ..approvals import get_approval_service
+        from ..approvals import ApprovalActor, get_approval_service
         from ...security.tool_guard.approval import ApprovalDecision
 
         # Parse: /approval approve <request_id>  or  /approval deny <request_id>
@@ -844,7 +844,19 @@ class WecomChannel(BaseChannel):
             if action == "approve"
             else ApprovalDecision.DENIED
         )
-        resolved = await svc.resolve_request(request_id, decision)
+        # Identity of the WeCom user who typed the command comes from the
+        # frame, never from the text they typed (B2 identity boundary).
+        _body = frame.get("body") or {}
+        wecom_user = str((_body.get("from") or {}).get("userid", ""))
+        resolved = await svc.resolve_request(
+            request_id,
+            decision,
+            actor=ApprovalActor(
+                user_id=wecom_user,
+                channel="wecom",
+                source="control_command",
+            ),
+        )
         if resolved:
             label = "已批准" if action == "approve" else "已拒绝"
             await self._send_text_via_frame(

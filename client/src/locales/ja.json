@@ -2257,6 +2257,7 @@
     "approveFailed": "承認に失敗しました",
     "cancelTask": "タスクをキャンセル",
     "denyFailed": "拒否に失敗しました",
+    "resolveFailed": "承認操作が反映されませんでした。再試行してください",
     "expiredTitle": "承認は失効しました",
     "expiredHint": "この承認はタイムアウトし、ツールは実行されませんでした。",
     "expiredDesc": "同じ操作を再度依頼し、新しい承認カードが出たらすぐに承認してください。",

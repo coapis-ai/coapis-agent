@@ -50,6 +50,7 @@ from ..crons.api import router as cron_router
 # from ..runner.api import router as runner_router
 from .console import router as console_router
 from .token_usage import router as token_usage_router
+from .usage_session import router as usage_session_router
 from .agent_stats import router as agent_stats_router
 from .auth import router as auth_router
 from .messages import router as messages_router
@@ -135,6 +136,7 @@ router.include_router(tools_router)
 router.include_router(workspace_router)
 router.include_router(envs_router)
 router.include_router(token_usage_router)
+router.include_router(usage_session_router)
 router.include_router(agent_stats_router)
 router.include_router(auth_router)
 # files_router is included directly in _app.py — skip here to avoid double registration

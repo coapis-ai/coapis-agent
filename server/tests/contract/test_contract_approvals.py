@@ -8,7 +8,7 @@
                    tool_name, result: ToolGuardResult,
                    timeout_seconds=TOOL_GUARD_APPROVAL_TIMEOUT_SECONDS,
                    extra=None) -> PendingApproval          # 关键字参数
-    resolve_request(rid, decision: ApprovalDecision) -> PendingApproval | None
+    resolve_request(rid, decision, *, actor: ApprovalActor | None)
     get_request(rid) / get_pending_by_session(sid) / get_pending_by_root_session(root)
     live_remaining_seconds(rid) / resolve_live(rid)
     cancel_all_pending_by_root_session(root)
@@ -16,6 +16,9 @@
 服务方法都是协程（仓库 pytest 配了 ``asyncio_mode=auto``，直接 async def 即可）。
 现状锁 = B2 收尾时不许改松的行为；B2 目标锁 = ``xfail(strict=True)``
 （今天必须失败，做完自动变红，逼着摘标记）。
+
+**B2 已收紧**：裁决必须带身份。``actor`` 是必答项——缺身份、跨用户、
+通道不符一律拒绝；admin 放行并留审计日志；企微卡片回调用受信任来源直通。
 """
 from __future__ import annotations
 
@@ -26,8 +29,10 @@ import pytest
 
 from coapis.app.approvals.service import (
     TOOL_GUARD_APPROVAL_TIMEOUT_SECONDS,
+    ApprovalActor,
     ApprovalService,
     PendingApproval,
+    identity_check,
 )
 from coapis.security.tool_guard.approval import ApprovalDecision
 from coapis.security.tool_guard.models import (
@@ -76,15 +81,18 @@ async def _pending(
     session_id: str = "s-contract",
     **kw,
 ) -> PendingApproval:
+    defaults = {
+        "user_id": "u-contract",
+        "channel": "console",
+        "agent_id": "a-contract",
+        "tool_name": "Bash",
+    }
+    defaults.update(kw)
     return await service.create_pending(
         session_id=session_id,
         root_session_id=session_id,
-        user_id="u-contract",
-        channel="console",
-        agent_id="a-contract",
-        tool_name="Bash",
         result=_result(),
-        **kw,
+        **defaults,
     )
 
 
@@ -154,7 +162,11 @@ async def test_lookup_by_unknown_session_is_empty_not_error(service):
 
 async def test_resolve_request_returns_the_resolved_row(service):
     item = await _pending(service)
-    resolved = await service.resolve_request(item.request_id, ApprovalDecision.APPROVED)
+    resolved = await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.APPROVED,
+        actor=ApprovalActor(user_id="u-contract", channel="console", source="http"),
+    )
     assert resolved is not None
     assert resolved.request_id == item.request_id
 
@@ -162,8 +174,16 @@ async def test_resolve_request_returns_the_resolved_row(service):
 async def test_resolve_request_is_single_use(service):
     # 二次裁决必须取不到：审批一旦被复用就是"一次同意、永久放行"。
     item = await _pending(service)
-    first = await service.resolve_request(item.request_id, ApprovalDecision.APPROVED)
-    second = await service.resolve_request(item.request_id, ApprovalDecision.DENIED)
+    first = await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.APPROVED,
+        actor=ApprovalActor(user_id="u-contract", channel="console", source="http"),
+    )
+    second = await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.DENIED,
+        actor=ApprovalActor(user_id="u-contract", channel="console", source="http"),
+    )
     assert first is not None
     assert second is None
 
@@ -186,7 +206,11 @@ async def test_get_request_reads_without_consuming(service):
 async def test_denied_path_is_first_class(service):
     # 拒绝必须与批准同样可查（红线：拒绝是一等公民，不是异常路径）。
     item = await _pending(service)
-    resolved = await service.resolve_request(item.request_id, ApprovalDecision.DENIED)
+    resolved = await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.DENIED,
+        actor=ApprovalActor(user_id="u-contract", channel="console", source="http"),
+    )
     assert resolved is not None
 
 
@@ -194,6 +218,126 @@ def test_decision_vocabulary_is_stable():
     # 前端/台账/超时处理共用这套字面量，改名等于历史对不上。
     values = {d.value for d in ApprovalDecision}
     assert {"approved", "denied"} <= values
+
+
+# ----------------------------------------------------------- 身份边界（B2）
+#
+# 五例矩阵：无身份 / 正确身份 / admin / 跨用户 / 受信任回调。
+# 检查写在 service 层，不在路由里——路由忘了做检查，机器不会替它兜底。
+
+
+_OWNER = "alice"
+_OWNER_ACTOR = ApprovalActor(user_id=_OWNER, channel="console", source="http")
+
+
+async def test_identity_missing_actor_is_refused(service):
+    """缺身份必须失败：不带 actor 的裁决不得改动任何台账。"""
+    item = await _pending(service, user_id=_OWNER)
+    assert await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.APPROVED,
+    ) is None
+    # 行还在，且仍是 pending —— 没有被人隔空批掉。
+    live = await service.get_request(item.request_id)
+    assert live is not None and live.status == "pending"
+
+
+async def test_identity_owner_is_allowed(service):
+    item = await _pending(service, user_id=_OWNER)
+    resolved = await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.APPROVED,
+        actor=_OWNER_ACTOR,
+    )
+    assert resolved is not None and resolved.status == "approved"
+
+
+async def test_identity_admin_is_allowed_and_logged(service):
+    """admin 跨用户放行，但必须留审计痕迹（日志）。"""
+    item = await _pending(service, user_id=_OWNER)
+    resolved = await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.APPROVED,
+        actor=ApprovalActor(
+            user_id="boss",
+            is_admin=True,
+            channel="console",
+            source="http",
+        ),
+    )
+    assert resolved is not None and resolved.status == "approved"
+
+
+async def test_identity_cross_user_is_refused(service):
+    """跨用户必须 403 语义：拿别人的 request_id 批不动。"""
+    item = await _pending(service, user_id=_OWNER)
+    assert await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.APPROVED,
+        actor=ApprovalActor(user_id="mallory", channel="console", source="http"),
+    ) is None
+    live = await service.get_request(item.request_id)
+    assert live is not None and live.status == "pending"
+
+
+async def test_identity_channel_mismatch_is_refused(service):
+    """通道维度：同一用户从错误通道下裁决也要被拒。"""
+    item = await _pending(service, user_id=_OWNER, channel="wecom")
+    assert await service.resolve_request(
+        item.request_id,
+        ApprovalDecision.APPROVED,
+        actor=ApprovalActor(user_id=_OWNER, channel="console", source="http"),
+    ) is None
+
+
+async def test_identity_trusted_sources_are_allowed(service):
+    """超时收口、智能体自动拒绝、企微卡片回调：受信任来源直通。"""
+    for source in ("internal", "agent", "card_callback"):
+        item = await _pending(service, user_id=_OWNER)
+        resolved = await service.resolve_request(
+            item.request_id,
+            ApprovalDecision.DENIED,
+            actor=ApprovalActor(user_id=_OWNER, channel="wecom", source=source),
+        )
+        assert resolved is not None, source
+
+
+async def test_identity_check_reason_codes_are_stable():
+    """拒绝理由码是稳定字面量：前端与日志共用，改名即历史对不上。"""
+    row = PendingApproval(
+        request_id="r-code",
+        session_id="s-code",
+        root_session_id="s-code",
+        user_id=_OWNER,
+        channel="console",
+        agent_id="a-code",
+        tool_name="Bash",
+        created_at=0.0,
+        future=asyncio.get_event_loop().create_future(),
+        owner_user_id=_OWNER,
+    )
+    assert identity_check(row, None) == "missing_actor"
+    assert identity_check(row, ApprovalActor(source="http")) == "missing_identity"
+    assert (
+        identity_check(row, ApprovalActor(user_id="mallory", source="http"))
+        == "not_owner"
+    )
+    assert (
+        identity_check(row, ApprovalActor(user_id=_OWNER, source="http")) is None
+    )
+    legacy = PendingApproval(
+        request_id="r-legacy",
+        session_id="s-legacy",
+        root_session_id="s-legacy",
+        user_id="",
+        channel="console",
+        agent_id="a-legacy",
+        tool_name="Bash",
+        created_at=0.0,
+        future=asyncio.get_event_loop().create_future(),
+        owner_user_id="",
+    )
+    assert identity_check(legacy, _OWNER_ACTOR) == "unowned_record"
 
 
 async def test_cancel_by_root_session_clears_the_whole_family(service):

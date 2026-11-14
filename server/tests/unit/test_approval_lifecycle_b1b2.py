@@ -23,7 +23,7 @@ import time
 
 import pytest
 
-from coapis.app.approvals.service import ApprovalService
+from coapis.app.approvals.service import ApprovalActor, ApprovalService
 from coapis.app.runner.control_commands.approval_handler import (
     ApprovalCommandHandler,
 )
@@ -33,6 +33,11 @@ from coapis.security.tool_guard.models import ToolGuardResult
 
 SESSION = "console:approval-lifecycle"
 AGENT = "agent:default"
+
+
+def _owner_actor() -> ApprovalActor:
+    """The record's own owner acting through the web console (B2)."""
+    return ApprovalActor(user_id="admin", channel="console", source="http")
 
 
 def _result(tool: str = "execute_shell_command") -> ToolGuardResult:
@@ -181,7 +186,11 @@ async def test_maintenance_loop_expires_without_new_creates():
 async def test_resolve_live_ok_for_live_record():
     svc = ApprovalService()
     rid = await _make(svc)
-    pending, state = await svc.resolve_live(rid, ApprovalDecision.APPROVED)
+    pending, state = await svc.resolve_live(
+        rid,
+        ApprovalDecision.APPROVED,
+        actor=_owner_actor(),
+    )
     assert state == "ok"
     assert pending is not None and pending.status == "approved"
     assert pending.future.result() == ApprovalDecision.APPROVED
@@ -193,7 +202,11 @@ async def test_resolve_live_refuses_closed_future():
     svc = ApprovalService()
     rid = await _make(svc)
     svc._pending[rid].future.cancel()  # noqa: SLF001 - agent gave up
-    pending, state = await svc.resolve_live(rid, ApprovalDecision.APPROVED)
+    pending, state = await svc.resolve_live(
+        rid,
+        ApprovalDecision.APPROVED,
+        actor=_owner_actor(),
+    )
     assert state == "stale"
     assert pending is not None
     assert pending.status == "pending"  # untouched: nothing to resolve
@@ -202,8 +215,27 @@ async def test_resolve_live_refuses_closed_future():
 @pytest.mark.asyncio
 async def test_resolve_live_not_found():
     svc = ApprovalService()
-    pending, state = await svc.resolve_live("missing", ApprovalDecision.APPROVED)
+    pending, state = await svc.resolve_live(
+        "missing",
+        ApprovalDecision.APPROVED,
+        actor=_owner_actor(),
+    )
     assert pending is None and state == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_resolve_live_forbidden_for_other_user():
+    """B2: a cross-user resolve_live must answer forbidden and change nothing."""
+    svc = ApprovalService()
+    rid = await _make(svc)
+    pending, state = await svc.resolve_live(
+        rid,
+        ApprovalDecision.APPROVED,
+        actor=ApprovalActor(user_id="mallory", channel="console", source="http"),
+    )
+    assert state == "forbidden" and pending is None
+    live = await svc.get_request(rid)
+    assert live is not None and live.status == "pending"
 
 
 @pytest.mark.asyncio

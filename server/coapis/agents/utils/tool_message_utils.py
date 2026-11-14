@@ -22,6 +22,7 @@ paired and ordered to prevent API errors.
 """
 import json
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -403,3 +404,104 @@ def _truncate_text(text: str, max_length: int) -> str:
         f"{text[:half_length]}\n\n[...truncated {truncated_chars} "
         f"chars...]\n\n{text[-half_length:]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Interrupt closure (B2 · 中断收口)
+# ---------------------------------------------------------------------------
+
+#: Reason codes recognised by :func:`close_dangling_tool_calls`.  They are
+#: literal strings stored in the transcript and read by the frontend, so
+#: renaming one breaks old sessions.
+INTERRUPT_REASONS: dict[str, str] = {
+    "user_cancel": "已中断：用户停止",
+    "timeout": "已中断：超时",
+    "budget": "已中断：额度/预算耗尽",
+}
+
+
+def find_dangling_tool_calls(messages: Any) -> list[dict[str, str]]:
+    """Return ``[{"id": …, "name": …}]`` for tool calls with no result.
+
+    Pairing is computed over the whole conversation, exactly like
+    :func:`_remove_unpaired_tool_messages`: a tool result that landed in a
+    later message closes an earlier call, so scanning only the last turn
+    would close calls that were already answered.
+    """
+    msgs = getattr(messages, "content", None)
+    if msgs is None:
+        msgs = messages
+    msgs = msgs if isinstance(msgs, (list, tuple)) else []
+
+    all_uses: list[dict[str, str]] = []
+    all_results: set[str] = set()
+    for msg in msgs:
+        uses, results = extract_tool_ids(msg)
+        all_results |= results
+        content = getattr(msg, "content", None)
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and block.get("id")
+            ):
+                all_uses.append(
+                    {
+                        "id": str(block["id"]),
+                        "name": str(block.get("name") or ""),
+                    },
+                )
+
+    seen: set[str] = set()
+    dangling: list[dict[str, str]] = []
+    for use in all_uses:
+        if use["id"] in all_results or use["id"] in seen:
+            continue
+        seen.add(use["id"])
+        dangling.append(use)
+    return dangling
+
+
+def close_dangling_tool_calls(
+    messages: Any,
+    *,
+    reason: str = "user_cancel",
+) -> list[Any]:
+    """Build the terminal messages that close unanswered tool calls.
+
+    A cancelled turn leaves the assistant message holding ``tool_use`` blocks
+    whose ``tool_result`` never arrived.  The next request then fails
+    vendor-side validation — the pairing is checked by the API, which is why
+    a session stopped once kept erroring — and the tool card spins forever in
+    the UI.  This returns one ``system`` message carrying a terminal
+    ``tool_result`` for each dangling call, shaped like the denial path in
+    ``tool_guard_mixin`` so the history renderer and the model both recognise
+    the block.
+
+    Returns the messages to append (empty list when nothing is dangling).
+    """
+    from agentscope.message import Msg, ToolResultBlock
+
+    dangling = find_dangling_tool_calls(messages)
+    if not dangling:
+        return []
+
+    text = INTERRUPT_REASONS.get(reason) or f"已中断：{reason}"
+    blocks = [
+        ToolResultBlock(
+            type="tool_result",
+            id=use["id"],
+            name=use["name"],
+            output=[{"type": "text", "text": text}],
+        )
+        for use in dangling
+    ]
+    msg = Msg(
+        name="system",
+        content=blocks,
+        role="system",
+        metadata={"interrupted": True, "cancellation_reason": reason},
+    )
+    return [msg]

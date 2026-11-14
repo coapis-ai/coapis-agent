@@ -2661,6 +2661,16 @@ class AgentRunner(Runner):
         except asyncio.CancelledError as exc:
             logger.info(f"query_handler: {session_id} cancelled!")
 
+            # Why this turn ended.  The stop command, a wall-clock timeout and
+            # a budget cut all arrive as CancelledError, and the transcript
+            # must say which one it was — the closure text and the frontend
+            # chip both come from this single value.
+            cancellation_reason = "user_cancel"
+            for _name in ("budget", "timeout"):
+                if _name in str(exc):
+                    cancellation_reason = _name
+                    break
+
             # Cancel all pending approvals for this root session
             root_session_id = base_request_context.get(
                 "root_session_id",
@@ -2725,6 +2735,10 @@ class AgentRunner(Runner):
                                     name="assistant",
                                     content=[TextBlock(text=partial_text)],
                                     role="assistant",
+                                    # B2: the turn is over, not generating.
+                                    # The frontend renders "本轮已中断" from
+                                    # this marker instead of a live spinner.
+                                    metadata={"interrupted": True},
                                 ),
                             )
                             logger.info(
@@ -2738,6 +2752,44 @@ class AgentRunner(Runner):
                                 "response on cancel: %s",
                                 mem_exc,
                             )
+
+            # Close every tool call that the cancel left unanswered, before
+            # handing the session back to the user.  An assistant message
+            # ending on tool_use blocks with no tool_result fails vendor-side
+            # pairing validation on the *next* request (the session stays
+            # broken until it is compacted) and leaves the tool card
+            # spinning in the UI forever.
+            if agent is not None:
+                try:
+                    from ...agents.utils.tool_message_utils import (
+                        close_dangling_tool_calls,
+                    )
+
+                    _memory_msgs = getattr(
+                        getattr(agent, "memory", None),
+                        "content",
+                        [],
+                    )
+                    closures = close_dangling_tool_calls(
+                        list(_memory_msgs),
+                        reason=cancellation_reason,
+                    )
+                    if closures:
+                        await agent.memory.add(closures)
+                        logger.info(
+                            "CancelledError: closed %d dangling tool call(s) "
+                            "in session %s (reason=%s)",
+                            len(closures),
+                            session_id,
+                            cancellation_reason,
+                        )
+                except Exception as closure_exc:
+                    # Never let the closure break the cancel path: a failed
+                    # bookkeeping pass must not turn a stop into an error.
+                    logger.warning(
+                        "Dangling tool-call closure failed: %s",
+                        closure_exc,
+                    )
 
             if agent is not None:
                 await agent.interrupt()

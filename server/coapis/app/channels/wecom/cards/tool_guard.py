@@ -316,7 +316,7 @@ async def handle(
     #    can continue executing the tool.  Previously this was done
     #    by enqueuing a "/approval" text message, but nothing ever
     #    consumed that message — the Future was never resolved.
-    from ...approvals import get_approval_service
+    from ...approvals import ApprovalActor, get_approval_service
     from ....security.tool_guard.approval import ApprovalDecision
 
     svc = get_approval_service()
@@ -325,7 +325,18 @@ async def handle(
         if action == "approve"
         else ApprovalDecision.DENIED
     )
-    resolved = await svc.resolve_request(request_id, decision)
+    # The card payload is encrypted and its binding to the approval record
+    # was validated above, so the callback carries a trusted identity
+    # (B2: ``card_callback`` is an accepted actor source).
+    resolved = await svc.resolve_request(
+        request_id,
+        decision,
+        actor=ApprovalActor(
+            user_id=user_id,
+            channel="wecom",
+            source="card_callback",
+        ),
+    )
     if resolved:
         logger.info(
             "wecom approval resolved: request_id=%s decision=%s tool=%s",

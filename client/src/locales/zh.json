@@ -2881,6 +2881,7 @@
     "approveFailed": "批准失败",
     "cancelTask": "取消任务",
     "denyFailed": "拒绝失败",
+    "resolveFailed": "审批操作未生效，请重试",
     "expiredTitle": "审批已失效",
     "expiredHint": "该审批已超时失效，工具未执行。",
     "expiredDesc": "请重新发起该操作，并在新的审批卡出现后立即批准。",

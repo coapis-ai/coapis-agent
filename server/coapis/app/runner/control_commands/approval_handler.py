@@ -27,10 +27,25 @@ import logging
 import time
 
 from .base import BaseControlCommandHandler, ControlContext
-from ...approvals import get_approval_service
+from ...approvals import FORBIDDEN_MESSAGE, ApprovalActor, get_approval_service
 from ....security.tool_guard.approval import ApprovalDecision
 
 logger = logging.getLogger(__name__)
+
+
+def actor_from_context(context: ControlContext) -> ApprovalActor:
+    """Identity of the user who typed the control command (B2).
+
+    Taken from the command context (the channel that delivered the message),
+    not from anything in the command text.
+    """
+    channel = getattr(context.channel, "channel", "") or ""
+    return ApprovalActor(
+        user_id=context.user_id or "",
+        is_admin=str(getattr(context, "role", "")).lower() == "admin",
+        channel=channel,
+        source="control_command",
+    )
 
 
 class ApprovalCommandHandler(BaseControlCommandHandler):
@@ -126,7 +141,10 @@ class ApprovalCommandHandler(BaseControlCommandHandler):
         resolved, state = await svc.resolve_live(
             request_id,
             ApprovalDecision.APPROVED,
+            actor=actor_from_context(context),
         )
+        if state == "forbidden":
+            return f"⚠️ {FORBIDDEN_MESSAGE}\n\n请求 ID: `{request_id}`"
         if state != "ok":
             return (
                 f"⚠️ **审批已失效，不会执行**\n\n"
@@ -207,7 +225,10 @@ class ApprovalCommandHandler(BaseControlCommandHandler):
         resolved, state = await svc.resolve_live(
             request_id,
             ApprovalDecision.DENIED,
+            actor=actor_from_context(context),
         )
+        if state == "forbidden":
+            return f"⚠️ {FORBIDDEN_MESSAGE}\n\n请求 ID: `{request_id}`"
         if state != "ok":
             return (
                 f"✅ **审批已失效，无需拒绝**\n\n"
@@ -312,10 +333,11 @@ class ApprovalCommandHandler(BaseControlCommandHandler):
         resolved = await svc.resolve_request(
             request_id,
             ApprovalDecision.DENIED,
+            actor=actor_from_context(context),
         )
 
         if resolved is None:
-            return f"❌ **审批请求不存在**\n\n" f"请求 ID: `{request_id[:16]}`"
+            return f"❌ **审批请求不存在或无权操作**\n\n" f"请求 ID: `{request_id[:16]}`"
 
         return (
             f"✅ **审批请求已取消**\n\n"

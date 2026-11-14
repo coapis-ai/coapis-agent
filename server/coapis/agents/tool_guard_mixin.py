@@ -111,7 +111,7 @@ class ToolGuardMixin:
         # so every decision — command rules, evasion, path layer, access
         # control — comes from one evaluator reading one config source.
         from coapis.security.tool_guard.unified_engine import get_unified_engine
-        from coapis.app.approvals import get_approval_service
+        from coapis.app.approvals import ApprovalActor, get_approval_service
 
         self._tool_guard_engine = get_unified_engine()
         self._tool_guard_approval_service = get_approval_service()
@@ -1106,6 +1106,7 @@ class ToolGuardMixin:
                         await svc.resolve_request(
                             request_id,
                             ApprovalDecision.TIMEOUT,
+                            actor=ApprovalActor(source="agent"),
                         )
                     except Exception:  # pragma: no cover - defensive
                         logger.debug(
@@ -1176,6 +1177,7 @@ class ToolGuardMixin:
             await svc.resolve_request(
                 request_id,
                 ApprovalDecision.DENIED,
+                actor=ApprovalActor(source="agent"),
             )
             logger.debug(
                 "[APPROVAL WAIT] Auto-denied request_id=%s, re-raising "
