@@ -185,6 +185,7 @@ def decision_stats(
     clause = " AND ".join(where)
     degraded = ",".join(f"'{x}'" for x in _DEGRADED)
     from coapis.decision.gateway import JUDGED_LAYERS
+
     judged_set = ",".join(f"'{x}'" for x in JUDGED_LAYERS)
     sql = text(
         "SELECT source, "
@@ -232,6 +233,124 @@ def decision_stats(
         "total": int(total_n),
         "cost": float(total_cost or 0),
         "by_source": [dict(r._mapping) for r in rows],
+    }
+
+
+@router.get("/judge-health")
+def judge_health(
+    request: Request,
+    days: int = Query(7, ge=1, le=90),
+) -> dict[str, Any]:
+    """判官健康只读卡（B3 · 收尾方案 v1 §6.1）：供给侧 + 台账侧一屏看穿。
+
+    为什么单独一个端点：判官的问题从来不是"判了几次"，而是"为什么没判"。
+    供给侧说"槽位里是谁、它凭什么能判"；台账侧按**弃权原因码**分桶说
+    "沉默都为什么沉默"。两者并排，管理员才能一眼看出该配模型、该开闸、
+    还是该修上游。只读，不改任何配置。
+    """
+    me, role = _identity(request)
+    from coapis.decision.config import get_hub_config
+    from coapis.decision.gateway import JUDGED_LAYERS
+    from coapis.decision.judge_reasons import REASON_TEXT, parse_code
+    from coapis.decision.resolver import availability_key, judge_capability_ok
+
+    cfg = get_hub_config()
+    slot_provider = str(getattr(cfg, "judge_provider_id", "") or "")
+    slot_model = str(getattr(cfg, "judge_model", "") or "")
+
+    supply: dict[str, Any] = {
+        "slot_provider_id": slot_provider,
+        "slot_model": slot_model,
+        "availability_key": availability_key(slot_provider, slot_model),
+        "capability_dispatch": bool(getattr(cfg, "judge_capability_dispatch", False)),
+        "probe_enabled": bool(getattr(cfg, "judge_probe_enabled", False)),
+        "min_prompt_tokens": int(getattr(cfg, "judge_min_prompt_tokens", 2048) or 2048),
+        "capable": None,
+        "capability_reason": "",
+        "capability": {},
+    }
+    if slot_provider and slot_model:
+        ok, code = judge_capability_ok(
+            slot_provider, slot_model,
+            min_prompt_tokens=supply["min_prompt_tokens"],
+        )
+        supply["capable"] = bool(ok)
+        supply["capability_reason"] = "" if ok else code
+        try:
+            from coapis.providers.provider_manager import ProviderManager
+
+            prov = ProviderManager.get_instance().get_provider(slot_provider)
+            if prov is not None:
+                supply["capability"] = prov.judge_capability(slot_model)
+        except Exception:  # noqa: BLE001 - 读不到底牌不影响卡片出数
+            supply["capability"] = {}
+
+    # 台账侧：按弃权原因码分桶（reason 列形状 = [码] 人话）。
+    # 码的解析在 SQL 里做（substr+instr），Python 侧再过滤一次形状，
+    # 保证"旧账无码行"归入 untagged 而不是消失。
+    # “真判”口径 = 判官模型给出结论的两层（llm / llm_session）。
+    # 网关里那组 JUDGED_LAYERS 把 timeout/transport/parse 也算成“问过模型”，
+    # 那是给 /stats 用的（“问到过”≠“判成了”）；这张卡回答“为什么没判成”，
+    # 所以超时/传输/解析失败**都算弃权**，一起进分桶。
+    judged_set = "'llm','llm_session'"  # noqa: E501
+    where = ["created_at >= (strftime('%s','now') - :win_sec)"]
+    params: dict[str, Any] = {"win_sec": int(days) * 86400}
+    if role != "admin":
+        where.append("user_id = :me")
+        params["me"] = me
+    clause = " AND ".join(where)
+    abstain: list[dict[str, Any]] = []
+    total_judged = 0
+    total_rows = 0
+    try:
+        from coapis.foundation.db.engine import get_session
+
+        with get_session() as session:
+            rows = session.execute(
+                text(
+                    "SELECT CASE WHEN substr(reason,1,1)='[' AND instr(reason,']')>2 "
+                    "THEN substr(reason, 2, instr(reason,']') - 2) ELSE '' END AS code, "
+                    "COUNT(*) AS n "
+                    f"FROM decision_events WHERE {clause} "
+                    f"AND hit_layer NOT IN ({judged_set}) "
+                    "GROUP BY code ORDER BY n DESC"
+                ),
+                params,
+            ).all()
+            abstain = [
+                {
+                    "code": str(r._mapping.get("code") or "") or "untagged",
+                    "text": REASON_TEXT.get(str(r._mapping.get("code") or ""), "无原因码（旧账）"),
+                    "count": int(r._mapping.get("n") or 0),
+                }
+                for r in rows
+            ]
+            total_judged = int(session.execute(
+                text(f"SELECT COUNT(*) FROM decision_events WHERE {clause} "
+                     f"AND hit_layer IN ({judged_set})"),
+                params,
+            ).scalar() or 0)
+            total_rows = int(session.execute(
+                text(f"SELECT COUNT(*) FROM decision_events WHERE {clause}"),
+                params,
+            ).scalar() or 0)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("[Decisions] 判官健康读数失败: %s", exc)
+        return {"days": days, "supply": supply, "abstain": [],
+                "judged": 0, "rows": 0, "error": str(exc)}
+
+    # 原因码必须全部来自码表（判"台账铺码是否完整"用得上）
+    known = [a for a in abstain if a["code"] in REASON_TEXT]
+    return {
+        "days": days,
+        "supply": supply,
+        "abstain": abstain,
+        "judged": total_judged,
+        "rows": total_rows,
+        "untagged": int(sum(a["count"] for a in abstain if a["code"] == "untagged")),
+        "coded_ratio": round(
+            sum(a["count"] for a in known) / max(1, total_rows - total_judged), 3,
+        ),
     }
 
 

@@ -2568,5 +2568,23 @@
     "sourceSelfcheck": "メインモデル自己評価",
     "sourceCache": "判断キャッシュ",
     "sourceHub": "判断ハブ"
+  },
+  "judgeHealth": {
+    "title": "ジャッジ健全性",
+    "scope": "直近7日台帳",
+    "refresh": "更新",
+    "unavailable": "読み取り不可",
+    "slot": "ジャッジスロット",
+    "capable": "能力ゲート：適合",
+    "incapable": "能力ゲート：不適合",
+    "noSlot": "スロット空",
+    "dispatchOn": "能力ゲート有効",
+    "dispatchOff": "能力ゲート観測のみ",
+    "probeOn": "プローブ有効",
+    "probeOff": "プローブ無効",
+    "rows": "イベント",
+    "judged": "判定成功",
+    "codedRatio": "棄権のコード付与率",
+    "noAbstain": "期間中に棄権記録なし"
   }
 }

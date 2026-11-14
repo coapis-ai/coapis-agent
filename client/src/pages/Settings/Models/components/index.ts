@@ -2,3 +2,4 @@
 export * from "./sections";
 export * from "./cards";
 export * from "./modals";
+export { default as JudgeHealthCard } from "./sections/JudgeHealthCard";

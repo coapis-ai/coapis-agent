@@ -304,3 +304,62 @@ def test_router_registered_under_api_prefix():
         "/decisions/config",
         "/decisions/{event_id}/rating",
     } <= hits, sorted(hits)
+
+# ── B3 判官健康只读卡 ──────────────────────────────────────────────────
+
+
+def test_judge_health_card_shape(client):
+    """判官健康卡（B3）：管理员看"判官为什么沉默"只能读它 —— 字段名即契约。"""
+    cli, _holder, _cfg = client
+    resp = cli.get("/api/decisions/judge-health?days=7")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    for key in ("supply", "abstain", "judged", "rows", "coded_ratio", "untagged"):
+        assert key in body, key
+    for key in (
+        "slot_provider_id",
+        "slot_model",
+        "availability_key",
+        "capability_dispatch",
+        "probe_enabled",
+        "min_prompt_tokens",
+        "capable",
+    ):
+        assert key in body["supply"], key
+    assert isinstance(body["abstain"], list)
+
+
+def test_judge_health_buckets_by_reason_code(client):
+    """弃权行按**原因码**分桶；旧账（无码行）归 untagged，不许消失。"""
+    from coapis.decision import judge_reasons as jr
+    from coapis.decision.ledger_contract import write_ledger
+
+    cli, _holder, _cfg = client
+    for code in (jr.NO_SLOT, jr.NO_SLOT, jr.BREAKER_OPEN):
+        write_ledger(
+            source="gateway", purpose="verify", hit_layer="no_model",
+            action="abstain", value=None,
+            reason=jr.format_reason(code, "取证"),
+            outcome="pending", user_id="alice",
+        )
+    write_ledger(
+        source="gateway", purpose="verify", hit_layer="no_model",
+        action="abstain", value=None,
+        reason="铺码之前的旧账句子",
+        outcome="pending", user_id="alice",
+    )
+    write_ledger(
+        source="gateway", purpose="verify", hit_layer="llm",
+        action="proceed", value="satisfied", reason="判了",
+        outcome="pending", user_id="alice",
+    )
+
+    body = cli.get("/api/decisions/judge-health?days=7").json()
+    buckets = {a["code"]: a["count"] for a in body["abstain"]}
+    assert buckets.get("no_slot") == 2
+    assert buckets.get("breaker_open") == 1
+    assert buckets.get("untagged") == 1
+    assert body["judged"] == 1
+    assert body["rows"] == 5
+    # 铺码完整率 = 有码弃权行 / 全部弃权行（B3 验收口径）
+    assert body["coded_ratio"] == round(3 / 4, 3)

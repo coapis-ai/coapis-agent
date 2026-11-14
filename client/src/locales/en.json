@@ -3186,5 +3186,23 @@
     "sourceToolGate": "Tool gate",
     "sourceCache": "Judgment cache",
     "sourceHub": "Judgment hub"
+  },
+  "judgeHealth": {
+    "title": "Judge health",
+    "scope": "Last 7 days ledger",
+    "refresh": "Refresh",
+    "unavailable": "Unavailable",
+    "slot": "Judge slot",
+    "capable": "Capability gate: fit",
+    "incapable": "Capability gate: not fit",
+    "noSlot": "Slot empty",
+    "dispatchOn": "Capability gate enforced",
+    "dispatchOff": "Capability gate observe-only",
+    "probeOn": "Probes on",
+    "probeOff": "Probes off",
+    "rows": "Events",
+    "judged": "Judged",
+    "codedRatio": "Abstain coded ratio",
+    "noAbstain": "No abstain records in window"
   }
 }

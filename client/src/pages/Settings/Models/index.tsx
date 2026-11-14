@@ -12,6 +12,7 @@ import {
   ConfiguredModelsSection,
   ProviderCard,
   CustomProviderModal,
+  JudgeHealthCard,
 } from "./components";
 import type { DefaultSlot } from "./components/modelSlots";
 import styles from "./index.module.less";
@@ -259,6 +260,10 @@ const ModelsPage: React.FC = () => {
           </section>
         </>
       )}
+
+      <section style={{ marginTop: 16 }}>
+        <JudgeHealthCard />
+      </section>
 
       <CustomProviderModal
         open={showAddProviderModal}

@@ -3212,5 +3212,23 @@
     "sourceToolGate": "工具闸",
     "sourceCache": "判断缓存",
     "sourceHub": "判断中枢"
+  },
+  "judgeHealth": {
+    "title": "判官健康",
+    "scope": "近 7 天台账",
+    "refresh": "刷新",
+    "unavailable": "暂不可读",
+    "slot": "判官槽位",
+    "capable": "能力闸：胜任",
+    "incapable": "能力闸：不胜任",
+    "noSlot": "槽位为空",
+    "dispatchOn": "能力闸已生效",
+    "dispatchOff": "能力闸只观测",
+    "probeOn": "探针已开",
+    "probeOff": "探针未开",
+    "rows": "事件",
+    "judged": "判成",
+    "codedRatio": "弃权带码率",
+    "noAbstain": "窗口内无弃权记录"
   }
 }
