@@ -478,3 +478,55 @@ def test_probe_config_switch_defaults_off():
 
     assert DEFAULTS["judge_probe_enabled"] is False
     assert DEFAULTS["judge_capability_dispatch"] is False
+
+# ── 10. B3 判官适配器：provider 侧交出"判官模型对象" ──────────────────
+
+
+def _openai_provider(models):
+    from coapis.providers.openai_provider import OpenAIProvider
+
+    return OpenAIProvider(
+        id="p1", name="t", api_key="k", base_url="http://x", models=models
+    )
+
+
+def test_as_judge_model_returns_retry_wrapped_object():
+    prov = _openai_provider([])
+    wrapped = prov.as_judge_model("glm-4.7")
+    # 判官走与聊天主链同一口径的重试/限流/可用性记账通路（B1 目标）
+    assert type(wrapped).__name__ == "RetryChatModel"
+    # 能力底牌随对象走：消费方不用再去别处拼"这台模型能不能判"
+    assert wrapped.judge_capability["availability_key"] == "p1:glm-4.7"
+    assert wrapped.judge_capability["model_id"] == "glm-4.7"
+
+
+def test_as_judge_model_refuses_to_invent_a_model():
+    # 没有型号可用时明确报错，不悄悄拿"第一个模型"或聊天激活模型顶上
+    # （v15 D1 反语义红线：判官没有回落链）
+    prov = _openai_provider([])
+    import pytest as _py
+
+    with _py.raises(ValueError):
+        prov.as_judge_model()
+
+
+def test_judge_capability_reports_unprobed_as_none():
+    prov = _openai_provider([])
+    cap = prov.judge_capability("never-probed")
+    # 未观测 = None（不猜）。能力闸据此放行，探测过才谈否决。
+    assert cap["structured_output"] is None
+    assert cap["context_window"] is None
+
+
+def test_judge_capability_reads_declared_window():
+    # 用真 ModelInfo：provider 是 pydantic 模型，models 会被校验成 ModelInfo，
+    # 简易 stub 带不进 max_sequence_length（字段被丢弃）。
+    from coapis.providers.provider import ModelInfo
+
+    prov = _openai_provider([
+        ModelInfo(id="wide", name="wide", max_sequence_length=131072),
+    ])
+    cap = prov.judge_capability("wide")
+    assert cap["context_window"] == 131072
+    # 未声明 model_type 时按 provider 口径返回 None（不猜类型）
+    assert cap["model_type"] in (None, "chat")

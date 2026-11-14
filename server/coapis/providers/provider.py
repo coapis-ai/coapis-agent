@@ -539,6 +539,82 @@ class Provider(ProviderInfo, ABC):
             "max_retries": 0,
         }
 
+    # ── B3 判官适配器（收尾方案 v1 §5/§6.1）──────────────────────────
+    def judge_capability(self, model_id: str) -> dict:
+        """这个 provider 的某个模型当判官的底牌（能力元数据，不是猜测）。
+
+        三样都按"有没有证据"口径，None = 未观测：
+        - ``structured_output``：探测缓存里 json_mode 的结论（探测过才有）；
+        - ``context_window``：模型自报的 ``max_sequence_length``；
+        - ``supports_thinking``：``support_reasoning`` 标记（思考型模型要把
+          推理文字与正文分开，否则 JSON 结论被推理文字淹没 → parse_fail）。
+
+        为什么不猜：判官选错模型的代价是"看起来判官不行"——嵌入模型当判官
+        9/9 全超时（v14 实测）、窗口不够的模型读不完被判内容，两者在台账
+        上都长成 timeout/parse_fail。能力闸（decision.resolver.
+        judge_capability_ok）吃的就是这三样，**未观测 = 放行**。
+        """
+        from .model_capability_cache import get_capability_cache
+
+        info = None
+        for model in self.models:
+            if getattr(model, "id", None) == model_id:
+                info = model
+                break
+        key = f"{self.id}:{model_id}"
+        try:
+            structured = get_capability_cache().get(key, "json_mode", None)
+        except Exception:  # noqa: BLE001 - 缓存不可用不参与判定
+            structured = None
+        return {
+            "provider_id": self.id,
+            "model_id": model_id,
+            "availability_key": key,
+            "structured_output": structured,
+            "context_window": getattr(info, "max_sequence_length", None)
+            if info is not None
+            else None,
+            "supports_thinking": getattr(info, "support_reasoning", None)
+            if info is not None
+            else None,
+            "model_type": getattr(info, "model_type", None) if info else None,
+        }
+
+    def as_judge_model(self, model_id: str | None = None, **kwargs):
+        """把本 provider 的模型包成"判官可用的模型对象"（B3 适配器）。
+
+        为什么要有它：判官在网关里直连 HTTP（自带超时/预算/熔断那套），
+        绕开了重试与限流——于是判官"连不上"在可用性台账里不留痕，看板把
+        "判官没意见"与"判官连不上"混成一格。需要**模型对象**（而不是裸
+        HTTP）的消费方——第一个就是离线评测体系（B5）——从这里拿，拿到的
+        是带重试/限流/可用性记账的包装件，与聊天主链同一口径。
+
+        调用方禁止按 provider 类型分支（60+ provider 分支不可维护，chatml
+        那串 provider 名就是这种枚举烧出来的）：差异由 provider 覆写本方法，
+        基类给默认实现 = 本 provider 的 chat 模型 + RetryChatModel 包装。
+        """
+        from .retry_chat_model import RetryChatModel
+
+        target = str(model_id or "").strip()
+        if not target:
+            # 回落本 provider 的默认模型（provider.default_model_id）。
+            # 注意：判官槽位为空时**不回落聊天激活模型**——那是 v15 D1 的
+            # 反语义红线；这里的回落只发生在调用方显式向本 provider 要模型
+            # 却没给型号的场景，语义与判官选模无关。
+            target = str(getattr(self, "default_model_id", "") or "").strip()
+        if not target:
+            raise ValueError(
+                f"provider {self.id} 没有可当判官的模型"
+                "（未指定 model_id 且 provider 无默认模型）",
+            )
+        wrapped = RetryChatModel(
+            self.get_chat_model_instance(target),
+            rate_limit_config=kwargs.get("rate_limit_config"),
+        )
+        # 能力底牌随对象走：拿到判官模型的人同时知道"它凭什么判、能不能判"
+        wrapped.judge_capability = self.judge_capability(target)
+        return wrapped
+
     @abstractmethod
     def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
         """Return an instance of the chat model associated with this
