@@ -526,7 +526,7 @@ class JudgeGateway:
                 reply = JudgeReply(
                     hit_layer=LAYER_RULE,
                     value=fast,
-                    reason="规则预命中，未问模型",
+                    reason=jr.format_reason(jr.RULE_DECIDED),
                     latency_ms=elapsed(),
                 )
                 await self._ledger(purpose, reply, describe, **ids)
@@ -633,10 +633,13 @@ class JudgeGateway:
         post_used = int(counts.get(purpose, 0))
         budget_reason = ""
         if post_used >= post_cap:
-            budget_reason = f"岗位判断预算用尽（{purpose} 每轮 {post_cap} 次）"
+            budget_reason = jr.format_reason(
+                jr.BUDGET_EXHAUSTED, f"岗位 {purpose} 每轮 {post_cap} 次"
+            )
         elif pool_used >= pool_cap:
-            budget_reason = f"单轮判断预算用尽（{cap} 次）" + (
-                "" if is_acc else f"，验收预留 {reserve} 次"
+            budget_reason = jr.format_reason(
+                jr.BUDGET_EXHAUSTED,
+                f"单轮 {cap} 次" + ("" if is_acc else f"，验收预留 {reserve} 次"),
             )
         # v19 P2-2（启动期首格免池子闸）：一轮任务要用的判断数天然超过"池子"额度
         # ——判档1 + 计划门禁1 + 计划审查1 + 技能触发1 + 工具门禁N + 验收1，
@@ -702,7 +705,7 @@ class JudgeGateway:
             reply = await asyncio.shield(task)
         except asyncio.CancelledError:
             return await self._degrade(
-                purpose, LAYER_TRANSPORT, "判断任务被取消",
+                purpose, LAYER_TRANSPORT, jr.format_reason(jr.CANCELLED),
                 rule_fallback, describe, elapsed, ids,
             )
         if leader:
@@ -749,16 +752,16 @@ class JudgeGateway:
         provider_id = str((slot or {}).get("provider_id") or "")
         model_id = str((slot or {}).get("model") or "")
         if not provider_id or not model_id:
-            return await degrade(LAYER_NO_MODEL, "未配置判断模型（判官槽位空）")
+            return await degrade(LAYER_NO_MODEL, jr.format_reason(jr.NO_SLOT))
 
         provider = self._get_provider(provider_id)
         if provider is None:
-            return await degrade(LAYER_NO_MODEL, f"提供商不存在（{provider_id}）")
+            return await degrade(LAYER_NO_MODEL, jr.format_reason(jr.PROVIDER_MISSING, provider_id))
 
         # 模型类型闸门：嵌入/排序/语音/图像模型当判官必超时（v14 根因）
         mtype = self._model_type(provider, model_id)
         if mtype != "chat":
-            return await degrade(LAYER_NOT_CHAT, f"非聊天模型（{mtype}）")
+            return await degrade(LAYER_NOT_CHAT, jr.format_reason(jr.NOT_CHAT, mtype))
 
         kwargs = self._build_kwargs(provider, model_id, cfg)
         bkey = _breaker_key(purpose)
@@ -842,7 +845,7 @@ class JudgeGateway:
                     _reset_soft_streak(bkey)
                     return await degrade(
                         LAYER_TIMEOUT,
-                        f"判断超时（硬熔断 {hard_s:.1f}s，模型 {model_id}）",
+                        jr.format_reason(jr.TIMEOUT_HARD, f"硬熔断 {hard_s:.1f}s 模型 {model_id}"),
                     )
                 streak = _note_soft_timeout(bkey)
                 soft_streak = max(int(getattr(cfg, "breaker_soft_streak", 5)), 1)
@@ -863,7 +866,7 @@ class JudgeGateway:
                 # 算成两条样本（v19 实测：双记账 16 对推开熔断）。
                 return await degrade(
                     LAYER_TIMEOUT,
-                    f"判断超时（软阈值 {soft_s:.1f}s，判官后台补判中，模型 {model_id}）",
+                    jr.format_reason(jr.TIMEOUT_SOFT, f"软阈值 {soft_s:.1f}s 模型 {model_id}"),
                     ledger=False,
                 )
         except Exception as exc:
@@ -877,7 +880,7 @@ class JudgeGateway:
                 f"{type(exc).__name__}: {str(exc)[:200]}",
             )
             return await degrade(
-                LAYER_TRANSPORT, f"判断调用失败（{type(exc).__name__}: {exc}）",
+                LAYER_TRANSPORT, jr.format_reason(jr.TRANSPORT, f"{type(exc).__name__}: {exc}"),
             )
 
         try:
@@ -886,7 +889,7 @@ class JudgeGateway:
             value = None
         if value is None:
             breaker.record_failure(bkey, f"parse_fail model={model_id}")
-            return await degrade(LAYER_PARSE_FAIL, "判断结果解析失败")
+            return await degrade(LAYER_PARSE_FAIL, jr.format_reason(jr.PARSE_FAIL, f"模型 {model_id}"))
 
         breaker.record_success(bkey)
         _reset_soft_streak(bkey)
@@ -954,7 +957,7 @@ class JudgeGateway:
                     value=None,
                     hit_layer=LAYER_TIMEOUT,
                     source="rule",
-                    reason=f"判断超时（硬熔断 {hard_s:.1f}s，后台补判被掐停）",
+                    reason=jr.format_reason(jr.TIMEOUT_HARD, f"硬熔断 {hard_s:.1f}s 后台补判被掐停"),
                     latency_ms=int((time.perf_counter() - started_at) * 1000),
                     model=model_id,
                     ok=False,
@@ -976,7 +979,7 @@ class JudgeGateway:
                     value=None,
                     hit_layer=LAYER_TRANSPORT,
                     source="rule",
-                    reason=f"判断链路故障：{type(exc).__name__}: {exc}",
+                    reason=jr.format_reason(jr.TRANSPORT, f"{type(exc).__name__}: {exc}"),
                     latency_ms=int((time.perf_counter() - started_at) * 1000),
                     model=model_id,
                     ok=False,
@@ -1007,7 +1010,7 @@ class JudgeGateway:
                     value=None,
                     hit_layer=LAYER_PARSE_FAIL,
                     source="rule",
-                    reason="判断结果解析失败（软超时后台补判）",
+                    reason=jr.format_reason(jr.PARSE_FAIL, "软超时后台补判"),
                     latency_ms=int((time.perf_counter() - started_at) * 1000),
                     model=model_id,
                     ok=False,

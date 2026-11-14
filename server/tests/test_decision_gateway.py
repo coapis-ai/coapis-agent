@@ -18,6 +18,7 @@ import time
 import pytest
 
 from coapis.decision import gateway as gw
+from coapis.decision import judge_reasons
 from coapis.decision.rubric import LEVELS
 from coapis.decision.breaker import reset_breakers
 from coapis.decision.cache import reset_judgment_cache
@@ -511,7 +512,9 @@ async def test_soft_timeout_degrades_then_background_rejudges(monkeypatch):
     )
     # 主链：立刻降级，降级原因写的是「判断超时」，值是规则兜底给的合法档位
     assert got.hit_layer == gw.LAYER_TIMEOUT
-    assert "判断超时" in (got.reason or "")
+    # B3 起按原因码断言（台账 reason 列形状 = [码] 人话；句子会改，码不会）
+    assert judge_reasons.parse_code(got.reason or "") == judge_reasons.TIMEOUT_SOFT
+    assert "软阈值" in (got.reason or "")
     assert got.value == "simple" and got.value in LEVELS
 
     from coapis.decision.bus import get_bus
