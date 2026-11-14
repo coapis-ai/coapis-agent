@@ -427,9 +427,20 @@ function collectTurnAnnotations(messages: OutputMessage[]): {
     }
   }
 
+  // 本轮是否被中断：后端 _annotate_turn_resources 把 interrupted 写在轮内
+  // 最后一条 assistant 消息的 metadata 上 —— 与产出/引用同源同生命周期。
+  // 键只在真为 true 时出现（前端按"有徽标=中断"读，不猜）。
+  const lastAssistant = [...messages]
+    .reverse()
+    .find((m) => m.role === "assistant" && m.type === "message");
+  const lastMeta = (lastAssistant as Record<string, unknown> | undefined)
+    ?.metadata as Record<string, unknown> | undefined;
+  const interrupted = lastMeta?.interrupted === true;
+
   return {
     ...(resources.length ? { resources } : {}),
     ...(citations.length ? { citations } : {}),
+    ...(interrupted ? { interrupted: true } : {}),
   };
 }
 

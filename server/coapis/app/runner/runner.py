@@ -412,6 +412,7 @@ def _annotate_turn_resources(
     msgs: list,
     resources: list,
     citations: list,
+    turn_interrupted: bool = False,
 ) -> int:
     """把本轮产出/引用资源与知识库来源写进最后一条 assistant 消息的 metadata。
 
@@ -423,7 +424,7 @@ def _annotate_turn_resources(
     Returns:
         写入的字段数（0 表示没有可写信息，未改动任何消息）。
     """
-    if not resources and not citations:
+    if not resources and not citations and not turn_interrupted:
         return 0
 
     # 调用方有两种形状：整轮消息列表（Msg 对象）与单条 dict 消息
@@ -459,8 +460,13 @@ def _annotate_turn_resources(
         meta["resources"] = resources
     if citations:
         meta["kb_citations"] = citations
+    if turn_interrupted:
+        # B1：流式被取消/异常收口 → 前端要显示"本轮已中断"。
+        # 持久真值在 token_usage.stream_interrupted 列，这里是给回放用的
+        # 即时副本（落库消息与写台账不在同一个调用里）。
+        meta["interrupted"] = True
     _set_meta(last_asst, meta)
-    return len(resources) + len(citations)
+    return len(resources) + len(citations) + (1 if turn_interrupted else 0)
 
 
 class AgentRunner(Runner):
@@ -920,9 +926,21 @@ class AgentRunner(Runner):
                         chat.id, effective_user_id,
                     )
                     _kb_cites = _enrich_citations_ctx.get() or []
-                    _annotated = _annotate_turn_resources(
-                        _msgs_to_add, _turn_res, _kb_cites,
+                    from ...token_usage.turn_usage import (
+                        clear_turn_interrupted,
+                        turn_was_interrupted,
                     )
+
+                    _interrupted = bool(turn_was_interrupted(chat.id))
+                    _annotated = _annotate_turn_resources(
+                        _msgs_to_add,
+                        _turn_res,
+                        _kb_cites,
+                        turn_interrupted=_interrupted,
+                    )
+                    if _interrupted:
+                        # 标记是一次性的：写过就清，别让它漂到下一轮
+                        clear_turn_interrupted(chat.id)
                     if _annotated:
                         logger.info(
                             "_persist_chat_messages: annotated assistant msg "

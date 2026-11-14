@@ -191,6 +191,8 @@ def clear_session_context() -> None:
     _ROOT_SESSION_ID.set(None)
     _WORKSPACE_DIR.set(None)
     _USERNAME.set(None)
+    _CHAT_ID.set(None)
+    _TURN_ID.set(None)
 
     # Backward compatibility: clear old config.context vars too
     try:

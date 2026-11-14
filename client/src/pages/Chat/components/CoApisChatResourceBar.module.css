@@ -23,6 +23,22 @@
   flex-wrap: wrap;
 }
 
+/* 本轮中断徽标（B1）：中断轮经常没有产出，提示必须挂头部才不会被空面板
+   一起吞掉。警示色，不与计数/"查看全部"抢位置。 */
+.interruptedChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid rgba(217, 119, 6, 0.45);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  white-space: nowrap;
+}
+
 .title {
   display: inline-flex;
   align-items: center;

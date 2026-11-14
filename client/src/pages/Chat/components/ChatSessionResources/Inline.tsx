@@ -1,9 +1,13 @@
 /**
  * 左栏「当前会话」的资源下拉（B1/B2）。
  *
- * 设计口径（小蜜蜂 2026-10-23 定稿）：
+ * 设计口径（小蜜蜂 2026-10-23 定稿 + 2026-11-13 收口）：
  *  - 资源挂在**当前会话标题下方**，随会话选中态出现；未选中的会话不显示资源。
- *  - 分「生成 / 引用」两组，组头可折叠；不显示"会话资源"这种标题头。
+ *  - **一个卡片平铺整会话全部资源**，不再分「生成 / 引用」两个下拉、不再折叠
+ *    （与聊天里的「本轮资源」同一形态，唯一区别：聊天只显示本轮，这里显示整会话）。
+ *  - 行首图标按类别出形状（Word/Excel/PDF/图片/网页…各有各的形，颜色按大类），
+ *    行尾来源标签四类（产出 / 知识库 / 网页 / 引用），尺子在 ../resourceDisplay.tsx
+ *    —— 与聊天里同源，同一条资源在两处的形状与标签一致。
  *  - 面板限高 168px 内部滚动，不撑破左栏。
  *  - 预览走页面级预览抽屉；不可预览的类型退化成下载。
  *  - 顶栏资源按钮已下线（D3），这里留一条「查看全部」作为 L3 抽屉的常驻入口。
@@ -23,28 +27,16 @@ import {
 } from "../../../../utils/webPreview";
 import { formatResMeta, splitFileName } from "./resourceFormat";
 import type { ChatResourceItem } from "../../../../api/modules/chat";
+import { categoryIconOf, SOURCE_LABEL_KEY, sourceOf } from "../resourceDisplay";
 import { getChatResourcesShared } from "../useChatResourceLedger";
 import { displayName } from "./helpers";
 import styles from "./inline.module.less";
 
 /**
- * 分组口径：用台账行的 `role`，不用类型名。
- *
- * 台账给文件类资源登记的 `kind` 恒为 "file"（foundation/file_ledger.py），
- * 按 report/pdf/image 这类名字分「生成/引用」会全部落进引用组——用户要的两组
- * 必须来自后端的 role（producer=本次会话产出，reference=读进来的）。
- *
- * v25 · P2（第 1 条「和聊天界面里类似」）：产出 = producer **或 export**。
- * 本轮资源条的筛选（CoApisChatResourceBar:510）、L3 抽屉的绿标签
- * （ChatSessionResources/index.tsx）、台账 v25 新增的 role 筛选，三处都是
- * `producer|export`；左栏此前只认 producer → 导出（export）行在左栏落进
- * 「引用」组、在抽屉里顶着绿色「产出」标签，同一行两处口径打架。
+ * 分组口径（产出 = producer | export）唯一实现在 ../resourceDisplay 的
+ * `splitResourcesByRole` —— 本轮资源条、左栏、抽屉三处共用同一把尺子，
+ * 左栏不再本地复制一份（B1 收口：一把尺子只有一份实现）。
  */
-const PRODUCED_ROLES: ReadonlySet<string> = new Set(["producer", "export"]);
-
-/** 与上面这把尺子同源的判定（左栏分组 / 计数共用）。 */
-const isProducedRole = (role?: string): boolean =>
-  PRODUCED_ROLES.has(role || "");
 
 /** 面板内最多渲染的行数：多于这个数走「查看全部」进抽屉，不在左栏堆。 */
 const PANEL_LIMIT = 40;
@@ -119,7 +111,6 @@ export function ChatSessionResourcesInline({
   // 本轮条写 55，同一个数三处不一（小蜜蜂 2026-11-06 第 1 条量出来的老毛病，
   // 当时只把「去重」统一了，切片这层没管）。
   const [total, setTotal] = useState(0);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const lastKeyRef = useRef<number | null>(null);
 
@@ -157,35 +148,19 @@ export function ChatSessionResourcesInline({
     bodyRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [chatId, items.length]);
 
-  const produced = items.filter((it) => isProducedRole(it.role));
-  const referenced = items.filter((it) => !isProducedRole(it.role));
-
-  const toggleGroup = useCallback((key: string) => {
-    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
-  }, []);
-
   const renderGroup = (
     key: string,
     label: string,
     rows: ChatResourceItem[],
   ) => {
     if (rows.length === 0) return null;
-    const isCollapsed = collapsed[key];
     return (
       <div className={styles.group} key={key}>
-        <button
-          type="button"
-          className={styles.groupHead}
-          onClick={() => toggleGroup(key)}
-          aria-expanded={!isCollapsed}
-        >
+        <div className={styles.groupHead}>
           <span className={styles.groupLabel}>{label}</span>
           <span className={styles.groupCount}>{rows.length}</span>
-          <span className={styles.groupChevron} data-collapsed={isCollapsed}>
-            ▾
-          </span>
-        </button>
-        {!isCollapsed && (
+        </div>
+        {(
           <ul className={styles.list}>
             {rows.slice(0, PANEL_LIMIT).map((item) => {
               const rel = toLedgerRelPath(item.path);
@@ -221,6 +196,7 @@ export function ChatSessionResourcesInline({
                     onClick={() => openResource(item, onPreview)}
                   >
                     <span className={styles.rowName}>
+                      <span className={styles.rowIcon}>{categoryIconOf(item)}</span>
                       <span className={styles.rowStem}>{stem}</span>
                       {ext ? <span className={styles.rowExt}>{ext}</span> : null}
                     </span>
@@ -229,6 +205,13 @@ export function ChatSessionResourcesInline({
                       {previewable
                         ? null
                         : ` · ${t("chat.resDownloadOnlyShort", "仅下载")}`}
+                      <span
+                        className={styles.rowTag}
+                        data-src={sourceOf(item)}
+                        title={t(SOURCE_LABEL_KEY[sourceOf(item)])}
+                      >
+                        {t(SOURCE_LABEL_KEY[sourceOf(item)])}
+                      </span>
                     </span>
                   </button>
                 </li>
@@ -251,16 +234,8 @@ export function ChatSessionResourcesInline({
           </div>
         ) : (
           <>
-            {renderGroup(
-              "produced",
-              t("chat.resourceGroupProduced", "产出"),
-              produced,
-            )}
-            {renderGroup(
-              "referenced",
-              t("chat.resourceGroupReferenced", "引用"),
-              referenced,
-            )}
+            {/* 一个卡片：整会话全部资源平铺（形态与聊天里的「本轮资源」一致） */}
+            {renderGroup("all", t("chat.resources.barTitle", "会话资源"), items)}
           </>
         )}
       </div>

@@ -26,6 +26,9 @@ class _BreakerState:
     last_failure_at: float = 0.0
     #: 半开探测开始的时刻，用于探测超时放行（见 CircuitBreaker.probe_s）
     probe_started_at: float = 0.0
+    #: 最后一次失败的原因（B1）。只记计数不记原因时，熔断打开后台账里
+    #: 只剩 "circuit breaker open"，运维不知道是 429 还是超时。
+    last_note: str = ""
 
 
 class CircuitBreaker:
@@ -107,7 +110,12 @@ class CircuitBreaker:
             return False
         return False
 
-    def record_failure(self, key: str) -> None:
+    def record_failure(self, key: str, note: str = "") -> None:
+        """记一次失败。``note`` = 为什么失败（可选参数，旧调用零改动）。
+
+        判官侧原来只有"第 3 次失败了"这种计数，没有"为什么"；B1 要求
+        台账写明原因（验收 2：429 注入后 reason 要能看出 rate_limited）。
+        """
         if not self._enabled:
             return
         state = self._state(key)
@@ -123,6 +131,7 @@ class CircuitBreaker:
             state.failures = 0
         state.last_failure_at = now
         state.failures += 1
+        state.last_note = str(note)[:400]
         state.probing = False
         state.probe_started_at = 0.0
         if state.failures >= self._threshold:
@@ -144,6 +153,7 @@ class CircuitBreaker:
             state.opened_at = 0.0
             state.probing = False
             state.probe_started_at = 0.0
+            state.last_note = ""
             self._cooldown_s = self._base_cooldown_s
 
     def sync_thresholds(
@@ -187,6 +197,36 @@ class CircuitBreaker:
         """当前累计的连续失败次数（未熔断时也在计数）。"""
         state = self._states.get(key)
         return 0 if state is None else int(state.failures)
+
+    def note_of(self, key: str) -> str:
+        """最后一次失败记下的原因；没记过就是空串。"""
+        state = self._states.get(key)
+        return "" if state is None else str(state.last_note or "")
+
+    def reason_of(self, key: str, provider_id: str = "", model: str = "") -> str:
+        """熔断原因 = **状态 + 计数 + 最近一次具体原因 (+ 模型可用性)**。
+
+        ``provider_id`` 给定时并入模型可用性台账的原因；该台账**无记录 =
+        ok**（没观测过就没有证据说它坏，不猜）。整串截到 400 字符，
+        台账字段不防爆。
+        """
+        bits: list[str] = [f"breaker={self.state_of(key)}"]
+        failures = self.failures_of(key)
+        if failures:
+            bits.append(f"failures={failures}")
+        note = self.note_of(key)
+        if note:
+            bits.append(note)
+        if provider_id:
+            try:
+                from ..providers.provider_model_availability import reason_of
+
+                avail = reason_of(provider_id, model)
+                if avail and avail != "ok":
+                    bits.append(f"model_availability={avail}")
+            except Exception:  # 台账不可用不能影响判官
+                pass
+        return " ".join(bits)[:400]
 
     def reset(self, key: Optional[str] = None) -> None:
         """清空熔断状态（测试/运维用）。"""

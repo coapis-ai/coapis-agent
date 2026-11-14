@@ -25,7 +25,10 @@ import asyncio
 import pytest
 from agentscope.model._model_usage import ChatUsage
 
-from coapis.app.agent_context import (
+# 尺子口径（B1）：生产写入侧是 ``coapis.config.session_context``
+# （runner.py / console.py 实测都写它）；``app.agent_context`` 是另一套
+# ContextVar，两边各写一份就是"两把尺子"——契约只认 session_context。
+from coapis.config.session_context import (
     set_current_agent_id,
     set_current_session_id,
 )
@@ -33,7 +36,10 @@ from coapis.providers.retry_chat_model import RETRYABLE_STATUS_CODES
 from coapis.token_usage.buffer import _UsageEvent
 from coapis.token_usage.model_wrapper import TokenRecordingModelWrapper
 
-# 目标锁：B1 交付后这些必须变 XPASS（strict 下即判红 → 摘标记）
+# 目标锁：B1 交付后这些必须变 XPASS（strict 下即判红 → 摘标记）。
+# 2026-11-14 B1-A 交付时摘掉 5 条（逐轮 usage 已落库 + clear 补 chat/turn）；
+# 仍挂着的 @B1 都是未交付项，不许提前摘。
+# 2026-11-14 B1-B 又摘 1 条（冻结尺子：集合元素一个没动，只换成 frozenset）。
 B1 = pytest.mark.xfail(
     strict=True,
     reason="B1 目标契约：逐轮用量带 chat_id/turn/latency 并落库（未实现）",
@@ -65,7 +71,6 @@ def test_retryable_status_codes_cover_rate_limit_and_upstream():
     assert {429, 529, 500, 502, 503, 504} <= set(RETRYABLE_STATUS_CODES)
 
 
-@B1
 def test_retryable_status_codes_are_frozen_set():
     # 它是"用量/重试/熔断"共用的尺子，运行时必须只读。
     # 现状是可变 set：B1 冻结它（frozenset），防止任何模块就地 .add()。
@@ -93,7 +98,9 @@ def test_retryable_status_codes_are_single_source():
 
 
 def test_usage_event_shape_is_the_disk_contract():
-    # 落盘/聚合都以这六个字段为键，改名等于历史清零。
+    # 落盘/聚合都以这些字段为键，改名等于历史清零。
+    # B1 交付：追加逐轮面五字段（与迁移 0026 同名列）；旧六字段一个没动，
+    # 历史聚合读面因此不受影响。
     fields = set(_UsageEvent._fields)
     assert fields == {
         "provider_id",
@@ -102,10 +109,14 @@ def test_usage_event_shape_is_the_disk_contract():
         "completion_tokens",
         "date_str",
         "now_iso",
+        "chat_id",
+        "session_id",
+        "turn_index",
+        "latency_ms",
+        "api_call_id",
     }
 
 
-@B1
 def test_usage_event_carries_call_identity_and_turn():
     # 逐轮落库要求每条事件说清"属于哪一次调用、哪一轮、谁发起"。
     ev = _UsageEvent(
@@ -200,7 +211,6 @@ def test_pop_usage_is_per_session_isolated():
 # ── 4. B1 目标：每轮一行、带归因与耗时、写进 token_usage ────────────────
 
 
-@B1
 def test_record_usage_keeps_latency_from_chatusage():
     # ChatUsage.time 现成就有（秒）。现状实现直接丢掉 → 台账 latency 恒 0。
     wrapper = _wrapper()
@@ -214,7 +224,6 @@ def test_record_usage_keeps_latency_from_chatusage():
     assert int(got["latency_ms"]) == 812
 
 
-@B1
 def test_record_usage_carries_chat_identity(tmp_path, monkeypatch):
     # 归因三件套（chat_id / session_id / turn_index）必须在事件里，
     # 否则 token_usage 永远无法按轮对账 —— PRD C1 的病根。
@@ -231,7 +240,6 @@ def test_record_usage_carries_chat_identity(tmp_path, monkeypatch):
     assert got["turn_index"] >= 1
 
 
-@B1
 def test_record_usage_writes_one_db_row_per_call(tmp_path, monkeypatch):
     # 终态判据（方案 §4 验收 1）：一次调用 → token_usage 一行且 tokens>0。
     from coapis.token_usage import db_writer
@@ -293,7 +301,6 @@ def test_session_context_exposes_identity_pair_and_reset():
     assert sc.get_current_turn_id() == "contract-turn"
 
 
-@B1
 def test_clear_session_context_resets_chat_and_turn():
     # 实测缺陷（B0 取证）：clear_session_context 清了 9 个变量，
     # **漏了 _CHAT_ID 与 _TURN_ID** —— 长连接处理器"清完上下文"后，

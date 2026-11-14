@@ -573,3 +573,61 @@
 .wrap > .body {
   flex: 1 1 100%;
 }
+
+/* ── v31（liuliangxu 2026-11-13）：行首类别图标 + 行尾来源标签 ──────
+   图标形状按类别出（Word / Excel / PPT / PDF / 图片 / 网页 / 知识库 /
+   工具 / 数据源…各有各的形），颜色由 ../resourceDisplay.tsx 按大类给
+   （文档蓝 / 知识库紫 / 网页青绿 / 工具橙 / 数据源青）。
+   来源标签四类：产出 / 知识库 / 网页 / 引用，配色与聊天里的本轮资源条同源。
+   两个元素都**并在既有两排之内**（图标进名称排、标签进大小时间排），
+   不改 .rowMain 的 column 结构，行高不变。 */
+.rowIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.rowTag {
+  flex: none;
+  display: inline-block;
+  max-width: 62px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid rgba(140, 140, 140, 0.35);
+  border-radius: 4px;
+  color: #8c8c8c;
+  background: transparent;
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+
+  &[data-src="produced"] {
+    color: #389e0d;
+    border-color: rgba(82, 196, 26, 0.35);
+    background: rgba(82, 196, 26, 0.12);
+  }
+
+  &[data-src="kb"] {
+    color: #722ed1;
+    border-color: rgba(114, 46, 209, 0.3);
+    background: rgba(114, 46, 209, 0.1);
+  }
+
+  &[data-src="web"] {
+    color: #08979c;
+    border-color: rgba(19, 194, 194, 0.3);
+    background: rgba(19, 194, 194, 0.1);
+  }
+
+  &[data-src="reference"] {
+    color: #0958d9;
+    border-color: rgba(22, 119, 255, 0.28);
+    background: rgba(22, 119, 255, 0.08);
+  }
+}

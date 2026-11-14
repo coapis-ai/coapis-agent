@@ -54,6 +54,12 @@ def _db_insert(
     total_tokens: int | None,
     cost_cents: float,
     created_at: float | None = None,
+    provider_id: str | None = None,
+    session_id: str | None = None,
+    chat_id: str | None = None,
+    turn_index: int | None = None,
+    latency_ms: int | None = None,
+    stream_interrupted: bool | None = None,
 ) -> None:
     from sqlalchemy import text
     engine = _engine()
@@ -66,8 +72,10 @@ def _db_insert(
             text(
                 "INSERT INTO token_usage "
                 "(user_id, username, agent_id, model, input_tokens, output_tokens, "
-                " total_tokens, cost_cents, created_at) "
-                "VALUES (:uid, :uname, :aid, :model, :in_t, :out_t, :total, :cost, :ts)"
+                " total_tokens, cost_cents, created_at, provider_id, session_id, "
+                " chat_id, turn_index, latency_ms, stream_interrupted) "
+                "VALUES (:uid, :uname, :aid, :model, :in_t, :out_t, :total, :cost, :ts, "
+                " :pid, :sid, :cid, :tidx, :lat, :intr)"
             ),
             {
                 "uid": str(user_id) if user_id is not None else None,
@@ -79,6 +87,12 @@ def _db_insert(
                 "total": total,
                 "cost": float(cost_cents or 0),
                 "ts": ts,
+                "pid": provider_id,
+                "sid": session_id,
+                "cid": chat_id,
+                "tidx": turn_index,
+                "lat": latency_ms,
+                "intr": (1 if stream_interrupted else 0) if stream_interrupted is not None else None,
             },
         )
 
@@ -93,6 +107,12 @@ def save_token_usage(
     cost_cents: float = 0.0,
     username: str | None = None,
     created_at: float | None = None,
+    provider_id: str | None = None,
+    session_id: str | None = None,
+    chat_id: str | None = None,
+    turn_index: int | None = None,
+    latency_ms: int | None = None,
+    stream_interrupted: bool | None = None,
 ) -> None:
     """每次 LLM 调用后记录明细（model_wrapper._record_usage_to_db 调用）。
 
@@ -100,6 +120,10 @@ def save_token_usage(
     - model_wrapper: save_token_usage(user_id=..., username=..., agent_id=..., model=...,
       input_tokens=..., output_tokens=..., total_tokens=..., cost_cents=...)
     - 旧签名: record_token_usage(user_id, agent_id, model, in, out, cost, created_at)
+
+    逐轮明细列（provider_id/session_id/chat_id/turn_index/latency_ms/
+    stream_interrupted，0026 迁移）：新调用点带上；旧调用点缺项落 NULL——
+    诚实缺项，不写假 0。
     """
     try:
         engine = _engine()
@@ -107,6 +131,9 @@ def save_token_usage(
             _db_insert(
                 user_id, username, agent_id, model,
                 input_tokens, output_tokens, total_tokens, cost_cents, created_at,
+                provider_id=provider_id, session_id=session_id, chat_id=chat_id,
+                turn_index=turn_index, latency_ms=latency_ms,
+                stream_interrupted=stream_interrupted,
             )
         else:
             _file_append(
@@ -114,7 +141,10 @@ def save_token_usage(
                 input_tokens, output_tokens, total_tokens, cost_cents, created_at,
             )
     except Exception as e:
-        logger.debug(f"Failed to save token usage: {e}")
+        # B1 实测教训：这条 debug 级吞异常让"台账 0 行"查无可查（user_id NOT NULL
+        # 被传 None，每次 INSERT 都 IntegrityError 却无人知晓）。逐轮台账是账本，
+        # 写不进去属于必须让人看见的事。
+        logger.warning("逐轮台账写入失败（已忽略该行）: %s", e)
 
 
 def record_token_usage(

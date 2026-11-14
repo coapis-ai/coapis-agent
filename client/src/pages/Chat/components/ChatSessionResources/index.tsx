@@ -15,13 +15,12 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import type { TableProps } from "antd";
 import {
-  FileTextOutlined,
-  GlobalOutlined,
   ReloadOutlined,
   EyeOutlined,
   DownloadOutlined,
   AimOutlined,
 } from "@ant-design/icons";
+import { categoryIconOf, SOURCE_COLOR, SOURCE_LABEL_KEY, sourceOf } from "../resourceDisplay";
 import { Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -50,14 +49,6 @@ const NAME_CLIP: React.CSSProperties = {
 };
 
 const PAGE_SIZE = 20;
-
-const KIND_ICON: Record<string, React.ReactNode> = {
-  file: <FileTextOutlined style={{ color: "#1677ff" }} />,
-  web: <GlobalOutlined style={{ color: "#52c41a" }} />,
-  kb: <FileTextOutlined style={{ color: "#722ed1" }} />,
-  mcp: <FileTextOutlined style={{ color: "#fa8c16" }} />,
-  db: <FileTextOutlined style={{ color: "#13c2c2" }} />,
-};
 
 /**
  * 状态词表（方案 §3.2 / §12.4，验收项 1）。
@@ -253,7 +244,7 @@ const ChatSessionResources: React.FC<Props> = ({
       title: "",
       key: "kind",
       width: 36,
-      render: (_, item) => KIND_ICON[item.kind] || KIND_ICON.file,
+      render: (_, item) => categoryIconOf(item),
     },
     {
       title: t("chat.resources.name"),
@@ -307,11 +298,12 @@ const ChatSessionResources: React.FC<Props> = ({
               }}
             >
             {link}
-            {item.role === "producer" || item.role === "export" ? (
-              <Tag color="green" style={{ margin: 0, flexShrink: 0 }}>
-                {t("chat.resources.produced")}
-              </Tag>
-            ) : null}
+            <Tag
+              color={SOURCE_COLOR[sourceOf(item)]}
+              style={{ margin: 0, flexShrink: 0 }}
+            >
+              {t(SOURCE_LABEL_KEY[sourceOf(item)])}
+            </Tag>
             {TAGGED_STATUSES.has(st) ? (
               <Tag
                 color={STATUS_META[st]?.color}

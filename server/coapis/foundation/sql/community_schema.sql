@@ -106,10 +106,17 @@ CREATE TABLE IF NOT EXISTS token_usage (
     output_tokens INTEGER DEFAULT 0,
     total_tokens INTEGER DEFAULT 0,
     cost_cents REAL DEFAULT 0,
-    created_at REAL
+    created_at REAL,
+    provider_id TEXT,
+    session_id TEXT,
+    chat_id TEXT,
+    turn_index INTEGER,
+    latency_ms INTEGER,
+    stream_interrupted INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_token_usage_user ON token_usage(user_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_token_usage_scope ON token_usage(username, session_id, chat_id, turn_index);
 
 -- ---------------- 迁移状态（完成标记，F6） ----------------
 CREATE TABLE IF NOT EXISTS token_usage_daily (

@@ -541,9 +541,20 @@ class JudgeGateway:
 
         # --- L0 前置门：熔断（近期连续失败就别再试） ---
         bkey = _breaker_key(purpose)
-        if not _hub_breaker(bkey, cfg).allow(bkey):
+        _hub = _hub_breaker(bkey, cfg)
+        if not _hub.allow(bkey):
+            # B1-B：台账要写明**为什么**不可用。只写"熔断中"等于让运维猜
+            # （dev 实测台账里 breaker 行只有一句"近期判断连续失败"）。
+            #  provider/model 用槽位值——本函数里没有 model_id（它在下面的
+            #  调用函数里），照抄变量名就是 NameError（测试抓到过一次）。
+            reason = _hub.reason_of(
+                bkey,
+                provider_id=str(slot.get("provider_id") or ""),
+                model=str(slot.get("model") or ""),
+            )
             return await self._degrade(
-                purpose, LAYER_BREAKER, "熔断中（近期判断连续失败）",
+                purpose, LAYER_BREAKER,
+                f"熔断中（{reason or '近期判断连续失败'}）",
                 rule_fallback, describe, elapsed, ids,
             )
 
@@ -782,7 +793,10 @@ class JudgeGateway:
                 # 到点就是硬熔断——判官的额度用完了，这就是失败，照常计数。
                 hard_capped = soft_s >= hard_s - 1e-9
                 if hard_capped:
-                    breaker.record_failure(bkey)
+                    breaker.record_failure(
+                        bkey,
+                        f"hard_timeout {hard_s:.1f}s model={model_id}",
+                    )
                     _reset_soft_streak(bkey)
                     return await degrade(
                         LAYER_TIMEOUT,
@@ -792,7 +806,10 @@ class JudgeGateway:
                 soft_streak = max(int(getattr(cfg, "breaker_soft_streak", 5)), 1)
                 if streak >= soft_streak:
                     _reset_soft_streak(bkey)
-                    breaker.record_failure(bkey)
+                    breaker.record_failure(
+                        bkey,
+                        f"soft_timeout_streak {streak} model={model_id}",
+                    )
                     logger.warning(
                         "[决策中枢] %s 连续 %d 次软超时（软阈值 %.1fs），"
                         "本岗位熔断冷却 %.0fs",
@@ -813,7 +830,10 @@ class JudgeGateway:
                 "[决策中枢] %s 调用失败: %s: %s", purpose, type(exc).__name__, exc,
                 exc_info=True,
             )
-            breaker.record_failure(bkey)
+            breaker.record_failure(
+                bkey,
+                f"{type(exc).__name__}: {str(exc)[:200]}",
+            )
             return await degrade(
                 LAYER_TRANSPORT, f"判断调用失败（{type(exc).__name__}: {exc}）",
             )
@@ -823,7 +843,7 @@ class JudgeGateway:
         except Exception:
             value = None
         if value is None:
-            breaker.record_failure(bkey)
+            breaker.record_failure(bkey, f"parse_fail model={model_id}")
             return await degrade(LAYER_PARSE_FAIL, "判断结果解析失败")
 
         breaker.record_success(bkey)

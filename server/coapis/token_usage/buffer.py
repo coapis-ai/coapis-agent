@@ -41,6 +41,13 @@ class _UsageEvent(NamedTuple):
     completion_tokens: int
     date_str: str  # YYYY-MM-DD, pre-computed by producer
     now_iso: str  # ISO-8601 timestamp, pre-computed by producer
+    # 逐轮明细字段（B1，批次契约锁定）：日聚合面不使用，仅为生产端
+    # 兼容扩展——带默认值，既有 6 字段调用点不受影响。
+    chat_id: str = ""
+    session_id: str = ""
+    turn_index: int = 0
+    latency_ms: int = 0
+    api_call_id: str = ""
 
 
 class TokenUsageBuffer:

@@ -67,7 +67,10 @@ from .rate_limiter import LLMRateLimiter, get_rate_limiter
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504, 529}
+# 冻结（B1 契约锁 test_retryable_status_codes_are_frozen_set）：可变容器 =
+# 两把尺子的入口（谁都能 add 一个码）。frozenset 让它只能整份替换。
+# 元素与线上一致：429 限流 / 500 502 503 上游故障 / 504 超时 / 529 Anthropic 过载。
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504, 529})
 
 _openai_retryable: tuple[type[Exception], ...] | None = None
 _anthropic_retryable: tuple[type[Exception], ...] | None = None
@@ -192,6 +195,73 @@ def _is_request_shape_error(exc: BaseException) -> bool:
         str(exc)[:300],
     )
     return True
+
+
+def _split_model_key(key: str) -> tuple[str, str]:
+    """``provider_id:model_name`` → 两段；无冒号时 provider 记 unknown。"""
+    text = str(key or "")
+    if ":" in text:
+        pid, _, name = text.partition(":")
+        return pid.strip() or "unknown", name.strip()
+    return "unknown", text
+
+
+def _availability_status_from_exc(exc: BaseException) -> str:
+    """台账状态词汇（QwenPaw 词汇表：ok/rate_limited/timeout/auth/unsupported…）。
+
+    **尺子只有一把**：状态取自 ``exc.status_code`` —— 与 :func:`_is_retryable`
+    / :func:`_is_rate_limit` 读的是同一个字段。本函数**不改判**、不参与重试
+    决策，只把"为什么失败"翻译成台账词汇；无状态码时按异常类型名归类。
+    """
+    if _is_rate_limit(exc):
+        return "rate_limited"
+    status = getattr(exc, "status_code", None)
+    try:
+        code = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        code = None
+    if code is not None:
+        if code in (401, 403):
+            return "auth"
+        if code in (404, 422):
+            return "unsupported"
+        if code in (408, 504):
+            return "timeout"
+        if 500 <= code < 600:
+            return "unavailable"
+        return "unsupported"
+    name = type(exc).__name__.lower()
+    if "timeout" in name:
+        return "timeout"
+    if "ssl" in name or "connect" in name or "network" in name:
+        return "network"
+    return "unavailable"
+
+
+def _record_availability_ok(key: str) -> None:
+    """成功也记账 —— 否则台账只剩坏消息，看不见"恢复"。"""
+    try:
+        from .provider_model_availability import record_model_result_safe
+
+        provider_id, model = _split_model_key(key)
+        record_model_result_safe(provider_id, model, "ok")
+    except Exception:  # 观测面不反噬主链
+        return
+
+
+def _record_availability_failure(key: str, exc: BaseException) -> None:
+    try:
+        from .provider_model_availability import record_model_result_safe
+
+        provider_id, model = _split_model_key(key)
+        record_model_result_safe(
+            provider_id,
+            model,
+            _availability_status_from_exc(exc),
+            str(exc)[:400],
+        )
+    except Exception:  # 观测面不反噬主链
+        return
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -468,6 +538,7 @@ class RetryChatModel(ChatModelBase):
                     # _consume_stream_with_slot internally and handles
                     # retries on stream failure.
                     owns_semaphore = False
+                    _record_availability_ok(key)
                     return self._wrap_stream(
                         result,
                         args,
@@ -477,14 +548,19 @@ class RetryChatModel(ChatModelBase):
                         limiter,
                     )
 
+                _record_availability_ok(key)
                 return result
 
             except Exception as exc:
                 last_exc = exc
                 if _is_retryable(exc) and _is_rate_limit(exc):
                     await limiter.report_rate_limit(_extract_retry_after(exc))
+                    # 台账：429 写因（B1-B 验收 2 —— 判官 reason 的真值来源）
+                    _record_availability_failure(key, exc)
 
                 if not _is_retryable(exc) or attempt >= attempts:
+                    # 台账：放弃时写因（唯一决策点 = _is_retryable，不另起尺子）
+                    _record_availability_failure(key, exc)
                     raise
 
                 delay = _compute_backoff(attempt, self._retry_config)

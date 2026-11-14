@@ -61,6 +61,7 @@ from .backup import router as backup_router
 from .plan import router as plan_router
 from .update_api import router as update_router
 from .decisions import router as decisions_router
+from .provider_availability import router as provider_availability_router
 from .config_router import router as config_router_ext
 from .health import router as health_router
 from .chats import router as chats_router
@@ -147,6 +148,7 @@ router.include_router(plan_router)
 router.include_router(update_router)
 # 判断中枢：台账可见 + 配置可改（v14 §5.2 / U 批）
 router.include_router(decisions_router, prefix="/decisions")
+router.include_router(provider_availability_router)
 
 # Additional routers (CoApis extensions)
 router.include_router(config_router_ext)

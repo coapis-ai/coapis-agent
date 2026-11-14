@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import Index, Integer, REAL, Text, text
+from sqlalchemy import Boolean, Index, Integer, REAL, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import BaseRow
@@ -56,7 +56,16 @@ class TokenUsage(BaseRow):
     )
     created_at: Mapped[Optional[float]] = mapped_column(REAL)
 
+    # 逐轮明细列（0026，QwenPaw 借鉴 B1）：旧聚合面行 NULL = 诚实缺项。
+    provider_id: Mapped[Optional[str]] = mapped_column(Text)
+    session_id: Mapped[Optional[str]] = mapped_column(Text)
+    chat_id: Mapped[Optional[str]] = mapped_column(Text)
+    turn_index: Mapped[Optional[int]] = mapped_column(Integer)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    stream_interrupted: Mapped[Optional[bool]] = mapped_column(Boolean)
+
     __table_args__ = (
         Index("idx_token_usage_user", "user_id"),
         Index("idx_token_usage_created", "created_at"),
+        Index("idx_token_usage_scope", "username", "session_id", "chat_id", "turn_index"),
     )

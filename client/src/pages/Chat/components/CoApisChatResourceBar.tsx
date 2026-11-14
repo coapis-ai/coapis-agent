@@ -76,6 +76,11 @@ interface Props {
   onShowAll?: () => void;
   /** 「定位到消息」：滚到产出这条资源的那一轮（方案 §3.2 产出动作） */
   onLocate?: (messageId: string) => void;
+  /** 会话 id：行内「定位到消息」/「引用次数」等能力要它才亮（可空） */
+  chatId?: string;
+  /** 本轮是否被中断（后端 metadata.interrupted，B1）。
+   *  中断收尾时本轮常常没有产出，提示必须照样出现——空面板不该等于"没事"。 */
+  interrupted?: boolean;
 }
 
 /** 每组最多 8 行，其余折叠成「展开其余 N 项」（方案 §3.2 L2）。 */
@@ -123,12 +128,13 @@ type Tab = "all" | "reference" | "produced";
  * 来源标签、状态标签、行右侧 [预览]/[下载]/[转格式]，尾部「查看全部」。
  * 默认折叠成单行摘要（方案：默认折叠，单行 28px）；本轮无资源时整条不渲染。
  */
-const CoApisChatResourceBar: React.FC<Props> = ({
+const CoApisChatResourceBar: React.FC<Props> = ({  
   items,
   onPreview,
   onShowAll,
   onLocate,
-}) => {
+  interrupted = false,
+ }) => {
   const { t } = useTranslation();
   // v24（小蜜蜂 2026-11-09 第 2 条）：「引用 / 产出」两颗 chip 自己就是筛子——
   // 点一下只看这一组（并自动展开），再点一下回到两组同看。此前 chip 只是
@@ -302,7 +308,9 @@ const CoApisChatResourceBar: React.FC<Props> = ({
     );
   };
 
-  if (!items.length) return null;
+  // 无产出时默认不渲染（v25 的口径）。B1 例外：**本轮被中断**时必须渲染，
+  // 因为中断轮经常一个资源都没登记，用户有权知道"这轮没跑完"。
+  if (!items.length && !interrupted) return null;
 
   // 「定位到消息」的 DOM 锚点：本条资源条属于哪一轮，就标在哪
   const anchorMessageId = produced.find((i) => i.messageId)?.messageId;
@@ -353,6 +361,13 @@ const CoApisChatResourceBar: React.FC<Props> = ({
     >
       {/* 折叠态：单行摘要（方案：默认折叠，单行 28px） */}
       <div className={styles.header}>
+        {/* B1：本轮被中断时在头部提示。放头部是因为中断轮经常没有产出，
+            挂在分组里会随空面板一起消失。 */}
+        {interrupted && (
+          <span className={styles.interruptedChip} data-testid="interrupted-chip">
+            {t("chat.interrupted", "本轮已中断")}
+          </span>
+        )}
         {/* v25（小蜜蜂 2026-11-10 第 1 条引的原始诉求）：这一条挂的是**本轮**
             的引用与产出，名字必须自己说清楚——旧名「会话资源」让人以为整会话
             都在这儿，与左栏那个会话级下拉撞名，才是「分裂感」的根。 */}
