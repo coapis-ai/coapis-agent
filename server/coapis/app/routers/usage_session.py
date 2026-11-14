@@ -147,7 +147,11 @@ async def get_usage_by_session(
 
         turn_rows = conn.execute(
             text(
-                "SELECT turn_index, chat_id, api_call_id, provider_id, model,"
+                # 注意：token_usage 表里没有 api_call_id 列（0026 只补了
+                # turn_index / latency_ms / stream_interrupted），
+                # 调用级 id 只在内存事件里存在，库里没有第二套真相，
+                # 所以这里不查、不编，响应里给 null。
+                "SELECT turn_index, chat_id, provider_id, model,"
                 " input_tokens, output_tokens, total_tokens, cost_cents,"
                 " latency_ms, stream_interrupted, created_at"
                 f" FROM token_usage WHERE {clause}"
@@ -184,7 +188,8 @@ async def get_usage_by_session(
         {
             "turn_index": r["turn_index"],
             "chat_id": r["chat_id"],
-            "api_call_id": r["api_call_id"],
+            # 库里没有这一列（见上），不编值：需要调用级 id 请去台账事件侧看。
+            "api_call_id": None,
             "provider_id": r["provider_id"],
             "model": r["model"],
             "input_tokens": _scalar_int(r["input_tokens"]),
