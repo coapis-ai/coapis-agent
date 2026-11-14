@@ -14,9 +14,10 @@
   **绝不兜底会话激活模型**（D-A 拍板：不借对话模型，避免"模型切换攻击"）。
 * 内网端点空 Key 合法（v25 实锤：Key 判定归 provider 层，判定层不得越界）。
 
-B1 目标锁（``xfail(strict=True)``）：判官直连 provider，绕开
-``RetryChatModel`` —— 失败既不计 token 也不计可用性，于是"判官没意见"
-与"判官连不上"在看板上长得一模一样。
+B1 目标锁（原 ``xfail(strict=True)``，2026-11-14 B1/B3 交付时摘除）：
+判官供给自带模型可用性台账键（``availability_key``），开关在供给层生效。
+B3 新增：判官能力闸（窗口/类型/结构化输出三查，未观测=放行）与弃权
+原因码（台账 ``reason`` 列的 ``[码] 人话`` 形状，读侧按码分桶）。
 """
 from __future__ import annotations
 
@@ -24,16 +25,22 @@ from types import SimpleNamespace
 
 import pytest
 
+from coapis.decision import judge_reasons
 from coapis.decision import resolver as rs
 
-B1 = pytest.mark.xfail(
-    strict=True,
-    reason="B1 目标契约：判官调用纳入重试/可用性台账（未实现）",
-)
 
-
-def _model(model_id: str, model_type: str | None) -> SimpleNamespace:
-    return SimpleNamespace(id=model_id, name=model_id, model_type=model_type)
+def _model(
+    model_id: str,
+    model_type: str | None,
+    max_sequence_length: int | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=model_id,
+        name=model_id,
+        model_type=model_type,
+        # 模型自报窗口（真 ModelInfo 的 authoritative 字段）；None = 不上报
+        max_sequence_length=max_sequence_length,
+    )
 
 
 def _provider(models: list[SimpleNamespace], base_url: str = "http://127.0.0.1:8085/v1"):
@@ -236,28 +243,33 @@ def test_empty_everywhere_means_no_judge(use_provider, slot):
     assert rs.get_judge_provider_config(hub) is None
 
 
-def test_disabled_switch_is_not_enforced_at_supply_layer(use_provider, slot):
-    # 实测现状（B0 取证，锁住它，别以为开关在供给层）：
-    # ``get_judge_provider_config`` **完全不看 judge_enabled**，四种组合
-    # 都给配置。关闭判官靠各消费点自己判断 judge_enabled。
-    # 含义：任何新增消费点忘记自查开关，就会"关了判官仍在判断"。
-    # B3 目标锁见下方 test_supply_layer_honours_disabled_switch。
+def test_enabled_switch_keeps_supply_alive(use_provider, slot):
+    # 开关口径（B1 落地后重写，原为"现状锁"）：供给层认开关之后，
+    # **开启时必须有供给** —— 反向锁死"把开关判读过宽"这类改坏
+    # （例如把 judge_enabled 缺失当成关闭，判官会整批静默）。
     provider = _provider([_model("hub-judge", "chat")])
     use_provider(SimpleNamespace(get_provider=lambda pid: provider))
     slot(("p1", "hub-judge"))
-    hub = SimpleNamespace(judge_provider_id="p1", judge_model="hub-judge", judge_enabled=False)
+    hub = SimpleNamespace(judge_provider_id="p1", judge_model="hub-judge", judge_enabled=True)
     assert rs.get_judge_provider_config(hub) is not None
+    # 配置对象形态多样：缺 judge_enabled/enabled 键 = 未表态 = 不关闭
+    assert rs.get_judge_provider_config(
+        SimpleNamespace(judge_provider_id="p1", judge_model="hub-judge")
+    ) is not None
 
 
-@B1
 def test_supply_layer_honours_disabled_switch(use_provider, slot):
-    # B3 目标：开关应该在供给层生效一次，免得每个消费点各抄一份判定
-    # （今天 judge_enabled 在 gateway/plan_gate/selfcheck 里各查一遍）。
+    # B1 契约（已落地）：开关在供给层生效一次，消费点不必各抄一份判定
+    # （历史形状：judge_enabled 在 gateway/plan_gate/selfcheck 里各查一遍，
+    #  新增消费点忘记自查就会"关了判官仍在判断"）。
     provider = _provider([_model("hub-judge", "chat")])
     use_provider(SimpleNamespace(get_provider=lambda pid: provider))
     slot(("p1", "hub-judge"))
     hub = SimpleNamespace(judge_provider_id="p1", judge_model="hub-judge", judge_enabled=False)
     assert rs.get_judge_provider_config(hub) is None
+    # 中枢总开关 enabled 同样在供给层生效
+    hub2 = SimpleNamespace(judge_provider_id="p1", judge_model="hub-judge", enabled=False)
+    assert rs.get_judge_provider_config(hub2) is None
 
 
 def test_judge_supply_rejects_embedding_slot_without_crash(use_provider, slot):
@@ -304,10 +316,9 @@ def test_source_whitelist_covers_the_five_posts():
     assert posts <= set(lc.SOURCES)
 
 
-# ── 6. B1 目标：判官也要进可用性台账 ────────────────────────────────────
+# ── 6. 判官进可用性台账（B1 契约，已落地）──────────────────────────────
 
 
-@B1
 def test_judge_config_carries_availability_ledger_key(use_provider, slot):
     # 判官直连 provider，绕开 RetryChatModel：失败不计 token、也不计
     # 可用性。B1 要求供给结果带可用性台账键，使"没意见"与"连不上"可分。
@@ -318,3 +329,100 @@ def test_judge_config_carries_availability_ledger_key(use_provider, slot):
     cfg = rs.get_judge_provider_config(hub)
     assert cfg is not None
     assert cfg.get("availability_key") == "p1:slot-judge"
+    # 键的拼法由 resolver 独家提供（一处真源）：去空白，调用方不再各拼一套
+    assert rs.availability_key(" p1 ", " slot-judge ") == "p1:slot-judge"
+
+
+# ── 7. B3 能力闸：槽里有模型 ≠ 那模型胜任判官 ──────────────────────────
+
+
+def test_capability_gate_rejects_small_window_model(use_provider):
+    # 窗口不够的模型当判官 = 必然截断 = 台账上长成 timeout/parse_fail，
+    # 把"拿错模型"伪装成"判官不行"（dev 实测：嵌入模型当判官 9/9 全超时）。
+    provider = _provider([_model("tiny-judge", "chat", max_sequence_length=512)])
+    use_provider(SimpleNamespace(get_provider=lambda pid: provider))
+    ok, code = rs.judge_capability_ok("p1", "tiny-judge", min_prompt_tokens=2048)
+    assert ok is False
+    assert code == judge_reasons.SLOT_MODEL_INCAPABLE
+
+
+def test_capability_gate_accepts_wide_window_model(use_provider):
+    provider = _provider([_model("wide-judge", "chat", max_sequence_length=32768)])
+    use_provider(SimpleNamespace(get_provider=lambda pid: provider))
+    assert rs.judge_capability_ok("p1", "wide-judge", min_prompt_tokens=2048) == (True, "")
+
+
+def test_capability_gate_treats_unreported_window_as_ok(use_provider):
+    # 口径纪律：**未观测 = 放行**（max_sequence_length=None，提供商不上报）。
+    # 这条决定灰度能不能安全打开——没有证据说它坏就不猜，与可用性台账
+    # "无记录 = ok" 同口径。
+    provider = _provider([_model("quiet-judge", "chat")])
+    use_provider(SimpleNamespace(get_provider=lambda pid: provider))
+    assert rs.judge_capability_ok("p1", "quiet-judge", min_prompt_tokens=2048) == (True, "")
+
+
+def test_capability_gate_rejects_non_chat_slot(use_provider):
+    provider = _provider([_model("emb-judge", "embedding")])
+    use_provider(SimpleNamespace(get_provider=lambda pid: provider))
+    ok, code = rs.judge_capability_ok("p1", "emb-judge")
+    assert ok is False
+    assert code == judge_reasons.NOT_CHAT
+
+
+def test_capability_gate_missing_provider_is_abstain_not_crash(use_provider):
+    use_provider(SimpleNamespace(get_provider=lambda pid: None))
+    ok, code = rs.judge_capability_ok("ghost", "m")
+    assert ok is False
+    assert code == judge_reasons.PROVIDER_MISSING
+
+
+def test_capability_gate_reads_json_mode_probe(use_provider, monkeypatch):
+    # 探测缓存里 json_mode 明确 False → 判官读不出 JSON 结论，等于没判官。
+    provider = _provider([_model("nojson", "chat", max_sequence_length=32768)])
+    use_provider(SimpleNamespace(get_provider=lambda pid: provider))
+    import coapis.providers.model_capability_cache as mcc
+
+    monkeypatch.setattr(
+        mcc,
+        "get_capability_cache",
+        lambda: SimpleNamespace(get=lambda key, cap, default=None: False),
+        raising=True,
+    )
+    ok, code = rs.judge_capability_ok("p1", "nojson")
+    assert ok is False
+    assert code == judge_reasons.SLOT_MODEL_INCAPABLE
+
+
+# ── 8. B3 弃权原因码：台账"为什么没判"必须可分桶 ───────────────────────
+
+
+def test_reason_codes_are_the_single_source_of_abstain_text():
+    # 台账 reason 列的形状 = ``[码] 人话（细节）``。读侧按 ``[码]`` 分桶，
+    # 禁止再对中文句子做 LIKE（改一个字就断档）。
+    text = judge_reasons.format_reason(judge_reasons.NO_SLOT, "按规则直判")
+    assert text.startswith("[no_slot] ")
+    assert judge_reasons.parse_code(text) == judge_reasons.NO_SLOT
+    # 未知码不抛异常、码位照留（台账纪律：行必须写得出）
+    assert judge_reasons.parse_code(
+        judge_reasons.format_reason("brand_new_code")
+    ) == "brand_new_code"
+    # 非码形状 → 空串（读侧据此识别"旧账/无码行"）
+    assert judge_reasons.parse_code("熔断中（近期判断连续失败）") == ""
+
+
+def test_every_abstain_reason_in_gateway_carries_a_code():
+    # 网关出口的弃权文本必须带码：抽查四个出口文本形状。
+    # 为什么抽查而不是穷举：出口文本是 f-string 拼的，穷举要把每个出口
+    # 都跑一遍（那是网关测试的活）；这里锁"码 + 人话"这条装配约定。
+    for code in (
+        judge_reasons.NO_SLOT,
+        judge_reasons.BREAKER_OPEN,
+        judge_reasons.BUDGET_EXHAUSTED,
+        judge_reasons.TIMEOUT_HARD,
+        judge_reasons.PARSE_FAIL,
+        judge_reasons.TRANSPORT,
+    ):
+        assert code in judge_reasons.REASON_TEXT
+        assert judge_reasons.parse_code(
+            judge_reasons.format_reason(code, "细节")
+        ) == code

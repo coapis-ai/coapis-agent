@@ -40,9 +40,14 @@ from ..providers.provider_manager import ProviderManager
 from .breaker import get_breaker
 from .bus import get_bus
 from .ledger_contract import write_ledger
+from . import judge_reasons as jr
 from .cache import get_cached_judgment, make_cache_key, put_cached_judgment
 from .config import DecisionHubConfig, get_hub_config
-from .resolver import get_judge_provider_config, is_local_base_url
+from .resolver import (
+    get_judge_provider_config,
+    is_local_base_url,
+    judge_capability_ok,
+)
 from .types import DecisionResult
 
 logger = logging.getLogger(__name__)
@@ -501,7 +506,11 @@ class JudgeGateway:
         # --- L0 前置门：总开关/分开关 ---
         if not cfg.enabled or not cfg.post_enabled(purpose):
             return await self._degrade(
-                purpose, LAYER_DISABLED, "判官关闭",
+                purpose, LAYER_DISABLED,
+                jr.format_reason(
+                    jr.DISABLED,
+                    "总开关关" if not cfg.enabled else f"岗位 {purpose} 开关关",
+                ),
                 rule_fallback, describe, elapsed, ids,
             )
 
@@ -535,9 +544,40 @@ class JudgeGateway:
         )
         if not slot or not slot.get("provider_id") or not slot.get("model"):
             return await self._degrade(
-                purpose, LAYER_NO_MODEL, "未配置判断模型（判官槽位空），按规则直判",
+                purpose, LAYER_NO_MODEL,
+                jr.format_reason(jr.NO_SLOT, "按规则直判"),
                 rule_fallback, describe, elapsed, ids,
             )
+
+        # --- L0 前置门：判官能力闸（B3 · 收尾方案 v1 §6.1/§6.3）---
+        # 槽位里有模型 ≠ 那个模型能胜任判官。窗口不够大的模型读不完被判
+        # 内容，上游不报错、只回一句读不出结论的话——台账上长成
+        # timeout/parse_fail，把"拿错模型"伪装成"判官不行"（dev 实测：
+        # 嵌入模型当判官 9/9 全超时）。
+        # 灰度开关 judge_capability_dispatch 默认关：先只观测（打日志），
+        # 打开后不胜任的槽位直接不上岗，按规则直判 + 台账记原因码。
+        cap_ok, cap_code = judge_capability_ok(
+            str(slot.get("provider_id") or ""),
+            str(slot.get("model") or ""),
+            min_prompt_tokens=int(getattr(cfg, "judge_min_prompt_tokens", 2048) or 2048),
+        )
+        if not cap_ok:
+            _cap_detail = (
+                f"模型 {slot.get('provider_id')}/{slot.get('model')}"
+            )
+            if not bool(getattr(cfg, "judge_capability_dispatch", False)):
+                # 灰度关：只记观测，不否决判断（判官真判率是这一闸的验收尺子）
+                logger.info(
+                    "[决策中枢·能力闸·只观测] 岗位 %s 的判官 %s 判定不胜任（%s）；"
+                    "开关 judge_capability_dispatch 未开，本次照旧上岗",
+                    purpose, _cap_detail, cap_code,
+                )
+            else:
+                return await self._degrade(
+                    purpose, LAYER_NO_MODEL,
+                    jr.format_reason(cap_code, _cap_detail),
+                    rule_fallback, describe, elapsed, ids,
+                )
 
         # --- L0 前置门：熔断（近期连续失败就别再试） ---
         bkey = _breaker_key(purpose)
@@ -554,7 +594,9 @@ class JudgeGateway:
             )
             return await self._degrade(
                 purpose, LAYER_BREAKER,
-                f"熔断中（{reason or '近期判断连续失败'}）",
+                jr.format_reason(
+                    jr.BREAKER_OPEN, reason or "近期判断连续失败",
+                ),
                 rule_fallback, describe, elapsed, ids,
             )
 

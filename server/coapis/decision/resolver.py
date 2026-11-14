@@ -56,6 +56,86 @@ def is_ollama_base_url(base_url: Any) -> bool:
     return "11434" in raw or "ollama" in raw
 
 
+def availability_key(provider_id: str, model_id: str) -> str:
+    """模型可用性台账 / 能力探测缓存的统一键：``provider_id:model_id``。
+
+    B3（收尾方案 v1 §6.1）：键的拼法以前散在调用方，判官侧根本没有出键的
+    地方——两处各拼一套，台账就认不出"哪台模型坏过"。键只在配置组装处
+    生成一次，随配置一路带走。
+    """
+    return f"{str(provider_id or '').strip()}:{str(model_id or '').strip()}"
+
+
+def judge_capability_ok(
+    provider_id: str,
+    model_id: str,
+    min_prompt_tokens: int = 2048,
+) -> tuple[bool, str]:
+    """判官能力闸（B3 · 收尾方案 v1 §6.1）。返回 ``(能胜任?, 原因码)``。
+
+    为什么要在判断之前拦：判官的输入是"提示词 + 被判的内容"，几十 KB 的
+    计划/工具参数都要塞进去。窗口比这还小的模型必然被截断，上游不报错、
+    只给一句读不出结论的话——台账上就是 parse_fail/timeout，看起来像
+    "判官不行"，其实是拿错了模型。嵌入模型当判官 9/9 全超时就是这个形状
+    （v14 根因），类型闸挡住了那一类，**窗口闸挡的是这一类**，两者正交。
+
+    三查，全部只用已经在手的事实，**不发网络请求**：
+    1. chat 类型（复用 :func:`assert_chat_capable`，与既有校验同源）；
+    2. 输入窗口：模型自报的 ``max_sequence_length`` ≥ ``min_prompt_tokens``；
+    3. 结构化输出：探测缓存里 ``json_mode`` 明确探测为 False 的模型不胜任
+       （判官提示词要求 JSON 结论，读不出 JSON 的判官等于没有判官）。
+
+    口径纪律：**未观测 = 放行**。``max_sequence_length`` 为 None（提供商不
+    上报）或缓存无记录时不否决——没有证据说它坏就不猜，与模型可用性台账
+    "无记录 = ok" 同口径。这一条是灰度安全的前提：闸门打开不会把现有
+    判官全灭，只会挡掉有证据不胜任的。
+    """
+    # 局部导入：providers 层依赖判断中枢的只有这一条单向调用，
+    # 顶层互导会成环（gateway → resolver → providers → …）。
+    from ..providers.provider_manager import ProviderManager
+    from .judge_reasons import NOT_CHAT, PROVIDER_MISSING, SLOT_MODEL_INCAPABLE
+
+    try:
+        mgr = ProviderManager.get_instance()
+        provider = mgr.get_provider(provider_id) if mgr is not None else None
+    except Exception:  # noqa: BLE001 - 读不到管理器＝没有证据，放行
+        return True, ""
+    if provider is None:
+        return False, PROVIDER_MISSING
+
+    ok, _mtype = assert_chat_capable(provider, model_id)
+    if not ok:
+        return False, NOT_CHAT
+
+    info = None
+    for m in getattr(provider, "models", None) or []:
+        if getattr(m, "id", None) == model_id:
+            info = m
+            break
+    if info is not None:
+        window = getattr(info, "max_sequence_length", None)
+        if window is not None:
+            try:
+                if int(window) < int(min_prompt_tokens):
+                    return False, SLOT_MODEL_INCAPABLE
+            except (TypeError, ValueError):
+                pass
+
+    try:
+        from ..providers.model_capability_cache import get_capability_cache
+
+        probed = get_capability_cache().get(
+            availability_key(provider_id, model_id), "json_mode", None
+        )
+    except Exception:  # noqa: BLE001 - 缓存不可用不参与否决
+        probed = None
+    if probed is False:
+        return False, SLOT_MODEL_INCAPABLE
+
+    return True, ""
+
+
+
 
 def assert_chat_capable(provider: Any, model_id: str) -> tuple[bool, str]:
     """硬校验（v14 §4.4①）：候选模型必须是 **chat** 类型。
@@ -187,6 +267,10 @@ def build_provider_config(
             "api_base": str(provider.base_url).rstrip("/"),
             "api_key": str(provider.api_key),
             "model_type": model_type,
+            # B3（收尾方案 v1 §6.1）：可用性台账与探测缓存都按这个键记账，
+            # 配置组装处出键，下游不再各拼各的（"谁都能拼、拼得不一样"
+            # 就是台账认不出模型的成因）。
+            "availability_key": availability_key(provider_id, model),
         }
     except Exception as exc:
         logger.warning("[DecisionHub] 判断模型配置组装失败: %s", exc)
@@ -221,6 +305,25 @@ def _decision_slot_pair() -> tuple[str, str]:
         return "", ""
 
 
+def _supply_switch_off(hub: Any) -> bool:
+    """供给层开关：判官关了就不必有"判官模型配置"这个东西（B1 契约）。
+
+    以前开关只在网关出口处判，供给层（本函数）照旧解析模型——于是每个
+    调用方都要自己记得"先问开关"，漏一个就多烧一次模型；实测
+    判档/计划/验收三个消费点里有一个没记得问。口径反转成"开关是供给层
+    的事"：判官关闭 → 没有供给，调用方拿到的永远是 None，不可能误调。
+
+    认两种键名：``judge_enabled``（调用方传的判断语义开关，判档岗用它）与
+    ``enabled``（中枢总开关）。两者任一显式为 False 才算关闭；属性不存在
+    不算关闭（配置对象形态多样，缺键 = 未表态）。
+    """
+    for key in ("judge_enabled", "enabled"):
+        value = getattr(hub, key, None)
+        if value is not None and not value:
+            return True
+    return False
+
+
 def get_judge_provider_config(
     hub: Any = None,
     user_id: str | None = None,
@@ -253,6 +356,9 @@ def get_judge_provider_config(
 
     ``user_id``/``agent_id`` 形参保留为兼容位（历史签名），不再参与解析。
     """
+    # B1 契约（收尾方案 v1 §5）：开关在供给层生效，一处判全局。
+    if _supply_switch_off(hub):
+        return None
     pid = str(getattr(hub, "judge_provider_id", "") or "").strip()
     model = str(getattr(hub, "judge_model", "") or "").strip()
     source = "judge_slot"
