@@ -175,3 +175,179 @@ def evaluate_image_probe_answer(
         elapsed,
     )
     return False, f"Model did not recognise image (answer={answer!r})"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 判官能力探针（B3 · 收尾方案 v1 §6.1）
+#
+# 为什么探针要存在：判官槽位配了模型不等于模型胜任判官。判官要读几十 KB
+# 的计划/工具参数（长上下文），还要输出能被解析的 JSON 结论。这两件事
+# 上游各家说法不一、参数名不一（`response_format` / `json_mode` / 根本
+# 没有），只有探测能给出**这一家这一个模型**的事实。
+#
+# 设计口径（与探针家族一致）：
+# - 评测函数纯函数、无状态、无网络——判定逻辑可测；
+# - 网络函数只管发请求，超时用决策侧同一把尺子（本地慢模型宽限）；
+# - 结果写进 model_capability_cache，探测一次全平台复用；
+# - **未探测 = 不判定**（缓存无记录时判官能力闸放行），所以这一族探针
+#   默认不参与否决，由 `judge_probe_enabled` 开关点亮。
+# ══════════════════════════════════════════════════════════════════════
+
+#: 结构化输出探针的提示词：要求只回一个固定 JSON。
+_JSON_PROBE_PROMPT = (
+    'Reply with exactly this JSON and nothing else, no prose, '
+    'no code fence: {"ok": true}'
+)
+
+
+def evaluate_json_probe_answer(answer: str, reasoning: str = "") -> tuple[bool, str]:
+    """判定"模型能按要求回 JSON"——判官提示词要求 JSON 结论，读不出
+    JSON 的判官等于没有判官（台账上长成 parse_fail，看不出是模型不行
+    还是提示词没被遵守）。
+
+    判定：``json_mode`` 支持 = 回复里有可解析的 JSON 对象（容忍代码围栏
+    与前后废话——围栏内的 JSON 说明模型懂格式；完全无 JSON 才判否）。
+    """
+    import json as _json
+
+    text = str(answer or "").strip()
+    reasoning = str(reasoning or "").strip()
+    for candidate in (text, reasoning):
+        if not candidate:
+            continue
+        body = candidate
+        if "```" in body:
+            body = body.split("```")[1] if body.count("```") >= 2 else body
+            body = body.replace("json", "", 1)
+        start, end = body.find("{"), body.rfind("}")
+        if start >= 0 and end > start:
+            chunk = body[start : end + 1]
+            try:
+                parsed = _json.loads(chunk)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(parsed, dict):
+                return True, f"JSON mode ok (parsed keys={sorted(parsed)[:4]})"
+    return False, f"no parsable JSON in reply (answer={text[:80]!r})"
+
+
+def evaluate_long_context_answer(answer: str, marker: str) -> tuple[bool, str]:
+    """判定"模型读到了长上下文里的针"——长输入被截断时模型看不到针，
+    回不出针里的词。针必须在**长填充之后**的正文里，位置就是尺子。
+    """
+    text = str(answer or "").strip()
+    if marker and marker in text:
+        return True, f"long-context ok (marker found)"
+    return False, f"marker {marker!r} not echoed (answer={text[:80]!r})"
+
+
+async def _judge_probe_chat(
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict],
+    timeout: float,
+    extra: dict | None = None,
+) -> str:
+    """探针共用的一次聊天调用（与决策网关同一形状：直连 OpenAI 兼容端点）。"""
+    import httpx
+
+    from ..decision.resolver import is_local_base_url
+
+    api_base = str(base_url or "").rstrip("/")
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 200,
+        "temperature": 0.0,
+    }
+    if extra:
+        payload.update(extra)
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    # 本地模型（ollama 等）冷启动慢，探测宽限到 180s，与判官同一口径
+    eff_timeout = 180.0 if is_local_base_url(api_base) else max(timeout, 30.0)
+    async with httpx.AsyncClient(timeout=eff_timeout) as client:
+        resp = await client.post(
+            f"{api_base}/chat/completions", json=payload, headers=headers
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    msg = choices[0].get("message") or {}
+    content = msg.get("content") or ""
+    if isinstance(content, list):
+        content = " ".join(
+            str(p.get("text", "")) for p in content if isinstance(p, dict)
+        )
+    reasoning = str(msg.get("reasoning") or msg.get("reasoning_content") or "")
+    # 思考内容与正文并排返回：结构化输出探针要同时看两边
+    return f"{content}\n{reasoning}"
+
+
+async def probe_json_mode(
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout: float = 20.0,
+) -> tuple[bool, str]:
+    """结构化输出探针。返回 ``(支持, 说明)``；异常按"探测失败"记 False。"""
+    try:
+        answer = await _judge_probe_chat(
+            base_url, api_key, model,
+            [{"role": "user", "content": _JSON_PROBE_PROMPT}],
+            timeout,
+        )
+    except Exception as exc:  # noqa: BLE001 - 探测失败不是崩溃
+        return False, f"probe transport failed: {type(exc).__name__}: {exc}"
+    return evaluate_json_probe_answer(answer)
+
+
+async def probe_long_context_cap(
+    base_url: str,
+    api_key: str,
+    model: str,
+    marker: str = "PURPLE-OTTER-42",
+    filler_units: int = 600,
+    timeout: float = 20.0,
+) -> tuple[bool, str]:
+    """长上下文探针：塞入 ``filler_units`` 段填充文本（约 600×40 词 ≈ 24k
+    词，够压过 8k 档模型窗口），针放在填充之后。回不出针 = 读不到针。
+
+    保守口径：探针本身可能因**上游长度上限报错**而失败，那不能证明模型
+    不能读长文（有些家在限长时直接拒收）。因此本探针只在"成功回复且
+    未回针"时判 False；请求失败一律记为未探测（说明里写清原因）。
+    """
+    filler = "The quick brown fox jumps over the lazy dog. " * filler_units
+    prompt = (
+        filler
+        + "\nRead the line above the answer: the secret codeword is "
+        + marker
+        + ". Reply with ONLY the codeword."
+    )
+    try:
+        answer = await _judge_probe_chat(
+            base_url, api_key, model, [{"role": "user", "content": prompt}], timeout
+        )
+    except Exception as exc:  # noqa: BLE001
+        return False, f"probe transport failed (未探测): {type(exc).__name__}: {exc}"
+    return evaluate_long_context_answer(answer, marker)
+
+
+def record_judge_probe(
+    provider_id: str,
+    model_id: str,
+    capability: str,
+    supported: bool,
+    checked_detail: str = "",
+) -> None:
+    """把探测结果写进模型能力缓存（一次探测，全平台复用）。"""
+    from .model_capability_cache import get_capability_cache
+
+    key = f"{str(provider_id or '').strip()}:{str(model_id or '').strip()}"
+    get_capability_cache().record(
+        key, capability, supported=supported, checked_detail=checked_detail
+    )

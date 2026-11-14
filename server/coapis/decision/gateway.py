@@ -556,6 +556,20 @@ class JudgeGateway:
         # 嵌入模型当判官 9/9 全超时）。
         # 灰度开关 judge_capability_dispatch 默认关：先只观测（打日志），
         # 打开后不胜任的槽位直接不上岗，按规则直判 + 台账记原因码。
+        # --- L0 前置门：判官能力探针（B3 · 收尾方案 v1 §6.1，默认关）---
+        # 探测 = 真调一次上游，问两件上游各家说法不一的事：能不能按要求
+        # 回 JSON、读不读得长上下文。结果进模型能力缓存，一次探测全平台
+        # 复用；探测请求失败按"未探测"处理（放行），不把"上游拒收长输入"
+        # 当成"模型不能读长文"。
+        if bool(getattr(cfg, "judge_probe_enabled", False)):
+            probe_code = await self._probe_judge_slot(slot, cfg)
+            if probe_code:
+                return await self._degrade(
+                    purpose, LAYER_NO_MODEL,
+                    jr.format_reason(probe_code, f"探针实证 {slot.get('provider_id')}/{slot.get('model')}"),
+                    rule_fallback, describe, elapsed, ids,
+                )
+
         cap_ok, cap_code = judge_capability_ok(
             str(slot.get("provider_id") or ""),
             str(slot.get("model") or ""),
@@ -1069,6 +1083,42 @@ class JudgeGateway:
         return _text_of(res), *_usage_of(res)
 
     # ---------------- L4：规则兜底 ----------------
+
+    async def _probe_judge_slot(self, slot: dict, cfg: Any) -> str:
+        """上岗前补齐判官能力实证；返回原因码（空串 = 放行）。
+
+        口径：缓存里**没有记录**才探测（一次探测全平台复用，不重复烧）；
+        探测请求失败按未探测放行。判官探测的是判官真正要用的两件事，
+        不是"这个模型有没有视觉"——探针家族第一次有了判官这一维。
+        """
+        provider_id = str(slot.get("provider_id") or "")
+        model = str(slot.get("model") or "")
+        try:
+            from ..providers.model_capability_cache import get_capability_cache
+            from ..providers.multimodal_prober import (
+                probe_json_mode,
+                probe_long_context_cap,
+                record_judge_probe,
+            )
+            from .resolver import availability_key
+
+            key = availability_key(provider_id, model)
+            cache = get_capability_cache()
+            base_url, api_key = str(slot.get("base_url") or ""), str(slot.get("api_key") or "")
+        except Exception:  # noqa: BLE001 - 探测设施不可用 = 不拦上岗
+            return ""
+
+        if cache.get(key, "json_mode", None) is None:
+            ok, detail = await probe_json_mode(base_url, api_key, model)
+            record_judge_probe(provider_id, model, "json_mode", ok, detail)
+            if not ok and "transport failed" not in detail:
+                return jr.SLOT_MODEL_INCAPABLE
+        if cache.get(key, "long_context", None) is None:
+            ok, detail = await probe_long_context_cap(base_url, api_key, model)
+            record_judge_probe(provider_id, model, "long_context", ok, detail)
+            if not ok and "transport failed" not in detail:
+                return jr.SLOT_MODEL_INCAPABLE
+        return ""
 
     async def _degrade(
         self,

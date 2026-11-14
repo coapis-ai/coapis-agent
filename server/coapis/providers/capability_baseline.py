@@ -43,6 +43,18 @@ class ExpectedCapability:
     expected_video: bool | None
     doc_url: str = ""
     note: str = ""
+    # --- B3 判官能力三字段（收尾方案 v1 §6.1）：默认 None = 基线未记载 ---
+    # prompt_tokens: 官方标称上下文窗口。判官的输入是"提示词 + 被判内容"，
+    #   窗口小于判官输入下限的模型必然截断——上游不报错，只回一句读不出
+    #   结论的话，台账上长成 timeout/parse_fail（把"拿错模型"伪装成
+    #   "判官不行"）。
+    # cache_input: 是否支持输入缓存（判官每轮同一份提示词，缓存决定成本）。
+    # thinking_style: 思考开关风格（enable_thinking / reasoning_effort /
+    #   none / ollama）——判官要求"先想后答且只输出 JSON"，思考开着会把
+    #   推理文字混进 JSON 里，解析失败就是这么来的。
+    prompt_tokens: int | None = None
+    cache_input: bool | None = None
+    thinking_style: str | None = None
 
 
 @dataclass

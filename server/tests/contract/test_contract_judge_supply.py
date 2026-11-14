@@ -426,3 +426,55 @@ def test_every_abstain_reason_in_gateway_carries_a_code():
         assert judge_reasons.parse_code(
             judge_reasons.format_reason(code, "细节")
         ) == code
+
+# ── 9. B3 判官探针：探测结果决定判官能不能上岗 ─────────────────────────
+
+
+def test_json_probe_requires_parsable_json():
+    from coapis.providers.multimodal_prober import evaluate_json_probe_answer
+
+    ok, _ = evaluate_json_probe_answer('{"ok": true}')
+    assert ok is True
+    # 代码围栏里的 JSON 也算懂格式（上游常加围栏）
+    assert evaluate_json_probe_answer('```json\n{"ok": true}\n```')[0] is True
+    # 纯散文 = 不支持：判官提示词要求 JSON 结论，读不出等于没判官
+    assert evaluate_json_probe_answer("Sure! The answer is true.")[0] is False
+    # 思考通道里的 JSON 也认（思考型模型正文空、结论在 reasoning）
+    assert evaluate_json_probe_answer("", '{"ok": true}')[0] is True
+
+
+def test_long_context_probe_requires_the_marker():
+    from coapis.providers.multimodal_prober import evaluate_long_context_answer
+
+    assert evaluate_long_context_answer("PURPLE-OTTER-42", "PURPLE-OTTER-42")[0] is True
+    ok, detail = evaluate_long_context_answer("I cannot find it", "PURPLE-OTTER-42")
+    assert ok is False and "PURPLE-OTTER-42" in detail
+
+
+def test_probe_record_lands_in_capability_cache(monkeypatch):
+    from coapis.providers import multimodal_prober as mp
+    from coapis.providers import model_capability_cache as mcc
+
+    recorded: list = []
+    # record_judge_probe 是函数内导入（避免 providers 层顶层互导成环），
+    # 因此打桩点在 model_capability_cache 模块本身。
+    monkeypatch.setattr(
+        mcc,
+        "get_capability_cache",
+        lambda: SimpleNamespace(
+            record=lambda key, cap, supported, checked_detail="": recorded.append(
+                (key, cap, supported)
+            )
+        ),
+        raising=True,
+    )
+    mp.record_judge_probe("p1", "m1", "json_mode", True, "ok")
+    assert recorded == [("p1:m1", "json_mode", True)]
+
+
+def test_probe_config_switch_defaults_off():
+    # 探针要真调上游模型，会加一次判官前置延迟 —— 默认必须关。
+    from coapis.decision.config import DEFAULTS
+
+    assert DEFAULTS["judge_probe_enabled"] is False
+    assert DEFAULTS["judge_capability_dispatch"] is False
