@@ -158,6 +158,7 @@ class ToolGuardMixin:
         )
         if decision.plan_id:
             self._record_plan_scope_audit(tool_name, decision, approved=False)
+            self._observe_loop_plan_drift(tool_name, decision, tool_input)
         return False
 
     def _record_plan_scope_audit(self, tool_name: str, decision, approved: bool) -> None:
@@ -270,6 +271,7 @@ class ToolGuardMixin:
             tool_input = getattr(tool_call, "input", {}) or {}
             guard = self._get_tool_call_guard()
             dedup_result = guard.check_and_dedup(tool_name, tool_input)
+            self._observe_loop_dedup(dedup_result, tool_name)
             if dedup_result is not None:
                 from agentscope.message import TextBlock
                 from agentscope.tool import ToolResponse
@@ -379,6 +381,90 @@ class ToolGuardMixin:
         return result
 
     # pylint: disable=too-many-return-statements
+
+    # ==================================================================
+    # 循环闸观察链（B4）
+    # ------------------------------------------------------------------
+    # 闸链**不重造判定**：重复调用 / 空结果 / 思考停滞仍分别由
+    # ToolCallGuard 与 ReasoningLoopDetector 判定；本链只做三件现成机制
+    # 没有的事：归因稳定闸码、按门分桶计数、按门入台账（岗位 loop_gate）。
+    # 承接的新增门只有"每轮调用预算"，默认关（预算 0 = 只计数不拦）。
+    # ==================================================================
+
+    def _loop_gates(self):
+        """会话级闸链单例；异常一律返回 None，观察件不得影响主流程。"""
+        chain = getattr(self, "_loop_gate_chain", None)
+        if chain is not None:
+            return chain
+        try:
+            from .loop_gates import LoopGateChain
+
+            ctx = getattr(self, "_request_context", None) or {}
+            chain = LoopGateChain(
+                session_id=str(ctx.get("session_id", "") or ""),
+                chat_id=str(ctx.get("chat_id", "") or ""),
+                user_id=str(ctx.get("user_id", "") or ""),
+                agent_id=str(ctx.get("agent_id", "") or ""),
+            )
+            self._loop_gate_chain = chain
+            return chain
+        except Exception:  # pragma: no cover - 观察件不得影响主流程
+            logger.debug("loop-gates chain unavailable", exc_info=True)
+            return None
+
+    def _observe_loop_dedup(self, text: str, tool_name: str) -> None:
+        """把现成去重触发归因成闸码并计数（不改变返回给模型的内容）。"""
+        try:
+            chain = self._loop_gates()
+        except Exception:  # pragma: no cover
+            return
+        if chain is None:
+            return
+        try:
+            chain.observe_dedup(text, tool_name=tool_name)
+        except Exception:  # pragma: no cover
+            logger.debug("loop-gates observe_dedup failed", exc_info=True)
+
+    def _observe_loop_round(self, tool_name: str) -> bool:
+        """记录本轮调用；True 表示预算耗尽（本轮不再执行工具）。"""
+        try:
+            chain = self._loop_gates()
+        except Exception:  # pragma: no cover
+            return False
+        if chain is None:
+            return False
+        try:
+            verdict = chain.observe_round(tool_name=tool_name)
+            return bool(verdict is not None and verdict.is_blocking)
+        except Exception:  # pragma: no cover
+            logger.debug("loop-gates observe_round failed", exc_info=True)
+            return False
+
+    def _observe_loop_plan_drift(self, tool_name: str, decision: Any,
+                                 tool_input: dict | None = None) -> None:
+        """计划越界的归因计数（判定仍由 _plan_scope_covers 做，不搬第二套）。"""
+        try:
+            chain = self._loop_gates()
+        except Exception:  # pragma: no cover
+            return
+        if chain is None:
+            return
+        try:
+            payload = tool_input or {}
+            path = ""
+            for key in ("file_path", "path", "abs_path", "target_path"):
+                cand = str(payload.get(key, "") or "").strip()
+                if cand:
+                    path = cand
+                    break
+            chain.observe_plan_drift(
+                getattr(decision, "approved_scope", None),
+                tool_name,
+                path=path,
+            )
+        except Exception:  # pragma: no cover
+            logger.debug("loop-gates observe_plan_drift failed", exc_info=True)
+
     async def _decide_guard_action(
         self,
         tool_call: dict[str, Any],
@@ -395,6 +481,23 @@ class ToolGuardMixin:
 
         if not tool_name or not engine.enabled:
             return None
+
+        # 循环闸·每轮调用预算（默认关：预算 0 只计数不拦）。命中即复用现成
+        # auto_denied 通道降级——本轮不再执行工具，模型须转为文本汇报。
+        if self._observe_loop_round(tool_name):
+            logger.warning(
+                "loop-gate: 本轮调用预算耗尽 tool=%s session=%s",
+                tool_name,
+                (getattr(self, "_request_context", None) or {}).get(
+                    "session_id", "",
+                ),
+            )
+            return _GuardAction(
+                kind="auto_denied",
+                tool_name=tool_name,
+                tool_input=dict(tool_input),
+                guard_result=None,
+            )
 
         # Get tool execution level and user role
         exec_level = self._get_tool_execution_level()

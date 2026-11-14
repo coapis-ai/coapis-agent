@@ -4357,6 +4357,8 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             detection = self._reasoning_loop_detector.check_and_detect(
                 reasoning_text, tool_names,
             )
+            self._observe_loop_reasoning(detection)
+            self._observe_loop_stop_phrase(reasoning_text, tool_names)
 
             if detection == "force_exit":
                 logger.warning(
@@ -4720,6 +4722,49 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
     # future。前摇从"两判之和"降为"两判较大者 − 前置工作时间"。
     # 代价（D3 明说）：极短请求也会用掉一次判官额度 → 关键词命中即取消技能
     # 预判（`_cancel_prefetch`），判档判出 simple 且关键词已命中则跳过技能判官。
+    def _observe_loop_reasoning(self, detection: str) -> None:
+        """循环闸·思考环观察：把现成停滞/震荡判定归因成闸码并计数。"""
+        chain = getattr(self, "_loop_gate_chain", None)
+        if chain is None:
+            return
+        try:
+            marker = {
+                "force_exit": "[FORCE-EXIT]",
+                "force_text_only": "[LOOP-STAGNANT]",
+            }.get(str(detection), "")
+            if marker:
+                chain.observe_reasoning(marker)
+        except Exception:  # pragma: no cover
+            logger.debug("loop-gates observe_reasoning failed", exc_info=True)
+
+    def _observe_loop_stop_phrase(self, reasoning_text: str,
+                                  tool_names: list) -> None:
+        """循环闸·停止句观察（默认关）：自称完成却继续调写操作。"""
+        chain = getattr(self, "_loop_gate_chain", None)
+        if chain is None:
+            return
+        try:
+            for name in tool_names or []:
+                chain.observe_stop_phrase(reasoning_text, tool_name=str(name))
+        except Exception:  # pragma: no cover
+            logger.debug("loop-gates observe_stop_phrase failed", exc_info=True)
+
+    def _reset_loop_gates(self) -> None:
+        """新回合复位观察链：先补记，再开新轮，并刷新会话身份。"""
+        chain = getattr(self, "_loop_gate_chain", None)
+        if chain is None:
+            return
+        try:
+            chain.flush()
+            chain.new_round()
+            ctx = getattr(self, "_request_context", None) or {}
+            chain.session_id = str(ctx.get("session_id", "") or "")
+            chain.chat_id = str(ctx.get("chat_id", "") or "")
+            chain.user_id = str(ctx.get("user_id", "") or "")
+            chain.agent_id = str(ctx.get("agent_id", "") or "")
+        except Exception:  # pragma: no cover
+            logger.debug("loop-gates reset failed", exc_info=True)
+
     def _start_judge_prefetch(self, msg: Msg | list[Msg] | None, query: str) -> None:
         """并行发起判档与技能判官，结果挂在 self 上供消费处取。"""
         self._prefetch_tasks = {}
@@ -5002,6 +5047,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # Reset reasoning loop detector for new turn
         if hasattr(self, "_reasoning_loop_detector"):
             self._reasoning_loop_detector.reset()
+        self._reset_loop_gates()
 
         # P0: Initialize ProgressTracker for this turn
         try:
