@@ -40,6 +40,7 @@ POSTS = (
     "context",
     "acceptance",
     "advisor",
+    "loop_gate",  # B4a：循环闸岗（闸触发按门分桶入账，payload.purpose 存闸码）
 )
 
 DEFAULTS = {

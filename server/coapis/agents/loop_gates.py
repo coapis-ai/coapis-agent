@@ -67,8 +67,10 @@ GATE_LABELS: dict[str, str] = {
 # 闸码 → 台账岗位语义（岗位=loop_gate，purpose=闸码）
 LEDGER_SOURCE = "loop_gate"
 
-# 台账节流：每门每会话累计 N 次触发才追加一行
-_LEDGER_EVERY = int(os.getenv("COAPIS_LOOP_GATE_LEDGER_EVERY", "5"))
+# 台账节流粒度：默认 1 = 每次触发一行，治理页看到的就是真实计数。
+# （闸触发天然稀疏：去重拦截、会话量告警、停滞强制都是低频事件。）
+# 需要省行时用它，不是靠端点做估算。
+_LEDGER_EVERY = max(1, int(os.getenv("COAPIS_LOOP_GATE_LEDGER_EVERY", "1")))
 _GATE_LEDGER_ON = os.getenv("COAPIS_LOOP_GATE_LEDGER", "1").strip().lower() not in (
     "0", "false", "off", "no",
 )
@@ -78,6 +80,22 @@ _STOP_PHRASE_ON = os.getenv("COAPIS_LOOP_GATE_STOP_PHRASE", "0").strip().lower()
 )
 # 单轮调用预算默认 0 = 关（只做观察计数，不拦；>0 才生效）
 _ROUND_BUDGET = int(os.getenv("COAPIS_LOOP_GATE_ROUND_BUDGET", "0"))
+
+
+def ledger_every() -> int:
+    """节流入账粒度：每门每 N 次触发写一行（端点据此说明计数口径）。"""
+    return max(1, _LEDGER_EVERY)
+
+
+_TRUE = ("1", "true", "on", "yes")
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """布尔阈值的 env 读取：未设用默认，设了按真值串判定。"""
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in _TRUE
 
 
 def _env_int(name: str, default: int) -> int:
@@ -106,7 +124,10 @@ class GateThresholds:
 
     @classmethod
     def from_env(cls) -> "GateThresholds":
-        """阈值读取：env > 现值。env 未设时与现状逐字节一致。"""
+        """阈值读取：env > 现值。**每次调用都读 env**——模块导入时定值
+        会让运行期调参失效，治理页也就看不到当前真实值了。
+        env 未设时与现状逐字节一致（默认值 = 原硬编码常量）。
+        """
         return cls(
             exact_dedup=_env_int("COAPIS_LOOP_GATE_DEDUP", 2),
             dup_global=_env_int("COAPIS_LOOP_GATE_DUP_GLOBAL", 3),
@@ -114,8 +135,10 @@ class GateThresholds:
             session_warn=_env_int("COAPIS_LOOP_GATE_SESSION_WARN", 10),
             stagnation_similarity=_env_int("COAPIS_LOOP_GATE_STAGNANT", 5),
             stagnation_force_exit=_env_int("COAPIS_LOOP_GATE_FORCE_EXIT", 15),
-            round_budget=_ROUND_BUDGET,
-            stop_phrase_enabled=_STOP_PHRASE_ON,
+            round_budget=_env_int("COAPIS_LOOP_GATE_ROUND_BUDGET", _ROUND_BUDGET),
+            stop_phrase_enabled=_env_flag(
+                "COAPIS_LOOP_GATE_STOP_PHRASE", _STOP_PHRASE_ON,
+            ),
         )
 
 
@@ -358,6 +381,7 @@ class LoopGateChain:
 __all__ = [
     "GATE_CODES",
     "GATE_LABELS",
+    "ledger_every",
     "GateThresholds",
     "GateVerdict",
     "LEDGER_SOURCE",

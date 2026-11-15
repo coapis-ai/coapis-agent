@@ -33,6 +33,8 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -471,3 +473,188 @@ def put_config(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, 
     # checked 回传全字段生效值（越界值已夹取），供前端核对真正生效的每一项
     return {"ok": True, "decision_hub": accepted,
             "ignored": unknown, "checked": cfg.full_view()}
+
+
+@router.get("/loop-gates")
+def loop_gate_stats(
+    request: Request,
+    days: int = Query(7, ge=1, le=90, description="统计窗口（天）"),
+    chat_id: Optional[str] = Query(None, description="按会话过滤"),
+    recent_limit: int = Query(20, ge=1, le=200, description="最近触发行数"),
+) -> dict[str, Any]:
+    """循环闸触发对账：按门分桶 + 白话说明 + 最近触发行。
+
+    数据源是台账岗位 ``loop_gate``。闸码存在 ``payload.purpose`` ——
+    ``purpose`` **不是 decision_events 的列**（实测列签名里没有它，
+    契约层只能经 payload 把它带进台账），所以这里按行取回、在 Python 侧
+    聚合，不写方言相关的 json_extract。
+
+    计数口径：默认每次触发明细一行（``ledger_every`` = 1），
+    ``hits`` 就是台账行数本身 = 真实触发次数；若运维把节流粒度调大，
+    ``hits`` 会按行数 × 粒度还原，响应里的 ``counting_note`` 会说明。
+
+    十门零值补齐——"从没触发"与"没数据"必须分得开（v15 定下的口径）。
+    非管理员只见自己触发的闸（与 /decisions 同口径）。
+    """
+    from coapis.agents.loop_gates import GATE_CODES, GATE_LABELS, ledger_every
+
+    me, role = _identity(request)
+    # created_at 是 epoch 秒（Float 列，实测 dev 库全为 real）。
+    # 用 datetime 参数比较=拿数字和文本比，SQLite 里 real 恒小于 text，
+    # 窗口过滤会把**全部真实行**筛掉（端点恒 0 行的真因）。
+    since = time.time() - float(days) * 86400.0
+
+    sql = (
+        "SELECT event_id, created_at, action, reason, chat_id, turn, "
+        "user_id FROM decision_events "
+        "WHERE source = 'loop_gate' AND created_at >= :since"
+    )
+    params: dict[str, Any] = {"since": since, "_cap": 5000}
+    if role != "admin":
+        sql += " AND user_id = :me"
+        params["me"] = me
+    if chat_id:
+        sql += " AND chat_id = :chat_id"
+        params["chat_id"] = chat_id
+    sql += " ORDER BY created_at DESC, event_id DESC LIMIT :_cap"
+
+    buckets: dict[str, dict[str, Any]] = {
+        code: {
+            "gate": code,
+            "label": GATE_LABELS.get(code, code),
+            "rows": 0,
+            "hits": 0,
+            "actions": {},
+            "last_at": None,
+        }
+        for code in GATE_CODES
+    }
+    unknown: dict[str, int] = {}
+    picked: list[dict[str, Any]] = []
+    total_rows = 0
+
+    try:
+        from coapis.foundation.db.engine import get_session
+
+        with get_session() as session:
+            fetched = session.execute(text(sql), params).all()
+    except Exception as exc:  # pragma: no cover - 库坏了不该拖垮前端
+        logger.warning("[Decisions] 循环闸台账读取失败: %s", exc)
+        return {
+            "days": days,
+            "gates": list(buckets.values()),
+            "total_rows": 0,
+            "total_hits": 0,
+            "active_gates": 0,
+            "unknown_gates": {},
+            "recent": [],
+            "ledger_every": ledger_every(),
+            "enabled": _loop_gate_enabled_flag(),
+            "error": str(exc),
+        }
+
+    for event_id, created_at, action, reason, cid, turn, uid in fetched:
+        total_rows += 1
+        gate = _lg_gate_of(reason)
+        stamp = _lg_iso(created_at)
+        row = {
+            "event_id": str(event_id or ""),
+            "created_at": stamp,
+            "gate": gate,
+            "action": str(action or ""),
+            "reason": str(reason or ""),
+            "chat_id": str(cid or ""),
+            "turn": int(turn or 0),
+            "user_id": str(uid or ""),
+        }
+        bucket = buckets.get(gate)
+        if bucket is None:
+            # 未登记闸码必须显式暴露，不能静默吞掉
+            unknown[gate] = unknown.get(gate, 0) + 1
+        else:
+            bucket["rows"] += 1
+            key = str(action or "observe")
+            bucket["actions"][key] = int(bucket["actions"].get(key, 0)) + 1
+            if stamp and (not bucket["last_at"] or stamp > bucket["last_at"]):
+                bucket["last_at"] = stamp
+        if len(picked) < recent_limit:
+            picked.append(row)
+
+    every = ledger_every()
+    gates = sorted(
+        buckets.values(),
+        key=lambda item: (-int(item["rows"]), str(item["gate"])),
+    )
+    for item in gates:
+        item["hits"] = int(item["rows"]) * every
+
+    return {
+        "days": days,
+        "gates": gates,
+        "total_rows": total_rows,
+        "total_hits": total_rows * every,
+        "active_gates": sum(1 for g in gates if g["rows"] > 0),
+        "unknown_gates": unknown,
+        "recent": picked,
+        "ledger_every": every,
+        "counting_note": (
+            "hits = 台账行数 × ledger_every；默认 ledger_every=1，"
+            "即 hits 就是真实触发次数"
+        ),
+        "enabled": _loop_gate_enabled_flag(),
+    }
+
+
+def _lg_gate_of(reason: Any) -> str:
+    """闸码取法：读 reason 的 `[闸码]` 前缀（闸链写入时带的格式）。
+
+    台账表没有 purpose/payload 列（`_LEDGER_COLUMNS` 权威清单里没有），
+    闸码唯一活着的地方就是 reason 前缀——这是实测后的取舍，不是猜测。
+    解析不出前缀返回空串，由端点计入 unknown_gates 显式暴露。
+    """
+    text_ = str(reason or "").strip()
+    if not text_.startswith("["):
+        return ""
+    end = text_.find("]")
+    if end <= 1:
+        return ""
+    return text_[1:end].strip()
+
+
+def _lg_iso(value: Any) -> str:
+    """时间列统一转 ISO 文本。
+
+    台账的 created_at 是 epoch 秒（Float 列）；历史行里也见过文本时间。
+    这里两种都归一成 ISO，页面读到的时间必须可比、可读。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return ""
+        try:
+            return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
+        except (OverflowError, OSError, ValueError, TypeError):
+            return ""
+    return str(value)
+
+
+def _loop_gate_enabled_flag() -> dict[str, Any]:
+    """闸开关与阈值现状（阈值配置化后必须让页面看见当前值）。"""
+    try:
+        from coapis.agents.loop_gates import GateThresholds
+
+        cfg = GateThresholds.from_env()
+        return {
+            "round_budget": int(cfg.round_budget),
+            "stop_phrase": bool(cfg.stop_phrase_enabled),
+            "dedup": int(cfg.exact_dedup),
+            "empty_streak": int(cfg.empty_streak),
+            "session_warn": int(cfg.session_warn),
+            "stagnation_similarity": int(cfg.stagnation_similarity),
+            "stagnation_force_exit": int(cfg.stagnation_force_exit),
+        }
+    except Exception:  # pragma: no cover
+        return {}

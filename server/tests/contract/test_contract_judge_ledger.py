@@ -212,6 +212,8 @@ def test_source_whitelist_is_closed_set():
         "acceptance",
         "advisor",
         "selfcheck",
+        # B4b：循环闸岗位（闸码在 reason 前缀，按门分桶）
+        "loop_gate",
     } == set(lc.SOURCES)
 
 

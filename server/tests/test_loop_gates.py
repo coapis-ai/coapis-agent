@@ -148,15 +148,14 @@ def test_labels_cover_every_gate_code():
 
 
 # ---------------------------------------------------------------- 台账落点
-def test_ledger_rows_written_with_throttle(monkeypatch):
-    """节流：每门累计到阈值才写一行；岗位=loop_gate，purpose=闸码。"""
+def test_ledger_one_row_per_trigger_by_default(monkeypatch):
+    """默认粒度 1：每次触发明细一行，治理页读到的就是真实触发次数。"""
     rows: list[dict] = []
 
     def fake_write_ledger(**kwargs):
         rows.append(kwargs)
         return True
 
-    import coapis.agents.loop_gates as mod
     monkeypatch.setattr(
         "coapis.decision.ledger_contract.write_ledger", fake_write_ledger,
     )
@@ -164,19 +163,45 @@ def test_ledger_rows_written_with_throttle(monkeypatch):
                           user_id="u1", agent_id="a1")
     for _ in range(5):
         chain.observe_dedup("[DEDUP] 相同参数已调用过", tool_name="write_file")
-    assert len(rows) == 1, rows
+    assert len(rows) == 5, rows
     row = rows[0]
     assert row["source"] == LEDGER_SOURCE == "loop_gate"
     assert row["purpose"] == GATE_DUPLICATE
     assert row["hit_layer"] == "rule"
     assert GATE_LABELS[GATE_DUPLICATE] in row["reason"]
     assert row["session_id"] == "s1" and row["chat_id"] == "c1"
-    # 未达阈值的门在 flush 时补记
+    # 已写平，收尾无补记
+    assert chain.flush() == 0
+    assert len(rows) == 5
+
+
+def test_ledger_throttle_groups_at_env_granularity(monkeypatch):
+    """节流粒度 >1：每门每 N 次一行；未满阈值的门由 flush 补记。"""
+    import coapis.agents.loop_gates as mod
+
+    monkeypatch.setattr(mod, "_LEDGER_EVERY", 3)
+    rows: list[dict] = []
+
+    def fake_write_ledger(**kwargs):
+        rows.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "coapis.decision.ledger_contract.write_ledger", fake_write_ledger,
+    )
+    chain = LoopGateChain(ledger_enabled=True, session_id="s1")
+    for _ in range(7):
+        chain.observe_dedup("[DEDUP] 相同参数已调用过", tool_name="write_file")
+    assert len(rows) == 2, rows          # 第 3、第 6 次各一行
+    assert all(r["purpose"] == GATE_DUPLICATE for r in rows)
+    # 未达阈值的门（dup 余 1、oscillate 1 次）在 flush 时全部补记
     chain.observe_reasoning("[LOOP-OSCILLATING] 来回切换")
-    assert len(rows) == 1
-    assert chain.flush() == 1
     assert len(rows) == 2
-    assert rows[1]["purpose"] == GATE_OSCILLATION
+    assert chain.flush() == 2
+    assert len(rows) == 4
+    assert [r["purpose"] for r in rows[2:]] == [GATE_DUPLICATE, GATE_OSCILLATION]
+    # 补记后账面写平，二次收尾不重复写
+    assert chain.flush() == 0
 
 
 def test_ledger_write_failure_never_raises(monkeypatch):
