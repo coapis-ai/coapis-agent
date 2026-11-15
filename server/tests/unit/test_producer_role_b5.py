@@ -67,8 +67,10 @@ def test_source_maps_to_role(source, role):
 
 
 def test_producer_sources_are_the_write_sources():
+    # B5-A 检查点恢复（restore）把内容写回工作区，与 write_file 同源 = 产出方。
+    # 词表变化必须在这里显式加项，别让 file_ledger 单方面漂移。
     assert PRODUCER_SOURCES == frozenset(
-        {"write_file", "edit_file", "append_file", "convert"}
+        {"write_file", "edit_file", "append_file", "convert", "restore"}
     )
 
 

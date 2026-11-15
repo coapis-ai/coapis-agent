@@ -46,6 +46,7 @@ import {
   EyeOutlined,
   DatabaseOutlined,
   AuditOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -55,6 +56,7 @@ import AgentIdentityPanel from './AgentIdentityPanel';
 // 资源台账管理面（v20 · W2）：台账从 v17 起只有机器看得见，这一页给用户筛/
 // 定稿/巡检/归位的入口。
 import LedgerPanel from './LedgerPanel';
+import CheckpointPanel from './CheckpointPanel';
 import JudgmentPanel from './JudgmentPanel';
 // 会话侧的预览抽屉（B4）在这里复用：我的空间预览弹窗 2026-06-28 被移除后，
 // 文件只能下载不能看，产出文件的体验断在「我的空间」这一头。
@@ -115,6 +117,7 @@ const CATEGORIES = [
   { key: 'agents', label: '智能体', icon: <RobotOutlined /> },
   { key: 'ledger', label: '资源台账', labelKey: 'myspace.tabLedger', icon: <DatabaseOutlined /> },
   { key: 'judgment', label: '判断台账', labelKey: 'myspace.tabJudgment', icon: <AuditOutlined /> },
+  { key: 'checkpoints', label: '检查点', labelKey: 'myspace.tabCheckpoint', icon: <HistoryOutlined /> },
 ] as const;
 
 // ═══════════════════════════════════════════════════════════
@@ -846,7 +849,7 @@ const MySpacePage: React.FC = () => {
       />
 
       {/* 顶部工具栏 (仅文件 tab) */}
-      {activeCategory !== 'agents' && activeCategory !== 'ledger' && activeCategory !== 'judgment' && (
+      {activeCategory !== 'agents' && activeCategory !== 'ledger' && activeCategory !== 'judgment' && activeCategory !== 'checkpoints' && (
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <Breadcrumb items={breadcrumbItems} />
         
@@ -1068,6 +1071,11 @@ const MySpacePage: React.FC = () => {
       )}
       {/* 判断台账（v24）：判官的审计日志 + 开关。此前入口挂在聊天「会话资源」
           条上，和资源混在一起；它是审计，不是资源，搬到我的空间。 */}
+      {activeCategory === 'checkpoints' && (
+        <div className="page-content" style={{ padding: '16px' }}>
+          <CheckpointPanel />
+        </div>
+      )}
       {activeCategory === 'judgment' && (
         <div className="page-content" style={{ padding: '16px' }}>
           <JudgmentPanel />

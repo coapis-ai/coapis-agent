@@ -39,14 +39,15 @@ logger = logging.getLogger(__name__)
 
 #: Recognized write sources (anything else is stored as ``other``).
 VALID_SOURCES = frozenset(
-    {"upload", "write_file", "edit_file", "append_file", "send_file", "convert", "reconcile"}
+    {"upload", "write_file", "edit_file", "append_file", "send_file", "convert", "reconcile", "restore"}
 )
 
 #: 台账口径：哪些写入来源算「这个会话产出了它」（producer），其余算引用。
 #: ``upload`` 是用户传进来的，不是会话产物 → reference；``convert`` 是
 #: 交付那一刻由系统生成的产物 → producer。
+#: ``restore`` 是检查点回滚把内容写回工作区 —— 与 ``write_file`` 同源，算产出。
 PRODUCER_SOURCES = frozenset(
-    {"write_file", "edit_file", "append_file", "convert"}
+    {"write_file", "edit_file", "append_file", "convert", "restore"}
 )
 
 

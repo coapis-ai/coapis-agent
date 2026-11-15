@@ -422,11 +422,33 @@ async def execute_shell_command(
                 env,
             )
         else:
-            proc = await asyncio.create_subprocess_shell(
+            # B5-C 真隔离（bwrap）。mode=off 时 argv 就是 /bin/sh -c cmd，
+            # 与现状逐字节一致；auto/strict 才把命令关进命名空间。
+            from ...security.sandboxed_shell import (  # 延迟导入避免导入环
+                audit_sandbox_event,
+                plan_command,
+                refusal_message,
+            )
+
+            _sbx = plan_command(
                 cmd,
+                working_dir,
+                username=get_current_username(),
+            )
+            if _sbx.mode == "strict" and _sbx.degraded:
+                return ToolResponse(
+                    [TextBlock(type="text", text=refusal_message(_sbx))],
+                )
+            audit_sandbox_event(
+                _sbx,
+                username=get_current_username(),
+                command=cmd,
+            )
+
+            proc = await asyncio.create_subprocess_exec(
+                *_sbx.argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                bufsize=0,
                 cwd=str(working_dir),
                 env=env,
                 start_new_session=True,

@@ -76,6 +76,10 @@ from .voice import voice_router
 from .approval import router as approval_router
 from .user_scenes import router as user_scenes_router
 from .user import router as user_router
+# B5-A 检查点（默认关：开关 COAPIS_CHECKPOINTS_ENABLED，未开时端点明确报错）
+from .checkpoints import router as checkpoints_router
+# B5-B/B5-C 治理只读视图（事件联合视图 + 沙箱能力实测）
+from .governance import router as governance_router
 from .admin import router as admin_router
 from ...user_system.routers import users_router, points_router, tokens_router
 from .evolution import router as evolution_router
@@ -163,6 +167,8 @@ router.include_router(voice_router)
 router.include_router(approval_router)
 router.include_router(user_scenes_router)
 router.include_router(user_router)
+router.include_router(checkpoints_router)
+router.include_router(governance_router)
 # ⭐ 必须在 admin_router 之前注册：/admin/users/identity-bindings 是静态路径，
 # 若 admin_router 的 /admin/users/{user_id}（UUID 参数）先注册，会遮蔽静态路由导致 422
 router.include_router(external_systems_admin_router)
