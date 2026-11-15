@@ -83,6 +83,9 @@ DEFAULTS = {
     # 判档 1 次 + 事中改道 1 次 + 收尾验收 1 次 = 3。低于 3 时后到的岗位
     # 只会记下 budget_cap 台账（可见但不生效），等于关掉改道与验收。
     "judge_max_calls_per_turn": 7,
+    # v20 F6 配额护栏：当日 token 配额与在途判断上限，0 = 不限（不改既有行为）
+    "judge_daily_token_budget": 0,
+    "judge_max_in_flight": 0,
     # v15 §M2 软超时：**全局兜底值**（毫秒）。主链最多等判官这么久，超时
     # 先返回降级、判官后台跑完补写台账。
     # v19 P2-2：2000 → 5000。判官 p50=5997ms、91% 超过 2000ms——拿 2 秒的
@@ -350,6 +353,15 @@ class DecisionHubConfig:
     # 每轮判官 LLM 调用上限。判档 + 技能触发 + 验收加起来就该封顶，
     # 不能把整轮预算吃在判断上——这是"重复/循环判断"的根治闸门。
     judge_max_calls_per_turn: int = 7
+
+    # ---- v20 F6 判官配额护栏（实测 2026-11-15 dev v1.2.32）----
+    # 7 天台账 369 行里 75 行真判，烧掉 62,074 tokens，单判最长 16,963ms
+    # （软阈值 2,000ms），70 行 hit_layer=timeout。逐轮预算管得住"一轮几次"，
+    # 管不住"今天一共烧多少"和"同时压进去几个"——在线链路的失控口就在这两处。
+    # 0 = 不限（行为与既有部署逐字一致）；>0 时越界的判断降级为规则直判并记
+    # quota_exhausted，不进熔断（熔断是"模型坏了"，配额是"不该再问了"）。
+    judge_daily_token_budget: int = 0
+    judge_max_in_flight: int = 0
     # v14 §批次3 软超时（毫秒）：**全局兜底值**（岗位口径见
     # judge_soft_ms_post / soft_ms_for）。超过即主链先返回降级、判官后台
     # 跑完补写台账；硬超时 effective_timeout_ms 退居保险丝。

@@ -31,6 +31,7 @@ NOT_CHAT = "not_chat"               # 嵌入/排序/语音/图像模型不能当
 BREAKER_OPEN = "breaker_open"       # 熔断中：这一岗近期连败
 RATE_LIMITED = "rate_limited"       # 上游 429/限流
 BUDGET_EXHAUSTED = "budget_exhausted"  # 本轮判断预算用尽
+QUOTA_EXHAUSTED = "quota_exhausted"   # 当日判官配额用尽 / 在途判断过多（v20 F6）
 RULE_DECIDED = "rule_decided"       # 规则已定论，无需问模型
 DISABLED = "disabled"               # 岗位开关/总开关关闭
 TIMEOUT_SOFT = "timeout_soft"       # 软阈值到点，主链先走（判官仍在跑）
@@ -50,6 +51,7 @@ REASON_TEXT: dict[str, str] = {
     BREAKER_OPEN: "熔断中",
     RATE_LIMITED: "上游限流",
     BUDGET_EXHAUSTED: "本轮判断预算用尽",
+    QUOTA_EXHAUSTED: "当日判官配额用尽（在途过多或 token 到顶）",
     RULE_DECIDED: "规则已定论，未问模型",
     DISABLED: "判官开关关闭",
     TIMEOUT_SOFT: "主链等到软阈值先走（判官仍在后台跑）",
@@ -105,6 +107,7 @@ __all__ = [
     "NO_SLOT",
     "PARSE_FAIL",
     "PROVIDER_MISSING",
+    "QUOTA_EXHAUSTED",
     "RATE_LIMITED",
     "REASON_TEXT",
     "RULE_DECIDED",

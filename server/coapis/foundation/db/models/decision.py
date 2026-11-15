@@ -37,27 +37,27 @@ class DecisionEvent(BaseRow):
 
     # 岗位：skill_trigger / plan_gate / intent / complexity / tool_gate
     source: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 判级结果：trivial / light / standard / complex（无复杂度维度时为空串）
     complexity: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 动作：direct / plan / tool / escalate / none
     action: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 判断依据（短语，供人读；写入方截断到 500）
     reason: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 命中层：keyword / cache / llm / slot / fallback / breaker_open / disabled
     hit_layer: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 使用的判断模型（provider/model 文本，未落槽位时为空串）
     model: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 本次判断耗时（毫秒）
     latency_ms: Mapped[int] = mapped_column(
@@ -82,13 +82,13 @@ class DecisionEvent(BaseRow):
 
     # 作用域（与记忆域 scope 语义一致）
     user_id: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     agent_id: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     chat_id: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
 
     # 事后结果：pending / accepted / overridden / timeout / error
@@ -105,11 +105,11 @@ class DecisionEvent(BaseRow):
     # 同样遵守非空红线：老行读出为 ''/0（未知），不引入可空列。
     # 输入指纹（sha1 前 12 位，**不存原文**）
     input_hash: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 判断内容（结论值本身，如 select:pdf / complex / advise:change）
     judgment: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 轮次号（单轮判官预算按轮清账，"本轮判官花了几次"按轮聚合）
     turn: Mapped[int] = mapped_column(
@@ -124,16 +124,16 @@ class DecisionEvent(BaseRow):
     # 行来源：web=聊天会话 test=测试/合成 ''=存量未知。预检 KPI 只数 web，
     # 测试行不得掺入生产指标（v14 P7：真判率掺 e2e 合成行虚高）。
     origin: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 零值语义：no_llm_cost=设计为0 / usage_missing=该有记账没有 /
     # write_failure=降级路径写的行。无标记且 cost=0 = 记账坏了。
     zero_reason: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 被清洗出档位词表的原值留痕（清洗不销毁证据）
     dirty_band: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
 
     # ---- 治理接线列（迁移 0028 · B3）----
@@ -144,11 +144,11 @@ class DecisionEvent(BaseRow):
     # 问这一句干什么（"验收"/"开工档"…）。岗位名回答"谁问的"，
     # purpose 回答"问来干什么"，两者都要能按字面量聚合。
     purpose: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 会话主键（治理按会话筛事件的尺子；此前只能按 chat 筛）
     session_id: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=text("''")
+        Text, nullable=False, default="", server_default=""
     )
     # 判定上下文留痕（弃权原因码 abstain_reason 落这里）。
     # JSON 文本列：裸 SQL 写入方负责 dumps，读侧负责 loads —— 与
@@ -157,7 +157,7 @@ class DecisionEvent(BaseRow):
         Text,
         nullable=False,
         default="",
-        server_default=text("''"),
+        server_default="",
     )
 
     __table_args__ = (

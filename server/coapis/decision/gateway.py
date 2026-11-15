@@ -73,6 +73,7 @@ LAYER_ERROR = "error"           # L3 失败：超时/传输/解析/非聊天模�
 LAYER_DISABLED = "disabled"     # L0 前置门：总开关/岗位开关
 LAYER_BREAKER = "breaker_open"  # L0 前置门：熔断
 LAYER_BUDGET = "budget_cap"     # L0 前置门：每轮预算
+LAYER_QUOTA = "quota_cap"       # L0 前置门：当日配额（v20 F6，与逐轮预算分层）
 LAYER_NO_MODEL = "no_model"     # 无可用模型（配置缺失）
 # L3 失败细分（台账要能看出"怎么失败的"，一个 error 词不够用）
 LAYER_NOT_CHAT = "not_chat"     # 选中了嵌入/排序/语音/图像模型
@@ -95,6 +96,11 @@ JUDGED_LAYERS = (
 )
 
 _MAX_TURN_KEYS = 200
+
+# v20 F6 配额护栏。台账是唯一真值，这里只缓存"今天已烧多少 token"以省掉
+# 每次判断一次的查询；缓存过期即重算。跨进程各算各的（dev 单进程、生产
+# 多 worker 时各自守各自的上限），宁可少问一次也不把预算超成一倍。
+_QUOTA_CACHE_TTL_S = 60.0
 # 判官五岗调用名（调用方实际传进来的 purpose）：plan_gate / skill_trigger /
 # tool_gate / advisor / acceptance。验收岗在预算分池里单独留额度，见
 # _post_call_cap；上面那组 PURPOSE_* 是台账词表（验收写 verify），两套词
@@ -324,6 +330,10 @@ class JudgeGateway:
         self._inflight: dict[str, asyncio.Task] = {}
         # 单轮 LLM 判断计数：(user, agent, chat, turn) -> 次数
         self._turn_calls: dict[tuple[str, str, str, int], dict[str, int]] = {}
+        # v20 F6 配额护栏：在途判断数（判官一次要 0.5~17s，排队会拖整轮）与
+        # 当日 token 缓存 {"day": 本地日, "tokens": 已烧, "ts": 取样时刻}
+        self._in_flight = 0
+        self._quota_cache: dict[str, Any] = {"day": "", "tokens": 0, "ts": 0.0}
 
     # ---------------- 参数构造 ----------------
 
@@ -450,6 +460,73 @@ class JudgeGateway:
 
     # ---------------- 主入口 ----------------
 
+    def _release_in_flight(self, _task: Any = None) -> None:
+        """v20 F6：判断任务收尾时释放在途计数（下限 0，防计数漂负）。"""
+        self._in_flight = max(0, self._in_flight - 1)
+
+    def _quota_code(self, cfg: Any) -> Optional[str]:
+        """v20 F6 配额护栏：返回触发的码位，未触发返回 None。
+
+        两道闸都默认关闭（0 = 不限），行为与既有部署逐字一致：
+          * ``judge_max_in_flight`` —— 在途判断数。判官单判实测 0.5~17s，
+            逐轮预算数的是"已记账的次数"，拦不住同时压进去的请求；这里按
+            在途数直接限流（码位用 rate_limited，语义就是限流）。
+          * ``judge_daily_token_budget`` —— 当日全岗位 token 合计（台账
+            真值）。到顶后按规则直判，码位 quota_exhausted。
+        """
+        limit = int(getattr(cfg, "judge_max_in_flight", 0) or 0)
+        if limit > 0 and self._in_flight >= limit:
+            return jr.RATE_LIMITED
+        budget = int(getattr(cfg, "judge_daily_token_budget", 0) or 0)
+        if budget > 0 and self._daily_tokens() >= budget:
+            return jr.QUOTA_EXHAUSTED
+        return None
+
+    def _quota_note(self, cfg: Any) -> str:
+        """给降级台账附上配额现值（现场要能看出"当时到了多少"）。"""
+        return "在途 %s/%s, 当日 tokens %s/%s" % (
+            self._in_flight,
+            int(getattr(cfg, "judge_max_in_flight", 0) or 0),
+            self._quota_cache.get("tokens", 0),
+            int(getattr(cfg, "judge_daily_token_budget", 0) or 0),
+        )
+
+    def _daily_tokens(self) -> int:
+        """今日（本地日）台账 token 合计，带 _QUOTA_CACHE_TTL_S 缓存。
+
+        只读台账真值。查询失败沿用上一次的取样值（没有就按 0）—— 配额是
+        刹车不是闸死：因一次查询失败让整条判官链停摆，比多烧点 token 糟得
+        多。缓存按本地日分键，跨零点自动失效；命中缓存时零查询。
+        """
+        now = time.time()
+        day = time.strftime("%Y-%m-%d", time.localtime(now))
+        cache = self._quota_cache
+        if cache.get("day") == day and now - float(cache.get("ts") or 0) < _QUOTA_CACHE_TTL_S:
+            return int(cache.get("tokens") or 0)
+        try:
+            tokens = self._daily_tokens_live(day)
+        except Exception:  # noqa: BLE001 — 见 docstring：查询失败沿用旧值
+            logger.debug("quota: 当日 token 查询失败，沿用上次取样", exc_info=True)
+            return int(cache.get("tokens") or 0)
+        cache.update({"day": day, "tokens": tokens, "ts": now})
+        return tokens
+
+    def _daily_tokens_live(self, day: str) -> int:
+        """查台账：本地日 ``day`` 零点以来全岗位 token 合计（真值来源）。"""
+        from coapis.foundation.db.engine import get_session
+        from sqlalchemy import text
+
+        midnight = time.mktime(time.strptime(day, "%Y-%m-%d"))
+        with get_session() as session:
+            row = session.execute(
+                text(
+                    "SELECT COALESCE(SUM(tokens), 0) FROM decision_events "
+                    "WHERE created_at >= :from_ts"
+                ),
+                {"from_ts": midnight},
+            ).first()
+        return int(row[0] or 0) if row else 0
+
     async def judge(
         self,
         *,
@@ -546,6 +623,20 @@ class JudgeGateway:
             return await self._degrade(
                 purpose, LAYER_NO_MODEL,
                 jr.format_reason(jr.NO_SLOT, "按规则直判"),
+                rule_fallback, describe, elapsed, ids,
+            )
+
+        # --- v20 F6 配额护栏：在探测之前，先问"今天还该不该再问" ---
+        # 逐轮预算管住"一轮问几次"，管不住"今天一共烧多少"（dev 实测 7 天
+        # 62,074 tokens）与"同时压进去几个"（单判最长 16,963ms，排队会把
+        # 整轮拖穿）。越界按规则直判并记 quota_exhausted —— 不进熔断：
+        # 熔断说的是"这模型坏了"，配额说的是"不该再问了"，两者混在一条
+        # 时间线上，运维就分不清今天到底是模型不行还是我们用满了。
+        quota_code = self._quota_code(cfg)
+        if quota_code:
+            return await self._degrade(
+                purpose, LAYER_QUOTA,
+                jr.format_reason(quota_code, self._quota_note(cfg)),
                 rule_fallback, describe, elapsed, ids,
             )
 
@@ -712,9 +803,13 @@ class JudgeGateway:
                 ),
             )
             self._inflight[ckey] = task
+            # v20 F6：在途计数只数"真在飞的判断"。搭车的请求不算 —— 它们
+            # 不会额外产生一次模型调用，把它们计入会让配额被同问句放大。
+            self._in_flight += 1
             task.add_done_callback(
                 lambda _t, k=ckey: self._inflight.pop(k, None),
             )
+            task.add_done_callback(self._release_in_flight)
         try:
             reply = await asyncio.shield(task)
         except asyncio.CancelledError:
