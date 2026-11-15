@@ -282,3 +282,206 @@ def _refresh_projection() -> None:
         knowledge_export.export_from_db()
     except Exception:
         logger.warning("knowledge projection refresh failed", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# 上下文消费对账（B4c 治理可读层）—— 两个**只读**端点
+#
+# 加性新增，不改上面任何既有端点；不新增表、不写盘、不碰运行时。
+# 聚合与预览的全部算术都在 governance/context_usage.py（可被测试直接调用），
+# 这里只做鉴权、参数硬校验和自证。
+# ---------------------------------------------------------------------------
+
+
+def _context_scope(user: dict, user_id: str | None) -> str | None:
+    """上下文对账的可见范围：非管理员一律收窄到自己。
+
+    台账 ``token_usage.user_id`` 存的就是登录名（dev 库实测值 ``admin``），
+    所以收窄条件与 ``/memory/entries`` 同源：``token_usage.user_id == 登录名``。
+    """
+    own = str(user.get("username") or user.get("id") or "")
+    if user.get("role") != "admin":
+        return own
+    if user_id:
+        return str(user_id)
+    return None
+
+
+@router.get("/context-usage")
+async def context_usage_report(
+    user: dict = Depends(get_current_user),
+    days: int = Query(default=7),
+    limit: int = Query(default=500),
+    user_id: str | None = Query(default=None),
+) -> dict:
+    """窗口利用率实测：每次调用吃进多少 input token、模型窗口多大、峰值/均值多少。
+
+    - ``days`` 1~365、``limit`` 1~2000，**越界 400**（台账语义里越界是调用方错误，
+      不悄悄截断）；
+    - 非管理员自动按 ``token_usage.user_id == 登录名`` 收窄；
+    - 窗口分母只取 provider 注册表的自报值，取不到就返回 ``null`` + 说明，
+      **不编窗口值**。
+    """
+    from ...governance import context_usage
+
+    if not 1 <= int(days) <= context_usage.MAX_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"days 必须在 1~{context_usage.MAX_DAYS} 之间",
+        )
+    if not 1 <= int(limit) <= context_usage.MAX_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"limit 必须在 1~{context_usage.MAX_LIMIT} 之间",
+        )
+
+    scope = _context_scope(user, user_id)
+    return context_usage.usage_report(days=int(days), limit=int(limit), user_id=scope)
+
+
+class CompressPreviewRequest(BaseModel):
+    """压缩预览入参。预览永远不落盘，``dry_run=False`` 会被明确拒绝。"""
+
+    session_id: str = Field(..., description="要预览的会话 ID（新格式 chat UUID 或旧格式 session_id）")
+    tier: str | None = Field(default=None, description="档位名 full/thinking/lightweight；默认按无档位")
+    dry_run: bool = Field(default=True, description="预览端点恒为 True；传 False 直接 400")
+    user_id: str | None = Field(default=None, description="管理员专用：指定归属用户")
+
+
+@router.post("/compress-preview")
+async def context_compress_preview(
+    req: CompressPreviewRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """压缩**预览**：用现成计量层对目标会话做纯计算，返回计划数字 + 落盘自证。
+
+    明确拒绝的行为：
+      * ``dry_run=False`` → 400（预览端点不落盘，本文件里没有"真压"这回事）；
+      * 会话找不到 → 404；
+      * 会话没有可用消息 → 422；
+      * 模型窗口自报值取不到 → 422（不编窗口值就不可能算出目标预算）。
+    """
+    from pathlib import Path
+
+    from ...constant import WORKSPACES_DIR
+    from ...governance import context_usage
+
+    if req.dry_run is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="本端点是压缩预览，只算不写、绝不落盘：dry_run 必须为 True。"
+                   "要真正压缩由运行时上下文管理器在对话里执行，不在这里。",
+        )
+    session_id = str(req.session_id or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id 不能为空")
+
+    scope = _context_scope(user, req.user_id)
+    roots = Path(WORKSPACES_DIR)
+
+    # ---- 自证 before：台账行数 + 会话目录内容指纹 -------------------------
+    ledger_before = context_usage.ledger_counts()
+
+    hits = context_usage.find_session_state(session_id, root=roots, username=scope)
+    if not hits:
+        raise HTTPException(
+            status_code=404,
+            detail=f"会话不存在（session_id={session_id}），无法做压缩预览；"
+                   "非管理员只能查自己的会话",
+        )
+    hit = hits[0]
+    session_dir = Path(hit["path"]).parent
+    files_before = context_usage.fingerprint_dir(session_dir)
+
+    # ---- 纯计算：measure + trim（不落盘） ---------------------------------
+    try:
+        rows, meta = context_usage.session_messages(Path(hit["path"]))
+    except Exception as exc:  # noqa: BLE001 — 读不到就是读不到，明说
+        raise HTTPException(
+            status_code=422,
+            detail=f"会话状态文件读取失败，无法预览：{exc}",
+        ) from exc
+    if not rows:
+        raise HTTPException(
+            status_code=422,
+            detail="会话里没有可用消息（content 为空），压缩预览无可预览内容",
+        )
+
+    from types import SimpleNamespace
+
+    from ...agents.context.window_source import resolve_window
+
+    model_info = context_usage.latest_model_for_session(session_id, user_id=scope)
+    model = str(model_info.get("model") or "").strip()
+    if not model:
+        raise HTTPException(
+            status_code=422,
+            detail=f"台账里查不到该会话最近一次调用的模型（session_id={session_id}），"
+                   "窗口无从取得，压缩预览不可计算（不编窗口值）",
+        )
+    lookup = context_usage.window_lookup_for([model]).get(model) or {}
+    if not lookup.get("window_tokens"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"模型 {model} 的窗口自报值缺失（provider 注册表未上报），"
+                   "压缩预览的目标预算不可计算 —— 不编窗口值",
+        )
+    window = resolve_window(SimpleNamespace(max_sequence_length=lookup["window_tokens"]))
+
+    preview = context_usage.preview_compaction(rows, window=window, tier=req.tier)
+
+    # ---- 自证 after：逐项相等 + 断言 --------------------------------------
+    ledger_after = context_usage.ledger_counts()
+    files_after = context_usage.fingerprint_dir(session_dir)
+    ledger_equal = ledger_before == ledger_after
+    files_equal = files_before == files_after
+    if not (ledger_equal and files_equal):
+        # 预览声称只读，那就必须自证得了；自证不过就明确报错，不粉饰
+        raise HTTPException(
+            status_code=500,
+            detail="压缩预览期间台账行数或会话目录内容发生变化——预览不应有任何写入",
+        )
+
+    return {
+        "ok": True,
+        "dry_run": True,
+        "session_id": session_id,
+        "state_path": meta["state_path"],
+        "compressed_summary_chars": meta["compressed_summary_chars"],
+        "window": {
+            "model": model,
+            "provider_id": lookup.get("provider_id"),
+            "reported_tokens": int(window.reported_tokens),
+            "effective_tokens": int(window.effective_tokens),
+            "source": window.source,
+            "chars_per_token": float(window.chars_per_token),
+        },
+        "measure": {
+            "row_count": preview["row_count"],
+            "current_tokens": preview["current_tokens"],
+            "current_chars": preview["current_chars"],
+            "fixed_tokens": preview["fixed_tokens"],
+            "target_budget_tokens": preview["target_budget_tokens"],
+            "target_budget_chars": preview["target_budget_chars"],
+            "formula_budget_tokens": preview["formula_budget_tokens"],
+            "compact_threshold_ratio": preview["compact_threshold_ratio"],
+            "keep_chars_floor": preview["keep_chars_floor"],
+        },
+        "plan": preview["plan"],
+        "tier": preview["tier"],
+        "self_proof": {
+            "ledger_rows": {
+                "before": ledger_before,
+                "after": ledger_after,
+                "equal": ledger_equal,
+            },
+            "session_dir": {
+                "path": str(session_dir),
+                "file_count": len(files_after),
+                "files_before": files_before,
+                "files_after": files_after,
+                "equal": files_equal,
+            },
+            "writes_performed": 0,
+        },
+    }
