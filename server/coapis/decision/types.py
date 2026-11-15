@@ -11,11 +11,37 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
 #: 台账 reason 写入上限（超长截断，避免判断依据把台账撑爆）
 REASON_MAX_CHARS = 500
+
+
+def payload_to_json_text(payload: Any) -> str:
+    """判定上下文 → JSON 文本（台账 payload 列的存储形态）。
+
+    台账写入走裸 INSERT（``bus.py``），不经过 ORM 的 JSON 适配器，所以
+    写侧自己 dumps、读侧自己 loads —— 一把尺子量两头。
+    不可序列化时落空串并留痕，绝不抛（台账写入是旁路，旁路不炸主链）。
+    """
+    if not payload:
+        return ""
+    try:
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    except Exception:  # pragma: no cover - defensive
+        try:
+            return json.dumps(
+                {str(k): str(v) for k, v in dict(payload).items()},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        except Exception:
+            return ""
+
+
+_payload_json = payload_to_json_text
 
 Complexity = Literal["simple", "medium", "complex"]
 Action = Literal["direct_answer", "single_tool", "multi_tool", "plan_required"]
@@ -82,6 +108,16 @@ class DecisionResult:
     input_hash: str = ""
     # 用户评价：0 无效 / 1 有用 / 2 很有用 / 3 没评价
     rating: int = 3
+    # ---- 治理接线列（迁移 0028 · B3 治理接线）----
+    # A1 建的 origin/zero_reason/dirty_band 三列此前只存在于表里：写侧
+    # to_row 不输出、bus 白名单不含 → 台账里恒为空（"解析列全 NULL"
+    # 的根因）。治理读侧要按码分桶，写侧必须把码送进库。
+    origin: str = ""
+    zero_reason: str = ""
+    dirty_band: str = ""
+    # 问这一句干什么（"验收"/"开工档"…）与会话主键：治理事件视图的筛子。
+    purpose: str = ""
+    session_id: str = ""
 
     def to_row(self) -> dict[str, Any]:
         """转成台账行（全字段显式列举，配合全字段非空红线）。"""
@@ -106,6 +142,15 @@ class DecisionResult:
             "judgment": str(self.value or ""),
             "turn": int(self.turn or 0),
             "rating": int(self.rating if self.rating is not None else 3),
+            # A1 解析列（此前恒 NULL —— 列在表里、写侧不输出）
+            "origin": str(self.origin or ""),
+            "zero_reason": str(self.zero_reason or ""),
+            "dirty_band": str(self.dirty_band or ""),
+            # 治理接线列（迁移 0028）。payload 落 JSON **文本**：台账
+            # 写入走裸 INSERT（bus.py），不依赖 ORM 的 JSON 适配器。
+            "purpose": str(self.purpose or ""),
+            "session_id": str(self.session_id or ""),
+            "payload": _payload_json(self.payload),
         }
 
 

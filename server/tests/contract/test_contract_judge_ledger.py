@@ -273,10 +273,10 @@ def test_ledger_target_table_is_the_decision_ledger():
 # ── 5. B3 目标：弃权必须带原因码 ────────────────────────────────────────
 
 
-@B3
 def test_abstention_row_carries_a_reason_code(fake_bus):
-    # 验收口径（方案 §5）：弃权行 100% 带原因码。今天弃权=空判定，
-    # 看板只看到"判官没意见"，看不出为什么没意见。
+    # B3 交付（2026-11-15）：弃权行 100% 带原因码 —— 码位取自 judge_reasons
+    # 词表，由 ``ledger_contract.abstain_reason_of`` 推导、装配进 payload
+    # 与 reason 列。此前弃权=空判定，看板看不出"为什么没意见"。
     lc.write_ledger(
         source="acceptance",
         purpose="验收",

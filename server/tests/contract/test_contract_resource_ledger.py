@@ -357,10 +357,10 @@ def test_ledger_scopes_records_to_the_owning_user(tmp_path):
     ) is False, "用户命名空间之外的路径不得入台账"
 
 
-@B2
 def test_knowledge_db_mcp_resources_have_a_registration_face(tmp_path):
-    # 台账里 kb/db/mcp 类资源登记侧 0 处（实测 resources 表 kind=file 独大）。
-    # 没有登记面，资源栏的"知识库/数据库/MCP"三档永远是空的。B2 交付后摘标记。
+    # B2 交付（2026-11-15）：登记面入口 = ``file_ledger.record_resource_event``，
+    # kind 白名单与 resources 模型共用尺子。此前台账只有文件登记面，kb/db/mcp
+    # 登记侧 0 处，资源栏三档永远是空的。
     entry = getattr(fld, "record_resource_event", None)
     assert entry is not None, "FileLedgerService 尚无 kb/db/mcp 登记入口"
     row = entry(

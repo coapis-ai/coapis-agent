@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 # 台账行的合法档位词表：与判则同源（rubric），杜绝岗位自带小词表。
 from .rubric import LEVELS as _LEVELS
 
+# 弃权原因码：与判官供给层同一词表（B3），台账里的原因码不得自造。
+from .judge_reasons import ABSTAIN, NO_SLOT, PARSE_FAIL, format_reason
+
 # 岗位 source 合法集合（写侧枚举，防岗位名漂移）
 SOURCES = frozenset({
     "plan_gate", "plan_review", "skill_trigger", "tool_gate", "acceptance",
@@ -81,6 +84,37 @@ def normalize_band(value: Any) -> tuple[str, str]:
     if text in _LEVELS:
         return text, ""
     return "", (raw[:120] if raw else "")
+
+
+def abstain_reason_of(
+    *,
+    hit_layer: str = "",
+    band_clean: str = "",
+    dirty: str = "",
+    action: str = "",
+    reason: str = "",
+) -> str:
+    """弃权行的原因码（B3 交付）。判定有结论时返回 ``""`` —— 不是弃权就别编原因。
+
+    验收口径（方案 §5）：**弃权行 100% 带原因码**。此前"弃权 = 空判定"，
+    看板只看见"判官没意见"，看不出为什么没意见（槽位空？解析失败？模型
+    真弃权？），于是沉默与失职在台账里长得一模一样，无法归因也无法修。
+
+    码位取自 ``judge_reasons`` 这个唯一词表，读侧用 ``parse_code`` 分桶，
+    不再对中文句子做字符串匹配。
+    """
+    if str(action or "").strip() or str(reason or "").strip():
+        return ""
+    if str(band_clean or "").strip():
+        return ""
+    if str(dirty or "").strip():
+        # 岗位写了档位外的字面量（"plan_gate"/"select:low"…）：
+        # 模型答了，但读不出结论。
+        return PARSE_FAIL
+    layer = str(hit_layer or "").strip().lower()
+    if layer in ("", "none", "no_model"):
+        return NO_SLOT
+    return ABSTAIN
 
 
 def detect_origin(chat_id: str, session_id: str) -> str:
@@ -201,6 +235,19 @@ def write_ledger(
                 source,
             )
 
+        # B3：弃权必须带原因码。先判"是不是弃权"（原始 action/reason 为空
+        # 且无合法档位），再把码位装配进 reason 列 —— 读侧 parse_code 一个
+        # 函数就能分桶统计"判官为什么沉默"。
+        abstain = abstain_reason_of(
+            hit_layer=hit_layer,
+            band_clean=clean_band,
+            dirty=dirty,
+            action=action,
+            reason=reason,
+        )
+        if abstain:
+            reason = format_reason(abstain, str(reason or ""))
+
         from .bus import get_bus
         from .types import DecisionResult
 
@@ -225,10 +272,24 @@ def write_ledger(
                 turn=tn,
                 input_hash=str(input_hash or ""),
                 outcome=str(outcome or "pending")[:16],
-                # purpose/session_id 不在 DecisionResult 的字段上（dataclass
-                # 严格签名，多传即 TypeError——dev 台账 0 行的事故源头），
-                # 只能走 payload 带进台账。
-                payload={"purpose": purpose, "session_id": sid, "zero_reason": zero_reason},
+                # 治理接线（迁移 0028 + 白名单扩列）：这些字段现在**真的
+                # 落库**了。此前 DecisionResult 没有这些字段、白名单不含，
+                # 参数传到落库前就被丢弃 —— 台账里 origin/zero_reason/
+                # dirty_band 恒为空、purpose/session_id/payload 根本不存在，
+                # 于是看板按码分桶时全是空气。
+                purpose=str(purpose or ""),
+                session_id=str(sid or ""),
+                origin=detect_origin(cid, sid),
+                zero_reason=str(zero_reason or ""),
+                dirty_band=str(dirty or ""),
+                payload={
+                    "purpose": purpose,
+                    "session_id": sid,
+                    "zero_reason": zero_reason,
+                    # B3 交付：弃权行 100% 带原因码（码位在 judge_reasons
+                    # 词表，读侧 parse_code 分桶）。非弃权行恒为空串。
+                    "abstain_reason": abstain,
+                },
             ),
         )
         _write_governance(source, cid, tn, dirty, zero_reason)

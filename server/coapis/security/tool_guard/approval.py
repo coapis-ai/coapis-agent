@@ -31,6 +31,13 @@ class ApprovalDecision(str, Enum):
     APPROVED = "approved"
     DENIED = "denied"
     TIMEOUT = "timeout"
+    #: 台账尺子（B2）：**超时是一次默认拒绝**，不是"卡消失了"。
+    #:
+    #: 与 TIMEOUT 的分工是刻意的，不许合并：``TIMEOUT`` 是 agent 等待的
+    #: Future 结果（改名或改值等于历史对不上），``TIMED_OUT`` 是台账里
+    #: 那次裁决的名字（对账口径：超时计入拒绝，且单列可查）。
+    #: 只用于台账写入，不进 Future。
+    TIMED_OUT = "timed_out"
 
 
 def format_findings_summary(

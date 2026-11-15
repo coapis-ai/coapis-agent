@@ -42,6 +42,23 @@ _LEDGER_COLUMNS = (
     "judgment",
     "turn",
     "rating",
+    # 治理接线（迁移 0022 的解析列 + 迁移 0028 的读侧列）。
+    #
+    # 为什么必须扩：白名单是落库的**唯一通道**，不在名单里的字段在
+    # 落库前就被丢弃 —— 于是 origin/zero_reason/dirty_band 在库里恒为
+    # 默认值（"解析列全 NULL"的根因），purpose/session_id/payload 更是
+    # 从来没进过库。治理读侧要按码分桶、按会话筛、按弃权原因归因，
+    # 写侧不送就等于读侧永远查空气。
+    #
+    # 与 ``test_ledger_columns_are_the_nine_declared_ones`` 的关系：那条
+    # 锁锁的是"写侧不得夹带私有字段"，扩列必须同步更新它的期望集合，
+    # 并把每一列的出处写清楚（见该测试）。
+    "origin",
+    "zero_reason",
+    "dirty_band",
+    "purpose",
+    "session_id",
+    "payload",
 )
 
 

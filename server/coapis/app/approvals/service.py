@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -32,6 +33,12 @@ from typing import TYPE_CHECKING, Any
 
 from ...constant import TOOL_GUARD_APPROVAL_TIMEOUT_SECONDS
 from ...security.tool_guard.approval import ApprovalDecision
+from .intent_ledger import (
+    intent_stats as _intent_stats,
+    list_intent_rows as _list_intent_rows,
+    list_timeout_rows as _list_timeout_rows,
+    record_intent,
+)
 
 if TYPE_CHECKING:
     from ...security.tool_guard.models import ToolGuardResult
@@ -78,6 +85,23 @@ class ApprovalActor:
     source: str = ""
 
 
+def _self_approval_forbidden() -> bool:
+    """禁止自批开关（D7 · 方案 §13 拍板），每次读环境变量。
+
+    默认 forbid —— 方案口径：审批的意义是"别人替你把关"，自批等于把
+    闸门变成装饰。
+
+    ``COAPIS_APPROVAL_SELF_APPROVAL=allow`` 回退旧行为。这个旋钮是刻意
+    留的：日常主链里"用户点卡片批准自己会话的工具调用"是当前主要用法，
+    全量禁止自批 = 非管理员用户的每次工具审批都要管理员代批。部署侧
+    必须知道这件事，所以旋钮写在代码里、开关写在环境里，不靠口口相传。
+    """
+    return (
+        os.environ.get("COAPIS_APPROVAL_SELF_APPROVAL", "forbid").strip().lower()
+        != "allow"
+    )
+
+
 def _identity_check(pending: Any, actor: Any) -> str | None:
     """Return ``None`` to allow, or a reason code to reject.
 
@@ -104,9 +128,15 @@ def _identity_check(pending: Any, actor: Any) -> str | None:
     if actor_channel and pending_channel and actor_channel != pending_channel:
         return "channel_mismatch"
     if actor_user == owner:
+        # D7 禁止自批（方案 §13 拍板 D7）：发起这次工具调用的属主不能
+        # 自己批准自己的操作。灰度旋钮见 _self_approval_forbidden()。
+        if _self_approval_forbidden():
+            return "self_approval_forbidden"
         return None
     if bool(getattr(actor, "is_admin", False)):
-        # Admin override is allowed but must leave a trace (审计日志).
+        # Admin override is allowed but must leave a trace: 台账
+        # decide_source="admin_override"（见 resolve_request 落账处），
+        # 事后能回答"这张卡是谁替谁批的"。
         logger.info(
             "approval admin override: request_id=%s owner=%s actor=%s "
             "source=%s",
@@ -121,6 +151,18 @@ def _identity_check(pending: Any, actor: Any) -> str | None:
 
 #: Public alias — routers use it to answer 403 before calling resolve.
 identity_check = _identity_check
+
+
+#: 拒绝原因 → 台账码位（聚合尺子）。
+#:
+#: 台账按码分桶，不对人话句子做字符串匹配 —— 与判官原因码（judge_reasons）
+#: 同一纪律。已知码透传，未知原因取首词兜底，保证"每行都有码"。
+def _reason_code(reason: str) -> str:
+    text = str(reason or "").strip()
+    for known in ("missing_actor", "not_owner"):
+        if text.startswith(known):
+            return known
+    return (text.split(" ", 1)[0].lower()[:32]) if text else "unknown"
 
 
 @dataclass
@@ -201,6 +243,19 @@ class ApprovalService:
                 pending.future.set_result(ApprovalDecision.TIMEOUT)
             pending.status = "timeout"
             pending.resolved_at = now
+            # 台账：超时不是"消失"，是一次**默认拒绝**（B2 · 契约目标锁）。
+            # 裁决字面量用 TIMED_OUT（台账尺子）；Future 侧仍回 TIMEOUT，
+            # 因为那是 agent 等的信号，改名等于历史对不上。
+            record_intent(
+                pending,
+                decision=ApprovalDecision.TIMED_OUT.value,
+                outcome="auto:timeout",
+                decide_source="internal",
+                why=(
+                    f"超时默认拒绝：age={now - pending.created_at:.0f}s > "
+                    f"timeout={pending.timeout_seconds:.0f}s"
+                ),
+            )
             logger.info(
                 "Approval %s auto-timed out (age=%.0fs, timeout=%.0fs, tool=%s)",
                 k[:8],
@@ -304,6 +359,11 @@ class ApprovalService:
             self._pending[request_id] = pending
             self._gc_pending_locked()
 
+        # 台账：入队即登记（decision 留空 = 仍在等）。B2 交付：审批意图从
+        # 这一刻起可统计——此前队列是纯内存态，裁决取走即消失，盘上 0 行，
+        # 「用户到底批过什么」在盘上没有任何证据。
+        record_intent(pending)
+
         logger.info(
             "Approval pending created: request_id=%s agent_id=%s tool=%s "
             "severity=%s session=%s root=%s",
@@ -352,6 +412,18 @@ class ApprovalService:
                     getattr(actor, "source", ""),
                     getattr(actor, "user_id", ""),
                 )
+                # 台账：未遂选择照入账（B2 身份边界的账面证据）。
+                # decision 记**用户点的动作**，outcome 记 refused:<原因> ——
+                # 两列分记是刻意的：用户点了批准，台账不能写成他拒绝。
+                # 对账时"跨用户审批未遂"按 outcome 前缀单列成桶。
+                record_intent(
+                    pending,
+                    decision=decision.value,
+                    outcome="refused:" + _reason_code(reason),
+                    decided_by=str(getattr(actor, "user_id", "") or ""),
+                    decide_source="refused",
+                    why=reason,
+                )
                 return None
 
             self._pending.pop(request_id, None)
@@ -361,6 +433,29 @@ class ApprovalService:
         # Set Future result outside lock
         if not pending.future.done():
             pending.future.set_result(decision)
+
+        # 台账：用户的选择落成一行（B2 · 契约目标锁
+        # ``test_user_choice_leaves_an_intent_ledger_row``）。验收口径要求
+        # 事后能回答"选了哪种、为什么、谁选的、经哪条通道"。
+        # 管理员代批单独成桶（decide_source=admin_override）——
+        # "谁替谁批的"必须能从台账直接查，不靠翻日志。
+        _admin_override = (
+            bool(getattr(actor, "is_admin", False))
+            and str(getattr(actor, "user_id", "") or "")
+            != str(getattr(pending, "owner_user_id", "") or "")
+        )
+        record_intent(
+            pending,
+            decision=decision.value,
+            outcome="applied",
+            decided_by=str(getattr(actor, "user_id", "") or ""),
+            decide_source=(
+                "admin_override"
+                if _admin_override
+                else (str(getattr(actor, "source", "") or "") or "internal")
+            ),
+            why=str(getattr(actor, "reason", "") or ""),
+        )
 
         logger.info(
             "Approval request %s resolved: decision=%s tool=%s",
@@ -556,6 +651,47 @@ class ApprovalService:
             ]
             return sorted(result, key=lambda p: p.created_at)
 
+    # ------------------------------------------------------------------
+    # 意图台账（B2 · 方案 v1 §4 验收 5）
+    #
+    # 队列回答"现在要不要批"，台账回答"批过什么、谁批的、怎么收的场"。
+    # 读侧永不抛：台账坏了返回空列表，审批主链不受影响。
+    # ------------------------------------------------------------------
+
+    async def list_intent_rows(
+        self,
+        session_id: str = "",
+        *,
+        user_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """已收场的审批意图（用户选择可统计、可追溯）。"""
+        return _list_intent_rows(
+            session_id, user_id=user_id, limit=limit
+        )
+
+    async def list_timeout_rows(
+        self,
+        session_id: str = "",
+        *,
+        user_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """超时默认拒绝的审批（超时不是一笑了之，是一次裁决）。
+
+        读侧先结账：过期卡留在内存里不算"已超时入账"，读的时候顺手把
+        过期行落成裁决 —— 于是"超时了几张"这个数不依赖维护循环的节拍。
+        """
+        async with self._lock:
+            self._expire_stale_locked(time.time())
+        return _list_timeout_rows(
+            session_id, user_id=user_id, limit=limit
+        )
+
+    async def intent_stats(self, *, since: float = 0.0) -> dict[str, Any]:
+        """裁决分布计数（看板口径：已收场的行 + 按收场通道分桶）。"""
+        return _intent_stats(since=since)
+
     async def find_live_by_prefix(
         self,
         request_id_prefix: str,
@@ -672,6 +808,15 @@ class ApprovalService:
                     pending.future.set_result(ApprovalDecision.TIMEOUT)
                 pending.status = "superseded"
                 pending.resolved_at = now
+                # 台账：被取代也是收场，必须入账（否则"卡凭空消失"与
+                # "用户批了"在台账里长得一样）。
+                record_intent(
+                    pending,
+                    decision="system_cancelled",
+                    outcome="auto:superseded",
+                    decide_source="internal",
+                    why=f"同一工具调用重放，旧卡作废（tool_call={tool_call_id}）",
+                )
                 cancelled += 1
         if cancelled:
             logger.info(
@@ -706,7 +851,23 @@ class ApprovalService:
                     continue
                 if _identity_check(pending, actor) is not None:
                     continue
-                cancelled += self._expire_stale_locked(pending, reason)
+                # 修缺陷（B2 实测发现，崩溃级）：这里原本调用
+                # ``self._expire_stale_locked(pending, reason)`` 并把返回值
+                # 当计数累加，而该方法签名是 ``(self, now)``、无返回值 ——
+                # 只要 chat 有残留待批卡就会 TypeError。就地收场，语义与
+                # _expire_stale_locked 一致（置超时、结算 Future、落台账）。
+                pending.status = "timeout"
+                pending.resolved_at = now
+                if not pending.future.done():
+                    pending.future.set_result(ApprovalDecision.TIMEOUT)
+                record_intent(
+                    pending,
+                    decision=ApprovalDecision.TIMED_OUT.value,
+                    outcome="auto:chat_closed",
+                    decide_source="internal",
+                    why=reason,
+                )
+                cancelled += 1
         if cancelled:
             logger.info(
                 "Cancelled %d leftover approval(s) for chat %s",
@@ -746,6 +907,16 @@ class ApprovalService:
                     pending.future.set_result(ApprovalDecision.DENIED)
                 pending.status = "cancelled"
                 pending.resolved_at = now
+                # 台账：/stop 或断连导致的批量作废要入账（system_cancelled）。
+                # 与用户主动拒批分开统计 —— 否则"取消会话"会被算成
+                # "用户拒绝审批"，拒绝率被污染。
+                record_intent(
+                    pending,
+                    decision="system_cancelled",
+                    outcome="auto:stop_or_disconnect",
+                    decide_source="internal",
+                    why="用户停止任务/断连，待批准卡自动拒绝",
+                )
                 cancelled += 1
         if cancelled:
             logger.info(
@@ -781,6 +952,15 @@ class ApprovalService:
                 pending.future.set_result(ApprovalDecision.TIMEOUT)
             pending.status = "timeout"
             pending.resolved_at = now
+            # 台账：GC 清的卡也是收场（超时默认拒绝），不记的话"卡凭空
+            # 消失"与"用户批了/拒了"在台账里长得一样，超时率算不出来。
+            record_intent(
+                pending,
+                decision=ApprovalDecision.TIMED_OUT.value,
+                outcome="auto:timeout_gc",
+                decide_source="internal",
+                why=f"队列 GC 清理（卡龄超过 {_GC_PENDING_MAX_AGE_SECONDS:.0f}s）",
+            )
 
         overflow = len(self._pending) - _GC_MAX_PENDING
         if overflow <= 0:
@@ -795,6 +975,13 @@ class ApprovalService:
                 pending.future.set_result(ApprovalDecision.TIMEOUT)
             pending.status = "timeout"
             pending.resolved_at = now
+            record_intent(
+                pending,
+                decision=ApprovalDecision.TIMED_OUT.value,
+                outcome="auto:timeout_overflow",
+                decide_source="internal",
+                why=f"队列超过 {_GC_MAX_PENDING} 张上限，清最老的卡",
+            )
 
 
 # ------------------------------------------------------------------

@@ -48,3 +48,19 @@ def cwd_db_pollution_guard(tmp_path: Path) -> None:
         + f"\nCWD={Path.cwd()}\n"
         "修法：测试用 tmp_path 拼绝对路径；诊断脚本用 scripts/_probe_db.connect_ro。"
     )
+
+
+@pytest.fixture(autouse=True, name="legacy_self_approval_keeps_old_locks")
+def _legacy_self_approval_keeps_old_locks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """既有审批测试锁的是"属主可以自批"这条 D7 之前的现状。
+
+    D7（方案 §13）拍板**禁止自批**，默认态已翻转为 ``forbid``。这些既有
+    锁的真正对象是身份边界与越权拒绝，继续在 ``allow`` 态下测它们 ——
+    回退态本身也是产品承诺之一。
+
+    D7 新行为由 ``server/tests/contract/test_contract_approvals.py`` 里的
+    ``test_self_approval_is_forbidden_by_default`` 与
+    ``test_admin_override_is_traced`` 显式锁住。
+    """
+
+    monkeypatch.setenv("COAPIS_APPROVAL_SELF_APPROVAL", "allow")

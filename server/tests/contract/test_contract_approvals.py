@@ -432,20 +432,23 @@ def test_clean_result_is_safe_and_never_crashes():
 # ── 5. B2 目标：意图台账与超时默认语义 ──────────────────────────────────
 
 
-@B2
 async def test_user_choice_leaves_an_intent_ledger_row(service):
-    # 终态判据（方案 §4 验收 5）：用户选择要能回答"选了哪种、为什么"。
-    # 今天只有内存里的 decision 值，队列取走即消失，台账里没有任何一行。
+    # B2 交付（2026-11-15）：审批意图台账表 ``approval_intents`` +
+    # ``approvals/intent_ledger`` 写入器。一行两列是刻意的：``decision``
+    # 记用户点的动作，``outcome`` 记系统是否采纳（refused:*）。
+    # 无 actor 的 resolve 照旧被身份边界拒绝，但"用户点了批准"这件事
+    # 本身入账 —— 台账不歪曲用户行为。
     item = await _pending(service, "s-intent")
     await service.resolve_request(item.request_id, ApprovalDecision.APPROVED)
     rows = await service.list_intent_rows(session_id="s-intent")
     assert rows and rows[0]["decision"] == "approved"
 
 
-@B2
 async def test_timeout_leaves_a_ledger_row_not_a_vanish(service):
-    # 终态判据（方案 §4 验收 5）：超时也要进台账，可统计、可追溯。
-    # 今天超时只在内存里留下一条 decision，队列取走即消失，台账 0 行。
+    # B2 交付（2026-11-15）：超时 = 一次**默认拒绝**，落台账
+    # ``decision=timed_out``（``ApprovalDecision.TIMED_OUT``，台账尺子）。
+    # Future 侧仍回 TIMEOUT —— 那是 agent 等的信号，改名等于历史对不上。
+    # 读侧 ``list_timeout_rows`` 先结账再查，超时计数不依赖维护循环节拍。
     item = await _pending(service, "s-timeout", timeout_seconds=0.0)
     await asyncio.sleep(0.05)
     rows = await service.list_timeout_rows(session_id="s-timeout")

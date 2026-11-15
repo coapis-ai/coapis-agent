@@ -136,6 +136,30 @@ class DecisionEvent(BaseRow):
         Text, nullable=False, default="", server_default=text("''")
     )
 
+    # ---- 治理接线列（迁移 0028 · B3）----
+    # 实测断点：治理事件视图 SQL 查 session_id/purpose（及 evidence/
+    # rationale/updated_at 这些**从来没有的列**），异常被读侧吞掉，
+    # 于是台账 364 行在库里、看板 0 行。列建出来，读侧才有据可查。
+    # 同样遵守本表非空红线：老行读出为 ''（未知），不引入可空列。
+    # 问这一句干什么（"验收"/"开工档"…）。岗位名回答"谁问的"，
+    # purpose 回答"问来干什么"，两者都要能按字面量聚合。
+    purpose: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    # 会话主键（治理按会话筛事件的尺子；此前只能按 chat 筛）
+    session_id: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    # 判定上下文留痕（弃权原因码 abstain_reason 落这里）。
+    # JSON 文本列：裸 SQL 写入方负责 dumps，读侧负责 loads —— 与
+    # 裸 SQL 写入链（bus.py）匹配，不依赖 SQLAlchemy 的 JSON 适配器。
+    payload: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+        server_default=text("''"),
+    )
+
     __table_args__ = (
         Index("ix_decision_events_source_created", "source", "created_at"),
         Index("ix_decision_events_user_created", "user_id", "created_at"),

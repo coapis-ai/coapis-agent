@@ -996,6 +996,97 @@ def record_parse_event(
         return False
 
 
+#: B2 登记面（方案 v1 §5 / 契约目标锁
+#: ``test_knowledge_db_mcp_resources_have_a_registration_face``）。
+#:
+#: 此前台账只有**文件**登记面（``record_file_event``），实测 dev 台账 kind
+#: 分布 file 独大、kb/db/mcp 登记侧 0 处 —— 前端资源栏的「知识库/数据库/
+#: MCP」三档永远是空的（读面有筛子，登记侧没有入口，筛的是空气）。
+#: kind 白名单与 resources 模型共用同一把尺子（``VALID_KINDS``）。
+RESOURCE_EVENT_KINDS = frozenset({"kb", "db", "mcp", "web"})
+
+
+def record_resource_event(
+    user_id: Optional[str],
+    *,
+    kind: str,
+    resource_id: Optional[str] = None,
+    title: Optional[str] = None,
+    session_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    turn_id: Optional[str] = None,
+    source: str = "other",
+) -> Optional[dict[str, Any]]:
+    """登记一条**非文件**资源（知识库/数据库/MCP/网页），返回台账行摘要。
+
+    B2 交付物：知识库检索、数据库查询、MCP 调用这些"用户手里也算资源"的
+    对象，从此有了唯一的入账入口。口径与文件登记面一致：
+
+    * **旁路**：永不抛异常，任何失败只 debug 日志并返回 ``None``，
+      绝不把异常抛回检索/查询主链；
+    * **幂等**：同一 owner/kind/resource_id 重复登记只刷新 ``last_seen_at``，
+      不会分裂成两行（复用 ``ResourceLedger.register`` 这个唯一登记入口）；
+    * **归属**：``owner_scope="user"``，只装该用户的资源。
+
+    返回 ``{"resource_key", "kind", "title", "owner_id", "source"}``。
+    """
+    try:
+        if kind not in RESOURCE_EVENT_KINDS:
+            return None
+        owner = (user_id or "").strip()
+        ident = (resource_id or "").strip()
+        if not owner or not ident:
+            return None
+        from .resource_ledger import get_resource_ledger
+
+        rl = get_resource_ledger()
+        key = rl.register(
+            owner_scope="user",
+            owner_id=owner,
+            kind=kind,
+            path=ident,
+            title=title,
+            source=source,
+            path_form="workspace",
+        )
+        if not key:
+            return None
+        role = role_for_source(source)
+        if session_id:
+            rl.attach_ref(
+                resource_key=key,
+                referrer_kind="session",
+                referrer_id=session_id,
+                role=role,
+            )
+        if chat_id:
+            rl.attach_ref(
+                resource_key=key,
+                referrer_kind="chat",
+                referrer_id=chat_id,
+                role=role,
+                turn_id=str(turn_id or ""),
+            )
+        if agent_id:
+            rl.attach_ref(
+                resource_key=key,
+                referrer_kind="agent",
+                referrer_id=agent_id,
+                role="producer",
+            )
+        return {
+            "resource_key": key,
+            "kind": kind,
+            "title": (title or "").strip() or ident,
+            "owner_id": owner,
+            "source": source,
+        }
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("resource ledger non-file event failed (ignored): %s", exc)
+        return None
+
+
 #: 轻量巡检节拍（秒）。v26 · F4（拍板 D6）：巡检从"每天一轮"改成
 #: "每 tick 一轮轻量 + 每天 hour:00 一轮全量"。
 _LEDGER_TICK_SEC = 1800.0

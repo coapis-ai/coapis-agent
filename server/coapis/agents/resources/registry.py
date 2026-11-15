@@ -64,6 +64,61 @@ def _tag(h: Hit, source: str) -> dict:
     return d
 
 
+def _record_ledger_hits(hits: list[dict]) -> None:
+    """B2 接线：非文件命中入账（旁路，永不抛）。
+
+    检索面是 kb/db/mcp 在仓库里的**唯一真实采集点**——实测接线前
+    ``record_resource_event`` 全仓库零调用方，台账 kind 分布 file 独大。
+    口径：
+
+    * 归属用户取会话上下文（``get_current_username``），拿不到就**不记**，
+      绝不写死 user_id；
+    * 每个 (kind, ref) 一次检索只记一行（``register`` 本身幂等，去重只为
+      少开事务）；
+    * ``file`` 面不入这个口——文件有自己的登记面（``record_file_event``），
+      ``RESOURCE_EVENT_KINDS`` 白名单也挡着；
+    * 任何异常只 debug 日志，绝不抛回检索链。
+    """
+    try:
+        from ...config.session_context import (
+            get_current_agent_id,
+            get_current_chat_id,
+            get_current_session_id,
+            get_current_turn_id,
+            get_current_username,
+        )
+        from ...foundation.file_ledger import (
+            RESOURCE_EVENT_KINDS,
+            record_resource_event,
+        )
+
+        username = get_current_username()
+        if not username:
+            return
+        seen: set[tuple[str, str]] = set()
+        for h in hits:
+            kind = str(h.get("source") or "")
+            if kind not in RESOURCE_EVENT_KINDS:
+                continue
+            ref = str(h.get("ref") or "").strip()
+            if not ref or (kind, ref) in seen:
+                continue
+            seen.add((kind, ref))
+            record_resource_event(
+                username,
+                kind=kind,
+                resource_id=ref,
+                title=h.get("title"),
+                session_id=get_current_session_id(),
+                chat_id=get_current_chat_id(),
+                agent_id=get_current_agent_id(),
+                turn_id=get_current_turn_id(),
+                source=f"{kind}_query",
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("resource ledger hook skipped: %s", exc)
+
+
 async def search(
     scope: str | None,
     query: str,
@@ -100,6 +155,8 @@ async def search(
                     hits.append(_tag(Hit(meta=m, score=0.0, snippet=m.summary), name))
             except Exception as exc:
                 errors[name] = f"{type(exc).__name__}: {exc}"
+        # 发现模式同样入账：用户主动看了哪些库/表/MCP 服务，是真实使用足迹。
+        _record_ledger_hits(hits)
         return {
             "mode": "discover",
             "scope": scope or "",

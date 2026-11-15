@@ -71,13 +71,20 @@ _KIND_BY_EVENT_TYPE = {
     "tool_guard_approval": "approval",
     "approval": "approval",
     "permission_denied": "sandbox_denied",
-    "path_check": "sandbox_denied",
-    "command_check": "sandbox_denied",
-    "sandbox": "sandbox_denied",
+    # ⚠️ 掺水根因（此处曾是沙箱拦截率虚高的源头）：``path_check`` /
+    # ``command_check`` / ``sandbox`` 以前**无条件**映射成 sandbox_denied，
+    # 于是"路径校验通过""命令检查通过"这类**放行**记录也进了拒绝桶。
+    # 实测 dev 审计链 1810 条放行里混着 213 条真拒绝 —— 检查类事件的桶
+    # 必须取决于**结果**，交回 _kind_by_result 判（见 _RESULT_SENSITIVE_*）。
     "tool_plan_scope": "tool",
     "config_change": "config",
     "file_op": "file_version",
 }
+
+#: 结果敏感的检查类事件：放行归 tool 桶，拒绝才归 sandbox_denied。
+_RESULT_SENSITIVE_EVENT_TYPES = frozenset(
+    {"path_check", "command_check", "sandbox"}
+)
 
 #: 判官的插手点（plan_gate/tool_gate/…）→ judge
 _JUDGE_POINT_KINDS = "judge"
@@ -109,6 +116,9 @@ def classify_audit_event(raw: dict[str, Any]) -> dict[str, Any] | None:
     result = str(raw.get("result") or "")
 
     kind = _KIND_BY_EVENT_TYPE.get(event_type)
+    if event_type in _RESULT_SENSITIVE_EVENT_TYPES:
+        # 检查类事件：桶取决于**结果**，不取决于事件名（沙箱掺水修复）。
+        kind = "sandbox_denied" if result.startswith("denied") else None
     if kind is None:
         kind = _kind_by_result(event_type, result, meta)
     if kind is None:
@@ -150,15 +160,27 @@ def _kind_by_result(
     result: str,
     meta: dict[str, Any],
 ) -> str | None:
-    """兜底映射：老日志里没有 event_type 语义、只有结果的，按结果判。"""
+    """兜底映射：老日志里没有 event_type 语义、只有结果的，按结果判。
+
+    ⚠️ 拒绝/放行只能按**结果**分，不能按事件名分（沙箱掺水根因）。
+    此前这里写的是 ``if "sandbox" in event_type or "path" in event_type
+    or "command" in event_type: return "sandbox_denied"`` —— 事件名里带
+    command/path/sandbox 的**放行**记录（沙箱检查通过、路径校验通过）
+    全被算成沙箱拒绝。实测 dev 审计链 1810 条放行里混进 213 条真拒绝，
+    看板上的"沙箱拦截率"是掺水的假数字。
+    """
+    denied = result.startswith("denied")
     if result.startswith("denied_by_policy(sandbox)"):
         return "sandbox_denied"
     if "approval" in event_type:
         return "approval"
-    if "sandbox" in event_type or "path" in event_type or "command" in event_type:
+    if denied and ("sandbox" in result or "sandbox" in event_type):
         return "sandbox_denied"
+    if denied:
+        return "tool_denied"
+    # 到这里都是**未拒绝**的记录：有工具对象的归 tool，其余不进拒绝桶
     if meta.get("tool") is not None:
-        return "tool_denied" if result.startswith("denied") else "tool"
+        return "tool"
     return None
 
 
@@ -246,38 +268,74 @@ def read_judge_events(
     username: str | None = None,
     since_ts: float | None = None,
 ) -> list[dict[str, Any]]:
-    """判官事件（decision_events）。"""
+    """判官事件（decision_events）。
+
+    ⚠️ 列名一律以**库里的真实列**为准（2026-11-15 在 dev 真库
+    ``/apps/ai/coapis-dev/system/coapis.db`` 用 PRAGMA 实测）。此前这条
+    SQL 查了 9 个从来不存在的列（``updated_at``/``point``/``subject``/
+    ``verdict``/``confidence``/``evidence``/``rationale``/``session_id``/
+    ``deleted_at``），异常被 ``_query_rows`` 吞成空列表 —— 台账 364 行
+    在库里，看板 0 行。列名对不上表，是"看板永远空"的头号根因。
+    """
     sql = (
-        "SELECT event_id, created_at, updated_at, user_id, session_id, agent_id, "
-        "point, subject, verdict, confidence, evidence, rationale, outcome, cost "
-        "FROM decision_events WHERE deleted_at IS NULL"
+        "SELECT event_id, created_at, user_id, session_id, agent_id, source, "
+        "purpose, action, judgment, hit_layer, model, cost, tokens, outcome, "
+        "reason, origin, zero_reason, dirty_band, payload "
+        "FROM decision_events"
     )
     params: dict[str, Any] = {"lim": int(limit)}
     if username:
-        sql += " AND user_id = :uid"
+        sql += " WHERE user_id = :uid"
         params["uid"] = username
     if since_ts is not None:
-        sql += " AND created_at >= :since"
+        sql += (" AND" if " WHERE" in sql else " WHERE") + " created_at >= :since"
         params["since"] = float(since_ts)
     sql += " ORDER BY created_at DESC LIMIT :lim"
 
     out = []
     for r in _query_rows(sql, params):
+        # payload 是 JSON 文本（写侧 dumps，见 decision/types.payload_to_json_text）。
+        # 弃权原因码落在里面 —— 读侧解出来，看板才知道"判官为什么沉默"。
+        detail = _loads_payload(r.get("payload"))
         out.append(
             {
                 "kind": "judge",
                 "ts": r.get("created_at"),
                 "username": r.get("user_id"),
-                "source": "decision_events",
-                "action": r.get("point"),
+                "source": r.get("source"),
+                "action": r.get("source"),
+                "purpose": r.get("purpose"),
                 "session": r.get("session_id"),
-                "target": r.get("subject"),
-                "result": r.get("verdict"),
-                "reason": r.get("rationale"),
+                "target": r.get("chat_id"),
+                "result": r.get("judgment"),
+                "reason": r.get("reason"),
+                "hit_layer": r.get("hit_layer"),
+                "cost": r.get("cost"),
+                "tokens": r.get("tokens"),
+                "outcome": r.get("outcome"),
+                "origin": r.get("origin"),
+                "zero_reason": r.get("zero_reason"),
+                "dirty_band": r.get("dirty_band"),
+                "abstain_reason": detail.get("abstain_reason") or "",
                 "ref_id": r.get("event_id"),
             }
         )
     return out
+
+
+def _loads_payload(raw: Any) -> dict[str, Any]:
+    """台账 payload（JSON 文本）→ dict。解不开返回空 dict，不抛。"""
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        import json
+
+        got = json.loads(str(raw))
+        return got if isinstance(got, dict) else {}
+    except Exception:
+        return {}
 
 
 def read_file_version_events(
