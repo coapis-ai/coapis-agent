@@ -47,6 +47,7 @@ import {
   DatabaseOutlined,
   AuditOutlined,
   HistoryOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -58,6 +59,8 @@ import AgentIdentityPanel from './AgentIdentityPanel';
 import LedgerPanel from './LedgerPanel';
 import CheckpointPanel from './CheckpointPanel';
 import JudgmentPanel from './JudgmentPanel';
+// 治理视图（B4 出口验收第 2 条 + B5 收尾）：把三个已上线的对账端点亮到页面上
+import GovernancePanel from './GovernancePanel';
 // 会话侧的预览抽屉（B4）在这里复用：我的空间预览弹窗 2026-06-28 被移除后，
 // 文件只能下载不能看，产出文件的体验断在「我的空间」这一头。
 import CoApisPreviewDrawer, { type PreviewTarget } from '../Chat/components/CoApisPreviewDrawer';
@@ -118,6 +121,9 @@ const CATEGORIES = [
   { key: 'ledger', label: '资源台账', labelKey: 'myspace.tabLedger', icon: <DatabaseOutlined /> },
   { key: 'judgment', label: '判断台账', labelKey: 'myspace.tabJudgment', icon: <AuditOutlined /> },
   { key: 'checkpoints', label: '检查点', labelKey: 'myspace.tabCheckpoint', icon: <HistoryOutlined /> },
+  // 2026-11-15 治理视图（B4 出口验收第 2 条：闸触发按门分桶写进台账 → 治理页可见；
+  // B5 治理事件可见性收尾）。走 labelKey，不硬编码中文。
+  { key: 'governance', label: '治理视图', labelKey: 'myspace.tabGovernance', icon: <SafetyCertificateOutlined /> },
 ] as const;
 
 // ═══════════════════════════════════════════════════════════
@@ -256,7 +262,8 @@ const MySpacePage: React.FC = () => {
 
   const loadFiles = useCallback(async (path: string = currentPath) => {
     // 台账/判断 tab 不列文件树：category 白名单里没有这两个，发过去必被后端拒。
-    if (activeCategory === 'ledger' || activeCategory === 'judgment') return;
+    // 2026-11-15 治理视图同理——它是自取数的审计面板，category 白名单里也没有它。
+    if (activeCategory === 'ledger' || activeCategory === 'judgment' || activeCategory === 'governance') return;
     setLoading(true);
     try {
       const query = new URLSearchParams({ path, category: activeCategory }).toString();
@@ -330,7 +337,8 @@ const MySpacePage: React.FC = () => {
 
   useEffect(() => {
     // 判断台账是自取数的独立面板，不参与文件空间任何取数。
-    if (activeCategory === 'judgment') return;
+    // 治理视图同理（2026-11-15）：三张卡自己发三个只读 GET，文件层取数对它无意义。
+    if (activeCategory === 'judgment' || activeCategory === 'governance') return;
     loadFiles();
     loadUsage();
     loadConfig();
@@ -849,7 +857,7 @@ const MySpacePage: React.FC = () => {
       />
 
       {/* 顶部工具栏 (仅文件 tab) */}
-      {activeCategory !== 'agents' && activeCategory !== 'ledger' && activeCategory !== 'judgment' && activeCategory !== 'checkpoints' && (
+      {activeCategory !== 'agents' && activeCategory !== 'ledger' && activeCategory !== 'judgment' && activeCategory !== 'checkpoints' && activeCategory !== 'governance' && (
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <Breadcrumb items={breadcrumbItems} />
         
@@ -1081,7 +1089,14 @@ const MySpacePage: React.FC = () => {
           <JudgmentPanel />
         </div>
       )}
-      {activeCategory !== 'agents' && activeCategory !== 'ledger' && activeCategory !== 'judgment' && (
+      {/* 治理视图（B4/B5 收尾）：三张只读对账卡自己取数，同 checkpoints 一样不吃文件层的
+          状态——它是治理审计的看板，不是文件浏览器。 */}
+      {activeCategory === 'governance' && (
+        <div className="page-content" style={{ padding: '16px' }}>
+          <GovernancePanel />
+        </div>
+      )}
+      {activeCategory !== 'agents' && activeCategory !== 'ledger' && activeCategory !== 'judgment' && activeCategory !== 'governance' && (
         <div className="page-content" style={{ padding: '16px' }}>
           {viewMode === 'list' && (
             <List
