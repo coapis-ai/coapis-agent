@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from coapis.agents.loop_gates import (
@@ -29,6 +31,26 @@ from coapis.agents.loop_gates import (
     gate_round_budget,
     gate_stop_phrase,
 )
+
+
+def _strict_ledger_fake(rows: list) -> callable:
+    """按 ``write_ledger`` 真签名校验的假写入器。
+
+    教训（2026-11-16 实锤）：原先的假写入器写成 ``**kwargs``，什么参数都收。
+    真实调用点 ``loop_gates._write_ledger`` 传了签名外的 ``complexity=""``，
+    真函数抛 TypeError 又被 ``except Exception: pass`` 吞掉，于是台账长期 0 行
+    而测试全绿。这里先 ``sig.bind``，错参当场让测试变红。
+    """
+    from coapis.decision import ledger_contract
+
+    sig = inspect.signature(ledger_contract.write_ledger)
+
+    def _fake(**kwargs):
+        sig.bind(**kwargs)  # 参数不在签名内 → TypeError → 测试红
+        rows.append(kwargs)
+        return True
+
+    return _fake
 
 
 # ---------------------------------------------------------------- 归因（纯函数）
@@ -206,12 +228,8 @@ def test_ledger_one_row_per_trigger_by_default(monkeypatch):
     """默认粒度 1：每次触发明细一行，治理页读到的就是真实触发次数。"""
     rows: list[dict] = []
 
-    def fake_write_ledger(**kwargs):
-        rows.append(kwargs)
-        return True
-
     monkeypatch.setattr(
-        "coapis.decision.ledger_contract.write_ledger", fake_write_ledger,
+        "coapis.decision.ledger_contract.write_ledger", _strict_ledger_fake(rows),
     )
     chain = LoopGateChain(ledger_enabled=True, session_id="s1", chat_id="c1",
                           user_id="u1", agent_id="a1")
@@ -236,12 +254,8 @@ def test_ledger_throttle_groups_at_env_granularity(monkeypatch):
     monkeypatch.setattr(mod, "_LEDGER_EVERY", 3)
     rows: list[dict] = []
 
-    def fake_write_ledger(**kwargs):
-        rows.append(kwargs)
-        return True
-
     monkeypatch.setattr(
-        "coapis.decision.ledger_contract.write_ledger", fake_write_ledger,
+        "coapis.decision.ledger_contract.write_ledger", _strict_ledger_fake(rows),
     )
     chain = LoopGateChain(ledger_enabled=True, session_id="s1")
     for _ in range(7):

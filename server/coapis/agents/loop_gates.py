@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field, replace
@@ -69,6 +70,20 @@ GATE_LABELS: dict[str, str] = {
 
 # 闸码 → 台账岗位语义（岗位=loop_gate，purpose=闸码）
 LEDGER_SOURCE = "loop_gate"
+
+logger = logging.getLogger(__name__)
+# 台账失败只告警一次：闸触发是高频事件，刷屏会淹掉日志；
+# 但完全不记就会把"闸在跑、台账 0 行"这类结构性故障埋进肚子里（本处已踩过一次）。
+_ledger_warned = False
+
+
+def _warn_ledger_once(context: str, exc: Exception) -> None:
+    global _ledger_warned
+    if _ledger_warned:
+        return
+    _ledger_warned = True
+    logger.warning("loop_gate %s: %s: %s", context, type(exc).__name__, exc)
+
 
 # 台账节流粒度：默认 1 = 每次触发一行，治理页看到的就是真实计数。
 # （闸触发天然稀疏：去重拦截、会话量告警、停滞强制都是低频事件。）
@@ -523,7 +538,8 @@ class LoopGateChain:
                 from decision import ledger_contract as _ledger
             except ImportError:
                 from coapis.decision import ledger_contract as _ledger
-        except Exception:
+        except Exception as exc:  # 不可静默：静默会让"闸在跑但台账 0 行"再也查不出来
+            _warn_ledger_once("import ledger_contract failed", exc)
             return
         try:
             _ledger.write_ledger(
@@ -533,15 +549,14 @@ class LoopGateChain:
                 hit_layer="rule",
                 reason=f"[{verdict.gate}] {verdict.label}"
                        + (f"（{verdict.detail}）" if verdict.detail else ""),
-                complexity="",
                 user_id=self.user_id,
                 agent_id=self.agent_id,
                 session_id=self.session_id,
                 chat_id=self.chat_id,
                 zero_reason_hint="" if verdict.hits else "no_gate_hit",
             )
-        except Exception:
-            pass  # 台账永不阻断主流程
+        except Exception as exc:  # 台账永不阻断主流程，但首次失败必须留痕
+            _warn_ledger_once("write_ledger failed", exc)
 
     def flush(self) -> int:
         """收尾补记：把未满节流阈值的触发写进台账（回合结束调用）。"""
