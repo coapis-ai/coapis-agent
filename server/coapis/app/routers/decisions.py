@@ -454,6 +454,7 @@ def put_config(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, 
     from coapis.decision import normalize_hub_keys
     from coapis.decision.config import (
         HUB_KEY_ALIASES,
+        POST_KEY_ALIASES,
         DecisionHubConfig,
         save_hub_section,
     )
@@ -461,8 +462,14 @@ def put_config(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, 
     known = set(DecisionHubConfig.known_keys())
     body = body or {}
     # 只筛掉不认识的键；键名收敛交给写入侧统一做（别名归一 + 全名落盘），
-    # 读取侧与落盘段同名，两处不会各认一套键名。
-    accepted = {k: v for k, v in body.items() if k in known or k in HUB_KEY_ALIASES}
+    # 读取侧与落盘段同名，两处不会各认一套键名。岗位开关走平铺别名
+    # （``plan_gate_enabled`` 这类），不在别名表里会被当未知键静默拒收——
+    # 页面开关点了等于没点。
+    accepted = {
+        k: v
+        for k, v in body.items()
+        if k in known or k in HUB_KEY_ALIASES or k in POST_KEY_ALIASES
+    }
     unknown = sorted(set(body) - set(accepted))
     if not accepted:
         raise HTTPException(status_code=400, detail="没有可识别的配置项")

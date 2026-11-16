@@ -216,6 +216,11 @@ def _as_str(val: Any, default: str) -> str:
 #: 管理端可用的短名键（写盘时按原样保留，读取时收敛成全名）。
 HUB_KEY_ALIASES = frozenset({"timeout_ms", "max_calls_per_turn", "advisor_enabled"})
 
+#: 岗位开关的平铺别名（``plan_gate_enabled`` 这类）。写盘侧只出嵌套
+#: ``posts`` 段，管理端与手改配置习惯平铺 —— 两套键名必须在 normalize
+#: 一处收敛成嵌套段，读侧只认一份，否则"管理台保存 = 空操作"。
+POST_KEY_ALIASES = frozenset(f"{p}_enabled" for p in POSTS)
+
 
 def normalize_hub_keys(raw: Any) -> dict:
     """把管理端短名收敛成中枢全名（键名只在这一处映射）。
@@ -225,6 +230,11 @@ def normalize_hub_keys(raw: Any) -> dict:
     迟早对不上，所以映射只留这一份：配置写入、读取校验、路由过滤都调它。
 
     只在短名出现且对应全名缺席时生效，避免同一份配置里两个键名互相覆盖。
+
+    岗位开关（``posts`` 段 ↔ ``{post}_enabled`` 平铺键）是唯一例外，必须
+    **平铺压过嵌套**：落盘文件里的 ``posts`` 只是上一次保存的快照，而平铺键
+    通常代表更新的一次显式指定（管理台只发平铺键，手改配置也只有平铺键）。
+    让快照压过新指令，页面开关就永远落不了地。
     """
     out = dict(raw or {})
     for alias, full in (
@@ -239,6 +249,17 @@ def normalize_hub_keys(raw: Any) -> dict:
             if _as_bool(out["advisor_enabled"], True)
             else 0
         )
+    # 岗位开关：平铺别名折进嵌套段，折完删掉平铺键（段就是唯一真相）。
+    posts = dict(out.get("posts")) if isinstance(out.get("posts"), Mapping) else {}
+    for alias in POST_KEY_ALIASES:
+        if alias not in out:
+            continue
+        post = alias[: -len("_enabled")]
+        if post in POSTS:
+            posts[post] = _as_bool(out[alias], True)
+        out.pop(alias)
+    if posts:
+        out["posts"] = posts
     return out
 
 
@@ -479,7 +500,16 @@ class DecisionHubConfig:
                 merged[key] = _as_str(val, default)
             else:
                 merged[key] = _as_float(val, default)
-        posts = {p: _as_bool(raw.get(f"{p}_enabled"), merged["enabled"]) for p in POSTS}
+        # 岗位开关只认嵌套 ``posts`` 段（平铺别名已在 normalize_hub_keys 折进来）。
+        # 写盘侧 full_view 出的就是这一段，读写同名才闭得上环。
+        posts_raw = raw.get("posts")
+        posts = {
+            p: _as_bool(
+                posts_raw.get(p) if isinstance(posts_raw, Mapping) else None,
+                merged["enabled"],
+            )
+            for p in POSTS
+        }
         # 构造即夹取安全区间：调用方漏调 normalized() 也不会把判断环节配成拖死主链路
         return cls(posts=posts, **merged).normalized()
 
