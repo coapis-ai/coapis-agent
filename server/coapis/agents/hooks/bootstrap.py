@@ -28,6 +28,7 @@ finally block, ensuring:
 2. Guidance appears naturally after the answer
 3. No internal directives leak to the user
 """
+import re
 import json
 import logging
 from pathlib import Path
@@ -255,7 +256,7 @@ class BootstrapHook:
             if len(name) > 50:
                 name = ""
             # Remove trailing punctuation from name
-            name = _re.sub(r"[，。！？,.!?]+$", "", name).strip()
+            name = re.sub(r"[，。！？,.!?]+$", "", name).strip()
 
             if not name and not style and not customization:
                 return

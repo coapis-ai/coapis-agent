@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 from typing import Any
 
 try:  # POSIX 文件锁；非 POSIX 平台退化为「无选举」
@@ -41,7 +42,12 @@ from ...config import get_dream_cron
 
 from ..console_push_store import append as push_store_append
 from .executor import CronExecutor
-from .heartbeat import run_heartbeat_once
+from .heartbeat import (
+    is_cron_expression,
+    parse_heartbeat_cron,
+    parse_heartbeat_every,
+    run_heartbeat_once,
+)
 from .models import CronExecutionRecord, CronJobSpec, CronJobState
 from .repo.base import BaseJobRepository
 

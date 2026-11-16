@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from agentscope.message import Msg
 
+from ..app.approvals.service import ApprovalActor
 from ..security.tool_guard.models import (
     GuardSeverity,
     GuardThreatCategory,

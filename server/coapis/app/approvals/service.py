@@ -793,6 +793,9 @@ class ApprovalService:
         """
         now = time.time()
         cancelled = 0
+        # ``now`` is read inside the loop below but was never defined, so
+        # closing a chat that still had pending approvals raised NameError.
+        now = time.time()
         async with self._lock:
             to_cancel = [
                 k
@@ -845,6 +848,9 @@ class ApprovalService:
         if not chat_id:
             return 0
         cancelled = 0
+        # ``now`` is read inside the loop below but was never defined, so
+        # closing a chat that still had pending approvals raised NameError.
+        now = time.time()
         async with self._lock:
             for request_id, pending in list(self._pending.items()):
                 if str(pending.extra.get("chat_id", "")) != chat_id:
@@ -894,6 +900,9 @@ class ApprovalService:
         """
         now = time.time()
         cancelled = 0
+        # ``now`` is read inside the loop below but was never defined, so
+        # closing a chat that still had pending approvals raised NameError.
+        now = time.time()
         async with self._lock:
             to_cancel = [
                 k

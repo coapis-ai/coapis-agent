@@ -30,6 +30,8 @@ from .db.models.user import AuditLog, User, UserPreference, UserSetting
 from .db.models.usage import PointTransaction, TokenUsage
 from .user_repository import UserRepository
 
+from sqlalchemy.orm import Session, sessionmaker
+
 logger = logging.getLogger(__name__)
 
 

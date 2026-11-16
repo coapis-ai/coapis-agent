@@ -29,6 +29,10 @@ from pydantic import BaseModel
 from .buffer import _UsageEvent
 from .manager import get_token_usage_manager
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _opt(obj: Any, name: str, default: str = "") -> str:
     """安全取属性（缺失一律回默认值）。

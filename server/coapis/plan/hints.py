@@ -226,6 +226,17 @@ if _HAS_DEFAULT_HINT:
             "CRITICAL: Include a 'finish_plan' tool call.\n"
         )
 
+        auto_no_plan: str = (
+            "This turn was classified as a multi-step task, but no plan "
+            "exists yet.\n"
+            + _LANG_BLOCK
+            + "Call 'create_plan' first: decompose the request into ordered "
+            "subtasks, each with a name, a description and a measurable "
+            "expected_outcome. Then start the first subtask right away; no "
+            "user confirmation is required.\n"
+        )
+
+
         no_plan: str | None = (
             "There is no active plan yet.\n"
             + _LANG_BLOCK
@@ -262,6 +273,9 @@ if _HAS_DEFAULT_HINT:
             """Select hint when there is no active plan."""
             if nb is not None and getattr(nb, "_plan_tool_gate", False):
                 return self.no_plan
+            if nb is not None and getattr(nb, "_plan_auto_hint", False):
+                return self.auto_no_plan
+
             if nb is not None and getattr(
                 nb,
                 "_plan_recently_finished",

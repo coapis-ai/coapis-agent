@@ -46,6 +46,7 @@ from agentscope.tool import ToolResponse
 from ...constant import WORKING_DIR
 from ...config.context import (
     get_current_shell_command_timeout,
+    get_current_username,
     get_current_workspace_dir,
 )
 

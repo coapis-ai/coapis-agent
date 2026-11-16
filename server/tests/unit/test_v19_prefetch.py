@@ -12,6 +12,7 @@
 """
 
 import asyncio
+from types import SimpleNamespace
 
 
 
@@ -88,12 +89,81 @@ async def test_hub_off_launches_nothing():
     assert st._prefetch_tasks == {}, "中枢关闭不得发起预判（白烧判官额度）"
 
 
-async def test_disabled_post_launches_only_the_other():
+async def test_disabled_post_classifies_but_never_judges(monkeypatch):
+    """v21 F2：plan_gate 岗位关闭 ⇒ 规则判档照发，但绝不请判官。
+
+    旧契约「岗位关着就一个预判都不发起」已废止：它把零成本的规则层和花钱的
+    判官绑在同一颗开关上，岗位一关，规则判档一起停摆，计划链在默认配置下
+    整体静默（实测 1806 轮对话 create_plan 调用 0 次）。现在岗位只决定
+    「请不请判官」，由 _classify_plan_level 里的 judge_enabled 单独把关。
+    """
+    from coapis.agents.react_agent import CoApisAgent
+
     st = _Stub(_Hub(plan=False, skill=True))
     st._start_judge_prefetch(None, "第一步做A，第二步做B")
-    assert set(st._prefetch_tasks) == {"skill_trigger"}
+    assert set(st._prefetch_tasks) == {"plan_gate", "skill_trigger"}
     await asyncio.gather(*st._prefetch_tasks.values())
 
+    seen = {}
+
+    class _Cap:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+        def set_ledger_scope(self, *_args):
+            pass
+
+        def set_skills_dir(self, *_args):
+            pass
+
+        async def classify_smart(self, _text):
+            return "simple"
+
+    monkeypatch.setattr(
+        "coapis.agents.plan_gate.ComplexityClassifier", _Cap,
+    )
+    # _Stub 用假实现覆盖了 _classify_plan_level，这里显式跑真方法。
+    assert await CoApisAgent._classify_plan_level(st, "hello") == "simple"
+    assert seen.get("judge_enabled") is False, "岗位关闭却仍请了判官"
+
+
+async def test_arm_plan_sets_auto_hint_when_rules_say_complex():
+    """v21 F3：规则判为多步 ⇒ notebook._plan_auto_hint 点亮，供逐轮注入。
+
+    只点亮提示、不锁工具闸：模型自主判断不需要计划时仍可直答。
+    """
+    from coapis.agents.react_agent import CoApisAgent
+
+    async def _ready(value):
+        return value
+
+    def _arm(level):
+        st = _Stub(_Hub(True, True))
+        st._prepare_plan_gate = lambda _m: "多步任务"
+        st._PLAN_SKELETON_HINT = "skeleton"
+        st.plan_notebook = SimpleNamespace(_plan_auto_hint=False)
+        added = []
+        st.memory = SimpleNamespace(
+            add=_sink(added),
+        )
+        st._prefetch_tasks = {"plan_gate": _ready(level)}
+        return st, added
+
+    def _sink(sink):
+        async def _add(*_args, **_kwargs):
+            sink.append(1)
+
+        return _add
+
+    armed, added_a = _arm("complex")
+    await CoApisAgent._maybe_arm_plan(armed, [])
+    assert armed.plan_notebook._plan_auto_hint is True
+    assert len(added_a) == 1, "多步任务应写入计划骨架提示"
+
+    quiet, added_q = _arm("simple")
+    await CoApisAgent._maybe_arm_plan(quiet, [])
+    assert quiet.plan_notebook._plan_auto_hint is False
+    assert added_q == [], "简单任务不该注入计划骨架"
 
 async def test_no_prefetch_falls_back_to_sync_judge():
     """预判缺席时必须原路补判：加了预判不许少判一次。"""

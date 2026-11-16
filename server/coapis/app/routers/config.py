@@ -16,6 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import json
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
@@ -509,7 +510,7 @@ async def put_channel(
                 disk_data = json.load(f)
             disk_channels = disk_data.get("channels", {})
             # Update only the target channel in disk data
-            dumped = agent_config.model_dump(exclude_none=True)
+            dumped = agent.config.model_dump(exclude_none=True)
             disk_channels[channel_name] = dumped.get("channels", {}).get(channel_name, {})
             disk_data["channels"] = disk_channels
             # Write back merged data directly

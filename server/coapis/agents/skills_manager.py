@@ -804,6 +804,36 @@ def _extract_requirements(post: dict[str, Any]) -> SkillRequirements:
         return SkillRequirements()
 
 
+def _resolve_skill_dir(skill_name: str) -> Path | None:
+    """Locate the directory that holds ``<skill_name>/SKILL.md``.
+
+    Resolution order mirrors the skill loaders: current workspace skills dir
+    -> shared skill pool -> packaged built-ins.  Returns ``None`` when the
+    skill is unknown (callers already handle that).
+    """
+    candidates: list[Path] = []
+    try:
+        from ..config.context import get_current_workspace_dir
+
+        workspace_dir = get_current_workspace_dir()
+    except Exception:  # pragma: no cover - contextvar absent outside a turn
+        workspace_dir = None
+    if workspace_dir is not None:
+        candidates.append(
+            get_workspace_skills_dir(Path(workspace_dir)) / skill_name,
+        )
+    candidates.extend(
+        [
+            get_skill_pool_dir() / skill_name,
+            get_builtin_skills_dir() / skill_name,
+        ],
+    )
+    for candidate in candidates:
+        if (candidate / "SKILL.md").is_file():
+            return candidate
+    return None
+
+
 def get_skill_requirements(skill_name: str) -> SkillRequirements:
     """Return parsed requirements for a skill by name."""
     skill_dir = _resolve_skill_dir(skill_name)

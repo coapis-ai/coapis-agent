@@ -328,7 +328,8 @@ async def auto_heal(
         fixed = sum(1 for r in results if r.get("success"))
         return {
             "action": "fix_all",
-            "checkpoint": checkpoint_result,
+            # 无自动快照能力：回滚靠 git / 备份，不谎报。
+        "checkpoint": None,
             "results": results,
             "total": len(fixable),
             "fixed": fixed,

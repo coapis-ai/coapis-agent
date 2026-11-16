@@ -27,7 +27,7 @@ import time
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy import func, select, update
 

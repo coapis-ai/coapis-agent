@@ -50,6 +50,8 @@ logger = logging.getLogger(__name__)
 
 # Floor so a bogus 0/None from a provider cannot produce a 0-token budget.
 _MIN_WINDOW_TOKENS = 512
+# 取不到真实分词器时的兜底「每 token 字符数」，与本模块 1.1 口径一致。
+_FALLBACK_CHARS_PER_TOKEN = 1.1
 
 
 @dataclass(frozen=True)

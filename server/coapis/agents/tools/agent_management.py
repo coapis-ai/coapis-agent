@@ -31,6 +31,10 @@ from agentscope.tool import ToolResponse
 
 from ...config.utils import read_last_api
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 DEFAULT_AGENT_API_BASE_URL = "http://127.0.0.1:8088"
 DEFAULT_AGENT_API_TIMEOUT = 30.0

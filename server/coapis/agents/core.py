@@ -396,6 +396,13 @@ class AgentCore:
         query = message or ""
         system = self._build_system_prompt(skills, memory, is_initial, query)
 
+        # Resolve on-demand tools before the budget gate: the budget has to be
+        # measured against the whole assembled request (tool schemas count),
+        # and ``openai_tools`` must exist before ``trim_to_budget`` reads it.
+        openai_tools = None
+        if tools:
+            openai_tools = tools.get_openai_tools(query=query, core_only=not is_initial)
+
         # Budget check runs on the assembled request (system + history +
         # tool schemas), not on the history alone — that is the whole prompt
         # the provider is about to be charged for.
@@ -404,11 +411,6 @@ class AgentCore:
             tools=openai_tools,
             system=system,
         )
-
-        # Get on-demand tools (core tools + query-relevant tools)
-        openai_tools = None
-        if tools:
-            openai_tools = tools.get_openai_tools(query=query, core_only=not is_initial)
 
         # Build request params
         request_params = {
@@ -950,6 +952,8 @@ class AgentCore:
             # SkillManager scans skills_dir alone, so without this filter the
             # index listed 5 workspace skills while 21 were loadable and the
             # model never saw most of what it could use.
+            # toolkit 不在本方法参数里，从实例取；取不到则不过滤（同旧行为）
+            toolkit = getattr(self, "toolkit", None)
             loadable = set(toolkit.skills.keys()) if getattr(toolkit, "skills", None) else None
             # Use query-based matching for initial requests, compact for subsequent
             if is_initial and query:

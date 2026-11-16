@@ -204,7 +204,9 @@ class EvolutionEngine:
         self.data_dir = Path(data_dir)
         # workspace_dir: explicit path to user workspace (where MEMORY.md lives).
         # Falls back to data_dir.parent for backward compatibility.
-        self.workspace_dir = Path(workspace_dir) if workspace_dir else self.data_dir.parent
+        self.workspace_dir = (
+            Path(workspace_dir) if workspace_dir else self.data_dir.parent
+        )
         self.foundation_manager = foundation_manager
         self.agent_core = agent_core  # LLM client for experience extraction
         
@@ -772,7 +774,7 @@ class EvolutionEngine:
                 current_tokens = 0
 
             # 读取最近的 daily logs 作为增量信息
-            daily_dir = workspace_dir / "memory"
+            daily_dir = self.workspace_dir / "memory"
             today_logs = ""
             if daily_dir.exists():
                 from datetime import datetime
@@ -813,7 +815,7 @@ class EvolutionEngine:
                 # 保存为待确认草稿（而非直接覆写）
                 from datetime import datetime
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                draft_dir = workspace_dir / ".dream_drafts"
+                draft_dir = self.workspace_dir / ".dream_drafts"
                 draft_dir.mkdir(parents=True, exist_ok=True)
                 draft_file = draft_dir / f"draft_{timestamp}.md"
                 draft_meta = draft_dir / f"draft_{timestamp}.json"
@@ -843,7 +845,7 @@ class EvolutionEngine:
                     f"{result.strip()}\n\n<!-- 梦境优化于 {timestamp} (auto-approved) -->\n",
                     encoding="utf-8",
                 )
-                logger.info("Dream optimization auto-approved for %s", workspace_dir.name)
+                logger.info("Dream optimization auto-approved for %s", self.workspace_dir.name)
             else:
                 logger.debug("Dream optimization: LLM returned empty/negligible result")
         except Exception as e:

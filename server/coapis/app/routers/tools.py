@@ -35,6 +35,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from ..permissions.decorators import require_permission
 from coapis.tools.registry import TOOL_GROUPS
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:  # annotation-only names
+    from coapis.config.config import Config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["tools"])

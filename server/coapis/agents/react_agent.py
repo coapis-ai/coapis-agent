@@ -87,6 +87,9 @@ from ..constant import (
 )
 from ..providers.model_capability_cache import get_capability_cache
 
+if TYPE_CHECKING:  # annotation-only names (no runtime import)
+    from agentscope.plan import CompressionConfig
+
 if TYPE_CHECKING:
     from ..agents.memory import BaseMemoryManager
     from ..agents.context import BaseContextManager
@@ -4781,7 +4784,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         if not getattr(hub, "enabled", False):
             return
         gate_text = self._prepare_plan_gate(msg)
-        if gate_text is not None and hub.post_enabled("plan_gate"):
+        if gate_text is not None:
             self._spawn_prefetch(
                 "plan_gate", self._classify_plan_level(gate_text),
             )
@@ -4853,6 +4856,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         否则验收岗与工具闸拿不到本轮目标。
         """
         notebook = getattr(self, "plan_notebook", None)
+        if notebook is not None:
+            # 每轮重置「建议先立计划」标记：只在规则判档判为多步时点亮。
+            notebook._plan_auto_hint = False
+
         if notebook is None or getattr(notebook, "plan", None) is not None:
             return None
         text = self._gate_text(msg)
@@ -4916,9 +4923,19 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             from .plan_gate import COMPLEX
 
             hub = self._decision_hub()
-            if hub.enabled and not hub.post_enabled("plan_gate"):
-                # 岗位关闭：不判档，也不消费预判（预判侧同样不发起）
-                return
+            # v21 F2: 岗位开关只关「请判官精判」，不关零成本的规则判档。
+            # 旧实现把两件事绑死：岗位一关 → 不判档 → 不注入骨架提示 →
+            # 计划链在默认配置下整体静默（实测 1806 轮对话 create_plan 0 次）。
+            # 判官是否参与由 _classify_plan_level 里的 judge_enabled 单独把关。
+            if not hub.enabled:
+                # 中枢总闸只该决定「要不要请判官 / 要不要记账」，不该连坐
+                # 零成本的规则判档：实测 dev hub.enabled=False 时这里直接
+                # return，计划骨架提示永不注入，计划只能靠模型自愿发起。
+                # 判官参与与否由 _classify_plan_level 的 judge_enabled 把关。
+                logger.debug(
+                    "Plan gate: hub.enabled=False → 不请判官，规则判档继续",
+                )
+
             # v19 P1-1：优先吃 reply 开头就发起的预判，干等的时长挪到前置工作里
             level = await self._await_prefetch(
                 "plan_gate", lambda: self._classify_plan_level(text),
@@ -4929,6 +4946,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self._prefetch_plan_level = level
         if level != COMPLEX:
             return
+        # v21 F3: 规则判档认定是多步任务后，把「先立计划」的提示挂上每轮注入。
+        # 不锁工具闸（锁了会把「模型自主判断不需要计划」的轮次直接卡死），
+        # 只给持续提示——对齐上游 DefaultPlanToHint 的注入方式，但触发条件
+        # 收窄到规则层判为 COMPLEX 的轮次，简单问答不受打扰。
+        notebook = getattr(self, "plan_notebook", None)
+        if notebook is not None:
+            notebook._plan_auto_hint = True
+
         await self.memory.add(
             Msg("user", self._PLAN_SKELETON_HINT, "user"),
             marks=_MemoryMark.HINT,
@@ -4999,13 +5024,20 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # ── Hook: PRE_DISPATCH ──
         try:
+            _hook_msg = msg[-1] if isinstance(msg, list) and msg else msg
+            _hook_text = (
+                _hook_msg.get_text_content() or ""
+                if _hook_msg is not None
+                and hasattr(_hook_msg, "get_text_content")
+                else ""
+            )
             await self._run_hook(HookPhase.PRE_DISPATCH, {
                 "agent_id": self._agent_config.id,
                 "user_id": self._request_context.get("user_id"),
-                "message": query,
+                "message": _hook_text,
             })
         except Exception:
-            pass
+            logger.debug("PRE_DISPATCH hook failed", exc_info=True)
 
         # Process file and media blocks in messages
         if msg is not None:

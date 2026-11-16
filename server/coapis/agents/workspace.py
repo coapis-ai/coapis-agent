@@ -1329,7 +1329,7 @@ class Workspace:
                     )
                     # Persist empty state to session
                     try:
-                        session_obj = runner.session if runner else None
+                        session_obj = self._runner.session if self._runner else None
                         if session_obj:
                             await session_obj.update_session_state(
                                 session_id=chat_key,
@@ -1349,7 +1349,7 @@ class Workspace:
                     )
                     yield Event(
                         object="response",
-                        id=response_id,
+                        id=str(uuid_mod.uuid4()),
                         status=RunStatus.Completed,
                         created_at=int(__import__('time').time() * 1000),
                     )

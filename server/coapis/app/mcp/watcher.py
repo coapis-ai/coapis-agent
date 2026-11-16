@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable, Optional, Dict
+from typing import Callable, Any, Dict, Optional
 
 from .manager import MCPClientManager
 from ...config.config import MCPConfig

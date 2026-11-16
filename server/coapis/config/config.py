@@ -2421,7 +2421,10 @@ def migrate_legacy_config_to_multi_agent() -> bool:
             indent=2,
         )
 
-    # Copy markdown files (AGENTS.md, SOUL.md, PROFILE.md)
+    # Copy markdown files (AGENTS.md, SOUL.md, PROFILE.md).
+    # ``old_workspace`` was referenced but never defined; in the legacy
+    # single-agent layout the prompt files live at the WORKING_DIR root.
+    old_workspace = Path(WORKING_DIR)
     for md_file in ["AGENTS.md", "SOUL.md", "PROFILE.md"]:
         old_md = old_workspace / md_file
         if old_md.exists():

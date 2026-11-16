@@ -37,7 +37,7 @@ import secrets
 
 import bcrypt
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Request, Response, HTTPException
 from fastapi.responses import JSONResponse

@@ -32,7 +32,7 @@ import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Tuple
 
 from ..providers.model_type import infer_model_type
 from coapis.foundation.thinking_shape import thinking_request_kwargs
@@ -49,6 +49,9 @@ from .resolver import (
     judge_capability_ok,
 )
 from .types import DecisionResult
+
+if TYPE_CHECKING:  # annotation-only names (no runtime import)
+    from .breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 

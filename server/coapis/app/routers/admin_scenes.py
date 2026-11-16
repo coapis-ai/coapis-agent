@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 
@@ -42,6 +42,9 @@ from ...services.scene_agent_service import SceneAgentService
 from ...exceptions import SceneNotFoundError
 from ..auth import get_current_user
 from ..permissions.decorators import require_permission
+
+if TYPE_CHECKING:  # annotation-only names (no runtime import)
+    from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 

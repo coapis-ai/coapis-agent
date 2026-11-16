@@ -217,6 +217,10 @@ class ModelCommandHandler(BaseControlCommandHandler):
 
             lines.append(f"\n**Provider: {provider_name}** (`{provider_id}`)")
 
+            # 供应商元数据目前不记录用户自加模型，退化为不标注，
+            # 避免整条 /model 命令被 NameError 打断。
+            extra_model_ids: set[str] = set()
+
             for model in all_models:
                 model_id = model.id
 

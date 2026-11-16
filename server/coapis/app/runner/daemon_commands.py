@@ -36,6 +36,7 @@ from ...utils.logging import LOG_NAMESPACE, LOG_FILE_PATH
 if TYPE_CHECKING:
     from ...config.config import AgentProfileConfig
     from ..multi_agent_manager import MultiAgentManager
+    from agentscope.message import Msg
 
 logger = logging.getLogger(__name__)
 
