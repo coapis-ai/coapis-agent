@@ -415,10 +415,19 @@ class ToolGuardMixin:
         if chain is not None:
             return chain
         try:
-            from .loop_gates import LoopGateChain
+            from .loop_gates import GateThresholds, LoopGateChain
 
             ctx = getattr(self, "_request_context", None) or {}
+            # 阈值走 hub 配置（A2）：改 decision_hub.json 即生效，不必重启。
+            # 取不到配置时 hub=None，effective 退化为纯 env/默认，绝不抛。
+            hub = None
+            try:
+                getter = getattr(self, "_decision_hub", None)
+                hub = getter() if callable(getter) else None
+            except Exception:  # pragma: no cover - 配置取不到不影响主链
+                hub = None
             chain = LoopGateChain(
+                thresholds=GateThresholds.effective(hub),
                 session_id=str(ctx.get("session_id", "") or ""),
                 chat_id=str(ctx.get("chat_id", "") or ""),
                 user_id=str(ctx.get("user_id", "") or ""),

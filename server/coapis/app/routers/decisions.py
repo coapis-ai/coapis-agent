@@ -649,19 +649,29 @@ def _lg_iso(value: Any) -> str:
 
 
 def _loop_gate_enabled_flag() -> dict[str, Any]:
-    """闸开关与阈值现状（阈值配置化后必须让页面看见当前值）。"""
+    """闸开关与阈值现状（阈值配置化后必须让页面看见当前值）。
+
+    显示的是 :meth:`GateThresholds.effective` 的**生效值**（hub > env > 默认），
+    不是纯 env 读数——否则页面报一套、闸里跑另一套，调参时必然对着假数字猜。
+    """
     try:
         from coapis.agents.loop_gates import GateThresholds
+        from coapis.decision.config import get_hub_config
 
-        cfg = GateThresholds.from_env()
+        cfg = GateThresholds.effective(get_hub_config())
         return {
             "round_budget": int(cfg.round_budget),
-            "stop_phrase": bool(cfg.stop_phrase_enabled),
+            # 旧字段保持布尔语义（页面在用），新字段给出三态档位。
+            "stop_phrase": cfg.stop_phrase_mode != "off",
+            "stop_phrase_mode": str(cfg.stop_phrase_mode),
             "dedup": int(cfg.exact_dedup),
             "empty_streak": int(cfg.empty_streak),
             "session_warn": int(cfg.session_warn),
             "stagnation_similarity": int(cfg.stagnation_similarity),
             "stagnation_force_exit": int(cfg.stagnation_force_exit),
+            "dup_global": int(cfg.dup_global),
+            "fail_streak": int(cfg.fail_streak),
+            "fail_cooldown_s": int(cfg.fail_cooldown_s),
         }
     except Exception:  # pragma: no cover
         return {}

@@ -57,7 +57,7 @@ Unsure → unmet. Strict closing is the whole point of having a judge.
 
 ## 4. Discipline
 
-- Output only the requested JSON. No explanation, no reassurance.
+- Output **only** in the form this role asks for. No explanation, no reassurance: acceptance/retrospective roles want JSON; the direction watchdog wants a single token — `CONTINUE` or `ADJUST: sentence`.
 - If a rubric conflicts with an explicit user requirement, the user wins
   — and say so in the verdict.
 - "Judge lower / judge unmet when unsure" is deliberate strictness.

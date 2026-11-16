@@ -74,11 +74,65 @@ def test_stop_phrase_ignores_read_tools_and_empty():
 
 
 def test_stop_phrase_gate_off_by_default(monkeypatch):
-    # 默认关（灰度口径）：环境变量未设时 stop_phrase_enabled=False
+    # 默认关（灰度口径）：环境变量未设时档位为 off
     monkeypatch.delenv("COAPIS_LOOP_GATE_STOP_PHRASE", raising=False)
-    assert GateThresholds.from_env().stop_phrase_enabled is False
+    assert GateThresholds.from_env().stop_phrase_mode == "off"
     chain = LoopGateChain(ledger_enabled=False)
     assert chain.observe_stop_phrase("已完成", tool_name="write_file") is None
+
+
+def test_stop_phrase_shadow_records_but_does_not_block(monkeypatch):
+    """shadow 档：命中要入账（否则攒不出点亮依据），但 action 不是阻断动作。"""
+    monkeypatch.delenv("COAPIS_LOOP_GATE_STOP_PHRASE", raising=False)
+    chain = LoopGateChain(
+        thresholds=GateThresholds(stop_phrase_mode="shadow"),
+        ledger_enabled=False,
+    )
+    verdict = chain.observe_stop_phrase("已完成", tool_name="write_file")
+    assert verdict is not None
+    assert verdict.action == "observe"
+    # enforce 才是禁写动作；两档的差别只在 action，不在"要不要记一笔"。
+    hard = LoopGateChain(
+        thresholds=GateThresholds(stop_phrase_mode="enforce"),
+        ledger_enabled=False,
+    )
+    got = hard.observe_stop_phrase("已完成", tool_name="write_file")
+    assert got is not None and got.action == "force_text_only"
+
+
+def test_stop_phrase_mode_ignores_garbage(monkeypatch):
+    """档位写错时熄火：灰度期宁可没数据，也不能因拼错字符串判死写操作。"""
+    chain = LoopGateChain(
+        thresholds=GateThresholds(stop_phrase_mode="shaddow"),
+        ledger_enabled=False,
+    )
+    assert chain.observe_stop_phrase("已完成", tool_name="write_file") is None
+
+
+def test_effective_lets_hub_override_env_but_not_default_value(monkeypatch):
+    """A2 验收：hub 配过的值能盖 env；hub 停在默认值时不能把 env 静音。"""
+    from coapis.decision.config import DecisionHubConfig
+
+    monkeypatch.setenv("COAPIS_LOOP_GATE_STAGNANT", "7")
+    # hub 未配置该键（值仍是 DEFAULTS 的 5）→ 保留 env 的 7
+    hub_plain = DecisionHubConfig.from_dict({"posts": {}})
+    assert GateThresholds.effective(hub_plain).stagnation_similarity == 7
+    # hub 显式配了 3（离开了默认值）→ 压在 env 之上
+    hub_wired = DecisionHubConfig.from_dict(
+        {"loop_gate_stagnant": 3, "loop_gate_stop_phrase_mode": "shadow",
+         "posts": {}},
+    )
+    eff = GateThresholds.effective(hub_wired)
+    assert eff.stagnation_similarity == 3
+    assert eff.stop_phrase_mode == "shadow"
+    # hub=None 等价纯 env，且不碰配置文件
+    assert GateThresholds.effective().stagnation_similarity == 7
+
+
+def test_stop_phrase_env_switch_still_means_enforce(monkeypatch):
+    """旧旋钮 COAPIS_LOOP_GATE_STOP_PHRASE=1 继续有效，语义 = enforce。"""
+    monkeypatch.setenv("COAPIS_LOOP_GATE_STOP_PHRASE", "1")
+    assert GateThresholds.from_env().stop_phrase_mode == "enforce"
 
 
 # ---------------------------------------------------------------- 预算门

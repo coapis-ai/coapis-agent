@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable
 
 # ---------------------------------------------------------------------------
@@ -124,6 +124,42 @@ def _env_int_zero_ok(name: str, default: int) -> int:
     return value if value >= 0 else default
 
 
+def _env_stop_mode() -> str:
+    """env 读完成度哨兵档位。
+
+    旧旋钮 ``COAPIS_LOOP_GATE_STOP_PHRASE=1`` 保留，语义 = 旧的"开"= enforce；
+    未设时与改动前逐字节一致（关）。档位名不合法的兜底在 :func:`_norm_stop_mode`。
+    """
+    if _env_flag("COAPIS_LOOP_GATE_STOP_PHRASE", _STOP_PHRASE_ON):
+        return "enforce"
+    return "off"
+
+
+def _norm_stop_mode(raw: Any) -> str:
+    """档位兜底：只认 off/shadow/enforce，其余一律 off。
+
+    手写出错（``shaddow``）时**不拦**——灰度期的原则是宁可影子没数据，
+    也不能因为一个拼错的字符串把主链的写操作判死。
+    """
+    mode = str(raw or "").strip().lower()
+    return mode if mode in ("off", "shadow", "enforce") else "off"
+
+
+# hub 键 → GateThresholds 字段。写在这里而不是散在方法里：新增一个阈值时
+# 只有这一张表需要动，配置侧（DEFAULTS）与闸侧不会各认一套名字。
+_HUB_TO_FIELD: dict[str, str] = {
+    "loop_gate_exact_dedup": "exact_dedup",
+    "loop_gate_dup_global": "dup_global",
+    "loop_gate_empty_streak": "empty_streak",
+    "loop_gate_session_warn": "session_warn",
+    "loop_gate_stagnant": "stagnation_similarity",
+    "loop_gate_force_exit": "stagnation_force_exit",
+    "loop_gate_round_budget": "round_budget",
+    "loop_gate_fail_streak": "fail_streak",
+    "loop_gate_fail_cooldown_s": "fail_cooldown_s",
+}
+
+
 @dataclass(frozen=True)
 class GateThresholds:
     """循环闸阈值（D9：从硬编码常量变成可配，默认值=现值，零行为变化）。"""
@@ -135,7 +171,10 @@ class GateThresholds:
     stagnation_similarity: int = 5
     stagnation_force_exit: int = 15
     round_budget: int = 0  # 0 = 不拦（只计数）
-    stop_phrase_enabled: bool = False
+    # 完成度哨兵三态（A2 灰度）：off 熄火 / shadow 命中只入账不拦 / enforce 禁写。
+    # 取代原 stop_phrase_enabled 布尔：一个旋钮一件事，不留"开关说开、档位说关"
+    # 这种自相矛盾的组合。
+    stop_phrase_mode: str = "off"
     # 失败签名闸（A1）：同一工具连续同类失败达到 N 次 → 提示换路 + 冷却
     fail_gate_enabled: bool = True
     fail_streak: int = 2
@@ -156,14 +195,49 @@ class GateThresholds:
             stagnation_similarity=_env_int("COAPIS_LOOP_GATE_STAGNANT", 5),
             stagnation_force_exit=_env_int("COAPIS_LOOP_GATE_FORCE_EXIT", 15),
             round_budget=_env_int("COAPIS_LOOP_GATE_ROUND_BUDGET", _ROUND_BUDGET),
-            stop_phrase_enabled=_env_flag(
-                "COAPIS_LOOP_GATE_STOP_PHRASE", _STOP_PHRASE_ON,
-            ),
+            stop_phrase_mode=_env_stop_mode(),
             fail_gate_enabled=_env_flag("COAPIS_LOOP_GATE_FAIL", True),
             fail_streak=_env_int("COAPIS_LOOP_GATE_FAIL_STREAK", 2),
             fail_cooldown_s=_env_int_zero_ok("COAPIS_LOOP_GATE_FAIL_COOLDOWN", 60),
             fail_hint_enabled=_env_flag("COAPIS_LOOP_GATE_FAIL_HINT", True),
         )
+
+    @classmethod
+    def effective(cls, hub: Any | None = None) -> "GateThresholds":
+        """生效阈值 = env 打底、hub 覆盖（``hub=None`` 时等价 :meth:`from_env`）。
+
+        为什么不在 ``from_env()`` 里直接读配置文件：单测和治理页都需要"纯 env
+        读数"，而配置文件是运行态的——把它读进纯函数，单测就变成看机器脸色。
+        所以配置文件由调用方（闸链、治理页）自己传进来，优先级与判断岗一致：
+        **hub 配置 > env > 默认**。
+
+        只覆盖 hub 里**真的配过**的键。这里有两个坑，都得绕：
+
+        * hub 字段永远有值（``DEFAULTS`` 兜底），拿 ``is not None`` 判"没配"
+          判不出来——那样会把 env 旋钮全部静音；可靠的信号只有"它离开了默认值"，
+          所以比一下 DEFAULTS。代价是"页面显式设成与默认相同值"时不覆盖 env，
+          但值本来就相同，且治理页显示的是本方法的生效值，不会各说一套；
+        * 不能直接拿 hub 当唯一来源：hub 的 env 口径是 ``LOOP_GATE_*``
+          （DEFAULTS 键名大写），闸的 env 口径是 ``COAPIS_LOOP_GATE_*``，
+          两套名字同义不同写（实测 ``docker/`` 下没人设过任何一个，所以
+          不是活回归，但留着就是下次"写读键名不一致"的种子）。
+        """
+        base = cls.from_env()
+        if hub is None:
+            return base
+        from ..decision.config import DEFAULTS
+
+        override: dict[str, Any] = {}
+        for hub_key, field_name in _HUB_TO_FIELD.items():
+            val = getattr(hub, hub_key, None)
+            if val is not None and val != DEFAULTS[hub_key]:
+                override[field_name] = val
+        mode = getattr(hub, "loop_gate_stop_phrase_mode", None)
+        if mode is not None:
+            mode = _norm_stop_mode(mode)
+            if mode != _norm_stop_mode(DEFAULTS["loop_gate_stop_phrase_mode"]):
+                override["stop_phrase_mode"] = mode
+        return replace(base, **override) if override else base
 
 
 @dataclass(frozen=True)
@@ -325,12 +399,26 @@ class LoopGateChain:
         return None
 
     def observe_stop_phrase(self, text: str, tool_name: str = "") -> GateVerdict | None:
-        """停止句门（默认关；开时命中即禁止写操作）。"""
-        if not self.thresholds.stop_phrase_enabled:
+        """完成度哨兵：自称完成却还要调写操作。三态灰度（A2）。
+
+        * ``off``     —— 不判（现默认，与改动前一致）；
+        * ``shadow``  —— 命中只归因入账（``action=observe``，非阻断），主链照常走。
+          开关一旦彻底关掉，影子数据一条都攒不出来，"跑三天再按数据点亮"
+          这句验收就没有数据来源；
+        * ``enforce`` —— 命中即禁止写操作。
+
+        口径要说实话：唯一调用点（``react_agent`` 的观察链）**丢弃返回值**，
+        所以 ``enforce`` 今天与 ``shadow`` 同样只归因、不拦。要让 enforce 真拦，
+        得由写工具路径消费本 verdict——那一步等影子数据说话后再拍，
+        不在这里擅自接进主链。
+        """
+        mode = self.thresholds.stop_phrase_mode
+        if mode not in ("shadow", "enforce"):
             return None
-        if gate_stop_phrase(text, tool_name):
-            return self._hit(GATE_STOP_PHRASE, "force_text_only", detail=str(tool_name))
-        return None
+        if not gate_stop_phrase(text, tool_name):
+            return None
+        action = "force_text_only" if mode == "enforce" else "observe"
+        return self._hit(GATE_STOP_PHRASE, action, detail=str(tool_name))
 
     # -- 失败签名闸（A1）-------------------------------------------------
     def observe_failure(self, tool_name: str, output: str) -> GateVerdict | None:

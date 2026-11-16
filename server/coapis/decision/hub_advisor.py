@@ -27,12 +27,69 @@ import logging
 import re
 from typing import Any, Callable, Sequence
 
-from .rubric import JSON_ONLY, rubric_for
+from .rubric import rubric_for
 
 logger = logging.getLogger(__name__)
 
 #: 改道动作取值域（台账 action 列）
 VERDICTS = ("continue", "change", "stop", "abstain")
+
+# ── 模型侧契约（D5·A3）───────────────────────────────────────────
+# 对模型只要求一个词：CONTINUE / ADJUST。
+#
+# 为什么不再是 JSON：判官槽位上常跑 0.6B~7B 的小模型，让它吐
+# ``{"verdict":..,"evidence":..,"next":..}`` 这种三字段合法 JSON 是失败常态；
+# 解析一失败就吃一次 breaker 失败计数，等于把"格式不行"混进"模型不行"里，
+# 最后熔断反映的根本不是真判率。单字契约把格式失败面压成 0。
+#
+# 代价要说清：模型不再自己写"下一步"。那本来也只是被截成 200 字的一句话，
+# 且消费方还留着 next 槽位（见 react_agent._inject_advisor_hint），所以是
+# "少一个不可靠字段"，不是"少一个功能"。
+#
+# 台账仍写 change：ADJUST 是**模型词**、change 是**台账词**，一一对应。
+# 换叫法会让新旧台账行分成两代词汇、前端映射也得跟着改，不值当。
+_ADJUST = "ADJUST"
+_CONTINUE = "CONTINUE"
+_EVIDENCE_MAX = 200
+
+CONTRACT_PROMPT = (
+    "只回答一个词，不要任何解释、标点、JSON。\n\n"
+    "干得对，或者你拿不准 —— CONTINUE\n"
+    "明显在原地打转、跑偏、或已经越界 —— ADJUST: 一句话讲清该怎么改\n\n"
+    "注意：说不清就是 CONTINUE。你不是来刷存在感的，误拦一次比漏判一次贵。\n"
+)
+
+
+def _sentence_after(text: str) -> str:
+    """取 ADJUST 之后那句话当证据；模型没写句子就空着，不替它编。"""
+    idx = text.upper().find(_ADJUST)
+    tail = text[idx + len(_ADJUST):] if idx >= 0 else text
+    cleaned = tail.strip().strip(' :：.,、。；;{}[]()"')
+    return cleaned.strip()[:_EVIDENCE_MAX]
+
+
+def parse_contract(text: str) -> tuple[str, str] | None:
+    """单字契约解析 → ``(台账词, 证据)``；``None`` = 模型什么都没吐（parse_fail）。
+
+    口径只有一句：**非 ADJUST 一律 CONTINUE**。判官的职责是"要不要改道"，
+    说不清就等于"不改"——把解析失败当"该拦"处置，等于用一个更笨的模型去
+    否决主链的正常工作。
+
+    但**空回复仍返回 None**：那不是"它说继续"，是这一判没有内容。它必须留在
+    parse_fail 上可见，否则判官挂了、槽位空转，我们从台账里看到的会是一片
+    祥和的 continue。
+    """
+    body = str(text or "").strip()
+    if not body:
+        return None
+    upper = body.upper()
+    if _ADJUST in upper and _CONTINUE in upper:
+        # 两个词都冒出来 = 它自己也没定。不确定即放行。
+        return ("continue", "")
+    if _ADJUST in upper:
+        return ("change", _sentence_after(body))
+    return ("continue", "")
+
 
 #: 发射即忘的任务集合（防 GC 掐掉未完成任务）
 _pending: set[asyncio.Task] = set()
@@ -123,6 +180,24 @@ def fire_advisor(
         force=bool(scope.get("advise_now")),
     ):
         return None
+
+    # 判官槽位是空的 —— 它压根不上岗。此时若照打，网关每一发都在 no_model 层
+    # 落一行台账，按 advisor_every_iters 的节奏天天累积，而这些行的信息量是零。
+    # “台账 0 白跑行”这条验收要治的就是这个：**结构上不发射**，不是在台账侧过滤。
+    # 判据与网关 :622 同一句（provider_id / model），免得两处各判一套、
+    # 又长出一个“写读键名不一致”。
+    try:
+        from .resolver import get_judge_provider_config
+
+        slot = get_judge_provider_config(
+            hub,
+            user_id=str(scope.get("user_id") or "") or None,
+            agent_id=str(scope.get("agent_id") or "") or None,
+        )
+    except Exception:  # pragma: no cover - 取不到判据时按没配处理，宁可不问
+        slot = None
+    if not slot or not slot.get("provider_id") or not slot.get("model"):
+        return None
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -154,28 +229,29 @@ async def advise(
         "智能体已经做的动作（按顺序，序号即证据编号）：\n"
         f"{build_digest(tool_msgs)}\n\n"
         f"{rubric_for('advisor', skills)}\n\n"
-        "输出 JSON：{\"verdict\":\"continue|change|stop\","
-        "\"evidence\":\"引用上面第几号动作（change/stop 必填）\","
-        "\"next\":\"一句话讲清接下来该怎么干（continue 可空）\"}\n"
-        + JSON_ONLY
+        # 单字契约（D5·A3）：不再要 JSON。详见文件头 CONTRACT 段的取舍。
+        + CONTRACT_PROMPT
     )
 
     def _parse(text: str) -> dict[str, Any] | None:
-        obj = _load_obj(text)
-        if not obj:
+        hit = parse_contract(text)
+        if hit is None:
             return None
-        verdict = str(obj.get("verdict") or "").strip().lower()
-        if verdict not in VERDICTS:
-            return None
+        verdict, evidence = hit
         return {
             "verdict": verdict,
-            "evidence": str(obj.get("evidence") or "")[:200],
-            "next": str(obj.get("next") or "")[:300],
+            "evidence": evidence,
+            # 单字契约下模型不再产出"下一步"。这个键**保留**：注入提示的
+            # 格式化函数（react_agent._inject_advisor_hint）在读它，留空比
+            # 造一条"键已删"的兼容分支便宜，也不破坏消费方。
+            "next": "",
         }
 
     reply = await get_judge_gateway().judge(
         purpose="advisor",
-        system="你是任务方向纠察员，按判则回答目标漂移三问。" + JSON_ONLY,
+        # 不拼 JSON_ONLY：单字契约下它是一条**反向**指令（会逼模型去吐 JSON），
+        # 而格式失败又会吃 breaker 失败计数——正是本批要治的病。
+        system="你是任务方向纠察员。只回答 CONTINUE 或 ADJUST: 句子。",
         user=prompt,
         parse=_parse,
         rule_fallback=lambda: {

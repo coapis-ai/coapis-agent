@@ -57,6 +57,23 @@ class _FakeGateway:
         )
 
 
+def _slot_on(monkeypatch, slot=None):
+    """让假 hub 带上一枚可用的判官槽位。
+
+    A3 起 ``fire_advisor`` 会先看槽位配没配——没配就不发射，免得在台账里
+    天天累积 no_model 白跑行。所以替身必须能回答这个问题。打在 ``resolver``
+    上，因为被测代码用的是函数内 import，那正是为了让这里能换。
+    """
+    from coapis.decision import resolver as _res
+
+    monkeypatch.setattr(
+        _res,
+        "get_judge_provider_config",
+        lambda hub, user_id=None, agent_id=None: (
+            {"provider_id": "p", "model": "m"} if slot is None else slot
+        ),
+    )
+
 def _install(monkeypatch, gateway: _FakeGateway) -> _FakeGateway:
     from coapis.decision import gateway as gw
 
@@ -100,6 +117,7 @@ def test_should_advise_rhythm_and_gates():
 
 
 def test_fire_advisor_respects_gate(monkeypatch):
+    _slot_on(monkeypatch)
     g = _install(monkeypatch, _FakeGateway(payload={"verdict": "continue"}))
 
     async def go():
@@ -143,12 +161,17 @@ def test_advise_prompt_carries_rubric(monkeypatch):
         await adv.advise(goal="目标", tool_msgs=[], scope={"turn": 1},
                          hub=_Hub())
         assert "改道判则" in g.calls[0]["user"]
-        assert "只输出一个 JSON 对象" in g.calls[0]["system"]
+        # A3 起纠察岗不再要 JSON：system 里必须是单字契约，而不是 JSON 指令。
+        # 断言换向是有意的——旧断言锁的正是本批要拆掉的契约。
+        assert "只输出一个 JSON 对象" not in g.calls[0]["system"]
+        assert "CONTINUE" in g.calls[0]["system"]
+        assert "ADJUST" in g.calls[0]["system"]
 
     asyncio.run(go())
 
 
 def test_fire_advisor_on_verdict_callback(monkeypatch):
+    _slot_on(monkeypatch)
     seen = []
     _install(monkeypatch, _FakeGateway(payload={
         "verdict": "stop", "evidence": "第3号", "next": "停",
@@ -342,3 +365,35 @@ def test_acceptance_never_raises(monkeypatch):
         await task  # 不抛
 
     asyncio.run(go())
+
+
+def test_fire_advisor_skips_without_judge_slot(monkeypatch):
+    """A3 验收「台账 0 白跑行」：判官槽位为空时**根本不发射**。
+
+    不发射才是治本——网关就不会在 no_model 层按节奏天天落一行零信息台账。
+    用 asyncio.run 把事件循环撑起来，否则"没发射"可能只是因为没循环而降级，
+    那样这条断言就是假的。
+    """
+    import asyncio
+
+    from coapis.decision import hub_advisor as adv
+    from coapis.decision import resolver as _res
+
+    fake = _install(monkeypatch, _FakeGateway(payload={"verdict": "continue"}))
+    monkeypatch.setattr(
+        _res,
+        "get_judge_provider_config",
+        lambda hub, user_id=None, agent_id=None: {},
+    )
+
+    async def _go():
+        out = adv.fire_advisor(
+            goal="写个报告", tool_msgs=[], scope={"iters": 1, "turn": 1},
+            hub=_Hub(),
+        )
+        if asyncio.iscoroutine(out) or asyncio.isfuture(out):
+            return await out
+        return out
+
+    asyncio.run(_go())
+    assert fake.calls == [], "槽位为空却仍然打了判官：会往台账灌 no_model 白跑行"

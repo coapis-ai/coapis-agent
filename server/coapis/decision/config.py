@@ -177,6 +177,26 @@ DEFAULTS = {
     # 台账保留天数：判断日志只进台账、不进记忆管道，因此**必须**有出口，
     # 否则详单表无限增长。总线在写入时顺带清掉超期的行。
     "ledger_retention_days": 90,
+    # ── 循环闸阈值（D5·A2）─────────────────────────────────────────
+    # 这批数原先只有 env 旋钮（COAPIS_LOOP_GATE_*）：改一个值要重启容器，
+    # 实际效果就是"能调但没人调"。放进 hub 配置后，它们和判断岗共用同一条
+    # 生效路径（decision_hub.json，5 秒缓存，改文件即生效、不必重启）。
+    # 优先级：本配置 > env > 默认；默认值 = 原硬编码常量，零行为变化。
+    # 消费点在 agents/loop_gates.py（GateThresholds.effective），0 的语义随字段。
+    "loop_gate_exact_dedup": 2,
+    "loop_gate_dup_global": 3,
+    "loop_gate_empty_streak": 2,
+    "loop_gate_session_warn": 10,
+    "loop_gate_stagnant": 5,
+    "loop_gate_force_exit": 15,
+    "loop_gate_round_budget": 0,     # 0 = 只计数不拦
+    "loop_gate_fail_streak": 2,
+    "loop_gate_fail_cooldown_s": 60,  # 0 = 不冷却
+    # 完成度哨兵（自称完成却继续调写操作）的三态灰度：
+    #   off     = 整条熄火（现默认，与改动前一致）
+    #   shadow  = 命中只入账不拦——用它攒"该不该点亮"的数据
+    #   enforce = 命中即禁止写操作
+    "loop_gate_stop_phrase_mode": "off",
 }
 
 
@@ -436,6 +456,18 @@ class DecisionHubConfig:
     selfcheck_enabled: bool = True
     selfcheck_timeout_ms: int = 20000
     selfcheck_min_answer_chars: int = 80
+    # ── 循环闸阈值（D5·A2）─────────────────────────────────────────
+    # 见 DEFAULTS 同段注释：hub > env > 默认，默认值 = 原硬编码常量。
+    loop_gate_exact_dedup: int = 2
+    loop_gate_dup_global: int = 3
+    loop_gate_empty_streak: int = 2
+    loop_gate_session_warn: int = 10
+    loop_gate_stagnant: int = 5
+    loop_gate_force_exit: int = 15
+    loop_gate_round_budget: int = 0
+    loop_gate_fail_streak: int = 2
+    loop_gate_fail_cooldown_s: int = 60
+    loop_gate_stop_phrase_mode: str = "off"
     # v19 P2-2 接线（消费点：decision/gateway.py 轮内池子闸）：启动期前 N 轮，
     # 每个岗位**本轮第一格**判断不吃轮内池子闸——判档/计划门禁/计划审查/技能触发
     # 全落在前几轮，池子默认 6 格，工具门禁一多就把启动期判断整批砍掉
