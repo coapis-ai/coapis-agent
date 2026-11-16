@@ -36,6 +36,7 @@ GATE_OSCILLATION = "oscillate"   # 思考震荡（来回切换不收敛）
 GATE_ROUND_BUDGET = "round"      # 单轮调用预算耗尽
 GATE_PLAN_DRIFT = "plan_drift"   # 越出计划范围
 GATE_STOP_PHRASE = "stop_phrase"  # 自称完成却继续调写操作
+GATE_FAIL_SIG = "fail_sig"       # 同一工具连续同类失败（签名表归因）
 
 GATE_CODES: tuple[str, ...] = (
     GATE_DUPLICATE,
@@ -48,6 +49,7 @@ GATE_CODES: tuple[str, ...] = (
     GATE_ROUND_BUDGET,
     GATE_PLAN_DRIFT,
     GATE_STOP_PHRASE,
+    GATE_FAIL_SIG,
 )
 
 # 闸码 → 白话说明（治理页/日志用；不给用户看行话）
@@ -62,6 +64,7 @@ GATE_LABELS: dict[str, str] = {
     GATE_ROUND_BUDGET: "本轮调用预算已用尽",
     GATE_PLAN_DRIFT: "越出本轮计划范围",
     GATE_STOP_PHRASE: "自称完成却继续动手",
+    GATE_FAIL_SIG: "同一工具连续同类失败",
 }
 
 # 闸码 → 台账岗位语义（岗位=loop_gate，purpose=闸码）
@@ -109,6 +112,18 @@ def _env_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def _env_int_zero_ok(name: str, default: int) -> int:
+    """允许显式设 0 的整数阈值（0 在这里是合法语义，如"不要冷却"）。"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
 @dataclass(frozen=True)
 class GateThresholds:
     """循环闸阈值（D9：从硬编码常量变成可配，默认值=现值，零行为变化）。"""
@@ -121,6 +136,11 @@ class GateThresholds:
     stagnation_force_exit: int = 15
     round_budget: int = 0  # 0 = 不拦（只计数）
     stop_phrase_enabled: bool = False
+    # 失败签名闸（A1）：同一工具连续同类失败达到 N 次 → 提示换路 + 冷却
+    fail_gate_enabled: bool = True
+    fail_streak: int = 2
+    fail_cooldown_s: int = 60
+    fail_hint_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> "GateThresholds":
@@ -139,6 +159,10 @@ class GateThresholds:
             stop_phrase_enabled=_env_flag(
                 "COAPIS_LOOP_GATE_STOP_PHRASE", _STOP_PHRASE_ON,
             ),
+            fail_gate_enabled=_env_flag("COAPIS_LOOP_GATE_FAIL", True),
+            fail_streak=_env_int("COAPIS_LOOP_GATE_FAIL_STREAK", 2),
+            fail_cooldown_s=_env_int_zero_ok("COAPIS_LOOP_GATE_FAIL_COOLDOWN", 60),
+            fail_hint_enabled=_env_flag("COAPIS_LOOP_GATE_FAIL_HINT", True),
         )
 
 
@@ -256,6 +280,9 @@ class LoopGateChain:
     _hits: dict[str, int] = field(default_factory=dict)
     _unwritten: dict[str, int] = field(default_factory=dict)
     _round_calls: int = 0
+    # 失败签名闸：key = "工具名:签名码" → 连续次数 / 冷却截止时间
+    _fail_streak: dict[str, int] = field(default_factory=dict)
+    _fail_cooldown: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # 构造说关就关；构造说开时，env 总闸仍可关闭。
@@ -301,6 +328,62 @@ class LoopGateChain:
         if gate_stop_phrase(text, tool_name):
             return self._hit(GATE_STOP_PHRASE, "force_text_only", detail=str(tool_name))
         return None
+
+    # -- 失败签名闸（A1）-------------------------------------------------
+    def observe_failure(self, tool_name: str, output: str) -> GateVerdict | None:
+        """工具执行后观察一次输出：签名归因 → 连续同类计数 → 达阈值提示换路。
+
+        三条语义（对齐方案 §1③"连续失败计数 + 冷却 + 触发归零"）：
+
+        * **归零**：这次没失败（或换了别的失败签名）→ 原 key 的连击立刻清零；
+        * **冷却**：提示过一次后进冷却，冷却期内只计数不重复提示、不重复入账，
+          免得同一条错误把上下文和台账刷屏；
+        * **提示**：同一工具同一签名连续 ``fail_streak`` 次 → ``hint``，
+          文案由 ``failure_signatures.hint_text`` 统一生成。
+
+        返回 ``None`` 表示"不用管"。判定不靠 LLM，纯签名表。
+        """
+        if not self.thresholds.fail_gate_enabled:
+            return None
+        try:
+            from .utils.failure_signatures import classify_failure
+        except Exception:  # pragma: no cover - 观察件不得影响主流程
+            return None
+        try:
+            sig = classify_failure(tool_name, output)
+        except Exception:  # pragma: no cover
+            return None
+
+        tool = str(tool_name or "")
+        if sig is None:
+            # 成功（或认不出失败）→ 该工具所有签名连击归零
+            for key in [k for k in self._fail_streak if k.startswith(f"{tool}:")]:
+                self._fail_streak.pop(key, None)
+            return None
+
+        key = f"{tool}:{sig.code}"
+        now = time.monotonic()
+        streak = int(self._fail_streak.get(key, 0)) + 1
+        self._fail_streak[key] = streak
+
+        cooldown = int(self.thresholds.fail_cooldown_s)
+        if cooldown > 0 and now < float(self._fail_cooldown.get(key, 0.0)):
+            return None  # 冷却中：只累计，不再提示/入账
+        if streak < int(self.thresholds.fail_streak):
+            return None
+
+        if cooldown > 0:
+            self._fail_cooldown[key] = now + cooldown
+        from .utils.failure_signatures import hint_text
+        return self._hit(
+            GATE_FAIL_SIG, "hint",
+            detail=hint_text(sig, streak)
+            if self.thresholds.fail_hint_enabled else f"{tool}×{sig.code}×{streak}",
+        )
+
+    def failure_streaks(self) -> dict[str, int]:
+        """当前连击快照（key=工具:签名码），治理页与单测看这个。"""
+        return {k: int(v) for k, v in self._fail_streak.items() if int(v) > 0}
 
     def round_calls(self) -> int:
         return int(self._round_calls)
