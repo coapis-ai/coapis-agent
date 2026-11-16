@@ -156,6 +156,13 @@ _LOOKUP_ORDER: tuple[str, ...] = (
 TOOL_RULES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "execute_shell_command": (
         ("missing_dep", ("command not found", "未找到命令", "没有那个命令")),
+        # 脚本本身写坏时，退出码只是表象：SyntaxError 归 syntax 才给得出
+        # "改哪一行"的提示，归 exit_nonzero 只能说"命令失败了"。
+        # 同理 NameError/TypeError 是脚本内部异常，不是"退出码非 0"。
+        ("syntax", ("syntaxerror:", "parseerror:", "unexpected eof")),
+        ("indent", ("indentationerror:",)),
+        ("tool_error", ("nameerror:", "typeerror:", "attributeerror:",
+                        "indexerror:", "keyerror:", "unboundlocalerror:")),
         ("resource", ("no space left on device", "disk quota")),
         ("vcs_conflict", ("non-fast-forward", "would be overwritten",
                           "unstaged changes", "nothing to commit")),
@@ -201,7 +208,15 @@ TOOL_RULES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "web_search": (
         ("resource", ("rate limit", "quota", "too many requests", "429")),
-        ("network", ("failed to search", "search failed", "no results")),
+        # 顺序即优先级：搜索后端自己抛异常时，"web_search failed" 里的
+        # failed 不是网络故障——判成 network 会让模型去重试网络，
+        # 而真正该做的是别再传那个参数。
+        ("invalid_arg", ("unexpected keyword argument",)),
+        ("tool_error", ("typeerror:", "valueerror:", "keyerror:",
+                        "attributeerror:", "traceback (most recent call last)")),
+        ("empty_result", ("no results", "未检索到", "没有找到相关")),
+        ("network", ("failed to search", "search failed", "无法连接",
+                     "连接失败", "dns", "unreachable")),
     ),
     "send_file_to_user": (
         ("file_missing", ("no such file", "not found", "does not exist")),
@@ -307,6 +322,10 @@ _DEFINITE_HEAD: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("file_missing", ("no such file or directory", "filenotfounderror")),
     ("network", ("net::err_", "connection refused", "could not resolve host")),
     ("vcs_conflict", ("non-fast-forward", "merge conflict detected")),
+    # 构建失败的经典句式："make: *** [Makefile:12: all] Error 2"。它写成
+    # "Error 2" 而不是 "Error:"，走不过 `_PREAMBLE_RE` 的词边界，但这行本身
+    # 就是确定性失败——归不出因就等于白拦。
+    ("exit_nonzero", ("make: ***",)),
     ("syntax", ("syntaxerror:", "jsondecodeerror:", "parseerror:")),
     ("indent", ("indentationerror:",)),
     ("db_error", ("operationalerror:", "integrityerror:",
@@ -354,13 +373,34 @@ def _has_preamble(head: str) -> bool:
     return bool(_PREAMBLE_RE.search(head))
 
 
+#: Python 异常行（NameError: / AttributeError: / UnboundLocalError: …）。
+#: 这类文案一直漏在闸外：`nameerror:` 里虽然含 "error:"，但前面紧贴字母、
+#: 不满足 `_PREAMBLE_RE` 的词边界，而工具常常只把异常名加一行消息打出来
+#: （没 traceback、也没 "Error:"）。锚定**首行**开头才认——正文或匹配行里
+#: 引用的异常名（"grep 搜到一处 NameError:"）不算工具失败。
+_EXCEPTION_HEAD_RE = re.compile(r"[a-z_][a-z0-9_]*error\s*:")
+_EXCEPTION_MAX_CHARS = 400
+
+
+def _has_failure_signal(body: str, head: str) -> bool:
+    """失败证据的唯一实现：定性短语 / 失败口气 / 短输出首行的 Python 异常行。
+
+    `is_failure_output`（要不要记账）与 `classify_failure`（归不归得出因）必须
+    用同一把尺子——否则会出现"闸认它是失败、归因却返回 None"的空转：账记了，
+    签名却是空的，发现闭环拿不到 canary，等于白记账。
+    """
+    if _definite_head_hit(head) is not None or _has_preamble(head):
+        return True
+    return (len(body) <= _EXCEPTION_MAX_CHARS
+            and _EXCEPTION_HEAD_RE.match(head) is not None)
+
+
 def is_failure_output(output: str) -> bool:
     """对外：这段输出是不是失败（只过两级闸，不做细归因）。"""
     body = str(output or "").strip().lower()
     if not body:
         return False
-    head = _head_of(body)
-    return _definite_head_hit(head) is not None or _has_preamble(head)
+    return _has_failure_signal(body, _head_of(body))
 
 
 def _tool_rules(tool_name: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -404,7 +444,7 @@ def classify_failure(tool_name: str, output: str) -> FailureSignature | None:
     # 这一条挡掉的是"读文件/grep 正文里写着 timeout / TypeError"的误伤。
     head = _head_of(body)
     definite = _definite_head_hit(head)
-    if definite is None and not _has_preamble(head):
+    if definite is None and not _has_failure_signal(body, head):
         return None
 
     for code, patterns in _tool_rules(tool_name):

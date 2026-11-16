@@ -219,3 +219,40 @@ def test_提示文案讲人话():
     assert "重复同样的调用不会有新结果" in text      # 不可重试签名说得更硬
     ok = classify_failure("execute_shell_command", "Error: command timed out")
     assert ok is not None and "别再原样重试" in hint_text(ok, 2)
+
+
+def _code(tool: str, output: str):
+    """取归因结果里的码；归不出来返回 None（只为把断言写得短一点）。"""
+    sig = classify_failure(tool, output)
+    return sig.code if sig is not None else None
+
+
+# ── 真实回放纠偏：2026-11-16 用 dev 2295 条真实工具输出抽检时发现的码位判错 ──
+# 这类错误的代价不是"没归因"，而是"归错了因"——模型会照着错的因去重试
+# 一条根本不通的路（网络重试 vs 改参数），比不归因更浪费。
+
+
+def test_搜索后端抛异常不能判成网络故障():
+    # 真样本：web_search 传了不支持的 topk 参数
+    out = ("[Tool Error] web_search failed: TypeError: web_search() "
+           "got an unexpected keyword argument 'topk'")
+    sig = classify_failure("web_search", out)
+    assert sig is not None
+    assert sig.code == "invalid_arg"          # 曾判成 network，会诱发无谓重试
+    assert not sig.retryable
+    # 真·网络故障仍归 network
+    assert _code("web_search", "failed to search: DNS resolution failed") == "network"
+    # 搜到了但没结果 ≠ 网络故障
+    assert _code("web_search", "no results for this query") == "empty_result"
+
+
+def test_脚本自身语法错误归_syntax_不归退出码():
+    # 真样本：命令退出码非 0，但根因是被执行脚本的 SyntaxError
+    out = ("exit code 1\n[stderr] SyntaxError: name '_current_session' "
+           "is used before assignment\n")
+    assert _code("execute_shell_command", out) == "syntax"
+    assert _code("execute_shell_command", "IndentationError: unexpected indent") == "indent"
+    # 脚本内部运行时异常归 tool_error，不是笼统的"退出码非 0"
+    assert _code("execute_shell_command", "NameError: name 'hub' is not defined") == "tool_error"
+    # 普通命令失败仍走 exit_nonzero
+    assert _code("execute_shell_command", "make: *** [all] Error 2\n") == "exit_nonzero"
