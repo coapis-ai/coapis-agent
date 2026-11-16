@@ -167,6 +167,14 @@ TOOL_RULES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("vcs_conflict", ("non-fast-forward", "would be overwritten",
                           "unstaged changes", "nothing to commit")),
         ("file_missing", ("is a directory", "no such file or directory")),
+        # 权限必须排在 exit_nonzero 之前：`exit code 1 / Permission denied` 里
+        # 退出码只是表象。判成 exit_nonzero 只能说"命令失败了、换个动作"，
+        # 判成 permission 才给得出"重复调用不会有新结果，去解决前置条件"。
+        # 实测 dev 最高频的权限形状是 ssh/git 的 `Permission denied (publickey)`，
+        # 曾被下面的 exit_nonzero 兜底抢走——分类错了，提示再准也是错的药。
+        ("permission", ("permission denied", "operation not permitted",
+                        "access denied", "publickey", "eacces", "eperm",
+                        "拒绝访问", "权限不足")),
         ("exit_nonzero", ("exit code", "exited with")),
     ),
     "read_file": (

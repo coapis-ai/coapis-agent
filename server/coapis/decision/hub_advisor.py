@@ -43,7 +43,7 @@ _ACTION_CHARS = 160
 _MAX_ACTIONS = 8
 
 
-def should_advise(hub: Any, iters: int) -> bool:
+def should_advise(hub: Any, iters: int, *, force: bool = False) -> bool:
     """本轮要不要判一次改道（纯函数，给单测用）。
 
     Args:
@@ -65,6 +65,11 @@ def should_advise(hub: Any, iters: int) -> bool:
     min_iters = int(getattr(hub, "advisor_min_iters", 3) or 3)
     if iters < min_iters:
         return False
+    if force:
+        # 规则层已经拿出"该改道"的证据（新失败形状），再等凑满 every 轮就是
+        # 明知故犯。注意：上面几道闸照样生效——force 只跳过取整节奏，
+        # 不能拿它越过岗位开关去开岗。
+        return True
     return (iters - min_iters) % every == 0
 
 
@@ -110,7 +115,13 @@ def fire_advisor(
     Returns:
         后台任务；被闸门挡掉时返回 ``None``。
     """
-    if not should_advise(hub, int(scope.get("iters") or 0)):
+    # ③→④：规则层（失败签名闸）发现没见过的事件形状时，scope 里带 advise_now，
+    # 该问就问一次，不用等取整节奏。
+    if not should_advise(
+        hub,
+        int(scope.get("iters") or 0),
+        force=bool(scope.get("advise_now")),
+    ):
         return None
     try:
         loop = asyncio.get_running_loop()

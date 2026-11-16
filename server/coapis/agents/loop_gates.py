@@ -175,6 +175,9 @@ class GateVerdict:
     action: str          # block / hint / force_text_only / finalize / observe
     detail: str = ""
     hits: int = 0        # 该门在本会话的累计触发次数
+    # 失败签名码（目前只有 fail_sig 闸会带）。带上它，下游（顾问、治理页）才能
+    # 按"哪种失败"归因，而不是只知道"闸响了"。
+    code: str = ""
 
     @property
     def is_blocking(self) -> bool:
@@ -335,9 +338,13 @@ class LoopGateChain:
 
         三条语义（对齐方案 §1③"连续失败计数 + 冷却 + 触发归零"）：
 
-        * **归零**：这次没失败（或换了别的失败签名）→ 原 key 的连击立刻清零；
+        * **归零**：这次没失败（成功或认不出形状）→ 该工具**所有**签名连击清零。
+          换签名**不**归零：不同签名各算各的、各自达阈值各自提示。这不是偷懒，
+          是安全边界——若换签名就清零，模型在同两条坏路之间来回切换就能把连击
+          永远压在阈值下，失败闸形同虚设，而那正是最该拦的振荡形状；
         * **冷却**：提示过一次后进冷却，冷却期内只计数不重复提示、不重复入账，
-          免得同一条错误把上下文和台账刷屏；
+          免得同一条错误把上下文和台账刷屏。冷却同样按 ``工具:签名`` 独立，
+          旧签名的冷却**不会**连坐新签名——否则模型换个错误形状就能躲过提示；
         * **提示**：同一工具同一签名连续 ``fail_streak`` 次 → ``hint``，
           文案由 ``failure_signatures.hint_text`` 统一生成。
 
@@ -379,6 +386,9 @@ class LoopGateChain:
             GATE_FAIL_SIG, "hint",
             detail=hint_text(sig, streak)
             if self.thresholds.fail_hint_enabled else f"{tool}×{sig.code}×{streak}",
+            # 把签名码一路带到下游：治理页与顾问都要按"哪种失败"归因，
+            # 只知道"闸响了"决定不了该换什么路。
+            code=sig.code,
         )
 
     def failure_streaks(self) -> dict[str, int]:
@@ -399,7 +409,8 @@ class LoopGateChain:
     def total_hits(self) -> int:
         return sum(int(v) for v in self._hits.values())
 
-    def _hit(self, gate: str, action: str, *, detail: str = "") -> GateVerdict:
+    def _hit(self, gate: str, action: str, *, detail: str = "",
+             code: str = "") -> GateVerdict:
         hits = int(self._hits.get(gate, 0)) + 1
         self._hits[gate] = hits
         self._unwritten[gate] = int(self._unwritten.get(gate, 0)) + 1
@@ -409,6 +420,7 @@ class LoopGateChain:
             action=action,
             detail=detail,
             hits=hits,
+            code=code,
         )
         if self._unwritten[gate] >= max(1, _LEDGER_EVERY):
             self._unwritten[gate] = 0

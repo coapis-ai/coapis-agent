@@ -172,6 +172,29 @@ def test_成功即归零():
     assert ch.observe_failure("execute_shell_command", _ERR) is None
 
 
+def test_权限必须抢在退出码非0之前_否则给错药():
+    """`exit code 1 + Permission denied` 的退出码只是表象。
+
+    判成 exit_nonzero 只能说"命令失败了、换个动作"；判成 permission 才给得出
+    "重复调用不会有新结果，去解决前置条件"。实测 dev 里最高频的权限形状是
+    ssh/git 的 `Permission denied (publickey)`（连 ssh -T 探连通性都是 exit 255），
+    曾被兜底的 exit_nonzero 抢走——分类错了，提示再准也是错的药。
+    """
+    for text in (
+        "Command failed with exit code 1.\n[stderr] git@gitee.com: Permission denied (publickey).",
+        "Command failed with exit code 255.\n[stderr] ssh: Permission denied, please try again.",
+        "[stderr] touch /etc/x: Permission denied\nexit code 1",
+    ):
+        sig = classify_failure("execute_shell_command", text)
+        assert sig is not None and sig.code == "permission", text
+        assert sig.retryable is False, "权限失败不该重试"
+        assert "权限" in sig.label
+
+    # 真·纯退出码失败（无任何其它特征）仍归 exit_nonzero，别把兜底规则删没了
+    plain = classify_failure("execute_shell_command", "Command failed with exit code 3.")
+    assert plain is not None and plain.code == "exit_nonzero"
+
+
 def test_换签名各算各的():
     ch = _chain(cooldown=0)
     ch.observe_failure("execute_shell_command", _ERR)

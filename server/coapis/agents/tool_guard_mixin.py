@@ -92,6 +92,20 @@ class _GuardAction:
         self.guard_result = guard_result
 
 
+def _append_guard_note(result: Any, note: str) -> None:
+    """把闸的提示追加到工具结果尾部。
+
+    只认本文件自己产出/消费的那种结果形状（dict + content 文本块列表）；
+    形状不认识就直接放弃——宁可这次没提示，也不伪造一个模型看不懂的结果。
+    """
+    if not isinstance(result, dict):
+        return
+    content = result.get("content")
+    if not isinstance(content, list):
+        return
+    content.append({"type": "text", "text": f"\n[循环闸提示] {note}"})
+
+
 class ToolGuardMixin:
     """Mixin that adds tool-guard interception to a ReActAgent.
 
@@ -375,6 +389,10 @@ class ToolGuardMixin:
                 self._get_tool_call_guard().record(
                     tool_name, tool_input, result_text,
                 )
+            # ③→④ 接线：失败签名观察。空输出也要观察（empty_result 是一类
+            # 签名），所以不挂在 result_text 的 if 里。
+            if tool_name:
+                self._observe_loop_failure(tool_name, result_text, result)
         except Exception:
             pass  # Non-blocking
 
@@ -424,6 +442,46 @@ class ToolGuardMixin:
             chain.observe_dedup(text, tool_name=tool_name)
         except Exception:  # pragma: no cover
             logger.debug("loop-gates observe_dedup failed", exc_info=True)
+
+    def _observe_loop_failure(
+        self,
+        tool_name: str,
+        output: str,
+        result: Any = None,
+    ) -> None:
+        """③→④ 接线：失败签名命中才提示，新签名才请顾问开处方。
+
+        和 `_observe_loop_round` 同一套纪律：观察件不改控制流、异常一律吞。
+        差别在投递方式——工具结果已经产出，只能把提示追加到结果尾部（模型
+        下一轮 reasoning 就能看到），不能像前置闸那样拦下调用。
+        """
+        chain = self._loop_gates()
+        if chain is None:
+            return
+        try:
+            verdict = chain.observe_failure(tool_name, output)
+        except Exception:
+            return
+        if verdict is None:
+            return
+        if verdict.detail:
+            _append_guard_note(result, verdict.detail)
+        if verdict.code:
+            # 同一个签名只惊动顾问一次：第 3、4、5 次只是重复报警，处方不会
+            # 变，钱照付。顾问岗关着或没配决策模型时，fire_advisor 自己返回
+            # None，这里只留一个请求位，不产生模型调用。
+            seen = getattr(self, "_loop_advised_codes", None)
+            if seen is None:
+                seen = self._loop_advised_codes = set()
+            if verdict.code not in seen:
+                seen.add(verdict.code)
+                self._loop_advise_pending = True
+
+    def _take_loop_advice_request(self) -> bool:
+        """消费一次"规则层请顾问看看"的请求（每轮最多消费一次）。"""
+        pending = bool(getattr(self, "_loop_advise_pending", False))
+        self._loop_advise_pending = False
+        return pending
 
     def _observe_loop_round(self, tool_name: str) -> bool:
         """记录本轮调用；True 表示预算耗尽（本轮不再执行工具）。"""

@@ -4203,6 +4203,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             if _adv_hub is not None and _adv_hub.post_enabled("advisor"):
                 _adv_scope = self._decision_scope()
                 _adv_scope["iters"] = int(self._hub_iters)
+                # ③→④：规则层（失败签名闸）发现没见过的失败形状时，请顾问
+                # 开一次处方——证据已经摆在眼前，不该再等取整节奏。顾问岗关着
+                # 时 fire_advisor 自己就返回 None，这里不产生任何模型调用。
+                _adv_scope["advise_now"] = self._take_loop_advice_request()
                 _fire_advisor(
                     goal=str(getattr(self, "_hub_goal", "") or user_query),
                     tool_msgs=self._recent_tool_msgs,
