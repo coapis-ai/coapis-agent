@@ -236,7 +236,7 @@ async def get_current_plan(
         try:
             workspace = _get_workspace(manager, agent_id, username)
             if workspace:
-                session_store = getattr(workspace, "session", None)
+                session_store = getattr(getattr(workspace, "runner", None), "session", None)
                 if session_store and hasattr(session_store, "get_session_state_dict"):
                     states = await session_store.get_session_state_dict(
                         session_id=session_id,
@@ -250,7 +250,10 @@ async def get_current_plan(
                         if current_plan and isinstance(current_plan, dict):
                             plan_data = _normalize_plan_data(current_plan)
         except Exception:
-            pass
+            logger.warning(
+                "plan/current: session-state notebook fallback failed",
+                exc_info=True,
+            )
 
     # 3. A finished plan: ``current_plan`` is cleared by ``finish_plan``, so
     #    fall back to the snapshot the runtime persisted for this session.
@@ -287,7 +290,7 @@ async def _get_finished_plan(
     """
     if workspace is None or not session_id:
         return None
-    session_store = getattr(workspace, "session", None)
+    session_store = getattr(getattr(workspace, "runner", None), "session", None)
     if not session_store or not hasattr(session_store, "get_session_state_dict"):
         return None
     try:
