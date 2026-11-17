@@ -51,6 +51,7 @@ interface EntryDict {
   doneTip: string;
   /** 已放弃 tooltip */
   abandonedTip: string;
+  finishedTip: string;
   /** 浮层标题 */
   title: string;
   /** 空态主提示 */
@@ -72,6 +73,7 @@ const DICT: Record<Lang, EntryDict> = {
     step: (i, n) => `第 ${i}/${n} 步`,
     doneTip: "计划已完成",
     abandonedTip: "计划已放弃",
+    finishedTip: "已结束",
     title: "任务计划",
     emptyTitle: "还没有任务计划。",
     emptyHint: "复杂任务可先让 AI 拆解步骤。",
@@ -85,6 +87,7 @@ const DICT: Record<Lang, EntryDict> = {
     step: (i, n) => `Step ${i}/${n}`,
     doneTip: "Plan completed",
     abandonedTip: "Plan abandoned",
+    finishedTip: "Finished",
     title: "Task plan",
     emptyTitle: "No task plan yet.",
     emptyHint: "For a complex task, ask the AI to break it into steps first.",
@@ -98,6 +101,7 @@ const DICT: Record<Lang, EntryDict> = {
     step: (i, n) => `ステップ ${i}/${n}`,
     doneTip: "計画は完了しました",
     abandonedTip: "計画は中止されました",
+    finishedTip: "終了しました",
     title: "タスク計画",
     emptyTitle: "タスク計画はまだありません。",
     emptyHint: "複雑なタスクは、まず AI に手順を分解させましょう。",
@@ -111,6 +115,7 @@ const DICT: Record<Lang, EntryDict> = {
     step: (i, n) => `Шаг ${i}/${n}`,
     doneTip: "План выполнен",
     abandonedTip: "План отменён",
+    finishedTip: "Завершён",
     title: "План задач",
     emptyTitle: "План задач пока нет.",
     emptyHint: "Сложную задачу сначала попросите ИИ разбить на шаги.",
@@ -230,14 +235,24 @@ const ChatPlanEntry: React.FC = () => {
   useEffect(() => {
     if (!enabled) return;
     const unsub = subscribePlanUpdates(
-      (updatedPlan: PlanStateResponse | null, eventSessionId?: string) => {
+      (
+        updatedPlan: PlanStateResponse | null,
+        eventSessionId?: string,
+        eventAliases?: string[],
+      ) => {
         const mySid = getBackendSessionId();
         // 服务端 /plan/stream 按 agent 广播（同一智能体下所有会话共用一条流），
         // 会话归属必须在前端自己判：
         //  - 我有会话 id：只收同一会话的事件；
         //  - 我还没有会话 id（新会话页）：任何带会话 id 的事件都不属于我。
+        const aliases = eventAliases || [];
         if (mySid) {
-          if (eventSessionId && eventSessionId !== mySid) return;
+          if (
+            eventSessionId &&
+            eventSessionId !== mySid &&
+            !aliases.includes(mySid)
+          )
+            return;
         } else if (eventSessionId) {
           return;
         }
@@ -300,14 +315,18 @@ const ChatPlanEntry: React.FC = () => {
   const isDone =
     !!plan && (plan.state === "done" || (totalCount > 0 && doneCount >= totalCount));
   const isAbandoned = !!plan && plan.state === "abandoned";
+  // finish_plan 会清空 current_plan；后端把最终快照标上 finished 继续供读，
+  // 这种计划已经结束，不能按“进行中”渲染。
+  const isFinished = !!plan && plan.finished === true;
 
   // 徽标：无计划=灰标签；进行中/待办=蓝色「第 i/n 步」；完成=绿色「✓ n/n」
   let badgeText = L.entry;
   if (isDone) badgeText = `✓ ${doneCount}/${totalCount}`;
   else if (isAbandoned) badgeText = L.entry;
+  else if (isFinished) badgeText = `${doneCount}/${totalCount}`;
   else if (totalCount > 0) badgeText = L.step(currentStep, totalCount);
 
-  const badgeColor = isDone
+  const badgeColor = isDone || isFinished
     ? "var(--colorSuccessText, #52c41a)"
     : plan
       ? "var(--colorPrimaryText, #1677ff)"
@@ -317,7 +336,9 @@ const ChatPlanEntry: React.FC = () => {
     ? L.doneTip
     : isAbandoned
       ? L.abandonedTip
-      : L.tooltip;
+      : isFinished
+        ? `${L.finishedTip} ${doneCount}/${totalCount}`
+        : L.tooltip;
 
   const panelContent = (
     <div

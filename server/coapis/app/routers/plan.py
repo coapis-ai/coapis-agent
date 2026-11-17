@@ -252,6 +252,16 @@ async def get_current_plan(
         except Exception:
             pass
 
+    # 3. A finished plan: ``current_plan`` is cleared by ``finish_plan``, so
+    #    fall back to the snapshot the runtime persisted for this session.
+    if plan_data is None and session_id and manager:
+        try:
+            workspace = _get_workspace(manager, agent_id, username)
+            if workspace:
+                plan_data = await _get_finished_plan(workspace, session_id, username)
+        except Exception:
+            logger.warning("Finished plan fallback lookup failed", exc_info=True)
+
     return {
         "plan": plan_data,
         "session_id": session_id,
@@ -262,6 +272,44 @@ async def get_current_plan(
             "messages_limit": 0,
         },
     }
+
+
+async def _get_finished_plan(
+    workspace,
+    session_id: str,
+    username: str,
+) -> dict | None:
+    """Read the persisted snapshot of a plan whose lifecycle has ended.
+
+    ``finish_plan`` clears ``current_plan`` so ``agent.plan_notebook`` holds
+    nothing once a plan is done. The runtime stores the final snapshot under
+    ``agent.coapis_finished_plan`` so a refresh still shows what was planned.
+    """
+    if workspace is None or not session_id:
+        return None
+    session_store = getattr(workspace, "session", None)
+    if not session_store or not hasattr(session_store, "get_session_state_dict"):
+        return None
+    try:
+        states = await session_store.get_session_state_dict(
+            session_id=session_id,
+            user_id=username,
+            allow_not_exist=True,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to read finished plan from session state",
+            exc_info=True,
+        )
+        return None
+    raw = (states.get("agent") or {}).get("coapis_finished_plan")
+    if isinstance(raw, dict) and raw:
+        data = _normalize_plan_data(raw)
+        if data is not None:
+            data["finished"] = True
+            return data
+    return None
+
 
 
 # ---------------------------------------------------------------------------

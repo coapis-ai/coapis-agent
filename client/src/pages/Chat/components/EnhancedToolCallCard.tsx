@@ -588,6 +588,29 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
   // 生成智能摘要
   const summary = useMemo(() => generateSummary(toolName, inputObj), [toolName, inputObj]);
 
+  /**
+   * Structured preview of a plan created inside the stream. The raw JSON dump
+   * below stays available, but a plan is only useful when its steps are
+   * readable where the model announced it.
+   */
+  const planSteps = useMemo(() => {
+    if (toolName !== "create_plan" && toolName !== "revise_current_plan") {
+      return [] as { name: string; description?: string }[];
+    }
+    const obj = inputObj as Record<string, unknown> | null;
+    const nested = obj?.plan as Record<string, unknown> | undefined;
+    const raw = obj?.subtasks ?? nested?.subtasks;
+    if (!Array.isArray(raw)) return [] as { name: string; description?: string }[];
+    return raw
+      .map((item) => {
+        const s = (item ?? {}) as Record<string, unknown>;
+        const name = typeof s.name === "string" ? s.name.trim() : "";
+        const desc = typeof s.description === "string" ? s.description.trim() : "";
+        return { name, description: desc || undefined };
+      })
+      .filter((s) => s.name.length > 0);
+  }, [toolName, inputObj]);
+
   // 格式化输出
   const { text: formattedOutput, isLong: isOutputLong } = useMemo(
     () => formatOutput(outputStr),
@@ -700,6 +723,34 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                   {summary && (
                     <div style={{ marginBottom: 8, color: themeColors.textSecondary, fontSize: 12 }}>
                       {summary}
+                    </div>
+                  )}
+
+                  {/* 计划步骤预览：让流里的计划卡不再只有一个名字 */}
+                  {planSteps.length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      <Text
+                        strong
+                        style={{ fontSize: 11, color: themeColors.textSecondary }}
+                      >
+                        {t('chat.toolCall.planSteps', '计划步骤')} (
+                        {planSteps.length})
+                      </Text>
+                      <ol
+                        style={{
+                          margin: '4px 0 0',
+                          paddingInlineStart: 18,
+                          fontSize: 11,
+                          color: themeColors.textPrimary,
+                        }}
+                      >
+                        {planSteps.map((s, i) => (
+                          <li key={`${s.name}-${i}`} style={{ marginBottom: 2 }}>
+                            {s.name}
+                            {s.description ? ` — ${s.description}` : ''}
+                          </li>
+                        ))}
+                      </ol>
                     </div>
                   )}
 

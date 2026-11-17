@@ -47,6 +47,10 @@ class PlanStateResponse(BaseModel):
     created_at: str | None = None
     finished_at: str | None = None
     outcome: str | None = None
+    #: True when the plan lifecycle has ended (the runtime cleared
+    #: ``current_plan`` after ``finish_plan``) but the final snapshot is
+    #: still being served so the UI can show a completed plan.
+    finished: bool = False
 
 
 class PlanConfigResponse(BaseModel):

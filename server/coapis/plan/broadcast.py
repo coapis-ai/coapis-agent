@@ -1,128 +1,185 @@
-# -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
-# Copyright 2026 蜜蜂 & CoApis Contributors
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-"""SSE broadcast for plan updates.
-
-Minimal implementation: a global dict mapping agent IDs to sets of
-``asyncio.Queue``. No scoping, no tickets, no auth.
-
-Also maintains a live plan state cache so API endpoints can serve
-the current plan even before the session file is written.
-"""
+"""SSE plan broadcasting and live plan cache."""
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_queues: dict[str, set[asyncio.Queue]] = {}
+# Per-agent SSE clients
+_sse_clients: dict[str, set[asyncio.Queue]] = {}
 
-# Outer key: agent_id.  Inner key: session_id.
-_live_plan_cache: dict[str, dict[str, dict[str, Any] | None]] = {}
+# agent_id -> {session_key -> plan_data} live cache, bounded per agent.
+# ``session_key`` may be the channel session id (e.g. ``console:admin``)
+# *and* the chat UUID: both are registered for the same plan so the UI can
+# query with whichever id it actually holds (see ``broadcast_plan_update``).
+_plan_live_cache: dict[str, OrderedDict[str, dict[str, Any] | None]] = {}
+_MAX_LIVE_SESSIONS = 64
 
 
 def register_sse_client(agent_id: str) -> asyncio.Queue:
-    """Register a new SSE client for *agent_id* and return its queue."""
-    q: asyncio.Queue = asyncio.Queue(maxsize=256)
-    _queues.setdefault(agent_id, set()).add(q)
-    logger.debug(
-        "SSE client registered for agent %s (total=%d)",
-        agent_id,
-        len(_queues[agent_id]),
-    )
+    """Register an SSE client for an agent and return its queue."""
+    q: asyncio.Queue = asyncio.Queue()
+    _sse_clients.setdefault(agent_id, set()).add(q)
     return q
 
 
 def unregister_sse_client(agent_id: str, q: asyncio.Queue) -> None:
-    """Unregister an SSE client queue for *agent_id*."""
-    clients = _queues.get(agent_id)
-    if clients is not None:
+    """Unregister an SSE client queue."""
+    clients = _sse_clients.get(agent_id)
+    if clients:
         clients.discard(q)
         if not clients:
-            del _queues[agent_id]
-    logger.debug("SSE client unregistered for agent %s", agent_id)
+            _sse_clients.pop(agent_id, None)
 
 
-def get_live_plan(
+def _cache_put(
     agent_id: str,
-    session_id: str | None = None,
-) -> tuple[bool, dict[str, Any] | None]:
-    """Return ``(found, plan_data)`` from the live cache.
-
-    When *session_id* is given, returns only a match for that session.
-    When omitted, returns any cached plan for the agent.
-    """
-    sessions = _live_plan_cache.get(agent_id)
-    if sessions is None:
-        return False, None
-    if session_id is not None:
-        if session_id not in sessions:
-            return False, None
-        return True, sessions[session_id]
-    for data in sessions.values():
-        return True, data
-    return False, None
-
-
-def clear_live_plan(agent_id: str, session_id: str | None = None) -> None:
-    """Remove the cached live plan state."""
-    if session_id is None:
-        _live_plan_cache.pop(agent_id, None)
-    else:
-        sessions = _live_plan_cache.get(agent_id)
-        if sessions:
-            sessions.pop(session_id, None)
-            if not sessions:
-                _live_plan_cache.pop(agent_id, None)
+    key: str,
+    plan_data: dict[str, Any] | None,
+) -> None:
+    """Write one session key into the bounded per-agent live cache."""
+    sessions = _plan_live_cache.setdefault(agent_id, OrderedDict())
+    sessions[key] = plan_data
+    sessions.move_to_end(key)
+    while len(sessions) > _MAX_LIVE_SESSIONS:
+        sessions.popitem(last=False)
 
 
 def broadcast_plan_update(
     agent_id: str,
     payload: dict[str, Any],
     session_id: str | None = None,
+    session_ids: list[str] | None = None,
 ) -> None:
-    """Push *payload* to all SSE clients subscribed to *agent_id*.
+    """Broadcast a plan update to all SSE clients of an agent.
 
-    Also updates the live plan cache so API polling can serve it.
-    Silently drops messages for queues that are full.
+    ``session_id`` keeps the historical single-key behaviour; ``session_ids``
+    registers extra aliases — typically the channel session id **and** the
+    chat UUID — so a UI that queries ``/plan/current`` with the chat UUID
+    finds the plan the runtime cached under the channel session id.
+
+    The payload forwarded to SSE clients carries ``session_ids`` so the
+    subscriber can match on whichever id it knows.
     """
+    out = payload
     if payload.get("type") == "plan_update":
-        sid = session_id or ""
-        sessions = _live_plan_cache.setdefault(agent_id, {})
         plan_data = payload.get("plan")
-        sessions[sid] = plan_data
-        logger.debug(
-            "Live cache updated: agent=%s session=%r has_plan=%s",
+
+        keys: list[str] = []
+        for candidate in [session_id, *(session_ids or [])]:
+            if candidate and candidate not in keys:
+                keys.append(candidate)
+
+        # Merge aliases already recorded for any of these keys so a plan that
+        # was first cached under one id keeps matching the other id.
+        known: list[str] = list(keys)
+        if plan_data is not None:
+            for key in keys:
+                prev = _plan_live_cache.get(agent_id, {}).get(key)
+                if isinstance(prev, dict):
+                    for alias in prev.get("session_ids") or []:
+                        if alias not in known:
+                            known.append(alias)
+            plan_data = dict(plan_data)
+            plan_data["session_ids"] = known
+            out = dict(payload)
+            out["plan"] = plan_data
+
+        out = dict(out)
+        out["session_id"] = session_id or (keys[0] if keys else None)
+        out["session_ids"] = known
+
+        for key in keys:
+            _cache_put(agent_id, key, plan_data)
+
+        logger.info(
+            "plan_update broadcast: agent=%s keys=%s plan=%s state=%s "
+            "subtasks=%s",
             agent_id,
-            sid,
-            plan_data is not None,
+            keys,
+            (plan_data or {}).get("name") if plan_data else None,
+            (plan_data or {}).get("state") if plan_data else None,
+            len((plan_data or {}).get("subtasks") or []) if plan_data else 0,
         )
 
-    clients = _queues.get(agent_id)
+    clients = _sse_clients.get(agent_id)
     if not clients:
         return
-    enriched = {**payload, "session_id": session_id} if session_id else payload
-    for q in list(clients):
+
+    enriched = _enrich_with_usage(agent_id, out)
+    dead: list[asyncio.Queue] = []
+    for q in clients:
         try:
             q.put_nowait(enriched)
         except asyncio.QueueFull:
-            logger.warning(
-                "SSE queue full for agent %s, dropping message",
-                agent_id,
-            )
+            dead.append(q)
+
+    for q in dead:
+        clients.discard(q)
+
+
+def get_live_plan(
+    agent_id: str,
+    session_id: str | None = None,
+) -> tuple[bool, dict | None]:
+    """Return ``(found, plan_data)`` from the live cache.
+
+    ``plan_data`` may be ``None`` when no plan exists for that session.
+    Matches either on the cache key itself or on any alias recorded in the
+    cached payload, so a query by chat UUID hits a plan cached under the
+    channel session id (and vice versa).
+    """
+    sessions = _plan_live_cache.get(agent_id)
+    if not sessions:
+        return False, None
+    if session_id:
+        cached = sessions.get(session_id)
+        if cached is not None:
+            return True, cached
+        for cached in sessions.values():
+            if isinstance(cached, dict) and session_id in (
+                cached.get("session_ids") or []
+            ):
+                return True, cached
+        return False, None
+    # No specific session: most recent non-empty plan.
+    for cached in reversed(list(sessions.values())):
+        if cached is not None:
+            return True, cached
+    return False, None
+
+
+def get_cached_session_keys(agent_id: str) -> list[str]:
+    """Return the session keys currently held for ``agent_id`` (debug aid)."""
+    return list(_plan_live_cache.get(agent_id, {}).keys())
+
+
+def _enrich_with_usage(
+    agent_id: str,
+    payload: dict,
+) -> dict:
+    """Attach LLM usage metrics to a plan_update payload."""
+    if payload.get("type") != "plan_update":
+        return payload
+    try:
+        from ..tokens.usage import get_llm_metrics
+
+        metrics = get_llm_metrics()
+        enriched = dict(payload)
+        enriched["usage"] = {
+            "total_inference_time_ms": round(
+                metrics["total_inference_time"] * 1000, 1
+            ),
+            "last_inference_time_ms": round(
+                metrics["last_inference_time"] * 1000, 1
+            ),
+            "total_prompt_tokens": metrics["total_prompt_tokens"],
+            "total_completion_tokens": metrics["total_completion_tokens"],
+            "model_name": metrics["model_name"],
+        }
+        return enriched
+    except Exception:
+        return payload

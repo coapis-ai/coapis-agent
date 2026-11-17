@@ -2028,36 +2028,107 @@ class AgentRunner(Runner):
                     from ...plan.broadcast import broadcast_plan_update
                     from ...plan.schemas import plan_to_response
 
+                    def _plan_session_keys() -> list[str]:
+                        """Session keys this plan must be reachable by.
+
+                        The runtime addresses a session by ``session_id``
+                        (e.g. ``console:admin``) while the UI addresses a chat
+                        by the ChatSpec UUID. Registering both keeps
+                        ``GET /plan/current`` from missing the live cache
+                        every time the caller queries by chat id.
+                        """
+                        keys: list[str] = []
+                        if session_id:
+                            keys.append(session_id)
+                        try:
+                            chat_id = getattr(chat, "id", None)
+                        except Exception:
+                            chat_id = None
+                        if chat_id:
+                            cid = str(chat_id)
+                            if cid not in keys:
+                                keys.append(cid)
+                        return keys
+
+                    def _finished_plan_snapshot(nb):
+                        """Final plan snapshot once ``finish_plan`` cleared it."""
+                        from coapis.plan.lifecycle import (
+                            finished_plan_snapshot,
+                        )
+
+                        return finished_plan_snapshot(nb)
+
+                    def _persist_finished_plan(snapshot):
+                        """Durable copy of a finished plan snapshot.
+
+                        The runner does not save ``plan_notebook`` after the
+                        reply, so without this a completed plan would only be
+                        readable while the process lives. It is stored under
+                        ``agent.coapis_finished_plan``; ``load_session_state``
+                        uses ``strict=False`` and ignores the unknown key.
+                        """
+                        if snapshot is None or chat is None:
+                            return
+                        try:
+                            loop = asyncio.get_running_loop()
+                        except RuntimeError:
+                            return
+
+                        async def _write():
+                            try:
+                                await self.session.update_session_state(
+                                    session_id=chat.id,
+                                    key="agent.coapis_finished_plan",
+                                    value=snapshot,
+                                    user_id=user_id,
+                                    create_if_not_exist=True,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "Failed to persist finished plan snapshot",
+                                    exc_info=True,
+                                )
+
+                        try:
+                            loop.create_task(_write())
+                        except Exception:
+                            logger.warning(
+                                "Finished-plan persist task skipped",
+                                exc_info=True,
+                            )
+
                     def _on_plan_change(  # pylint: disable=protected-access
                         nb,
                         plan,
                     ):
                         had_plan = getattr(nb, "_qp_had_plan", False)
                         prev_id = getattr(nb, "_qp_prev_plan_id", None)
+                        plan_data = None
 
                         if plan is not None:
                             cur_id = plan.id
                             if not had_plan or cur_id != prev_id:
                                 nb._plan_just_mutated = True
                             nb._qp_prev_plan_id = cur_id
+                            plan_data = plan_to_response(plan).model_dump()
+                            nb._qp_last_plan_data = plan_data
                         else:
                             if had_plan:
                                 nb._plan_recently_finished = True
                             nb._qp_prev_plan_id = None
+                            plan_data = _finished_plan_snapshot(nb)
+                            _persist_finished_plan(plan_data)
                         nb._qp_had_plan = plan is not None
 
                         payload = {
                             "type": "plan_update",
-                            "plan": (
-                                plan_to_response(plan).model_dump()
-                                if plan is not None
-                                else None
-                            ),
+                            "plan": plan_data,
                         }
                         broadcast_plan_update(
                             self.agent_id,
                             payload,
                             session_id=session_id,
+                            session_ids=_plan_session_keys(),
                         )
 
                     plan_notebook.register_plan_change_hook(

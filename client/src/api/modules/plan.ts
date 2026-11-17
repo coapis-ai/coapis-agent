@@ -22,6 +22,21 @@ export interface PlanStateResponse {
   created_at: string | null;
   finished_at: string | null;
   outcome: string | null;
+  /**
+   * True when the plan's lifecycle has ended (``finish_plan`` cleared
+   * ``current_plan``) but the final snapshot is still being served, so the
+   * UI can show a completed plan instead of an empty one.
+   */
+  finished?: boolean;
+  /** Session keys this plan is cached under (channel id and/or chat UUID). */
+  session_ids?: string[];
+}
+
+/** Envelope returned by ``GET /plan/current``. */
+export interface PlanQueryResponse {
+  plan: PlanStateResponse | null;
+  session_id?: string | null;
+  usage?: Record<string, unknown>;
 }
 
 export interface PlanConfigResponse {
@@ -29,15 +44,39 @@ export interface PlanConfigResponse {
   agent_id?: string;
 }
 
+/**
+ * Accept both the documented envelope and a bare plan object, so callers
+ * never mistake the envelope for a plan (which used to render 0/0).
+ */
+export function unwrapPlan(
+  body: PlanQueryResponse | PlanStateResponse | null | undefined,
+): PlanStateResponse | null {
+  if (!body || typeof body !== "object") return null;
+  if ("plan" in body) {
+    const inner = (body as PlanQueryResponse).plan;
+    return inner ?? null;
+  }
+  // A bare plan must at least carry an id or a name; anything else (e.g. an
+  // unexpected `{}` body) must not be mistaken for a plan, or the UI will
+  // render an empty "0/0" panel that looks like it has data.
+  if (!("id" in body) && !("name" in body)) return null;
+  return body as PlanStateResponse;
+}
+
 export const planApi = {
-  getCurrentPlan: (sessionId?: string, agentId?: string) => {
+  /** Resolved plan for a session, or ``null`` when there is none. */
+  getCurrentPlan: async (
+    sessionId?: string,
+    agentId?: string,
+  ): Promise<PlanStateResponse | null> => {
     const params = new URLSearchParams();
     if (sessionId) params.set("session_id", sessionId);
     if (agentId) params.set("agent_id", agentId);
     const qs = params.toString();
-    return request<PlanStateResponse | null>(
-      `/plan/current${qs ? `?${qs}` : ""}`,
-    );
+    const body = await request<
+      PlanQueryResponse | PlanStateResponse | null
+    >(`/plan/current${qs ? `?${qs}` : ""}`);
+    return unwrapPlan(body);
   },
 
   getPlanConfig: (agentId?: string) => {
@@ -55,6 +94,25 @@ export const planApi = {
 };
 
 /**
+ * True when an SSE payload belongs to the session we are watching.
+ *
+ * The runtime caches a plan under the channel session id **and** the chat
+ * UUID; whichever one the caller holds, the payload's ``session_ids`` list
+ * contains it. Matching only on ``session_id`` used to drop every event for
+ * callers that address chats by UUID.
+ */
+export function planEventMatchesSession(
+  data: Record<string, unknown>,
+  sessionId?: string,
+): boolean {
+  if (!sessionId) return true;
+  const aliases = data.session_ids;
+  if (Array.isArray(aliases) && aliases.includes(sessionId)) return true;
+  const eventSid = (data.session_id as string | undefined) || "";
+  return !eventSid || eventSid === sessionId;
+}
+
+/**
  * Subscribe to plan updates via SSE using fetch streaming.
  * Filters events by sessionId so users only see their own plans.
  * Returns an unsubscribe function.
@@ -63,6 +121,8 @@ export function subscribePlanUpdates(
   onUpdate: (
     plan: PlanStateResponse | null,
     sessionId: string | undefined,
+    /** Every session key this plan is cached under (aliases for matching). */
+    sessionAliases?: string[],
   ) => void,
   onError?: (err: unknown) => void,
   options?: { agentId?: string; sessionId?: string },
@@ -104,16 +164,19 @@ export function subscribePlanUpdates(
               try {
                 const data = JSON.parse(line.slice(6));
                 if (data.type === "plan_update") {
-                  // Filter by session if specified
-                  const eventSid = data.session_id || "";
-                  if (
-                    filterSessionId &&
-                    eventSid &&
-                    eventSid !== filterSessionId
-                  ) {
+                  if (!planEventMatchesSession(data, filterSessionId)) {
                     continue;
                   }
-                  onUpdate(data.plan ?? null, data.session_id);
+                  const aliases: string[] = Array.isArray(data.session_ids)
+                    ? (data.session_ids as string[])
+                    : Array.isArray(data.plan?.session_ids)
+                      ? (data.plan.session_ids as string[])
+                      : [];
+                  onUpdate(
+                    unwrapPlan({ plan: data.plan ?? null }),
+                    data.session_id,
+                    aliases,
+                  );
                 }
               } catch {
                 // ignore parse errors
