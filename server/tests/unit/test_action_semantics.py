@@ -178,3 +178,34 @@ def test_plan_text_semantics_needs_confirmation_for_side_effects():
 
 def test_empty_plan_text_is_conservative():
     assert plan_text_semantics("") is get_config().unknown_semantics
+
+
+
+
+def test_workspace_write_plan_text_is_not_external():
+    """计划文本是散文：工作区内写入不是「出入」，不该卡确认。"""
+    for text in (
+        "write_file 在工作区中转目录覆盖写入 a.txt",
+        "用 write_file 新建配置文件",
+        "整理报告并保存为 md",
+        "把常量改成 2000 并跑测试",
+    ):
+        assert plan_text_semantics(text) is ActionSemantics.LOCAL_WRITE
+
+
+def test_leaving_workspace_plan_text_still_needs_confirmation():
+    for text in (
+        "发送消息给张三",
+        "推送通知到企微群",
+        "删除生产数据库记录",
+        "重启容器",
+    ):
+        assert plan_text_semantics(text) is ActionSemantics.EXTERNAL_WRITE
+
+
+def test_plan_and_action_fallbacks_are_different_on_purpose():
+    cfg = get_config()
+    # 动作级：判不准按对外写入（宁严勿松）
+    assert cfg.unknown_semantics is ActionSemantics.EXTERNAL_WRITE
+    # 计划级：判不准按工作区内写入（否则门禁形同虚设）
+    assert cfg.plan_unknown_semantics is ActionSemantics.LOCAL_WRITE

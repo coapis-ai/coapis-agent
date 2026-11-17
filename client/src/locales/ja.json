@@ -1798,6 +1798,12 @@
       "copyResponse": "回答をコピー",
       "done": "完了",
       "failed": "失敗",
+      "blocked": "ブロックしました",
+      "blockedDetail": "ブロック理由",
+      "blockedReason": {
+        "planScopePending": "プランが未確認のため、この操作はブロックされました",
+        "guardDenied": "セキュリティルールがこの操作をブロックしました"
+      },
       "aborted": "中断",
       "params": "入力",
       "output": "出力",
@@ -2269,6 +2275,11 @@
     "title": "プラン",
     "noPlan": "アクティブなプランがありません",
     "noPlanHint": "/plan <説明> でプランを作成",
+    "confirmTitle": "計画の確認待ち：{{title}}",
+    "confirmHint": "確認後は通常の工程が自動実行されます。外部への影響や破壊的な操作は個別に承認が必要です。",
+    "confirmAction": "確認して実行",
+    "confirmSuccess": "計画を確認しました",
+    "confirmFailed": "確認に失敗しました",
     "progress": "進捗",
     "outcome": "結果",
     "state": {
@@ -2276,7 +2287,8 @@
       "in_progress": "進行中",
       "done": "完了",
       "abandoned": "中止"
-    }
+    },
+    "pendingConfirm": "確認待ち"
   },
   "admin": {
     "confirmDisable": "ユーザーを無効化しますか",

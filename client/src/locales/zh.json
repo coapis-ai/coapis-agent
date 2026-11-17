@@ -2399,6 +2399,12 @@
       "copyResponse": "复制正文",
       "done": "已完成",
       "failed": "失败",
+      "blocked": "已拦下",
+      "blockedDetail": "拦下原因",
+      "blockedReason": {
+        "planScopePending": "方案还没确认，这个动作已拦下",
+        "guardDenied": "安全规则拦下了这个动作"
+      },
       "aborted": "已中止",
       "params": "输入",
       "output": "输出",
@@ -2893,6 +2899,11 @@
     "title": "计划",
     "noPlan": "暂无活跃计划",
     "noPlanHint": "使用 /plan <描述> 创建计划",
+    "confirmTitle": "方案待确认：{{title}}",
+    "confirmHint": "确认后计划内普通操作自动放行；涉及出入或破坏性的动作仍会单独征求确认。",
+    "confirmAction": "确认执行",
+    "confirmSuccess": "方案已确认",
+    "confirmFailed": "确认失败",
     "progress": "进度",
     "outcome": "结果",
     "state": {
@@ -2900,7 +2911,8 @@
       "in_progress": "进行中",
       "done": "已完成",
       "abandoned": "已放弃"
-    }
+    },
+    "pendingConfirm": "待确认"
   },
   "files": {
     "upload": "上传",

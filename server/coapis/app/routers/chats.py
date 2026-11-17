@@ -947,7 +947,7 @@ async def get_chat(
             mem = InMemoryMemory()
             mem.load_state_dict(memory_state, strict=False)
             memories = await mem.get_memory(prepend_summary=False)
-            messages = agentscope_msg_to_message(memories)
+            messages = agentscope_msg_to_message(memories, include_tool_results=True)
     except Exception as e:
         logger.warning(f"Failed to load messages from session: {e}", exc_info=True)
 

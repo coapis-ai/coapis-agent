@@ -2130,6 +2130,21 @@ class AgentRunner(Runner):
                             session_id=session_id,
                             session_ids=_plan_session_keys(),
                         )
+                        # 授权域按运行时会话键发牌，而前端确认用的是聊天
+                        # UUID：把两个键并到同一条授权域上，否则确认请求
+                        # 永远找不到那条待确认记录（确认链路断在这）。
+                        try:
+                            from ...plan.scope import add_scope_aliases
+
+                            add_scope_aliases(
+                                session_id,
+                                _plan_session_keys(),
+                            )
+                        except Exception:  # pragma: no cover
+                            logger.debug(
+                                "plan scope alias failed",
+                                exc_info=True,
+                            )
 
                     plan_notebook.register_plan_change_hook(
                         "broadcast",

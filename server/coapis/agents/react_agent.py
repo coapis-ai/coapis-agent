@@ -3878,7 +3878,14 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             from coapis.plan.scope import sync_session_scope
 
             plan = getattr(notebook, "current_plan", None)
-            verdict, reason = sync_session_scope(session_id, plan)
+            # 授权域同时登记运行时主键与聊天 UUID：前端按聊天 UUID 寻址，
+            # 只登记主键时面板查不到挂起的方案，"待确认"卡片永远不出现。
+            chat_id = str(self._request_context.get("chat_id") or "")
+            verdict, reason = sync_session_scope(
+                session_id,
+                plan,
+                aliases=[k for k in (session_id, chat_id) if k],
+            )
         except Exception:  # pragma: no cover - 治理层不可用时不影响对话
             logger.debug("plan-scope sync skipped", exc_info=True)
             return

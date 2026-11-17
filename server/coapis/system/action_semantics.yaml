@@ -24,6 +24,7 @@ thresholds:
   scope_auto_approve_max: local_write
   subagent_max: external_write
   unknown: external_write
+  plan_unknown: local_write
 
 # 显式判为破坏性的工具（覆盖 tools 表）
 destructive_tools:
@@ -96,7 +97,58 @@ destructive_patterns:
   - '\bshutdown\b|\breboot\b'
 
 # 计划文本里的"出入/破坏"线索（命中则计划必须先确认）
+# 计划文本里的「工作区内写入」线索：写文件/改代码/出产物，不算出入。
+# 与 unknown 的区别：unknown 是**动作级**兜底（宁严勿松，需确认）；
+# plan_unknown 是**计划级**兜底（散文判不准时按工作区内写入）。
+# 若计划级也按对外写入兜底，几乎每个计划都要用户确认——实测一轮内
+# pending 发牌 62 次、重建 50 个计划，方案门禁反而失效。
+plan_local_write_keywords:
+  - 写
+  - 写入
+  - 写进
+  - 写到
+  - 写回
+  - 改写
+  - 新建
+  - 创建
+  - 生成
+  - 保存
+  - 落盘
+  - 追加
+  - 记录
+  - 整理
+  - 构建
+  - 实现
+  - 修改
+  - 更新
+  - 编辑
+  - 覆盖
+  - 重命名
+  - 移动
+  - write
+  - edit
+  - create
+  - save
+  - append
+  - generate
+  - build
+  - patch
+  - implement
+  - update
+  - modify
+  - overwrite
+  - rename
+
 side_effect_keywords:
+  - 重启
+  - 停服
+  - 停机
+  - 关机
+  - restart
+  - shutdown
+  - 回滚
+  - 回复邮件
+  - 写入外部
   - 发送
   - 发消息
   - 推送
@@ -116,7 +168,6 @@ side_effect_keywords:
   - 销毁
   - 卸载
   - 重置
-  - 覆盖
   - 授权
   - 凭证
   - 令牌

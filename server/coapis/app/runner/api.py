@@ -188,7 +188,7 @@ async def get_chat(
     memory.load_state_dict(memory_state, strict=False)
 
     memories = await memory.get_memory(prepend_summary=False)
-    messages = agentscope_msg_to_message(memories)
+    messages = agentscope_msg_to_message(memories, include_tool_results=True)
     return ChatHistory(messages=messages, status=status)
 
 

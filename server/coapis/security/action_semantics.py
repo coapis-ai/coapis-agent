@@ -232,10 +232,22 @@ DEFAULT_PLAN_SIDE_EFFECT_KEYWORDS: tuple[str, ...] = (
     "send ", "notify", "publish", "post ", "email", "webhook", "http post",
     "push", "deploy",
     # 破坏性
-    "删除", "清空", "清除", "销毁", "卸载", "重置", "回滚", "覆盖",
+    "删除", "清空", "清除", "销毁", "卸载", "重置", "回滚",
     "drop", "delete", "remove", "destroy", "purge", "format", "truncate",
     # 权限/凭证
     "授权", "凭证", "令牌", "密码", "token", "secret", "credential",
+)
+
+#: 计划文本里的「工作区内写入」线索词（写文件/改代码/出产物，不是出入）
+#: 计划文本只是散文，真正的出入与破坏在动作级由 classify_action +
+#: tool_guard 逐次把关；这里若一律按对外写入兜底，几乎每个计划都要
+#: 用户确认，方案门禁反而形同虚设（实测 pending 62 次 / executing 2 次）。
+DEFAULT_PLAN_LOCAL_WRITE_KEYWORDS: tuple[str, ...] = (
+    "写入", "写进", "写到", "写回", "改写", "新建", "创建", "生成", "保存",
+    "落盘", "追加", "记录", "整理", "构建", "实现", "修改", "更新", "编辑",
+    "覆盖", "重命名", "移动",
+    "write", "edit", "create", "save", "append", "generate", "build",
+    "patch", "implement", "update", "modify", "overwrite", "rename", "mv ",
 )
 
 #: 计划文本里的"纯读取"线索词（命中且无出入词 → 判定为可直接执行）
@@ -267,6 +279,15 @@ class ActionSemanticsConfig:
     scope_auto_max: ActionSemantics = ActionSemantics.LOCAL_WRITE
     #: 子智能体可继承的最高语义档（用户口径：继承除破坏性之外全部）
     subagent_max: ActionSemantics = ActionSemantics.EXTERNAL_WRITE
+    #: 计划文本命中「工作区内写入」线索时判这档（不是出入）
+    plan_local_write_keywords: tuple[str, ...] = (
+        DEFAULT_PLAN_LOCAL_WRITE_KEYWORDS
+    )
+    #: 计划文本未命中任何线索时的兜底档。
+    #: 注意与 unknown_semantics 分开：后者是**动作级**兜底（宁严勿松），
+    #: 前者是**计划级**兜底（散文判不准时按工作区内写入，
+    #: 否则每个计划都触发确认，实测导致一轮重建 50 个计划）。
+    plan_unknown_semantics: ActionSemantics = ActionSemantics.LOCAL_WRITE
     #: 未收录工具按工具名启发式判定的兜底档
     unknown_semantics: ActionSemantics = ActionSemantics.EXTERNAL_WRITE
 
@@ -326,6 +347,10 @@ def _load_config() -> ActionSemanticsConfig:
     kws = raw.get("read_only_keywords") or []
     if isinstance(kws, list) and kws:
         cfg.read_only_keywords = tuple(str(k) for k in kws)
+    kws = raw.get("plan_local_write_keywords") or []
+    if isinstance(kws, list) and kws:
+        cfg.plan_local_write_keywords = tuple(str(k) for k in kws)
+
 
     thresholds = raw.get("thresholds") or {}
     if isinstance(thresholds, dict):
@@ -338,6 +363,15 @@ def _load_config() -> ActionSemanticsConfig:
         cfg.subagent_max = parse_semantics(
             str(thresholds.get("subagent_max", cfg.subagent_max.value)),
         )
+        cfg.plan_unknown_semantics = parse_semantics(
+            str(
+                thresholds.get(
+                    "plan_unknown",
+                    cfg.plan_unknown_semantics.value,
+                ),
+            ),
+        )
+
         cfg.unknown_semantics = parse_semantics(
             str(thresholds.get("unknown", cfg.unknown_semantics.value)),
         )
@@ -511,8 +545,14 @@ def is_destructive(sem: ActionSemantics) -> bool:
 def plan_text_semantics(text: str) -> ActionSemantics:
     """计划文本级预判（粗判，用于"方案必须经过确认"的门禁）。
 
-    命中出入/破坏线索 → 至少对外写入；命中破坏线索 → 破坏性。
-    纯读取线索且无出入线索 → 读取；判不准时按对外写入（宁严勿松）。
+    命中破坏线索 → 破坏性；命中出入线索 → 对外写入；命中**工作区内**
+    写入线索 → local_write（计划文本是散文，不能因为出现"写入/覆盖/改"
+    就判成出入，否则几乎每个计划都要确认——实测一轮内 pending 发牌 62 次、
+    重建 50 个计划）；纯读取线索 → 读取；判不准按计划级兜底档
+    ``plan_unknown_semantics``（默认 local_write）。
+
+    注意与 ``classify_semantics`` 的区别：动作级判不准按 ``unknown_semantics``
+    （external_write，宁严勿松），计划级判不准按 ``plan_unknown_semantics``。
     """
     cfg = get_config()
     low = (text or "").lower()
@@ -530,10 +570,12 @@ def plan_text_semantics(text: str) -> ActionSemantics:
     if _keywords_hit(low, cfg.side_effect_keywords):
         return ActionSemantics.EXTERNAL_WRITE
 
+    if _keywords_hit(low, cfg.plan_local_write_keywords):
+        return ActionSemantics.LOCAL_WRITE
     if _keywords_hit(low, cfg.read_only_keywords):
         return ActionSemantics.READ
 
-    return cfg.unknown_semantics
+    return cfg.plan_unknown_semantics
 
 
 _DESTRUCTIVE_KEYWORDS: tuple[str, ...] = (
@@ -554,6 +596,7 @@ __all__ = [
     "ActionSemanticsConfig",
     "COMMAND_LEVEL_TO_SEMANTICS",
     "DEFAULT_TOOL_SEMANTICS",
+    "DEFAULT_PLAN_LOCAL_WRITE_KEYWORDS",
     "ORDER",
     "at_least",
     "classify_action",

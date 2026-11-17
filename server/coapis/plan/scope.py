@@ -107,6 +107,8 @@ class PlanScope:
     origin: str = "plan"
     #: 继承链（子智能体记录父域）
     parent_plan_id: str | None = None
+    #: 发牌理由：放行原因，或等待确认的原因（控制台原样展示）
+    reason: str = ""
     #: 命中统计（审计用）
     hits: int = 0
     denials: int = 0
@@ -144,6 +146,8 @@ class ScopeRegistry:
 
     def __init__(self) -> None:
         self._scopes: dict[str, PlanScope] = {}
+        #: 别名键 → 同一 PlanScope（会话键与聊天 UUID 都能命中）
+        self._aliases: dict[str, set[str]] = {}
 
     # -- 写入 ---------------------------------------------------------------
 
@@ -160,6 +164,8 @@ class ScopeRegistry:
         origin: str = "plan",
         parent_plan_id: str | None = None,
         plan_id: str | None = None,
+        aliases: Iterable[str] = (),
+        reason: str = "",
     ) -> PlanScope:
         """建立/覆盖一个会话的授权域。"""
         now = datetime.now(timezone.utc)
@@ -175,22 +181,37 @@ class ScopeRegistry:
             expires_at=now + timedelta(seconds=max(1, int(ttl_seconds))),
             origin=origin,
             parent_plan_id=parent_plan_id,
+            reason=reason,
         )
-        self._scopes[session_id] = scope
+        keys = [session_id] + [
+            a for a in (aliases or ()) if a and a != session_id
+        ]
+        for key in keys:
+            stale = self._scopes.get(key)
+            if stale is not None:
+                self._drop_all(stale)
+        for key in keys:
+            self._scopes[key] = scope
+        if len(keys) > 1:
+            self._aliases[scope.plan_id] = set(keys[1:])
         logger.info(
-            "plan-scope granted: session=%s plan=%s status=%s max=%s ttl=%ss origin=%s",
+            "plan-scope granted: session=%s plan=%s status=%s max=%s ttl=%ss "
+            "origin=%s reason=%s",
             session_id,
             scope.plan_id,
             status,
             max_semantics.value,
             ttl_seconds,
             origin,
+            reason,
         )
         return scope
 
     def revoke(self, session_id: str, reason: str = "") -> bool:
         """撤销授权域，返回是否存在过。"""
-        scope = self._scopes.pop(session_id, None)
+        scope = self._scopes.get(session_id)
+        if scope is not None:
+            self._drop_all(scope)
         if scope is None:
             return False
         logger.info(
@@ -211,6 +232,33 @@ class ScopeRegistry:
         scope.status = status
         return scope
 
+    # -- 别名（同一授权域可被多个会话键命中） ---------------------
+
+    def _drop_all(self, scope: PlanScope) -> None:
+        """摘掉指向同一对象的**所有**键（主键 + 别名）。"""
+        for key in [k for k, v in self._scopes.items() if v is scope]:
+            self._scopes.pop(key, None)
+        self._aliases.pop(scope.plan_id, None)
+
+    def add_aliases(self, session_id: str, extras: Iterable[str]) -> bool:
+        """给已存在的授权域补登别名键（如聊天 UUID ↔ 运行时会话键）。"""
+        scope = self._scopes.get(session_id)
+        if scope is None:
+            return False
+        added = False
+        for key in extras:
+            if not key or key == session_id:
+                continue
+            if self._scopes.get(key) is None:
+                self._scopes[key] = scope
+                added = True
+        if added:
+            keys = {
+                k for k, v in self._scopes.items() if v is scope and k != session_id
+            }
+            self._aliases[scope.plan_id] = keys
+        return True
+
     # -- 读取 ---------------------------------------------------------------
 
     def get(self, session_id: str) -> PlanScope | None:
@@ -221,7 +269,7 @@ class ScopeRegistry:
         if scope.status in _ACTIVE_STATUSES and scope.expires_at <= datetime.now(
             timezone.utc,
         ):
-            self._scopes.pop(session_id, None)
+            self._drop_all(scope)
             logger.info(
                 "plan-scope expired: session=%s plan=%s",
                 session_id,
@@ -233,7 +281,12 @@ class ScopeRegistry:
     def snapshot(self) -> list[dict[str, Any]]:
         """当前所有授权域的快照（诊断用）。"""
         out = []
+        seen: list[PlanScope] = []
+        # 同一授权域可能挂在多个键下（会话键 + 聊天 UUID），只报一次
         for scope in self._scopes.values():
+            if any(s is scope for s in seen):
+                continue
+            seen.append(scope)
             out.append(
                 {
                     "session_id": scope.session_id,
@@ -253,6 +306,7 @@ class ScopeRegistry:
     def clear(self) -> None:
         """清空（测试用）。"""
         self._scopes.clear()
+        self._aliases.clear()
 
 
 _REGISTRY = ScopeRegistry()
@@ -481,6 +535,7 @@ def derive_subagent_scope(
         ttl_seconds=ttl,
         origin="subagent_inherit",
         parent_plan_id=parent.plan_id,
+        reason=parent.reason,
     )
 
 
@@ -506,6 +561,7 @@ def sync_session_scope(
     plan: Any,
     *,
     auto_approve_pure_read: bool = True,
+    aliases: Iterable[str] = (),
 ) -> tuple[str, str]:
     """按当前计划同步会话授权域。
 
@@ -534,6 +590,17 @@ def sync_session_scope(
     if existing is not None and existing.status in _ACTIVE_STATUSES:
         if existing.title == spec.title and existing.max_semantics == worst:
             return ("unchanged", reason)
+    # ── F2 防洗白：用户尚未回应的"待确认"不因换标题而失效 ────────
+    # 模型把待确认的破坏性方案改个标题重新登记，新文案若读起来"无害"，
+    # 就会落到下面的 auto_execute 分支被重新发牌成 EXECUTING —— 等于
+    # 绕过用户确认（E2E 实测：scope 仍显示 pending，3 个文件照删）。
+    # 规则：pending 只能被用户的 confirm/deny 或 TTL 过期终结；
+    #       重新规划最多补充别名，绝不降级、绝不静默放行。
+    if existing is not None and existing.status == SCOPE_STATUS_PENDING:
+        if aliases:
+            _REGISTRY.add_aliases(session_id, aliases)
+        return ("pending", reason)
+
 
     if verdict == "auto_execute":
         if not auto_approve_pure_read:
@@ -544,8 +611,22 @@ def sync_session_scope(
             status=SCOPE_STATUS_EXECUTING,
             max_semantics=worst,
             origin="plan_auto",
+            aliases=aliases,
+            reason=reason,
         )
         return ("auto_execute", reason)
+
+    # 同一轮反复同步时不重新发牌：档位没升级、仍是待确认 → 保留原域与原
+    # TTL。否则每步都 mint 新 plan_id，会刷掉 TTL 并反复注入确认提示
+    # （实测 pending 发牌 62 次，正是"一轮重建 50 个计划"的放大器）。
+    if (
+        existing is not None
+        and existing.status == SCOPE_STATUS_PENDING
+        and rank(worst) <= rank(existing.max_semantics)
+    ):
+        if aliases:
+            _REGISTRY.add_aliases(existing.session_id, aliases)
+        return ("pending", reason)
 
     # 需要确认：挂起，不放行任何动作
     _REGISTRY.grant(
@@ -554,8 +635,25 @@ def sync_session_scope(
         status=SCOPE_STATUS_PENDING,
         max_semantics=worst,
         origin="plan_confirm",
+        aliases=aliases,
+        reason=reason,
     )
     return ("pending", reason)
+
+
+def add_scope_aliases(session_id: str, aliases: Iterable[str]) -> bool:
+    """把同一计划的多个会话键并入一条授权域。
+
+    运行时会话键（如 ``console:admin``）与聊天 UUID 不是同一个字符串，
+    前端确认时用的是聊天键。不并键的话，确认请求永远找不到那条待确认域
+    ——这就是"方案确认未接线"的另一半。
+    """
+    return _REGISTRY.add_aliases(session_id, aliases)
+
+
+def peek_scope(session_id: str) -> "PlanScope | None":
+    """只读查看某会话的授权域（含别名键）；不存在或已过期返回 None。"""
+    return _REGISTRY.get(session_id)
 
 
 def confirm_session_scope(session_id: str, plan_title: str = "") -> PlanScope | None:
@@ -579,8 +677,10 @@ __all__ = [
     "build_plan_spec",
     "classify_plan",
     "confirm_session_scope",
+    "peek_scope",
     "derive_subagent_scope",
     "evaluate_scope",
     "get_registry",
     "sync_session_scope",
+    "add_scope_aliases",
 ]

@@ -35,7 +35,8 @@ interface ToolData {
     data?: {
       name?: string;
       arguments?: string;
-      output?: string;
+      /** 运行时可能是字符串，也可能是 [{type:'text',text}] 块数组或其 JSON 串 */
+      output?: unknown;
       server_label?: string;
     };
   }>;
@@ -427,6 +428,8 @@ interface StatusIndicatorProps {
   elapsed: number;
   failed?: boolean;
   aborted?: boolean;
+  /** 被安全规则拦下：动作没执行，不能显示绿色✅ */
+  blocked?: boolean;
   /** 运行中动作文案（按工具类别给，如「读取中/写入中/检索中」） */
   runningText?: string;
 }
@@ -436,6 +439,7 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   elapsed,
   failed,
   aborted,
+  blocked,
   runningText,
 }) => {
   const { t } = useTranslation();
@@ -451,6 +455,17 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
         )}
         <Text type="secondary" style={{ fontSize: 11 }}>
           {runningText || t('chat.tool.running', '执行中')}
+        </Text>
+      </Space>
+    );
+  }
+
+  if (blocked) {
+    return (
+      <Space size={4}>
+        <StopOutlined style={{ fontSize: 14, color: '#ff4d4f' }} />
+        <Text style={{ fontSize: 11, color: '#ff4d4f' }}>
+          {t('chat.tool.blocked', '已拦下')}
         </Text>
       </Space>
     );
@@ -517,13 +532,115 @@ function formatOutput(output: string | undefined): { text: string; isLong: boole
 }
 
 // ---------------------------------------------------------------------------
+// 拦截哨兵（尾巴1：被拦下的工具以前在界面里显示绿色✅）
+// ---------------------------------------------------------------------------
+//
+// 工具结果一路到前端只剩一条 `output` 字符串，没有 error 位可用；后端
+// `tool_guard_mixin` 在自动拦截时会把一枚哨兵放在输出**首行**：
+//   [[coapis:tool-blocked]] kind=plan_scope_pending
+// 卡片据此判定「这个动作其实没执行」，渲染成 ⛔ 已拦下 + 原因，并把这一行
+// 机器标记从展示文本里剥掉。只有首行以哨兵开头才算被拦下——正文里偶然出现
+// 同样字样不会误判。
+export const GUARD_BLOCK_SENTINEL = '[[coapis:tool-blocked]]';
+
+/** kind → [i18n key, 中文兜底] */
+const GUARD_BLOCK_REASONS: Record<string, [string, string]> = {
+  plan_scope_pending: [
+    'chat.tool.blockedReason.planScopePending',
+    '方案还没确认，这个动作已拦下',
+  ],
+  guard_denied: [
+    'chat.tool.blockedReason.guardDenied',
+    '安全规则拦下了这个动作',
+  ],
+};
+
+export function parseGuardBlock(
+  output: string | undefined,
+): { kind: string; text: string } | null {
+  if (!output) return null;
+  const lines = output.split('\n');
+  let firstIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].trim().length > 0) {
+      firstIdx = i;
+      break;
+    }
+  }
+  if (firstIdx < 0 || !lines[firstIdx].trim().startsWith(GUARD_BLOCK_SENTINEL)) {
+    return null;
+  }
+  const head = lines[firstIdx].trim();
+  const matched = /kind=([A-Za-z0-9_-]+)/.exec(head.slice(GUARD_BLOCK_SENTINEL.length));
+  const text = [
+    ...lines.slice(0, firstIdx),
+    ...lines.slice(firstIdx + 1),
+  ]
+    .join('\n')
+    .trim();
+  return { kind: matched ? matched[1] : 'guard_denied', text };
+}
+
+export function guardBlockReason(
+  kind: string,
+  translate: (key: string, defaultValue: string) => string,
+): string {
+  const entry = GUARD_BLOCK_REASONS[kind] || GUARD_BLOCK_REASONS.guard_denied;
+  return translate(entry[0], entry[1]);
+}
+/**
+ * 把工具输出归一成纯文本。
+ *
+ * 运行时这里可能收到三种形状：字符串、`[{type:'text',text}]` 块数组、以及块
+ * 数组的 JSON 串（历史消息回灌时最常见）。不归一的话哨兵永远在第二行以后，
+ * "被拦下"就会被判成普通成功；顺带也不再往界面上吐生 JSON。认不出文本块的
+ * JSON（工具真的返回 JSON 数据）保持原样，不吞内容。
+ */
+export function coerceToolOutput(raw: unknown): string {
+  const blocksToText = (value: unknown): string => {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) {
+      return value.map(blocksToText).filter((s) => s.length > 0).join('\n');
+    }
+    if (typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      if (typeof obj.text === 'string') return obj.text;
+      if (obj.output !== undefined) return blocksToText(obj.output);
+    }
+    return '';
+  };
+
+  if (raw == null) return '';
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        const text = blocksToText(JSON.parse(trimmed));
+        if (text) return text;
+      } catch {
+        /* 不是合法 JSON，原样展示 */
+      }
+    }
+    return raw;
+  }
+  const fromBlocks = blocksToText(raw);
+  if (fromBlocks) return fromBlocks;
+  try {
+    return JSON.stringify(raw, null, 2);
+  } catch {
+    return String(raw);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // EnhancedToolCallCard 主组件
 // ---------------------------------------------------------------------------
 
 /**
  * 展开态尺子（SSOT，2026-11-12 用户拍板 / B0 契约锁）
  * ---------------------------------------------------------------------------
- * 规则只有一条：**只有运行中临时展开，完成即收起**；
+ * 规则只有一条：**运行中或被拦下时临时展开，正常完成即收起**；
  * `manualOpen === null` 表示用户从没手动开合过 → 完全跟随运行状态；
  * 用户一旦手动开合，之后一律以用户的为准，机器不再抢状态。
  *
@@ -535,12 +652,15 @@ export function computeCardActiveKey({
   hasDetails,
   loading,
   manualOpen,
+  blocked = false,
 }: {
   hasDetails: boolean;
   loading: boolean;
   manualOpen: boolean | null;
+  /** 被安全规则拦下时默认展开——用户得看得到"为什么没执行" */
+  blocked?: boolean;
 }): string[] {
-  return hasDetails && (manualOpen ?? loading) ? ["1"] : [];
+  return hasDetails && (manualOpen ?? (loading || blocked)) ? ["1"] : [];
 }
 
 const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => {
@@ -553,10 +673,19 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
   const toolName = content[0]?.data?.name || 'unknown';
   const serverLabel = content[0]?.data?.server_label;
   const argumentsStr = content[0]?.data?.arguments;
-  const outputStr = content[1]?.data?.output;
+  const outputStr = coerceToolOutput(content[1]?.data?.output);
   const loading = data.status === 'in_progress';
   const failed = data.status === 'failed' || data.status === 'rejected';
   const aborted = data.status === 'canceled';
+
+  // 被安全规则拦下的动作其实没有执行。以前卡片照旧显示绿色✅，等于界面在
+  // 撒谎（尾巴1）；这里解析后端哨兵，把"拦下"这件事如实体现在界面上，
+  // 并把拦截原因摊开给用户看（尾巴2：拦下之后用户看不到任何说明）。
+  const guardBlock = useMemo(() => parseGuardBlock(outputStr), [outputStr]);
+  const blocked = guardBlock !== null;
+  const blockedReason = guardBlock
+    ? guardBlockReason(guardBlock.kind, t)
+    : '';
 
   // 解析输入参数
   const inputObj = useMemo(() => {
@@ -592,7 +721,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
    * Structured preview of a plan created inside the stream. The raw JSON dump
    * below stays available, but a plan is only useful when its steps are
    * readable where the model announced it.
-   */
+  */
   const planSteps = useMemo(() => {
     if (toolName !== "create_plan" && toolName !== "revise_current_plan") {
       return [] as { name: string; description?: string }[];
@@ -611,10 +740,10 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
       .filter((s) => s.name.length > 0);
   }, [toolName, inputObj]);
 
-  // 格式化输出
+  // 格式化输出（先剥掉哨兵行，别让机器标记漏进界面）
   const { text: formattedOutput, isLong: isOutputLong } = useMemo(
-    () => formatOutput(outputStr),
-    [outputStr],
+    () => formatOutput(guardBlock ? guardBlock.text : outputStr),
+    [outputStr, guardBlock],
   );
 
   // 计时器
@@ -649,13 +778,15 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
   // 用户一旦手动开合，之后一律以用户的为准，机器不再抢状态。
   const hasDetails = Boolean(argumentsStr || outputStr) && !displayCfg.hideDetails;
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const activeKey = computeCardActiveKey({ hasDetails, loading, manualOpen });
+  const activeKey = computeCardActiveKey({ hasDetails, loading, manualOpen, blocked });
 
   return (
     <div
       style={{
-        border: `1px solid ${loading ? themeColors.accentColor : themeColors.borderColor}`,
-        borderLeft: `3px solid ${themeColors.accentColor}`,
+        border: `1px solid ${
+          blocked ? '#ff4d4f' : loading ? themeColors.accentColor : themeColors.borderColor
+        }`,
+        borderLeft: `3px solid ${blocked ? '#ff4d4f' : themeColors.accentColor}`,
         borderRadius: 6,
         marginBottom: 8,
         background: loading ? themeColors.bgColor : themeColors.cardBg,
@@ -692,26 +823,42 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                   {/* 工具图标 */}
                   <span style={{ fontSize: 14, flexShrink: 0 }}>{category.icon}</span>
 
-                  {/* 工具名 */}
-                  <Text
-                    strong
-                    style={{
-                      fontSize: 12,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {titleText}
-                  </Text>
+                  {/* 工具名（被拦下时紧跟一行原因：收起状态也看得见） */}
+                  <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                    <Text
+                      strong
+                      style={{
+                        fontSize: 12,
+                        display: 'block',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {titleText}
+                    </Text>
+                    {blocked && (
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          display: 'block',
+                          color: '#ff4d4f',
+                          lineHeight: '16px',
+                        }}
+                      >
+                        {blockedReason}
+                      </Text>
+                    )}
+                  </div>
 
                   {/* 状态指示器 */}
-                  <div style={{ marginLeft: 'auto', marginRight: 8 }}>
+                  <div style={{ marginRight: 8 }}>
                     <StatusIndicator
                       loading={loading}
                       elapsed={elapsed}
                       failed={failed}
                       aborted={aborted}
+                      blocked={blocked}
                       runningText={toolRunningLabel(toolName, i18n.language)}
                     />
                   </div>
@@ -791,7 +938,9 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                   {outputStr && (
                     <div>
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        {t('chat.tool.output', '输出')}:
+                        {blocked
+                          ? t('chat.tool.blockedDetail', '拦下原因')
+                          : t('chat.tool.output', '输出')}:
                         {isOutputLong && (
                           <Tag style={{ marginLeft: 4, fontSize: 10, background: themeColors.tagBg, color: themeColors.textSecondary }}>
                             {t('chat.tool.truncated', '已截断')}
@@ -809,7 +958,9 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                           margin: '4px 0 0',
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-all',
-                          borderLeft: `2px solid ${loading ? '#faad14' : '#52c41a'}`,
+                          borderLeft: `2px solid ${
+                            blocked ? '#ff4d4f' : loading ? '#faad14' : '#52c41a'
+                          }`,
                           color: themeColors.textPrimary,
                         }}
                       >
@@ -850,6 +1001,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
               elapsed={elapsed}
               failed={failed}
               aborted={aborted}
+              blocked={blocked}
               runningText={toolRunningLabel(toolName, i18n.language)}
             />
           </div>

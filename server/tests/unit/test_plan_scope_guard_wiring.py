@@ -86,3 +86,85 @@ def test_without_scope_covers_nothing():
 def test_missing_session_id_is_safe():
     stub = _Stub("")
     assert stub._plan_scope_covers("write_file", {}) is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F1 真拦：pending 授权域必须能否决动作，而不只是"免审批"
+# （E2E 实测：scope 一直显示待确认，模型照样删掉了 3 个文件）
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_pending_scope_vetoes_confirmation_level_action():
+    """待确认的域内，出入/破坏性动作必须被否决（不是放行去审批）。"""
+    _Stub(SESSION)
+    get_registry().grant(
+        SESSION,
+        "删除文件并生成汇总",
+        status=SCOPE_STATUS_PENDING,
+        max_semantics=ActionSemantics.DESTRUCTIVE,
+    )
+    action = _Stub(SESSION)._plan_scope_veto(
+        "execute_shell_command",
+        {"command": "ssh ops@prod 'systemctl restart app'"},
+    )
+    assert action is not None
+    assert action.kind == "auto_denied"
+    assert action.guard_result is not None
+    finding = action.guard_result.findings[0]
+    assert finding.rule_id == "PLAN_SCOPE_PENDING"
+    assert finding.guardian == "plan_scope"
+    # 否决文案要能教模型停下来问用户，而不是让它换个说法再来
+    assert "确认" in finding.description
+    assert "不要靠改写方案标题" in finding.description
+
+
+def test_pending_scope_vetoes_destructive_action():
+    _Stub(SESSION)
+    get_registry().grant(
+        SESSION,
+        "清理临时文件",
+        status=SCOPE_STATUS_PENDING,
+        max_semantics=ActionSemantics.DESTRUCTIVE,
+    )
+    action = _Stub(SESSION)._plan_scope_veto(
+        "execute_shell_command",
+        {"command": "rm -rf ./build"},
+    )
+    assert action is not None and action.kind == "auto_denied"
+
+
+def test_pending_scope_lets_reads_through_but_still_blocks_writes():
+    """读类照常放行（会话不会被冻死）；从本地写入起一律拦下。
+
+    这就是 F1 的边界：未确认的方案不放行任何有副作用的动作，
+    但查看文件、读配置这类只读动作照常走，模型仍能把方案讲清楚。
+    """
+    _Stub(SESSION)
+    get_registry().grant(
+        SESSION,
+        "删除文件并生成汇总",
+        status=SCOPE_STATUS_PENDING,
+        max_semantics=ActionSemantics.DESTRUCTIVE,
+    )
+    stub = _Stub(SESSION)
+    assert stub._plan_scope_veto("read_file", {"path": "notes/a.txt"}) is None
+    assert (
+        stub._plan_scope_veto(
+            "write_file",
+            {"file_path": "notes/a.txt", "content": "x"},
+        )
+        is not None
+    )
+
+
+def test_veto_without_session_id_is_silent():
+    get_registry().grant(
+        SESSION,
+        "删除文件并生成汇总",
+        status=SCOPE_STATUS_PENDING,
+        max_semantics=ActionSemantics.DESTRUCTIVE,
+    )
+    assert _Stub("")._plan_scope_veto(
+        "execute_shell_command",
+        {"command": "rm -rf ./build"},
+    ) is None

@@ -2516,6 +2516,12 @@
       "copyResponse": "Copy response",
       "done": "Completed",
       "failed": "Failed",
+      "blocked": "Blocked",
+      "blockedDetail": "Why it was blocked",
+      "blockedReason": {
+        "planScopePending": "The plan was not confirmed, so this action was blocked",
+        "guardDenied": "A security rule blocked this action"
+      },
       "aborted": "Aborted",
       "params": "Input",
       "output": "Output",
@@ -2866,6 +2872,11 @@
     "title": "Plan",
     "noPlan": "No active plan",
     "noPlanHint": "Use /plan <description> to create a plan",
+    "confirmTitle": "Plan awaiting confirmation: {{title}}",
+    "confirmHint": "After confirmation routine steps run automatically; actions that leave the workspace or are destructive still need individual approval.",
+    "confirmAction": "Confirm",
+    "confirmSuccess": "Plan confirmed",
+    "confirmFailed": "Confirmation failed",
     "progress": "Progress",
     "outcome": "Outcome",
     "state": {
@@ -2873,7 +2884,8 @@
       "in_progress": "In Progress",
       "done": "Done",
       "abandoned": "Abandoned"
-    }
+    },
+    "pendingConfirm": "Pending"
   },
   "files": {
     "upload": "Upload",

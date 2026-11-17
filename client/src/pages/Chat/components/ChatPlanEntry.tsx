@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Popover, Progress, Tooltip } from "antd";
+import { Button, message, Popover, Progress, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   planApi,
   subscribePlanUpdates,
+  type PlanScopeView,
   type PlanStateResponse,
 } from "../../../api/modules/plan";
 import { useAgentStore } from "../../../stores/agentStore";
@@ -170,13 +171,16 @@ const PlanIcon = () => (
 );
 
 const ChatPlanEntry: React.FC = () => {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const { selectedAgent } = useAgentStore();
   const agentId = selectedAgent || undefined;
 
   const [enabled, setEnabled] = useState(false);
   const [plan, setPlan] = useState<PlanStateResponse | null>(null);
   const [open, setOpen] = useState(false);
+  // 方案授权域：pending_confirmation 时入口要显式告诉用户"方案待确认"。
+  const [scope, setScope] = useState<PlanScopeView | null>(null);
+  const [confirming, setConfirming] = useState(false);
   // 订阅回调在闭包里运行，读不到最新 state，故会话判定一律实时读 window。
   const sidRef = useRef<string>(getBackendSessionId());
   const unsubRef = useRef<(() => void) | null>(null);
@@ -198,18 +202,47 @@ const ChatPlanEntry: React.FC = () => {
     // 时后端会返回该智能体「任意」缓存计划，徽标会凭空亮起来。
     if (!sid) {
       setPlan(null);
+      setScope(null);
       return;
     }
     try {
-      const data = await planApi.getCurrentPlan(sid || undefined, agentId);
+      const data = await planApi.getCurrentPlanWithScope(sid, agentId);
       // 切会话期间的迟到响应直接丢弃，否则徽标会串会话。
       if (getBackendSessionId() !== sid) return;
-      setPlan(data ?? null);
+      const envelope = data as {
+        plan?: PlanStateResponse | null;
+        scope?: PlanScopeView | null;
+      } | null;
+      setPlan(envelope?.plan ?? null);
+      setScope(envelope?.scope ?? null);
     } catch (err) {
       // 计划是锦上添花，读不到就安静地不显示，不能影响聊天。
       console.warn("[ChatPlanEntry] 读取任务计划失败（忽略）:", err);
+      setScope(null);
     }
   }, [agentId]);
+
+  // 计划挂起等待确认：出入动作被挡住，只有用户确认后才放行。
+  const pendingScope =
+    scope && scope.status === "pending_confirmation" ? scope : null;
+
+  const handleConfirm = async () => {
+    const sid = getBackendSessionId();
+    if (!sid || !pendingScope) return;
+    setConfirming(true);
+    try {
+      await planApi.confirmPlan({
+        session_id: sid,
+        plan_title: pendingScope.plan_title,
+      });
+      message.success(t("plan.confirmSuccess", "已确认，方案授权域已生效"));
+      await fetchPlan();
+    } catch (err) {
+      message.error(`${t("plan.confirmFailed", "确认失败")}: ${String(err)}`);
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   // 1) 是否启用：跟随当前智能体的计划开关（与 Chat 页 /plan 命令同源判断）
   useEffect(() => {
@@ -257,6 +290,8 @@ const ChatPlanEntry: React.FC = () => {
           return;
         }
         setPlan(updatedPlan ?? null);
+        // 授权域状态不在 SSE 负载里，随计划事件补拉一次。
+        void fetchPlan();
       },
       (err: unknown) => {
         console.warn("[ChatPlanEntry] 计划订阅异常（不影响聊天）:", err);
@@ -268,7 +303,7 @@ const ChatPlanEntry: React.FC = () => {
       unsub();
       unsubRef.current = null;
     };
-  }, [enabled, agentId]);
+  }, [enabled, agentId, fetchPlan]);
 
   // 3) 首次拉取 + 会话切换检测（纯本地比较，不消耗请求）+ 回到前台补一次
   useEffect(() => {
@@ -312,6 +347,8 @@ const ChatPlanEntry: React.FC = () => {
   const currentStep =
     runningIdx >= 0 ? runningIdx + 1 : Math.min(doneCount + 1, Math.max(totalCount, 1));
   const percent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+  // "待确认"优先于运行/完成显示：这是需要用户动手的状态。
+  const needsConfirm = Boolean(pendingScope);
   const isDone =
     !!plan && (plan.state === "done" || (totalCount > 0 && doneCount >= totalCount));
   const isAbandoned = !!plan && plan.state === "abandoned";
@@ -325,6 +362,8 @@ const ChatPlanEntry: React.FC = () => {
   else if (isAbandoned) badgeText = L.entry;
   else if (isFinished) badgeText = `${doneCount}/${totalCount}`;
   else if (totalCount > 0) badgeText = L.step(currentStep, totalCount);
+  // 待确认优先：这是必须用户动手才会放行的状态。
+  if (needsConfirm) badgeText = t("plan.pendingConfirm", "待确认");
 
   const badgeColor = isDone || isFinished
     ? "var(--colorSuccessText, #52c41a)"
@@ -355,6 +394,25 @@ const ChatPlanEntry: React.FC = () => {
         </div>
       ) : (
         <>
+          {pendingScope ? (
+            <div className={planStyles.confirmBar} style={{ marginBottom: 12 }}>
+              <div className={planStyles.confirmTitle}>
+                {t("plan.confirmTitle", { title: pendingScope.plan_title })}
+                {pendingScope.reason ? ` · ${pendingScope.reason}` : ""}
+              </div>
+              <div className={planStyles.confirmHint}>
+                {t("plan.confirmHint")}
+              </div>
+              <Button
+                type="primary"
+                size="small"
+                loading={confirming}
+                onClick={handleConfirm}
+              >
+                {t("plan.confirmAction", "确认执行方案")}
+              </Button>
+            </div>
+          ) : null}
           <div className={planStyles.planInfo}>
             <div className={planStyles.planName}>
               {plan.name}
@@ -439,7 +497,16 @@ const ChatPlanEntry: React.FC = () => {
               : headerStyles.headerActionBtn
           }
         >
-          <span style={{ fontSize: 12, color: badgeColor }}>{badgeText}</span>
+          <span
+            style={{
+              fontSize: 12,
+              color: needsConfirm
+                ? "var(--colorWarningText, #faad14)"
+                : badgeColor,
+            }}
+          >
+            {badgeText}
+          </span>
         </Button>
       </Tooltip>
     </Popover>

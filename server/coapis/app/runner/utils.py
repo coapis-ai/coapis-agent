@@ -365,8 +365,24 @@ def _build_media_message_from_block(
 
 
 # pylint: disable=too-many-branches,too-many-statements, too-many-nested-blocks
+def _carries_tool_result(msg: Msg) -> bool:
+    """AgentScope 把工具结果存成 role="system" 的消息。
+
+    历史回放需要这些消息来还原工具卡的输出与「被拦下」状态；而注入进
+    memory 的内部系统消息（如进度小结）不带工具结果块，仍需跳过。
+    """
+    content = getattr(msg, "content", None)
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(b, dict) and b.get("type") == "tool_result"
+        for b in content
+    )
+
+
 def agentscope_msg_to_message(
     messages: Union[Msg, List[Msg]],
+    include_tool_results: bool = False,
 ) -> List[Message]:
     """
     Convert AgentScope Msg(s) into one or more runtime Message objects.
@@ -394,8 +410,13 @@ def agentscope_msg_to_message(
     for msg in msgs:
         role = msg.role or "assistant"
 
-        # Skip internal system messages (e.g. progress summaries injected into memory)
-        if role == "system":
+        # Skip internal system messages (e.g. progress summaries injected into memory).
+        # Exception: tool results are stored as role="system" messages. Dropping them
+        # made every reloaded chat lose all tool output, and a guard-blocked action
+        # rendered as a green success in history. Only the replay callers opt in.
+        if role == "system" and not (
+            include_tool_results and _carries_tool_result(msg)
+        ):
             continue
         metadata = {
             "original_id": msg.id,

@@ -27,7 +27,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Body
 from fastapi.requests import Request
@@ -211,6 +211,37 @@ async def update_plan_config(
 # GET /plan/current
 # ---------------------------------------------------------------------------
 
+@router.post("/plan/confirm")
+async def confirm_plan(
+    session_id: str = Body(...),
+    plan_title: str | None = Body(default=None),
+) -> Dict[str, Any]:
+    """确认方案：放行该会话的待确认授权域。
+
+    确认前，计划里涉及「出入」的动作一律回落为逐次单独审批；
+    确认后在授权域内自动放行，破坏性动作仍需单独确认。
+    """
+    from ...plan.scope import confirm_session_scope
+
+    scope = confirm_session_scope(session_id, plan_title=plan_title)
+    if scope is None:
+        raise HTTPException(
+            status_code=404,
+            detail="no pending plan to confirm (confirmed or expired)",
+        )
+    logger.info(
+        "plan-confirmed: session=%s plan=%s max=%s",
+        session_id,
+        scope.title,
+        scope.max_semantics.value,
+    )
+    return {
+        "ok": True,
+        "status": scope.status,
+        "plan_title": scope.title,
+        "max_semantics": scope.max_semantics.value,
+        "remaining_seconds": round(scope.remaining_seconds(), 1),
+    }
 @router.get("/plan/current")
 async def get_current_plan(
     request: Request,
@@ -265,9 +296,25 @@ async def get_current_plan(
         except Exception:
             logger.warning("Finished plan fallback lookup failed", exc_info=True)
 
+    from ...plan.scope import peek_scope
+
+    # 方案确认态：前端据此显示「确认执行」按钮或已确认标记
+    scope = peek_scope(session_id)
+    scope_view: Optional[Dict[str, Any]] = None
+    if scope is not None:
+        scope_view = {
+            "plan_title": scope.title,
+            "status": scope.status,
+            "max_semantics": scope.max_semantics.value,
+            "reason": scope.reason,
+            "remaining_seconds": round(scope.remaining_seconds(), 1),
+            "hits": scope.hits,
+            "denials": scope.denials,
+        }
     return {
         "plan": plan_data,
         "session_id": session_id,
+        "scope": scope_view,
         "usage": {
             "sessions_used": 0,
             "sessions_limit": 0,

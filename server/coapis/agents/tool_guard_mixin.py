@@ -54,6 +54,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ── 拦截哨兵（尾巴1：被拦下的工具卡在界面里显示绿色✅）─────────────
+# 工具结果只有一条 ``output`` 字符串能到达前端卡片（``FunctionCallOutput``
+# 只有 call_id / name / output 三个字段，没有 error 位），所以"这是被拦下
+# 的"这件事只能随文本一起下发。前端 ``EnhancedToolCallCard`` 认出首行的
+# 哨兵后，会把这一行剥掉，并把卡片渲染成 ⛔ 已拦下 + 拦截原因。
+# 只下发给会渲染工具卡的控制台/网页通道，IM 通道（企微等）输出保持干净。
+GUARD_BLOCK_SENTINEL = "[[coapis:tool-blocked]]"
+GUARD_BLOCK_KIND_PLAN_PENDING = "plan_scope_pending"
+GUARD_BLOCK_KIND_DENIED = "guard_denied"
+
+
+def _guard_block_kind(guard_result: Any) -> str:
+    """把拦截来源归一成前端能区分的 kind。"""
+    try:
+        findings = list(getattr(guard_result, "findings", None) or [])
+    except Exception:  # pragma: no cover - 归一失败也只影响文案
+        return GUARD_BLOCK_KIND_DENIED
+    for finding in findings:
+        rule_id = str(getattr(finding, "rule_id", "") or "")
+        guardian = str(getattr(finding, "guardian", "") or "")
+        if rule_id == "PLAN_SCOPE_PENDING" or guardian == "plan_scope":
+            return GUARD_BLOCK_KIND_PLAN_PENDING
+    return GUARD_BLOCK_KIND_DENIED
+
 
 def _normalize_tool_guard_ui_lang(raw: Any) -> str:
     """Map language code to tool-guard UI bundle (en/zh/ru/ja)."""
@@ -175,6 +199,99 @@ class ToolGuardMixin:
             self._record_plan_scope_audit(tool_name, decision, approved=False)
             self._observe_loop_plan_drift(tool_name, decision, tool_input)
         return False
+
+    def _plan_scope_veto(self, tool_name: str, tool_input: dict) -> Any:
+        """方案未确认时否决有副作用的动作（F1 真拦）。
+
+        ``_plan_scope_covers`` 只会"免审批"、从不否决：会话里的方案还
+        挂在"待确认"时，破坏性动作照样执行（E2E 实测删了 3 个文件）。
+        这里补上否决面 —— 只要存在用户尚未回应的 pending 授权域，
+        凡是需要确认的语义（外部写/破坏性）一律不下发到工具。纯读取
+        照常放行，因此不会把会话冻死，也不会拦掉规划类工具。
+        """
+        session_id = str(self._request_context.get("session_id") or "")
+        if not session_id:
+            return None
+        try:
+            from coapis.plan.scope import (
+                SCOPE_STATUS_PENDING,
+                ScopeDecision,
+                peek_scope,
+            )
+            from coapis.security.action_semantics import (
+                ActionSemantics,
+                classify_action,
+                rank,
+            )
+            from uuid import uuid4
+        except Exception:  # pragma: no cover - 模块缺失时不否决
+            return None
+        try:
+            scope = peek_scope(session_id)
+            if scope is None or scope.status != SCOPE_STATUS_PENDING:
+                return None
+            semantics = classify_action(tool_name, tool_input or {})
+        except Exception:  # pragma: no cover - 判定失败回落审批链
+            logger.warning("plan-scope veto check failed", exc_info=True)
+            return None
+        # 未确认的域不放行任何有副作用的动作：读类（READ/EXTERNAL_READ）
+        # 照常放行，从本地写入起一律拦下——既不会把会话冻死，也不会让
+        # 模型"先把三个文件写出来再说"。
+        if rank(semantics) < rank(ActionSemantics.LOCAL_WRITE):
+            return None
+        title = str(getattr(scope, "title", "") or "")
+        plan_id = getattr(scope, "plan_id", None)
+        note = (
+            f"方案「{title}」还没得到用户确认（状态=待确认），"
+            f"这个动作（{semantics.value}）已被方案授权域拦下。"
+            "请停下：把方案和影响范围讲清楚，请用户确认"
+            "（界面点「确认」或输入 /plan confirm）之后再执行；"
+            "不要靠改写方案标题或拆成小步来绕过确认。"
+        )
+        logger.warning(
+            "plan-scope veto: tool=%s session=%s plan=%s semantics=%s",
+            tool_name,
+            session_id,
+            plan_id,
+            semantics.value,
+        )
+        self._record_plan_scope_audit(
+            tool_name,
+            ScopeDecision(
+                covered=False,
+                reason=note,
+                semantics=semantics,
+                plan_id=plan_id,
+            ),
+            approved=False,
+        )
+        return _GuardAction(
+            kind="auto_denied",
+            tool_name=tool_name,
+            tool_input=dict(tool_input or {}),
+            guard_result=ToolGuardResult(
+                tool_name=tool_name,
+                params=dict(tool_input or {}),
+                findings=[
+                    GuardFinding(
+                        id=f"plan-scope-{uuid4().hex[:12]}",
+                        rule_id="PLAN_SCOPE_PENDING",
+                        category=GuardThreatCategory.RESOURCE_ABUSE,
+                        severity=GuardSeverity.HIGH,
+                        title="方案未确认，动作被拦下",
+                        description=note,
+                        tool_name=tool_name,
+                        param_name="input",
+                        matched_value=title[:200],
+                        matched_pattern=None,
+                        snippet=str(getattr(scope, "reason", "") or "")[:200],
+                        remediation="请用户确认方案后再执行",
+                        guardian="plan_scope",
+                    ),
+                ],
+                guardians_used=["plan_scope"],
+            ),
+        )
 
     def _record_plan_scope_audit(self, tool_name: str, decision, approved: bool) -> None:
         """把方案授权域的放行/回落写入审计日志（失败不影响主流程）。"""
@@ -601,6 +718,11 @@ class ToolGuardMixin:
         if self._plan_scope_covers(tool_name, tool_input):
             return None
 
+        # ── 方案未确认 → 否决有副作用的动作（F1 真拦）──────────────
+        veto_action = self._plan_scope_veto(tool_name, tool_input)
+        if veto_action is not None:
+            return veto_action
+
         # ── InputGuardEngine: input content detection (ALL tools) ──
         # Detects prompt injection, data exfiltration, path traversal
         # across ALL tool inputs — not just shell commands.
@@ -989,6 +1111,15 @@ class ToolGuardMixin:
                 f"⛔ 此工具已被安全规则拦截。你必须立即停止当前任务，"
                 f"不要尝试使用其他工具或方法来绕过。"
                 f"请告知用户该操作已被拦截，并等待用户下一步指示。"
+            )
+
+        # 尾巴1：被拦下的工具以前在界面里显示绿色✅——前端只能看到一段文本，
+        # 不知道"这个动作其实没执行"。这里给会渲染工具卡的通道下一枚哨兵，
+        # 前端认出首行后剥掉它并把卡片画成 ⛔ 已拦下（附原因）。
+        if not use_md:
+            denied_text = (
+                f"{GUARD_BLOCK_SENTINEL} kind="
+                f"{_guard_block_kind(guard_result)}\n{denied_text}"
             )
 
         tool_res_msg = Msg(

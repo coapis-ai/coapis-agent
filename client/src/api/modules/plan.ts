@@ -37,6 +37,7 @@ export interface PlanQueryResponse {
   plan: PlanStateResponse | null;
   session_id?: string | null;
   usage?: Record<string, unknown>;
+  scope?: PlanScopeView | null;
 }
 
 export interface PlanConfigResponse {
@@ -48,6 +49,25 @@ export interface PlanConfigResponse {
  * Accept both the documented envelope and a bare plan object, so callers
  * never mistake the envelope for a plan (which used to render 0/0).
  */
+/** 方案确认态：后端 /plan/current 的 scope 字段。 */
+export interface PlanScopeView {
+  plan_title: string;
+  status: string;
+  max_semantics: string;
+  reason: string;
+  remaining_seconds: number;
+  hits: number;
+  denials: number;
+}
+
+/** POST /plan/confirm 的响应。 */
+export interface ConfirmPlanResponse {
+  ok: boolean;
+  status: string;
+  plan_title: string;
+  max_semantics: string;
+  remaining_seconds: number;
+}
 export function unwrapPlan(
   body: PlanQueryResponse | PlanStateResponse | null | undefined,
 ): PlanStateResponse | null {
@@ -64,6 +84,28 @@ export function unwrapPlan(
 }
 
 export const planApi = {
+  getCurrentPlanWithScope: async (
+    sessionId?: string,
+    agentId?: string,
+  ): Promise<{
+    plan: PlanStateResponse | null;
+    scope: PlanScopeView | null;
+  }> => {
+    const params = new URLSearchParams();
+    if (agentId) params.set("agent_id", agentId);
+    if (sessionId) params.set("session_id", sessionId);
+    const qs = params.toString();
+    const res = await request<PlanQueryResponse>(
+      `/plan/current${qs ? "?" + qs : ""}`,
+    );
+    return { plan: unwrapPlan(res), scope: res.scope ?? null };
+  },
+
+  confirmPlan: (body: { session_id: string; plan_title?: string }) =>
+    request<ConfirmPlanResponse>("/plan/confirm", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   /** Resolved plan for a session, or ``null`` when there is none. */
   getCurrentPlan: async (
     sessionId?: string,

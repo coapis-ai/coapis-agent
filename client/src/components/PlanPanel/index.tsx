@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Drawer, Progress, Spin } from "antd";
+import { Button, Drawer, message, Progress, Spin } from "antd";
 import { IconButton } from "@agentscope-ai/design";
 import { SparkOperateRightLine } from "@agentscope-ai/icons";
 import { useChatAnywhereSessionsState } from "@agentscope-ai/chat";
@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import {
   planApi,
   subscribePlanUpdates,
+  type PlanScopeView,
   type PlanStateResponse,
 } from "../../api/modules/plan";
 import { useAgentStore } from "../../stores/agentStore";
@@ -48,6 +49,8 @@ const PlanPanel: React.FC<PlanPanelProps> = ({ open, onClose }) => {
   const agentId = selectedAgent || undefined;
   const [plan, setPlan] = useState<PlanStateResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [scope, setScope] = useState<PlanScopeView | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
   // Track the latest plan provided by SSE so polling cannot overwrite it
   // with a stale null response.
@@ -58,7 +61,12 @@ const PlanPanel: React.FC<PlanPanelProps> = ({ open, onClose }) => {
     const sid = getBackendSessionId();
     setLoading(true);
     try {
-      const data = await planApi.getCurrentPlan(sid || undefined, agentId);
+      const snap = await planApi.getCurrentPlanWithScope(
+        sid || undefined,
+        agentId,
+      );
+      const data = snap.plan;
+      setScope(snap.scope ?? null);
       // If SSE already provided a non-null plan but the poll returned null,
       // trust SSE — the cache may not have been populated for this session_id
       // yet, or a race condition caused a stale response.
@@ -115,6 +123,26 @@ const PlanPanel: React.FC<PlanPanelProps> = ({ open, onClose }) => {
     return () => clearInterval(interval);
   }, [open, fetchPlan]);
 
+  const handleConfirm = async () => {
+    const sid = getBackendSessionId();
+    if (!sid) {
+      message.error(t("plan.confirmFailed"));
+      return;
+    }
+    setConfirming(true);
+    try {
+      await planApi.confirmPlan({
+        session_id: sid,
+        plan_title: scope?.plan_title,
+      });
+      message.success(t("plan.confirmSuccess"));
+      fetchPlan();
+    } catch {
+      message.error(t("plan.confirmFailed"));
+    } finally {
+      setConfirming(false);
+    }
+  };
   const doneCount =
     plan?.subtasks.filter((s) => s.state === "done" || s.state === "abandoned")
       .length ?? 0;
@@ -143,6 +171,22 @@ const PlanPanel: React.FC<PlanPanelProps> = ({ open, onClose }) => {
       </div>
 
       <div className={styles.content}>
+      {scope && scope.status === "pending_confirmation" && (
+        <div className={styles.confirmBar}>
+          <span className={styles.confirmText}>
+            {t("plan.confirmTitle", { title: scope.plan_title })}
+            {scope.reason ? " · " + scope.reason : ""}
+          </span>
+          <Button
+            size="small"
+            type="primary"
+            loading={confirming}
+            onClick={handleConfirm}
+          >
+            {t("plan.confirmAction")}
+          </Button>
+        </div>
+      )}
         {loading && !plan ? (
           <div className={styles.emptyState}>
             <Spin />
