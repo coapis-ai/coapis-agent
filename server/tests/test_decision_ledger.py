@@ -17,7 +17,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from coapis.agents.react_agent import CoApisAgent  # noqa: E402
 from coapis.config import session_context as sc  # noqa: E402
-from coapis.decision.gateway import JudgeGateway, _level_of  # noqa: E402
+from coapis.decision.gateway import (  # noqa: E402
+    JudgeGateway,
+    _ledger_final_outcome,
+    _level_of,
+)
 
 
 def _fake_agent(request_context, config_id="agent-from-config"):
@@ -246,3 +250,38 @@ async def test_ledger_row_carries_level_tokens_and_scope(monkeypatch):
     assert row.outcome == "pending"            # 新行一律 pending，验收再回填
     assert row.model == "q3"  # 契约统一小写，成本对账按小写匹配价表
     assert real_bus is not None
+
+
+@pytest.mark.parametrize(
+    ("purpose", "action", "judgment", "expected"),
+    [
+        # 判档行必须留空串：对错只能等验收回填，写终态就是假账。
+        ("plan_gate", "continue", "select:low,medium", ""),
+        # 验收行写自己的 verdict——此前真判了还写 pending，同账自相矛盾。
+        ("acceptance", "satisfied", "satisfied", "satisfied"),
+        ("acceptance", "partial/overreach", "partial", "partial"),
+        ("acceptance", "abstain", "abstain", "abstain"),
+        ("verify", "failed", "failed", "failed"),
+        # 技能命中行与判档行共用 hit/miss 词表（健康卡按 source 分组）。
+        ("skill_trigger", "预激活docx", "['docx']", "hit"),
+        ("skill_trigger", "无技能命中", "[]", "miss"),
+        ("skill_trigger", "", "", "miss"),
+        # 闸门放行/否决是最终态，不该永远 pending。
+        ("tool_gate", "tool:execute_shell_command:allow", "allow", "applied"),
+        ("tool_gate", "tool:execute_shell_command:deny", "deny", "vetoed"),
+        # 其余岗位给终态码，宁可码多不要假 pending。
+        ("advisor", "restart", "restart", "final"),
+        ("plan_review", "approved", "approved", "final"),
+        ("selfcheck", "satisfied", "satisfied", "final"),
+    ],
+)
+def test_ledger_final_outcome_is_terminal_per_post(
+    purpose, action, judgment, expected,
+):
+    """台账 outcome 语义收口：只有判档行等回填，其余岗位写出来就是终态。
+
+    dev 实测全表 414 行里 379 行卡在 pending（91.5%），其中技能/闸门/
+    顾问行 224 行根本没有回填者——pending 被当成默认值用，制造了
+    "判断永不收场"的假象。这里钉住每个岗位写账时的终态，防止漂移。
+    """
+    assert _ledger_final_outcome(purpose, action, judgment) == expected
