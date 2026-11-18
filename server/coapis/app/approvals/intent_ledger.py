@@ -224,6 +224,47 @@ def _query(
         return []
 
 
+def sweep_orphaned_intents(grace_seconds: float = 90.0) -> int:
+    """把上一辈子进程留下的未收场行收场掉（返回收场条数）。
+
+    审批的 future 只活在进程内存里：进程一重启，DB 里那条 pending 行
+    就永远不会有人再写它 —— 读侧会看到"还没收场"的僵尸行，统计超时率
+    也被它压低。这里在维护循环里扫一次：``outcome`` 为空且早于 grace 的
+    行，按超时收场，``decide_source`` 标 ``maintenance`` 以便和真实的
+    用户超时区分开。
+
+    grace（默认 90s）是为了不误伤本辈子刚入队、还在等人裁决的行。
+    永不抛异常；失败返回 0。
+    """
+    try:
+        from sqlalchemy import select
+
+        from ...foundation.db import get_session
+        from ...foundation.db.models.approval import ApprovalIntent
+
+        now = _now()
+        cutoff = now - max(0.0, float(grace_seconds))
+        with get_session() as s:
+            rows = s.execute(
+                select(ApprovalIntent)
+                .where(ApprovalIntent.outcome == "")
+                .where(ApprovalIntent.created_at < cutoff)
+            ).scalars().all()
+            for row in rows:
+                row.decision = "timed_out"
+                row.outcome = "auto:abandoned_at_startup"
+                row.decide_source = "maintenance"
+                row.why = "进程重启后无人收场，由维护清扫按超时收场"
+                row.resolved_at = now
+            count = len(rows)
+        if count:
+            logger.info("intent ledger: 清扫未收场行 %d 条", count)
+        return count
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("intent ledger sweep failed (ignored): %s", exc)
+        return 0
+
+
 def _now() -> float:
     import time
 
@@ -235,4 +276,5 @@ __all__ = [
     "list_intent_rows",
     "list_timeout_rows",
     "record_intent",
+    "sweep_orphaned_intents",
 ]

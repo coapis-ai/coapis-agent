@@ -38,6 +38,7 @@ from .intent_ledger import (
     list_intent_rows as _list_intent_rows,
     list_timeout_rows as _list_timeout_rows,
     record_intent,
+    sweep_orphaned_intents,
 )
 
 if TYPE_CHECKING:
@@ -299,6 +300,9 @@ class ApprovalService:
                     async with self._lock:
                         expired = self._expire_stale_locked(time.time())
                         self._gc_pending_locked()
+                    # DB 侧清扫：内存 future 活不过重启，上一辈子的
+                    # pending 行必须有人收场，否则读侧永远看见僵尸行
+                    sweep_orphaned_intents()
                     if expired:
                         logger.info(
                             "Approval maintenance: expired %d stale record(s)",
