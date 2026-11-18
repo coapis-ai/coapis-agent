@@ -60,6 +60,20 @@ export interface DecisionSourceStat {
   hit: number;
   miss: number;
   pending: number;
+  /** 判官口径：只统计真问过判官（hit_layer∈{llm,llm_session}）的行 */
+  hit_judged: number;
+  miss_judged: number;
+  pending_judged: number;
+}
+
+/** 待回执的两种含义，后端用 ledger_contract.PENDING_EXPECTED_SOURCES 划分 */
+export interface DecisionPendingSummary {
+  total: number;
+  /** 合法等验收回填（目前只有 plan_gate） */
+  expected: number;
+  /** 其余岗位却停在 pending = 收口失效，应当恒为 0 */
+  anomaly: number;
+  expected_sources: string[];
 }
 
 export interface DecisionStatsResponse {
@@ -67,6 +81,8 @@ export interface DecisionStatsResponse {
   total: number;
   cost: number;
   by_source: DecisionSourceStat[];
+  /** 待回执是否都是合法的（plan_gate 等回填）；anomaly>0 说明收口失效 */
+  pending: DecisionPendingSummary;
   error?: string;
 }
 

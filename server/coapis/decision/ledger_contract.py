@@ -182,6 +182,13 @@ _LEDGER_FINAL_SOURCES = frozenset({
 })
 
 
+# 唯一允许停在 pending 的岗位（v1.2.46 收口的尺子）。
+#
+# 写侧 ledger_final_outcome 用它决定"哪些行返回空串等回填"，读侧
+# /api/decisions/stats 用它把 pending 分成"合法待收场"与"收口失效"。
+# 一侧改岗位、另一侧自动跟上——不允许再养第二把尺子。
+PENDING_EXPECTED_SOURCES = frozenset({"plan_gate"})
+
 # 判官裁决词表：验收/复核行的 outcome 直接用它。
 _JUDGE_VERDICTS = ("satisfied", "partial", "failed", "abstain")
 
@@ -226,7 +233,7 @@ def ledger_final_outcome(
     val = (judgment or "").strip().lower()
     text = f"{act}|{val}"
 
-    if purpose == "plan_gate":
+    if purpose in PENDING_EXPECTED_SOURCES:
         return ""
 
     if purpose in ("acceptance", "verify", "plan_review"):
@@ -432,42 +439,3 @@ def _write_governance(
             )
     except Exception:  # noqa: BLE001 - 治理列是加护，不阻断
         logger.debug("ledger_contract: 治理列补写失败 source=%s", source, exc_info=True)
-
-
-def backfill_outcome(
-    *,
-    chat_id: str,
-    turn: int,
-    outcome: str,
-    cost: float,
-    tokens: int,
-    note: str = "",
-) -> int:
-    """验收回填：把本轮判定行的 outcome 落定。返回更新行数；永不抛异常。
-
-    主匹配键是 (chat_id, turn)。chat_id 贯通（批次2）后新行都有主键；
-    贯通前的历史行不追溯回填——台账纪律是"新行必须可对账"，不粉饰旧账。
-    """
-    try:
-        from sqlalchemy import update as _sa_update
-
-        from ..foundation.db import get_session
-        from ..foundation.db.models.decision import DecisionEvent
-
-        if not chat_id or not turn:
-            return 0
-        with get_session() as session:
-            result = session.execute(
-                _sa_update(DecisionEvent)
-                .where(DecisionEvent.chat_id == chat_id, DecisionEvent.turn == turn)
-                .values(
-                    outcome=str(outcome)[:16],
-                    cost=max(0.0, float(cost)),
-                    tokens=max(0, int(tokens)),
-                    **({"reason": note[:500]} if note else {}),
-                )
-            )
-            return int(result.rowcount or 0)
-    except Exception:  # noqa: BLE001
-        logger.debug("ledger_contract: outcome 回填失败 chat=%s", str(chat_id)[:24], exc_info=True)
-        return 0

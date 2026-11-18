@@ -172,6 +172,14 @@ def decision_stats(
 ) -> dict[str, Any]:
     """逐来源战绩：判断次数、真判断/降级/超时、耗时、花费、命中率。
 
+    **命中率有两把尺子**（v1.2.47）：``hit``/``miss``/``pending`` 是全行
+    口径，规则直判、闸门关闭的行也算在里面，量的是这个岗位立项闸整体准不
+    准；``hit_judged``/``miss_judged``/``pending_judged`` 只统计真问过判官
+    的行，才是判官自己的战绩。plan_gate 实测 111 行里只有 3 行真判，两个
+    口径差一个数量级，混着算就是"判官命中率 75%"那种假账。顶层 ``pending``
+    汇总块再把待回执分成"合法等回填"与"收口失效"（尺子是
+    ledger_contract.PENDING_EXPECTED_SOURCES，写账侧同一个）。
+
     这组数字就是"判官到底有没有发生作用"的直接证据：``degraded`` 高
     说明阶梯在原地降级（多半是没配判断模型或超时太短），``llm`` 有数
     才说明真跑过大模型。
@@ -190,6 +198,7 @@ def decision_stats(
     clause = " AND ".join(where)
     degraded = ",".join(f"'{x}'" for x in _DEGRADED)
     from coapis.decision.gateway import JUDGED_LAYERS
+    from coapis.decision.ledger_contract import PENDING_EXPECTED_SOURCES
 
     judged_set = ",".join(f"'{x}'" for x in JUDGED_LAYERS)
     sql = text(
@@ -206,9 +215,19 @@ def decision_stats(
         "MAX(latency_ms) AS max_ms, "
         "ROUND(CAST(SUM(cost) AS NUMERIC), 4) AS cost, "
         "SUM(tokens) AS tokens, "
+        # 两把尺子分开记（v1.2.47）：不带后缀的是全行口径——规则直判的
+        # 对错也算进去，量的是"立项闸准不准"；带 judged 后缀的只统计真
+        # 问过判官的行，量的才是"判官准不准"。plan_gate 实测 111 行里只有
+        # 3 行 hit_layer=llm，两个口径差一个数量级，混在一起算必然错。
         "SUM(CASE WHEN outcome='hit' THEN 1 ELSE 0 END) AS hit, "
         "SUM(CASE WHEN outcome='miss' THEN 1 ELSE 0 END) AS miss, "
-        "SUM(CASE WHEN outcome='pending' THEN 1 ELSE 0 END) AS pending "
+        "SUM(CASE WHEN outcome='pending' THEN 1 ELSE 0 END) AS pending, "
+        f"SUM(CASE WHEN outcome='hit' AND hit_layer IN ({judged_set}) "
+        "THEN 1 ELSE 0 END) AS hit_judged, "
+        f"SUM(CASE WHEN outcome='miss' AND hit_layer IN ({judged_set}) "
+        "THEN 1 ELSE 0 END) AS miss_judged, "
+        f"SUM(CASE WHEN outcome='pending' AND hit_layer IN ({judged_set}) "
+        "THEN 1 ELSE 0 END) AS pending_judged "
         f"FROM decision_events WHERE {clause} "
         "GROUP BY source ORDER BY n DESC"
     )
@@ -233,11 +252,29 @@ def decision_stats(
         logger.warning("[Decisions] 统计读取失败: %s", exc)
         return {"days": days, "total": 0, "cost": 0.0, "by_source": [],
                 "error": str(exc)}
+    # 收场口径（v1.2.47）：只有 PENDING_EXPECTED_SOURCES 里的岗位停在 pending
+    # 才算合法（等验收回填）。其余岗位一旦 pending 就是收口失效——v1.2.45
+    # 那批"永远 pending"的假账正是这么混进台账的，单列 anomaly 当哨兵，
+    # 别让它再藏在总数里。
+    expected_sources = sorted(PENDING_EXPECTED_SOURCES)
+    pending_total = sum(int(r._mapping.get("pending") or 0) for r in rows)
+    pending_expected = sum(
+        int(r._mapping.get("pending") or 0)
+        for r in rows
+        if (r._mapping.get("source") or "") in PENDING_EXPECTED_SOURCES
+    )
+
     return {
         "days": days,
         "total": int(total_n),
         "cost": float(total_cost or 0),
         "by_source": [dict(r._mapping) for r in rows],
+        "pending": {
+            "total": pending_total,
+            "expected": pending_expected,
+            "anomaly": pending_total - pending_expected,
+            "expected_sources": expected_sources,
+        },
     }
 
 

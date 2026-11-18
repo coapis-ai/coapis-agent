@@ -3069,6 +3069,10 @@
       "judged": "Judged",
       "degraded": "Degraded",
       "noStats": "No judgment records in the last 7 days.",
+      "judgeHitRate": "Judge hit",
+      "await": "Awaiting",
+      "pendingAnomaly": "Outcome leak",
+      "pendingAnomalyHint": "rows stuck at pending outside the backfill jobs",
       "list": "Judgment records",
       "empty": "No judgment records yet"
     },

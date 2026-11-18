@@ -73,6 +73,25 @@ const SOURCE_KEYS: Record<string, string> = {
 
 const SOURCE_TOKENS = Object.keys(SOURCE_KEYS);
 
+/**
+ * outcome 着色。v1.2.46 起非判档岗位写账即终态，台账里会出现 applied/
+ * rerouted/vetoed/final/satisfied/partial/failed/abstain 这些码；此前只给
+ * hit/miss 上了色，其余一律灰 Tag，满屏看不出"放行"和"否决"的区别。
+ * 词表以 ledger_contract.LEDGER_OUTCOME_CODES 为准。
+ */
+const OUTCOME_COLORS: Record<string, string> = {
+  hit: 'green',
+  miss: 'red',
+  applied: 'cyan',
+  rerouted: 'gold',
+  vetoed: 'volcano',
+  satisfied: 'green',
+  partial: 'gold',
+  failed: 'red',
+  abstain: 'default',
+  final: 'default',
+};
+
 /** 台账时间：float epoch 秒 → 本地时间。非法值原样交出去，不编。 */
 function fmtTime(v: unknown): string {
   const sec = Number(v);
@@ -201,7 +220,7 @@ export default function JudgmentPanel() {
         width: 76,
         render: (v: string) =>
           v && v !== 'pending' ? (
-            <Tag color={v === 'hit' ? 'green' : v === 'miss' ? 'red' : 'default'}>
+            <Tag color={OUTCOME_COLORS[v] ?? 'default'}>
               {t(`decision.outcome.${v}`, v)}
             </Tag>
           ) : (
@@ -326,7 +345,17 @@ export default function JudgmentPanel() {
                   : s.source}{' '}
                 <b>{s.n}</b>
                 {` · ${t('myspace.judgment.judged', '真判')} ${s.llm ?? 0}`}
+                {(s.hit_judged ?? 0) + (s.miss_judged ?? 0) > 0
+                  ? ` · ${t('myspace.judgment.judgeHitRate', '判官命中')} ${Math.round(
+                      ((s.hit_judged ?? 0) /
+                        ((s.hit_judged ?? 0) + (s.miss_judged ?? 0))) *
+                        100,
+                    )}%`
+                  : ''}
                 {` · ${t('myspace.judgment.degraded', '降级')} ${s.degraded ?? 0}`}
+                {s.pending
+                  ? ` · ${t('myspace.judgment.await', '待回执')} ${s.pending}`
+                  : ''}
                 {s.avg_ms ? ` · ${Math.round(Number(s.avg_ms))}ms` : ''}
               </span>
             ))}
@@ -336,6 +365,16 @@ export default function JudgmentPanel() {
             {t('myspace.judgment.noStats', '近 7 天没有判断记录。')}
           </Text>
         )}
+        {stats?.pending && stats.pending.anomaly > 0 ? (
+          <Text type="danger" style={{ fontSize: 12, display: 'block' }}>
+            {t('myspace.judgment.pendingAnomaly', '收口失效')}{' '}
+            {stats.pending.anomaly}{' '}
+            {t(
+              'myspace.judgment.pendingAnomalyHint',
+              '行停在 pending，但只应出现在待回填岗位',
+            )}
+          </Text>
+        ) : null}
       </Card>
 
       <Card

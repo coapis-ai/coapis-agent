@@ -2559,6 +2559,10 @@
       "judged": "実判断",
       "degraded": "降格",
       "noStats": "直近7日に判断記録がありません。",
+      "judgeHitRate": "判定命中",
+      "await": "受領待ち",
+      "pendingAnomaly": "収束不良",
+      "pendingAnomalyHint": "行が pending のまま、補完対象以外の職務に残っています",
       "list": "判断記録",
       "empty": "判断記録はまだありません"
     },

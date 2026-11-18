@@ -3096,6 +3096,10 @@
       "judged": "真判",
       "degraded": "降级",
       "noStats": "近 7 天没有判断记录。",
+      "judgeHitRate": "判官命中",
+      "await": "待回执",
+      "pendingAnomaly": "收口失效",
+      "pendingAnomalyHint": "行停在 pending，但只应出现在待回填岗位",
       "list": "判断记录",
       "empty": "还没有判断记录"
     },

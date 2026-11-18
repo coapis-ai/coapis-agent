@@ -363,3 +363,39 @@ def test_judge_health_buckets_by_reason_code(client):
     assert body["rows"] == 5
     # 铺码完整率 = 有码弃权行 / 全部弃权行（B3 验收口径）
     assert body["coded_ratio"] == round(3 / 4, 3)
+
+
+def test_stats_splits_judge_ruler_and_flags_bogus_pending(client):
+    """判官战绩只按真问过判官的行算；非判档岗位的 pending 记成收口失效。
+
+    plan_gate 的 pending 是合法的（等验收回填），tool_gate 冒出 pending
+    就是收口失效。命中率若按全行口径算，规则直判的战绩会算到判官头上——
+    dev 实测 plan_gate 111 行里只有 3 行真判，差一个数量级。
+    """
+    c, _holder, _ = client
+    _add(user_id="alice", chat_id="pg1", source="plan_gate",
+         hit_layer="llm", reason_code="judged", cost_ms=1000, outcome="hit")
+    _add(user_id="alice", chat_id="pg2", source="plan_gate",
+         hit_layer="rule", reason_code="rule", cost_ms=2000, outcome="miss")
+    _add(user_id="alice", chat_id="pg3", source="plan_gate",
+         hit_layer="rule", reason_code="rule", cost_ms=2000, outcome="pending")
+    _add(user_id="alice", chat_id="tg1", source="tool_gate",
+         hit_layer="llm", reason_code="judged", cost_ms=3000, outcome="pending")
+
+    body = c.get("/api/decisions/stats", params={"days": 7}).json()
+    by = {row["source"]: row for row in body["by_source"]}
+
+    # 全行口径三种 outcome 都在；判官口径只剩那 1 行真判
+    assert by["plan_gate"]["hit"] == 1
+    assert by["plan_gate"]["miss"] == 1
+    assert by["plan_gate"]["pending"] == 1
+    assert by["plan_gate"]["hit_judged"] == 1
+    assert by["plan_gate"]["miss_judged"] == 0
+    assert by["plan_gate"]["pending_judged"] == 0
+
+    # 待回执拆口径：判档那 1 行合法，tool_gate 那 1 行是失效
+    pend = body["pending"]
+    assert pend["total"] == 2
+    assert pend["expected"] == 1
+    assert pend["anomaly"] == 1
+    assert pend["expected_sources"] == ["plan_gate"]

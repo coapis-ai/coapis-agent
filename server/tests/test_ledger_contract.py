@@ -345,47 +345,32 @@ def test_detect_origin_uses_session_id_too():
     assert lc.detect_origin("550e8400-e29b-41d4-a716-446655440000", "e2e-run") == "test"
 
 
-def test_backfill_outcome_requires_chat_id():
-    assert lc.backfill_outcome(chat_id="", turn=1, outcome="achieved", cost=0.1, tokens=10) == 0
+def test_pending_expected_sources_is_the_one_ruler():
+    """哪些行该停在 pending，写账侧和统计侧必须共用同一把尺子。
 
+    v1.2.45 那批"永远 pending"的假账，根子是"写账即终态"这条规则散在几个
+    调用点各写各的。v1.2.47 把统计侧的收场口径也接到 PENDING_EXPECTED_SOURCES
+    上。这个测试钉住两点：集合本身没漂，且"返回空串"只可能发生在集合内的
+    岗位上——否则读侧的 anomaly 哨兵就会瞎报。
+    """
+    assert lc.PENDING_EXPECTED_SOURCES == {"plan_gate"}
 
-def test_backfill_outcome_requires_turn():
-    assert lc.backfill_outcome(chat_id="c1", turn=0, outcome="achieved", cost=0.1, tokens=10) == 0
-
-
-def test_backfill_outcome_swallows_db_failure(monkeypatch):
-    def _boom():
-        raise RuntimeError("库连不上")
-
-    import coapis.foundation.db as db_mod
-
-    monkeypatch.setattr(db_mod, "get_session", _boom)
-    out = lc.backfill_outcome(chat_id="c1", turn=2, outcome="achieved", cost=0.2, tokens=20)
-    assert out == 0  # 永不抛异常（红线）
-
-
-def test_backfill_outcome_clamps_negative_cost(monkeypatch):
-    """负成本进库前夹紧（对账不接受负数花费）。"""
-    calls = {}
-
-    class _Sess:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def execute(self, stmt, params=None):
-            calls["stmt"] = stmt
-            class _R:
-                rowcount = 1
-
-            return _R()
-
-    import coapis.foundation.db as db_mod
-
-    monkeypatch.setattr(db_mod, "get_session", lambda: _Sess())
-    assert lc.backfill_outcome(chat_id="c1", turn=2, outcome="achieved", cost=-1.0, tokens=-5) == 1
-    compiled = str(calls["stmt"].compile(compile_kwargs={"literal_binds": True}))
-    assert "outcome" in compiled
-    assert "-1.0" not in compiled  # 夹紧为 0
+    # purpose 取值实测取自 server/coapis 里的 purpose="..." 调用点，不是编的
+    purposes = ("plan_gate", "acceptance", "advisor", "intent", "plan_review",
+                "selfcheck", "skill_trigger", "tool_gate", "verify")
+    shapes = (
+        ("allow", "select:docx"),
+        ("allow", ""),
+        ("confirm", "cmd:git status"),
+        ("veto", "cmd:rm -rf /"),
+        ("", ""),
+    )
+    for purpose in purposes:
+        for action, judgment in shapes:
+            result = lc.ledger_final_outcome(purpose, action, judgment)
+            blank = result == ""
+            assert blank == (purpose in lc.PENDING_EXPECTED_SOURCES), (
+                purpose, action, judgment, result
+            )
+            if not blank:
+                assert result in lc.LEDGER_OUTCOME_CODES, (purpose, result)
