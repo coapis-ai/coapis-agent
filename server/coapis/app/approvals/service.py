@@ -86,19 +86,23 @@ class ApprovalActor:
 
 
 def _self_approval_forbidden() -> bool:
-    """禁止自批开关（D7 · 方案 §13 拍板），每次读环境变量。
+    """属主本人能否批准自己发起的操作（默认 **放行**）。
 
-    默认 forbid —— 方案口径：审批的意义是"别人替你把关"，自批等于把
-    闸门变成装饰。
+    2026-11-18 拍板：CoApis 是「个人对自己的会话做自己的操作」，审批的
+    目的不是「谁也不能自批」这种合规形态，而是「危险动作要有人确认」。
+    属主本人点批准就是最强确认 —— 拦它只会把「顺畅」变成「反复打断」。
 
-    ``COAPIS_APPROVAL_SELF_APPROVAL=allow`` 回退旧行为。这个旋钮是刻意
-    留的：日常主链里"用户点卡片批准自己会话的工具调用"是当前主要用法，
-    全量禁止自批 = 非管理员用户的每次工具审批都要管理员代批。部署侧
-    必须知道这件事，所以旋钮写在代码里、开关写在环境里，不靠口口相传。
+    治理诉求保留：部署侧显式 ``COAPIS_APPROVAL_SELF_APPROVAL=forbid``
+    即打开强约束（属主自批被拒，台账记 ``refused:self_approval_forbidden``）。
+
+    真正的跨用户边界不在这个旋钮里：非属主的普通用户、无身份的调用者，
+    任何档位下都拒（见 ``_identity_check`` 的 ``missing_actor`` /
+    ``missing_identity`` / ``not_owner``）。管理员代批始终放行并单独成桶
+    （``decide_source=admin_override``）。
     """
     return (
-        os.environ.get("COAPIS_APPROVAL_SELF_APPROVAL", "forbid").strip().lower()
-        != "allow"
+        os.environ.get("COAPIS_APPROVAL_SELF_APPROVAL", "allow").strip().lower()
+        == "forbid"
     )
 
 
@@ -439,21 +443,42 @@ class ApprovalService:
         # 事后能回答"选了哪种、为什么、谁选的、经哪条通道"。
         # 管理员代批单独成桶（decide_source=admin_override）——
         # "谁替谁批的"必须能从台账直接查，不靠翻日志。
+        _actor_source = str(getattr(actor, "source", "") or "")
         _admin_override = (
             bool(getattr(actor, "is_admin", False))
             and str(getattr(actor, "user_id", "") or "")
             != str(getattr(pending, "owner_user_id", "") or "")
         )
-        record_intent(
-            pending,
-            decision=decision.value,
-            outcome="applied",
-            decided_by=str(getattr(actor, "user_id", "") or ""),
-            decide_source=(
+        # 尺子修正：agent 侧的**自动收场**不是「用户裁决被采纳」。
+        # 超时（tool_guard_mixin 等待循环）与用户 /stop（CancelledError）
+        # 都经这里落账，此前一律写 outcome=applied + 枚举名，于是台账里
+        # 出现过 decision=timeout / outcome=applied 这种自相矛盾的行，
+        # 而 /stop 也被计进了「用户拒绝」。两件事都不该存在：
+        #   · decision 是台账尺子词表（timed_out / system_cancelled），
+        #     枚举名 timeout 越界；
+        #   · outcome 前缀 auto = 系统自动收场，与 applied 严格分家。
+        if decision == ApprovalDecision.TIMEOUT:
+            _ledger_decision = "timed_out"
+            _ledger_outcome = "auto:timeout"
+            _decide_source = "internal"
+        elif decision == ApprovalDecision.DENIED and _actor_source == "agent":
+            _ledger_decision = "system_cancelled"
+            _ledger_outcome = "auto:cancel"
+            _decide_source = "internal"
+        else:
+            _ledger_decision = decision.value
+            _ledger_outcome = "applied"
+            _decide_source = (
                 "admin_override"
                 if _admin_override
-                else (str(getattr(actor, "source", "") or "") or "internal")
-            ),
+                else (_actor_source or "internal")
+            )
+        record_intent(
+            pending,
+            decision=_ledger_decision,
+            outcome=_ledger_outcome,
+            decided_by=str(getattr(actor, "user_id", "") or ""),
+            decide_source=_decide_source,
             why=str(getattr(actor, "reason", "") or ""),
         )
 
