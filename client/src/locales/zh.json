@@ -3314,7 +3314,15 @@
     "goJudgeSlot": "去判官槽位",
     "outcome": {
       "hit": "命中",
-      "miss": "未命中"
+      "miss": "未命中",
+      "final": "定局",
+      "applied": "已放行",
+      "rerouted": "已改道",
+      "vetoed": "已否决",
+      "satisfied": "达标",
+      "partial": "部分达标",
+      "failed": "未达标",
+      "abstain": "弃权"
     },
     "outcomePending": "待回执",
     "sourcePlanGate": "立项闸",

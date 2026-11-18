@@ -17,11 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from coapis.agents.react_agent import CoApisAgent  # noqa: E402
 from coapis.config import session_context as sc  # noqa: E402
-from coapis.decision.gateway import (  # noqa: E402
-    JudgeGateway,
-    _ledger_final_outcome,
-    _level_of,
-)
+from coapis.decision.gateway import JudgeGateway, _level_of  # noqa: E402
+from coapis.decision.ledger_contract import ledger_final_outcome  # noqa: E402
 
 
 def _fake_agent(request_context, config_id="agent-from-config"):
@@ -265,6 +262,11 @@ async def test_ledger_row_carries_level_tokens_and_scope(monkeypatch):
         # 技能命中行与判档行共用 hit/miss 词表（健康卡按 source 分组）。
         ("skill_trigger", "预激活docx", "['docx']", "hit"),
         ("skill_trigger", "无技能命中", "[]", "miss"),
+        # dev 台账真实列值：判据在 judgment 冒号后，不在 action 措辞。
+        ("skill_trigger", "预激活docx", "select:docx", "hit"),
+        ("skill_trigger", "无技能命中", "none", "miss"),
+        ("skill_trigger", "无技能命中", "select:", "miss"),
+        ("skill_trigger", "", "", "miss"),
         ("skill_trigger", "", "", "miss"),
         # 闸门放行/否决是最终态，不该永远 pending。
         ("tool_gate", "tool:execute_shell_command:allow", "allow", "applied"),
@@ -284,4 +286,60 @@ def test_ledger_final_outcome_is_terminal_per_post(
     顾问行 224 行根本没有回填者——pending 被当成默认值用，制造了
     "判断永不收场"的假象。这里钉住每个岗位写账时的终态，防止漂移。
     """
-    assert _ledger_final_outcome(purpose, action, judgment) == expected
+    assert ledger_final_outcome(purpose, action, judgment) == expected
+
+
+@pytest.mark.parametrize(
+    ("purpose", "action", "value", "expected"),
+    [
+        ("skill_trigger", "预激活docx", "['docx']", "hit"),
+        ("skill_trigger", "无技能命中", "[]", "miss"),
+        # dev 台账真实列值：判据在 judgment 冒号后，不在 action 措辞。
+        ("skill_trigger", "预激活docx", "select:docx", "hit"),
+        ("skill_trigger", "无技能命中", "none", "miss"),
+        ("skill_trigger", "无技能命中", "select:", "miss"),
+        ("skill_trigger", "", "", "miss"),
+        ("tool_gate", "tool:execute_shell_command:allow", "allow", "applied"),
+        ("tool_gate", "tool:write_file:deny", "deny", "vetoed"),
+        ("tool_gate", "tool:bash:reroute", "reroute", "rerouted"),
+        ("tool_gate", "sandbox_denied", "denied", "final"),
+        ("acceptance", "satisfied", "satisfied", "satisfied"),
+        ("advisor", "restart", "restart", "final"),
+        # 判档行留 pending：它等验收回填，写终态就是假账。
+        ("plan_gate", "continue", "select:low,medium", "pending"),
+    ],
+)
+def test_write_ledger_writes_terminal_outcome_by_default(
+    monkeypatch, purpose, action, value, expected,
+):
+    """不传 outcome 时，write_ledger 自己必须落终态码（不能是 pending）。
+
+    回归钉：v1.2.45 把收口规则写进了 write_ledger，但形参默认值是
+    "pending"（truthy），``outcome or helper(...)`` 永远取左边，规则整段
+    失效——helper 单测全绿也照样写 pending（dev 活体实测 25 行全 pending）。
+    这条只走真实写入路径，把"默认值必须是空串"钉死。
+    """
+    from coapis.decision import bus as bus_mod
+    from coapis.decision import ledger_contract as lc_mod
+
+    caught = []
+
+    class _Bus:
+        def emit(self, event, *, user_id="", agent_id="", chat_id=""):
+            caught.append(event)
+            return event
+
+    monkeypatch.setattr(bus_mod, "get_bus", lambda: _Bus())
+    monkeypatch.setattr(lc_mod, "_write_governance", lambda *a, **k: None)
+
+    assert lc_mod.write_ledger(
+        source=purpose,
+        purpose=purpose,
+        chat_id="t:outcome:%s" % purpose,
+        turn=5,
+        action=action,
+        value=value,
+        hit_layer="rule",
+    ) is True
+    assert len(caught) == 1, "台账行没有送达总线"
+    assert caught[0].outcome == expected

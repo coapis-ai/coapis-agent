@@ -252,46 +252,6 @@ class JudgeReply:
 _LEVELS = frozenset({"simple", "medium", "complex"})
 
 
-# 台账 outcome 语义（一处定终态）：只有"待评"行才配停在 pending。
-#
-# pending 历史上被当成"所有行的默认值"，于是健康卡里 91.5% 的
-# outcome=pending 其实是字段语义错位——技能命中、闸门放行这类行写出来
-# 就是最终态，没有任何链路会回头评它们，让它们永远 pending 只是制造
-# "未收场"的假账。真正需要等验收回填的只有判档行（plan_gate）。
-_LEDGER_FINAL_SOURCES = frozenset({
-    "acceptance", "verify", "tool_gate", "skill_trigger", "intent",
-    "advisor", "tool_guard", "plan_review", "selfcheck",
-})
-
-
-def _ledger_final_outcome(
-    purpose: str, action: str, judgment: str,
-) -> str:
-    """某岗位写账时就能确定的最终态 outcome（空串=保持 pending 等回填）。
-
-    - 判档行（plan_gate）返回空串：对错要等验收回填 hit/miss。
-    - 验收行写自己的 verdict（satisfied/partial/failed/abstain）——此前
-      判官真判了、结论只在 action 列，outcome 仍写 pending，同一条账
-      自相矛盾（实测 11 行）。
-    - 技能命中行 hit/miss 与判档行同词：健康卡按 source 分组计数，
-      两个岗位共用词表不会互相污染命中率。
-    - 其余岗位写 applied/final 这类终态码，宁可码多，不要假 pending。
-    """
-    if purpose == "plan_gate":
-        return ""
-    text = f"{action or ''}|{judgment or ''}"
-    if purpose in ("acceptance", "verify"):
-        for word in ("satisfied", "partial", "failed", "abstain"):
-            if word in text:
-                return word
-        return "abstain"
-    if purpose == "skill_trigger":
-        return "miss" if ("无技能命中" in text or text.startswith("|")) else "hit"
-    if purpose == "tool_gate":
-        return "applied" if ":allow" in text else "vetoed"
-    return "final"
-
-
 def _level_of(judgment: str) -> str:
     """判档行的判断值 → 档位本身。
 
@@ -1364,7 +1324,6 @@ class JudgeGateway:
                 agent_id=agent_id,
                 chat_id=chat_id,
                 turn=int(turn or 0) or None,
-                outcome=_ledger_final_outcome(purpose, description, judgment),
             )
         except Exception as exc:  # pragma: no cover - 台账故障不影响判断
             logger.debug("[JudgeGateway] 台账写入异常（忽略）: %s", exc)

@@ -2670,7 +2670,15 @@
     "goJudgeSlot": "判断モデル枠",
     "outcome": {
       "hit": "命中",
-      "miss": "未命中"
+      "miss": "未命中",
+      "final": "確定",
+      "applied": "通過",
+      "rerouted": "経路変更",
+      "vetoed": "拒否",
+      "satisfied": "充足",
+      "partial": "部分充足",
+      "failed": "未充足",
+      "abstain": "棄権"
     },
     "outcomePending": "受領待ち",
     "sourcePlanGate": "計画ゲート",

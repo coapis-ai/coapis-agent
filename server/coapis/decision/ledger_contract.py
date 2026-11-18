@@ -170,6 +170,90 @@ def resolve_ids(scope: Optional[dict]) -> tuple[str, str, str, str, int]:
     return user_id, agent_id, session_id, chat_id, turn
 
 
+# 台账 outcome 语义（一处定终态）：只有"待评"行才配停在 pending。
+#
+# pending 历史上被当成"所有行的默认值"，于是健康卡里 91.5% 的
+# outcome=pending 其实是字段语义错位——技能命中、闸门放行这类行写出来
+# 就是最终态，没有任何链路会回头评它们，让它们永远 pending 只是制造
+# "未收场"的假账。真正需要等验收回填的只有判档行（plan_gate）。
+_LEDGER_FINAL_SOURCES = frozenset({
+    "acceptance", "verify", "tool_gate", "skill_trigger", "intent",
+    "advisor", "tool_guard", "plan_review", "selfcheck",
+})
+
+
+# 判官裁决词表：验收/复核行的 outcome 直接用它。
+_JUDGE_VERDICTS = ("satisfied", "partial", "failed", "abstain")
+
+# judgment 列取这些值时等于"没命中任何技能"（含 select: 空名单与 select 无冒号）。
+_EMPTY_SKILL_VALUES = frozenset(
+    {"", "none", "null", "[]", "{}", "no-hit", "select"}
+)
+
+# 台账 outcome 的全部合法码：写侧由 ledger_final_outcome 产生，读侧
+# （人工改判白名单 / 前端标签）从这里取，避免两处各养一份词表。
+LEDGER_OUTCOME_CODES = (
+    "pending", "hit", "miss",
+    "applied", "rerouted", "vetoed", "final",
+    "satisfied", "partial", "failed", "abstain",
+)
+
+def ledger_final_outcome(
+    purpose: str, action: str, judgment: str,
+) -> str:
+    """某岗位写账时就能确定的最终态 outcome（空串=保持 pending 等回填）。
+
+    判据一律对着 dev 台账的**真实列值**写，不靠猜：
+
+    - 判档行（plan_gate）返回空串：对错要等验收回填 hit/miss。
+    - 验收/复核行（acceptance/verify/plan_review）写自己的 verdict
+      （satisfied/partial/failed/abstain）。此前判官真判了、结论只在
+      action 列，outcome 却写 pending，同一条账自相矛盾（实测 11 行）。
+      acceptance 没裁决词算 abstain（判官没判即弃权）；plan_review 没
+      裁决词算 final（那一格没判，不等于弃权）。
+    - 技能命中行（skill_trigger）看 judgment 冒号后的技能名单：dev 实测
+      命中行 judgment=select:docx，未命中行 judgment=none 或 select:。
+      名单为空就是 miss，跟 action 措辞无关（v1.2.45 只认 action，把
+      judgment=select: 的 miss 行算成了 hit）。
+    - 工具闸行（tool_gate）裁决词在 action 冒号尾段（实测 hub_tool_gate
+      只发 allow|reroute，护栏拒绝走 deny/block）：allow→applied、
+      reroute→rerouted、deny/block→vetoed，其余 final。
+    - 其余岗位（intent / loop_gate / skill_gate / selfcheck …）本来就是
+      一次性事实，写 final。宁可码多，不要假 pending。
+    """
+    purpose = (purpose or "").strip().lower()
+    act = (action or "").strip().lower()
+    val = (judgment or "").strip().lower()
+    text = f"{act}|{val}"
+
+    if purpose == "plan_gate":
+        return ""
+
+    if purpose in ("acceptance", "verify", "plan_review"):
+        if act in _JUDGE_VERDICTS:
+            return act
+        for word in _JUDGE_VERDICTS:
+            if word in text:
+                return word
+        return "abstain" if purpose in ("acceptance", "verify") else "final"
+
+    if purpose == "skill_trigger":
+        skills = val.split(":", 1)[1] if ":" in val else val
+        if "无技能命中" in act or skills in _EMPTY_SKILL_VALUES:
+            return "miss"
+        return "hit"
+
+    if purpose == "tool_gate":
+        tail = act.rsplit(":", 1)[-1] if ":" in act else act
+        if ":allow" in text or tail in ("allow", "passed"):
+            return "applied"
+        if ":reroute" in text or tail in ("reroute", "rerouted"):
+            return "rerouted"
+        if ":deny" in text or ":block" in text or tail in ("deny", "block", "veto", "vetoed"):
+            return "vetoed"
+        return "final"
+
+    return "final"
 def write_ledger(
     *,
     source: str,
@@ -184,7 +268,11 @@ def write_ledger(
     tokens: int = 0,
     input_hash: str = "",
     value: str = "",
-    outcome: str = "pending",
+    # 默认必须是**空串**：默认值一旦写成 "pending"（truthy），下面
+    # `outcome or ledger_final_outcome(...)` 就永远取左边，终态收口规则
+    # 整段变成死代码 —— v1.2.45 活体验收 25 行全写 pending 就是这么挂的
+    # （单测只直接断言 helper，没走写入路径，所以测不出来）。
+    outcome: str = "",
     user_id: str = "",
     agent_id: str = "",
     session_id: str = "",
@@ -271,7 +359,18 @@ def write_ledger(
                 value=str(value or "")[:256],
                 turn=tn,
                 input_hash=str(input_hash or ""),
-                outcome=str(outcome or "pending")[:16],
+                # 调用方没给 outcome 时不再一律写 pending：写出来就是
+                # 最终态的岗位（技能命中/闸门放行/验收结论/意图分类）
+                # 按 purpose 落终态码；只有判档行留在 pending 等回填。
+                outcome=str(
+                    outcome
+                    or ledger_final_outcome(
+                        str(purpose or ""),
+                        str(action or ""),
+                        str(value or ""),
+                    )
+                    or "pending"
+                )[:16],
                 # 治理接线（迁移 0028 + 白名单扩列）：这些字段现在**真的
                 # 落库**了。此前 DecisionResult 没有这些字段、白名单不含，
                 # 参数传到落库前就被丢弃 —— 台账里 origin/zero_reason/

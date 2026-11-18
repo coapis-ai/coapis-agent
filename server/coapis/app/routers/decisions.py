@@ -42,6 +42,7 @@ from sqlalchemy import text
 
 from ..permissions import require_perm
 from ...decision.config import POSTS
+from ...decision.ledger_contract import LEDGER_OUTCOME_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,9 @@ _DEFAULT_LIMIT = 50
 # 原先硬写五岗，plan_review / tool_gate / intent 的行存在却筛不出来——
 # 治理页上"六岗配置"有六个岗，筛选项只有五个，对账口径天生缺角。
 _SOURCES = tuple(sorted(set(POSTS) | {"outcome"}))
-_OUTCOMES = ("hit", "miss", "pending")
+# 人工改判的合法码与写侧共用一张表：台账早已不止 hit/miss/pending，
+# 白名单窄一格，管理员想把误写的 applied 纠成 vetoed 就会被 400 挡回。
+_OUTCOMES = tuple(LEDGER_OUTCOME_CODES)
 
 # 台账里"判了但没走成"的层——词表必须与 gateway 写入侧逐字一致
 # （LAYER_BREAKER="breaker_open"、LAYER_BUDGET="budget_cap"…）。
@@ -361,7 +364,7 @@ def rate_decision(
     event_id: str,
     request: Request,
     rating: int = Query(..., ge=-1, le=1, description="1 准 / 0 不准 / -1 撤销"),
-    outcome: Optional[str] = Query(None, description="hit|miss|pending"),
+    outcome: Optional[str] = Query(None, description="outcome 码，见 LEDGER_OUTCOME_CODES"),
 ) -> dict[str, Any]:
     """给某一次判断打分（台账 ``rating`` 列的入口）。
 

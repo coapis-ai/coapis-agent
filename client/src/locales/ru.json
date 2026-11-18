@@ -2685,7 +2685,15 @@
     "goJudgeSlot": "Слот судьи",
     "outcome": {
       "hit": "Попадание",
-      "miss": "Промах"
+      "miss": "Промах",
+      "final": "Итог",
+      "applied": "Пропущено",
+      "rerouted": "Перенаправлено",
+      "vetoed": "Отклонено",
+      "satisfied": "Выполнено",
+      "partial": "Частично",
+      "failed": "Не выполнено",
+      "abstain": "Воздержался"
     },
     "outcomePending": "Ожидает подтверждения",
     "sourcePlanGate": "Шлюз плана",

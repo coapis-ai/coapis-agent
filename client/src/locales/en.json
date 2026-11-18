@@ -3288,7 +3288,15 @@
     "goJudgeSlot": "Judge slot",
     "outcome": {
       "hit": "Hit",
-      "miss": "Miss"
+      "miss": "Miss",
+      "final": "Final",
+      "applied": "Applied",
+      "rerouted": "Rerouted",
+      "vetoed": "Vetoed",
+      "satisfied": "Satisfied",
+      "partial": "Partially met",
+      "failed": "Failed",
+      "abstain": "Abstained"
     },
     "outcomePending": "Awaiting receipt",
     "sourcePlanGate": "Plan gate",
