@@ -1110,6 +1110,7 @@ class LightContextManager(BaseContextManager):
             from .reference_collector import (
                 _iter_text_chunks,
                 _workspace_root,
+                finalize_file_references,
                 finalize_media_references,
                 finalize_web_references,
             )
@@ -1122,6 +1123,9 @@ class LightContextManager(BaseContextManager):
                 # `/files/preview/…`）按 producer 进台账——生成图片/图表
                 # 只在回复正文出现时也要被资源条看见。
                 finalize_media_references(body, _workspace_root(_gc()))
+            registered_files = finalize_file_references(
+                reply_msg.get_text_content() or "",
+            )
         except Exception:
             logger.debug("web reference gate skipped", exc_info=True)
 

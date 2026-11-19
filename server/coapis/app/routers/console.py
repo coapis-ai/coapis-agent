@@ -295,14 +295,6 @@ async def console_chat(
     request: Request,
     payload: Optional[Dict[str, Any]] = Body(default=None),
 ):
-    request_chat_id = None  # Initialize before any conditional use
-    if payload is None:
-        payload = {}
-    import json as _json
-    logger.warning(
-        "CONSOLE_CHAT_PAYLOAD: %s",
-        _json.dumps(payload, ensure_ascii=False),
-    )
     """Console chat endpoint - SSE streaming response using CoApis component chain.
 
     Component chain:
@@ -312,6 +304,9 @@ async def console_chat(
     agentscope_runtime component chain, ensuring correct event format, message
     filtering, and reconnection support.
     """
+    request_chat_id = None  # Initialize before any conditional use
+    if payload is None:
+        payload = {}
     manager = request.app.state.multi_agent_manager
     if not manager:
         raise HTTPException(status_code=503, detail="Service temporarily unavailable, please retry later")

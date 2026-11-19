@@ -166,6 +166,13 @@ class TurnResources:
     seen: set[str] = field(default_factory=set)
     #: 搜索/输出里出现过的链接候选，等正文闸门裁决（见 finalize_web_references）
     pending_web: list[dict] = field(default_factory=list)
+    # v26 补丁 · 扫描类文件候选池。
+    # glob/grep 输出、脚本正文里"扫到"的文件名，工具只是看见过，不等于本轮碰过。
+    # 先攒在这里，回复写完后由 finalize_file_references 按"正文有没有提到"裁决 ——
+    # 尺子对齐 finalize_web_references 对搜索 URL 的做法（见 685 行附近）。
+    # 不收这个口，一次 grep 就能把工作区里的文件整片刷进这条会话的资源池
+    # （实测：与本会话无关的 pptx 混进了会话 690f6f88 的清单）。
+    pending_files: list[dict] = field(default_factory=list)
 
     def add(self, item: dict) -> bool:
         key = f"{item.get('kind')}::{item.get('ref')}"
@@ -599,10 +606,17 @@ def collect_from_tool_call(
         else:
             return added
 
+        explicit_paths = _explicit_file_params(tool_input, workspace)
         for item in candidates:
             if not turn.add(item):
                 continue
             added.append(item)
+            # 登记侧闸门：扫描类引用候选先不入账，等回复写完由正文裁决。
+            # 工具"看见"过（grep 命中、glob 列出）≠ 本轮交付；
+            # 明确操作目标（参数里写死的 path）与本轮声明产出（producer）不受影响。
+            if _is_scan_reference(item, tool_name, explicit_paths):
+                turn.pending_files.append(item)
+                continue
             _ledger_register(
                 item,
                 chat_id=chat_id,
@@ -717,6 +731,93 @@ def finalize_web_references(body_text: str) -> int:
     return kept
 
 
+# ── v26 补丁 · 登记侧闸门：扫到的文件先当候选，正文提到才入账 ─────────────
+#
+# 立场与 finalize_web_references 一致：工具"捞到过"只是候选，模型回复里没提
+# 就不算这轮的引用。差别只在尺子 —— URL 看正文有没有引这个链接，文件看文件名
+# 或相对路径有没有出现在正文里。
+# 不这么做的话，一次 grep_search 能把整棵工作区文件登记成本会话引用，
+# 会话资源面板就会出现"跟我这次对话无关的文件"。
+
+#: 工具参数里"明确操作目标"的字段名（read_file / write_file / edit_file 等）
+_FILE_PARAM_KEYS = ("file_path", "path", "notebook_path", "absolute_path")
+
+#: 列举型工具：返回的是候选池，不是本轮碰过的文件
+_LISTING_TOOLS = frozenset({"glob_search", "grep_search"})
+
+
+def _explicit_file_params(tool_input: dict | None, workspace) -> set[str]:
+    """工具参数里写死的文件路径，归一化成工作区相对路径。
+
+    这些是"明确操作目标"，可以立即入账；工具输出里扫到的名字要走正文闸门。
+    """
+    out: set[str] = set()
+    if not isinstance(tool_input, dict):
+        return out
+    for key in _FILE_PARAM_KEYS:
+        raw = tool_input.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        try:
+            rel = _normalize_file_path(raw, workspace)
+        except Exception:
+            continue
+        if rel:
+            out.add(str(rel))
+    return out
+
+
+def _is_scan_reference(item: dict, tool_name: str, explicit: set[str]) -> bool:
+    """这条候选是否属于"扫到的引用"（要经正文裁决才入账）。
+
+    role=producer 不算：那是本轮声明的产出，写文件侧另有台账事件互证。
+    列举型工具（glob/grep）永远算扫描：参数里的 path 只是搜索根目录，
+    不代表本轮碰过里面列出的任何一个文件。
+    """
+    if item.get("kind") != "file" or item.get("role") == "producer":
+        return False
+    if tool_name in _LISTING_TOOLS:
+        return True
+    rel = str(item.get("rel_path") or item.get("ref") or "")
+    return rel not in explicit
+
+
+def _file_cited_in_body(rel: str, body_text: str) -> bool:
+    """文件名或相对路径是否被回复正文提到（宽松度对齐 _cited_in_body）。"""
+    if not rel or not body_text:
+        return False
+    name = rel.rsplit("/", 1)[-1]
+    if name and name in body_text:
+        return True
+    return rel in body_text
+
+
+def finalize_file_references(body_text: str) -> int:
+    """回复写完后裁决扫描类文件候选：正文提到的才入账，其余整批丢弃。"""
+    turn = _turn_resources_ctx.get()
+    if turn is None or not turn.pending_files:
+        return 0
+    registered = 0
+    for item in turn.pending_files:
+        if registered >= MAX_SEARCH_CANDIDATES:
+            break
+        if not _file_cited_in_body(str(item.get("ref") or ""), body_text):
+            continue
+        _ledger_register(
+            item,
+            chat_id=turn.chat_id,
+            username=turn.username,
+            turn_id=turn.turn_id,
+        )
+        registered += 1
+    if registered:
+        logger.debug(
+            "reference_collector: 本轮 %s 扫描类文件候选 %d 条，正文提到入账 %d 条",
+            turn.turn_id,
+            len(turn.pending_files),
+            registered,
+        )
+    return registered
 def finalize_media_references(body_text: str, workspace: Optional[Path]) -> int:
     """正文媒体闸门（v20 · W5）：回复正文里的媒体链接进台账。
 

@@ -34,6 +34,7 @@ from sqlalchemy import func, select, update
 from ..constant import WORKING_DIR, WORKSPACES_DIR
 from .db.engine import get_session
 from .db.models.files import FileRecord
+from .resource_category import NOISE_DIR_PARTS
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,22 @@ VALID_STATUSES = frozenset({"draft", "delivered", "archived"})
 #: 解析台账的合法状态（一期 A1）。``degraded`` = 超阈值/超时的降级读——
 #: 内容可用但不是全文，计划闸门据此决定要不要先补读。
 PARSE_STATUSES = frozenset({"ok", "timeout", "fail", "degraded"})
+
+
+def _is_noise_rel(rel: str) -> bool:
+    """登记侧噪音闸：命中系统噪音目录就不入台账。
+
+    尺子与展示侧同源 —— 直接复用 ``resource_category.NOISE_DIR_PARTS``
+    （``.temp`` / ``.trash`` / ``.git`` / ``__pycache__`` / ``node_modules`` /
+    ``venv`` / ``site-packages`` / ``.ipynb_checkpoints``）。此前只有展示侧
+    过滤、登记侧照收，库里于是堆满 ``.temp/<哈希>/script.py`` 这类工具临时
+    产物（实测某会话 249 行里 247 行是噪音），界面按展示尺子过滤后仍会
+    出现"数量对不上、搜出无关文件"的分叉。
+
+    只看目录段、不看文件名，避免 ``venv.md`` 这类正常文件被误伤。
+    """
+    parts = [s for s in (rel or "").replace("\\", "/").split("/") if s]
+    return any(seg in NOISE_DIR_PARTS for seg in parts[:-1])
 
 
 class FileLedgerService:
@@ -235,6 +252,11 @@ class FileLedgerService:
                 uid = username or "shared"
             if rel is None:
                 return False  # outside ledger-managed roots → not ledgered
+            if _is_noise_rel(rel):
+                # 系统噪音（.temp/.trash/__pycache__/venv…）是工具临时产物，
+                # 不是用户可见交付物：登记侧直接拒收，让库里的尺子和界面上的
+                # 尺子（resource_category）保持同一份，杜绝"数量对不上"分叉。
+                return False
             try:
                 size = p.stat().st_size if p.exists() else 0
             except OSError:
@@ -304,6 +326,8 @@ class FileLedgerService:
                 uid = username or "shared"
             if rel is None:
                 return False  # 台账管不到的目录 → 不记
+            if _is_noise_rel(rel):
+                return False  # 解析回写同理：噪音文件不进台账
             now = time.time()
             st = status if status in PARSE_STATUSES else "fail"
             with get_session() as s:
@@ -808,6 +832,8 @@ class FileLedgerService:
                         rel = p.resolve().relative_to(root.resolve()).as_posix()
                     except (ValueError, OSError, RuntimeError):
                         continue
+                    if _is_noise_rel(rel):
+                        continue  # 定期补扫同样不吃 .temp/.trash 等噪音
                     if rel in existing:
                         continue
                     try:
@@ -858,6 +884,8 @@ class FileLedgerService:
                             ).as_posix()
                         except (ValueError, OSError, RuntimeError):
                             continue
+                        if _is_noise_rel(rel):
+                            continue  # 共享根同理
                         if rel in existing:
                             continue
                         try:

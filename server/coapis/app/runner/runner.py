@@ -171,15 +171,19 @@ def _session_backfill_resources(chat_id: str, username: str) -> None:
 
 
 async def _session_backfill_resources_task(chat_id: str, username: str) -> None:
-    """补扫的异步壳：扫盘挪进线程，绝不平淡生成器里的 event loop。"""
+    """v28 · 会话后台补扫——把同步扫描丢进线程池。
+
+    原实现在这个协程里 ``asyncio.create_task`` 调用**它自己**：真正的
+    ``_session_backfill_resources`` 一次都没跑过（脚本/MCP 生成的文件因此
+    永不登记），而任务链自我投递、永不停歇，空转刷事件循环。
+    """
     try:
         import asyncio
 
-        asyncio.create_task(
-            _session_backfill_resources_task(chat_id, username)
-        )
+        await asyncio.to_thread(_session_backfill_resources, chat_id, username)
     except Exception:
-        logger.debug("session backfill task skipped", exc_info=True)
+        # 补齐失败只影响下一轮的会话面，不能把异常抛回本轮主链
+        logger.exception("chat %s session 资源后台补齐失败（不影响本轮消息）", chat_id)
 
 
 def _turn_resources_from_ledger(chat_id: str, username: str) -> list:
@@ -249,6 +253,90 @@ def _turn_resources_from_ledger(chat_id: str, username: str) -> list:
 # ------------------------------------------------------------------
 # Evolution Engine Helpers (used in query_handler)
 # ------------------------------------------------------------------
+def _finalize_turn_resources(
+    chat_id: str,
+    username: str,
+    chat_owner_id: str = "",
+) -> list:
+    """v28 · 方案A（小蜜蜂 2026-11-19 拍板）：本轮资源只留一把尺子。
+
+    四个落点原先一律写成 ``台账 or 采集器``——台账取到东西就把采集器整份丢掉，
+    台账取空又整份改用采集器。本轮卡片因此常「只剩引用组」：write_file /
+    edit_file 的产出只入台账、不入采集器，台账这一头只要取空（归属或轮号任一
+    端对不上），产出组就整组蒸发，而引用组恰好从采集器补上，看上去像「只显
+    引用不显产出」。
+
+    这里做三件事：
+
+    1. **归属同一把尺子**：优先用会话登记的属主 ``ChatSpec.user_id``（工作区
+       属主），回退登录名——与会话面板 ``chats.py`` 的 ``owner or username``
+       对齐；登录名与工作区属主分裂时（如 wangjing / zrsz_189）不再读空。
+    2. **合流而不是二选一**：台账(按轮) ∪ 采集器(本轮)，按路径/URL 去重。
+    3. **producer 压过 reference**：同一条资源两侧口径冲突时，产出身份优先——
+       生成过的东西不该被另一侧的引用登记洗成「引用」。
+    """
+    owner = (chat_owner_id or "").strip() or (username or "").strip()
+    ledger_items = _turn_resources_from_ledger(chat_id, owner) if owner else []
+    collector_items = _take_turn_resources()
+    if not collector_items:
+        return ledger_items
+    if not ledger_items:
+        return collector_items
+
+    merged = list(ledger_items)
+    index = {}
+    for pos, row in enumerate(merged):
+        key = _resource_match_key(row)
+        if key:
+            index[key] = pos
+
+    for item in collector_items:
+        key = _resource_match_key(item)
+        if not key:
+            merged.append(item)
+            continue
+        pos = index.get(key)
+        if pos is None:
+            index[key] = len(merged)
+            merged.append(item)
+            continue
+        keep = dict(merged[pos])
+        roles = {keep.get("role"), item.get("role")}
+        if "producer" in roles:
+            keep["role"] = "producer"
+        # 台账侧字段（kind/size/mtime/role）为准，采集器只补台账没有的展示位。
+        for field, value in item.items():
+            if keep.get(field) in (None, "", [], 0) and value not in (None, "", [], 0):
+                keep[field] = value
+        merged[pos] = keep
+
+    return merged
+
+
+def _resource_match_key(row: dict) -> str:
+    """资源去重的尺子：文件按归一化相对路径，网络引用按 URL。
+
+    台账存工作区相对路径（``files/x.md``），采集器常给绝对路径
+    （``/apps/ai/coapis/workspaces/u/files/x.md``）——同一份文件两种写法必须
+    落到同一个键上，否则合流会显示成两条。
+    """
+    raw = (row.get("path") or "").strip().replace("\\", "/")
+    if raw:
+        low = raw.lower()
+        marker = None
+        for seg in ("/files/", "/media/", "/output/", "/temp/", "/downloads/"):
+            pos = low.rfind(seg)
+            if pos != -1:
+                marker = pos + 1
+                break
+        tail = low[marker:] if marker else low
+        if tail.startswith("./"):
+            tail = tail[2:]
+        return "file:" + tail.rstrip("/")
+    url = (row.get("url") or "").strip()
+    return "url:" + url.lower() if url else ""
+
+
 
 def _evolution_collect_text(msg: Any, buf: list[str]) -> None:
     """Append text content from a message to a buffer list.
@@ -922,8 +1010,10 @@ class AgentRunner(Runner):
                             chat.id, effective_user_id
                         )
                     )
-                    _turn_res = _turn_resources_from_ledger(
-                        chat.id, effective_user_id,
+                    _turn_res = _finalize_turn_resources(
+                        chat.id,
+                        effective_user_id,
+                        getattr(chat, "user_id", ""),
                     )
                     _kb_cites = _enrich_citations_ctx.get() or []
                     from ...token_usage.turn_usage import (
@@ -997,8 +1087,10 @@ class AgentRunner(Runner):
                                 chat.id, effective_user_id
                             )
                         )
-                        _fb_res = _turn_resources_from_ledger(
-                            chat.id, effective_user_id,
+                        _fb_res = _finalize_turn_resources(
+                            chat.id,
+                            effective_user_id,
+                            getattr(chat, "user_id", ""),
                         )
                         _fb_cites = _enrich_citations_ctx.get() or []
                         _fb_md = {}
@@ -1338,7 +1430,7 @@ class AgentRunner(Runner):
                         asyncio.create_task(
                             _session_backfill_resources_task(_cid, _uname)
                         )
-                        _turn_res = _turn_resources_from_ledger(_cid, _uname) or _take_turn_resources()
+                        _turn_res = _finalize_turn_resources(_cid, _uname)
                         if _turn_res:
                             event.resources = _turn_res
                     except Exception:
@@ -1385,7 +1477,7 @@ class AgentRunner(Runner):
                     asyncio.create_task(
                         _session_backfill_resources_task(_cid, _uname)
                     )
-                    _turn_res = _turn_resources_from_ledger(_cid, _uname) or _take_turn_resources()
+                    _turn_res = _finalize_turn_resources(_cid, _uname)
                     if _turn_res:
                         _fallback.resources = _turn_res
                 except Exception:
