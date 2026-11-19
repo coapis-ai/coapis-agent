@@ -13,7 +13,7 @@ export interface ScenePickerProps {
   scenes: SceneConfig[];
   /** 点击卡片：进入该场景 */
   onSelect: (scene: SceneConfig) => void;
-  /** 当前场景 id（高亮 + 「当前」标记，并置顶） */
+  /** 当前场景 id（高亮 + 「当前」标记，不参与排序） */
   currentSceneId?: string;
   /** 按分类标签过滤（工作台 URL 参数），'all' 表示不过滤 */
   categoryFilterId?: string;
@@ -79,15 +79,11 @@ const ScenePicker: React.FC<ScenePickerProps> = ({
       return true;
     });
 
-    // 当前场景置顶，其余按使用热度降序
-    list.sort((a, b) => {
-      if (a.id === currentSceneId) return -1;
-      if (b.id === currentSceneId) return 1;
-      return (b.usage_count || 0) - (a.usage_count || 0);
-    });
+    // 位置固定：保持后端返回的顺序（按创建先后），不按使用热度、也不把当前场景置顶。
+    // 旧实现会把当前场景排第一并按 usage_count 降序，点击任意场景后它会跳到列表首位。
 
     return list;
-  }, [scenes, categoryFilterId, searchText, selectedTag, currentSceneId]);
+  }, [scenes, categoryFilterId, searchText, selectedTag]);
 
   const gridCols = cols ?? { xs: 24, sm: 12, md: 8, lg: 6 };
 

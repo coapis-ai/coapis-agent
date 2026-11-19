@@ -138,7 +138,10 @@ class SqliteSceneRepository:
             params.append(category)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
-        sql += " ORDER BY usage_count DESC, created_at DESC"
+        # 场景列表位置固定：按创建先后 + scene_id 兜底排序。
+        # 旧实现按 usage_count 降序，用户每点一次场景计数就 +1，列表位置随之漂移
+        # （刚点的场景会跳到第一位）。usage_count 仍保留，只用于卡片上的热度展示。
+        sql += " ORDER BY created_at ASC, scene_id ASC"
         if limit is not None:
             sql += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
