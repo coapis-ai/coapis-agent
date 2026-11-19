@@ -3356,5 +3356,16 @@
     "judged": "判成",
     "codedRatio": "弃权带码率",
     "noAbstain": "窗口内无弃权记录"
+  },
+  "planBoard": {
+    "title": "执行计划",
+    "unnamed": "未命名计划",
+    "inProgress": "进行中",
+    "completed": "已完成",
+    "abandoned": "已放弃",
+    "stepProgress": "{{done}}/{{total}}",
+    "result": "结果",
+    "goal": "目标",
+    "resultMissing": "结果待补"
   }
 }

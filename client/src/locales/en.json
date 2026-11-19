@@ -3330,5 +3330,16 @@
     "judged": "Model calls",
     "codedRatio": "Abstain coded ratio",
     "noAbstain": "No abstain records in window"
+  },
+  "planBoard": {
+    "title": "Plan",
+    "unnamed": "Untitled plan",
+    "inProgress": "In progress",
+    "completed": "Completed",
+    "abandoned": "Abandoned",
+    "stepProgress": "{{done}}/{{total}}",
+    "result": "Result",
+    "goal": "Goal",
+    "resultMissing": "Result missing"
   }
 }

@@ -33,6 +33,8 @@ from fastapi import APIRouter, HTTPException, Query, Body
 from fastapi.requests import Request
 from fastapi.responses import StreamingResponse
 
+from coapis.plan.schemas import outcome_pending as _outcome_pending
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["plan"])
@@ -105,7 +107,7 @@ def _normalize_plan_data(raw: dict) -> dict:
     subtasks = []
     for st in raw.get("subtasks", []):
         if isinstance(st, dict):
-            subtasks.append({
+            entry = {
                 "name": st.get("name", ""),
                 "description": st.get("description", ""),
                 "expected_outcome": st.get("expected_outcome", ""),
@@ -113,7 +115,17 @@ def _normalize_plan_data(raw: dict) -> dict:
                 "state": st.get("state", "todo"),
                 "created_at": st.get("created_at"),
                 "finished_at": st.get("finished_at"),
-            })
+            }
+            # Same ruler as plan_to_response, so a snapshot persisted before
+            # this field existed still reports "结果待补" truthfully.
+            entry["outcome_pending"] = bool(st.get("outcome_pending")) or (
+                _outcome_pending(
+                    entry["expected_outcome"],
+                    entry["outcome"],
+                    entry["state"],
+                )
+            )
+            subtasks.append(entry)
     return {
         "id": raw.get("id", ""),
         "name": raw.get("name", ""),
@@ -252,6 +264,7 @@ async def get_current_plan(
     agent_id = _resolve_agent_id(request, username)
 
     plan_data = None
+    workspace = None
 
     # 1. Try live broadcast cache
     try:
@@ -311,7 +324,20 @@ async def get_current_plan(
             "hits": scope.hits,
             "denials": scope.denials,
         }
+    # Plan history needs the session store even when the live plan came from
+    # the broadcast cache, so resolve the workspace once here.
+    if workspace is None and session_id and manager:
+        try:
+            workspace = _get_workspace(manager, agent_id, username)
+        except Exception:  # pragma: no cover - defensive
+            workspace = None
+
+    plans = _build_plan_history(
+        plan_data,
+        await _get_finished_plans(workspace, session_id, username),
+    )
     return {
+        "plans": plans,
         "plan": plan_data,
         "session_id": session_id,
         "scope": scope_view,
@@ -324,42 +350,98 @@ async def get_current_plan(
     }
 
 
+async def _get_finished_plans(
+    workspace,
+    session_id: str,
+    username: str,
+) -> list[dict]:
+    """Every persisted plan of this session, oldest first.
+
+    2026-11-19 (计划执行能力优化) — 一个会话会跑很多次计划，此前只回最后一份，
+    用户刷新后看不见"这个会话到底做过哪几件事"。新键 ``coapis_finished_plans``
+    存列表；老会话只有单键 ``coapis_finished_plan``，读到时同样成列表。
+    """
+    if workspace is None:
+        return []
+    # ``Workspace`` exposes the store as ``runner.session``; keep the legacy
+    # ``session`` attribute as a fallback for minimal workspace stubs.
+    session_store = getattr(getattr(workspace, "runner", None), "session", None)
+    if session_store is None:
+        session_store = getattr(workspace, "session", None)
+    if session_store is None or not hasattr(session_store, "get_session_state_dict"):
+        return []
+    try:
+        states = await session_store.get_session_state_dict(
+            session_id=session_id,
+            user_id=username or "default",
+            allow_not_exist=True,
+        )
+        agent_state = states.get("agent") or {}
+        raw = agent_state.get("coapis_finished_plans")
+        if not isinstance(raw, list) or not raw:
+            legacy = agent_state.get("coapis_finished_plan")
+            raw = [legacy] if isinstance(legacy, dict) and legacy else []
+        plans = []
+        for item in raw:
+            if not isinstance(item, dict) or not item:
+                continue
+            entry = _normalize_plan_data(dict(item))
+            entry["finished"] = True
+            plans.append(entry)
+        return plans
+    except Exception:
+        logger.debug(
+            "Failed to read persisted plan history for session=%s",
+            session_id,
+            exc_info=True,
+        )
+        return []
+
+
 async def _get_finished_plan(
     workspace,
     session_id: str,
     username: str,
 ) -> dict | None:
-    """Read the persisted snapshot of a plan whose lifecycle has ended.
+    """Read the newest persisted snapshot (kept for older callers)."""
+    plans = await _get_finished_plans(workspace, session_id, username)
+    if not plans:
+        return None
+    return plans[-1]
 
-    ``finish_plan`` clears ``current_plan`` so ``agent.plan_notebook`` holds
-    nothing once a plan is done. The runtime stores the final snapshot under
-    ``agent.coapis_finished_plan`` so a refresh still shows what was planned.
+
+def _build_plan_history(
+    current: Optional[dict],
+    finished: list[dict],
+) -> list[dict]:
+    """One ordered view of everything this session has planned.
+
+    Chronological, oldest first, de-duplicated by plan id; the live plan is
+    flagged ``finished=False`` so the UI can pin it on top while still being
+    able to show everything underneath.
     """
-    if workspace is None or not session_id:
-        return None
-    session_store = getattr(getattr(workspace, "runner", None), "session", None)
-    if not session_store or not hasattr(session_store, "get_session_state_dict"):
-        return None
-    try:
-        states = await session_store.get_session_state_dict(
-            session_id=session_id,
-            user_id=username,
-            allow_not_exist=True,
-        )
-    except Exception:
-        logger.warning(
-            "Failed to read finished plan from session state",
-            exc_info=True,
-        )
-        return None
-    raw = (states.get("agent") or {}).get("coapis_finished_plan")
-    if isinstance(raw, dict) and raw:
-        data = _normalize_plan_data(raw)
-        if data is not None:
-            data["finished"] = True
-            return data
-    return None
-
+    history: list[dict] = []
+    seen: set = set()
+    for item in finished:
+        key = item.get("id") or item.get("name")
+        if key in seen:
+            continue
+        seen.add(key)
+        history.append(item)
+    if current:
+        key = current.get("id") or current.get("name")
+        if key in seen:
+            for idx, item in enumerate(history):
+                if (item.get("id") or item.get("name")) == key:
+                    entry = dict(current)
+                    entry["finished"] = False
+                    history[idx] = entry
+                    break
+        else:
+            entry = dict(current)
+            entry.setdefault("finished", False)
+            history.append(entry)
+    return history
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,11 @@ export interface SubTaskResponse {
   state: "todo" | "in_progress" | "done" | "abandoned";
   created_at: string | null;
   finished_at: string | null;
+  /**
+   * 步骤已结束但没有记录可用结果（空、或只写 done/完成 这类占位）。
+   * UI 显示「结果待补」而不是绿勾，避免"看起来做完了、其实什么也没有"。
+   */
+  outcome_pending?: boolean;
 }
 
 export interface PlanStateResponse {
@@ -34,7 +39,13 @@ export interface PlanStateResponse {
 
 /** Envelope returned by ``GET /plan/current``. */
 export interface PlanQueryResponse {
+  /** 本会话最新的计划；从未计划过时为 null。 */
   plan: PlanStateResponse | null;
+  /**
+   * 本会话的全部计划（最旧在前）。一个会话会跑很多次计划，只给最新一份时
+   * 用户刷新后看不见"到底做过哪几件事"，看板靠这个字段还原完整历史。
+   */
+  plans?: PlanStateResponse[];
   session_id?: string | null;
   usage?: Record<string, unknown>;
   scope?: PlanScopeView | null;
@@ -83,12 +94,43 @@ export function unwrapPlan(
   return body as PlanStateResponse;
 }
 
+/**
+ * 把 /plan/current 的返回体归一成"本会话计划列表"（最旧在前）。
+ *
+ * 2026-11-19 (计划执行能力优化) — 一个会话会跑很多次计划。后端只回最新一份时，
+ * 用户刷新后看不见"这个会话到底做过哪几件事"。这里统一兼容三种后端形态：
+ * 只回 plans / 只回 plan / 两者都给，缺字段时退化成单计划而不是白屏。
+ */
+export function resolvePlanHistory(
+  body: PlanQueryResponse | PlanStateResponse | null | undefined,
+): PlanStateResponse[] {
+  if (!body || typeof body !== "object") return [];
+  if (!("plan" in body)) {
+    const single = body as PlanStateResponse;
+    if (!("id" in single) && !("name" in single)) return [];
+    return [single];
+  }
+  const query = body as PlanQueryResponse;
+  const history = (Array.isArray(query.plans) ? query.plans : []).filter(Boolean);
+  const latest = query.plan ?? null;
+  if (history.length === 0) {
+    return latest ? [latest] : [];
+  }
+  if (latest && !history.some((p) => p?.id === latest.id)) {
+    return [...history, latest];
+  }
+  return history as PlanStateResponse[];
+}
+
+
 export const planApi = {
   getCurrentPlanWithScope: async (
     sessionId?: string,
     agentId?: string,
   ): Promise<{
     plan: PlanStateResponse | null;
+    /** 本会话全部计划（最旧在前），看板的完整数据源。 */
+    plans: PlanStateResponse[];
     scope: PlanScopeView | null;
   }> => {
     const params = new URLSearchParams();
@@ -98,7 +140,11 @@ export const planApi = {
     const res = await request<PlanQueryResponse>(
       `/plan/current${qs ? "?" + qs : ""}`,
     );
-    return { plan: unwrapPlan(res), scope: res.scope ?? null };
+    return {
+      plan: unwrapPlan(res),
+      plans: resolvePlanHistory(res),
+      scope: res.scope ?? null,
+    };
   },
 
   confirmPlan: (body: { session_id: string; plan_title?: string }) =>

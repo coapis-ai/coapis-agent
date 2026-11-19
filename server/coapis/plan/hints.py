@@ -113,16 +113,25 @@ def should_skip_auto_continue(  # pylint: disable=protected-access
     return False
 
 
+def _clip(text: str, limit: int) -> str:
+    text = (text or "").strip().replace("\n", " ")
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
 def _compact_plan_text(plan: "Plan") -> str:
     """Build a compact representation of *plan*.
 
-    Done/abandoned subtasks show only status + name (no outcomes).
-    In-progress subtask shows full details.  Todo subtasks show truncated
-    description.
+    2026-11-19 (计划执行能力优化) — 这一版同时服务于"结果必须可见"：
+
+    * ``todo`` 步骤带 ``Expected``，模型在开工前就知道"做完"的标准是什么；
+    * ``done`` 步骤带 ``Outcome``（模型此前**从未**在计划里看到产出字段，
+      自然不会去填它——这是"步骤显示完成、结果什么都没有"的上游根因）；
+    * 产出缺失时明写 ``Outcome: (missing)``，把缺口暴露在模型眼前，
+      而不是静默省略。
     """
-    desc = plan.description
-    if len(desc) > _PLAN_DESC_LIMIT:
-        desc = desc[: _PLAN_DESC_LIMIT - 3] + "..."
+    desc = _clip(plan.description, _PLAN_DESC_LIMIT)
 
     lines = [
         f"# {plan.name}",
@@ -133,16 +142,21 @@ def _compact_plan_text(plan: "Plan") -> str:
     for i, st in enumerate(plan.subtasks):
         if st.state in ("done", "abandoned"):
             lines.append(f"  {i}. [{st.state}] {st.name}")
+            outcome = _clip(st.outcome, _DESC_LIMIT)
+            if outcome:
+                lines.append(f"     Outcome: {outcome}")
+            else:
+                lines.append("     Outcome: (missing - state the concrete result)")
         elif st.state == "in_progress":
             lines.append(f"  {i}. [in_progress] {st.name}")
-            lines.append(f"     Desc: {st.description}")
-            lines.append(f"     Expected: {st.expected_outcome}")
+            lines.append(f"     Desc: {_clip(st.description, _DESC_LIMIT)}")
+            lines.append(f"     Expected: {_clip(st.expected_outcome, _DESC_LIMIT)}")
         else:
-            d = st.description
-            if len(d) > _DESC_LIMIT:
-                d = d[: _DESC_LIMIT - 3] + "..."
             lines.append(f"  {i}. [todo] {st.name}")
-            lines.append(f"     Desc: {d}")
+            lines.append(f"     Desc: {_clip(st.description, _DESC_LIMIT)}")
+            expected = _clip(st.expected_outcome, _DESC_LIMIT)
+            if expected:
+                lines.append(f"     Expected: {expected}")
     return "\n".join(lines)
 
 
@@ -200,10 +214,14 @@ if _HAS_DEFAULT_HINT:
             + "Subtask {subtask_idx} ('{subtask_name}') is in_progress.\n"
             "Execute this subtask:\n"
             "1. Each turn: short text + at least one tool call.\n"
-            "2. When objective is met, call 'finish_subtask' with a concise "
-            "outcome.\n"
+            "2. When objective is met, call 'finish_subtask'. Its outcome is "
+            "the RESULT the user will read: state the concrete deliverable "
+            "(file path, command output, measured number or conclusion) in "
+            "the user's language, in one sentence. Never leave it empty and "
+            "never write a placeholder such as 'done' or 'completed'.\n"
             "3. If stuck after a few tries, call 'finish_subtask' with a "
-            "partial outcome anyway.\n"
+            "partial outcome that says what was achieved and what is still "
+            "missing.\n"
             "CRITICAL: Do NOT reply with text only — the ReAct loop stops "
             "without a tool call.\n"
         )
@@ -222,7 +240,9 @@ if _HAS_DEFAULT_HINT:
             "The current plan:\n```\n{plan}\n```\n"
             + _LANG_BLOCK
             + "All subtasks are complete. Call 'finish_plan' with "
-            "state='done' and a concise outcome summary.\n"
+            "state='done' and an outcome summary that reports, in the user's "
+            "language: what was delivered (files, links, numbers) and which "
+            "step, if any, ended without a recorded result.\n"
             "CRITICAL: Include a 'finish_plan' tool call.\n"
         )
 

@@ -2150,16 +2150,33 @@ class AgentRunner(Runner):
 
                         return finished_plan_snapshot(nb)
 
-                    def _persist_finished_plan(snapshot):
-                        """Durable copy of a finished plan snapshot.
+                    def _finished_plan_snapshots(nb):
+                        """All finished plans this notebook can still see."""
+                        try:
+                            from coapis.plan.lifecycle import (
+                                finished_plan_snapshots,
+                            )
 
-                        The runner does not save ``plan_notebook`` after the
-                        reply, so without this a completed plan would only be
-                        readable while the process lives. It is stored under
-                        ``agent.coapis_finished_plan``; ``load_session_state``
-                        uses ``strict=False`` and ignores the unknown key.
+                            return finished_plan_snapshots(nb)
+                        except Exception:
+                            logger.warning(
+                                "Finished-plan snapshot failed",
+                                exc_info=True,
+                            )
+                            return []
+
+                    def _persist_finished_plans(snapshots):
+                        """Durable copy of every finished plan of this chat.
+
+                        A session plans repeatedly; keeping only the last
+                        snapshot made earlier plans vanish from the UI, which
+                        is exactly the complaint "刷新后看不到做过的计划".
+                        The merged list lives in ``agent.coapis_finished_plans``
+                        while ``agent.coapis_finished_plan`` keeps the newest
+                        entry for older clients. ``load_session_state`` runs
+                        with ``strict=False`` and ignores both unknown keys.
                         """
-                        if snapshot is None or chat is None:
+                        if not snapshots or chat is None:
                             return
                         try:
                             loop = asyncio.get_running_loop()
@@ -2168,16 +2185,45 @@ class AgentRunner(Runner):
 
                         async def _write():
                             try:
+                                from coapis.plan.lifecycle import (
+                                    FINISHED_PLAN_KEY,
+                                    FINISHED_PLANS_KEY,
+                                    merge_finished_plan_snapshots,
+                                )
+
+                                states = await self.session.get_session_state_dict(
+                                    session_id=chat.id,
+                                    user_id=user_id,
+                                )
+                                agent_state = states.get("agent") or {}
+                                existing = agent_state.get(FINISHED_PLANS_KEY)
+                                if not existing:
+                                    legacy = agent_state.get(FINISHED_PLAN_KEY)
+                                    if isinstance(legacy, dict) and legacy:
+                                        existing = [legacy]
+                                merged = merge_finished_plan_snapshots(
+                                    existing,
+                                    [s for s in snapshots if s.get("finished")],
+                                )
+                                if not merged:
+                                    return
                                 await self.session.update_session_state(
                                     session_id=chat.id,
-                                    key="agent.coapis_finished_plan",
-                                    value=snapshot,
+                                    key=f"agent.{FINISHED_PLANS_KEY}",
+                                    value=merged,
+                                    user_id=user_id,
+                                    create_if_not_exist=True,
+                                )
+                                await self.session.update_session_state(
+                                    session_id=chat.id,
+                                    key=f"agent.{FINISHED_PLAN_KEY}",
+                                    value=merged[-1],
                                     user_id=user_id,
                                     create_if_not_exist=True,
                                 )
                             except Exception:
                                 logger.warning(
-                                    "Failed to persist finished plan snapshot",
+                                    "Failed to persist finished plans",
                                     exc_info=True,
                                 )
 
@@ -2188,7 +2234,6 @@ class AgentRunner(Runner):
                                 "Finished-plan persist task skipped",
                                 exc_info=True,
                             )
-
                     def _on_plan_change(  # pylint: disable=protected-access
                         nb,
                         plan,
@@ -2209,7 +2254,10 @@ class AgentRunner(Runner):
                                 nb._plan_recently_finished = True
                             nb._qp_prev_plan_id = None
                             plan_data = _finished_plan_snapshot(nb)
-                            _persist_finished_plan(plan_data)
+                        # 每次计划变化都落盘。模型若没调用 finish_plan，
+                        # 这是刷新后仍能看见这份计划的唯一机会；落盘按
+                        # ChatSpec id 走，保证会话之间互不串。
+                        _persist_finished_plans(_finished_plan_snapshots(nb))
                         nb._qp_had_plan = plan is not None
 
                         payload = {

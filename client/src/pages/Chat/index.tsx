@@ -55,6 +55,8 @@ import { useVendorLabels } from "./components/vendorLabels";
 // 2026-11-13 拍板：知识库引用独立卡下线注册（组件文件 components/CoApisKbCitations
 // 保留未删）。引用统一并入「本轮资源」，与产出资源共用同一预览窗。
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
+// 计划看板：计划主线常驻可见（2026-11-19 计划执行能力优化）。
+import ChatPlanBoard from "./components/ChatPlanBoard";
 import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
 import {
   useChatResourceLedger,
@@ -2743,6 +2745,11 @@ export default function ChatPage() {
               />
             </ChatErrorBoundary>
           </div>
+          {/* 执行计划看板（2026-11-19 计划执行能力优化）：工具细节可以折叠，
+              但“做哪几件事、到哪一步、结果是什么”必须一直看得见。
+              数据源 = GET /plan/current 全量历史 + /plan/stream 实时推进。 */}
+          <ChatPlanBoard chatId={chatId} />
+
           {/* v23 · 右侧资源条整列下线（2026-11-09 拍板）：它与左栏选中会话后的展开面
               板、气泡末尾的本轮资源条三层同义——同一接口、同一作用域、同一份缓存，上半
               区（scope=session，跨聊天汇总）已确认砍掉。常驻 200px 换来的还有「栏盖住

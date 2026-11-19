@@ -23,6 +23,47 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+_MISSING_OUTCOME_WORDS = {
+    "done",
+    "completed",
+    "finish",
+    "finished",
+    "ok",
+    "success",
+    "成功",
+    "完成",
+    "已完成",
+    "好了",
+    "搞定",
+    "无",
+    "-",
+    "n/a",
+    "na",
+}
+
+
+def outcome_pending(expected: str | None, outcome: str | None, state: str) -> bool:
+    """True when a step ended without telling the user what came out of it.
+
+    2026-11-19 (计划执行能力优化) — 「步骤显示完成、结果什么都没有」是用户能
+    直接看见的问题：模型常把 ``finish_subtask`` 的 outcome 留空或写成
+    ``done``。这类步骤不能算真正交付，UI 要标成「结果待补」而不是绿勾，
+    模型侧也才能在计划文本里看到缺口（见 ``plan.hints``）。
+    """
+    if state not in ("done", "abandoned"):
+        return False
+    text = (outcome or "").strip()
+    if not text:
+        return True
+    if text.lower() in _MISSING_OUTCOME_WORDS:
+        return True
+    # 只复述承诺、没有新信息的产出同样不算交付
+    promised = (expected or "").strip()
+    if promised and text == promised:
+        return True
+    return False
+
+
 class SubTaskResponse(BaseModel):
     """A single subtask in the plan response."""
 
@@ -33,6 +74,8 @@ class SubTaskResponse(BaseModel):
     state: Literal["todo", "in_progress", "done", "abandoned"] = "todo"
     created_at: str | None = None
     finished_at: str | None = None
+    #: 已完成但没记录可用结果 —— UI 显示「结果待补」而非绿勾。
+    outcome_pending: bool = False
 
 
 class PlanStateResponse(BaseModel):
@@ -70,6 +113,11 @@ def plan_to_response(plan) -> PlanStateResponse:
             state=st.state,
             created_at=st.created_at,
             finished_at=st.finished_at,
+            outcome_pending=outcome_pending(
+                st.expected_outcome,
+                st.outcome,
+                st.state,
+            ),
         )
         for st in plan.subtasks
     ]

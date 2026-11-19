@@ -1,0 +1,267 @@
+/* ChatPlanBoard — 对话内执行计划看板
+ * 2026-11-19 计划执行能力优化：计划主线必须常驻可见。
+ * 令牌一律带字面量兜底，避免主题变量缺失时整块不可读。
+ */
+
+.board {
+  margin: 0 16px 8px;
+  border: 1px solid var(--colorBorder, rgba(0, 0, 0, 0.1));
+  border-radius: 10px;
+  background: var(--colorBgBase, #fff);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--colorText, rgba(0, 0, 0, 0.88));
+}
+
+.title {
+  flex: none;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.planName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--colorTextSecondary, rgba(0, 0, 0, 0.6));
+}
+
+.chipLive,
+.chipDone {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.chipLive {
+  color: var(--colorPrimary, #1677ff);
+  background: var(--colorPrimaryBg, rgba(22, 119, 255, 0.1));
+}
+
+.chipDone {
+  color: var(--colorSuccess, #52c41a);
+  background: var(--colorSuccessBg, rgba(82, 196, 26, 0.1));
+}
+
+.progress {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--colorTextTertiary, rgba(0, 0, 0, 0.45));
+}
+
+.caretDown,
+.caretUp {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--colorTextTertiary, rgba(0, 0, 0, 0.45));
+  border-bottom: 1.5px solid var(--colorTextTertiary, rgba(0, 0, 0, 0.45));
+  transform: rotate(45deg);
+}
+
+.caretUp {
+  transform: rotate(-135deg);
+}
+
+.body {
+  padding: 0 12px 10px;
+}
+
+.bar {
+  height: 4px;
+  margin-bottom: 8px;
+  border-radius: 2px;
+  background: var(--colorFillSecondary, rgba(0, 0, 0, 0.06));
+  overflow: hidden;
+}
+
+.barFill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--colorPrimary, #1677ff);
+  transition: width 0.25s ease;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+
+.step {
+  display: flex;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px dashed var(--colorBorderSecondary, rgba(0, 0, 0, 0.06));
+}
+
+.step:first-child {
+  border-top: none;
+}
+
+.markerSlot {
+  flex: none;
+  width: 16px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.markerDone,
+.markerWarn,
+.markerSkip {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.markerDone {
+  background: var(--colorSuccess, #52c41a);
+}
+
+.markerWarn {
+  background: var(--colorWarning, #faad14);
+}
+
+.markerSkip {
+  background: var(--colorFill, rgba(0, 0, 0, 0.15));
+  color: var(--colorTextSecondary, rgba(0, 0, 0, 0.6));
+}
+
+.markerRun {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--colorPrimary, #1677ff);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.markerTodo {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--colorBorder, rgba(0, 0, 0, 0.2));
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.stepBody {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.stepName {
+  color: var(--colorText, rgba(0, 0, 0, 0.88));
+  word-break: break-word;
+}
+
+.stepLabel {
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--colorTextSecondary, rgba(0, 0, 0, 0.6));
+  background: var(--colorFillTertiary, rgba(0, 0, 0, 0.04));
+}
+
+.stepResult {
+  margin-top: 3px;
+  color: var(--colorText, rgba(0, 0, 0, 0.8));
+  word-break: break-word;
+}
+
+.stepGoal {
+  margin-top: 3px;
+  color: var(--colorTextSecondary, rgba(0, 0, 0, 0.6));
+  word-break: break-word;
+}
+
+.stepMissing {
+  margin-top: 3px;
+  color: var(--colorWarning, #faad14);
+  font-size: 12px;
+}
+
+.history {
+  border-top: 1px solid var(--colorBorderSecondary, rgba(0, 0, 0, 0.06));
+  padding: 4px 12px 8px;
+}
+
+.historyItem {
+  margin-top: 2px;
+}
+
+.historyHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  color: var(--colorTextSecondary, rgba(0, 0, 0, 0.6));
+}
+
+.historyCaret {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.historyHead[aria-expanded="true"] .historyCaret {
+  transform: rotate(45deg);
+}
+
+.historyName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyMeta {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}

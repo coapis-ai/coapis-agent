@@ -2727,5 +2727,16 @@
     "judged": "Вынесено решений",
     "codedRatio": "Доля отказов с кодом",
     "noAbstain": "В окне нет отказов"
+  },
+  "planBoard": {
+    "title": "План",
+    "unnamed": "План без названия",
+    "inProgress": "Выполняется",
+    "completed": "Завершено",
+    "abandoned": "Прекращено",
+    "stepProgress": "{{done}}/{{total}}",
+    "result": "Результат",
+    "goal": "Цель",
+    "resultMissing": "Результат не записан"
   }
 }

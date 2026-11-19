@@ -2712,5 +2712,16 @@
     "judged": "判定成功",
     "codedRatio": "棄権のコード付与率",
     "noAbstain": "期間中に棄権記録なし"
+  },
+  "planBoard": {
+    "title": "実行計画",
+    "unnamed": "名称未設定の計画",
+    "inProgress": "実行中",
+    "completed": "完了",
+    "abandoned": "中止",
+    "stepProgress": "{{done}}/{{total}}",
+    "result": "結果",
+    "goal": "目標",
+    "resultMissing": "結果未記録"
   }
 }
