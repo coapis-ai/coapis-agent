@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """自检验收单测（v27 · 拍板 D3）。
 
-锁四件事：① 自评只在判官不在岗时由调用方发射（本模块自己只管熄火条件）；
+锁四件事：① 自评只在决策模型不在岗时由调用方发射（本模块自己只管熄火条件）；
 ② 判不出就不写台账（垃圾自评比不写更坏——它会回填出假档位）；
 ③ 写台账必带 source=selfcheck 且 outcome 与 verdict 同值（看板要靠这一列把
-「自己给自己打分」与「判官外部验收」分开统计）；④ 任何异常都不许逃出模块。
+「自己给自己打分」与「决策模型外部验收」分开统计）；④ 任何异常都不许逃出模块。
 """
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def test_parse_rejects_bad_shape(raw):
 def test_verdicts_stay_inside_the_acceptance_vocabulary():
     """自评不许造第四种说法，也不许用 abstain 装死。
 
-    验收口径里有 abstain（判官没判就留空）；自评不存在「不判」——要么给出
+    验收口径里有 abstain（决策模型没判就留空）；自评不存在「不判」——要么给出
     结论，要么整条不写台账。把 abstain 写进自评，等于给台账灌一行假档位。
     """
     assert set(sc.VERDICTS) <= set(acc.VERDICTS)

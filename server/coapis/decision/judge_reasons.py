@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""判官弃权原因码 —— 台账里"为什么没判"的唯一真源（收尾方案 v1 §6.2 · B3）。
+"""决策模型弃权原因码 —— 台账里"为什么没判"的唯一真源（收尾方案 v1 §6.2 · B3）。
 
-为什么要有这个文件：判官不给结论的时刻比给结论的多，台账必须说清**为什么**。
+为什么要有这个文件：决策模型不给结论的时刻比给结论的多，台账必须说清**为什么**。
 此前原因是一句自由文本，写在 gateway 的十七个出口里，各写各的字面量：
-"未配置判断模型（判官槽位空）"、"熔断中（…）"、"判断超时（2.6s）"……
+"未配置决策模型（决策模型槽位空）"、"熔断中（…）"、"判断超时（2.6s）"……
 看板上想按原因分桶，只能对中文句子做 LIKE——一句话改字，分桶就断档；
 同一件事（槽位空）在 L0 前置门、_run_llm、后台补判三处措辞还各不相同。
 
 本模块只做两件事：
-1. 码表：每个"判官没意见"的原因一个稳定码 + 一句人话。码是机读的，
+1. 码表：每个"决策模型没意见"的原因一个稳定码 + 一句人话。码是机读的，
    句子是给人看的，两者绑在一起，句子改了码不变。
 2. 装配：``format_reason(code, detail)`` 出 ``[码] 人话`` 形状，
    直接进台账 ``reason`` 列（该列是文本列，没有独立的 payload 列——
@@ -16,7 +16,7 @@
    ``_LEDGER_COLUMNS`` 里没有 payload，加列要走迁移，属 B3 额外范围）。
    分桶按 ``reason LIKE '[码]%'`` 聚合。
 
-红线：本模块纯函数、无状态、无 IO——它是判官各出口的一把尺子，
+红线：本模块纯函数、无状态、无 IO——它是决策模型各出口的一把尺子，
 不是又一个判断层。
 """
 from __future__ import annotations
@@ -44,23 +44,23 @@ USAGE_MISSING = "usage_missing"     # 真判成功但 usage 取回 0
 
 #: 码 → 人话。台账读侧与看板 tooltip 都用它，不再各抄一份。
 REASON_TEXT: dict[str, str] = {
-    NO_SLOT: "未配置判断模型（判官槽位空）",
-    SLOT_MODEL_INCAPABLE: "判官模型不具备判断能力",
-    PROVIDER_MISSING: "判官提供商不存在",
-    NOT_CHAT: "非聊天模型不能当判官",
+    NO_SLOT: "未配置决策模型（决策模型槽位空）",
+    SLOT_MODEL_INCAPABLE: "决策模型不具备判断能力",
+    PROVIDER_MISSING: "决策模型提供商不存在",
+    NOT_CHAT: "非聊天模型不能当决策模型",
     BREAKER_OPEN: "熔断中",
     RATE_LIMITED: "上游限流",
     BUDGET_EXHAUSTED: "本轮判断预算用尽",
-    QUOTA_EXHAUSTED: "当日判官配额用尽（在途过多或 token 到顶）",
+    QUOTA_EXHAUSTED: "当日决策模型配额用尽（在途过多或 token 到顶）",
     RULE_DECIDED: "规则已定论，未问模型",
-    DISABLED: "判官开关关闭",
-    TIMEOUT_SOFT: "主链等到软阈值先走（判官仍在后台跑）",
+    DISABLED: "决策模型开关关闭",
+    TIMEOUT_SOFT: "主链等到软阈值先走（决策模型仍在后台跑）",
     TIMEOUT_HARD: "判断超时（硬阈值）",
     TRANSPORT: "判断调用失败",
-    PARSE_FAIL: "判官回复解析不出结论",
-    ABSTAIN: "判官弃权",
+    PARSE_FAIL: "决策模型回复解析不出结论",
+    ABSTAIN: "决策模型弃权",
     CANCELLED: "判断任务被取消",
-    USAGE_MISSING: "判官用时未取到用量",
+    USAGE_MISSING: "决策模型用时未取到用量",
 }
 
 ALL_CODES = frozenset(REASON_TEXT)
@@ -73,7 +73,7 @@ def format_reason(code: str, detail: str = "") -> str:
     读侧会看到它，比静默降级成空串好查。整串截到 500（列约定）。
     """
     code = str(code or "").strip()
-    text = REASON_TEXT.get(code, "判官未给出结论")
+    text = REASON_TEXT.get(code, "决策模型未给出结论")
     detail = str(detail or "").strip()
     out = f"[{code or 'unknown'}] {text}"
     if detail:
@@ -84,7 +84,7 @@ def format_reason(code: str, detail: str = "") -> str:
 def parse_code(reason: str) -> str:
     """从台账 ``reason`` 文本取回码；非 ``[码]`` 形状返回空串。
 
-    读侧分桶唯一入口：看板统计"判官为什么沉默"只认这个函数，
+    读侧分桶唯一入口：看板统计"决策模型为什么沉默"只认这个函数，
     禁止再对中文句子做字符串匹配。
     """
     raw = str(reason or "")

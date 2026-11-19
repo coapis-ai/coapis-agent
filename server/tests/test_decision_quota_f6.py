@@ -1,4 +1,4 @@
-"""v20 F6 判官配额护栏测试。
+"""v20 F6 决策模型配额护栏测试。
 
 覆盖三件事，都是本轮实测逼出来的：
   1. 默认值 0/0 时护栏必须完全沉默（既有部署行为逐字不变）；
@@ -17,7 +17,7 @@ from coapis.decision.gateway import LAYER_QUOTA, JudgeGateway
 
 
 class _Cfg:
-    """最小判官配置：只给护栏用到的两个旋钮。"""
+    """最小决策模型配置：只给护栏用到的两个旋钮。"""
 
     judge_max_in_flight = 0
     judge_daily_token_budget = 0
@@ -75,7 +75,7 @@ def test_quota_note_carries_live_numbers(gateway):
 
 
 def test_daily_tokens_falls_back_on_db_failure(gateway, monkeypatch):
-    """台账读不到时按放行处理：不能因为一次查询失败让判官链整条停摆。"""
+    """台账读不到时按放行处理：不能因为一次查询失败让决策模型链整条停摆。"""
 
     def boom():
         raise RuntimeError("db down")

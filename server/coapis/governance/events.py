@@ -5,7 +5,7 @@
 
 - ``audit.jsonl`` —— 工具调用 / 工具闸拦截 / 审批决策 / 沙箱路径与命令检查 /
   配置变更（``agents/security/audit_logger.py`` 的哈希链）；
-- ``decision_events`` —— 判官六类插手点；
+- ``decision_events`` —— 决策模型六类插手点；
 - ``file_records`` —— 资源台账（谁在什么时候产出了哪个文件、第几版）；
 - ``memory_timelines`` —— 记忆晋升链。
 
@@ -24,7 +24,7 @@
 ``{kind, ts, username, source, action, target, session, result, reason, ref_id}``
 
 ``target`` 是**操作对象**（工具名 / 文件路径 / 命令），``session`` 是所属会话；
-两者分开是因为审批与判官事件都要同时看"动了什么"和"在哪次会话里动的"。
+两者分开是因为审批与决策模型事件都要同时看"动了什么"和"在哪次会话里动的"。
 """
 
 from __future__ import annotations
@@ -268,7 +268,7 @@ def read_judge_events(
     username: str | None = None,
     since_ts: float | None = None,
 ) -> list[dict[str, Any]]:
-    """判官事件（decision_events）。
+    """决策模型事件（decision_events）。
 
     ⚠️ 列名一律以**库里的真实列**为准（2026-11-15 在 dev 真库
     ``/apps/ai/coapis-dev/system/coapis.db`` 用 PRAGMA 实测）。此前这条

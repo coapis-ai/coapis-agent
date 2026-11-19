@@ -716,7 +716,7 @@ def _iter_business_py():
 
 
 def test_no_new_scattered_judgment_model_clients():
-    """业务模块新增"自己拼判断模型客户端"必须失败。"""
+    """业务模块新增"自己拼决策模型客户端"必须失败。"""
     hits = []
     for rel, path in _iter_business_py():
         text = path.read_text(encoding="utf-8")
@@ -906,20 +906,20 @@ def _patch_judge_provider(monkeypatch, prov):
 
 
 def test_judge_slot_empty_means_no_judge(monkeypatch):
-    """槽位空 = 没有判官：会话激活模型再可用也不借。"""
+    """槽位空 = 没有决策模型：会话激活模型再可用也不借。"""
     from coapis.decision.resolver import get_judge_provider_config
 
     _patch_slot(monkeypatch, ("prov-x", "model-x"))  # 对话模型完全可用
     _patch_judge_provider(monkeypatch, _JudgeProv())
     got = get_judge_provider_config(_hub_slot(), user_id="u1", agent_id="a1")
     assert got is None, (
-        "D-A：未配置判官槽位时必须返回 None（判官不上岗、按规则直判），"
+        "D-A：未配置决策模型槽位时必须返回 None（决策模型不上岗、按规则直判），"
         "不得回落借用会话激活模型：%r" % (got,)
     )
 
 
 def test_judge_slot_configured_uses_that_model(monkeypatch):
-    """配了判官槽位就用它：provider_id/model 齐全，api_base 归一化好拼端点。"""
+    """配了决策模型槽位就用它：provider_id/model 齐全，api_base 归一化好拼端点。"""
     from coapis.decision.resolver import get_judge_provider_config
 
     _patch_slot(monkeypatch, ("prov-x", "model-x"))
@@ -933,7 +933,7 @@ def test_judge_slot_configured_uses_that_model(monkeypatch):
 
 
 def test_judge_slot_pointing_to_missing_model_is_none(monkeypatch):
-    """槽位里的模型被删了 → None（判官不上岗），绝不回落到对话模型。"""
+    """槽位里的模型被删了 → None（决策模型不上岗），绝不回落到对话模型。"""
     from coapis.decision.resolver import get_judge_provider_config
 
     _patch_slot(monkeypatch, ("prov-x", "model-x"))
@@ -944,7 +944,7 @@ def test_judge_slot_pointing_to_missing_model_is_none(monkeypatch):
 
 
 def test_judge_slot_pointing_to_embedding_model_is_none(monkeypatch):
-    """槽位里塞了嵌入模型 → None：宁可不判，也不拿嵌入模型当判官。"""
+    """槽位里塞了嵌入模型 → None：宁可不判，也不拿嵌入模型当决策模型。"""
     from coapis.decision.resolver import get_judge_provider_config
 
     _patch_slot(monkeypatch, ("prov-x", "model-x"))

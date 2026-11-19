@@ -223,8 +223,8 @@ def effort_shape(
 ) -> Optional[Dict[str, Any]]:
     """把四档 effort 翻成厂商形状；effort 为空/非法 → None（调用方跳过下发）。
 
-    厂形取自 :func:`shape_family`（与判官同源）。传了 base_url/provider_id 就按
-    端点判（与判官完全一致）；不传则退回按 provider_type 判——老调用点零改动。
+    厂形取自 :func:`shape_family`（与决策模型同源）。传了 base_url/provider_id 就按
+    端点判（与决策模型完全一致）；不传则退回按 provider_type 判——老调用点零改动。
     返回值键（主链契约，勿改）：``effort`` / ``reasoning_effort`` /
     ``thinking_budget_hint`` / ``generate_kwargs`` / ``model_attrs``。
     """
@@ -277,7 +277,7 @@ def apply_thinking_shape(
 ) -> Dict[str, Any]:
     """把档位写到真模型上，返回本轮结束后还原所需的状态。
 
-    厂形判定与判官同源：provider_type/base_url/provider_id 缺哪个就从模型自带
+    厂形判定与决策模型同源：provider_type/base_url/provider_id 缺哪个就从模型自带
     的配置里补哪个（调用点零改动即可吃到端点级判定）。
     """
     target = resolve_thinking_target(model)
@@ -454,7 +454,7 @@ class ThinkingBudgetManager:
 
         effort 是思考开支的唯一来源，minimal 显式关思考（hint=0 由适配层
         翻译成各家 provider 的关闭形状）。未知 effort 按 minimal 处理——
-        判官不认识档位时绝不退回高开支，这条与 D9 的档位词表作废一致。
+        决策模型不认识档位时绝不退回高开支，这条与 D9 的档位词表作废一致。
         """
         key = (effort or "").strip().lower()
         if key not in _EFFORT_BUDGET:

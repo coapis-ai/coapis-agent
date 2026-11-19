@@ -2,7 +2,7 @@
 """轮次级 usage 计算（B1 · 借鉴 QwenPaw ``token_usage/turn_usage.py``）。
 
 **为什么需要这个模块**（实测 2026-11-13，``.analysis/实测底数-20261113.txt``）：
-判官台账 241 行里 ``cost_cents`` 恒 0、tokens 大量取不到；流式调用不回传 usage
+决策模型台账 241 行里 ``cost_cents`` 恒 0、tokens 大量取不到；流式调用不回传 usage
 （我们的请求体从来没带 ``stream_options.include_usage``）。聚合面
 （``buffer.py`` 的日聚合）已成熟，缺的是**逐轮**这一层。
 

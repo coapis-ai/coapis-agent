@@ -4,7 +4,7 @@
 覆盖：
 - 配置层：按岗位软阈值（v19 P1-2）、岗位表夹取、``judge_soft_ms_post``
   必须是数据类字段（只写进 DEFAULTS 会让整个中枢配置装载 TypeError —— 实测过）。
-- 判官：软阈值是中性事件（连续计数才冷却）、非终态不落台账（P0-2）。
+- 决策模型：软阈值是中性事件（连续计数才冷却）、非终态不落台账（P0-2）。
 - 技能触发：Tier2 幽灵引用丢弃 + 兜底条数走配置 + 短词不打分（P0-3/P0-4/P1-4）。
 - 治理闸门：六岗配置写入口要权限、技能写端点挂审计依赖（P2-3）。
 """
@@ -85,14 +85,14 @@ def test_soft_timeout_streak_is_neutral_until_threshold():
 
 
 def test_degrade_can_skip_ledger_for_non_terminal_judgment(spy_ledger):
-    """软阈值不是终态：主链先走时不落账，台账只记判官终态那一行（P0-2 ②）。"""
+    """软阈值不是终态：主链先走时不落账，台账只记决策模型终态那一行（P0-2 ②）。"""
     gateway = gw.JudgeGateway()
 
     async def run() -> gw.JudgeReply:
         return await gateway._degrade(  # noqa: SLF001 - 测试直调内部出口
             "plan_gate",
             gw.LAYER_TIMEOUT,
-            "判断超时（软阈值 0.0s，判官后台补判中）",
+            "判断超时（软阈值 0.0s，决策模型后台补判中）",
             None,
             None,
             lambda: 12,

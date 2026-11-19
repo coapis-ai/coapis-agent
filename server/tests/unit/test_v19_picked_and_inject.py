@@ -18,8 +18,8 @@ from coapis.agents.react_agent import CoApisAgent
 class _PickedStub:
     """`_load_on_demand_skills` 的最小宿主：只保留点名路径要碰的属性。
 
-    `_skill_selector=None` 且点完名后候选池清空，关键词/判官两条路自然跳过，
-    于是本文件只测"点名"这一件事，不依赖判官与模型。
+    `_skill_selector=None` 且点完名后候选池清空，关键词/决策模型两条路自然跳过，
+    于是本文件只测"点名"这一件事，不依赖决策模型与模型。
     """
 
     _agent_id = "a1"
@@ -45,7 +45,7 @@ class _PickedStub:
         return True
 
     async def _llm_classify_skills(self, *a, **kw):
-        """判官层桩：本文件不测判官，返回空命中即可。"""
+        """决策模型层桩：本文件不测决策模型，返回空命中即可。"""
         return []
 
     # v19 P1-1：Phase2 走「取消预判 / 消费预判」两个新方法，桩给最小实现
@@ -67,7 +67,7 @@ def _stub(pool, picked):
 
 @pytest.mark.asyncio
 async def test_picked_skills_load_directly_and_bill_as_user_picked(monkeypatch):
-    """用户点名 = 直装：跳过关键词/判官，台账 origin=user_picked 单列。"""
+    """用户点名 = 直装：跳过关键词/决策模型，台账 origin=user_picked 单列。"""
     from coapis.agents import react_agent as ra
 
     events = []

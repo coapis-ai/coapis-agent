@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""B0 契约锁 · 判官供给面（方案 v1 §3 第 0 批 / D14）
+"""B0 契约锁 · 决策模型供给面（方案 v1 §3 第 0 批 / D14）
 
 **口径照抄代码**（``coapis/decision/resolver.py`` 的公开面就是
-``__all__`` 那六个名字）。今天已成立的行为是**现状锁**——B3 把判官接真时
+``__all__`` 那六个名字）。今天已成立的行为是**现状锁**——B3 把决策模型接真时
 不许把它们改松：
 
 * ``assert_chat_capable``：类型以 ``ModelInfo.model_type``（用户在模型管理
@@ -10,13 +10,13 @@
   台账不许把推断当声明。
 * 模型必须真实存在（用户删模型后偏好会变陈旧 → 降级不判断）。
 * ``judge_enabled=False`` 就是不供给（关闭就是关闭）。
-* 两处（hub 显式键 / decision 槽位）都空 → ``None`` = 判官不上岗，
+* 两处（hub 显式键 / decision 槽位）都空 → ``None`` = 决策模型不上岗，
   **绝不兜底会话激活模型**（D-A 拍板：不借对话模型，避免"模型切换攻击"）。
 * 内网端点空 Key 合法（v25 实锤：Key 判定归 provider 层，判定层不得越界）。
 
 B1 目标锁（原 ``xfail(strict=True)``，2026-11-14 B1/B3 交付时摘除）：
-判官供给自带模型可用性台账键（``availability_key``），开关在供给层生效。
-B3 新增：判官能力闸（窗口/类型/结构化输出三查，未观测=放行）与弃权
+决策模型供给自带模型可用性台账键（``availability_key``），开关在供给层生效。
+B3 新增：决策模型能力闸（窗口/类型/结构化输出三查，未观测=放行）与弃权
 原因码（台账 ``reason`` 列的 ``[码] 人话`` 形状，读侧按码分桶）。
 """
 from __future__ import annotations
@@ -66,7 +66,7 @@ def use_provider(monkeypatch):
 
 @pytest.fixture()
 def slot(monkeypatch):
-    """控制 decision 槽位（判官的第二供给来源）。"""
+    """控制 decision 槽位（决策模型的第二供给来源）。"""
 
     def _apply(pair: tuple[str, str]) -> None:
         monkeypatch.setattr(rs, "_decision_slot_pair", lambda: pair)

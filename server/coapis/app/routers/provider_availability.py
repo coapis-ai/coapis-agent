@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """模型可用性台账接口（B1-B · 只读）。
 
-**为什么单独一个路由**（实施方案 §5-B1）：判官弃权时台账里只写得到
+**为什么单独一个路由**（实施方案 §5-B1）：决策模型弃权时台账里只写得到
 "circuit breaker open"，运维看不到是 429、超时还是鉴权；聊天侧重试耗尽时
 同样没有留下"为什么"。本路由把两份原因合成一处给人看。
 
 **只读**：本路由不写任何状态；写由
 ``providers/provider_model_availability.py`` 在调用链里完成。
-权限口径沿用判官台账（``judge:audit``，见 routers/decisions.py:323）。
+权限口径沿用决策模型台账（``judge:audit``，见 routers/decisions.py:323）。
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ async def get_provider_model_availability(
 
     数据口径：台账是**进程内**的（重启即清空），TTL 默认 1 小时
     （``COAPIS_AVAILABILITY_TTL`` 秒，非法值回默认）。所以它是"最近发生过
-    什么"的观测面，不是长期审计账——长期账在判官台账 ``decision_events``。
+    什么"的观测面，不是长期审计账——长期账在决策模型台账 ``decision_events``。
     """
     provider_ids = [provider_id] if provider_id else None
     try:

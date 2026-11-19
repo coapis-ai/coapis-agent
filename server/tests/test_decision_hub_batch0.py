@@ -114,7 +114,7 @@ async def test_llm_classify_skills_returns_matches(monkeypatch):
 # --------------------------------------------------------------------------
 @contextlib.contextmanager
 def _hub_chain(monkeypatch, tmp_path, invoke, rows=None):
-    """把兜底判接在真实判断网关上，判官层用注入的假模型调用。
+    """把兜底判接在真实判断网关上，决策模型层用注入的假模型调用。
 
     batch0 时代是整层替换 classify_intent_llm，超时/异常由消费方自己兜；
     v14 起超时与降级归网关管，测试必须走真实链路，别把网关跳过。
@@ -163,7 +163,7 @@ def _hub_chain(monkeypatch, tmp_path, invoke, rows=None):
 
 @pytest.mark.asyncio
 async def test_llm_classify_skills_timeout_returns_empty(monkeypatch, tmp_path, caplog):
-    """超时硬限（走真实判断网关）：判官卡住 → 空结果 + 降级留痕，不阻塞主流程。"""
+    """超时硬限（走真实判断网关）：决策模型卡住 → 空结果 + 降级留痕，不阻塞主流程。"""
 
     async def slow_invoke(_self, _provider, _model_id, _system, _user, _kwargs):
         await asyncio.sleep(5)
@@ -219,7 +219,7 @@ async def test_llm_classify_skills_no_candidates_skips_llm(monkeypatch):
 def test_selector_guard_follows_hub_hard_budget(monkeypatch):
     """v19 P0-1：调用方不许自带尺子——安全网只跟网关**硬熔断**挂钩。
 
-    旧实现从 agent 的 ``running_config.llm_timeout_ms``（会话模型超时，与判官
+    旧实现从 agent 的 ``running_config.llm_timeout_ms``（会话模型超时，与决策模型
     无关）自取一把尺子，与网关的软阈值/硬熔断/轮内预算三处并行；同一轮判断
     有好几把尺子，是"真判率被绞掉"的成因之一。现在只有一把尺子：
     ``coapis.decision.config``，调用方仅保留"网关万一失控"的兜底余量。

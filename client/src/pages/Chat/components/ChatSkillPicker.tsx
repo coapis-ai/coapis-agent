@@ -77,7 +77,7 @@ export default function ChatSkillPicker({ agentId, value, onChange }: Props) {
       <Tooltip
         title={t(
           "chat.skillPicker.tip",
-          "本轮指定技能：选中的技能本轮直装，跳过关键词与判官（只影响这一条消息）",
+          "本轮指定技能：选中的技能本轮直装，跳过关键词与决策模型（只影响这一条消息）",
         )}
       >
         <button

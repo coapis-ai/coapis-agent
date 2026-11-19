@@ -7,14 +7,14 @@ Why: 五岗里工具岗是空号——台账里没有 ``tool_gate`` 这个来源
 改道岗看得见动作序列，但它按节奏抽样（每 N 轮一次），看不见单步。
 
 How: ``react_agent._acting`` 每次要执行工具前发射一次判断（**发射即忘**，
-判官要 1~4s，绝不卡在动作前面）。输入 = 用户目标 + 本次工具与参数摘要 +
+决策模型要 1~4s，绝不卡在动作前面）。输入 = 用户目标 + 本次工具与参数摘要 +
 最近动作摘要；输出 = ``allow|reroute`` + 理由 + 建议改用的工具。判出
 ``reroute`` 时把结论作为一条 HINT 注进记忆，影响**下一个**动作。台账写一行
 ``source=tool_gate``，``action="tool:<名>:allow|reroute"``。
 
 刻意的设计（一期边界，讲清楚不藏）：
-* **只提示不拦**：一期绝不否决工具调用。判官一期真判率 19%，拦错一次就是
-  主链故障；``block`` 不进词表，判官给了也降级成 ``reroute``。
+* **只提示不拦**：一期绝不否决工具调用。决策模型一期真判率 19%，拦错一次就是
+  主链故障；``block`` 不进词表，决策模型给了也降级成 ``reroute``。
 * **便宜动作不判**：纯只读、自描述的工具在 ``CHEAP_TOOLS`` 里跳过，不烧
   判断预算（v14 §4.4④：判断本身不能变成循环）。
 * **规则层有把握就不问模型**：同一工具同一参数连续第 N 次 = 原地打转，这条
@@ -313,7 +313,7 @@ def rule_fast(
 
 
 def _parse_verdict(raw: str) -> dict[str, Any]:
-    """判官输出 → ``{verdict, why, tool}``。不成 JSON 抛 ValueError。"""
+    """决策模型输出 → ``{verdict, why, tool}``。不成 JSON 抛 ValueError。"""
     text = raw.strip()
     match = re.search(r"\{.*\}", text, re.S)
     if match:
@@ -321,14 +321,14 @@ def _parse_verdict(raw: str) -> dict[str, Any]:
     try:
         data = json.loads(text)
     except Exception as exc:  # noqa: BLE001 - 交网关记 parse_fail
-        raise ValueError(f"判官输出不是 JSON 对象: {raw[:80]!r}") from exc
+        raise ValueError(f"决策模型输出不是 JSON 对象: {raw[:80]!r}") from exc
     if not isinstance(data, dict):
-        raise ValueError(f"判官输出不是对象: {raw[:80]!r}")
+        raise ValueError(f"决策模型输出不是对象: {raw[:80]!r}")
     verdict = str(data.get("verdict") or "").strip().lower()
     if verdict == "block" and _BLOCK_AS_REROUTE:
         verdict = "reroute"
     if verdict not in VERDICTS:
-        raise ValueError(f"判官给了词表外的结论: {verdict!r}")
+        raise ValueError(f"决策模型给了词表外的结论: {verdict!r}")
     return {
         "verdict": verdict,
         "why": str(data.get("why") or "")[:200],

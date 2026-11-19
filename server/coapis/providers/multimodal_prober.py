@@ -201,8 +201,8 @@ _JSON_PROBE_PROMPT = (
 
 
 def evaluate_json_probe_answer(answer: str, reasoning: str = "") -> tuple[bool, str]:
-    """判定"模型能按要求回 JSON"——判官提示词要求 JSON 结论，读不出
-    JSON 的判官等于没有判官（台账上长成 parse_fail，看不出是模型不行
+    """判定"模型能按要求回 JSON"——决策模型提示词要求 JSON 结论，读不出
+    JSON 的决策模型等于没有决策模型（台账上长成 parse_fail，看不出是模型不行
     还是提示词没被遵守）。
 
     判定：``json_mode`` 支持 = 回复里有可解析的 JSON 对象（容忍代码围栏

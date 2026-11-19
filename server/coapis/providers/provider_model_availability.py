@@ -5,7 +5,7 @@
 
 - ``decision/breaker.py`` = **计数与冷却**（连续失败阈值 → 打开 → 冷却）。
 - 本模块 = **原因与可见性**：把"为什么不可用"写下来、留给 API 与人看。
-- 熔断打开时由 ``gateway`` 读本模块 :func:`reason_of` 把原因带进判官台账。
+- 熔断打开时由 ``gateway`` 读本模块 :func:`reason_of` 把原因带进决策模型台账。
 
 键固定为 ``(provider_id, model)``（D9：不引入 workspace 维度）。
 进程内单例 + TTL；台账是**运维观测数据**，不是计费依据。
@@ -110,8 +110,8 @@ class ProviderModelAvailabilityView:
 class ProviderModelAvailabilityStore:
     """进程内单例存储（TTL 过期自动剔除；不自己落库）。
 
-    持久化说明：判官/聊天侧的观测台账要长期留痕时，由调用方显式调用
-    :func:`persist_to_decision_ledger`（判官侧已有 ``decision_events`` 通路），
+    持久化说明：决策模型/聊天侧的观测台账要长期留痕时，由调用方显式调用
+    :func:`persist_to_decision_ledger`（决策模型侧已有 ``decision_events`` 通路），
     本模块**不自己写库**——避免与熔断器形成两本账。
     """
 
@@ -191,7 +191,7 @@ class ProviderModelAvailabilityStore:
         return ProviderModelAvailabilityView(items=items)
 
     def reason_of(self, provider_id: str, model: str) -> str:
-        """给熔断器/判官台账用的"为什么不可用"。
+        """给熔断器/决策模型台账用的"为什么不可用"。
 
         无记录 → ``ok``（**没观测过就等于没证据说它坏**，不猜坏）。
         """

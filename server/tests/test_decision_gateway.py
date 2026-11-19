@@ -494,7 +494,7 @@ async def _drain_bg_tasks() -> None:
 
 
 async def test_soft_timeout_degrades_then_background_rejudges(monkeypatch):
-    """软超时：主链立刻降级先走，判官后台跑完照常入账（v14 §批次3）。
+    """软超时：主链立刻降级先走，决策模型后台跑完照常入账（v14 §批次3）。
 
     这条同时钉住一个 dev 实测过的 P0：后台任务里引用主流程的局部名
     （breaker）会 NameError，补判全灭且「Task exception was never retrieved」。
@@ -538,7 +538,7 @@ async def test_soft_timeout_degrades_then_background_rejudges(monkeypatch):
 
 
 def _no_slot(monkeypatch):
-    """判官槽位置空（等价于用户没配决策模型）。"""
+    """决策模型槽位置空（等价于用户没配决策模型）。"""
     monkeypatch.setattr(
         gw, "get_judge_provider_config", lambda *a, **k: None, raising=True,
     )
@@ -559,7 +559,7 @@ async def test_no_judge_slot_abstains_without_touching_model(monkeypatch):
     )
     assert reply.hit_layer == gw.LAYER_NO_MODEL
     assert reply.value == "L1" and calls["n"] == 1
-    assert not reply.model, "未配置判官时台账不能记着任何模型"
+    assert not reply.model, "未配置决策模型时台账不能记着任何模型"
     assert reply.latency_ms < 200, "配置缺失必须零成本直判，不许去撞模型"
     from coapis.decision.bus import get_bus
 
@@ -571,7 +571,7 @@ async def test_no_judge_slot_abstains_without_touching_model(monkeypatch):
 
 
 async def test_no_judge_slot_never_consumes_turn_budget(monkeypatch):
-    """模型岗额度只 1 次：未配置判官连判 3 次，次次直判，撞不到预算门。"""
+    """模型岗额度只 1 次：未配置决策模型连判 3 次，次次直判，撞不到预算门。"""
     _no_slot(monkeypatch)
     h = hub(judge_max_calls_per_turn=1, judge_reserve_acceptance=0)
     scope = {"user_id": "u1", "agent_id": "a1", "chat_id": "c77", "turn": 77}
@@ -588,7 +588,7 @@ async def test_no_judge_slot_never_consumes_turn_budget(monkeypatch):
 
 
 async def test_no_judge_slot_does_not_pollute_breaker(monkeypatch):
-    """没配判官不能记成判断失败：否则判官一上线就被历史熔断掐死。"""
+    """没配决策模型不能记成判断失败：否则决策模型一上线就被历史熔断掐死。"""
     _no_slot(monkeypatch)
     scope = {"user_id": "u1", "agent_id": "a1", "chat_id": "c78", "turn": 78}
     for _ in range(5):
@@ -607,13 +607,13 @@ async def test_no_judge_slot_does_not_pollute_breaker(monkeypatch):
         hub=hub(), scope=scope,
     )
     assert reply.hit_layer == gw.LAYER_LLM, (
-        "未配置期间的直判被记成了失败，判官上线即熔断：%s" % reply.hit_layer
+        "未配置期间的直判被记成了失败，决策模型上线即熔断：%s" % reply.hit_layer
     )
     assert model.calls == 1
 
 
 def test_no_model_is_not_counted_as_a_judged_attempt():
-    """no_model 必须在真判断层白名单之外（配置状态 ≠ 判官败绩）。"""
+    """no_model 必须在真判断层白名单之外（配置状态 ≠ 决策模型败绩）。"""
     assert gw.LAYER_NO_MODEL not in gw.JUDGED_LAYERS
 
 
@@ -622,7 +622,7 @@ async def test_startup_turns_exempt_from_turn_budget(monkeypatch):
 
     一轮任务天然要用掉 判档1+门禁1+审查1+技能1+工具N+验收1，池子默认 6 格，
     工具门禁一多就把后面的判断整批砍掉——实测 budget_cap 落点大半在 turn=0/1
-    的启动期岗位上：任务从第一步就没判断，判官形同事后点评。
+    的启动期岗位上：任务从第一步就没判断，决策模型形同事后点评。
     口子只保"每轮每岗位第一格"；同一岗位本轮第二次起照旧受闸（防打转），
     验收预留照管，N=0 完全关闭。
     """

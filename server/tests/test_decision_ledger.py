@@ -4,7 +4,7 @@
   1. complexity 列塞判断值整串（'select:low,medium'）→ 只写档位
   2. 判档行身份取构造期 request_context → 改取每请求上下文
   3. 轮号恒 0（pre_reply 钩子跑在 reply 体自增之前）→ 轮次时钟
-  4. 预算键在全空作用域下退化成全平台共用 → 判官永久熔断
+  4. 预算键在全空作用域下退化成全平台共用 → 决策模型永久熔断
 """
 
 import os
@@ -160,7 +160,7 @@ def test_gateway_budget_key_matches_replica():
 
 
 def test_budget_cap_recovers_when_turn_advances():
-    """预算按轮计：同一会话跑到下一轮，判官必须重新可用（不是永久熔断）。"""
+    """预算按轮计：同一会话跑到下一轮，决策模型必须重新可用（不是永久熔断）。"""
     gw = JudgeGateway()
     ids = {"chat_id": "", "session_id": "s1", "purpose": "plan_gate"}
 

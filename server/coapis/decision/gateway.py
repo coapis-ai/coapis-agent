@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """判断中枢唯一 LLM 出口（v14 §4.1 / §5 B1+B2）。
 
-为什么要有这个文件：判官此前有两条平行的 LLM 通路（plan_gate._call_llm
+为什么要有这个文件：决策模型此前有两条平行的 LLM 通路（plan_gate._call_llm
 走裸 httpx、intent_classifier._call_llm 也走裸 httpx），两条都绕过
 CoApis 的 provider 层，于是拿不到 get_effective_generate_kwargs 里的
 参数、拿不到流式消毒、拿不到 usage；再叠加"槽位空就取
-provider.models[0]"的兜底，判官在生产被静默指派给 ollama 上的
+provider.models[0]"的兜底，决策模型在生产被静默指派给 ollama 上的
 qwen3-embedding:0.6b（嵌入模型不能对话），9/9 全超时。
 
 本模块是唯一的出口，规矩写死在代码里：
@@ -112,7 +112,7 @@ PURPOSE_CALL_ACC = "acceptance"
 
 
 def _post_call_cap(cfg: Any, purpose: str) -> int:
-    """某岗位每轮可调用判官几次（预算分池，v14 §4.3）。
+    """某岗位每轮可调用决策模型几次（预算分池，v14 §4.3）。
 
     上限写在配置里、可按岗位调；0/负数=该岗不限（仍受全局 7 次约束）。
     """
@@ -160,7 +160,7 @@ def _hub_breaker(purpose_key: str, cfg: Any) -> CircuitBreaker:
 
     闸门是惰性建的：第一次用到时按那一刻的配置定阈值。若那一刻中枢
     配置尚未装载（拿到默认 3 次 / 120 秒），之后配置改成 5 次也不会
-    回头更新——于是「配置说 5 次才熔断、实际 3 次就熔断」，判官被记成
+    回头更新——于是「配置说 5 次才熔断、实际 3 次就熔断」，决策模型被记成
     故障、整轮判断被跳过。每次取用都对齐一次，口径分裂就此结束。
     """
     breaker = get_breaker(purpose_key)
@@ -186,7 +186,7 @@ _PARAM_REJECT_HINTS = (
 def _param_rejection_keys(text: str) -> set:
     """上游报错点到名、且确实是我们发出去的形状键 → 该剥掉重试。
 
-    判官的输入是自然语言，模型答得出来；形状键是我们额外塞的私有参数，
+    决策模型的输入是自然语言，模型答得出来；形状键是我们额外塞的私有参数，
     不认识它的上游会判 400。参数被拒 ≠ 判断失败：剥掉参数再要一次结论，
     比直接落一行传输错误、再把连续失败计入熔断要诚实得多。
     """
@@ -345,9 +345,9 @@ class JudgeGateway:
         """按端点类型给出"思考开关"参数；端点不认的一律不发。
 
         形状表**不在这份文件里**——取单一真源
-        :mod:`coapis.foundation.thinking_shape`（主链向下取用同一份，判官与主链
-        同源：主链认得的形状判官就能用）。这里以前自己抄了一张三家表
-        （v14 §4.2），结果判官用的 DeepSeek
+        :mod:`coapis.foundation.thinking_shape`（主链向下取用同一份，决策模型与主链
+        同源：主链认得的形状决策模型就能用）。这里以前自己抄了一张三家表
+        （v14 §4.2），结果决策模型用的 DeepSeek
         （provider_type=deepseek、base_url=api.deepseek.com）三种形态全不命中，
         返回空 → 思考没关 → 单次 12~18 秒：4 秒软阈值的工具岗全数超时，
         连吃三条就熔断整轮，验收岗的 12 秒硬阈值也被 18 秒的思考模型击穿。
@@ -415,7 +415,7 @@ class JudgeGateway:
         kwargs: dict[str, Any],
         slot_key: tuple[str, str],
     ) -> tuple[str, int, int]:
-        """调判官；上游拒收形状参数时剥掉该参数重试一次，并拉黑该槽位。
+        """调决策模型；上游拒收形状参数时剥掉该参数重试一次，并拉黑该槽位。
 
         只治「参数被拒」这一类：报的是模型不存在、鉴权失败、超时，剥参数
         没有意义，原样抛给调用方分层处理。
@@ -471,7 +471,7 @@ class JudgeGateway:
         """v20 F6 配额护栏：返回触发的码位，未触发返回 None。
 
         两道闸都默认关闭（0 = 不限），行为与既有部署逐字一致：
-          * ``judge_max_in_flight`` —— 在途判断数。判官单判实测 0.5~17s，
+          * ``judge_max_in_flight`` —— 在途判断数。决策模型单判实测 0.5~17s，
             逐轮预算数的是"已记账的次数"，拦不住同时压进去的请求；这里按
             在途数直接限流（码位用 rate_limited，语义就是限流）。
           * ``judge_daily_token_budget`` —— 当日全岗位 token 合计（台账
@@ -498,7 +498,7 @@ class JudgeGateway:
         """今日（本地日）台账 token 合计，带 _QUOTA_CACHE_TTL_S 缓存。
 
         只读台账真值。查询失败沿用上一次的取样值（没有就按 0）—— 配额是
-        刹车不是闸死：因一次查询失败让整条判官链停摆，比多烧点 token 糟得
+        刹车不是闸死：因一次查询失败让整条决策模型链停摆，比多烧点 token 糟得
         多。缓存按本地日分键，跨零点自动失效；命中缓存时零查询。
         """
         now = time.time()
@@ -559,7 +559,7 @@ class JudgeGateway:
             scope: ``{user_id, agent_id, chat_id, turn}``，台账作用域与
                 单轮预算的计数口径。
             on_late_verdict: **迟到真判的回执**。软超时后主链拿降级值先走，
-                判官在后台跑出的真结论只进台账——消费方（如验收回填判档行）
+                决策模型在后台跑出的真结论只进台账——消费方（如验收回填判档行）
                 拿到的永远是弃权值，闭环 0 行的真因就在这里。给了这个回调，
                 后台补判成功时就用**真结论**再叫它一次；回调异常一律吞掉。
         """
@@ -676,7 +676,7 @@ class JudgeGateway:
             if not bool(getattr(cfg, "judge_capability_dispatch", False)):
                 # 灰度关：只记观测，不否决判断（判官真判率是这一闸的验收尺子）
                 logger.info(
-                    "[决策中枢·能力闸·只观测] 岗位 %s 的判官 %s 判定不胜任（%s）；"
+                    "[决策中枢·能力闸·只观测] 岗位 %s 的决策模型 %s 判定不胜任（%s）；"
                     "开关 judge_capability_dispatch 未开，本次照旧上岗",
                     purpose, _cap_detail, cap_code,
                 )
@@ -1010,7 +1010,7 @@ class JudgeGateway:
             value=value,
             hit_layer=LAYER_LLM,
             source="llm",
-            reason="判官判定",
+            reason="决策模型判定",
             model=model_id,
             input_tokens=tin,
             output_tokens=tout,
@@ -1037,12 +1037,12 @@ class JudgeGateway:
     ) -> None:
         """软超时后把这一判跑完：成功样本照常入账、进缓存（v14 §批次3）。
 
-        主链已经走了，判官结果不丢弃——台账要反映"判官真实判了什么"，
+        主链已经走了，决策模型结果不丢弃——台账要反映"决策模型真实判了什么"，
         治理对账才能把"真判能力"与"预算损耗"分开。本方法在后台任务运行，
         一切异常吞掉：补判是加护，绝不反噬主链与进程。
 
         ``hard_s`` 是 F1 自适应预算给的**硬熔断**：软阈值只管"主链等多久"，
-        硬阈值管"这一判最多活多久"，到点取消调用，绝不让一次判官调用挂到
+        硬阈值管"这一判最多活多久"，到点取消调用，绝不让一次决策模型调用挂到
         天荒地老把连接池占干。
         """
         try:
@@ -1138,7 +1138,7 @@ class JudgeGateway:
             value=value,
             hit_layer=LAYER_LLM,
             source="llm",
-            reason="判官判定（软超时后台补记）",
+            reason="决策模型判定（软超时后台补记）",
             model=model_id,
             input_tokens=tin,
             output_tokens=tout,
@@ -1183,11 +1183,11 @@ class JudgeGateway:
     # ---------------- L4：规则兜底 ----------------
 
     async def _probe_judge_slot(self, slot: dict, cfg: Any) -> str:
-        """上岗前补齐判官能力实证；返回原因码（空串 = 放行）。
+        """上岗前补齐决策模型能力实证；返回原因码（空串 = 放行）。
 
         口径：缓存里**没有记录**才探测（一次探测全平台复用，不重复烧）；
-        探测请求失败按未探测放行。判官探测的是判官真正要用的两件事，
-        不是"这个模型有没有视觉"——探针家族第一次有了判官这一维。
+        探测请求失败按未探测放行。决策模型探测的是决策模型真正要用的两件事，
+        不是"这个模型有没有视觉"——探针家族第一次有了决策模型这一维。
         """
         provider_id = str(slot.get("provider_id") or "")
         model = str(slot.get("model") or "")
@@ -1231,8 +1231,8 @@ class JudgeGateway:
     ) -> JudgeReply:
         """拿不到结论时的统一出口：规则值 + 台账，绝不空手而归。
 
-        ``ledger=False`` 用于"判官还在跑、这一判没有终态"的场合（v19 P0-2）：
-        主链软阈值到点先走时判断并没有失败——台账要等判官出终态（真判 /
+        ``ledger=False`` 用于"决策模型还在跑、这一判没有终态"的场合（v19 P0-2）：
+        主链软阈值到点先走时判断并没有失败——台账要等决策模型出终态（真判 /
         解析失败 / 硬熔断）再落**那一行**。此前软阈值先写一行 timeout、
         后台补判再写一行 llm，一次判记两行，对账把同一次判断算成两条样本。
         """

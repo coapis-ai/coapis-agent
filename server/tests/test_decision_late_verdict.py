@@ -1,6 +1,6 @@
-"""判官迟到真判的回执 + 验收岗单独软阈值（v14 §3.2 闭环第二段）。
+"""决策模型迟到真判的回执 + 验收岗单独软阈值（v14 §3.2 闭环第二段）。
 
-主链软超时后拿降级值先走，判官在后台跑出的**真结论**只进台账——消费方
+主链软超时后拿降级值先走，决策模型在后台跑出的**真结论**只进台账——消费方
 （验收回填判档行的 outcome）拿到的永远是弃权值，闭环恒 0。这两条把断链接上：
 
 1. ``judge(on_late_verdict=...)``：后台补判成功时，用真结论回调消费方；
@@ -22,7 +22,7 @@ SCOPE = {"user_id": "u1", "agent_id": "a1", "chat_id": "c1", "turn": 1}
 
 
 class SlowModel:
-    """固定耗时、固定回答的假判官模型。"""
+    """固定耗时、固定回答的假决策模型。"""
 
     def __init__(self, text: str, sleep_s: float = 0.4):
         self.text = text
@@ -158,7 +158,7 @@ async def test_late_verdict_hook_crash_does_not_bite(monkeypatch):
 
 
 async def test_acceptance_gets_its_own_soft_budget(monkeypatch):
-    """同一个判官、同一次耗时：主链岗位弃权，验收岗判到真结论。"""
+    """同一个决策模型、同一次耗时：主链岗位弃权，验收岗判到真结论。"""
     wire(monkeypatch, SlowModel('{"verdict":"hit"}', 0.3))
     cfg = hub(judge_soft_ms=60.0, judge_soft_ms_acceptance=1200.0,
              judge_min_interval_ms=0.0)

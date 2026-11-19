@@ -2293,7 +2293,7 @@ class AgentRunner(Runner):
                 if _picked:
                     agent._picked_skills = _picked
                     logger.warning(
-                        "[Skill] 本轮用户点名技能=%s（跳过关键词/判官，台账 origin=user_picked）",
+                        "[Skill] 本轮用户点名技能=%s（跳过关键词/决策模型，台账 origin=user_picked）",
                         _picked,
                     )
             except Exception as e:  # pragma: no cover - 防御性

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""验收回灌：一轮跑完，判官对着需求验交付（v14 §3.5 · 插手点⑤）。
+"""验收回灌：一轮跑完，决策模型对着需求验交付（v14 §3.5 · 插手点⑤）。
 
 Why: 台账里 ``outcome`` 恒为 ``pending`` ——「判得准不准」这件事**没有任何
 人在算**：判档说 complex，最后有没有真交付 complex 的东西，没人回填。
-没有回填就没有命中率，也就没有「调判则」的依据，判官永远自说自话。
+没有回填就没有命中率，也就没有「调判则」的依据，决策模型永远自说自话。
 
 How: 轮尾（POST_POST_PROCESS 之后）以**发射即忘**的方式判一次：
-需求 = 用户本轮原话，交付 = 智能体本轮最终回答。判官吐
+需求 = 用户本轮原话，交付 = 智能体本轮最终回答。决策模型吐
 ``verdict=satisfied|partial|failed`` + 两条红线（越界 / 过度设计）。
 台账写一行 ``source=acceptance``（``action`` = verdict），并把**同轮的
 判档行**回填成 ``outcome=hit|miss``、``rating=verdict``——这是命中率的
@@ -17,7 +17,7 @@ How: 轮尾（POST_POST_PROCESS 之后）以**发射即忘**的方式判一次�
   验收是加分项，不是关键路径。
 * **短对话不判**：需求少于 12 字、交付少于 40 字的多是招呼/确认，
   判了只会生产噪声台账。
-* 判官不可用时**照样记一行**（hit_layer=no_model/abstain）——判官缺席
+* 决策模型不可用时**照样记一行**（hit_layer=no_model/abstain）——决策模型缺席
   必须可见，这是 v14 §2.2 的第 2 条根因（静默弃权）的解法。
 """
 from __future__ import annotations
@@ -169,7 +169,7 @@ async def judge_acceptance(
             "verdict": "abstain",
             "overreach": False,
             "overdesign": False,
-            "reason": "无可用判官，弃权",
+            "reason": "无可用决策模型，弃权",
             "missing": "",
         },
         describe=lambda v: (
@@ -229,7 +229,7 @@ async def _backfill_plan_gate(
     """把同轮判档行回填 outcome=hit|miss、rating=verdict。
 
     命中率只在这一处产生：判档行写出来时 outcome=pending，验收判完
-    才知道那次判档对不对。**弃权不回填**——判官没判就没有对错，
+    才知道那次判档对不对。**弃权不回填**——决策模型没判就没有对错，
     记成 miss 会把命中率永久污染。回填失败静默（台账是旁路）。
     """
     if verdict == "abstain":
@@ -293,7 +293,7 @@ def _backfill_sync(chat_id: str, turn: int, verdict: str) -> None:
 
 
 def _load_obj(text: str) -> dict[str, Any] | None:
-    """从判官输出里取 JSON 对象（剥代码围栏 + 取第一个花括号块）。"""
+    """从决策模型输出里取 JSON 对象（剥代码围栏 + 取第一个花括号块）。"""
     txt = (text or "").strip()
     if not txt:
         return None

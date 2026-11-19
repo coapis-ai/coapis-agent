@@ -16,7 +16,7 @@
 
 """判断中枢可见可控（v14 §5.2 / U 批）。
 
-判官过去最大的问题不是"判得准不准"，是**没人知道它判没判**——台账
+决策模型过去最大的问题不是"判得准不准"，是**没人知道它判没判**——台账
 写进库里，前端一行都看不到。这一层只做两件事：把台账按会话/来源摊开，
 把配置开关交到人手里。
 
@@ -24,8 +24,8 @@ Endpoints:
     GET    /decisions              — 台账列表（chat_id / source / turn 过滤，分页）
     GET    /decisions/stats        — 近 N 天逐来源战绩（判断/降级/超时/命中率/花费）
     POST   /decisions/{id}/rating  — 人给一次判断打分
-    GET    /decisions/config       — 判官配置 + 当前生效的判断模型
-    PUT    /decisions/config       — 改判官配置（落 agent.json，即时生效）
+    GET    /decisions/config       — 决策模型配置 + 当前生效的决策模型
+    PUT    /decisions/config       — 改决策模型配置（落 agent.json，即时生效）
 
 作用域：普通用户只看自己的行（台账 user_id == 登录名）；admin 看全部。
 """
@@ -174,14 +174,14 @@ def decision_stats(
 
     **命中率有两把尺子**（v1.2.47）：``hit``/``miss``/``pending`` 是全行
     口径，规则直判、闸门关闭的行也算在里面，量的是这个岗位立项闸整体准不
-    准；``hit_judged``/``miss_judged``/``pending_judged`` 只统计真问过判官
-    的行，才是判官自己的战绩。plan_gate 实测 111 行里只有 3 行真判，两个
-    口径差一个数量级，混着算就是"判官命中率 75%"那种假账。顶层 ``pending``
+    准；``hit_judged``/``miss_judged``/``pending_judged`` 只统计真问过决策模型
+    的行，才是决策模型自己的战绩。plan_gate 实测 111 行里只有 3 行真判，两个
+    口径差一个数量级，混着算就是"决策模型命中率 75%"那种假账。顶层 ``pending``
     汇总块再把待回执分成"合法等回填"与"收口失效"（尺子是
     ledger_contract.PENDING_EXPECTED_SOURCES，写账侧同一个）。
 
-    这组数字就是"判官到底有没有发生作用"的直接证据：``degraded`` 高
-    说明阶梯在原地降级（多半是没配判断模型或超时太短），``llm`` 有数
+    这组数字就是"决策模型到底有没有发生作用"的直接证据：``degraded`` 高
+    说明阶梯在原地降级（多半是没配决策模型或超时太短），``llm`` 有数
     才说明真跑过大模型。
     """
     me, role = _identity(request)
@@ -283,9 +283,9 @@ def judge_health(
     request: Request,
     days: int = Query(7, ge=1, le=90),
 ) -> dict[str, Any]:
-    """判官健康只读卡（B3 · 收尾方案 v1 §6.1）：供给侧 + 台账侧一屏看穿。
+    """决策模型健康只读卡（B3 · 收尾方案 v1 §6.1）：供给侧 + 台账侧一屏看穿。
 
-    为什么单独一个端点：判官的问题从来不是"判了几次"，而是"为什么没判"。
+    为什么单独一个端点：决策模型的问题从来不是"判了几次"，而是"为什么没判"。
     供给侧说"槽位里是谁、它凭什么能判"；台账侧按**弃权原因码**分桶说
     "沉默都为什么沉默"。两者并排，管理员才能一眼看出该配模型、该开闸、
     还是该修上游。只读，不改任何配置。
@@ -377,7 +377,7 @@ def judge_health(
                 params,
             ).scalar() or 0)
     except Exception as exc:  # pragma: no cover
-        logger.warning("[Decisions] 判官健康读数失败: %s", exc)
+        logger.warning("[Decisions] 决策模型健康读数失败: %s", exc)
         return {"days": days, "supply": supply, "abstain": [],
                 "judged": 0, "rows": 0, "error": str(exc)}
 
@@ -405,7 +405,7 @@ def rate_decision(
 ) -> dict[str, Any]:
     """给某一次判断打分（台账 ``rating`` 列的入口）。
 
-    普通用户只能改自己的行——判官战绩不能被别人刷分。
+    普通用户只能改自己的行——决策模型战绩不能被别人刷分。
     """
     me, role = _identity(request)
     if outcome is not None and outcome not in _OUTCOMES:
@@ -440,7 +440,7 @@ def rate_decision(
 
 @router.get("/config")
 def get_config(request: Request) -> dict[str, Any]:
-    """判官配置 + 当前生效的判断模型（面板必须显示"判官到底是谁"）。"""
+    """决策模型配置 + 当前生效的决策模型（面板必须显示"决策模型到底是谁"）。"""
     me, _role = _identity(request)
     agent_id = _active_agent_id(request, me)
     # 判断模型的解析唯一归 resolver，且**只认判官槽位**（D-A 2026-11-05 拍板：
@@ -484,7 +484,7 @@ def get_config(request: Request) -> dict[str, Any]:
     dependencies=[Depends(require_perm("judge:audit"))],
 )
 def put_config(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """改判官配置：落盘到部署级配置文件（重启后仍生效）并立即生效。
+    """改决策模型配置：落盘到部署级配置文件（重启后仍生效）并立即生效。
 
     只认 :mod:`coapis.decision.config` 认识的键，未知键拒收——不再制造
     "配置写了没人读"的死字段（v14 §0.3 的教训）。落盘位置是

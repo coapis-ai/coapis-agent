@@ -18,14 +18,14 @@
 **为什么放在 foundation**：这张表有两个消费者——
 
 1. 对话主链下发档位：:mod:`coapis.agents.utils.thinking_budget`
-2. 判官自己关/开思考：:mod:`coapis.decision.gateway`
+2. 决策模型自己关/开思考：:mod:`coapis.decision.gateway`
 
-判官与主链的模型来自**同一份模型配置**：主链能用的形状，判官就能用；判官也绝不
-用主链不认的私有键位。原先两处各抄一张表（判官只按 provider_type 查表），代价
-写在 dev 台账里——判官模型 ``provider_type="deepseek"`` +
+决策模型与主链的模型来自**同一份模型配置**：主链能用的形状，决策模型就能用；决策模型也绝不
+用主链不认的私有键位。原先两处各抄一张表（决策模型只按 provider_type 查表），代价
+写在 dev 台账里——决策模型 ``provider_type="deepseek"`` +
 ``base_url="https://api.deepseek.com/v1"`` 三种形态全不命中 → 返回空 → 思考根本
 没关 → 单次 12~18 秒，击穿软阈值并连吃熔断（台账 24 行 ``breaker_open``）。
-同一轮里主链按端点判定生效、判官按端点判定失效，就是分表抄写的直接后果。
+同一轮里主链按端点判定生效、决策模型按端点判定失效，就是分表抄写的直接后果。
 
 放在 foundation 而不是 decision 的理由：本模块被**智能体层**顶层导入，而
 ``coapis.decision/__init__`` 会连带拉起 providers → app 路由链——把一张纯字符串
@@ -126,7 +126,7 @@ def shape_family(
     base_url: Any = "",
     provider_id: Any = "",
 ) -> str:
-    """厂商/端点 → 思考参数形状家族。**全系统唯一**映射处（主链与判官同源）。
+    """厂商/端点 → 思考参数形状家族。**全系统唯一**映射处（主链与决策模型同源）。
 
     判定优先级：**端点 > provider_type > provider_id**。
     ``provider_type="openai"`` 底下既可能是 DashScope 兼容口（顶层
@@ -173,9 +173,9 @@ def thinking_request_kwargs(
     provider_id: Any = "",
     thinking: bool = False,
 ) -> Dict[str, Any]:
-    """按厂形给出「这一行的思考开/关」**请求体参数**（判官用，与主链同一张表）。
+    """按厂形给出「这一行的思考开/关」**请求体参数**（决策模型用，与主链同一张表）。
 
-    - ``thinking=False`` 关思考；``thinking=True`` 显式开思考（验收岗用——判官
+    - ``thinking=False`` 关思考；``thinking=True`` 显式开思考（验收岗用——决策模型
       模型平时按行关着省时间，验收判断需要推理，故单独开）。
     - 厂形认不出 → 返回空字典，调用方自行兜底（绝不猜键位）。
 
@@ -199,7 +199,7 @@ def family_request_kwargs(
 ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
     """主链下发用：把（厂形 + 思考开支）翻成 ``(generate_kwargs, model_attrs, effort)``。
 
-    与 :func:`thinking_request_kwargs` 同表同键位，只是主链带预算数字、判官只要开关。
+    与 :func:`thinking_request_kwargs` 同表同键位，只是主链带预算数字、决策模型只要开关。
     返回的 ``reasoning_effort`` 已按厂形修正（Ollama 没有四档，minimal 落 low）。
     """
     generate_kwargs: Dict[str, Any] = {}

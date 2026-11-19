@@ -337,7 +337,7 @@ class ComplexityClassifier:
 
         判则只有一处定义（``coapis/decision/rubric.py``），工作区里名字含
         ``判则``/``rubric`` 的技能会自动叠加进来并优先。过去这里是空串——
-        判则不进 prompt，判官等于在按"没人知道的尺子"判，台账里的
+        判则不进 prompt，决策模型等于在按"没人知道的尺子"判，台账里的
         judgment 回溯不到标准，"判得准不准"根本无从核对。
         """
         try:

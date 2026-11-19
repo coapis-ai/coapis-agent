@@ -219,7 +219,7 @@ def test_config_put_persists_known_keys_only(client):
     assert saved["llm_timeout_ms"] == 2500
     # advisor_enabled=False 归一成"每 N 轮复核 = 0"，即关闭
     assert saved["advisor_every_iters"] == 0
-    assert saved.get("judge_model") == "glm-4.7", "判官模型必须落盘（F1：判官槽位）"
+    assert saved.get("judge_model") == "glm-4.7", "决策模型必须落盘（F1：决策模型槽位）"
     assert "judge_mode" not in saved, "未知键不落盘"
     assert "timeout_ms" not in saved, "别名不落盘，只有一份键名"
     assert "advisor_enabled" not in saved, "别名不落盘，只有一份键名"
@@ -247,9 +247,9 @@ def test_config_put_reaches_hub_config(client):
 
 
 def test_config_put_denied_for_non_admin(client):
-    """v19 P2-3：改判官配置改的是**整台部署**的判断行为，必须管理员 + 留痕。
+    """v19 P2-3：改决策模型配置改的是**整台部署**的判断行为，必须管理员 + 留痕。
 
-    原先任何登录用户 PUT /decisions/config 都能把判官总开关关掉、把技能岗
+    原先任何登录用户 PUT /decisions/config 都能把决策模型总开关关掉、把技能岗
     预算改成 1，落盘全局生效且零审计。闸门 = judge:audit（矩阵缺席即拒）。
     """
     c, holder, _ = client
@@ -309,7 +309,7 @@ def test_router_registered_under_api_prefix():
 
 
 def test_judge_health_card_shape(client):
-    """判官健康卡（B3）：管理员看"判官为什么沉默"只能读它 —— 字段名即契约。"""
+    """决策模型健康卡（B3）：管理员看"决策模型为什么沉默"只能读它 —— 字段名即契约。"""
     cli, _holder, _cfg = client
     resp = cli.get("/api/decisions/judge-health?days=7")
     assert resp.status_code == 200, resp.text
@@ -366,10 +366,10 @@ def test_judge_health_buckets_by_reason_code(client):
 
 
 def test_stats_splits_judge_ruler_and_flags_bogus_pending(client):
-    """判官战绩只按真问过判官的行算；非判档岗位的 pending 记成收口失效。
+    """决策模型战绩只按真问过决策模型的行算；非判档岗位的 pending 记成收口失效。
 
     plan_gate 的 pending 是合法的（等验收回填），tool_gate 冒出 pending
-    就是收口失效。命中率若按全行口径算，规则直判的战绩会算到判官头上——
+    就是收口失效。命中率若按全行口径算，规则直判的战绩会算到决策模型头上——
     dev 实测 plan_gate 111 行里只有 3 行真判，差一个数量级。
     """
     c, _holder, _ = client

@@ -284,7 +284,7 @@ export default function JudgmentPanel() {
         extra={
           <Space size={12} wrap>
             <span style={{ fontSize: 12 }}>
-              {t('decision.enabled', '判官')}{' '}
+              {t('decision.enabled', '决策模型')}{' '}
               <Switch
                 size="small"
                 checked={!!config?.enabled}
@@ -314,7 +314,7 @@ export default function JudgmentPanel() {
         }
       >
         <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
-          {t('decision.judgeModel', '判官模型')}：
+          {t('decision.judgeModel', '决策模型')}：
           {judge.model
             ? `${judge.provider_id || '?'} / ${judge.model}`
             : t('decision.noJudge', '未配置（走规则）')}
@@ -323,7 +323,7 @@ export default function JudgmentPanel() {
             : ''}
           {'  '}
           <a href="#/settings/models" style={{ fontSize: 12 }}>
-            {t('decision.goJudgeSlot', '去判官槽位')}
+            {t('decision.goJudgeSlot', '去决策模型槽位')}
           </a>
         </div>
 
@@ -346,7 +346,7 @@ export default function JudgmentPanel() {
                 <b>{s.n}</b>
                 {` · ${t('myspace.judgment.judged', '真判')} ${s.llm ?? 0}`}
                 {(s.hit_judged ?? 0) + (s.miss_judged ?? 0) > 0
-                  ? ` · ${t('myspace.judgment.judgeHitRate', '判官命中')} ${Math.round(
+                  ? ` · ${t('myspace.judgment.judgeHitRate', '决策模型命中')} ${Math.round(
                       ((s.hit_judged ?? 0) /
                         ((s.hit_judged ?? 0) + (s.miss_judged ?? 0))) *
                         100,

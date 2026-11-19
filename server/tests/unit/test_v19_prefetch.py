@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""v19 P1-1：判官异步预判（拍板 D3）。
+"""v19 P1-1：决策模型异步预判（拍板 D3）。
 
 台账实测的前摇：判档 avg 2841ms、技能岗 avg 5321ms，两处**串行** await
 = 用户干等 8s 量级。本文件只测预判这层机件的四条硬规矩：
 
   1. 中枢开着 → reply 开头就把两判**并行发起**（两个 task 同时在跑）；
-  2. 中枢关着 / 岗位关着 → 一个预判都不发起（不白烧判官额度）；
+  2. 中枢关着 / 岗位关着 → 一个预判都不发起（不白烧决策模型额度）；
   3. 消费处有预判就吃预判，**没有预判必须原路补判**——加了预判不许少判；
   4. 预判自身出问题 → 原路补判，绝不把异常泼到主链上。
 """
@@ -86,16 +86,16 @@ async def test_hub_on_launches_both_judges_in_parallel():
 async def test_hub_off_launches_nothing():
     st = _Stub(_Hub(enabled=False))
     st._start_judge_prefetch(None, "随便说点什么")
-    assert st._prefetch_tasks == {}, "中枢关闭不得发起预判（白烧判官额度）"
+    assert st._prefetch_tasks == {}, "中枢关闭不得发起预判（白烧决策模型额度）"
 
 
 async def test_disabled_post_classifies_but_never_judges(monkeypatch):
-    """v21 F2：plan_gate 岗位关闭 ⇒ 规则判档照发，但绝不请判官。
+    """v21 F2：plan_gate 岗位关闭 ⇒ 规则判档照发，但绝不请决策模型。
 
     旧契约「岗位关着就一个预判都不发起」已废止：它把零成本的规则层和花钱的
-    判官绑在同一颗开关上，岗位一关，规则判档一起停摆，计划链在默认配置下
+    决策模型绑在同一颗开关上，岗位一关，规则判档一起停摆，计划链在默认配置下
     整体静默（实测 1806 轮对话 create_plan 调用 0 次）。现在岗位只决定
-    「请不请判官」，由 _classify_plan_level 里的 judge_enabled 单独把关。
+    「请不请决策模型」，由 _classify_plan_level 里的 judge_enabled 单独把关。
     """
     from coapis.agents.react_agent import CoApisAgent
 
@@ -124,7 +124,7 @@ async def test_disabled_post_classifies_but_never_judges(monkeypatch):
     )
     # _Stub 用假实现覆盖了 _classify_plan_level，这里显式跑真方法。
     assert await CoApisAgent._classify_plan_level(st, "hello") == "simple"
-    assert seen.get("judge_enabled") is False, "岗位关闭却仍请了判官"
+    assert seen.get("judge_enabled") is False, "岗位关闭却仍请了决策模型"
 
 
 async def test_arm_plan_sets_auto_hint_when_rules_say_complex():
@@ -183,7 +183,7 @@ async def test_broken_prefetch_falls_back_to_sync_judge():
     st = _Stub(_Hub())
 
     async def _boom():
-        raise RuntimeError("判官炸了")
+        raise RuntimeError("决策模型炸了")
 
     st._spawn_prefetch("plan_gate", _boom())
     await asyncio.sleep(0.01)

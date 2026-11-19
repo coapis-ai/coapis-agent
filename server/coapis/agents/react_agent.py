@@ -2103,7 +2103,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         if loaded:
             self._core_skills = list(dict.fromkeys(list(self._core_skills) + loaded))
             logger.warning(
-                "[Skill] 本轮用户点名直装 %s（跳过关键词/判官，origin=user_picked）",
+                "[Skill] 本轮用户点名直装 %s（跳过关键词/决策模型，origin=user_picked）",
                 loaded,
             )
         if picked:
@@ -2178,7 +2178,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             ):
                 # 判档说这轮是简单请求，且预判已有结论 → 不采用技能判官结果
                 self._cancel_prefetch(
-                    "skill_trigger", "判档 simple，短请求不启技能判官",
+                    "skill_trigger", "判档 simple，短请求不启技能决策模型",
                 )
                 self._skill_trigger_reason = (
                     "skipped_simple: 判档判出 simple，本轮只用规则层技能"
@@ -2318,10 +2318,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
     # ``soft_ms_for``，硬超时按 ``effective_timeout_ms``）。
 
     def _skill_judge_model_name(self) -> str:
-        """本次兜底判会用到哪个模型（台账用；未配置判官返回空串）。
+        """本次兜底判会用到哪个模型（台账用；未配置决策模型返回空串）。
 
-        D-A（2026-11-05 拍板）：口径与判官实际用的模型一致——只认判官槽位，
-        不报会话激活模型。空串 = 这一轮判官不上岗，台账里看得清清楚楚。
+        D-A（2026-11-05 拍板）：口径与决策模型实际用的模型一致——只认决策模型槽位，
+        不报会话激活模型。空串 = 这一轮决策模型不上岗，台账里看得清清楚楚。
         """
         try:
             from ..decision import get_judge_provider_config
@@ -2352,7 +2352,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
     def _hub_turn_clock_hook(agent: Any) -> None:
         """轮次计数钩子（pre_reply）：轮次号 +1，坏数据当 1 重起，绝不抛。
 
-        判官的单轮 LLM 预算按轮清账、"同一输入不重复判"按轮生效，都依赖
+        决策模型的单轮 LLM 预算按轮清账、"同一输入不重复判"按轮生效，都依赖
         这个计数。它挂在对话入口上，因此**必须**比计数本身更皮实：
         ``_turn_seq`` 被外部写成非数字（测试注入、子类覆盖、持久化回来是
         字符串）时不能抛 ValueError 把对话打死——直接当作新账重起。
@@ -2399,7 +2399,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
     def _on_demand_skill_summaries(self) -> dict:
         """按需技能：名字 → 一句话摘要。
 
-        判官的验收岗/改道岗都要这份清单作为判断依据。技能字典的真名是
+        决策模型的验收岗/改道岗都要这份清单作为判断依据。技能字典的真名是
         ``_on_demand_skills``（``{name: (skill_dir, keywords)}``），这里统一
         转成摘要字典，避免调用方各自拼属性名拼出 AttributeError。
         """
@@ -2508,11 +2508,11 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
     ) -> list[str]:
         """LLM 兜底预选（v14 三层漏斗 Layer 2）。
 
-        关键词没命中时，让判官从候选技能里挑出最贴合的 1~3 个。
+        关键词没命中时，让决策模型从候选技能里挑出最贴合的 1~3 个。
 
-        v14：判官调用**全部经判断网关**——模型解析（含 chat 类型硬校验）、
+        v14：决策模型调用**全部经判断网关**——模型解析（含 chat 类型硬校验）、
         超时、熔断、缓存、台账、单飞、单轮预算都由网关统一负责，这里只把
-        判断结论翻译成技能名。判官不可用（无对话模型 / 熔断打开 / 本轮预算
+        判断结论翻译成技能名。决策模型不可用（无对话模型 / 熔断打开 / 本轮预算
         耗尽 / 中枢关闭）时返回空列表 = 本轮只用关键词层，**绝不**自己抓
         一个模型来判，也绝不重复判断。
         """
@@ -2555,7 +2555,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         )
         if not matched:
             if not self._skill_trigger_reason:
-                self._skill_trigger_reason = "judge_empty: 判官判断不触发"
+                self._skill_trigger_reason = "judge_empty: 决策模型判断不触发"
             logger.info("[TriggerDebug] %s", self._skill_trigger_reason)
             return []
         matched = [n for n in matched if n in candidates]
@@ -3922,7 +3922,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             logger.debug("plan-confirm hint injection skipped", exc_info=True)
 
     async def _inject_advisor_hint(self, res: dict) -> None:
-        """事中改道提示（v14 §3.4）：判官说方向偏了，下一轮动作吃它。
+        """事中改道提示（v14 §3.4）：决策模型说方向偏了，下一轮动作吃它。
 
         Args:
             res: :func:`coapis.decision.hub_advisor.advise` 的返回值，
@@ -4176,7 +4176,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 # QueryAnalyzer 的关键词 effort 是第三个头，绝不覆盖判官。
                 if _query_analysis.thinking_effort:
                     logger.debug(
-                        "[P1] QueryAnalyzer effort=%s 被忽略（思考档位归判官）",
+                        "[P1] QueryAnalyzer effort=%s 被忽略（思考档位归决策模型）",
                         _query_analysis.thinking_effort,
                     )
                 # v14 §批次4 / §4.4④：意图岗并入这条判断链，但**结论必须入账**。
@@ -4780,7 +4780,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             logger.debug("loop-gates reset failed", exc_info=True)
 
     def _start_judge_prefetch(self, msg: Msg | list[Msg] | None, query: str) -> None:
-        """并行发起判档与技能判官，结果挂在 self 上供消费处取。"""
+        """并行发起判档与技能决策模型，结果挂在 self 上供消费处取。"""
         self._prefetch_tasks = {}
         self._prefetch_wait_ms = {}
         self._prefetch_plan_level = None
@@ -4811,7 +4811,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         self._prefetch_tasks[key] = task
 
     def _cancel_prefetch(self, key: str, why: str = "") -> None:
-        """关键词层已命中 → 技能判官不必再判，取消以省一次判官往返。"""
+        """关键词层已命中 → 技能决策模型不必再判，取消以省一次决策模型往返。"""
         tasks = getattr(self, "_prefetch_tasks", None)
         task = (tasks or {}).get(key) if isinstance(tasks, dict) else None
         if task is not None and not task.done():
@@ -4940,7 +4940,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 # return，计划骨架提示永不注入，计划只能靠模型自愿发起。
                 # 判官参与与否由 _classify_plan_level 的 judge_enabled 把关。
                 logger.debug(
-                    "Plan gate: hub.enabled=False → 不请判官，规则判档继续",
+                    "Plan gate: hub.enabled=False → 不请决策模型，规则判档继续",
                 )
 
             # v19 P1-1：优先吃 reply 开头就发起的预判，干等的时长挪到前置工作里

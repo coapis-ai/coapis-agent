@@ -6,7 +6,7 @@
 - **D3 指纹不落原文**：只存 sha256 + 长度 + 元数据，**绝不存用户原文**。
 - **D6 判断日志进台账**：``DecisionResult.to_row()`` 出行，由 ``bus`` 落
   ``decision_events``（与资源台账同库、同为 fire-and-forget 范式）。
-- **D10 判官自审一期不做**：这里没有「判官的判官」。
+- **D10 决策模型自审一期不做**：这里没有「决策模型的决策模型」。
 """
 from __future__ import annotations
 

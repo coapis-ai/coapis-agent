@@ -6,7 +6,7 @@
 ``bus.get_bus().emit(DecisionResult)`` 落行，再由 ``_write_governance``
 补治理列（origin/zero_reason/dirty_band）。
 
-这一节绝大多数是**现状锁**——B3 动判官时不许把它们改松。只有弃权原因码
+这一节绝大多数是**现状锁**——B3 动决策模型时不许把它们改松。只有弃权原因码
 是 B3 目标锁（``xfail(strict=True)``）。
 """
 from __future__ import annotations

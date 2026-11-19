@@ -134,7 +134,7 @@ def register_on_demand_skills(skills: dict[str, dict]) -> None:
 
 
 def _parse_skill_names(raw: str, allowed: dict[str, str]) -> list[str]:
-    """判官输出 → 技能名列表。
+    """决策模型输出 → 技能名列表。
 
     只认注册表里真实存在的名字，绝不把模型随口说的名字当技能。一个都认不出
     来不算失败（那是"没命中"），但输出不成 JSON 就算解析失败，交网关降级。
@@ -146,9 +146,9 @@ def _parse_skill_names(raw: str, allowed: dict[str, str]) -> list[str]:
     try:
         names = json.loads(text)
     except Exception as exc:  # noqa: BLE001 - 交给网关记 parse_fail
-        raise ValueError(f"判官输出不是 JSON 数组: {raw[:80]!r}") from exc
+        raise ValueError(f"决策模型输出不是 JSON 数组: {raw[:80]!r}") from exc
     if not isinstance(names, list):
-        raise ValueError(f"判官输出不是数组: {raw[:80]!r}")
+        raise ValueError(f"决策模型输出不是数组: {raw[:80]!r}")
     return [n for n in names if isinstance(n, str) and n in allowed]
 
 

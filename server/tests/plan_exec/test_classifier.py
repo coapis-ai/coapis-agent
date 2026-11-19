@@ -112,9 +112,9 @@ class TestCalibration20(unittest.TestCase):
 
 
 class TestLiteJudgeDegradation(unittest.IsolatedAsyncioTestCase):
-    """判官不可用时必须保住规则结论，且绝不拿对话模型去顶判官（D-A）。
+    """决策模型不可用时必须保住规则结论，且绝不拿对话模型去顶决策模型（D-A）。
 
-    D-A 拍板后，判官槽位为空的判断在网关 L0 前置门就返回，模型一次都不调。
+    D-A 拍板后，决策模型槽位为空的判断在网关 L0 前置门就返回，模型一次都不调。
     这两条过去是 mock plan_gate 里的薄委托函数（该函数已删——判档全部走网关，
     委托函数是生产零调用的死代码，mock 它等于自证不存在）。
     """

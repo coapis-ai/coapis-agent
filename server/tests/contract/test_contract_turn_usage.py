@@ -330,7 +330,7 @@ def test_record_safe_never_raises(monkeypatch):
 
 
 def test_breaker_reason_of_carries_note_and_state():
-    """熔断原因 = 状态 + 计数 + 最近一次原因（判官台账的 reason 数据源）。"""
+    """熔断原因 = 状态 + 计数 + 最近一次原因（决策模型台账的 reason 数据源）。"""
     from coapis.decision.breaker import CircuitBreaker
 
     br = CircuitBreaker(

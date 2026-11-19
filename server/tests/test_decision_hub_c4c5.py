@@ -58,7 +58,7 @@ class _FakeGateway:
 
 
 def _slot_on(monkeypatch, slot=None):
-    """让假 hub 带上一枚可用的判官槽位。
+    """让假 hub 带上一枚可用的决策模型槽位。
 
     A3 起 ``fire_advisor`` 会先看槽位配没配——没配就不发射，免得在台账里
     天天累积 no_model 白跑行。所以替身必须能回答这个问题。打在 ``resolver``
@@ -291,7 +291,7 @@ def test_acceptance_backfills_plan_gate(monkeypatch):
 
 
 def test_acceptance_abstain_never_backfills(monkeypatch):
-    """弃权不能回填成 miss——判官没判就没有对错。"""
+    """弃权不能回填成 miss——决策模型没判就没有对错。"""
     calls = []
     monkeypatch.setattr(
         acc, "_backfill_sync",
@@ -368,7 +368,7 @@ def test_acceptance_never_raises(monkeypatch):
 
 
 def test_fire_advisor_skips_without_judge_slot(monkeypatch):
-    """A3 验收「台账 0 白跑行」：判官槽位为空时**根本不发射**。
+    """A3 验收「台账 0 白跑行」：决策模型槽位为空时**根本不发射**。
 
     不发射才是治本——网关就不会在 no_model 层按节奏天天落一行零信息台账。
     用 asyncio.run 把事件循环撑起来，否则"没发射"可能只是因为没循环而降级，
@@ -396,4 +396,4 @@ def test_fire_advisor_skips_without_judge_slot(monkeypatch):
         return out
 
     asyncio.run(_go())
-    assert fake.calls == [], "槽位为空却仍然打了判官：会往台账灌 no_model 白跑行"
+    assert fake.calls == [], "槽位为空却仍然打了决策模型：会往台账灌 no_model 白跑行"

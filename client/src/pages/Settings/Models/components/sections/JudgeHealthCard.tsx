@@ -79,7 +79,7 @@ export const JudgeHealthCard: React.FC = () => {
     <Card
       size="small"
       loading={loading && !data}
-      title={t("judgeHealth.title", "判官健康")}
+      title={t("judgeHealth.title", "决策模型健康")}
       extra={
         <Space size="small">
           <span style={{ color: "#888", fontSize: 12 }}>
@@ -104,7 +104,7 @@ export const JudgeHealthCard: React.FC = () => {
       ) : (
         <Space direction="vertical" size={6} style={{ width: "100%" }}>
           <Space size={4} wrap>
-            <Tag>{t("judgeHealth.slot", "判官槽位")}</Tag>
+            <Tag>{t("judgeHealth.slot", "决策模型槽位")}</Tag>
             <span style={{ fontFamily: "monospace", fontSize: 12 }}>
               {supply?.slot_provider_id || "-"} / {supply?.slot_model || "-"}
             </span>

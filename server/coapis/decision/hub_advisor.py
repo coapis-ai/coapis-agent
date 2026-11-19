@@ -12,10 +12,10 @@ How: 环1（ReAct 每轮动作前）按 ``advisor_every_iters`` 的节奏判一�
 被它影响；台账写一行 ``source=advisor``。
 
 刻意的设计：
-* **发射即忘**：判官要 1~3 秒，绝不能卡在动作前。本轮判、下轮生效。
+* **发射即忘**：决策模型要 1~3 秒，绝不能卡在动作前。本轮判、下轮生效。
 * **前几轮不判**：``advisor_min_iters`` 之前动作太少，判了看不出来，
   只会产生噪声台账。
-* **改道必须带证据**：判则要求 change/stop 引用动作序号，防判官凭
+* **改道必须带证据**：判则要求 change/stop 引用动作序号，防决策模型凭
   感觉改道；拿不准判 continue（提示每轮都在花钱）。
 * 预算闸门由网关统一管（``judge_max_calls_per_turn``），本模块不加闸。
 """
@@ -71,12 +71,12 @@ def _sentence_after(text: str) -> str:
 def parse_contract(text: str) -> tuple[str, str] | None:
     """单字契约解析 → ``(台账词, 证据)``；``None`` = 模型什么都没吐（parse_fail）。
 
-    口径只有一句：**非 ADJUST 一律 CONTINUE**。判官的职责是"要不要改道"，
+    口径只有一句：**非 ADJUST 一律 CONTINUE**。决策模型的职责是"要不要改道"，
     说不清就等于"不改"——把解析失败当"该拦"处置，等于用一个更笨的模型去
     否决主链的正常工作。
 
     但**空回复仍返回 None**：那不是"它说继续"，是这一判没有内容。它必须留在
-    parse_fail 上可见，否则判官挂了、槽位空转，我们从台账里看到的会是一片
+    parse_fail 上可见，否则决策模型挂了、槽位空转，我们从台账里看到的会是一片
     祥和的 continue。
     """
     body = str(text or "").strip()
@@ -131,7 +131,7 @@ def should_advise(hub: Any, iters: int, *, force: bool = False) -> bool:
 
 
 def build_digest(tool_msgs: Sequence[Any] | None) -> str:
-    """把最近几次动作压成给判官看的摘要（``1. name 参数摘要`` 形式）。"""
+    """把最近几次动作压成给决策模型看的摘要（``1. name 参数摘要`` 形式）。"""
     lines: list[str] = []
     msgs = [m for m in (tool_msgs or []) if m is not None]
     for idx, msg in enumerate(msgs[-_MAX_ACTIONS:], start=1):
@@ -302,7 +302,7 @@ async def _run(
 
 
 def _load_obj(text: str) -> dict[str, Any] | None:
-    """从判官输出里取 JSON 对象（剥围栏 + 取第一个花括号块）。"""
+    """从决策模型输出里取 JSON 对象（剥围栏 + 取第一个花括号块）。"""
     txt = (text or "").strip()
     if not txt:
         return None

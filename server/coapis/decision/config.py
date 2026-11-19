@@ -223,7 +223,7 @@ def _as_str(val: Any, default: str) -> str:
     """字符串项归一化。
 
     模型槽（``judge_provider_id``/``judge_model``）是字符串——以前没有
-    字符串分支，非数值配置一律被 ``_as_float`` 吞回默认值，判官固定模型槽
+    字符串分支，非数值配置一律被 ``_as_float`` 吞回默认值，决策模型固定模型槽
     会永远读成空（等于该功能恒不生效）。
     """
     if val is None:
@@ -367,7 +367,7 @@ class DecisionHubConfig:
         - 其余岗位吃 ``judge_soft_ms_post`` 表里的值，表里没写的岗位
           （以及空表）回落全局 ``judge_soft_ms``。
         - 硬超时（``effective_timeout_ms``）不受影响，它是"这一判最多活
-          多久"的保险丝；软阈值只管"主链等多久就先走、判官后台补判"。
+          多久"的保险丝；软阈值只管"主链等多久就先走、决策模型后台补判"。
         """
         key = str(purpose or "").strip()
         if key == "acceptance":
@@ -593,7 +593,7 @@ class DecisionHubConfig:
                     _PROBE_SOFT_WARNED = True
                     logger.warning(
                         "[决策中枢] 配置口径分裂：熔断探针超时 %.1fs 小于最大岗位"
-                        "软阈值 %.1fs——半开探测会在判官正常判完之前判它失败，"
+                        "软阈值 %.1fs——半开探测会在决策模型正常判完之前判它失败，"
                         "熔断合不上。建议 BREAKER_PROBE_TIMEOUT_S >= %.1f",
                         float(self.breaker_probe_timeout_s),
                         _soft_max / 1000.0,
@@ -688,7 +688,7 @@ class DecisionHubConfig:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
     def as_dict(self) -> dict[str, Any]:
-        """判官设置项 API 的字典视图（v14 §5.2 的契约字段名）。
+        """决策模型设置项 API 的字典视图（v14 §5.2 的契约字段名）。
 
         字段名按 API 契约拼：``max_calls_per_turn`` 是本类
         ``judge_max_calls_per_turn`` 的契约名，``timeout_s`` 由
@@ -721,7 +721,7 @@ class DecisionHubConfig:
 
     @property
     def llm_timeout_s(self) -> float:
-        """判断模型超时（秒）。"""
+        """决策模型超时（秒）。"""
         return self.llm_timeout_ms / 1000.0
 
     @property
@@ -816,7 +816,7 @@ def _saved_file_section_safe() -> dict:
     """读数据根 ``config/decision_hub.json``（管理台保存的那份），失败给空。
 
     优先级：智能体段 > 环境变量 > 这份文件 > 默认值。界面改了预算要能
-    真的落到判官身上，运行时就必须读它（带 5 秒缓存，改配置不必重启）。
+    真的落到决策模型身上，运行时就必须读它（带 5 秒缓存，改配置不必重启）。
     """
     try:
         sec = saved_hub_section()

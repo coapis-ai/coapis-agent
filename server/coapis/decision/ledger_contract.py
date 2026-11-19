@@ -97,7 +97,7 @@ def abstain_reason_of(
     """弃权行的原因码（B3 交付）。判定有结论时返回 ``""`` —— 不是弃权就别编原因。
 
     验收口径（方案 §5）：**弃权行 100% 带原因码**。此前"弃权 = 空判定"，
-    看板只看见"判官没意见"，看不出为什么没意见（槽位空？解析失败？模型
+    看板只看见"决策模型没意见"，看不出为什么没意见（槽位空？解析失败？模型
     真弃权？），于是沉默与失职在台账里长得一模一样，无法归因也无法修。
 
     码位取自 ``judge_reasons`` 这个唯一词表，读侧用 ``parse_code`` 分桶，
@@ -120,7 +120,7 @@ def abstain_reason_of(
 def detect_origin(chat_id: str, session_id: str) -> str:
     """行来源：test / no_identity / web（v14 §批次5 写侧，v19 P2-1 补身份缺失）。
 
-    v19 P2-1：chat_id 与 session_id 都空时单列 ``no_identity``。实测判官台账里有
+    v19 P2-1：chat_id 与 session_id 都空时单列 ``no_identity``。实测决策模型台账里有
     66 行 chat_id/turn_id/user_id 全空——它们既进不了闭环对账、也无法按会话归因，
     却一路混在真判率分母里，于是"真判率"这种数字根本无法复核。宁可承认这批不知道
     是谁的，也不要拿它去算成绩。
@@ -214,9 +214,9 @@ def ledger_final_outcome(
 
     - 判档行（plan_gate）返回空串：对错要等验收回填 hit/miss。
     - 验收/复核行（acceptance/verify/plan_review）写自己的 verdict
-      （satisfied/partial/failed/abstain）。此前判官真判了、结论只在
+      （satisfied/partial/failed/abstain）。此前决策模型真判了、结论只在
       action 列，outcome 却写 pending，同一条账自相矛盾（实测 11 行）。
-      acceptance 没裁决词算 abstain（判官没判即弃权）；plan_review 没
+      acceptance 没裁决词算 abstain（决策模型没判即弃权）；plan_review 没
       裁决词算 final（那一格没判，不等于弃权）。
     - 技能命中行（skill_trigger）看 judgment 冒号后的技能名单：dev 实测
       命中行 judgment=select:docx，未命中行 judgment=none 或 select:。

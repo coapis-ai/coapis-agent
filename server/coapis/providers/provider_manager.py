@@ -2220,11 +2220,11 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         )
 
     def clear_default_model(self, model_type: str) -> None:
-        """空掉一个槽位（v16）：只能设不能清 = 判官一旦上岗就永远下不来。
+        """空掉一个槽位（v16）：只能设不能清 = 决策模型一旦上岗就永远下不来。
 
         槽位从 ``default_models.json`` 里删掉；``DefaultModelsConfig.to_dict``
         跳过空槽，所以 GET 侧立刻看不见这一项。清 chat 槽位时撤掉环境里激活
-        模型的引用（与 set 侧的 pin 对称）；清 decision 槽位时把判官请下岗。
+        模型的引用（与 set 侧的 pin 对称）；清 decision 槽位时把决策模型请下岗。
         """
         self.default_models.set_by_type(model_type, None)
         self._save_default_models()

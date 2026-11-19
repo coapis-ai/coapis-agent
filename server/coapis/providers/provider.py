@@ -51,7 +51,7 @@ _LOCAL_PORTS = (11434, 8080, 8081, 8082, 8000)  # ollama / vLLM / llama.cpp
 def is_local_endpoint(base_url: Any) -> bool:
     """端点是否指向**本地/内网的自托管推理服务**（ollama、vLLM、llama.cpp…）。
 
-    用途只有一个：**判断中枢给判官排超时预算**（本地链路跑思考模型 5~15 秒，
+    用途只有一个：**判断中枢给决策模型排超时预算**（本地链路跑思考模型 5~15 秒，
     远端 API 通常 1~3 秒，见 ``decision/resolver.is_local_base_url``，它委托到
     本函数，全项目一份尺子）。
 
@@ -541,7 +541,7 @@ class Provider(ProviderInfo, ABC):
 
     # ── B3 判官适配器（收尾方案 v1 §5/§6.1）──────────────────────────
     def judge_capability(self, model_id: str) -> dict:
-        """这个 provider 的某个模型当判官的底牌（能力元数据，不是猜测）。
+        """这个 provider 的某个模型当决策模型的底牌（能力元数据，不是猜测）。
 
         三样都按"有没有证据"口径，None = 未观测：
         - ``structured_output``：探测缓存里 json_mode 的结论（探测过才有）；
@@ -549,7 +549,7 @@ class Provider(ProviderInfo, ABC):
         - ``supports_thinking``：``support_reasoning`` 标记（思考型模型要把
           推理文字与正文分开，否则 JSON 结论被推理文字淹没 → parse_fail）。
 
-        为什么不猜：判官选错模型的代价是"看起来判官不行"——嵌入模型当判官
+        为什么不猜：决策模型选错模型的代价是"看起来决策模型不行"——嵌入模型当决策模型
         9/9 全超时（v14 实测）、窗口不够的模型读不完被判内容，两者在台账
         上都长成 timeout/parse_fail。能力闸（decision.resolver.
         judge_capability_ok）吃的就是这三样，**未观测 = 放行**。
@@ -581,11 +581,11 @@ class Provider(ProviderInfo, ABC):
         }
 
     def as_judge_model(self, model_id: str | None = None, **kwargs):
-        """把本 provider 的模型包成"判官可用的模型对象"（B3 适配器）。
+        """把本 provider 的模型包成"决策模型可用的模型对象"（B3 适配器）。
 
-        为什么要有它：判官在网关里直连 HTTP（自带超时/预算/熔断那套），
-        绕开了重试与限流——于是判官"连不上"在可用性台账里不留痕，看板把
-        "判官没意见"与"判官连不上"混成一格。需要**模型对象**（而不是裸
+        为什么要有它：决策模型在网关里直连 HTTP（自带超时/预算/熔断那套），
+        绕开了重试与限流——于是决策模型"连不上"在可用性台账里不留痕，看板把
+        "决策模型没意见"与"决策模型连不上"混成一格。需要**模型对象**（而不是裸
         HTTP）的消费方——第一个就是离线评测体系（B5）——从这里拿，拿到的
         是带重试/限流/可用性记账的包装件，与聊天主链同一口径。
 
@@ -604,7 +604,7 @@ class Provider(ProviderInfo, ABC):
             target = str(getattr(self, "default_model_id", "") or "").strip()
         if not target:
             raise ValueError(
-                f"provider {self.id} 没有可当判官的模型"
+                f"provider {self.id} 没有可当决策模型的模型"
                 "（未指定 model_id 且 provider 无默认模型）",
             )
         wrapped = RetryChatModel(
