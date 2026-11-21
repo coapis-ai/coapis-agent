@@ -29,7 +29,7 @@ const CoApisDeepThinking: React.FC<{ data: IDeepThinking }> = ({ data }) => {
       title={
         hideThinking
           ? t("chat.deepThinkingCollapsed", "思考已收起 · 展开")
-          : data.title || t("chat.deepThinking", "深度思考")
+          : data.title || t("chat.deepThinking", "思考")
       }
       loading={data.loading}
       content={data.content}

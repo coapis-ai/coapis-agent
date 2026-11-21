@@ -55,8 +55,8 @@ import { useVendorLabels } from "./components/vendorLabels";
 // 2026-11-13 拍板：知识库引用独立卡下线注册（组件文件 components/CoApisKbCitations
 // 保留未删）。引用统一并入「本轮资源」，与产出资源共用同一预览窗。
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
-// 计划看板：计划主线常驻可见（2026-11-19 计划执行能力优化）。
-import ChatPlanBoard from "./components/ChatPlanBoard";
+// 执行计划卡：计划主线进本轮回答气泡内（2026-11-20 v2.1，底部常驻看板已撤）。
+import ChatPlanCard from "./components/ChatPlanCard";
 import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
 import {
   useChatResourceLedger,
@@ -2153,9 +2153,28 @@ export default function ChatPage() {
     [ledgerMetaOf],
   );
 
-  /** 响应气泡末尾插槽（方案 §3.2 L2 / §12.3）：产出卡 + 本轮资源条 */
+  /** 响应气泡末尾插槽（方案 §3.2 L2 / §12.3）：计划卡 + 本轮资源条 */
+  // 2026-11-21 用户拍板：执行计划卡在**回答的最后**（最后总结之前）；执行过程中跟着最新内容一直在最下面。
+  // SDK 的 response.prepend 槽渲染在正文**之前**，上一版放那里卡片跑到了
+  // 整轮回答的最上面，已废弃；改回 append 槽，order 12 排在「本轮资源」(14) 之前。
   const chatAppendSlots = useMemo(
     () => [
+      {
+        // 执行计划卡（2026-11-20 v2.1）：计划主线画进**这一轮**的气泡里，
+        // 位置在「本轮资源」之前——工具调用可以折叠看不见，但「做哪几件事、
+        // 到哪一步、结果是什么」必须常驻。isLast=false 时组件自己不渲染，
+        // 所以历史轮次回看不会被每张气泡插一块进度条。
+        id: "coapis-chat-plan",
+        order: 12,
+        render: ({ data, isLast }: { data: any; isLast?: boolean }) => (
+          <ChatPlanCard
+            chatId={chatId}
+            cardData={data}
+            isLast={isLast}
+            getMessages={() => chatMessagesBridgeRef.current?.getMessages() || []}
+          />
+        ),
+      },
       // 知识库引用独立卡（id: kb-citations）已下线注册：引用改走统一资源台账，
       // 与产出资源同列「本轮资源」、共用同一预览窗。组件文件按拍板保留未删。
       {
@@ -2178,7 +2197,7 @@ export default function ChatPage() {
         ),
       },
     ],
-    [roundItems, ledgerMetaOf, handleLocateResource],
+    [roundItems, ledgerMetaOf, handleLocateResource, chatId],
   );
 
   const options = useMemo(() => {
@@ -2745,10 +2764,10 @@ export default function ChatPage() {
               />
             </ChatErrorBoundary>
           </div>
-          {/* 执行计划看板（2026-11-19 计划执行能力优化）：工具细节可以折叠，
-              但“做哪几件事、到哪一步、结果是什么”必须一直看得见。
-              数据源 = GET /plan/current 全量历史 + /plan/stream 实时推进。 */}
-          <ChatPlanBoard chatId={chatId} />
+          {/* 执行计划卡已改挂进回答气泡的 append 槽位
+              （id: coapis-chat-plan，order 12，见 chatAppendSlots）。
+              原先贴在消息区最底部的常驻看板，与总结区隔开几百像素，
+              读起来像另一场对话的进度条 —— 2026-11-20 拍板彻底撤掉。 */}
 
           {/* v23 · 右侧资源条整列下线（2026-11-09 拍板）：它与左栏选中会话后的展开面
               板、气泡末尾的本轮资源条三层同义——同一接口、同一作用域、同一份缓存，上半

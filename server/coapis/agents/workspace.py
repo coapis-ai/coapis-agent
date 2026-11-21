@@ -447,14 +447,44 @@ class Workspace:
             except Exception:
                 pass
             r._health = True
-            # Wire ChatManager for session persistence
-            if self.chat_manager:
-                r.set_chat_manager(self.chat_manager)
-            # Wire MCP manager if initialized
-            if hasattr(self, '_mcp_manager') and self._mcp_manager:
-                r.set_mcp_manager(self._mcp_manager)
             self._runner = r
+        self._wire_runner(self._runner)
         return self._runner
+
+    def _wire_runner(self, r):
+        """(Re-)attach lazily-ready services to the cached runner.
+
+        The runner can be materialized before workspace services have
+        started: the first request may touch the ``runner`` property while
+        ``chat_manager`` / ``_mcp_manager`` are still None (services are
+        lazily started in ``_do_start``).  Wiring only once at creation
+        time left the cached runner permanently without a ChatManager,
+        which silently skipped history loading and message persistence,
+        so assistant replies vanished after a page refresh.
+
+        Re-check on every property access so the runner heals itself as
+        soon as the services become available.
+        """
+        if r is None:
+            return
+        cm = self.chat_manager
+        if cm is not None and getattr(r, "_chat_manager", None) is None:
+            r.set_chat_manager(cm)
+            logger.info(
+                "Workspace runner re-wired: ChatManager attached "
+                "(agent_id=%s username=%s)",
+                self.agent_id,
+                getattr(self, "username", None),
+            )
+        mcp = getattr(self, "_mcp_manager", None)
+        if mcp is not None and getattr(r, "_mcp_manager", None) is None:
+            r.set_mcp_manager(mcp)
+            logger.info(
+                "Workspace runner re-wired: MCPManager attached "
+                "(agent_id=%s)",
+                self.agent_id,
+            )
+
 
     async def _init_mcp_manager(self):
         """Initialize MCP client manager with merged global+user config.
@@ -1058,6 +1088,8 @@ class Workspace:
 
         # ── MCP Client Manager: 热加载 MCP 工具 ──────────────────────
         await self._init_mcp_manager()
+        # Heal a runner cached before these services existed.
+        self._wire_runner(getattr(self, "_runner", None))
         await self._start_mcp_config_watcher()
 
         # ── TriggerTracker: 确保技能触发追踪单例已初始化 ──

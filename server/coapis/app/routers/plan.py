@@ -33,6 +33,7 @@ from fastapi import APIRouter, HTTPException, Query, Body
 from fastapi.requests import Request
 from fastapi.responses import StreamingResponse
 
+from coapis.plan.lifecycle import plan_really_done
 from coapis.plan.schemas import outcome_pending as _outcome_pending
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,9 @@ def _normalize_plan_data(raw: dict) -> dict:
         "subtasks": subtasks,
         "created_at": raw.get("created_at"),
         "finished_at": raw.get("finished_at"),
+        # finished 的唯一尺子见 plan.lifecycle.plan_really_done：runner 只在
+        # 新开计划时才清 current，不能靠「它还是不是 current」判定在跑。
+        "finished": bool(raw.get("finished")) or plan_really_done(raw),
         "outcome": raw.get("outcome"),
     }
 
@@ -430,16 +434,19 @@ def _build_plan_history(
         history.append(item)
     if current:
         key = current.get("id") or current.get("name")
+        # 同一把尺子：每一步都勾掉的计划，不再因为「还是当前那份」而被抹成
+        # unfinished——否则卡片永远显示「进行中」且一直轮询（1e9c20b7 实测）。
+        really_done = bool(current.get("finished")) or plan_really_done(current)
         if key in seen:
             for idx, item in enumerate(history):
                 if (item.get("id") or item.get("name")) == key:
                     entry = dict(current)
-                    entry["finished"] = False
+                    entry["finished"] = really_done
                     history[idx] = entry
                     break
         else:
             entry = dict(current)
-            entry.setdefault("finished", False)
+            entry["finished"] = really_done
             history.append(entry)
     return history
 

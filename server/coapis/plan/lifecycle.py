@@ -16,6 +16,7 @@ final snapshot has to be reconstructed here.
 """
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any
 
@@ -65,6 +66,28 @@ def _normalize_finished(snapshot: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
+def plan_really_done(snapshot: dict[str, Any]) -> bool:
+    """「跑完了」的唯一尺子：state 是 done，**且每一步都真打上了勾**。
+
+    为什么不能只看 id/finished：runner 只在新开一份计划时才清空
+    ``current_plan``，于是本会话最后一份计划会永远「还是 current」。实测
+    会话 1e9c20b7 四步全 done、finished_at 已落，卡片仍显示「进行中」且一直
+    轮询——就是因为它无条件地把自己报成 unfinished。
+
+    为什么也不能只看 state：``_normalize_finished`` 的 state 是按子任务**推断**
+    的（全 todo 会被推成 abandoned），那种计划其实还没开工、仍可能由 runner
+    继续推，不能当终点态（2026-11-20 面板停在「3/5」不动就是这么来的）。
+    """
+    if str(snapshot.get("state") or "") != "done":
+        return False
+    states = [
+        str(s.get("state") or "")
+        for s in (snapshot.get("subtasks") or [])
+        if isinstance(s, dict)
+    ]
+    return bool(states) and all(s == "done" for s in states)
+
+
 def finished_plan_snapshots(notebook: Any) -> list[dict[str, Any]]:
     """All plans this notebook still knows about, oldest first.
 
@@ -103,7 +126,7 @@ def finished_plan_snapshots(notebook: Any) -> list[dict[str, Any]]:
         current_id = None
     if current_id is not None:
         for snap in finished:
-            if snap.get("id") == current_id:
+            if snap.get("id") == current_id and not plan_really_done(snap):
                 snap["finished"] = False
 
     try:
@@ -159,3 +182,50 @@ def merge_finished_plan_snapshots(
     if limit and len(merged) > limit:
         merged = merged[-limit:]
     return merged
+
+
+# ---------------------------------------------------------------------------
+# 跨轮持久化 / 恢复（2026-11-20 定位）
+# ---------------------------------------------------------------------------
+
+# agentscope 的 ``ReActAgent.__init__`` 只是把 ``plan_notebook`` 当普通属性
+# 挂着（没有 ``register_state``），所以 ``agent.state_dict()`` 里根本没有它，
+# ``load_session_state`` 也就无从恢复。实测 32 个会话文件里 ``current_plan``
+# 全是 None：计划只在单轮内存里活着，用户回复"确认"的那一轮拿不到计划，
+# 模型把三步全跑完、``finish_plan`` 仍报 "There is no plan to finish"，
+# 前端卡片永远停在 0/3。下面两个函数是这条链路上唯一的落盘/恢复通路。
+
+RESUMABLE_PLAN_STATES = ("todo", "in_progress")
+
+
+def notebook_state_payload(notebook: Any) -> dict:
+    """把计划本序列化成可写进 session store 的 dict；不可用时返回 ``{}``。"""
+    if notebook is None:
+        return {}
+    try:
+        state = notebook.state_dict()
+    except Exception:  # pragma: no cover - SDK 内部结构变化
+        logger.warning("plan notebook state_dict failed", exc_info=True)
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def restore_notebook_state(notebook: Any, saved: Any) -> bool:
+    """把上一轮持久化的计划本装回新建的实例。
+
+    只恢复还没跑完的计划（``todo`` / ``in_progress``）：已完成或已放弃的计划
+    不该在下一轮复活。返回 ``True`` 表示 ``notebook.current_plan`` 已可用。
+    """
+    if notebook is None or not isinstance(saved, dict) or not saved:
+        return False
+    current = saved.get("current_plan")
+    if not isinstance(current, dict):
+        return False
+    if current.get("state") not in RESUMABLE_PLAN_STATES:
+        return False
+    try:
+        notebook.load_state_dict(copy.deepcopy(saved), strict=False)
+    except Exception:  # pragma: no cover - SDK 内部结构变化
+        logger.warning("plan notebook restore failed", exc_info=True)
+        return False
+    return getattr(notebook, "current_plan", None) is not None

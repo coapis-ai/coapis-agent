@@ -1454,7 +1454,7 @@
     "allChats": "すべてのチャット",
     "createNewChat": "新しいチャットを作成",
     "statusIdle": "待機",
-    "statusInProgress": "処理中",
+    "statusInProgress": "作業中",
     "disclaimer": "あなたのために働き、あなたと共に成長します",
     "greeting": "こんにちは、今日はどんなお手伝いができますか？",
     "description": "私はあなたの質問をサポートするAIアシスタントです。",
@@ -1573,6 +1573,7 @@
       "empty": "今回のリソースはありません",
       "more": "他 {{n}} 件未読込",
       "barTitle": "セッションのリソース",
+      "viewShort": "表示",
       "barTitleRound": "このターンのリソース",
       "viewAllSession": "セッション全体のリソース",
       "viewAllTip": "このセッションの全リソース（以前のターンを含む）を開く",
@@ -1593,6 +1594,8 @@
       "drawerTitle": "チャットリソース",
       "producedTitle": "今回の成果物",
       "viewAll": "すべて表示",
+      "moreBtn": "もっと見る",
+      "moreRest": "さらに {{n}} 件",
       "reference": "参照",
       "convert": "形式変換",
       "expandRest": "他 {{n}} 件を表示",
@@ -1775,39 +1778,39 @@
     "noteIt": "記録する",
     "noteSaved": "長期記憶に保存しました",
     "noteFailed": "記録に失敗しました",
-    "deepThinking": "深い思考",
-    "deepThinkingCollapsed": "思考は折りたたまれています · 展開",
+    "deepThinking": "思考",
+    "deepThinkingCollapsed": "思考の途中 · 展開",
     "simple": {
       "thinking": "思考",
       "step": "ステップ {{n}}",
-      "statusRunning": "実行中",
-      "statusDone": "完了",
-      "statusFailed": "失敗",
-      "running": "実行中",
-      "params": "パラメータ",
-      "output": "出力",
+      "statusRunning": "処理しています",
+      "statusDone": "できました",
+      "statusFailed": "うまくいきません",
+      "running": "処理しています",
+      "params": "やったこと",
+      "output": "結果",
       "copy": "テキストをコピー",
       "copied": "コピーしました",
       "file": "ファイル"
     },
     "tool": {
-      "running": "実行中",
+      "running": "処理しています",
       "reading": "読み込み中",
       "writing": "書き込み中",
       "searching": "検索中",
       "copyResponse": "回答をコピー",
-      "done": "完了",
-      "failed": "失敗",
+      "done": "できました",
+      "failed": "うまくいきません",
       "blocked": "ブロックしました",
       "blockedDetail": "ブロック理由",
       "blockedReason": {
         "planScopePending": "プランが未確認のため、この操作はブロックされました",
         "guardDenied": "セキュリティルールがこの操作をブロックしました"
       },
-      "aborted": "中断",
-      "params": "入力",
-      "output": "出力",
-      "truncated": "省略済み"
+      "aborted": "停止しました",
+      "params": "やったこと",
+      "output": "結果",
+      "truncated": "長いため一部を表示"
     },
     "resourcesTitle": "セッションリソース"
   },
@@ -2275,20 +2278,20 @@
     "title": "プラン",
     "noPlan": "アクティブなプランがありません",
     "noPlanHint": "/plan <説明> でプランを作成",
-    "confirmTitle": "計画の確認待ち：{{title}}",
+    "confirmTitle": "このステップはOKをください：{{title}}",
     "confirmHint": "確認後は通常の工程が自動実行されます。外部への影響や破壊的な操作は個別に承認が必要です。",
-    "confirmAction": "確認して実行",
+    "confirmAction": "OK、進めて",
     "confirmSuccess": "計画を確認しました",
     "confirmFailed": "確認に失敗しました",
     "progress": "進捗",
     "outcome": "結果",
     "state": {
       "todo": "未着手",
-      "in_progress": "進行中",
-      "done": "完了",
-      "abandoned": "中止"
+      "in_progress": "作業中",
+      "done": "できました",
+      "abandoned": "キャンセル"
     },
-    "pendingConfirm": "確認待ち"
+    "pendingConfirm": "あなたの確認待ち"
   },
   "admin": {
     "confirmDisable": "ユーザーを無効化しますか",
@@ -2714,14 +2717,17 @@
     "noAbstain": "期間中に棄権記録なし"
   },
   "planBoard": {
-    "title": "実行計画",
+    "title": "進捗",
     "unnamed": "名称未設定の計画",
-    "inProgress": "実行中",
-    "completed": "完了",
-    "abandoned": "中止",
-    "stepProgress": "{{done}}/{{total}}",
+    "inProgress": "作業中",
+    "notStarted": "まだ始めていません",
+    "completed": "すべて完了",
+    "abandoned": "キャンセル",
+    "stepProgress": "{{done}}/{{total}} ステップ",
     "result": "結果",
     "goal": "目標",
-    "resultMissing": "結果未記録"
+    "resultMissing": "結果は未記録",
+    "collapse": "折りたたむ",
+    "expand": "展開"
   }
 }

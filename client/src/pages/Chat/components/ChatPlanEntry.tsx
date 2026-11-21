@@ -69,18 +69,18 @@ interface EntryDict {
 
 const DICT: Record<Lang, EntryDict> = {
   zh: {
-    entry: "计划",
-    tooltip: "查看当前会话的任务计划",
+    entry: "进度",
+    tooltip: "看看这件事进行到哪了",
     step: (i, n) => `第 ${i}/${n} 步`,
-    doneTip: "计划已完成",
-    abandonedTip: "计划已放弃",
-    finishedTip: "已结束",
-    title: "任务计划",
-    emptyTitle: "还没有任务计划。",
-    emptyHint: "复杂任务可先让 AI 拆解步骤。",
+    doneTip: "都办完了",
+    abandonedTip: "已取消",
+    finishedTip: "结束了",
+    title: "进度",
+    emptyTitle: "还没有安排。",
+    emptyHint: "复杂任务可以让 AI 先拆成几步。",
     progress: "进度",
     outcome: "结果",
-    state: { todo: "待办", in_progress: "进行中", done: "已完成", abandoned: "已放弃" },
+    state: { todo: "待进行", in_progress: "正在做", done: "办好了", abandoned: "已取消" },
   },
   en: {
     entry: "Plan",

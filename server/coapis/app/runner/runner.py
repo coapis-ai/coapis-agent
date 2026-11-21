@@ -557,6 +557,67 @@ def _annotate_turn_resources(
     return len(resources) + len(citations) + (1 if turn_interrupted else 0)
 
 
+def _msg_plain_text(msg) -> str:
+    """
+    取一条消息的纯文本，容错版。
+
+    Msg.get_text_content() 只认带 type=text 的块；历史遗留或其它通道写进来的
+    占位消息可能是 {text: ...} 这种缺 type 的块（甚至是裸字符串），它会返回空串，
+    于是「同一条用户消息」在去重尺子里被判成不相等，会话里留下两个用户气泡。
+    """
+    try:
+        text = msg.get_text_content() or ""
+    except Exception:  # noqa: BLE001 - 取文本失败按空处理，交给下面的兜底
+        text = ""
+    if text.strip():
+        return text
+    content = getattr(msg, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            b.get("text") or ""
+            for b in content
+            if isinstance(b, dict) and b.get("text")
+        ]
+        return "\n".join(parts)
+    return ""
+
+
+
+def _drop_pre_persisted_placeholder(agent, user_text) -> None:
+    """
+    摘掉「预写」的占位用户消息。
+
+    console 通道在跑任务前会先把用户这句话写进会话（刷新时不至于看不见），
+    框架处理本轮输入时又会正常写一遍。会话落库有两条路径，其中后台压缩落库
+    直接写 agent.memory 本身，于是同一条用户消息变成两条、界面上出现双气泡。
+    这里在「会话已加载、框架尚未写入」这个窗口里把占位那份摘掉：
+    上下文少一条冗余、两条落库路径口径一致；万一本轮异常中断，会话文件里
+    仍留着占位，刷新照样看得见用户说过什么。
+    """
+    try:
+        memory = getattr(agent, "memory", None)
+        content = getattr(memory, "content", None)
+        if not content or not (user_text or "").strip():
+            return
+        last = content[-1]
+        msg = last[0] if isinstance(last, (tuple, list)) else last
+        role = getattr(msg, "role", None)
+        if getattr(role, "value", role) != "user":
+            return
+        if _msg_plain_text(msg).strip() != str(user_text).strip():
+            return
+        content.pop()
+        logger.debug(
+            "dropped pre-persisted user placeholder for turn (%d chars)",
+            len(str(user_text)),
+        )
+    except Exception as e:  # noqa: BLE001 - 摘不摘都不影响本轮执行
+        logger.debug("drop pre-persisted placeholder skipped: %s", e)
+
+
+
 class AgentRunner(Runner):
     def __init__(
         self,
@@ -592,6 +653,30 @@ class AgentRunner(Runner):
             mcp_manager: MCPClientManager instance
         """
         self._mcp_manager = mcp_manager
+
+    def _resolve_chat_manager(self):
+        """Return ChatManager, self-healing late wiring when possible.
+
+        ``Workspace.runner`` re-wires lazily-ready services on every
+        access; this is the last-line fallback so a stale runner picks
+        the manager up from its workspace instead of silently skipping
+        history loading and message persistence (assistant replies
+        would otherwise vanish when the user refreshes the chat).
+        """
+        if self._chat_manager is not None:
+            return self._chat_manager
+        ws = getattr(self, "_workspace", None)
+        cm = getattr(ws, "chat_manager", None)
+        if cm is not None:
+            logger.warning(
+                "Runner: ChatManager was missing; attached from workspace "
+                "(agent_id=%s workspace_id=%s)",
+                self.agent_id,
+                getattr(ws, "workspace_id", "?"),
+            )
+            self._chat_manager = cm
+            return cm
+        return None
 
     def set_workspace(self, workspace):
         """Set workspace for control command handlers.
@@ -708,9 +793,14 @@ class AgentRunner(Runner):
             effective_user_id = ws_username
 
         # Use workspace's own ChatManager (physical isolation)
-        cm = self._chat_manager
+        cm = self._resolve_chat_manager()
         if cm is None:
-            logger.warning("_persist_chat_messages: no ChatManager for user_id=%s, skip", user_id)
+            logger.error(
+                "_persist_chat_messages: no ChatManager for user_id=%s — "
+                "assistant reply NOT persisted; it will be missing when "
+                "the user refreshes this chat",
+                user_id,
+            )
             return
 
         # Find the chat by UUID (chat.id)
@@ -902,18 +992,24 @@ class AgentRunner(Runner):
                     # Check if they're the same user message
                     if (getattr(_last_existing, "role", "") == "user"
                             and getattr(_first_new, "role", "") == "user"):
-                        _last_text = getattr(_last_existing, "get_text_content", lambda: "")() or ""
-                        _first_text = getattr(_first_new, "get_text_content", lambda: "")() or ""
+                        _last_text = _msg_plain_text(_last_existing)
+                        _first_text = _msg_plain_text(_first_new)
                         if _last_text.strip() == _first_text.strip():
                             _skip_first = True
+                            # 占位消息只有纯文本；框架那份带原文与媒体块，回填进占位，
+                            # 这样刷新后既不双份、也不丢图片。
+                            try:
+                                _last_existing.content = _first_new.content
+                            except Exception:  # noqa: BLE001 - 回填失败不影响去重结果
+                                pass
                             logger.info("_persist_chat_messages: skipped duplicate user message")
                     else:
                         # 方案B：对 assistant / reasoning 也做尾部去重，避免同角色消息整段重复追加
                         _last_role = getattr(_last_existing, "role", "")
                         _first_role = getattr(_first_new, "role", "")
                         if _last_role and _first_role and _last_role == _first_role:
-                            _last_text = getattr(_last_existing, "get_text_content", lambda: "")() or ""
-                            _first_text = getattr(_first_new, "get_text_content", lambda: "")() or ""
+                            _last_text = _msg_plain_text(_last_existing)
+                            _first_text = _msg_plain_text(_first_new)
                             if _last_text.strip() == _first_text.strip():
                                 _skip_first = True
                                 logger.info(
@@ -1664,10 +1760,11 @@ class AgentRunner(Runner):
             # 为空，判断中枢五岗的身份因此全空——台账归不了因、验收回填
             # (chat_id, turn) 恒不命中，闭环 0%（v14 P2 真凶）。
             _hub_chat_id = str(getattr(request, "chat_id", None) or _get_ctx_chat_id() or "")
-            if not _hub_chat_id and session_id and self._chat_manager is not None:
+            cm_hub = self._resolve_chat_manager()
+            if not _hub_chat_id and session_id and cm_hub is not None:
                 try:
                     _hub_chat_id = str(
-                        await self._chat_manager.get_chat_id_by_session(
+                        await cm_hub.get_chat_id_by_session(
                             session_id,
                             channel,
                         )
@@ -1776,8 +1873,9 @@ class AgentRunner(Runner):
                 # 尝试从 request.chat_id 获取 ChatSpec
                 from ...config.session_context import get_current_chat_id
                 ctx_chat_id = getattr(request, 'chat_id', None) or get_current_chat_id()
-                if ctx_chat_id and self._chat_manager:
-                    temp_chat = await self._chat_manager.get_chat(ctx_chat_id)
+                cm_run = self._resolve_chat_manager()
+                if ctx_chat_id and cm_run:
+                    temp_chat = await cm_run.get_chat(ctx_chat_id)
                     if temp_chat and hasattr(temp_chat, 'scene_config') and temp_chat.scene_config:
                         scene_config_snapshot = temp_chat.scene_config
                         scene_id = temp_chat.scene_id
@@ -2082,11 +2180,12 @@ class AgentRunner(Runner):
 
             # --- Plan Mode ------------------------------------------
             plan_notebook = None
-            plan_enabled = getattr(
-                getattr(agent_config, "plan", None),
-                "enabled",
-                False,
-            )
+            # 计划模式默认开（2026-11-12 D4 拍板）。此前这里按 False 兜底，而管理台/
+            # 计划接口按 True 兜底：没配过 plan 段的老智能体在界面上显示「已开」，
+            # 运行时却不挂 PlanNotebook，计划永远不产生、计划卡片也就永远不出现。
+            # 两把尺子必须合成一把：没配过 = 开；显式写了 enabled 才以其为准。
+            plan_cfg = getattr(agent_config, "plan", None)
+            plan_enabled = True if plan_cfg is None else bool(getattr(plan_cfg, "enabled", True))
             if plan_enabled:
                 try:
                     from agentscope.plan import (
@@ -2164,6 +2263,48 @@ class AgentRunner(Runner):
                                 exc_info=True,
                             )
                             return []
+
+                    def _persist_notebook(nb):
+                        """把计划本整体写回 session store。
+
+                        这是跨轮恢复的唯一通路：agentscope 不把
+                        ``plan_notebook`` 当注册状态，``agent.state_dict()``
+                        里没有它，不显式落盘的话下一轮（典型就是用户回复
+                        "确认"那一轮）永远恢复不出进行中的计划。
+                        """
+                        if chat is None or nb is None:
+                            return
+                        try:
+                            from coapis.plan.lifecycle import (
+                                notebook_state_payload,
+                            )
+
+                            payload = notebook_state_payload(nb)
+                        except Exception:
+                            logger.warning(
+                                "plan notebook snapshot failed",
+                                exc_info=True,
+                            )
+                            return
+                        if not payload:
+                            return
+
+                        async def _write_nb() -> None:
+                            await self.session.update_session_state(
+                                session_id=chat.id,
+                                user_id=user_id,
+                                key="agent.plan_notebook",
+                                value=payload,
+                                create_if_not_exist=True,
+                            )
+
+                        try:
+                            task = asyncio.create_task(_write_nb())
+                            task.add_done_callback(_log_task_exception)
+                        except RuntimeError:
+                            logger.warning(
+                                "No running loop; plan notebook not saved",
+                            )
 
                     def _persist_finished_plans(snapshots):
                         """Durable copy of every finished plan of this chat.
@@ -2258,6 +2399,7 @@ class AgentRunner(Runner):
                         # 这是刷新后仍能看见这份计划的唯一机会；落盘按
                         # ChatSpec id 走，保证会话之间互不串。
                         _persist_finished_plans(_finished_plan_snapshots(nb))
+                        _persist_notebook(nb)
                         nb._qp_had_plan = plan is not None
 
                         payload = {
@@ -2386,13 +2528,13 @@ class AgentRunner(Runner):
 
             # Use the workspace's own ChatManager (physical isolation).
             # Each agent's ChatManager reads from its own workspace directory.
-            effective_cm = self._chat_manager
+            effective_cm = self._resolve_chat_manager()
+            # Prefer chat_id from request (passed via channel_meta)
+            # to match the exact chat. Contextvars don't propagate
+            # to background tasks, so request.chat_id is more reliable.
+            from ...config.session_context import get_current_chat_id
+            ctx_chat_id = getattr(request, 'chat_id', None) or get_current_chat_id()
             if effective_cm is not None:
-                # Prefer chat_id from request (passed via channel_meta)
-                # to match the exact chat. Contextvars don't propagate
-                # to background tasks, so request.chat_id is more reliable.
-                from ...config.session_context import get_current_chat_id
-                ctx_chat_id = getattr(request, 'chat_id', None) or get_current_chat_id()
                 if ctx_chat_id:
                     chat = await effective_cm.get_chat(ctx_chat_id)
                 if chat is None:
@@ -2404,10 +2546,27 @@ class AgentRunner(Runner):
                         agent_id=self.agent_id,
                     )
                 logger.debug(f"Runner: Got chat: {chat.id}")
+            elif ctx_chat_id:
+                logger.error(
+                    "ChatManager is None! chat_id=%s session_id=%s "
+                    "agent_id=%s — refusing to run this turn because "
+                    "the assistant reply could not be persisted to "
+                    "chat history (it would vanish on refresh).",
+                    ctx_chat_id,
+                    session_id,
+                    self.agent_id,
+                )
+                raise RuntimeError(
+                    f"ChatManager unavailable for agent '{self.agent_id}' "
+                    f"(chat_id={ctx_chat_id}); the assistant reply "
+                    "cannot be saved to chat history.",
+                )
             else:
-                logger.warning(
-                    f"ChatManager is None! Cannot auto-register chat for "
-                    f"session_id={session_id}",
+                logger.error(
+                    "ChatManager is None! Cannot auto-register chat for "
+                    f"session_id={session_id} (agent_id={self.agent_id}); "
+                    "history loading and message persistence are "
+                    "disabled for this turn.",
                 )
 
             # Skill info (/<name> without input) is display-only
@@ -2469,6 +2628,76 @@ class AgentRunner(Runner):
                         "and saves on completion",
                         e,
                     )
+                # 2026-11-20 治本：摘掉 console 通道预写的占位用户消息，
+                # 否则后台压缩落库会把同一句话写成两条（见 _drop_pre_persisted_placeholder）。
+                _drop_pre_persisted_placeholder(agent, _get_last_user_text(msgs))
+                # 计划本不是 agent 的注册状态：agentscope 的 ReActAgent 只是
+                # 把它当普通属性挂着，load_session_state 既不保存也不恢复它。
+                # 上一轮 create_plan 的计划必须在这里显式装回来，否则"用户回复
+                # 确认"的那一轮根本看不到计划——模型把三步全跑完，finish_plan
+                # 仍报 "There is no plan to finish"，卡片永远停在 0/3。
+                if plan_notebook is not None:
+                    try:
+                        from coapis.plan.lifecycle import (
+                            restore_notebook_state,
+                        )
+
+                        _st = await self.session.get_session_state_dict(
+                            session_id=chat.id,
+                            user_id=user_id,
+                        )
+                        # get_session_state_dict 返的是整个文件
+                        # （{"agent": {...}}），计划本存在 agent.plan_notebook 下。
+                        # 早先在这里直接 .get("plan_notebook") 永远拿到 None，
+                        # 恢复静默失效——这一步必须有日志，不能再哑掉。
+                        _saved_nb = (_st.get("agent") or {}).get("plan_notebook")
+                        if restore_notebook_state(plan_notebook, _saved_nb):
+                            _restored = plan_notebook.current_plan
+                            logger.info(
+                                "plan_notebook restored across turns: "
+                                "name=%s state=%s steps=%s",
+                                getattr(_restored, "name", ""),
+                                getattr(_restored, "state", ""),
+                                len(getattr(_restored, "subtasks", None) or []),
+                            )
+                            # 工具注册发生在计划恢复之前（agent 在 load_session_state
+                            # 之前就建好了），所以 react_agent 里"有恢复的计划就配
+                            # 簿记工具"那条判断当时看不到计划。必须在这里补配，否则
+                            # 这一轮模型调 update_subtask_state 直接
+                            # FunctionNotFoundError，卡片步骤永远 0/3。
+                            _equip = getattr(
+                                agent,
+                                "_equip_lazy_plan_tools",
+                                None,
+                            )
+                            if callable(_equip):
+                                try:
+                                    _equip("restored plan")
+                                except Exception:
+                                    logger.warning(
+                                        "lazy plan tools equip failed",
+                                        exc_info=True,
+                                    )
+                        else:
+                            # 没恢复成功也要说清楚：否则"跨轮恢复"又一次变成
+                            # 静默失效，排查时没有任何线索。
+                            _cur = (
+                                _saved_nb.get("current_plan")
+                                if isinstance(_saved_nb, dict)
+                                else None
+                            )
+                            logger.info(
+                                "plan_notebook not restored: has_saved=%s "
+                                "current_plan=%s state=%s",
+                                isinstance(_saved_nb, dict),
+                                bool(_cur),
+                                (_cur or {}).get("state"),
+                            )
+                    except Exception:
+                        logger.warning(
+                            "plan_notebook restore failed",
+                            exc_info=True,
+                        )
             session_state_loaded = True
 
             # Rebuild system prompt so it always reflects the latest
@@ -3195,7 +3424,7 @@ class AgentRunner(Runner):
                 
                 # Update chat status to "idle" when task ends
                 try:
-                    cm = self._chat_manager
+                    cm = self._resolve_chat_manager()
                     if cm is not None:
                         from .models import ChatUpdate
                         await cm.patch_chat(chat.id, ChatUpdate(status="idle"))

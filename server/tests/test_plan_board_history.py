@@ -33,6 +33,7 @@ from coapis.plan.lifecycle import (
     MAX_FINISHED_PLANS,
     finished_plan_snapshots,
     merge_finished_plan_snapshots,
+    plan_really_done,
 )
 from coapis.plan.schemas import outcome_pending, plan_to_response
 
@@ -271,3 +272,52 @@ def test_build_plan_history_dedupes_and_marks_live():
     assert [p["id"] for p in history] == ["p1", "p2"]
     assert history[-1]["finished"] is False
     assert _build_plan_history(None, []) == []
+
+
+# ---------------------------------------------------------------------------
+# 「跑完了」的唯一尺子：state=done 且每一步都真打上勾
+# （回归 1e9c20b7：4/4 全 done 的计划仍显示「进行中」且一直轮询）
+# ---------------------------------------------------------------------------
+def test_current_plan_that_is_really_done_stays_finished():
+    done = _plan(
+        "p1",
+        "收尾",
+        [_step("落账", state="done"), _step("验收", state="done")],
+        state="done",
+    )
+    notebook = types.SimpleNamespace(
+        storage=types.SimpleNamespace(plans={"p1": done}),
+        current_plan=types.SimpleNamespace(id="p1"),
+    )
+
+    snaps = finished_plan_snapshots(notebook)
+
+    assert snaps[0]["finished"] is True
+    assert snaps[0]["state"] == "done"
+
+
+def test_current_plan_with_untouched_steps_is_still_live():
+    """还没开跑（全 todo）的计划仍算在跑：不能把推断出的 abandoned 当终点态。"""
+    not_started = _plan("p1", "收尾", [_step("落账")])
+    notebook = types.SimpleNamespace(
+        storage=types.SimpleNamespace(plans={"p1": not_started}),
+        current_plan=types.SimpleNamespace(id="p1"),
+    )
+
+    snaps = finished_plan_snapshots(notebook)
+
+    assert snaps[0]["finished"] is False
+
+
+def test_plan_really_done_requires_every_step_checked():
+    assert plan_really_done(
+        {"state": "done", "subtasks": [{"state": "done"}, {"state": "done"}]},
+    ) is True
+    assert plan_really_done(
+        {"state": "done", "subtasks": [{"state": "done"}, {"state": "todo"}]},
+    ) is False
+    # 无子任务的空计划不算跑完：轮询得留着，等真正的落账。
+    assert plan_really_done({"state": "done", "subtasks": []}) is False
+    assert plan_really_done(
+        {"state": "in_progress", "subtasks": [{"state": "done"}]},
+    ) is False

@@ -154,17 +154,17 @@ describe("EnhancedToolCallCard —— 状态机落到渲染", () => {
     const { container } = renderCard(toolData({ status: "failed" }));
     expect(collapseState(container)).toBe("none");
     expect(screen.queryByText(OUTPUT_MARK)).not.toBeInTheDocument();
-    expect(screen.getByText("失败")).toBeInTheDocument();
+    expect(screen.getByText("没成功")).toBeInTheDocument();
   });
 
   it("取消：收起", () => {
     const { container } = renderCard(toolData({ status: "canceled" }));
     expect(collapseState(container)).toBe("none");
     expect(screen.queryByText(OUTPUT_MARK)).not.toBeInTheDocument();
-    expect(screen.getByText("已中止")).toBeInTheDocument();
+    expect(screen.getByText("已停止")).toBeInTheDocument();
   });
 
-  it("无输入无输出：只剩一条标题，明细区不存在（空壳卡不给展开入口）", () => {
+  it("缺少明细：只剩一条标题，明细区不存在（空壳卡不给展开入口）", () => {
     const { container } = renderCard(
       toolData({ status: "completed", args: null, output: null }),
     );
@@ -214,11 +214,11 @@ describe("EnhancedToolCallCard —— 状态机落到渲染", () => {
 describe("toolLabels —— 工具名中文动词（单一映射表）", () => {
   it("已登记的工具给出中文动词", () => {
     expect(toolStepLabel("read_file", "zh")).toBe("读取文件");
-    expect(toolStepLabel("execute_shell_command", "zh")).toBe("执行命令");
+    expect(toolStepLabel("execute_shell_command", "zh")).toBe("运行命令");
   });
 
-  it("未登记的工具走「工具 · 原名」兜底（不编造动词，也不吐空串）", () => {
-    expect(toolStepLabel("brand_new_tool", "zh")).toBe("工具 · brand_new_tool");
+  it("未登记的工具走「调用 · 原名」兜底（不编造动词，也不吐空串）", () => {
+    expect(toolStepLabel("brand_new_tool", "zh")).toBe("调用 · brand_new_tool");
   });
 
   it("空工具名返回空串，不抛异常", () => {

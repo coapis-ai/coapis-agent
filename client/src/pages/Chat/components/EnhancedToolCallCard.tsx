@@ -352,8 +352,8 @@ function generateSummary(toolName: string, input: Record<string, any>): string {
         stop: '停止',
         press_key: '按键',
         wait_for: '等待',
-        eval: '执行JS',
-        evaluate: '执行JS',
+        eval: '执行脚本',
+        evaluate: '执行脚本',
         hover: '悬停',
         select_option: '选择',
         file_upload: '上传',
@@ -454,7 +454,7 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
           </Text>
         )}
         <Text type="secondary" style={{ fontSize: 11 }}>
-          {runningText || t('chat.tool.running', '执行中')}
+          {runningText || t('chat.tool.running', '正在处理')}
         </Text>
       </Space>
     );
@@ -476,7 +476,7 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
       <Space size={4}>
         <CloseCircleOutlined style={{ fontSize: 12, color: '#ff4d4f' }} />
         <Text type="secondary" style={{ fontSize: 11 }}>
-          {t('chat.tool.failed', '失败')}
+          {t('chat.tool.failed', '没成功')}
         </Text>
       </Space>
     );
@@ -487,7 +487,7 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
       <Space size={4}>
         <StopOutlined style={{ fontSize: 12, color: '#faad14' }} />
         <Text type="secondary" style={{ fontSize: 11 }}>
-          {t('chat.tool.aborted', '已中止')}
+          {t('chat.tool.aborted', '已停止')}
         </Text>
       </Space>
     );
@@ -905,7 +905,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                   {argumentsStr && (
                     <div style={{ marginBottom: outputStr ? 8 : 0 }}>
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        {t('chat.tool.params', '参数')}:
+                        {t('chat.tool.params', '做什么')}:
                       </Text>
                       <pre
                         style={{
@@ -940,7 +940,7 @@ const EnhancedToolCallCard: React.FC<EnhancedToolCallCardProps> = ({ data }) => 
                       <Text type="secondary" style={{ fontSize: 11 }}>
                         {blocked
                           ? t('chat.tool.blockedDetail', '拦下原因')
-                          : t('chat.tool.output', '输出')}:
+                          : t('chat.tool.output', '结果')}:
                         {isOutputLong && (
                           <Tag style={{ marginLeft: 4, fontSize: 10, background: themeColors.tagBg, color: themeColors.textSecondary }}>
                             {t('chat.tool.truncated', '已截断')}

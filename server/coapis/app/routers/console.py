@@ -523,8 +523,8 @@ async def console_chat(
                     from agentscope.memory import InMemoryMemory
                     mem = InMemoryMemory()
                     mem.load_state_dict(memory_state, strict=False)
-                    from agentscope.message import Msg, TextBlock
-                    await mem.add(Msg(name="user", content=[TextBlock(text=user_content)], role="user"))
+                    from agentscope.message import Msg
+                    await mem.add(Msg(name="user", content=user_content, role="user"))
                     await session_obj.update_session_state(
                         session_id=chat.id,
                         key="agent.memory",

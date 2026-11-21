@@ -1,10 +1,12 @@
-/* ChatPlanBoard — 对话内执行计划看板
- * 2026-11-19 计划执行能力优化：计划主线必须常驻可见。
+/* ChatPlanCard — 画进回答气泡里的执行计划卡
+ * 2026-11-21：按用户拍板瘦身——**一行一条、只显示做了什么、收起靠按钮**。
+ * 去掉了进度条（头部已有 x/y）、去掉了每步的目标/结果明细行（收进悬浮 title）、
+ * 去掉了自动收口（标题栏不再整块可点，右侧一个「收起/展开」按钮负责开合）。
  * 令牌一律带字面量兜底，避免主题变量缺失时整块不可读。
  */
 
 .board {
-  margin: 0 16px 8px;
+  margin: 8px 0 0;
   border: 1px solid var(--colorBorder, rgba(0, 0, 0, 0.1));
   border-radius: 10px;
   background: var(--colorBgBase, #fff);
@@ -18,12 +20,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
+  padding: 7px 10px 7px 12px;
   color: var(--colorText, rgba(0, 0, 0, 0.88));
 }
 
@@ -66,57 +63,42 @@
   color: var(--colorTextTertiary, rgba(0, 0, 0, 0.45));
 }
 
-.caretDown,
-.caretUp {
+/* 收起/展开：标题栏右侧唯一的可点控件 */
+.toggle {
   flex: none;
-  width: 8px;
-  height: 8px;
-  border-right: 1.5px solid var(--colorTextTertiary, rgba(0, 0, 0, 0.45));
-  border-bottom: 1.5px solid var(--colorTextTertiary, rgba(0, 0, 0, 0.45));
-  transform: rotate(45deg);
+  padding: 2px 10px;
+  border: 1px solid var(--colorBorder, rgba(0, 0, 0, 0.15));
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--colorTextSecondary, rgba(0, 0, 0, 0.6));
 }
 
-.caretUp {
-  transform: rotate(-135deg);
+.toggle:hover {
+  border-color: var(--colorPrimary, #1677ff);
+  color: var(--colorPrimary, #1677ff);
 }
 
 .body {
-  padding: 0 12px 10px;
-}
-
-.bar {
-  height: 4px;
-  margin-bottom: 8px;
-  border-radius: 2px;
-  background: var(--colorFillSecondary, rgba(0, 0, 0, 0.06));
-  overflow: hidden;
-}
-
-.barFill {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--colorPrimary, #1677ff);
-  transition: width 0.25s ease;
+  padding: 0 12px 8px;
 }
 
 .steps {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 34vh;
+  max-height: 40vh;
   overflow-y: auto;
 }
 
+/* 一行一条：状态点 + 步骤名，单行截断，明细在 title 里 */
 .step {
   display: flex;
+  align-items: center;
   gap: 8px;
-  padding: 6px 0;
-  border-top: 1px dashed var(--colorBorderSecondary, rgba(0, 0, 0, 0.06));
-}
-
-.step:first-child {
-  border-top: none;
+  padding: 2px 0;
 }
 
 .markerSlot {
@@ -180,41 +162,23 @@
   }
 }
 
-.stepBody {
+.stepName {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--colorText, rgba(0, 0, 0, 0.7));
 }
 
-.stepName {
+.stepNameRun {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--colorText, rgba(0, 0, 0, 0.88));
-  word-break: break-word;
-}
-
-.stepLabel {
-  margin-right: 6px;
-  padding: 0 4px;
-  border-radius: 3px;
-  font-size: 11px;
-  color: var(--colorTextSecondary, rgba(0, 0, 0, 0.6));
-  background: var(--colorFillTertiary, rgba(0, 0, 0, 0.04));
-}
-
-.stepResult {
-  margin-top: 3px;
-  color: var(--colorText, rgba(0, 0, 0, 0.8));
-  word-break: break-word;
-}
-
-.stepGoal {
-  margin-top: 3px;
-  color: var(--colorTextSecondary, rgba(0, 0, 0, 0.6));
-  word-break: break-word;
-}
-
-.stepMissing {
-  margin-top: 3px;
-  color: var(--colorWarning, #faad14);
-  font-size: 12px;
+  font-weight: 600;
 }
 
 .history {
@@ -231,7 +195,7 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 4px 0;
+  padding: 3px 0;
   border: none;
   background: transparent;
   cursor: pointer;

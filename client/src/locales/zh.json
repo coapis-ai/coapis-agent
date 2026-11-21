@@ -2055,7 +2055,7 @@
     "allChats": "全部聊天",
     "createNewChat": "创建新聊天",
     "statusIdle": "空闲",
-    "statusInProgress": "进行中",
+    "statusInProgress": "正在做",
     "disclaimer": "懂你所需，伴你左右",
     "greeting": "你好，我今天能帮你做什么？",
     "description": "我是一个智能助手，可以帮助你解答问题。",
@@ -2151,7 +2151,7 @@
         "label": "显示思考内容",
         "desc": "关闭后，思考过程只保留一条折叠条，点击可展开"
       },
-      "hideThinkingDesc": "开启后思考过程整体隐藏；关闭则正常展示深度思考卡片",
+      "hideThinkingDesc": "开启后思考过程整体隐藏；关闭则正常展示思考卡片",
       "hideFooter": {
         "label": "隐藏页脚信息",
         "tooltip": "隐藏 token 统计、时间戳、模型名"
@@ -2268,6 +2268,7 @@
       "empty": "本轮没有资源",
       "more": "还有 {{n}} 项未加载",
       "barTitle": "会话资源",
+      "viewShort": "查看",
       "barTitleRound": "本轮资源",
       "viewAllSession": "会话全部资源",
       "viewAllTip": "打开本会话全部资源（含历史轮次）",
@@ -2288,6 +2289,8 @@
       "drawerTitle": "会话资源",
       "producedTitle": "本轮产出",
       "viewAll": "查看全部",
+      "moreBtn": "更多",
+      "moreRest": "还有 {{n}} 条",
       "reference": "引用",
       "convert": "转格式",
       "expandRest": "展开其余 {{n}} 项",
@@ -2376,39 +2379,39 @@
     "noteIt": "记下来",
     "noteSaved": "已记入长期记忆",
     "noteFailed": "记录失败",
-    "deepThinking": "深度思考",
-    "deepThinkingCollapsed": "思考已收起 · 展开",
+    "deepThinking": "思考",
+    "deepThinkingCollapsed": "思考过程 · 展开",
     "simple": {
       "thinking": "思考",
-      "step": "步骤 {{n}}",
-      "statusRunning": "执行中",
-      "statusDone": "完成",
-      "statusFailed": "失败",
-      "running": "执行中",
-      "params": "参数",
-      "output": "输出",
+      "step": "第 {{n}} 步",
+      "statusRunning": "正在处理",
+      "statusDone": "办好了",
+      "statusFailed": "没成功",
+      "running": "正在处理",
+      "params": "做什么",
+      "output": "结果",
       "copy": "复制正文",
       "copied": "已复制",
       "file": "文件"
     },
     "tool": {
-      "running": "执行中",
+      "running": "正在处理",
       "reading": "读取中",
       "writing": "写入中",
       "searching": "检索中",
       "copyResponse": "复制正文",
-      "done": "已完成",
-      "failed": "失败",
+      "done": "办好了",
+      "failed": "没成功",
       "blocked": "已拦下",
       "blockedDetail": "拦下原因",
       "blockedReason": {
         "planScopePending": "方案还没确认，这个动作已拦下",
         "guardDenied": "安全规则拦下了这个动作"
       },
-      "aborted": "已中止",
-      "params": "输入",
-      "output": "输出",
-      "truncated": "已截断"
+      "aborted": "已停止",
+      "params": "做什么",
+      "output": "结果",
+      "truncated": "内容太长，只显示了一部分"
     },
     "resourcesTitle": "会话资源"
   },
@@ -2899,20 +2902,20 @@
     "title": "计划",
     "noPlan": "暂无活跃计划",
     "noPlanHint": "使用 /plan <描述> 创建计划",
-    "confirmTitle": "方案待确认：{{title}}",
+    "confirmTitle": "这一步需要你点个头：{{title}}",
     "confirmHint": "确认后计划内普通操作自动放行；涉及出入或破坏性的动作仍会单独征求确认。",
-    "confirmAction": "确认执行",
+    "confirmAction": "可以，继续",
     "confirmSuccess": "方案已确认",
     "confirmFailed": "确认失败",
     "progress": "进度",
     "outcome": "结果",
     "state": {
-      "todo": "待办",
-      "in_progress": "进行中",
-      "done": "已完成",
-      "abandoned": "已放弃"
+      "todo": "待进行",
+      "in_progress": "正在做",
+      "done": "办好了",
+      "abandoned": "已取消"
     },
-    "pendingConfirm": "待确认"
+    "pendingConfirm": "等你确认"
   },
   "files": {
     "upload": "上传",
@@ -3358,14 +3361,17 @@
     "noAbstain": "窗口内无弃权记录"
   },
   "planBoard": {
-    "title": "执行计划",
+    "title": "进度",
     "unnamed": "未命名计划",
-    "inProgress": "进行中",
-    "completed": "已完成",
-    "abandoned": "已放弃",
-    "stepProgress": "{{done}}/{{total}}",
+    "inProgress": "正在做",
+    "notStarted": "还没开始",
+    "completed": "都办完了",
+    "abandoned": "已取消",
+    "stepProgress": "{{done}}/{{total}} 步",
     "result": "结果",
     "goal": "目标",
-    "resultMissing": "结果待补"
+    "resultMissing": "结果还没记",
+    "collapse": "收起",
+    "expand": "展开"
   }
 }

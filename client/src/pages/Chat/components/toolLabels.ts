@@ -15,7 +15,7 @@ export const TOOL_VERB_LABELS_ZH: Record<string, string> = {
   read_file: '读取文件',
   write_file: '写入文件',
   edit_file: '编辑文件',
-  execute_shell_command: '执行命令',
+  execute_shell_command: '运行命令',
   grep_search: '搜索内容',
   glob_search: '查找文件',
   list_files: '列出文件',
@@ -76,7 +76,7 @@ export function toolStepLabel(name: string, lang: string): string {
   if (!name) return '';
   const base = (lang || 'zh').toLowerCase().split('-')[0];
   if (base === 'zh') {
-    return TOOL_VERB_LABELS_ZH[name] ?? `工具 · ${name}`;
+    return TOOL_VERB_LABELS_ZH[name] ?? `调用 · ${name}`;
   }
   return name;
 }
@@ -108,8 +108,8 @@ export const TOOL_RUNNING_LABELS_ZH: Record<string, string> = {
   browser_use: '操作中',
   install_dependency: '安装中',
   git_ops: '提交中',
-  code_exec: '执行中',
-  execute_python_code: '执行中',
+  code_exec: '运行中',
+  execute_python_code: '运行中',
   record_daily_memory: '记录中',
   skill_manager: '整理技能中',
   cron_scheduler: '设置定时中',

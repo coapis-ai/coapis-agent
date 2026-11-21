@@ -2385,6 +2385,7 @@
       "empty": "No resources in this round",
       "more": "{{n}} more not loaded",
       "barTitle": "Session resources",
+      "viewShort": "View",
       "barTitleRound": "This turn's resources",
       "viewAllSession": "All session resources",
       "viewAllTip": "Open all resources of this session, including earlier turns",
@@ -2405,6 +2406,8 @@
       "drawerTitle": "Chat resources",
       "producedTitle": "Produced this round",
       "viewAll": "View all",
+      "moreBtn": "More",
+      "moreRest": "{{n}} more",
       "reference": "Reference",
       "convert": "Convert",
       "expandRest": "Show {{n}} more",
@@ -2493,39 +2496,39 @@
     "noteIt": "Save to memory",
     "noteSaved": "Saved to long-term memory",
     "noteFailed": "This reply has no text to record",
-    "deepThinking": "Deep thinking",
-    "deepThinkingCollapsed": "Thinking collapsed · expand",
+    "deepThinking": "Thinking",
+    "deepThinkingCollapsed": "Thinking · expand",
     "simple": {
       "thinking": "Thinking",
       "step": "Step {{n}}",
-      "statusRunning": "Running",
+      "statusRunning": "Working on it",
       "statusDone": "Done",
-      "statusFailed": "Failed",
-      "running": "Running",
-      "params": "Parameters",
-      "output": "Output",
+      "statusFailed": "Didn't work",
+      "running": "Working on it",
+      "params": "Request",
+      "output": "Result",
       "copy": "Copy text",
       "copied": "Copied",
       "file": "File"
     },
     "tool": {
-      "running": "Running",
+      "running": "Working on it",
       "reading": "Reading",
       "writing": "Writing",
       "searching": "Searching",
       "copyResponse": "Copy response",
-      "done": "Completed",
-      "failed": "Failed",
+      "done": "Done",
+      "failed": "Didn't work",
       "blocked": "Blocked",
       "blockedDetail": "Why it was blocked",
       "blockedReason": {
         "planScopePending": "The plan was not confirmed, so this action was blocked",
         "guardDenied": "A security rule blocked this action"
       },
-      "aborted": "Aborted",
-      "params": "Input",
-      "output": "Output",
-      "truncated": "truncated"
+      "aborted": "Stopped",
+      "params": "Request",
+      "output": "Result",
+      "truncated": "too long, shown partially"
     },
     "resourcesTitle": "Session resources"
   },
@@ -2872,20 +2875,20 @@
     "title": "Plan",
     "noPlan": "No active plan",
     "noPlanHint": "Use /plan <description> to create a plan",
-    "confirmTitle": "Plan awaiting confirmation: {{title}}",
+    "confirmTitle": "This step needs your OK: {{title}}",
     "confirmHint": "After confirmation routine steps run automatically; actions that leave the workspace or are destructive still need individual approval.",
-    "confirmAction": "Confirm",
+    "confirmAction": "Yes, go ahead",
     "confirmSuccess": "Plan confirmed",
     "confirmFailed": "Confirmation failed",
     "progress": "Progress",
     "outcome": "Outcome",
     "state": {
-      "todo": "Todo",
-      "in_progress": "In Progress",
+      "todo": "Up next",
+      "in_progress": "In progress",
       "done": "Done",
-      "abandoned": "Abandoned"
+      "abandoned": "Cancelled"
     },
-    "pendingConfirm": "Pending"
+    "pendingConfirm": "Needs your OK"
   },
   "files": {
     "upload": "Upload",
@@ -3332,14 +3335,17 @@
     "noAbstain": "No abstain records in window"
   },
   "planBoard": {
-    "title": "Plan",
+    "title": "Progress",
     "unnamed": "Untitled plan",
     "inProgress": "In progress",
-    "completed": "Completed",
-    "abandoned": "Abandoned",
-    "stepProgress": "{{done}}/{{total}}",
+    "notStarted": "Not started yet",
+    "completed": "All done",
+    "abandoned": "Cancelled",
+    "stepProgress": "{{done}}/{{total}} steps",
     "result": "Result",
     "goal": "Goal",
-    "resultMissing": "Result missing"
+    "resultMissing": "Result not recorded",
+    "collapse": "Collapse",
+    "expand": "Expand"
   }
 }

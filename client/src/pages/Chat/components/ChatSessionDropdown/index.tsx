@@ -115,7 +115,9 @@ const SessionLine = React.memo(function SessionLine({
    */
   const backendId = getBackendId(session);
   const showCaret =
-    !!backendId && !!data.currentBackendId && backendId === data.currentBackendId;
+    !!backendId &&
+    !!data.currentBackendId &&
+    backendId === data.currentBackendId;
   const expanded = showCaret && data.expandedId === backendId;
 
   return (
@@ -123,7 +125,10 @@ const SessionLine = React.memo(function SessionLine({
       <ChatSessionItem
         sessionId={session.id!}
         name={session.name || "New Chat"}
-        time={formatActivityTime(session.updatedAt ?? session.createdAt ?? null) ?? ""}
+        time={
+          formatActivityTime(session.updatedAt ?? session.createdAt ?? null) ??
+          ""
+        }
         updatedAt={session.updatedAt ?? session.createdAt ?? null}
         channelKey={channelKey || undefined}
         channelLabel={channelLabel}
@@ -269,17 +274,14 @@ interface ChatSessionDropdownProps {
   isMobile?: boolean;
 }
 
-/** Resolve the real backend UUID from an extended session (id may be a local timestamp) */
-/**
- * 左栏展开位的会话记忆（v17 · F1）：刷新页面后保持用户上次的收起/展开选择，
- * 别每次都把当前会话撑开——左栏首屏那 20 行里，展开面板比列表金贵。
- */
-const EXPAND_STORE_KEY = "coapis.chat.sidebarExpandedId";
-// v23（2026-11-09 拍板）：两个哨兵值，只存在于 sessionStorage 与本组件状态，
-// 不会与真实会话 id 撞车（后端 id 是 uuid 形态）。
-//   EXPAND_COLLAPSED —— 用户显式收起过：刷新后继续尊重，不再自动展开。
-//   EXPAND_AUTO      —— 从没表过态：交给「首条消息即展开」的时机落位。
-const EXPAND_COLLAPSED = "__collapsed__";
+// 左栏资源面板的展开态：caret 落在「当前会话」那一行。三态：
+//   具体 id —— 展开的那个会话（面板只挂在当前会话行下面，即当前会话）。
+//   null    —— 用户在本页显式点 caret 收起；尊重到离开这一页为止。
+//   哨兵串  —— EXPAND_AUTO：从没表过态，交给下面的 effect 落位。
+// 用户拍板（2026-11-21）：**选中的会话（当前会话）默认展开**。上一版把
+// 「用户显式收起过」写进 sessionStorage，刷新后当前会话仍然保持收起，与要求
+// 相反；面板本来就只跟随当前会话，没有需要跨刷新保存的状态 —— 手动收起只对
+// 这一页生效。空会话不用特判：面板没资源时自己 return null，不占位。
 const EXPAND_AUTO = "__auto__";
 
 const getBackendId = (session: ExtendedChatSession): string | null => {
@@ -308,13 +310,13 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   /** Create a new session and close the dropdown */
   const handleCreateSession = useCallback(async () => {
     try {
-      await sessionApi.createSession({ name: '' });
+      await sessionApi.createSession({ name: "" });
       // Refresh the session list so the new chat appears immediately
       const list = await sessionApi.getSessionList();
       setLocalSessions(list as unknown as ExtendedChatSession[]);
       setSessions(list);
     } catch (err) {
-      console.error('[NewChat] Failed:', err);
+      console.error("[NewChat] Failed:", err);
     }
     props.onClose?.();
   }, [props.onClose, setSessions]);
@@ -348,22 +350,12 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
    */
   const offsetRef = useRef(0);
 
-  // ── 左栏展开位（B4 / v17 · F1）─────────────────────────────────────
-  // 资源下拉挂在「展开的那一行」下方，默认就是当前会话；点 caret 收起。
-  // 一次只展开一行：多行同时展开会把左栏变成资源墙，列表就没法扫了。
-  // v17 · F1：展开位**只存后端 chat id**（资源面板就是按它取数的）；初值
-  // 优先取 sessionStorage，刷新后保持用户上次的收起/展开选择。
-  // v23（2026-11-09 拍板）：初值三态——具体会话号 / 收起哨兵 / 未定。
-  // 旧实现取不到就收起（null），配合下面持久化处的 removeItem，导致「手动收起后
-  // 一刷新又自动展开」；现在未定交给首条消息时机，收起写哨兵、刷新不反弹。
-  const [expandedId, setExpandedId] = useState<string | null>(() => {
-    try {
-      const saved = sessionStorage.getItem(EXPAND_STORE_KEY);
-      return saved === null ? EXPAND_AUTO : saved;
-    } catch {
-      return EXPAND_AUTO;
-    }
-  });
+  /**
+   * 展开位：null = 收起，字符串 = 展开的那个会话 id。
+   * 用户拍板（2026-11-21）：**当前会话默认展开** —— 初值恒为 AUTO，不再从
+   * sessionStorage 恢复「我收起过」，刷新 / 重进都跟随当前会话展开。
+   */
+  const [expandedId, setExpandedId] = useState<string | null>(EXPAND_AUTO);
 
   /**
    * 展开位切换。入参是**后端 id**（不是前端 chatId）：展开态、资源面板、
@@ -375,20 +367,6 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
     setExpandedId((prev) => (prev === backendId ? null : backendId));
   }, []);
 
-  /** 展开位落地即写 sessionStorage（隐私模式会抛，忽略即可）。 */
-  useEffect(() => {
-    if (expandedId === EXPAND_AUTO) {
-      // 未定：清记录，交给首条消息时机
-      sessionStorage.removeItem(EXPAND_STORE_KEY);
-    } else if (expandedId) {
-      sessionStorage.setItem(EXPAND_STORE_KEY, expandedId);
-    } else {
-      // v23：显式收起写哨兵。原来这里 removeItem，刷新后初值取不到 → 又被当成
-      // 首屏默认，正是「收起后一刷新又展开」的成因。
-      sessionStorage.setItem(EXPAND_STORE_KEY, EXPAND_COLLAPSED);
-    }
-  }, [expandedId]);
-
   /**
    * 当前会话变化（新建 / 切换 / 删除后回退）时，展开位跟到当前会话。
    *
@@ -396,9 +374,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
    * 选择——旧写法每次 currentBackendId 变化（含列表刷新带来的同一 id 重渲染）
    * 都无条件 setExpandedId，用户点了收起下一秒又被撑开。
    */
-  const lastCurrentRef = useRef<string | null>(
-    props.currentBackendId ?? null,
-  );
+  const lastCurrentRef = useRef<string | null>(props.currentBackendId ?? null);
   useEffect(() => {
     if (props.variant !== "sidebar") return;
     const bid = props.currentBackendId ?? null;
@@ -410,18 +386,17 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
     setExpandedId(bid);
   }, [props.variant, props.currentBackendId]);
 
-  // v23（2026-11-09 拍板）：右栏整列下线后，左栏当前会话行的资源列表默认展开，
-  // 时机取「首条消息即展开」——从没表过态（未定）时，一旦当前会话出现在侧栏会话
-  // 列表里就展开它的资源行。列表来自后端会话记录，而记录在首次发送时才建立（见上
-  // 面跟随 effect 里的空会话说明），故「出现在列表里」等价于「首条消息已发出」；
-  // 空会话保持收起，首屏视觉与今天一致。信号取现成数据，不新增接口。
+  // 「当前会话默认展开」落位（v28 拍板）：侧栏一挂载、拿到当前会话的后端
+  // id 就展开。不再用 `localSessions.some` 卡 —— 当前会话可能是从搜索或收藏
+  // 里翻出来的、不在已加载的那一页上，那时反而更该展开；而空会话渲染不出
+  // 东西（面板没资源时自己 return null），不存在"展开出一个空面板"。
   useEffect(() => {
     if (props.variant !== "sidebar") return;
     if (expandedId !== EXPAND_AUTO) return;
     const bid = props.currentBackendId ?? null;
     if (!bid) return;
-    if (localSessions.some((s) => getBackendId(s) === bid)) setExpandedId(bid);
-  }, [expandedId, localSessions, props.variant, props.currentBackendId]);
+    setExpandedId(bid);
+  }, [expandedId, props.variant, props.currentBackendId]);
   const observerRef = useRef<ResizeObserver | null>(null);
 
   /** Callback ref: attach a ResizeObserver whenever the wrapper DOM node appears */
@@ -479,9 +454,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
     // 根据搜索关键词过滤
     if (props.searchKeyword) {
       const keyword = props.searchKeyword.toLowerCase();
-      return sessions.filter(s => 
-        s.name?.toLowerCase().includes(keyword)
-      );
+      return sessions.filter((s) => s.name?.toLowerCase().includes(keyword));
     }
 
     return sessions;
@@ -505,7 +478,9 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
   useEffect(() => {
     localSessionsRef.current = localSessions;
   }, [localSessions]);
-  const currentBackendIdRef = useRef<string | null>(props.currentBackendId ?? null);
+  const currentBackendIdRef = useRef<string | null>(
+    props.currentBackendId ?? null,
+  );
   useEffect(() => {
     currentBackendIdRef.current = props.currentBackendId ?? null;
   }, [props.currentBackendId]);
@@ -712,14 +687,20 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
     }
 
     // 同上：改名后左栏读的是 localSessions，两边都要落
-      const nextRenamed = localSessions.map((s) =>
-        s.id === editingSessionId ? { ...s, name: editValue.trim() } : s,
-      );
-      setLocalSessions(nextRenamed);
-      setSessions(nextRenamed);
+    const nextRenamed = localSessions.map((s) =>
+      s.id === editingSessionId ? { ...s, name: editValue.trim() } : s,
+    );
+    setLocalSessions(nextRenamed);
+    setSessions(nextRenamed);
 
     handleEditCancel();
-  }, [editingSessionId, editValue, localSessions, setSessions, handleEditCancel]);
+  }, [
+    editingSessionId,
+    editValue,
+    localSessions,
+    setSessions,
+    handleEditCancel,
+  ]);
 
   /** Delete a session */
   const handleDelete = useCallback(
@@ -817,7 +798,14 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
         onClick: () => handleDelete(contextMenuSessionId),
       },
     ];
-  }, [contextMenuSessionId, localSessions, t, handleEditStart, handlePinToggle, handleDelete]);
+  }, [
+    contextMenuSessionId,
+    localSessions,
+    t,
+    handleEditStart,
+    handlePinToggle,
+    handleDelete,
+  ]);
 
   const isSidebar = props.variant === "sidebar";
 
@@ -889,10 +877,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
       {/* B5: onScroll 必须挂在真正会滚动的容器上。
           .listWrapper 是 overflow:hidden（只作浮层定位上下文，永不滚动），
           左栏的滚动容器是内层 .list —— 挂错地方 = 分页永不触发。 */}
-      <div
-        className={styles.listWrapper}
-        ref={listWrapperRef}
-      >
+      <div className={styles.listWrapper} ref={listWrapperRef}>
         <div className={styles.topGradient} />
         {listLoading && sortedSessions.length === 0 ? (
           /* F2-3：首屏取数中的骨架屏。整块列表换成居中 Spin 时，「加载中」和
@@ -913,11 +898,12 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
             {/* Background loading — only while a page is actually being
                 fetched. Gating on `loadingMore` keeps the spinner from
                 sitting in the list permanently whenever content overflows. */}
-            {sortedSessions.length * ITEM_HEIGHT > listHeight && loadingMore && (
-              <div className={styles.virtualListBackground}>
-                <Spin size="small" />
-              </div>
-            )}
+            {sortedSessions.length * ITEM_HEIGHT > listHeight &&
+              loadingMore && (
+                <div className={styles.virtualListBackground}>
+                  <Spin size="small" />
+                </div>
+              )}
             {isSidebar ? (
               /* 左栏形态：普通滚动列表。当前会话要在自己节点下方内嵌资源
                  面板（变高行），虚拟化定高列表做不到，所以这里不虚拟化。 */
@@ -964,10 +950,7 @@ const ChatSessionDropdown: React.FC<ChatSessionDropdownProps> = (props) => {
                         </span>
                       </>
                     ) : (
-                      t(
-                        "chat.allLoaded",
-                        `已加载全部会话（${total}）`,
-                      )
+                      t("chat.allLoaded", `已加载全部会话（${total}）`)
                     )}
                   </div>
                 )}

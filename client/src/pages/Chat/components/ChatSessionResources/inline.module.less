@@ -17,58 +17,9 @@
   margin: 2px 0 0 0;
   padding: 0;
   border-left: 1px solid rgba(0, 0, 0, 0.08);
-  /* v23（2026-11-09 拍板）：左栏资源列表默认常驻展开，限高 168 → 240
-     （可见行 5.3 → 7.6 行）。上限仍在：单会话最多渲染 40 条，超出滚动。 */
-  max-height: 240px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.group + .group {
-  margin-top: 6px;
-}
-
-/* 批次 B2：生成 / 引用 两组各自可折叠，计数直接跟在标签后面 */
-.groupHead {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 1px 2px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  min-width: 0;
-}
-
-.groupHead:hover {
-  background: rgba(0, 0, 0, 0.04);
-}
-
-.groupLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  color: rgba(0, 0, 0, 0.45);
-  white-space: nowrap;
-}
-
-.groupCount {
-  padding: 0 4px;
-  border-radius: 7px;
-  background: rgba(0, 0, 0, 0.06);
-  font-size: 10px;
-  line-height: 14px;
-  color: rgba(0, 0, 0, 0.45);
-  font-variant-numeric: tabular-nums;
-}
-
-.groupChevron {
-  margin-left: auto;
-  flex-shrink: 0;
+  /* v28（2026-11-21 拍板）：取消面板内滚动（原限高 240px ≈ 可见 7.6 行）——
+     一组只渲染最近 10 条、其余靠「更多」逐页放，限高会把第 8 条以后又藏进
+     内滚，等于没满足要求。整条左栏从此只有一个滚动容器。 */
 }
 
 .chevron {
@@ -161,57 +112,143 @@
   color: rgba(0, 0, 0, 0.4);
 }
 
-/* L3 入口（「查看全部」）。顶栏资源按钮下线后，左栏下拉是常驻入口，
-   多于面板上限的资源只能从这条进抽屉。 */
-.showAll {
+/* ── 一行控制条（2026-11-21 用户第 2 次纠正）──────────────────────
+   「会话资源 N · 引用 N ▾ · 产出 N ▾ · 查看全部」全在**这一行**里：
+   引用 / 产出 各是一枚下拉开关（点一下展开、再点一下收起，两组互不
+   影响），「查看全部」开 L3 抽屉。此前把「引用」「产出」做成各自占
+   一行的组头，用户读成"标题 + 两个下拉头"三行，与要求不符。
+   宽度与面板同基准：左内边距 0，与会话标题落在同一条线上。 */
+.bar {
   display: flex;
   align-items: center;
-  gap: 5px;
+  flex-wrap: wrap;
+  gap: 4px;
   width: 100%;
-  margin-top: 5px;
-  padding: 2px 2px;
-  border: none;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 0 0 4px 4px;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
+  padding: 1px 2px;
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 0, 0, 0.6);
   font-variant-numeric: tabular-nums;
 }
 
-.showAll:hover {
+/* .wrap 是 flex + wrap，控制条必须自己占满一整行，否则会与 body 并排 */
+.wrap > .bar {
+  flex: 1 1 100%;
+}
+
+.barTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.barCount {
+  padding: 0 4px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.06);
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* 下拉开关：标签 + 计数 + 尖角，一整枚可点（不再单独占一行） */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.03);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 15px;
+  color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+.chip:hover {
+  border-color: rgba(22, 119, 255, 0.35);
+  background: rgba(22, 119, 255, 0.08);
+  color: #1677ff;
+}
+
+.chipLabel {
+  white-space: nowrap;
+}
+
+.chipCount {
+  font-weight: 600;
+  color: inherit;
+}
+
+.chipCaret {
+  flex: none;
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: transform 0.15s ease;
+}
+
+.chipCaret[data-collapsed="true"] {
+  transform: rotate(-90deg);
+}
+
+.viewAll {
+  margin-left: auto;
+  flex: none;
+  padding: 0 4px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+
+.viewAll:hover {
   color: #1677ff;
   background: rgba(22, 119, 255, 0.08);
 }
 
 :global(.dark) {
-  .showAll {
-    border-top-color: rgba(255, 255, 255, 0.1);
+  .bar {
+    color: rgba(255, 255, 255, 0.65);
+  }
+
+  .barCount {
+    background: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.55);
   }
 
-  .showAll:hover {
+  .chip {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .chip:hover {
+    border-color: rgba(105, 177, 255, 0.45);
+    background: rgba(105, 177, 255, 0.14);
+    color: #69b1ff;
+  }
+
+  .viewAll {
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .viewAll:hover {
     color: #69b1ff;
     background: rgba(105, 177, 255, 0.12);
   }
 
   .body {
     border-left-color: rgba(255, 255, 255, 0.12);
-  }
-
-  .groupHead:hover {
-    background: rgba(255, 255, 255, 0.06);
-  }
-
-  .groupLabel {
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .groupCount {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.55);
   }
 
   .chevron {
@@ -466,7 +503,7 @@
       color: #69b1ff;
     }
   }
-.rowTag {
+  .rowTag {
     background: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.6);
   }
@@ -629,5 +666,50 @@
     color: #0958d9;
     border-color: rgba(22, 119, 255, 0.28);
     background: rgba(22, 119, 255, 0.08);
+  }
+}
+
+/* ── 「更多」分页按钮（2026-11-21 拍板：一组先给最近 10 条，点更多再 +10） ── */
+.moreRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 0 18px;
+  list-style: none;
+}
+
+.more {
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 18px;
+  color: #1677ff;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+}
+
+.moreRest {
+  font-size: 11px;
+  line-height: 16px;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+:global(.dark) {
+  .more {
+    color: #4096ff;
+  }
+
+  .moreRest {
+    color: rgba(255, 255, 255, 0.45);
   }
 }
