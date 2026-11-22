@@ -708,11 +708,41 @@ class CleanupEngine:
     # Tool results cleanup
     # ------------------------------------------------------------------
 
+    def _tool_result_dirs(self) -> list:
+        """Every tool-result cache dir this workspace owns.
+
+        The primary one is ``<workspace>/tool_results``.  Sub-agents are not
+        covered by it: ``AgentWorkspace`` roots a sub-agent at
+        ``<workspace>/agents/<agent_id>/`` and the context manager derives
+        ``tool_results_cache`` from that root, so each sub-agent writes its own
+        cache one level down.  Sweeping the primary dir only left those caches
+        growing forever (dev, 2026-11-22: 13 offloaded files from August were
+        still on disk under ``workspaces/admin/agents/user_a1af93/`` while the
+        nightly job reported a clean run every day).
+
+        Returns the primary dir first, then every nested candidate that
+        actually exists.  ``tool_result`` (singular) is accepted for the same
+        reason ``_resolve_tool_results_dir`` accepts it.
+        """
+        names = ("tool_results", "tool_result")
+        dirs = [self.tool_results_dir]
+        seen = {dirs[0].resolve() if dirs[0].exists() else dirs[0]}
+        agents_dir = self.workspace_dir / "agents"
+        if agents_dir.is_dir():
+            for name in names:
+                for cand in sorted(agents_dir.rglob(name)):
+                    if not cand.is_dir() or cand.is_symlink():
+                        continue
+                    key = cand.resolve()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    dirs.append(cand)
+        return dirs
+
     def cleanup_tool_results(self) -> CleanupStats:
-        """Delete tool result files older than hot_days."""
+        """Delete tool result files older than hot_days, primary and nested."""
         stats = CleanupStats(data_type="tool_results")
-        if not self.tool_results_dir.exists():
-            return stats
 
         rule = self.rules.get("tool_results", DEFAULT_RULES["tool_results"])
         hot_days = rule.get("hot_days", 3)
@@ -720,16 +750,25 @@ class CleanupEngine:
 
         deleted = 0
         freed = 0
-        for f in self.tool_results_dir.rglob("*"):
-            if f.is_file():
-                mtime = datetime.datetime.fromtimestamp(
-                    f.stat().st_mtime, tz=datetime.timezone.utc
-                )
-                if mtime < cutoff:
-                    size = f.stat().st_size
-                    f.unlink()
-                    deleted += 1
-                    freed += size
+        for tool_result_dir in self._tool_result_dirs():
+            if not tool_result_dir.exists():
+                continue
+            for f in tool_result_dir.rglob("*"):
+                try:
+                    if not f.is_file():
+                        continue
+                    mtime = datetime.datetime.fromtimestamp(
+                        f.stat().st_mtime, tz=datetime.timezone.utc
+                    )
+                    if mtime < cutoff:
+                        size = f.stat().st_size
+                        f.unlink()
+                        deleted += 1
+                        freed += size
+                except FileNotFoundError:
+                    continue  # raced with another cleaner
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning("Failed to clean tool result %s: %s", f, e)
 
         stats.items_deleted = deleted
         stats.bytes_freed = freed
