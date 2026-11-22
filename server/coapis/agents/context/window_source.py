@@ -50,6 +50,12 @@ logger = logging.getLogger(__name__)
 
 # Floor so a bogus 0/None from a provider cannot produce a 0-token budget.
 _MIN_WINDOW_TOKENS = 512
+_MIN_PLAUSIBLE_WINDOW_TOKENS = 64
+# Separate from the parsing floor above. A provider that states 404 tokens has
+# described a real, crippled slot -- that is the case this whole path exists
+# for, and discarding it let a doomed model look usable. A provider that
+# states 12 tokens is not describing a context window at all, so numbers that
+# small stay noise and fall through to inference.
 # 取不到真实分词器时的兜底「每 token 字符数」，与本模块 1.1 口径一致。
 _FALLBACK_CHARS_PER_TOKEN = 1.1
 
@@ -453,16 +459,27 @@ def parse_window_feedback(message: str) -> dict[str, Any] | None:
         return None
     text = message.replace("\n", " ")
     window = None
+    # A provider sometimes states a cap below our parsing floor. That cap is
+    # not noise, it is the pathology: honour the number the provider gave us
+    # instead of falling through to an invented one. A 404-token slot that
+    # "measured" as usable for a whole day was lost exactly this way.
+    stated = None
     for pattern in _WINDOW_PATTERNS:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             try:
-                window = int(match.group(1))
+                value = int(match.group(1))
             except (TypeError, ValueError):
                 continue
-            if window >= _MIN_WINDOW_TOKENS:
+            if value < _MIN_PLAUSIBLE_WINDOW_TOKENS:
+                continue
+            if value >= _MIN_WINDOW_TOKENS:
+                window = value
                 break
-            window = None
+            if stated is None or value < stated:
+                stated = value
+    if window is None:
+        window = stated
     if window is None:
         return None
     prompt = None
@@ -509,7 +526,14 @@ def _inferred_window_from_refusal(
     previous = _FEEDBACK.get((provider_id, model_name))
     if previous and previous.get("inferred"):
         cap = min(cap, int(previous["window_tokens"] * _INFERRED_SHRINK_STEP))
-    return max(_MIN_WINDOW_TOKENS, cap)
+    if cap <= 0:
+        return None
+    # Never raise an inferred ceiling. It is taken from a request the provider
+    # refused, so all it proves is that the window sits below this number;
+    # lifting it to a floor would turn "it could not hold that" into
+    # "it can hold this", which is the false pass this whole path exists to
+    # prevent.
+    return cap
 
 
 def record_window_feedback(
@@ -718,4 +742,194 @@ def check_model_window(
         # A number below the sanity floor is a mis-declaration, not a window;
         # judging on it would refuse a model we simply cannot trust.
         tokens = None
-    return window_usability(tokens)
+    return _apply_measured_evidence(
+        window_usability(tokens), provider_id, model_name
+    )
+
+# ── measured evidence: what the runtime has actually seen ────────────────────
+#
+# ``window_usability`` above can only judge a declared number, and a declared
+# number is a claim. Two measurements escape it, and both have shown up in
+# real traffic on this deployment:
+#
+#   * a provider that declares one window and refuses at a smaller one, which
+#     ``record_window_feedback`` already learns from the refusal text; and
+#   * an agent whose fixed prompt part -- system prompt, skill index and tool
+#     catalogue, before any history -- already costs more than the window the
+#     model claims to have. That is exactly the 2026-10-19 batch of requests
+#     that "fail on their first message": no threshold could have predicted
+#     it, because the number that mattered was ours, not the provider's.
+#
+# The gate measures both of those every turn. What it lacked was anywhere for
+# the measurement to arrive *before* a model gets chosen, so the selection
+# gate went on approving windows this deployment had already watched fail.
+# Recording them here closes that loop: same facts, one turn earlier.
+
+#: Room a reply and one round of history need on top of the fixed part. A
+#: window that merely fits the fixed part can be measured and cannot answer.
+MIN_REPLY_HEADROOM_TOKENS = 2000
+
+#: Largest fixed prompt part ever measured for a model slot, in tokens. The
+#: peak is what matters: an agent does not get to run on an average turn.
+_MEASURED_FIXED: dict = {}
+MAX_MEASURED_FIXED_RECORDS = 32
+
+
+def record_measured_fixed(provider_id, model_name, tokens):
+    """File the largest fixed prompt part measured against this model slot.
+
+    Called by the budget gate, which measures the fixed part of every request
+    it lets through. Monotonic on purpose: quiet days must not lower a number
+    that a busy turn already proved necessary.
+    """
+    if model_name is None or not isinstance(tokens, (int, float)) or tokens <= 0:
+        return None
+    key = (provider_id, model_name)
+    value = int(tokens)
+    entry = _MEASURED_FIXED.get(key)
+    if entry is None:
+        if len(_MEASURED_FIXED) >= MAX_MEASURED_FIXED_RECORDS:
+            _MEASURED_FIXED.pop(next(iter(_MEASURED_FIXED)))
+        _MEASURED_FIXED[key] = {"fixed_tokens": value, "seen_at": time.monotonic()}
+    else:
+        entry["fixed_tokens"] = max(entry["fixed_tokens"], value)
+        entry["seen_at"] = time.monotonic()
+    return _MEASURED_FIXED[key]
+
+
+def measured_fixed_tokens(provider_id, model_name):
+    """Largest fixed prompt part measured for this slot, 0 when never seen."""
+    entry = _MEASURED_FIXED.get((provider_id, model_name))
+    return int(entry["fixed_tokens"]) if entry else 0
+
+
+def measured_fixed_report():
+    """Every measured fixed overhead, for the diagnostics endpoint."""
+    out = {}
+    for (provider_id, model_name), entry in _MEASURED_FIXED.items():
+        out["%s/%s" % (provider_id, model_name)] = dict(entry)
+    return out
+
+
+def measured_usability(provider_id, model_name, declared_tokens=None):
+    """Judge a model slot on measured evidence rather than on its metadata.
+
+    Three facts decide it, two of them gathered by the gate at runtime:
+
+    * the smallest window the provider has actually held us to, stated in a
+      refusal -- a declaration above it is marketing;
+    * the largest fixed prompt part an agent of ours has needed on it. A
+      window that cannot hold our own always-on prompt plus room to answer is
+      not a small model, it is an unusable one; and
+    * the declared window itself, so that a slot can be refused *before* the
+      first failing turn rather than after it.
+
+    Returns ``{"usable": None}`` when nothing has been measured yet, so the
+    declared-only judgement keeps its authority until there is evidence to
+    override it. A slot is never refused on a measurement it never made.
+    """
+    proven = 0
+    observed = window_feedback(provider_id, model_name)
+    if observed is not None:
+        try:
+            proven = int(observed.get("window_tokens") or 0)
+        except (TypeError, ValueError):
+            proven = 0
+    fixed = measured_fixed_tokens(provider_id, model_name)
+    if proven <= 0 and fixed <= 0:
+        return {
+            "usable": None,
+            "proven_tokens": 0,
+            "fixed_tokens": 0,
+            "reason": "unmeasured",
+        }
+
+    # The tightest window either source would let us work with, and what the
+    # fixed part of a request plus room to answer needs on top of it.
+    held_to = min(n for n in (proven, declared_tokens or 0) if n > 0)
+    need = fixed + MIN_REPLY_HEADROOM_TOKENS if fixed else 0
+
+    if fixed and held_to and held_to < need:
+        return {
+            "usable": False,
+            "proven_tokens": held_to,
+            "fixed_tokens": fixed,
+            "reason": (
+                "this model's usable context is %d tokens, but an agent of ours "
+                "already spends %d tokens of it on the fixed part of a request "
+                "(system prompt, skill index and tool catalogue) before any "
+                "history is added, and a reply needs roughly %d more. Every chat "
+                "on it would fail on its first message." % (held_to, fixed, MIN_REPLY_HEADROOM_TOKENS)
+            ),
+        }
+
+    if proven > 0 and proven < MIN_USABLE_WINDOW_TOKENS:
+        return {
+            "usable": False,
+            "proven_tokens": proven,
+            "fixed_tokens": fixed,
+            "reason": (
+                "this model declares a larger window, but its provider has refused "
+                "requests above %d tokens -- below the %d-token floor CoApis needs "
+                "for the fixed part of a request. Trust the refusals: the declared "
+                "number is not what runs an agent here." % (proven, MIN_USABLE_WINDOW_TOKENS)
+            ),
+        }
+
+    if observed and observed.get("inferred"):
+        # Everything known here is an upper bound: the provider refused a
+        # prompt of this size, which proves the window is under it and proves
+        # nothing about the window reaching it. Vetoing on that would lock out
+        # a healthy model that merely was handed too much, so nothing is
+        # vetoed; but certifying a pass on an un-served slot would be the same
+        # lie the declared number told. Verdict withheld, reason stated.
+        bound = held_to or proven
+        return {
+            "usable": None,
+            "proven_tokens": bound,
+            "fixed_tokens": fixed,
+            "reason": (
+                "only an upper bound is known: %d tokens was refused, so the "
+                "window is below that, and this slot has never served a "
+                "request to prove it works" % bound
+            ),
+        }
+    return {
+        "usable": True,
+        "proven_tokens": held_to or proven,
+        "fixed_tokens": fixed,
+        "reason": "measured-ok",
+    }
+
+
+def _apply_measured_evidence(verdict, provider_id, model_name):
+    """Let a measurement veto a judgement made on declared metadata alone.
+
+    Only ever downgrades: nothing measured here can make an unusable model
+    usable, and an unmeasured slot keeps the verdict it was given. Keeps the
+    keys the callers already read, and adds what was measured so the model
+    screen can show its reasoning instead of reciting a threshold.
+    """
+    out = dict(verdict)
+    measured = measured_usability(
+        provider_id,
+        model_name,
+        out.get("effective_tokens"),
+    )
+    out["measured"] = {
+        "usable": measured["usable"],
+        "proven_tokens": measured["proven_tokens"],
+        "fixed_tokens": measured["fixed_tokens"],
+    }
+    if measured["usable"] is False and out.get("usable"):
+        out["usable"] = False
+        out["measured_reason"] = measured["reason"]
+        out["effective_tokens"] = measured["proven_tokens"] or out.get("effective_tokens")
+        out["reason"] = measured["reason"]
+        logger.warning(
+            "选型闸门按实测证据否决模型: %s/%s —— %s",
+            provider_id,
+            model_name,
+            measured["reason"],
+        )
+    return out

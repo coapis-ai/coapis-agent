@@ -1880,6 +1880,51 @@ class ContextBudgetGuard:
         )
         return reclaimable
 
+    def _adopt_observed_window(self) -> None:
+        """Budget against what this slot has really done, before sending.
+
+        ``resolve_window`` can only repeat what the endpoint advertises, and an
+        advertised number is precisely what let a 404-token slot be treated as
+        a 131072-token one. Once a refusal or a served prompt has proved a
+        smaller ceiling, the next request has to be measured against that
+        ceiling *before* it goes out -- otherwise every turn pays a round trip
+        the provider is going to refuse, which is the failure this whole path
+        exists to end.
+
+        It only ever lowers the window, never raises one, and an operator
+        override does not outrank a measurement: the number in the box is a
+        claim, the refusal is a fact.
+        """
+        try:
+            from .window_source import model_slot_of, window_feedback
+
+            provider_id, model_name = model_slot_of(self._inner)
+            observed = window_feedback(provider_id, model_name)
+        except Exception:  # noqa: BLE001 - evidence is a bonus, never a blocker
+            return
+        if not observed:
+            return
+        try:
+            cap = int(observed.get("window_tokens") or 0)
+        except (TypeError, ValueError):
+            return
+        previous = self.window.effective_tokens
+        if cap <= 0 or previous is None or cap >= previous:
+            return
+        self.window = replace(
+            self.window,
+            reported_tokens=min(self.window.reported_tokens or cap, cap),
+            effective_tokens=cap,
+            source="observed",
+        )
+        logger.warning(
+            "发请求前按实测窗口收窄: 智能体 %s 声明窗口 %d token，该槽位实测上限 "
+            "%d token；按实测窗口预算，不再拿声明值去撞提供商。",
+            self.agent_name,
+            previous,
+            cap,
+        )
+
     async def enforce(
         self,
         messages: Any,
@@ -1890,6 +1935,7 @@ class ContextBudgetGuard:
         Returns the post-pruning snapshot.  Raises ``ContextOverflowError``
         when the request still exceeds the window.
         """
+        self._adopt_observed_window()
         snapshot = self.measure(messages, tools)
         self.last_snapshot = snapshot
         self.start_gate_clock()
@@ -2029,10 +2075,80 @@ class ContextBudgetGuard:
             f"{after.history_chars} chars, pruning reclaimed "
             f"{reclaimed} chars). {cause}"
         )
+        # The window we could not fit is a fact about this model slot, and the
+        # selection gate should not get to relearn it the hard way the next
+        # time somebody saves this model.
+        from .window_source import model_slot_of, record_measured_fixed
+
+        _slot_provider, _slot_model = model_slot_of(self._inner)
+        record_measured_fixed(
+            _slot_provider,
+            _slot_model,
+            self.window.to_tokens(after.fixed_chars),
+        )
         logger.error(message)
         raise ContextOverflowError(message)
 
     # ── the call ────────────────────────────────────────────────────
+    async def _refusal_retry(self, messages: Any, tools: Any):
+        """Re-size a refused request under the window the refusal just taught us.
+
+        A provider that refuses with a stated cap has told us its declared
+        window was wrong. ``observe_refusal`` files that fact, and the next
+        guard built for this model would use it -- which leaves *this* turn
+        dead for no reason at all. So adopt the smaller window here and
+        enforce against it: archiving, trimming and degradation all run on
+        that path, and only if even they cannot fit does the refusal stand.
+
+        Returns the enforced snapshot when the request is worth sending again,
+        otherwise ``None`` and the caller re-raises what the provider said,
+        which is then the honest answer.
+        """
+        if getattr(self, "_refusal_retried", False):
+            return None
+        try:
+            from .window_source import model_slot_of, window_feedback
+
+            provider_id, model_name = model_slot_of(self._inner)
+            observed = window_feedback(provider_id, model_name)
+        except Exception:  # noqa: BLE001 - evidence is a bonus, never a blocker
+            return None
+        if not observed:
+            return None
+        try:
+            cap = int(observed.get("window_tokens") or 0)
+        except (TypeError, ValueError):
+            return None
+        previous = self.window.effective_tokens
+        if cap <= 0 or previous is None or cap >= previous:
+            return None
+        self._refusal_retried = True
+        self.window = replace(
+            self.window,
+            reported_tokens=min(self.window.reported_tokens or cap, cap),
+            effective_tokens=cap,
+            source="observed",
+        )
+        logger.warning(
+            "提供商拒绝后按实测窗口重试: 智能体 %s 原窗口 %d token，实测上限 %d token；"
+            "按实测窗口收紧后重发一次。",
+            self.agent_name,
+            previous,
+            cap,
+        )
+        try:
+            return await self.enforce(messages, tools)
+        except ContextOverflowError:
+            # Even the tightened window cannot hold the fixed part of this
+            # agent's prompt. The turn really is impossible, and what the
+            # provider told us first is the better message to surface.
+            logger.error(
+                "实测窗口 %d token 仍装不下智能体 %s 的固定开销，放弃重试。",
+                cap,
+                self.agent_name,
+            )
+            return None
+
     def observe_refusal(self, exc: BaseException) -> None:
         """Learn from a provider refusal that states the real window.
 
@@ -2694,6 +2810,7 @@ class ContextBudgetGuard:
             if self.degrade_mode and tools:
                 tools = None
         self._publish_to_governance(snapshot)
+        self._refusal_retried = False
         try:
             return await self._inner(messages, tools=tools, **kwargs)
         except Exception as exc:
@@ -2701,7 +2818,22 @@ class ContextBudgetGuard:
             # place that has both the refusal text and our own measurement of
             # the prompt that caused it.
             self.observe_refusal(exc)
-            raise
+            # Filing the real window and then ending the turn spends that
+            # learning on a log line. Where the provider said "smaller" rather
+            # than "no", enforce against the number it gave and send once more:
+            # this is the branch that turns an opaque 400 into either an answer
+            # or a refusal that states the size it actually tried.
+            retried = await self._refusal_retry(messages, tools)
+            if retried is None:
+                raise
+            if self.degrade_mode and tools:
+                tools = None
+            self._publish_to_governance(retried)
+            try:
+                return await self._inner(messages, tools=tools, **kwargs)
+            except Exception as retry_exc:
+                self.observe_refusal(retry_exc)
+                raise
 
     def _publish_to_governance(self, snapshot: BudgetSnapshot | None) -> None:
         """Report the measured prompt to the governance ledger, if any.

@@ -58,8 +58,21 @@ async def get_context_overhead(
     fixed-overhead guard had to pull, and the windows the providers reported
     by refusing a request.  In-memory, so it reports the live sessions and
     nothing historical.
+
+    ``measured_fixed`` is the same fixed cost keyed by *model* rather than by
+    agent, and kept as the largest ever seen. That is the number the model
+    selection gate consults, so this is where an admin can see why a model was
+    refused: a window that cannot hold the largest fixed prompt part measured
+    on it was never usable here, whatever its metadata declares.
     """
     from ...agents.context.fixed_overhead import latest_reports
-    from ...agents.context.window_source import feedback_report
+    from ...agents.context.window_source import (
+        feedback_report,
+        measured_fixed_report,
+    )
 
-    return {"agents": latest_reports(), "window_feedback": feedback_report()}
+    return {
+        "agents": latest_reports(),
+        "window_feedback": feedback_report(),
+        "measured_fixed": measured_fixed_report(),
+    }
