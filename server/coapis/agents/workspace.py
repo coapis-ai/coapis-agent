@@ -389,21 +389,24 @@ class Workspace:
             # Initialize context_manager and memory_manager for command dispatch
             try:
                 from .context.light_context_manager import LightContextManager
-                from .memory_manager import MemoryManager
                 r.context_manager = LightContextManager(
                     working_dir=str(self.workspace_dir),
                     agent_id=self.agent_id or "default",
                 )
-                r.memory_manager = MemoryManager(workspace_dir=self.workspace_dir)
-                # Set agent_id for command handler's config loading
-                r.memory_manager.agent_id = self.agent_id or "default"
             except Exception as _cm_err:
-                logger.warning("Failed to init context/memory manager for runner: %s", _cm_err)
-            # Register the registry-backed memory backend (config-driven,
-            # default "remelight") — this is the object that implements the
-            # nightly ``dream()`` pipeline. Kept separate from
-            # ``memory_manager`` above because the legacy command-dispatch
-            # API (save/prefetch/list_entries) lives on MemoryManager.
+                logger.warning("Failed to init context manager for runner: %s", _cm_err)
+            # One memory manager for the whole workspace.  The registry
+            # backend (config-driven, default "remelight") serves BOTH roles:
+            # the agent's memory_manager (memory tools, memory prompt,
+            # compaction handoff) and the dream cron's memory_backend.
+            #
+            # It used to be a different object from the agent's
+            # memory_manager: the agent got the file-based MemoryManager,
+            # which has no add_summarize_task / get_memory_prompt /
+            # memory_search.  Every compaction and every auto-memory interval
+            # therefore reached hand_to_long_term_memory() and were dropped
+            # with a single INFO line (dev, 2026-11-22) -- long-term memory
+            # never received anything.
             try:
                 from ..config.config import load_agent_config
                 from .memory.base_memory_manager import (
@@ -419,14 +422,16 @@ class Workspace:
                         "remelight",
                     )
                 )
-                r.memory_backend = _mm_cls(
+                _memory_manager = _mm_cls(
                     working_dir=str(self.workspace_dir),
                     agent_id=self.agent_id or "default",
                     username=getattr(self, "username", None),
                 )
+                r.memory_backend = _memory_manager
+                r.memory_manager = _memory_manager
             except Exception as _mb_err:
                 logger.warning(
-                    "Failed to init memory backend (dream) for runner: %s",
+                    "Failed to init memory backend for runner: %s",
                     _mb_err,
                 )
             # Manually initialize session (sync) and mark as healthy.
