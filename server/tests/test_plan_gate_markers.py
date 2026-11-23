@@ -44,5 +44,7 @@ def test_versions_and_dates_do_not_inflate_markers():
     ):
         assert _numeric_markers(text) == []
 
-    assert _classify("今天天气怎么样") == "simple"
+    assert _classify("帮我把这段话改通顺") == "simple"
     assert _classify("把 /tmp/a.txt 删掉") == "simple"
+    # 「今天天气怎么样」2026-11-23 起不再判 simple：答案得联网现查，
+    # 这类问题会先立计划再动手（锁在 test_classifier.py::test_1b）。

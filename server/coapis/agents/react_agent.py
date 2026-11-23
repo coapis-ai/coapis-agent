@@ -3490,6 +3490,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # 发射即忘：判官要 1~4s，绝不挡在动作前面。判出 reroute 走 HINT 影响
         # 下一个动作；台账由网关写（source=tool_gate）。一期只提示不拦。
         self._hub_fire_tool_gate(tool_call, tool_name)
+        self._note_turn_tool_call(tool_name)
 
         # ── Policy engine / tool governance ──
         if self._policy_engine is not None:
@@ -4058,6 +4059,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
 
         # --- 方案授权域同步（片0）：按当前计划语义授予/挂起授权域 ---
         await self._sync_plan_scope()
+        await self._maybe_backfill_plan()
 
         # --- Thinking budget control ---
         try:
@@ -4855,6 +4857,89 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             query, restrict_names=restrict or None,
         )
 
+    def _note_turn_tool_call(self, tool_name: str) -> None:
+        """记下本轮真正执行过的工具，供边跑边补计划回填进度。
+
+        只记名字、只留前 8 个：这里要的是「已经走到第几步」，不是执行细节。
+        """
+        calls = getattr(self, "_turn_tool_calls", None)
+        if not isinstance(calls, list):
+            calls = self._turn_tool_calls = []
+        if len(calls) < 8:
+            calls.append(tool_name or "unknown")
+
+    async def _maybe_backfill_plan(self) -> None:
+        """边跑边补：已动手两步以上却还没立计划，就把干过的活回填成计划。
+
+        A 让模型动手前先立计划，但那只是指令——模型可能直接开查（实测
+        2026-11-23：工具已下发 262 轮、plan_tool_calls=0，用户全程看不到进度，
+        已完成的步骤也没法打勾）。所以每个推理步骤都检查一次：补建计划并
+        把执行过的工具标成已完成步骤，面板当场出现，模型随后照常打勾收口。
+
+        子任务里带 done 与 in_progress，因此 hints 走 when_a_subtask_in_progress
+        而不是 at_the_beginning_after_mutation，不会反过来叫模型「等用户确认」。
+        """
+        if getattr(self, "_plan_backfilled", False):
+            return
+        notebook = getattr(self, "plan_notebook", None)
+        if notebook is None:
+            return
+        # PlanNotebook 上的属性叫 current_plan（实测容器内 dir），
+        # 用 getattr(notebook, "plan") 会恒为 None、守卫形同虚设。
+        if getattr(notebook, "current_plan", None) is not None:
+            return
+        calls = list(getattr(self, "_turn_tool_calls", []) or [])
+        if len(calls) < 2:
+            return
+        goal = (getattr(self, "_hub_goal", "") or "").strip()
+        if not goal:
+            return
+        # 本轮只补一次，失败也不重试，避免每步都往台账里砸。
+        self._plan_backfilled = True
+
+        from datetime import datetime as _dt
+
+        from agentscope.plan import SubTask
+
+        from .plan_gate import tool_action_cn
+
+        now = _dt.now().isoformat(timespec="seconds")
+        subtasks = [
+            SubTask(
+                name=tool_action_cn(name),
+                description="已执行：%s" % tool_action_cn(name),
+                expected_outcome="拿到该步骤的结果",
+                created_at=now,
+                state="done",
+                outcome="已执行",
+            )
+            for name in calls
+        ]
+        subtasks.append(
+            SubTask(
+                name="汇总结果并回答",
+                description="把已取得的结果整理成对用户可用的回答",
+                expected_outcome="给出完整回答",
+                created_at=now,
+                state="in_progress",
+                outcome="",
+            ),
+        )
+        try:
+            await notebook.create_plan(
+                name=goal[:40],
+                description=goal[:300],
+                expected_outcome=goal[:300],
+                subtasks=subtasks,
+            )
+        except Exception:
+            logger.warning("auto plan backfill failed", exc_info=True)
+            return
+        logger.info(
+            "auto plan backfilled: %d done steps + 1 收尾", len(calls),
+        )
+
+
     def _prepare_plan_gate(self, msg: Msg | list[Msg] | None) -> str | None:
         """判档前置：算出要判的文本 + 本轮工具闸记账清零。
 
@@ -4922,7 +5007,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         COAPIS_DECISION_PLAN_GATE_ENABLED=false.
         Only when the plan tools are registered and no plan is active.  This
         injects the skeleton; the agent writes the plan itself.
+
+        副作用：每轮开头重置「本轮工具记账」与「本轮是否已回填计划」，
+        让 ``_maybe_backfill_plan`` 的守卫按轮生效，不会拿上一轮的记录开跑。
         """
+        self._turn_tool_calls: list[str] = []
+        self._plan_backfilled = False
         text = self._prepare_plan_gate(msg)
         if text is None:
             return

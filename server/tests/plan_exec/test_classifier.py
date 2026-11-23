@@ -39,7 +39,21 @@ class TestComplexityClassifierBoundaries(unittest.TestCase):
         self.cls = ComplexityClassifier(judge_enabled=False)
 
     def test_1_simple_short_single_intent(self):
-        self.assertEqual(self.cls.classify("今天上海天气怎么样？"), SIMPLE)
+        # 短、单子目标、且不依赖外部现查信息：one-shot 能答完，不该套计划
+        # （2026-11-20 拍板）。样例去掉了「今天上海天气怎么样？」——答案得
+        # 现查的问题已改判非 simple，见 test_1b。
+        self.assertEqual(self.cls.classify("帮我把这段话改通顺"), SIMPLE)
+
+    def test_1b_short_question_needing_external_facts_is_not_simple(self):
+        # 「今天有哪些热点」7 字 1 个子目标：旧尺子只看长度、子目标数、顺序
+        # 与分叉信号，一律判 simple，于是不注入计划指令、计划面板全程不出现
+        # （实测 2026-11-23 chat d6404ec3）。答案得现查的问题必须先规划。
+        for text in ("今天有哪些热点", "今天上海天气怎么样？", "最新的报销政策"):
+            self.assertNotEqual(self.cls.classify(text), SIMPLE, text)
+            self.assertIn("信息获取意图", self.cls._last_reason, text)
+        # 一句话直答不能被误抬，否则简单问答也要多走一遍建计划
+        for text in ("今天几号", "现在几点", "你好", "谢谢"):
+            self.assertEqual(self.cls.classify(text), SIMPLE, text)
 
     def test_2_boundary_len_80_is_simple(self):
         base = "请帮我仔细核查一下今年第一季度的费用报销单据"

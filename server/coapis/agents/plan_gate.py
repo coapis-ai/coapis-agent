@@ -123,6 +123,76 @@ def _parse_level_and_effort(raw: str) -> tuple[str, str]:
     return level, effort
 
 
+# 信息获取意图（2026-11-23 实测补）。旧尺子只看长度、子目标数、顺序/分叉
+# 信号，所以「今天有哪些热点」这种 8 字短问被判 simple —— 于是既不注入
+# 计划指令，计划面板也全程不出现（实测 chat d6404ec3-be11-4c1d-8f88-8f50adc23144
+# 轮次 07c82567 台账：complexity=simple、plan_tool_calls=0、outcome=satisfied）。
+# 但这类问题的本质是「答案不 my 脑子里，得现查现取」：不先立计划就动手，
+# 用户看不到步骤，模型也容易查一次就收口。命中即视为多步任务。
+_NEEDS_TOOL_RE = re.compile(
+    # 外部信息源：答案不在模型脑子里，必须现查才有。故意不收「查/搜索/看看」
+    # 这类通用动词——实测它们会把大量单步内部操作（查OA、查配置）也抬成
+    # complex，把标定集准确率从 80% 压到 70%。
+    r"热点|新闻|资讯|头条|热搜|舆情|动态"
+    r"|天气|气温|股价|行情|汇率|票价|财报|公告"
+    # 明确的跨条目调研动作：要汇总多条信息才能交付。
+    r"|调研|了解一下|收集|汇总|盘点|梳理|整理成|整理一份|整理一下"
+    # 时效性问法。
+    r"|最新的?消息|最新进展|最新"
+    ,
+    re.IGNORECASE,
+)
+# 一句话直答白名单：命中就不算「要现查」，避免把「今天几号」「你好」这类
+# 真·一句话问答也强推进计划流程（那会让简单问答多一次无谓的建计划）。
+_DIRECT_ANSWER_RE = re.compile(
+    r"几号|几点|星期几|周几|多久|多少天|几天"
+    r"|你好|您好|谢谢|再见|拜拜"
+    r"|什么是|是什么|什么意思|是谁",
+    re.IGNORECASE,
+)
+
+
+def needs_plan_intent(text: str) -> bool:
+    """Does this request need fetching/processing before it can be answered?
+
+    Used for two things that must stay in sync: the rule floor in
+    :func:`classify` (never call such a request ``simple``), and
+    ``CoApisAgent._maybe_arm_plan`` (arm the plan skeleton even for a short
+    question). Keeping the word list in one place avoids the old drift where
+    the gate and the hint disagreed about what counts as multi-step.
+    """
+    if not text:
+        return False
+    if _DIRECT_ANSWER_RE.search(text):
+        return False
+    return bool(_NEEDS_TOOL_RE.search(text))
+
+
+def tool_action_cn(tool_name: str) -> str:
+    """Short Chinese verb phrase for a tool, used as an auto-plan subtask."""
+    return _TOOL_ACTION_CN.get(tool_name, "处理" if not tool_name else tool_name)
+
+
+_TOOL_ACTION_CN = {
+    "web_search": "联网检索",
+    "execute_shell_command": "执行命令",
+    "read_file": "读取文件",
+    "write_file": "写入文件",
+    "edit_file": "编辑文件",
+    "glob_search": "查找文件",
+    "grep_search": "检索代码",
+    "view_image": "查看图片",
+    "browser_use": "操作浏览器",
+    "fetch_url": "抓取网页",
+    "web_fetch": "抓取网页",
+    "memory_search": "检索记忆",
+    "create_plan": "创建计划",
+    "revise_current_plan": "修订计划",
+    "finish_subtask": "完成步骤",
+    "finish_plan": "完成计划",
+}
+
+
 class ComplexityClassifier:
     """规则判级 + lite judge 的三级复杂度分类器。
 
@@ -269,10 +339,21 @@ class ComplexityClassifier:
             level = SIMPLE
         else:
             level = MEDIUM
+        intent_floor = level == SIMPLE and needs_plan_intent(t)
+        if intent_floor:
+            # 「今天有哪些热点」8 字 1 个子目标：旧尺子只看长度、子目标数、
+            # 顺序与分叉信号，这类短问一律判 simple，于是不注入计划指令、
+            # 计划面板全程不出现（实测 2026-11-23 chat d6404ec3）。
+            # 答案不在模型脑子里、得现查现取的问题，本质是多步任务。
+            # 判 COMPLEX 是有意的：classify_smart 对 COMPLEX 直通，
+            # 不多花一次判官往返（dev 实测判官 12-18s，会拖慢聊天）。
+            level = COMPLEX
+
         # 尺子随结论一起留下：台账里的档位从此可核对（哪个信号触发的）。
         self._last_reason = (
             f"长度{n} 子目标{goals} 顺序标记{seq_kinds}"
             f" 分支{'有' if has_branch else '无'}"
+            + (" +信息获取意图" if intent_floor else "")
         )
         return level
 
