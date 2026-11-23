@@ -1717,6 +1717,7 @@ class AgentRunner(Runner):
         agent = None
         chat = None
         session_state_loaded = False
+        _qp_persist_tasks: list = []  # plan writes pending at turn close
         # Initialize variables before try block so they're available in finally
         _evolution_full_response: list[str] = []
         _evolution_full_reasoning: list[str] = []
@@ -2264,6 +2265,22 @@ class AgentRunner(Runner):
                             )
                             return []
 
+                    def _log_task_exception(task):
+                        """记录被丢弃的后台任务异常。
+
+                        这类任务没人 await，异常默认只会在事件循环里留下
+                        "Task exception was never retrieved"。挂上回调，
+                        至少能在日志里看到案发现场。
+                        """
+                        if task.cancelled():
+                            return
+                        exc = task.exception()
+                        if exc is not None:
+                            logger.warning(
+                                "Plan persistence task failed",
+                                exc_info=exc,
+                            )
+
                     def _persist_notebook(nb):
                         """把计划本整体写回 session store。
 
@@ -2301,6 +2318,7 @@ class AgentRunner(Runner):
                         try:
                             task = asyncio.create_task(_write_nb())
                             task.add_done_callback(_log_task_exception)
+                            _qp_persist_tasks.append(task)
                         except RuntimeError:
                             logger.warning(
                                 "No running loop; plan notebook not saved",
@@ -2369,7 +2387,8 @@ class AgentRunner(Runner):
                                 )
 
                         try:
-                            loop.create_task(_write())
+                            task = loop.create_task(_write())
+                            _qp_persist_tasks.append(task)
                         except Exception:
                             logger.warning(
                                 "Finished-plan persist task skipped",
@@ -2428,9 +2447,26 @@ class AgentRunner(Runner):
                                 exc_info=True,
                             )
 
+                    def _safe_plan_change(nb, plan):
+                        """计划钩子的最后一道闸：异常绝不允许外溢。
+
+                        agentscope 的 ``_trigger_plan_change_hooks`` 不做
+                        任何兜底，钩子里抛出的异常会直接变成工具调用的失
+                        败往上抛，把整轮对话打断在前端最初那一帧。计划相
+                        关的故障只该丢计划功能，不该丢整轮对话。
+                        """
+                        try:
+                            return _on_plan_change(nb, plan)
+                        except Exception:
+                            logger.warning(
+                                "plan change hook failed (swallowed)",
+                                exc_info=True,
+                            )
+                            return None
+
                     plan_notebook.register_plan_change_hook(
                         "broadcast",
-                        _on_plan_change,
+                        _safe_plan_change,
                     )
                 except Exception:
                     logger.warning(
@@ -3322,6 +3358,27 @@ class AgentRunner(Runner):
             # --- Flush memory manager on interrupt/cancel ---
             # Ensure any pending summary tasks are properly handled
             # when the session is interrupted (e.g., /stop, timeout, disconnect).
+            # 计划落盘是 fire-and-forget 的：回合结束（含取消）前统一收
+            # 口，否则这一轮的计划可能永远写不进会话状态，表现就是刷新
+            # 后计划消失。shield 保证正在写入的任务不被本轮的取消带走。
+            if _qp_persist_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            *(asyncio.shield(t) for t in _qp_persist_tasks),
+                            return_exceptions=True,
+                        ),
+                        timeout=10.0,
+                    )
+                except asyncio.CancelledError:
+                    logger.warning(
+                        "plan persist drain interrupted",
+                    )
+                except Exception:
+                    logger.warning(
+                        "plan persist drain failed",
+                        exc_info=True,
+                    )
             if self.memory_manager is not None:
                 try:
                     await self.memory_manager.close()

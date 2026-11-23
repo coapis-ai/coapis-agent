@@ -4,6 +4,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
+import time
+
+from coapis.plan.lifecycle import PLAN_META_SAVED_AT
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -64,6 +67,11 @@ def broadcast_plan_update(
     The payload forwarded to SSE clients carries ``session_ids`` so the
     subscriber can match on whichever id it knows.
     """
+    # 每次广播都重新盖落盘时刻：读取侧据此判断"这还是不是当前那一轮的计划"，
+    # 避免一小时前的计划在新一轮里继续顶着"当前计划"显示。
+    if payload.get("type") == "plan_update":
+        payload = {**payload, PLAN_META_SAVED_AT: time.time()}
+
     out = payload
     if payload.get("type") == "plan_update":
         plan_data = payload.get("plan")

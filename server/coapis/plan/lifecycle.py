@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
+import time
 from typing import Any
 
 from .schemas import plan_to_response
@@ -30,6 +32,80 @@ FINISHED_PLAN_KEY = "coapis_finished_plan"
 FINISHED_PLANS_KEY = "coapis_finished_plans"
 #: How many finished plans we keep per session (newest wins).
 MAX_FINISHED_PLANS = 20
+
+# ---------------------------------------------------------------------------
+# 「这份计划还算当前吗」的唯一尺子
+#
+# 计划是会话级状态，面板却是轮次级的展示。两者不挂钩时，任何一次
+# /plan/current 轮询都能把历史上最后一份计划捞出来当"当前计划"——用户
+# 问"今天有哪些热点"，面板却显示三天前那份已完成的任务。下面的元数据
+# 在每次落盘时盖章，读取侧统一按新鲜度裁决。
+# ---------------------------------------------------------------------------
+#: 随 notebook / 快照一起持久化：上次落盘的时刻（epoch 秒）
+PLAN_META_SAVED_AT = "_qp_saved_at"
+
+#: 距上次落盘超过这么久就不再算"当前计划"。默认 30 分钟：够覆盖"模型等
+#: 用户确认"的正常停顿，又能挡住隔夜僵尸。设为 0 表示不看新鲜度。
+PLAN_CURRENT_MAX_AGE_SECONDS = float(
+    os.getenv("COAPIS_PLAN_CURRENT_MAX_AGE", "") or 1800.0,
+)
+
+
+def stamp_plan_metadata(
+    saved: dict,
+    *,
+    now: float | None = None,
+) -> dict:
+    """给 notebook 状态字典盖上落盘时刻戳（就地返回同一对象）。"""
+    if not isinstance(saved, dict):
+        return saved
+    saved[PLAN_META_SAVED_AT] = time.time() if now is None else float(now)
+    return saved
+
+
+def plan_saved_at(saved: dict) -> float | None:
+    """读出落盘时刻；兼容"计划被包在 SSE 信封里"的两种形状。"""
+    if not isinstance(saved, dict):
+        return None
+    raw = saved.get(PLAN_META_SAVED_AT)
+    if raw is None:
+        inner = saved.get("plan")
+        if isinstance(inner, dict):
+            raw = inner.get(PLAN_META_SAVED_AT)
+    try:
+        return float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def plan_age_seconds(saved: dict, *, now: float | None = None) -> float | None:
+    """距上次落盘过了多久；没盖过章返回 ``None``。"""
+    saved_at = plan_saved_at(saved)
+    if saved_at is None:
+        return None
+    return max(0.0, (time.time() if now is None else float(now)) - saved_at)
+
+
+def plan_is_current(
+    saved: dict,
+    *,
+    max_age: float | None = None,
+    now: float | None = None,
+) -> bool:
+    """能否把它当作"当前计划"展示。
+
+    没盖过章的一律视为过期：那些正是本规则之前留下的僵尸，宁可少显示，
+    也不能让它们跑到毫不相干的轮次上。
+    """
+    limit = (
+        PLAN_CURRENT_MAX_AGE_SECONDS if max_age is None else float(max_age)
+    )
+    if limit <= 0:
+        return True
+    age = plan_age_seconds(saved, now=now)
+    if age is None:
+        return False
+    return age <= limit
 
 
 def _stored_plan_objects(notebook: Any) -> list[Any]:
@@ -177,6 +253,10 @@ def merge_finished_plan_snapshots(
                     break
             continue
         seen.add(sid)
+        # 只有首次进台账的快照才盖落盘时刻；已在台账里的沿用原时刻。
+        # 这样"历史上的已完成计划"才会随时间变陈旧，不再冒充当前计划。
+        if PLAN_META_SAVED_AT not in snap:
+            snap[PLAN_META_SAVED_AT] = time.time()
         merged.append(dict(snap))
 
     if limit and len(merged) > limit:
@@ -207,7 +287,8 @@ def notebook_state_payload(notebook: Any) -> dict:
     except Exception:  # pragma: no cover - SDK 内部结构变化
         logger.warning("plan notebook state_dict failed", exc_info=True)
         return {}
-    return state if isinstance(state, dict) else {}
+    # 盖上落盘时刻与轮次：读取侧据此判断"这份计划还是不是当前的"。
+    return stamp_plan_metadata(dict(state))
 
 
 def restore_notebook_state(notebook: Any, saved: Any) -> bool:
@@ -222,6 +303,9 @@ def restore_notebook_state(notebook: Any, saved: Any) -> bool:
     if not isinstance(current, dict):
         return False
     if current.get("state") not in RESUMABLE_PLAN_STATES:
+        return False
+    # 状态白名单挡不住"一直挂着没动的僵尸"：再按新鲜度拦一道。
+    if not plan_is_current(saved):
         return False
     try:
         notebook.load_state_dict(copy.deepcopy(saved), strict=False)

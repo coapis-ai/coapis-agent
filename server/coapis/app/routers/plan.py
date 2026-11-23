@@ -33,7 +33,7 @@ from fastapi import APIRouter, HTTPException, Query, Body
 from fastapi.requests import Request
 from fastapi.responses import StreamingResponse
 
-from coapis.plan.lifecycle import plan_really_done
+from coapis.plan.lifecycle import plan_is_current, plan_really_done
 from coapis.plan.schemas import outcome_pending as _outcome_pending
 
 logger = logging.getLogger(__name__)
@@ -274,6 +274,8 @@ async def get_current_plan(
     try:
         from ...plan.broadcast import get_live_plan
         found, cached = get_live_plan(agent_id, session_id)
+        if cached is not None and not plan_is_current(cached):
+            cached = None  # 缓存条目已过期：不是本轮的计划
         if found and cached is not None:
             plan_data = cached
     except Exception:
@@ -297,6 +299,8 @@ async def get_current_plan(
                         current_plan = nb_state.get("current_plan")
                         if current_plan and isinstance(current_plan, dict):
                             plan_data = _normalize_plan_data(current_plan)
+                            if not plan_is_current(nb_state):
+                                plan_data = None  # 落盘已久：不是本轮的计划
         except Exception:
             logger.warning(
                 "plan/current: session-state notebook fallback failed",
@@ -309,7 +313,14 @@ async def get_current_plan(
         try:
             workspace = _get_workspace(manager, agent_id, username)
             if workspace:
-                plan_data = await _get_finished_plan(workspace, session_id, username)
+                # 历史快照只是兜底，而且必须仍然新鲜：否则历史上最后一份计划会
+                # 在毫不相干的每一轮里反复浮现（用户看到的"已完成但内容不搭边"）。
+                for candidate in reversed(
+                    await _get_finished_plans(workspace, session_id, username)
+                ):
+                    if isinstance(candidate, dict) and plan_is_current(candidate):
+                        plan_data = _normalize_plan_data(candidate)
+                        break
         except Exception:
             logger.warning("Finished plan fallback lookup failed", exc_info=True)
 

@@ -19,6 +19,7 @@ What these lock down, in the order the user can see them:
 from __future__ import annotations
 
 import types
+import time
 
 import pytest
 
@@ -28,6 +29,7 @@ from coapis.app.routers.plan import (
     get_current_plan,
 )
 from coapis.plan.lifecycle import (
+    PLAN_META_SAVED_AT,
     FINISHED_PLAN_KEY,
     FINISHED_PLANS_KEY,
     MAX_FINISHED_PLANS,
@@ -236,6 +238,7 @@ async def test_current_plan_returns_history_when_live_cache_hits(monkeypatch):
     from coapis.plan import broadcast
 
     live = _plan("p2", "进行中", [_step("甲", "in_progress")])
+    live[PLAN_META_SAVED_AT] = time.time()
     monkeypatch.setattr(
         broadcast, "get_live_plan", lambda agent_id, sid: (True, live)
     )
@@ -251,6 +254,38 @@ async def test_current_plan_returns_history_when_live_cache_hits(monkeypatch):
     assert body["plans"][0]["finished"] is True
     assert body["plans"][-1]["finished"] is False
     assert body["plan"]["id"] == "p2"
+
+
+async def test_current_plan_rejects_stale_history_as_current(monkeypatch):
+    """陈旧的历史计划不得冒充「当前计划」。
+
+    小蜜蜂 2026-11-23 报障：问「今天有哪些热点」，计划面板直接弹出三天前
+    那份已完成任务。根因是 /plan/current 把历史台账里最新的一份当兜底返回，
+    而这份兜底没有时间维度的闸。
+    """
+    from coapis.plan import broadcast
+
+    monkeypatch.setattr(
+        broadcast, "get_live_plan", lambda agent_id, sid: (False, None)
+    )
+
+    stale = _plan(
+        "old",
+        "三天前的计划",
+        [_step("甲", "done", outcome="甲结果")],
+    )
+    stale[PLAN_META_SAVED_AT] = time.time() - 3 * 24 * 3600
+    ws = _FakeWorkspace({FINISHED_PLANS_KEY: [stale]})
+    manager = types.SimpleNamespace(
+        get_workspace=lambda agent_id, username=None: ws,
+    )
+
+    body = await get_current_plan(_fake_request(manager), session_id="chat-1")
+
+    # 不得当作当前计划返回……
+    assert body["plan"] is None
+    # ……但台账仍要查得到，供「查看历史计划」入口使用。
+    assert [p["id"] for p in body["plans"]] == ["old"]
 
 
 async def test_current_plan_without_manager_returns_empty_history(monkeypatch):

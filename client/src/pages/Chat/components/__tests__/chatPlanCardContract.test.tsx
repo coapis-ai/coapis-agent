@@ -12,8 +12,8 @@
  *
  * 断言全部对着真实渲染的 DOM 写，不锁 CSS 类名。
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, act, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import ChatPlanCard from "../ChatPlanCard";
 import { resolvePlanHistory } from "@/api/modules/plan";
 import type {
@@ -21,10 +21,20 @@ import type {
   PlanStateResponse,
 } from "@/api/modules/plan";
 
-const { getCurrentPlanWithScope, subscribePlanUpdates } = vi.hoisted(() => ({
-  getCurrentPlanWithScope: vi.fn(),
-  subscribePlanUpdates: vi.fn(() => () => {}),
-}));
+const { getCurrentPlanWithScope, subscribePlanUpdates, sseSink } = vi.hoisted(() => {
+  const sink: { cb: ((p: unknown) => void) | null } = { cb: null };
+  return {
+    getCurrentPlanWithScope: vi.fn(),
+    // 把 SSE 回调扣下来，用例就能模拟"这一轮推进来了某个计划"
+    subscribePlanUpdates: vi.fn((cb: (p: unknown) => void) => {
+      sink.cb = cb;
+      return () => {
+        sink.cb = null;
+      };
+    }),
+    sseSink: sink,
+  };
+});
 
 vi.mock("@/api/modules/plan", async () => {
   const actual =
@@ -40,6 +50,20 @@ vi.mock("@/api/modules/plan", async () => {
   };
 });
 
+
+/**
+ * 新契约（防幽灵）：已完成的计划只有「本轮 SSE 推过来过」才允许显示。
+ * 下面这些用例测的是收口 / 铺开 / 文案，不是这道门，所以统一把本轮该显示的那份
+ * 当成"推送过的计划"喂进卡片；门本身由文件末尾那条专门用例守着。
+ */
+async function pushFocusPlanFromMock() {
+  const all = getCurrentPlanWithScope.mock.results;
+  const body = all.length ? await all[all.length - 1].value : null;
+  const focus = body?.plan;
+  await act(async () => {
+    sseSink.cb?.(focus);
+  });
+}
 function step(over: Partial<import("@/api/modules/plan").SubTaskResponse> = {}) {
   return {
     name: "步骤",
@@ -138,6 +162,7 @@ describe("ChatPlanCard", () => {
     );
 
     render(<ChatPlanCard chatId="chat-1" isLast />);
+    await pushFocusPlanFromMock();
 
     expect(await screen.findByText("进度")).toBeInTheDocument();
     expect(screen.getByText("正在做")).toBeInTheDocument();
@@ -168,6 +193,7 @@ describe("ChatPlanCard", () => {
     render(
       <ChatPlanCard chatId="chat-1" isLast cardData={{ status: "completed" }} />,
     );
+    await pushFocusPlanFromMock();
 
     // 答完也摊着：步骤看得见，按钮写着「收起」。
     expect(await screen.findByText("进度")).toBeInTheDocument();
@@ -209,6 +235,7 @@ describe("ChatPlanCard", () => {
     );
 
     render(<ChatPlanCard chatId="chat-1" isLast />);
+    await pushFocusPlanFromMock();
 
     await screen.findByText("进度");
     const row = await screen.findByText("读源码");
@@ -235,14 +262,18 @@ describe("ChatPlanCard", () => {
     );
 
     render(<ChatPlanCard chatId="chat-1" isLast />);
+    await pushFocusPlanFromMock();
 
     await waitFor(() => expect(screen.getByText("都办完了")).toBeInTheDocument());
     expect(screen.queryByText("正在做")).toBeNull();
 
-    // 勾完的计划不再轮询：只有挂载那一次取数。
+    // 勾完的计划不再轮询。允许「收尾补刷」（2.5s / 8s 各一次，组件里写死的
+    // 设计，用来兜最后一步晚落库），但补刷窗口过后必须彻底停住。
+    await new Promise((resolve) => setTimeout(resolve, 9000));
+    const settled = getCurrentPlanWithScope.mock.calls.length;
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    expect(getCurrentPlanWithScope).toHaveBeenCalledTimes(1);
-  });
+    expect(getCurrentPlanWithScope).toHaveBeenCalledTimes(settled);
+  }, 20000);
 
   it("自称完成但没有可用结果 → 显示「结果待补」而不是绿勾", async () => {
     getCurrentPlanWithScope.mockResolvedValue(
@@ -272,6 +303,7 @@ describe("ChatPlanCard", () => {
     render(
       <ChatPlanCard chatId="chat-1" isLast cardData={{ status: "in_progress" }} />,
     );
+    await pushFocusPlanFromMock();
     await screen.findByText("进度");
     // 一行一条之后，明细都收在这一步的 title 里，不再单独占行。
     const rows = document.querySelectorAll("li[data-state]");
@@ -327,5 +359,59 @@ describe("ChatPlanCard", () => {
     const { container } = render(<ChatPlanCard chatId="chat-1" isLast />);
     await waitFor(() => expect(getCurrentPlanWithScope).toHaveBeenCalled());
     expect(container.firstChild).toBeNull();
+  });
+});
+
+
+describe("轮次归属（防幽灵）", () => {
+  beforeEach(() => {
+    getCurrentPlanWithScope.mockReset();
+    document.body.innerHTML = "";
+  });
+
+  it("已完成的计划只要本轮没推过，就一个字都不渲染", async () => {
+    const stale = plan({ name: "上文遗留的已完成计划", state: "done", finished: true });
+    getCurrentPlanWithScope.mockResolvedValue({ plan: stale, plans: [stale] });
+    const { container } = render(<ChatPlanCard chatId="chat-1" isLast />);
+    await waitFor(() => expect(getCurrentPlanWithScope).toHaveBeenCalled());
+    // 等一轮轮询与状态回填，确认不是"还没渲染出来"而是"压根不打算渲染"
+    await new Promise((r) => setTimeout(r, 40));
+    expect(container.textContent).toBe("");
+  });
+
+  it("同一份已完成计划，本轮推过来就正常显示", async () => {
+    const fresh = plan({ name: "本轮计划", state: "done", finished: true });
+    getCurrentPlanWithScope.mockResolvedValue({ plan: fresh, plans: [fresh] });
+    const { container } = render(<ChatPlanCard chatId="chat-1" isLast />);
+    await waitFor(() => expect(getCurrentPlanWithScope).toHaveBeenCalled());
+    await pushFocusPlanFromMock();
+    await screen.findByText("本轮计划");
+    expect(container.querySelector("li[data-state]")).not.toBeNull();
+  });
+
+  it("纯 todo 的僵尸计划：没推过又没动过，不上榜", async () => {
+    const zombie = plan({
+      name: "上文遗留的未开工计划",
+      state: "todo",
+      finished: false,
+      subtasks: [step({ name: "第一步", state: "todo" })],
+    });
+    getCurrentPlanWithScope.mockResolvedValue({ plan: zombie, plans: [zombie] });
+    const { container } = render(<ChatPlanCard chatId="chat-1" isLast />);
+    await waitFor(() => expect(getCurrentPlanWithScope).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(container.textContent).toBe("");
+  });
+
+  it("真的动过手的计划即使本轮没推也照常显示（防误杀）", async () => {
+    const running = plan({
+      name: "进行中的计划",
+      state: "in_progress",
+      finished: false,
+      subtasks: [step({ name: "第一步", state: "in_progress" })],
+    });
+    getCurrentPlanWithScope.mockResolvedValue({ plan: running, plans: [running] });
+    render(<ChatPlanCard chatId="chat-1" isLast />);
+    await screen.findByText("进行中的计划");
   });
 });

@@ -26,10 +26,12 @@ import os
 import re
 import json
 import uuid
+import asyncio
 import inspect
 import logging
 
 from typing import Any, Dict, Union, Sequence
+from collections import OrderedDict
 
 import aiofiles
 from agentscope.session import SessionBase
@@ -37,6 +39,46 @@ from agentscope_runtime.engine.schemas.exception import ConfigurationException
 from ...exceptions import AgentStateError
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 并发安全：同一会话文件的读-改-写必须串行化
+#
+# update_session_state 是"读整个 JSON → 改一个 key → 整体写回"。两个协程
+# 并发更新同一会话的不同 key 时，后写的那一份根本不含前者的修改（lost
+# update），而且它们抢同一个固定名 .tmp 时直接 FileNotFoundError。表现就
+# 是：计划收口后的状态永远落不了盘，磁盘上留着上一轮的历史计划，下一轮
+# 被当成"未完成计划"复活。
+#
+# 修法：每个会话文件一把 asyncio.Lock，save 与 update 共用同一把，把整段
+# 读-改-写关进临界区。锁表有界，空闲锁按需淘汰。
+# ---------------------------------------------------------------------------
+_SESSION_LOCKS: "OrderedDict[str, asyncio.Lock]" = OrderedDict()
+_MAX_SESSION_LOCKS = 512
+
+
+def _session_file_lock(path: str) -> asyncio.Lock:
+    """Return the per-session-file lock, evicting idle locks when bounded."""
+    lock = _SESSION_LOCKS.get(path)
+    if lock is None:
+        lock = asyncio.Lock()
+        _SESSION_LOCKS[path] = lock
+    else:
+        _SESSION_LOCKS.move_to_end(path)
+    while len(_SESSION_LOCKS) > _MAX_SESSION_LOCKS:
+        victim = None
+        for cand, cand_lock in _SESSION_LOCKS.items():
+            if cand != path and not cand_lock.locked():
+                victim = cand
+                break
+        if victim is None:
+            break
+        _SESSION_LOCKS.pop(victim, None)
+    return lock
+
+
+def _unique_tmp_path(session_save_path: str) -> str:
+    """Unique tmp name: pid + uuid, so concurrent writers never share one."""
+    return f"{session_save_path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
 
 
 def _safe_json_loads(content: str, filepath: str = "") -> dict:
@@ -271,6 +313,25 @@ class SafeJSONSession(SessionBase):
         user_id: str = "",
         **state_modules_mapping,
     ) -> None:
+        """Save state modules atomically, serialised per session file.
+
+        2026-11-23 — 与 ``update_session_state`` 共用同一把会话文件锁：
+        全量覆盖和读-改-写若并发跑，后落盘的一方会抹掉对方的修改。
+        """
+        path = self._get_save_path(session_id, user_id=user_id)
+        async with _session_file_lock(path):
+            return await self._save_session_state_unlocked(
+                session_id,
+                user_id=user_id,
+                **state_modules_mapping,
+            )
+
+    async def _save_session_state_unlocked(
+        self,
+        session_id: str,
+        user_id: str = "",
+        **state_modules_mapping,
+    ) -> None:
         """Save state modules to a JSON file using atomic async I/O.
 
         Writes to a .tmp file first, then renames atomically to prevent
@@ -287,7 +348,7 @@ class SafeJSONSession(SessionBase):
         # 同一会话并发保存（多消息/多渠道同时落盘）时两个协程会写同一个 tmp
         # 文件，短内容覆盖长内容后残留尾部字节 → 状态文件出现非法 UTF-8 尾巴，
         # 下次加载直接 UnicodeDecodeError，整条聊天 failed。
-        tmp_path = f"{session_save_path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        tmp_path = _unique_tmp_path(session_save_path)
         payload = json.dumps(state_dicts, ensure_ascii=False)
         try:
             async with aiofiles.open(
@@ -407,6 +468,33 @@ class SafeJSONSession(SessionBase):
         user_id: str = "",
         create_if_not_exist: bool = True,
     ) -> None:
+        """Update one key atomically, serialised per session file.
+
+        2026-11-23 — 本方法是"读整份 JSON → 改一个 key → 整体写回"。并发
+        调用各自基于旧快照写回，后写的一方会抹掉先写一方的 key（lost
+        update）；再加上抢同一个固定名 ``.tmp``，还会直接
+        ``FileNotFoundError``。计划状态的收口写入正是这样被丢掉的：磁盘
+        上留着上一轮的历史计划，下一轮把它当成未完成计划复活。现在整段
+        读-改-写关进同一把会话文件锁里。
+        """
+        path = self._get_save_path(session_id, user_id=user_id)
+        async with _session_file_lock(path):
+            return await self._update_session_state_unlocked(
+                session_id,
+                key,
+                value,
+                user_id=user_id,
+                create_if_not_exist=create_if_not_exist,
+            )
+
+    async def _update_session_state_unlocked(
+        self,
+        session_id: str,
+        key: Union[str, Sequence[str]],
+        value,
+        user_id: str = "",
+        create_if_not_exist: bool = True,
+    ) -> None:
         """Update a key in the session state file using atomic async I/O.
 
         Reads the existing state, merges the new key-value pair, then writes
@@ -457,7 +545,7 @@ class SafeJSONSession(SessionBase):
         # Ensure content blocks always have 'type' for proper history rendering
         _ensure_content_block_types(states)
 
-        tmp_path = session_save_path + ".tmp"
+        tmp_path = _unique_tmp_path(session_save_path)
         try:
             async with aiofiles.open(
                 tmp_path, "w", encoding="utf-8",

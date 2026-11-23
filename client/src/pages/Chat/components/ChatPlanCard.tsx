@@ -118,26 +118,41 @@ export default function ChatPlanCard({
   // 卡片会把「等你点确认」显示成「进行中」，用户只能干看着 0/N 不动。
   const [scope, setScope] = useState<PlanScopeView | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // 本组件挂载期间（≈本轮）由 SSE 推过的计划 id。切换会话即清空，因此
+  // 历史上的计划不会因为"它是最近的一份"就被当作当前计划显示。
+  const pushedRef = useRef<Set<string>>(new Set());
 
-  // 同一会话可能有多条 plan。不按「最后一条」取，而按「最有进度的一条」取：
+  // 同一会话可能有多条 plan。两道闸：先只留下「仍在运行」或「本轮 SSE 推过」
+  // 的（历史台账不参与"当前计划"的争夺），再在其中挑「最有进度的一条」——
   // 实测一轮里会留下两份同名计划（规则骨架 + 模型自建房），后一份常常全是
-  // todo 的僵尸计划——按最后一条显示会写成「0/3 步」，而且它永远 unfinished，
+  // todo 的僵尸计划，按最后一条显示会写成「0/3 步」，而且它永远 unfinished，
   // 兜底轮询据此判断「还在跑」，一个空闲页面 3 分钟能打出 64 次接口。
   let focusPlan: PlanStateResponse | null = null;
   if (plans.length > 0) {
-    const newestFirst = plans.slice().reverse();
-    // 优先级：①有进度且有步骤在跑（正在执行的这一轮）②有过任何进度（已跑完的
-    // 这一轮）③全 todo 的骨架/僵尸计划垫底。这样既能盖过上一轮做完的计划，也
-    // 不会被一份永远不动的僵尸计划顶成「进行中 0/3」。
-    const rank = (p: PlanStateResponse) => {
-      const moved = (p.subtasks || []).some((st) => st.state !== "todo");
-      return (moved ? 2 : 0) + (isLive(p) ? 1 : 0);
-    };
-    focusPlan =
-      newestFirst.find((p) => rank(p) === 3) ||
-      newestFirst.find((p) => rank(p) === 2) ||
-      newestFirst.find(isLive) ||
-      plans[plans.length - 1];
+    // 面板只认「仍在运行」或「本轮由 SSE 推过」的计划。历史计划留在台账
+    // 里供查看，但不许顶替本轮的计划显示——这正是「问热点却弹出三天前那份
+    // 已完成任务」的来源：接口会拿历史最新一份当兜底喂回来。
+    const eligible = plans.filter((p) => {
+      // 本轮 SSE 推过来过：一定是本轮的计划，直接放行。
+      if (p.id && pushedRef.current.has(p.id)) return true;
+      // 没推过的必须"真的动过"（有步骤已开始或已完成）才允许显示。
+      // 纯 todo 的僵尸计划一律不上榜——它就是「还没开始 0/3 步」
+      // 那位不速之客的来源，而且它永远 unfinished，会把兜底轮询吊着跑。
+      return isLive(p) && (p.subtasks || []).some((s) => s.state !== "todo");
+    });
+    if (eligible.length > 0) {
+      const newestFirst = eligible.slice().reverse();
+      focusPlan =
+        newestFirst.find(isLive) ??
+        newestFirst.find(
+          (p) =>
+            p.subtasks?.some((s) => s.state === "in_progress") ||
+            (p.subtasks && p.subtasks.every((s) => s.state === "done")),
+        ) ??
+        newestFirst.find((p) => p.subtasks && p.subtasks.length > 0) ??
+        newestFirst[newestFirst.length - 1] ??
+        null;
+    }
   }
 
   // 「这一轮是不是最新一轮」自己判：SDK 在 prepend 槽位给的 isLast 实测拿不到
@@ -233,6 +248,7 @@ export default function ChatPlanCard({
   // 首屏 + 会话切换时拉全量。
   useEffect(() => {
     keyRef.current = "";
+    pushedRef.current = new Set();
     setPlans([]);
     void refresh();
   }, [refresh]);
@@ -242,6 +258,7 @@ export default function ChatPlanCard({
     const off = subscribePlanUpdates(
       (plan: PlanStateResponse | null) => {
         if (plan) {
+          if (plan.id) pushedRef.current.add(plan.id);
           setPlans((prev) => {
             const idx = prev.findIndex((p) => p.id === plan.id);
             if (idx >= 0) {
