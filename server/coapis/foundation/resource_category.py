@@ -295,6 +295,36 @@ _ABSOLUTEISH_RE = re.compile(r"^(?:[A-Za-z]+://|[A-Za-z]:[\\/]|~|/)")
 #: 点开头的段（目录或文件）都不算用户资源。
 HIDDEN_SEGMENT_PREFIX = "."
 
+#: 平台自管目录（v27 · 2026-11-25）：交付区**里面**由平台生成、由业务侧另行
+#: 登记的目录。与点开头条目同性质，只是名字不带点，所以没法靠结构规则兜住，
+#: 必须由写入方自己声明——``register_platform_managed_dir`` 是唯一入口。
+#:
+#: 为什么需要这个声明位（mycom 实测逼出来的）：企业版把知识库引用归档写成
+#: ``files/kbrefs/<document_id>.md``，并按 ``kind=kb`` 登记台账、标题取知识库
+#: 里的**真实文档名**；而文件补扫只按"落在交付区里"判据，会把同一个文件再按
+#: ``kind=file`` 登记一次，标题只能退化成文件名 → 台账里同一物理文件两行。
+#: 读面合并键是 ``(kind, path)``（``resource_ledger._chat_resource_rows``），
+#: 两行 kind 不同**永不合并** → 资源条多出一条标题为 ``<uuid>.md`` 的重复项。
+#: 修在尺子上而不是修在标题上：这类文件本来就不该当"用户文件"进台账。
+PLATFORM_MANAGED_DIRS: set[str] = set()
+
+
+def register_platform_managed_dir(name: str) -> str:
+    """声明一个"平台自管目录"段名，使其下的文件不算用户资源。
+
+    幂等（集合语义），可在插件注册期反复调用。段名按 POSIX 口径清洗，
+    只取最后一段——传 ``"files/kbrefs"`` 与 ``"kbrefs"`` 等价，因为判定
+    看的是**路径里任意一段**命中（与 ``NOISE_DIR_PARTS`` 同一判法）。
+
+    Returns:
+        清洗后的段名；入参为空时返回空串且不登记。
+    """
+    seg = str(name or "").strip().strip("/").rsplit("/", 1)[-1].strip()
+    if not seg:
+        return ""
+    PLATFORM_MANAGED_DIRS.add(seg)
+    return seg
+
 
 def is_system_path(
     path: str, *, kind: str = "file", bare_top_file_ok: bool = False
@@ -318,6 +348,8 @@ def is_system_path(
       4. 首段不在交付目录（files/media/output/downloads/uploads）——这一条
          同时覆盖工作区根的 MEMORY.md/HEARTBEAT.md、技能目录
          （``.skills/…``/``skills/…/SKILL.md``）、memory/ 日记、scripts/、logs/；
+      4.5 任一段命中 ``PLATFORM_MANAGED_DIRS``（平台在交付区里自管、业务侧
+         已另行登记的目录，见 ``register_platform_managed_dir``）；
       5. 命中 ``PLATFORM_FILE_NAMES`` 的**根层**文件（防御：交付区里的同名
          文件是用户自己的产物，不在此列）。
     """
@@ -343,6 +375,10 @@ def is_system_path(
     # 任何点开头的段（``files/.session_dirs.json``、``media/docs/.nojekyll``…）
     # 都是平台/工具状态，不是用户交付物——``NOISE_DIR_PARTS`` 的一般式。
     if any(str(seg).startswith(HIDDEN_SEGMENT_PREFIX) for seg in parts):
+        return True
+    # 平台自管目录（``register_platform_managed_dir`` 声明）：判定看任意一段，
+    # 与噪音目录同一判法，故 ``files/kbrefs/x.md`` 与 ``kbrefs/x.md`` 都兜得住。
+    if PLATFORM_MANAGED_DIRS and any(str(seg) in PLATFORM_MANAGED_DIRS for seg in parts):
         return True
     # 工作区根上的**散文件**（``loose.md`` 这种没有目录前缀的一段名）：读面
     # 不算交付物（聊天里不该露），但**登记闸门必须放行**——台账要认识它，

@@ -181,6 +181,68 @@ def test_system_path_ruler_only_judges_files():
     assert rc.is_system_path("anything", kind="kb") is False
 
 
+def test_platform_managed_dir_is_declared_not_hardcoded():
+    """平台自管目录：由写入方声明，声明后其下文件不算用户资源。
+
+    病灶（2026-11-25 mycom 实测）：企业版把知识库引用归档写成
+    ``files/kbrefs/<doc_id>.md`` 并按 kind=kb 登记（标题=真实文档名），
+    文件补扫又把同一文件按 kind=file 再登记一次（标题只能=文件名 <uuid>.md）。
+    读面合并键是 (kind, path)，两行永不合并 → 资源条多出一条 uuid 标题。
+    治在尺子上：这类平台自管文件本就不该进"用户文件"台账。
+    """
+    declared = rc.register_platform_managed_dir("kbrefs")
+    assert declared == "kbrefs"
+    # 幂等：重复声明不报错、不产生第二个段名
+    assert rc.register_platform_managed_dir("kbrefs") == "kbrefs"
+    # 传全路径也只取末段（判定看任意一段）
+    assert rc.register_platform_managed_dir("files/kbrefs") == "kbrefs"
+    # 空值不登记
+    assert rc.register_platform_managed_dir("  ") == ""
+    try:
+        # 交付根内的平台自管目录：登记闸门口径（bare_top_file_ok=True）也拦
+        assert rc.is_system_path("files/kbrefs/8c441003.md", kind="file",
+                                 bare_top_file_ok=True) is True
+        # 判定看任意一段，不带交付根前缀同样拦得住
+        assert rc.is_system_path("kbrefs/8c441003.md", kind="file",
+                                 bare_top_file_ok=True) is True
+        # 深层同名目录也拦（平台自管目录整棵子树都是平台的）
+        assert rc.is_system_path("files/kbrefs/deep/x.md", kind="file",
+                                 bare_top_file_ok=True) is True
+        # 同名**文件**不受影响：拦的是目录段，不是名字
+        assert rc.is_system_path("files/kbrefs.md", kind="file",
+                                 bare_top_file_ok=True) is False
+        # 未声明的目录照常放行，别把尺子变成万能黑名单
+        assert rc.is_system_path("files/reports/x.md", kind="file",
+                                 bare_top_file_ok=True) is False
+        # 尺子只管文件类：业务侧自己登记的 kind=kb 行不受影响（预览要靠它）
+        assert rc.is_system_path("files/kbrefs/8c441003.md", kind="kb") is False
+    finally:
+        rc.PLATFORM_MANAGED_DIRS.clear()
+
+
+def test_kbrefs_declared_by_enterprise_owner():
+    """``kbrefs`` 必须由拥有该目录的企业版声明，社区版不得硬编码。
+
+    社区版没有知识库引用归档这个概念，写死段名等于把企业版细节漏进底座，
+    且企业版改名后会静默失效——所以社区版只提供机制（声明位），
+    企业版在插件注册期声明自己的目录。
+    """
+    # 社区版默认不声明任何平台自管目录
+    assert rc.PLATFORM_MANAGED_DIRS == set(), (
+        "社区版不应自带平台自管目录段名，应由拥有方声明"
+    )
+    pro = Path(__file__).resolve().parents[4] / "coapis-pro"
+    init_py = pro / "server/coapis/enterprise/__init__.py"
+    if not init_py.exists():  # 独立跑社区版测试时没有企业版仓库
+        pytest.skip("企业版仓库不在位")
+    text = init_py.read_text(encoding="utf-8", errors="ignore")
+    assert "register_platform_managed_dir" in text, (
+        "企业版未在插件注册期声明平台自管目录"
+    )
+    assert "KBREF_SUBDIR" in text, "企业版应声明自己拥有的 kbrefs 目录常量"
+
+
+
 def test_system_path_ruler_is_reused_not_copied():
     # 判定只允许一份实现（PRD C2 的"两份实现"病灶）。
     # 实测消费方（B0 初稿列的 agent_tools/resource_governance 系幽灵路径）：
