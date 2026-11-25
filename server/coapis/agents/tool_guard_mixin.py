@@ -161,6 +161,47 @@ class ToolGuardMixin:
         if not hasattr(self, "_tool_guard_engine"):
             self._init_tool_guard()
 
+    def _ensure_plan_tool_equipped(self, tool_name: str) -> None:
+        """计划簿记工具按需装备（片0 · 计划收口）。
+
+        懒注册把 finish_subtask 这类工具押在 plan-change hook 的触发时序上：
+        hook 漏触发、或模型在计划建好之前抢跑调用时，toolkit 里查不到函数，
+        直接 FunctionNotFoundError，计划收不了尾（2026-11-23 实测）。
+        执行前兜一道：名字属于计划工具且尚未注册 → 立即装备。
+        常驻 schema 成本为零，因此不必把工具提进 core 去换固定开销。
+        """
+        try:
+            notebook = getattr(self, "plan_notebook", None)
+            if notebook is None:
+                return
+            available = {fn.__name__: fn for fn in notebook.list_tools()}
+        except Exception:  # pragma: no cover - 无计划本能力时静默跳过
+            return
+        if tool_name not in available:
+            return
+        toolkit = getattr(self, "toolkit", None)
+        if toolkit is None or tool_name in getattr(toolkit, "tools", {}):
+            return
+        try:
+            toolkit.register_tool_function(
+                available[tool_name],
+                namesake_strategy=getattr(
+                    self,
+                    "_namesake_strategy",
+                    "override",
+                ),
+            )
+            logger.info(
+                "plan tool equipped on demand: %s",
+                tool_name,
+            )
+        except Exception:
+            logger.warning(
+                "plan tool on-demand equip failed: %s",
+                tool_name,
+                exc_info=True,
+            )
+
     def _plan_scope_covers(self, tool_name: str, tool_input: dict) -> bool:
         """是否被"已确认方案"的授权域覆盖（片0 · 方案授权域）。
 
@@ -198,7 +239,38 @@ class ToolGuardMixin:
         if decision.plan_id:
             self._record_plan_scope_audit(tool_name, decision, approved=False)
             self._observe_loop_plan_drift(tool_name, decision, tool_input)
+            self._plan_scope_open_circuit(session_id, decision)
         return False
+
+    def _plan_scope_open_circuit(self, session_id: str, decision: Any) -> None:
+        """连续越界熔断（片0 · 方案授权域）。
+
+        模型在同一方案里反复越界时，每次参数都不同，循环闸的"相同参数"
+        尺子抓不到，只会一路挂起等审批、原地重试到超时（2026-11-23 实测
+        30 分钟死循环）。累计越界达阈值就把方案置为 stalled，让后续越界
+        动作走否决通道——模型会收到"停下来汇报"的明确指令，而不是无限重试。
+        """
+        try:
+            from coapis.plan.scope import (
+                PLAN_SCOPE_STRIKE_LIMIT,
+                SCOPE_STATUS_EXECUTING,
+                SCOPE_STATUS_STALLED,
+                peek_scope,
+            )
+        except Exception:  # pragma: no cover - 模块缺失时不影响主流程
+            return
+        if decision.denials < PLAN_SCOPE_STRIKE_LIMIT:
+            return
+        scope = peek_scope(session_id)
+        if scope is None or scope.status != SCOPE_STATUS_EXECUTING:
+            return
+        scope.status = SCOPE_STATUS_STALLED
+        logger.warning(
+            "plan-scope circuit open: plan=%s denials=%d session=%s",
+            decision.plan_id,
+            decision.denials,
+            session_id,
+        )
 
     def _plan_scope_veto(self, tool_name: str, tool_input: dict) -> Any:
         """方案未确认时否决有副作用的动作（F1 真拦）。
@@ -215,6 +287,7 @@ class ToolGuardMixin:
         try:
             from coapis.plan.scope import (
                 SCOPE_STATUS_PENDING,
+                SCOPE_STATUS_STALLED,
                 ScopeDecision,
                 peek_scope,
             )
@@ -228,7 +301,10 @@ class ToolGuardMixin:
             return None
         try:
             scope = peek_scope(session_id)
-            if scope is None or scope.status != SCOPE_STATUS_PENDING:
+            if scope is None or scope.status not in (
+                SCOPE_STATUS_PENDING,
+                SCOPE_STATUS_STALLED,
+            ):
                 return None
             semantics = classify_action(tool_name, tool_input or {})
         except Exception:  # pragma: no cover - 判定失败回落审批链
@@ -241,13 +317,20 @@ class ToolGuardMixin:
             return None
         title = str(getattr(scope, "title", "") or "")
         plan_id = getattr(scope, "plan_id", None)
-        note = (
-            f"方案「{title}」还没得到用户确认（状态=待确认），"
-            f"这个动作（{semantics.value}）已被方案授权域拦下。"
-            "请停下：把方案和影响范围讲清楚，请用户确认"
-            "（界面点「确认」或输入 /plan confirm）之后再执行；"
-            "不要靠改写方案标题或拆成小步来绕过确认。"
-        )
+        if scope.status == SCOPE_STATUS_STALLED:
+            note = (
+                f"方案「{title}」内已连续多次越界，执行域已收口。"
+                f"这个动作（{semantics.value}）不再重试执行。"
+                "请停止调用工具，用文本说明已完成的部分和未完成的原因。"
+            )
+        else:
+            note = (
+                f"方案「{title}」还没得到用户确认（状态=待确认），"
+                f"这个动作（{semantics.value}）已被方案授权域拦下。"
+                "请停下：把方案和影响范围讲清楚，请用户确认"
+                "（界面点「确认」或输入 /plan confirm）之后再执行；"
+                "不要靠改写方案标题或拆成小步来绕过确认。"
+            )
         logger.warning(
             "plan-scope veto: tool=%s session=%s plan=%s semantics=%s",
             tool_name,
@@ -275,10 +358,18 @@ class ToolGuardMixin:
                 findings=[
                     GuardFinding(
                         id=f"plan-scope-{uuid4().hex[:12]}",
-                        rule_id="PLAN_SCOPE_PENDING",
+                        rule_id=(
+                            "PLAN_SCOPE_STALLED"
+                            if scope.status == SCOPE_STATUS_STALLED
+                            else "PLAN_SCOPE_PENDING"
+                        ),
                         category=GuardThreatCategory.RESOURCE_ABUSE,
                         severity=GuardSeverity.HIGH,
-                        title="方案未确认，动作被拦下",
+                        title=(
+                            "方案执行域已收口，动作被拦下"
+                            if scope.status == SCOPE_STATUS_STALLED
+                            else "方案未确认，动作被拦下"
+                        ),
                         description=note,
                         tool_name=tool_name,
                         param_name="input",
@@ -683,6 +774,12 @@ class ToolGuardMixin:
                 tool_input=dict(tool_input),
                 guard_result=None,
             )
+
+        # 计划簿记工具按需装备（片0 · 计划收口）：懒注册把 finish_subtask 这类
+        # 工具押在 plan-change hook 的触发时序上，hook 漏触发、或模型在计划建好
+        # 之前抢跑调用时，toolkit 里查不到函数，直接 FunctionNotFoundError、
+        # 计划收不了尾（2026-11-23 实测）。执行前兜一道，常驻 schema 成本为零。
+        self._ensure_plan_tool_equipped(tool_name)
 
         # Get tool execution level and user role
         exec_level = self._get_tool_execution_level()

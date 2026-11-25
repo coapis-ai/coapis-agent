@@ -107,6 +107,16 @@ _DEFAULT_READ_TOOLS: dict[str, ActionSemantics] = {
     "code_quality": ActionSemantics.READ,
     "secret_scan": ActionSemantics.READ,
     "check_agent_task": ActionSemantics.READ,
+    # 计划簿记（agentscope PlanNotebook 注册名）：只改内存里的计划状态，
+    # 对授权域不产生任何外部出入，必须永远放行。一旦落到 unknown_semantics
+    # 的 EXTERNAL_WRITE 兜底，执行阶段的收尾调用会被 plan-scope 拦成待审批，
+    # 模型拿不到可执行的下一步，就原地重试直到超时（2026-11-23 实测死循环）。
+    "create_plan": ActionSemantics.READ,
+    "revise_current_plan": ActionSemantics.READ,
+    "update_subtask_state": ActionSemantics.READ,
+    "finish_subtask": ActionSemantics.READ,
+    "view_subtasks": ActionSemantics.READ,
+    "finish_plan": ActionSemantics.READ,
 }
 
 #: 对外读取（发起网络请求但不改外部状态）

@@ -39,6 +39,12 @@ SCOPE_STATUS_APPROVED = "approved"
 SCOPE_STATUS_EXECUTING = "executing"
 SCOPE_STATUS_DONE = "done"
 SCOPE_STATUS_REVOKED = "revoked"
+#: 连续越界收口：方案内累计越界达阈值后置位，后续有副作用的动作一律
+#: 否决并提示模型停下来向用户汇报，避免原地重试到超时。
+SCOPE_STATUS_STALLED = "stalled"
+
+#: 同一方案授权域内累计越界多少次即触发收口
+PLAN_SCOPE_STRIKE_LIMIT = 3
 
 _ACTIVE_STATUSES = frozenset({SCOPE_STATUS_APPROVED, SCOPE_STATUS_EXECUTING})
 
@@ -131,6 +137,8 @@ class ScopeDecision:
     reason: str
     semantics: ActionSemantics
     plan_id: str | None = None
+    #: 判定后该方案授权域的累计越界次数，供上层做连续越界熔断
+    denials: int = 0
 
     def __bool__(self) -> bool:
         return self.covered
@@ -433,14 +441,20 @@ def evaluate_scope(
             reason="方案尚未确认，授权域未生效",
             semantics=sem,
             plan_id=scope.plan_id,
+            denials=scope.denials,
         )
 
-    if not scope.is_active():
+    # 收口态（stalled）仍算活跃域：纯读要放行，模型才能汇报进展；
+    # 有副作用的动作由 ceiling 判越界，再交给 veto 明确否决。
+    if not (
+        scope.is_active() or scope.status == SCOPE_STATUS_STALLED
+    ):
         return ScopeDecision(
             covered=False,
             reason="方案授权域已失效",
             semantics=sem,
             plan_id=scope.plan_id,
+            denials=scope.denials,
         )
 
     # 语义档越界
@@ -455,6 +469,7 @@ def evaluate_scope(
             ),
             semantics=sem,
             plan_id=scope.plan_id,
+            denials=scope.denials,
         )
 
     # 工具白名单越界（白名单为空表示不限工具，仅按语义）
@@ -465,6 +480,7 @@ def evaluate_scope(
             reason=f"越界：工具 {tool_name} 不在方案授权范围内",
             semantics=sem,
             plan_id=scope.plan_id,
+            denials=scope.denials,
         )
 
     # 路径越界
@@ -477,6 +493,7 @@ def evaluate_scope(
                 reason=f"越界：路径 {path} 不在方案授权范围内",
                 semantics=sem,
                 plan_id=scope.plan_id,
+            denials=scope.denials,
             )
 
     # 域内免审上限（配置层再收一道）
@@ -487,6 +504,7 @@ def evaluate_scope(
             reason=f"动作 {sem.value} 高于域内免审上限 {cfg.scope_auto_max.value}",
             semantics=sem,
             plan_id=scope.plan_id,
+            denials=scope.denials,
         )
 
     scope.hits += 1
