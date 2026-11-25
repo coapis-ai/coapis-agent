@@ -22,7 +22,7 @@ import os
 import time
 from typing import Any
 
-from .schemas import plan_to_response
+from .schemas import outcome_pending, plan_to_response
 
 logger = logging.getLogger(__name__)
 
@@ -313,3 +313,136 @@ def restore_notebook_state(notebook: Any, saved: Any) -> bool:
         logger.warning("plan notebook restore failed", exc_info=True)
         return False
     return getattr(notebook, "current_plan", None) is not None
+
+
+# ---------------------------------------------------------------- 本轮计划快照
+# 计划卡过去只活在"当前会话"这一个视图里：刷新一次换一批，历史轮次里的计划
+# 跟着一起消失。小蜜蜂 2026-11-24 拍板：计划和进度是聊天输出的一部分，应该
+# 跟着那一轮的消息一起存进聊天记录，各轮独立。这里负责把"这一轮动过的计划"
+# 取出来；落库点见 runner._annotate_turn_resources。
+
+# 只认"真的动了计划"的工具。view_subtasks / get_subtask_count 这类只读的不算，
+# 否则一个只是瞟了一眼进度的轮次也会凭空长出一张计划卡。
+PLAN_TURN_TOOLS: frozenset[str] = frozenset(
+    {
+        "create_plan",
+        "revise_current_plan",
+        "update_subtask_state",
+        "finish_subtask",
+    },
+)
+
+
+def plan_to_dict(raw: dict[str, Any]) -> dict[str, Any]:
+    """计划字典 → 前端认识的快照（接口与落库共用这一把尺子）。
+
+    /api/plan/updates 推的、/api/plan/current 给的、消息 metadata 里存的，
+    必须是同一份字段：否则刷新一次，卡片上的"已完成"会自己变。
+    """
+    subtasks = []
+    for st in raw.get("subtasks", []):
+        if not isinstance(st, dict):
+            continue
+        entry = {
+            "name": st.get("name", ""),
+            "description": st.get("description", ""),
+            "expected_outcome": st.get("expected_outcome", ""),
+            "outcome": st.get("outcome"),
+            "state": st.get("state", "todo"),
+            "created_at": st.get("created_at"),
+            "finished_at": st.get("finished_at"),
+        }
+        # Same ruler as plan_to_response, so a snapshot persisted before
+        # this field existed still reports "结果待补" truthfully.
+        entry["outcome_pending"] = bool(st.get("outcome_pending")) or (
+            outcome_pending(
+                entry["expected_outcome"],
+                entry["outcome"],
+                entry["state"],
+            )
+        )
+        subtasks.append(entry)
+    return {
+        "id": raw.get("id", ""),
+        "name": raw.get("name", ""),
+        "description": raw.get("description", ""),
+        "expected_outcome": raw.get("expected_outcome", ""),
+        "state": raw.get("state", "todo"),
+        "subtasks": subtasks,
+        "created_at": raw.get("created_at"),
+        "finished_at": raw.get("finished_at"),
+        # finished 的唯一尺子见本文件 plan_really_done：runner 只在
+        # 新开计划时才清 current，不能靠「它还是不是 current」判定在跑。
+        "finished": bool(raw.get("finished")) or plan_really_done(raw),
+        "outcome": raw.get("outcome"),
+    }
+
+
+def used_plan_tools(agent_messages: list) -> bool:
+    """这一轮是否真的调用过计划工具。
+
+    拿工具调用作证，不拿模型的自述当证据：模型说"我建了个计划"不算，
+    真发了 create_plan 才算。
+    """
+    for msg in agent_messages or []:
+        content = getattr(msg, "content", None)
+        if content is None and isinstance(msg, dict):
+            content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            block_type = getattr(block, "type", None) or (
+                block.get("type") if isinstance(block, dict) else None
+            )
+            if block_type != "tool_use":
+                continue
+            name = getattr(block, "name", None) or (
+                block.get("name") if isinstance(block, dict) else None
+            )
+            if name in PLAN_TURN_TOOLS:
+                return True
+    return False
+
+
+def storage_plans(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """从 state_dict 里取出全部计划。
+
+    agentscope 把 storage 存成 {"plans": {id: 计划}}，不是列表。按列表遍历
+    只会拿到字符串键 "plans"，一个计划都取不出来。
+    """
+    storage = state.get("storage")
+    if isinstance(storage, dict):
+        plans = storage.get("plans")
+        if isinstance(plans, dict):
+            return [p for p in plans.values() if isinstance(p, dict)]
+        if isinstance(plans, list):
+            return [p for p in plans if isinstance(p, dict)]
+    if isinstance(storage, list):
+        return [p for p in storage if isinstance(p, dict)]
+    return []
+
+
+def turn_plan_snapshot(
+    notebook: Any,
+    agent_messages: list,
+) -> dict[str, Any] | None:
+    """这一轮的计划快照；这一轮没动计划就返回 None，前端也就不长卡片。
+
+    优先取当前计划；计划办完后 current_plan 可能被清掉，退回复盘用的最后一份，
+    保证"把事办完的那一轮"也有卡可看。
+    """
+    if notebook is None or not used_plan_tools(agent_messages):
+        return None
+    try:
+        state = notebook_state_payload(notebook)
+    except Exception:  # pragma: no cover - SDK 内部结构变化
+        logger.warning("plan: snapshot state_dict failed", exc_info=True)
+        return None
+    current = state.get("current_plan")
+    raw = current if isinstance(current, dict) else None
+    if raw is None:
+        plans = storage_plans(state)
+        raw = plans[-1] if plans else None
+    if not isinstance(raw, dict) or not raw.get("id"):
+        return None
+    return plan_to_dict(raw)

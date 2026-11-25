@@ -13,8 +13,8 @@
  *   - **执行中摊开、答完自动收口**（2026-11-20 用户拍板修订）：跑的时候
  *     步骤全铺开，看得到做到第几步；这一轮答完自动收成一行（计划名 + 进度
  *     + 状态），想复盘点标题再展开——长会话回看不想满屏都是进度条。
- *   - 手动点开/收起过就听用户的（openKeys 里有值就不再自动决定）；更早的几份
- *     计划只占一行，步骤默认不铺开，避免一屏全是进度条。
+ *   - 手动点开/收起过就听用户的（openKeys 里有值就不再自动决定）；卡里只
+ *     展示当前这一份计划，历史轮次的计划一份都不列，避免一屏全是进度条。
  *
  * 数据通路沿用上一版（已实测可用，不另起一套）：
  *   - GET /plan/current 按会话作用域取本会话全部计划（刷新、切会话后仍在）；
@@ -22,7 +22,7 @@
  *   - 有步骤在跑时轮询兜底（焦点计划未完成就 2.5s 一次），SSE 断线也不停更；
  *   - 结果缺失的步骤明确标「结果待补」，不拿绿勾糊弄用户。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, message } from "antd";
 import {
@@ -52,6 +52,11 @@ interface ChatPlanCardProps {
   getMessages?: () => Array<{ id?: string; role?: string }> | undefined;
 
   isLast?: boolean;
+  /**
+   * 本轮消息 metadata 里存落的计划快照（后端 turn_plan_snapshot 写入）。
+   * 有它就不必再去问 /plan/current —— 那问的是「现在」，不是「那一轮」。
+   */
+  snapshot?: unknown;
 }
 
 type StepState = SubTaskResponse["state"];
@@ -87,6 +92,48 @@ function isLive(plan: PlanStateResponse): boolean {
   return true;
 }
 
+/**
+ * metadata 里的计划快照 → 卡片认识的计划对象。
+ *
+ * 字段尺子与后端 coapis.plan.lifecycle.plan_to_dict 一致（也就是
+ * /api/plan/updates 推的那份）。这里只做防御式收敛，不重新发明字段：
+ * 老消息没有这个键时返回 null，卡片就不显示，绝不编造一个计划。
+ */
+function fromSnapshot(raw: unknown): PlanStateResponse | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (!r.id && !r.name) return null;
+  const subtasks: SubTaskResponse[] = Array.isArray(r.subtasks)
+    ? r.subtasks
+        .filter((s) => s && typeof s === "object")
+        .map((s) => {
+          const x = s as Record<string, unknown>;
+          return {
+            name: String(x.name ?? ""),
+            description: String(x.description ?? ""),
+            expected_outcome: String(x.expected_outcome ?? ""),
+            outcome: (x.outcome ?? null) as string | null,
+            state: (x.state ?? "todo") as SubTaskResponse["state"],
+            created_at: (x.created_at ?? null) as string | null,
+            finished_at: (x.finished_at ?? null) as string | null,
+            outcome_pending: Boolean(x.outcome_pending),
+          };
+        })
+    : [];
+  return {
+    id: String(r.id ?? ""),
+    name: String(r.name ?? ""),
+    description: String(r.description ?? ""),
+    expected_outcome: String(r.expected_outcome ?? ""),
+    state: (r.state ?? "todo") as PlanStateResponse["state"],
+    subtasks,
+    created_at: (r.created_at ?? null) as string | null,
+    finished_at: (r.finished_at ?? null) as string | null,
+    outcome: (r.outcome ?? null) as string | null,
+    finished: Boolean(r.finished),
+  };
+}
+
 function countProgress(plan: PlanStateResponse): { done: number; total: number } {
   const steps = plan.subtasks || [];
   return {
@@ -109,8 +156,12 @@ export default function ChatPlanCard({
   isLast,
   cardData,
   getMessages,
+  snapshot,
 }: ChatPlanCardProps) {
   const { t } = useTranslation();
+  // 本轮自带快照 → 静态渲染：不拉 /plan/current、不订阅 SSE、不轮询。
+  // 那三样问的都是「现在」，会把别的轮次的计划串进这一轮。
+  const snapshotPlan = useMemo(() => fromSnapshot(snapshot), [snapshot]);
   const [plans, setPlans] = useState<PlanStateResponse[]>([]);
   const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({});
 
@@ -127,8 +178,8 @@ export default function ChatPlanCard({
   // 实测一轮里会留下两份同名计划（规则骨架 + 模型自建房），后一份常常全是
   // todo 的僵尸计划，按最后一条显示会写成「0/3 步」，而且它永远 unfinished，
   // 兜底轮询据此判断「还在跑」，一个空闲页面 3 分钟能打出 64 次接口。
-  let focusPlan: PlanStateResponse | null = null;
-  if (plans.length > 0) {
+  let focusPlan: PlanStateResponse | null = snapshotPlan;
+  if (!focusPlan && plans.length > 0) {
     // 面板只认「仍在运行」或「本轮由 SSE 推过」的计划。历史计划留在台账
     // 里供查看，但不许顶替本轮的计划显示——这正是「问热点却弹出三天前那份
     // 已完成任务」的来源：接口会拿历史最新一份当兜底喂回来。
@@ -195,7 +246,9 @@ export default function ChatPlanCard({
     if (!mine) return isLast !== false;
     return mine === cardData;
   })();
-  const visible = ownsTurn && plans.length > 0;
+  // 自带快照的轮次永远可见（含刷新后的历史轮）；没有快照又不在当前轮，
+  // 就不显示——老会话没存落计划，宁可空着也不编一个。
+  const visible = snapshotPlan ? true : ownsTurn && plans.length > 0;
   // 记住哪个 session key 真的取到了数据：作用域键错时计划会静默为空，
   // 这正是"面板恒 0/0"的老毛病，这里用候选键自愈而不是猜一个。
   const keyRef = useRef<string>("");
@@ -247,14 +300,16 @@ export default function ChatPlanCard({
 
   // 首屏 + 会话切换时拉全量。
   useEffect(() => {
+    if (snapshotPlan) return;
     keyRef.current = "";
     pushedRef.current = new Set();
     setPlans([]);
     void refresh();
-  }, [refresh]);
+  }, [refresh, snapshotPlan]);
 
   // 实时推进：SSE 事件先乐观合并，再防抖取一次权威列表。
   useEffect(() => {
+    if (snapshotPlan) return () => {};
     const off = subscribePlanUpdates(
       (plan: PlanStateResponse | null) => {
         if (plan) {
@@ -286,7 +341,8 @@ export default function ChatPlanCard({
   const prevLive = useRef<boolean | null>(null);
   const graceTimers = useRef<number[]>([]);
   useEffect(() => {
-    const busy = visible && !!focusPlan && isLive(focusPlan);
+    const busy =
+      !snapshotPlan && visible && !!focusPlan && isLive(focusPlan);
     const was = prevLive.current;
     prevLive.current = busy;
     if (busy) {
@@ -315,7 +371,8 @@ export default function ChatPlanCard({
   if (!visible || !focusPlan) return null;
 
   const focus = focusPlan as PlanStateResponse;
-  const history = plans.slice(0, -1).reverse();
+  // 快照卡片代表的是「已经结束的那一轮」，计划本身不再算在跑。
+  const live = snapshotPlan ? false : isLive(focus);
   const focusKey = planKey(focus, plans.length - 1);
   // 折叠尺子（2026-11-21 用户拍板修订：不做自动收口，**默认摊开，收不收由用户点按钮**）：
   //   卡里一行一条、只有「做哪件事 + 状态点」，头部带 x/y 进度，本身已经够短，
@@ -326,11 +383,28 @@ export default function ChatPlanCard({
   const progress = countProgress(focus);
   const steps = focus.subtasks || [];
 
-  const stateLabel = (plan: PlanStateResponse) => {
-    if (!isLive(plan)) {
-      return plan.state === "abandoned"
-        ? t("planBoard.abandoned", "已取消")
-        : t("planBoard.completed", "都办完了");
+  // 每一步都打上勾了就叫「都办完了」：后端偶尔来不及把 state 收成 done（例如轮次被
+  // 调用上限截断），这时还写「正在做」是在骗人——勾全绿了却显示在跑（实测 dev 会话 d6404ec3）。
+  const allStepsDone = (plan: PlanStateResponse) => {
+    const p = countProgress(plan);
+    return p.total > 0 && p.done === p.total;
+  };
+
+  const stateLabel = (plan: PlanStateResponse, isNowLive: boolean) => {
+    if (plan.state === "abandoned") {
+      return t("planBoard.abandoned", "已取消");
+    }
+    if (allStepsDone(plan)) {
+      return t("planBoard.completed", "都办完了");
+    }
+    if (!isNowLive) {
+      // 收尾态得分开说（2026-11-25 用户要求用语准确）：
+      // 一步没迈=还没开始（多半卡在确认门被晾下），走了一半停下=停在半路。
+      // 勾没走完却说「都办完了」是撒谎，所以这里绝不返回 completed。
+      const moved = (plan.subtasks || []).some((st) => st.state !== "todo");
+      return moved
+        ? t("planBoard.paused", "停在半路")
+        : t("planBoard.notStarted", "还没开始");
     }
     // 一步都没动过就别写「进行中」：确认门关掉后计划会被晾在那里，0/N 一直挂着
     // 「进行中」看着像在跑，其实什么都没发生（实测 dev 会话 4ca25e52）。
@@ -342,7 +416,7 @@ export default function ChatPlanCard({
 
   return (
     <div className={styles.board} data-testid="chat-plan-card">
-      <div className={styles.header}>
+      <div className={`${styles.header} ${focusOpen ? styles.headerOpen : ""}`}>
         <span className={styles.title}>
           {t("planBoard.title", "进度")}
         </span>
@@ -350,9 +424,15 @@ export default function ChatPlanCard({
           {focus.name || t("planBoard.unnamed", "未命名计划")}
         </span>
         <span
-          className={isLive(focus) || pendingConfirm ? styles.chipLive : styles.chipDone}
+            className={
+              (live && !allStepsDone(focus)) || pendingConfirm
+                ? styles.chipLive
+                : styles.chipDone
+            }
         >
-          {pendingConfirm ? t("plan.pendingBadge", "等你确认") : stateLabel(focus)}
+          {pendingConfirm
+            ? t("planBoard.pendingBadge", "等你确认")
+            : stateLabel(focus, live)}
         </span>
         <span className={styles.progress}>
           {t("planBoard.stepProgress", "{{done}}/{{total}} 步", {
@@ -362,16 +442,24 @@ export default function ChatPlanCard({
         </span>
         <button
           type="button"
-          className={styles.toggle}
-          data-testid="plan-toggle"
-          aria-expanded={focusOpen}
+          className={styles.caret}
           onClick={() =>
             setOpenKeys((prev) => ({ ...prev, [focusKey]: !focusOpen }))
           }
+          aria-expanded={focusOpen}
+          aria-label={
+            focusOpen
+              ? t("planBoard.collapseAria", "收起计划")
+              : t("planBoard.expandAria", "展开计划")
+          }
+          title={
+            focusOpen
+              ? t("planBoard.collapseAria", "收起计划")
+              : t("planBoard.expandAria", "展开计划")
+          }
+          data-testid="plan-toggle"
         >
-          {focusOpen
-            ? t("planBoard.collapse", "收起")
-            : t("planBoard.expand", "展开")}
+          <span className={styles.caretGlyph} />
         </button>
       </div>
 
@@ -409,47 +497,6 @@ export default function ChatPlanCard({
         </div>
       )}
 
-      {history.length > 0 && (
-        <div className={styles.history}>
-          {history.map((plan, idx) => {
-            const key = planKey(plan, idx);
-            const open = !!openKeys[key];
-            const p = countProgress(plan);
-            return (
-              <div key={key} className={styles.historyItem}>
-                <button
-                  type="button"
-                  className={styles.historyHead}
-                  onClick={() =>
-                    setOpenKeys((prev) => ({ ...prev, [key]: !open }))
-                  }
-                  aria-expanded={open}
-                >
-                  <span className={styles.historyCaret} />
-                  <span className={styles.historyName} title={plan.name}>
-                    {plan.name || t("planBoard.unnamed", "未命名计划")}
-                  </span>
-                  <span className={styles.historyMeta}>
-                    {t("planBoard.stepProgress", "{{done}}/{{total}} 步", {
-                      done: p.done,
-                      total: p.total,
-                    })}
-                    {" · "}
-                    {stateLabel(plan)}
-                  </span>
-                </button>
-                {open && (
-                  <ul className={styles.steps}>
-                    {(plan.subtasks || []).map((step, sIdx) => (
-                      <StepRow key={`${key}-${sIdx}`} step={step} />
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

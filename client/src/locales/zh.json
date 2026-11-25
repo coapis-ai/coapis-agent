@@ -3371,7 +3371,9 @@
     "result": "结果",
     "goal": "目标",
     "resultMissing": "结果还没记",
-    "collapse": "收起",
-    "expand": "展开"
+    "pendingBadge": "等你确认",
+    "collapseAria": "收起计划",
+    "expandAria": "展开计划",
+    "paused": "停在半路"
   }
 }

@@ -501,6 +501,7 @@ def _annotate_turn_resources(
     resources: list,
     citations: list,
     turn_interrupted: bool = False,
+    plan_snapshot: dict | None = None,
 ) -> int:
     """把本轮产出/引用资源与知识库来源写进最后一条 assistant 消息的 metadata。
 
@@ -512,7 +513,7 @@ def _annotate_turn_resources(
     Returns:
         写入的字段数（0 表示没有可写信息，未改动任何消息）。
     """
-    if not resources and not citations and not turn_interrupted:
+    if not (resources or citations or turn_interrupted or plan_snapshot):
         return 0
 
     # 调用方有两种形状：整轮消息列表（Msg 对象）与单条 dict 消息
@@ -553,8 +554,18 @@ def _annotate_turn_resources(
         # 持久真值在 token_usage.stream_interrupted 列，这里是给回放用的
         # 即时副本（落库消息与写台账不在同一个调用里）。
         meta["interrupted"] = True
+    if plan_snapshot:
+        # 本轮计划快照。字段与 /api/plan/updates 同一把尺子
+        # （coapis.plan.lifecycle.plan_to_dict），前端刷新后不必再
+        # 去问 /plan/current——那问的是「现在」，不是「那一轮」。
+        meta["plan_snapshot"] = plan_snapshot
     _set_meta(last_asst, meta)
-    return len(resources) + len(citations) + (1 if turn_interrupted else 0)
+    return (
+        len(resources)
+        + len(citations)
+        + (1 if turn_interrupted else 0)
+        + (1 if plan_snapshot else 0)
+    )
 
 
 def _msg_plain_text(msg) -> str:
@@ -754,6 +765,7 @@ class AgentRunner(Runner):
         full_reasoning: list[str] | None = None,
         user_text_override: str = "",
         agent_messages: list | None = None,
+        plan_notebook=None,
     ) -> None:
         """Persist chat messages to session state.
 
@@ -1118,11 +1130,17 @@ class AgentRunner(Runner):
                     )
 
                     _interrupted = bool(turn_was_interrupted(chat.id))
+                    from coapis.plan.lifecycle import turn_plan_snapshot
+
+                    # 计划及进度是本轮聊天输出的一部分：跟着这条 assistant 消息
+                    # 一起进聊天记录，各轮独立（小蜜蜂 2026-11-24 拍板）。
+                    _plan_snap = turn_plan_snapshot(plan_notebook, agent_messages)
                     _annotated = _annotate_turn_resources(
                         _msgs_to_add,
                         _turn_res,
                         _kb_cites,
                         turn_interrupted=_interrupted,
+                        plan_snapshot=_plan_snap,
                     )
                     if _interrupted:
                         # 标记是一次性的：写过就清，别让它漂到下一轮
@@ -1722,6 +1740,7 @@ class AgentRunner(Runner):
         _evolution_full_response: list[str] = []
         _evolution_full_reasoning: list[str] = []
         _memory_snapshot_len = 0
+        plan_notebook = None  # 建 agent 时才赋值；finally 里要读，先占位
         name = "New Chat"
         channel = DEFAULT_CHANNEL
         try:
@@ -3427,6 +3446,7 @@ class AgentRunner(Runner):
                         full_reasoning=getattr(self._workspace, 'last_full_reasoning', None),
                         user_text_override=query,
                         agent_messages=_new_msgs,
+                        plan_notebook=plan_notebook,
                     ))
                     # 企业版扩展点：回合结束归档消息到 PG（文件为主，PG 旁路归档）。
                     # 文件写盘成功后的路径上触发；用 shield 隔离，归档慢或失败都

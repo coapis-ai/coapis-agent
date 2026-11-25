@@ -5,8 +5,8 @@
  * 划卡」，同时按用户拍板改了折叠尺子。钉住四件肉眼可见的事：
  *  1. **只在最后一轮渲染**：历史气泡不插进度条（isLast=false 直接为空）；
  *  2. **执行中展开**：步骤与结果即时铺开，用户能看到做到第几步；
- *  3. **收起靠按钮**：卡片默认摊开，点标题栏的「收起」才压成一行（计划名 +
- *     N/N + 状态），再点「展开」还原——不猜回答状态、不做自动收口；
+ *  3. **收起靠三角符号**：卡片默认摊开，点标题栏的三角才压成一行（计划名 +
+ *     N/N + 状态），再点还原——折叠控件不写「收起/展开」文字（11-28 拍板）；
  *  4. 计划跑完**不许消失**；步骤自称完成却没有可用结果时，显示「结果待补」
  *     而不是绿勾；没有计划的会话渲染为空，不摆空框。
  *
@@ -202,18 +202,29 @@ describe("ChatPlanCard", () => {
     expect(screen.getByText("2/2 步")).toBeInTheDocument();
     expect(screen.getByText("写文档")).toBeInTheDocument();
     const toggle = screen.getByTestId("plan-toggle");
-    expect(toggle).toHaveTextContent("收起");
+    // 折叠控件统一用三角符号，不写「收起/展开」文字（2026-11-28 用户拍板）
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAccessibleName("收起计划");
+    expect(toggle.textContent?.trim()).toBe("");
+
+    // 三角朝向靠 header 上的展开态类名驱动：收起时类名必须换掉，否则三角永远朝右。
+    const header = toggle.parentElement as HTMLElement;
+    const openClass = header.className;
+    expect(openClass).not.toBe("");
 
     // 点收起：只剩一行（计划名、状态、进度仍在），步骤消失。
     fireEvent.click(toggle);
     await waitFor(() => expect(screen.queryByText("写文档")).toBeNull());
     expect(screen.getByText("2/2 步")).toBeInTheDocument();
-    expect(toggle).toHaveTextContent("展开");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAccessibleName("展开计划");
+    expect(header.className).not.toBe(openClass);
 
     // 再点展开：步骤回来。
     fireEvent.click(toggle);
     await waitFor(() => expect(screen.getByText("写文档")).toBeInTheDocument());
-    expect(toggle).toHaveTextContent("收起");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(header.className).toBe(openClass);
   });
 
   it("步骤一行一条：只渲染步骤名，目标与结果收进悬浮 title", async () => {
@@ -314,7 +325,32 @@ describe("ChatPlanCard", () => {
     expect(screen.getByText("有产出的步骤")).toBeInTheDocument();
   });
 
-  it("多次计划：最新一份当焦点，更早的收成一行、默认不铺开步骤", async () => {
+  it("步骤全打勾但后端 state 没收口 → 写「都办完了」，不许再写「正在做」", async () => {
+    // 实测 dev 会话 d6404ec3：两步都绿了、进度 2/2，chip 仍挂着「正在做」。
+    // 根因是轮次被调用上限截断，后端没把 plan.state 收成 done；展示层不能再骗人。
+    getCurrentPlanWithScope.mockResolvedValue(
+      body([
+        plan({
+          id: "p1",
+          name: "抓热点",
+          finished: false,
+          state: "in_progress",
+          subtasks: [
+            step({ name: "抓即时页", state: "done" }),
+            step({ name: "合并交付", state: "done" }),
+          ],
+        }),
+      ]),
+    );
+
+    render(<ChatPlanCard chatId="chat-1" isLast />);
+
+    await screen.findByText("抓热点");
+    expect(screen.getByText("都办完了")).toBeInTheDocument();
+    expect(screen.queryByText("正在做")).toBeNull();
+    expect(screen.getByText("2/2 步")).toBeInTheDocument();
+  });
+  it("多份计划只展示当前这一份，历史轮次的一份都不列", async () => {
     getCurrentPlanWithScope.mockResolvedValue(
       body([
         plan({
@@ -337,14 +373,9 @@ describe("ChatPlanCard", () => {
     // 焦点 = 最新一份：执行中，所以它的步骤默认铺开
     await screen.findByText("第二件：补测试");
     expect(screen.getByText("焦点步骤乙")).toBeInTheDocument();
-    // 更早的一份只占一行（有名字、有进度），步骤默认收起
-    expect(screen.getByText("第一件：梳理依赖")).toBeInTheDocument();
+    // 更早的一份连标题都不出现（2026-11-28 用户拍板：只展示当前轮，别把历史摊开）
+    expect(screen.queryByText("第一件：梳理依赖")).toBeNull();
     expect(screen.queryByText("历史步骤甲")).toBeNull();
-
-    fireEvent.click(screen.getByText("第一件：梳理依赖"));
-    await waitFor(() =>
-      expect(screen.getByText("历史步骤甲")).toBeInTheDocument(),
-    );
   });
 
   it("没有计划的会话不渲染空框", async () => {
@@ -358,6 +389,145 @@ describe("ChatPlanCard", () => {
     getCurrentPlanWithScope.mockRejectedValue(new Error("network down"));
     const { container } = render(<ChatPlanCard chatId="chat-1" isLast />);
     await waitFor(() => expect(getCurrentPlanWithScope).toHaveBeenCalled());
+    expect(container.firstChild).toBeNull();
+  });
+
+  // ── 计划快照：计划是那一轮聊天输出的一部分，跟着消息进聊天记录 ──
+  // 小蜜蜂 2026-11-24 拍板：不再让计划卡单独靠 /plan/current + SSE 各自处理。
+  // 后端把本轮计划快照写进 assistant 消息的 metadata，前端读它渲染。
+
+  const snapshotDone = {
+    id: "snap-done",
+    name: "查今天热点",
+    description: "搜热点并成文",
+    expected_outcome: "给出热点清单",
+    state: "done",
+    subtasks: [
+      {
+        name: "搜热点",
+        description: "搜",
+        expected_outcome: "拿到列表",
+        outcome: "3 条",
+        state: "done",
+        created_at: null,
+        finished_at: null,
+        outcome_pending: false,
+      },
+      {
+        name: "写结论",
+        description: "写",
+        expected_outcome: "成文",
+        outcome: "已成文",
+        state: "done",
+        created_at: null,
+        finished_at: null,
+        outcome_pending: false,
+      },
+    ],
+    created_at: null,
+    finished_at: "2026-11-24T10:00:00",
+    outcome: "完成",
+    finished: true,
+  };
+
+  const snapshotPaused = {
+    ...snapshotDone,
+    id: "snap-paused",
+    name: "整理周报",
+    state: "in_progress",
+    finished: false,
+    finished_at: null,
+    subtasks: [
+      snapshotDone.subtasks[0],
+      { ...snapshotDone.subtasks[1], state: "todo", outcome: null },
+    ],
+  };
+
+  it("自带快照的历史轮直接渲染，不再请求 /plan/current", () => {
+    render(
+      <ChatPlanCard chatId="chat-1" isLast={false} snapshot={snapshotDone} />,
+    );
+    expect(screen.getByText("查今天热点")).toBeInTheDocument();
+    expect(screen.getByText("2/2 步")).toBeInTheDocument();
+    expect(screen.getByText("都办完了")).toBeInTheDocument();
+    // 刷新后看到的是「那一轮」的样子，不是「现在」的样子：一次接口都不该发
+    expect(getCurrentPlanWithScope).not.toHaveBeenCalled();
+  });
+
+  it("跑完的轮次默认摊开，不用手点（2026-11-24 拍板）", () => {
+    render(
+      <ChatPlanCard chatId="chat-1" isLast={false} snapshot={snapshotDone} />,
+    );
+    expect(screen.getByText("搜热点")).toBeInTheDocument();
+    expect(screen.getByText("写结论")).toBeInTheDocument();
+  });
+
+  it("快照停在半路时说「停在半路」，不谎报「都办完了」", () => {
+    render(
+      <ChatPlanCard chatId="chat-1" isLast={false} snapshot={snapshotPaused} />,
+    );
+    expect(screen.getByText("停在半路")).toBeInTheDocument();
+    expect(screen.queryByText("都办完了")).not.toBeInTheDocument();
+    expect(screen.getByText("1/2 步")).toBeInTheDocument();
+  });
+
+  const snapshotNotStarted = {
+    ...snapshotDone,
+    id: "snap-todo",
+    name: "列出并统计根目录文件",
+    state: "todo",
+    finished: false,
+    finished_at: null,
+    outcome: null,
+    subtasks: snapshotDone.subtasks.map((st) => ({
+      ...st,
+      state: "todo",
+      outcome: null,
+    })),
+  };
+
+  it("快照一步都没迈时说「还没开始」，不说「停在半路」也不说「都办完了」", () => {
+    render(
+      <ChatPlanCard
+        chatId="chat-1"
+        isLast={false}
+        snapshot={snapshotNotStarted}
+      />,
+    );
+    expect(screen.getByText("还没开始")).toBeInTheDocument();
+    expect(screen.queryByText("停在半路")).not.toBeInTheDocument();
+    expect(screen.queryByText("都办完了")).not.toBeInTheDocument();
+    expect(screen.getByText("0/2 步")).toBeInTheDocument();
+  });
+
+  it("快照优先于实时接口：历史轮不被当前计划串台", () => {
+    getCurrentPlanWithScope.mockResolvedValue(
+      body([
+        plan({
+          id: "live-1",
+          name: "当前轮的计划",
+          state: "in_progress",
+          subtasks: [step({ name: "别的步骤", state: "in_progress" })],
+        }),
+      ]),
+    );
+    render(<ChatPlanCard chatId="chat-1" isLast snapshot={snapshotDone} />);
+    expect(screen.getByText("查今天热点")).toBeInTheDocument();
+    expect(screen.queryByText("当前轮的计划")).not.toBeInTheDocument();
+    expect(getCurrentPlanWithScope).not.toHaveBeenCalled();
+  });
+
+  it("没有快照又不是当前轮 → 不显示（老会话显示不了就不显示）", () => {
+    const { container } = render(
+      <ChatPlanCard chatId="chat-1" isLast={false} snapshot={undefined} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("快照残缺时不编造计划", () => {
+    const { container } = render(
+      <ChatPlanCard chatId="chat-1" isLast={false} snapshot={{}} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 });

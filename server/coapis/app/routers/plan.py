@@ -35,6 +35,7 @@ from fastapi.responses import StreamingResponse
 
 from coapis.plan.lifecycle import plan_is_current, plan_really_done
 from coapis.plan.schemas import outcome_pending as _outcome_pending
+from coapis.plan.lifecycle import plan_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -104,43 +105,12 @@ def _read_plan_from_agent_json(workspace) -> bool:
 
 
 def _normalize_plan_data(raw: dict) -> dict:
-    """Normalize a plan dict into the shape expected by the frontend."""
-    subtasks = []
-    for st in raw.get("subtasks", []):
-        if isinstance(st, dict):
-            entry = {
-                "name": st.get("name", ""),
-                "description": st.get("description", ""),
-                "expected_outcome": st.get("expected_outcome", ""),
-                "outcome": st.get("outcome"),
-                "state": st.get("state", "todo"),
-                "created_at": st.get("created_at"),
-                "finished_at": st.get("finished_at"),
-            }
-            # Same ruler as plan_to_response, so a snapshot persisted before
-            # this field existed still reports "结果待补" truthfully.
-            entry["outcome_pending"] = bool(st.get("outcome_pending")) or (
-                _outcome_pending(
-                    entry["expected_outcome"],
-                    entry["outcome"],
-                    entry["state"],
-                )
-            )
-            subtasks.append(entry)
-    return {
-        "id": raw.get("id", ""),
-        "name": raw.get("name", ""),
-        "description": raw.get("description", ""),
-        "expected_outcome": raw.get("expected_outcome", ""),
-        "state": raw.get("state", "todo"),
-        "subtasks": subtasks,
-        "created_at": raw.get("created_at"),
-        "finished_at": raw.get("finished_at"),
-        # finished 的唯一尺子见 plan.lifecycle.plan_really_done：runner 只在
-        # 新开计划时才清 current，不能靠「它还是不是 current」判定在跑。
-        "finished": bool(raw.get("finished")) or plan_really_done(raw),
-        "outcome": raw.get("outcome"),
-    }
+    """薄壳：字段尺子只有一把，见 coapis.plan.lifecycle.plan_to_dict。
+
+    落进聊天记录的计划快照（runner 走 turn_plan_snapshot）必须和这里推给
+    前端的字段完全一致，所以两边共用同一个实现，不在这里另写一份。
+    """
+    return plan_to_dict(raw)
 
 
 # ---------------------------------------------------------------------------

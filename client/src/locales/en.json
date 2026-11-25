@@ -3345,7 +3345,9 @@
     "result": "Result",
     "goal": "Goal",
     "resultMissing": "Result not recorded",
-    "collapse": "Collapse",
-    "expand": "Expand"
+    "pendingBadge": "Awaiting your confirmation",
+    "collapseAria": "Collapse plan",
+    "expandAria": "Expand plan",
+    "paused": "Stopped partway"
   }
 }

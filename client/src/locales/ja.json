@@ -2727,7 +2727,9 @@
     "result": "結果",
     "goal": "目標",
     "resultMissing": "結果は未記録",
-    "collapse": "折りたたむ",
-    "expand": "展開"
+    "pendingBadge": "確認待ち",
+    "collapseAria": "計画を折りたたむ",
+    "expandAria": "計画を展開",
+    "paused": "途中で停止"
   }
 }

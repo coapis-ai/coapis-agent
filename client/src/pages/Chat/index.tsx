@@ -57,6 +57,7 @@ import { useVendorLabels } from "./components/vendorLabels";
 import CoApisChatResourceBar from "./components/CoApisChatResourceBar";
 // 执行计划卡：计划主线进本轮回答气泡内（2026-11-20 v2.1，底部常驻看板已撤）。
 import ChatPlanCard from "./components/ChatPlanCard";
+import { planSnapshotFromResponse } from "./planSnapshot";
 import CoApisResourceDrawer from "./components/CoApisResourceDrawer";
 import {
   useChatResourceLedger,
@@ -2172,6 +2173,7 @@ export default function ChatPage() {
             cardData={data}
             isLast={isLast}
             getMessages={() => chatMessagesBridgeRef.current?.getMessages() || []}
+            snapshot={planSnapshotFromResponse(data)}
           />
         ),
       },
