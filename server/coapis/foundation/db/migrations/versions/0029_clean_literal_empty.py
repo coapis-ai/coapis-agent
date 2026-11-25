@@ -39,14 +39,23 @@ def _two_quotes(conn) -> str:
 
 
 def _columns(conn) -> list:
-    """库里真实存在的目标列（迁移必须在 SQLite/Postgres 两栈都跑得通）。"""
-    rows = conn.exec_driver_sql("PRAGMA table_info(decision_events)").fetchall()
-    if not rows:  # Postgres 没有 PRAGMA，退回 information_schema
+    """库里真实存在的目标列（迁移必须在 SQLite/Postgres 两栈都跑得通）。
+
+    Postgres 没有 PRAGMA，``exec_driver_sql("PRAGMA ...")`` 不是返回空行而是
+    直接抛 ``SyntaxError``（实测 psycopg2.errors.SyntaxError: syntax error at
+    or near "PRAGMA"），会把整个迁移和进程启动带崩；且事务一旦 aborted，同事务
+    内后续语句全部失败。所以按方言分流，PG 侧根本不碰 PRAGMA。
+    另外 PG 的 information_schema 结果只有一列，取值是 ``r[0]`` 而不是 ``r[1]``。
+    """
+    if conn.dialect.name == "postgresql":
         rows = conn.exec_driver_sql(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name = 'decision_events'"
         ).fetchall()
-    have = {str(r[1]) for r in rows}
+        have = {str(r[0]) for r in rows}
+    else:
+        rows = conn.exec_driver_sql("PRAGMA table_info(decision_events)").fetchall()
+        have = {str(r[1]) for r in rows}
     return [c for c in _COLUMNS if c in have]
 
 
