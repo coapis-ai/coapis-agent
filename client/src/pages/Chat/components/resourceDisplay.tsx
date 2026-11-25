@@ -132,10 +132,20 @@ export function categoryIconOf(item: ChatResourceItem, size?: number): ReactNode
  */
 export type ResourceSource = "produced" | "kb" | "web" | "reference";
 
-export function sourceOf(item: ChatResourceItem): ResourceSource {
+/**
+ * 返回 `null` 表示**角色未知，不画标签**（甲方案 2026-11-25）。
+ *
+ * 台账还没到位（或没登记）时 `item.role` 为空。此时既不能标「产出」
+ * 也不能标「引用」——标哪个都是猜，猜错就是用户看到的「归类跳变」。
+ * 知识库 / 网页两类靠 `kind` 就能确定，与台账角色无关，照常标。
+ */
+export function sourceOf(
+  item: ChatResourceItem,
+): ResourceSource | null {
   if (item.role === "producer" || item.role === "export") return "produced";
   if (item.kind === "kb") return "kb";
   if (item.kind === "web") return "web";
+  if (!item.role) return null;
   return "reference";
 }
 

@@ -368,3 +368,54 @@ describe("CoApisChatResourceBar —— 折叠与筛选", () => {
     expect(container.querySelector(".anticon-aim")).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 尺子 4：来源标签 —— 台账角色未知时宁可不标，不错标（甲方案 2026-11-25）
+// 背景：实时通道原先在台账反查不到时默认补 producer，于是无关文件先被
+// 标成「产出」、台账到位后跳成「引用」。这组用例钉住「未知 = 不画标签」。
+// ---------------------------------------------------------------------------
+
+describe("来源标签 —— 未知角色不画标签", () => {
+  it("台账角色未知的行：行还在、标签不画（不猜产出也不猜引用）", () => {
+    const unknown = {
+      ...item({ path: "files/unknown.txt", title: "unknown.txt" }),
+      role: undefined,
+    } as ChatResourceItem;
+    const { container } = render(<CoApisChatResourceBar items={[unknown]} />);
+    openGroup(container, "引用");
+    // 不标角色 ≠ 把文件藏起来，行必须照常出现
+    expect(screen.getByText("unknown.txt")).toBeInTheDocument();
+    // 但来源标签一个都不许出现
+    expect(container.querySelectorAll(".ant-tag")).toHaveLength(0);
+  });
+
+  it("台账角色已知的行：标签照常画（对照组，防止把标签全删了）", () => {
+    const { container } = render(
+      <CoApisChatResourceBar
+        items={[
+          item({ path: "files/ref.txt", title: "ref.txt", role: "reference" }),
+        ]}
+      />,
+    );
+    openGroup(container, "引用");
+    expect(container.querySelectorAll(".ant-tag").length).toBeGreaterThan(0);
+  });
+
+  it("已知与未知并存：只有未知那行没标签（知识库靠 kind 定，不受影响）", () => {
+    const known = item({
+      path: "files/kb.md",
+      title: "kb.md",
+      kind: "kb",
+      role: "reference",
+    });
+    const unknown = {
+      ...item({ path: "files/mystery.txt", title: "mystery.txt" }),
+      role: undefined,
+    } as ChatResourceItem;
+    const { container } = render(
+      <CoApisChatResourceBar items={[known, unknown]} />,
+    );
+    openGroup(container, "引用");
+    expect(container.querySelectorAll(".ant-tag")).toHaveLength(1);
+  });
+});

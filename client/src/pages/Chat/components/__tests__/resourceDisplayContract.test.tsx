@@ -195,6 +195,24 @@ describe("来源尺子：产出 / 知识库 / 网页 / 引用", () => {
     expect(sourceOf(SAMPLES[7])).toBe("reference");
   });
 
+  it("台账角色未知 → 不标来源（宁可不标，不错标）", () => {
+    // 甲方案 2026-11-25：实时通道在台账反查不到时不再默认补 producer。
+    // 这条钉住「未知 = 不画标签」，防止有人图省事又写回 `|| "producer"`
+    // ——那正是「同一文件刷新前标产出、刷新后变引用」的源头。
+    const unknown = { ...SAMPLES[1], role: undefined } as ChatResourceItem;
+    expect(sourceOf(unknown)).toBeNull();
+    expect(sourceOf({ ...SAMPLES[1], role: "" } as ChatResourceItem)).toBeNull();
+  });
+
+  it("台账角色未知但类型能定 → 知识库 / 网页照常标（与台账无关）", () => {
+    expect(sourceOf({ ...SAMPLES[5], role: undefined } as ChatResourceItem)).toBe(
+      "kb",
+    );
+    expect(sourceOf({ ...SAMPLES[4], role: undefined } as ChatResourceItem)).toBe(
+      "web",
+    );
+  });
+
   it("四类都有独立词条 key 与独立配色", () => {
     expect(new Set(Object.values(SOURCE_LABEL_KEY)).size).toBe(4);
     expect(new Set(Object.values(SOURCE_COLOR)).size).toBe(4);

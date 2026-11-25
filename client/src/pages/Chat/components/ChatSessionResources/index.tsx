@@ -298,12 +298,18 @@ const ChatSessionResources: React.FC<Props> = ({
               }}
             >
             {link}
-            <Tag
-              color={SOURCE_COLOR[sourceOf(item)]}
-              style={{ margin: 0, flexShrink: 0 }}
-            >
-              {t(SOURCE_LABEL_KEY[sourceOf(item)])}
-            </Tag>
+            {(() => {
+              // 台账角色未知时不画标签（与本轮资源条同一把尺子）
+              const src = sourceOf(item);
+              return src ? (
+                <Tag
+                  color={SOURCE_COLOR[src]}
+                  style={{ margin: 0, flexShrink: 0 }}
+                >
+                  {t(SOURCE_LABEL_KEY[src])}
+                </Tag>
+              ) : null;
+            })()}
             {TAGGED_STATUSES.has(st) ? (
               <Tag
                 color={STATUS_META[st]?.color}

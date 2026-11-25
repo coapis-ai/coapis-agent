@@ -2138,7 +2138,15 @@ export default function ChatPage() {
           path,
           title: r.title || r.name || path.split("/").pop() || path,
           messageId,
-          role: meta?.role || "producer",
+          // 甲方案（2026-11-25）：角色**只认两个权威来源**，绝不凭空造。
+          //   1) 台账（SSOT）优先；
+          //   2) 台账反查不到时，用资源自带的 role——后端 metadata.resources
+          //      每条本来就带 role（实测 `"role": "reference"`），丢掉它才是
+          //      浪费；
+          //   3) 两者都没有 → 留空 = 角色未知，渲染层（sourceOf）不画标签。
+          // 原来这里写 `|| "producer"`，是在没有任何依据的情况下硬标「产出」，
+          // 于是引用件先被标成产出、台账到位后跳成引用——用户看到的归类跳变。
+          role: meta?.role ?? r.role,
           ref_count: meta?.ref_count,
           status: meta?.status,
           updated_at: meta?.updated_at,

@@ -236,7 +236,9 @@ const CoApisChatResourceBar: React.FC<Props> = ({
         {shown.map((item) => {
           const st = resourceStatusOf(item);
           const dead = st === "deleted" || st === "missing";
-          // 来源标签逐条判定（引用组里能分出「知识库 / 网页 / 引用」三类）
+          // 来源标签逐条判定（引用组里能分出「知识库 / 网页 / 引用」三类）。
+          // src 为 null = 台账角色还没到位，此时**不画标签**，避免先标错
+          // 再改口（甲方案 2026-11-25）。
           const src = sourceOf(item);
           return (
             <div
@@ -251,9 +253,11 @@ const CoApisChatResourceBar: React.FC<Props> = ({
               >
                 {displayName(item) || item.path}
               </span>
-              <Tag className={styles.tag} color={SOURCE_COLOR[src]}>
-                {t(SOURCE_LABEL_KEY[src])}
-              </Tag>
+              {src ? (
+                <Tag className={styles.tag} color={SOURCE_COLOR[src]}>
+                  {t(SOURCE_LABEL_KEY[src])}
+                </Tag>
+              ) : null}
               {TAGGED_STATUSES.has(st) ? (
                 <Tag className={styles.tag} color={STATUS_META[st]?.color}>
                   {t(

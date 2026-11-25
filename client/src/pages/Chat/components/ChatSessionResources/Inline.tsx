@@ -246,13 +246,19 @@ export function ChatSessionResourcesInline({
                   {previewable
                     ? null
                     : ` · ${t("chat.resDownloadOnlyShort", "仅下载")}`}
-                  <span
-                    className={styles.rowTag}
-                    data-src={sourceOf(item)}
-                    title={t(SOURCE_LABEL_KEY[sourceOf(item)])}
-                  >
-                    {t(SOURCE_LABEL_KEY[sourceOf(item)])}
-                  </span>
+                  {(() => {
+                    // 台账角色未知时不画标签（与本轮资源条同一把尺子）
+                    const src = sourceOf(item);
+                    return src ? (
+                      <span
+                        className={styles.rowTag}
+                        data-src={src}
+                        title={t(SOURCE_LABEL_KEY[src])}
+                      >
+                        {t(SOURCE_LABEL_KEY[src])}
+                      </span>
+                    ) : null;
+                  })()}
                 </span>
               </button>
             </li>

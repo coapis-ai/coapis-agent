@@ -26,7 +26,14 @@ export interface ChatResourceItem {
   /** file → 工作区相对路径（files/x.md）；web → URL */
   path: string;
   title: string;
-  role: "producer" | "reference" | "attachment" | "export";
+  /**
+   * 台账角色。2026-11-25 甲方案：**台账查不到时留空，不猜**。
+   * 此前实时通道（消息 metadata）在台账反查不到时默认补 `producer`，
+   * 于是引用件、甚至与本轮无关的文件先被标成「产出」，台账到位后又
+   * 跳成「引用」——用户读成「同一文件两次归类不一样」。留空即表示
+   * 「角色未知」，渲染层据此**不显示来源标签**，等台账到位再显示。
+   */
+  role?: "producer" | "reference" | "attachment" | "export";
   ref_count?: number;
   status?: string;
   updated_at?: number | string;
