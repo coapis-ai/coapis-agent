@@ -383,8 +383,12 @@ def _evolution_trigger_turn_end(
             try:
                 from coapis.agents.utils.trigger_tracker import get_trigger_tracker
                 tracker = get_trigger_tracker()
-                trigger_events = tracker.get_session_trigger_events()
-                trigger_outcomes = tracker.get_session_trigger_outcomes()
+                # 2026-11-26：原先调的 get_session_trigger_events() /
+                # get_session_trigger_outcomes() 在 TriggerTracker 里
+                # 并不存在（全仓 0 命中），AttributeError 被下面的
+                # except Exception: pass 吞掉，进化引擎因此从未拿到
+                # 任何触发数据。改用真实存在的轮末结算入口。
+                trigger_events, trigger_outcomes = tracker.settle_turn()
             except Exception:
                 pass
 

@@ -578,6 +578,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # Initialize toolkit with built-in tools
         toolkit = self._create_toolkit(namesake_strategy=namesake_strategy)
 
+        # ── 技能触发闭环：开一轮（2026-11-26 治「闭环账本造假」）──
+        # CoApisAgent 实例每轮新建，而 trigger tracker 是进程级单例。
+        # 在这里开轮 = 结算上一轮攒下的结局 + 清空本轮 trigger 作用域；
+        # 不做这件事的话，``get_active_trigger_ids()`` 会把进程历史上
+        # 所有 trigger 都带回来，导致每次工具调用都给它们重复落账
+        # （dev 实测放大 9.4 倍、单条最多 140 次）。
+        try:
+            get_trigger_tracker().begin_turn()
+        except Exception:
+            logger.debug("react_agent: begin_turn failed", exc_info=True)
+
         # Load and register skills
         self._register_skills(toolkit)
 
@@ -1986,6 +1997,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             trigger_method=trigger_method,
             matched_keywords=matched_keywords,
             user_message=user_message,
+            # 归因链（2026-11-26）：旧实现不传这三个字段，导致台账里
+            # 全部结局 session_id 为空——能算出「技能被用了」，但永远
+            # 追不回「在哪次会话、哪个用户」。
+            session_id=str(ctx.get("session_id", "") or ""),
+            workspace_id=str(ctx.get("workspace_id", "") or ""),
+            channel=str(ctx.get("channel", "") or ""),
             user=ctx.get("username", "unknown"),
             agent=ctx.get("agent_id", "default"),
         )

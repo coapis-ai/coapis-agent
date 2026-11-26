@@ -108,12 +108,12 @@ class TriggerEffectivenessTracker:
     """
 
     # 配置
-    MIN_SAMPLES_FOR_ADJUSTMENT = 5   # 至少 N 次触发才调整权重
+    MIN_SAMPLES_FOR_ADJUSTMENT = 10   # 至少 N 次触发才调整权重
     SATISFACTION_THRESHOLD = 0.6     # 满意度阈值
     WEIGHT_DECAY = 0.85              # 低满意度时权重衰减系数
     WEIGHT_BOOST = 1.1               # 高满意度时权重提升系数
     MIN_WEIGHT = 0.1                 # 最低权重（低于此值自动降级）
-    MAX_WEIGHT = 1.5                 # 最高权重
+    MAX_WEIGHT = 1.2                 # 最高权重
     DEMOTION_THRESHOLD = 0.2         # 降级阈值
 
     def __init__(self):
@@ -132,7 +132,8 @@ class TriggerEffectivenessTracker:
         skill_name: str,
         matched_keywords: list[str],
         tool_success: bool,
-        user_followed_up: bool,
+        user_followed_up: Optional[bool],
+        skill_tool_used: bool = True,
     ) -> None:
         """记录一次触发的结果，更新关键词统计。
 
@@ -140,7 +141,9 @@ class TriggerEffectivenessTracker:
             skill_name: 技能名称
             matched_keywords: 本次触发匹配到的关键词列表
             tool_success: 工具执行是否成功
-            user_followed_up: 用户是否 follow-up（重复提问 = 不满意）
+            user_followed_up: 用户是否 follow-up；None 表示未采集，
+                不当作满意也不当作不满意
+            skill_tool_used: 本轮是否真的调用了工具（决定 hits 是否计数）
         """
         if not matched_keywords:
             return
@@ -159,10 +162,18 @@ class TriggerEffectivenessTracker:
             ))
 
             ks.total += 1
-            ks.hits += 1
+            # hits 语义修正：旧实现无条件 ``ks.hits += 1``，hit_rate
+            # 恒等于 1.0、零信息量。现在只有本轮真的动了工具才算命中。
+            if skill_tool_used:
+                ks.hits += 1
             if tool_success:
                 ks.successes += 1
-            if not user_followed_up:
+            # satisfied 语义修正：旧实现用 ``not user_followed_up`` 代理，
+            # 而调用方把它硬编码成 False，于是 satisfied 恒等于 total、
+            # 满意度恒为 1.0，_adjust_weights 只会加权、永不衰减——实测
+            # 70 个关键词里 68 个（97.1%）被顶到 MAX_WEIGHT 钉死。
+            # 现在：工具真的成功、且用户没有明确表达不满，才算满意。
+            if skill_tool_used and tool_success and user_followed_up is not True:
                 ks.satisfied += 1
             ks.last_hit_at = now_iso
 
