@@ -142,3 +142,10 @@ server/scripts_dev_smoke.py
 # 本地临时探针与基线 worktree（不入库）
 tmp/
 .baseline-wt/
+
+# --- 运行时自写状态（容器/测试写入，禁止入库）---
+# 这两个文件曾被测试写进仓库：trigger_effectiveness.json 里 70 个权重
+# 有 68 个被钉死在旧上限 1.5，全是测试造数，不是真实学习结果。
+server/system/tool_usage.jsonl
+server/system/skill_evolution/trigger_effectiveness.json
+server/system/skill_evolution/trigger_log.jsonl*
