@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from ..permissions.decorators import require_permission
-from coapis.tools.registry import TOOL_GROUPS
+from coapis.agents.tools.groups import TOOL_GROUP_MAP
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # annotation-only names
     from coapis.config.config import Config
@@ -168,11 +168,15 @@ def _add_user_audit(ws: Path, action: str, tool_name: str,
 # ── Registry integration ──────────────────────────────────────────────────
 
 def _tool_group(name: str) -> str:
-    """Return TOOL_GROUPS group for a tool name; default to 'other'."""
-    for group, spec in TOOL_GROUPS.items():
-        if name in spec.get("tools", set()):
-            return group
-    return "other"
+    """工具分组尺子：唯一来源 = 运行时注册表 coapis.agents.tools.groups。
+
+    2026-11-26 修正：此前这里查 coapis.tools.registry.TOOL_GROUPS
+    （5 组 / 23 个名字），而下面的工具列表本身来自运行时注册表
+    （13 组 / 34 个工具）。两把尺子的实测后果：34 个工具里 14 个被
+    归进 "other"，另有 data_ops / data_store / text_processor 三个名字
+    在运行时根本不存在。分组只影响展示与筛选，不改任何执行语义。
+    """
+    return TOOL_GROUP_MAP.get(name, "basic")
 
 
 def _get_registry_tools() -> Dict[str, Dict[str, Any]]:

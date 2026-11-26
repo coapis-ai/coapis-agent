@@ -23,7 +23,10 @@ with integrated tools, skills, and memory management.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
+import inspect
+import json
 import logging
 import os
 import time
@@ -420,6 +423,230 @@ def _wrap_tool_for_fault_tolerance(func, tool_name: str):
             pass
         _sync_wrapper.original_func = getattr(func, 'original_func', func)
         return _sync_wrapper
+
+
+# 工具"软失败"签名：工具正常返回、但内容是错误文本。
+# _wrap_tool_for_fault_tolerance 会把异常吞成 "[Tool Error] ..." 后正常返回，
+# 因此 _acting 的 except 分支永远抓不到，台账 success 恒真（实测真实失败
+# 12.1%，台账只记 1.7%）。
+#
+# 分两档以免误判正常输出：
+#   前缀档 —— 错误文本必然在开头（读日志/读代码时正文里出现同名字样不算失败）
+#   包含档 —— agentscope/工具特有的错误句式，正常输出里几乎不会出现
+_SOFT_FAILURE_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("[Tool Error]", "tool_exception"),
+    ("Traceback (most recent call last)", "traceback"),
+    ("Error:", "error_text"),
+)
+
+_SOFT_FAILURE_NEEDLES: tuple[tuple[str, str], ...] = (
+    ("The current plan is None", "no_active_plan"),
+    ("Invalid subtask_idx", "bad_subtask_idx"),
+    ("not found in the plan", "bad_subtask_idx"),
+    ("got an unexpected keyword argument", "bad_tool_arguments"),
+    ("missing 1 required positional argument", "bad_tool_arguments"),
+    ("所有搜索后端均无结果", "no_search_backend"),
+    ("Tool execution failed", "tool_execution_failed"),
+)
+
+
+def _extract_result_text(result: Any) -> str:
+    """把工具返回值拍平成纯文本，供失败判定与长度统计共用。"""
+    if result is None:
+        return ""
+    blocks = getattr(result, "content", None)
+    if blocks is None:
+        blocks = result
+    if isinstance(blocks, str):
+        return blocks
+    if isinstance(blocks, dict):
+        inner = blocks.get("text") or blocks.get("output") or blocks.get("content")
+        if isinstance(inner, str):
+            return inner
+        if inner is not None:
+            return _extract_result_text(inner)
+        # 2026-11-26：不少工具（web_search 等）直接返回 dict，且没有
+        # text/output/content 键。旧实现在这里返回 ""，于是台账把一次
+        # 成功调用记成 output_len=0，软失败探针也永远读不到
+        # "所有搜索后端均无结果" 这类话——观测层替工具撒了谎。
+        try:
+            return json.dumps(blocks, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            return str(blocks)
+    if isinstance(blocks, (list, tuple)):
+        parts: list[str] = []
+        for blk in blocks:
+            if isinstance(blk, str):
+                parts.append(blk)
+                continue
+            text = blk.get("text") if isinstance(blk, dict) else getattr(blk, "text", None)
+            if isinstance(text, str):
+                parts.append(text)
+        return " ".join(parts)
+    return str(blocks)
+
+
+def _detect_soft_failure(text: str) -> str | None:
+    """命中返回失败原因码，未命中返回 None。"""
+    if not text:
+        return None
+    head = text.lstrip()
+    for needle, code in _SOFT_FAILURE_PREFIXES:
+        if head.startswith(needle):
+            return code
+    window = text[:400]
+    for needle, code in _SOFT_FAILURE_NEEDLES:
+        if needle in window:
+            return code
+    return None
+
+
+# 模型对计划簿记工具的参数名幻觉 → 真实参数名。
+# 实测 760 次工具调用中 10 次因 unexpected keyword argument 失败，集中在
+# finish_subtask 被传成 outcome / subject_idx（真名为 subtask_outcome /
+# subtask_idx）。工具定义在第三方包里不可改，故在注册前包一层。
+_PLAN_ARG_ALIASES: dict[str, tuple[str, ...]] = {
+    "subtask_idx": (
+        "subject_idx", "subtask_index", "task_idx", "step_idx", "idx", "index",
+    ),
+    "subtask_outcome": ("outcome", "subtask_result", "result"),
+    "subtask_state": ("state", "status"),
+}
+
+
+async def _tool_result_text_from_memory(memory: Any, tool_call_id: str) -> str:
+    """从 memory 里按 tool_call_id 取本次工具结果的文本。
+
+    agentscope 的 ``_acting`` 对普通工具返回 None，工具结果只落在 memory 的
+    ToolResultBlock 上。台账若不看这里，output_len 与软失败判定永远是 0。
+    只回看最近若干条消息，避免长会话下每次工具调用都全量扫描。
+    """
+    try:
+        msgs = await memory.get_memory()
+    except Exception:
+        return ""
+    try:
+        for msg in reversed(list(msgs or [])[-12:]):
+            content = getattr(msg, "content", None)
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_result":
+                    continue
+                if tool_call_id and block.get("id") != tool_call_id:
+                    continue
+                return _extract_result_text(block.get("output"))
+    except Exception:
+        return ""
+    return ""
+
+
+def _tolerate_plan_arg_aliases(fn: Any) -> Any:
+    """把簿记工具上的参数名幻觉映射回真名，schema 仍保持真名。
+
+    只在"真名缺失且别名存在"时改名，模型显式给对的正确参数永不被覆盖。
+    ``functools.wraps`` + 显式 ``__signature__`` 保证 agentscope 生成给模型
+    的 schema 仍是原始真名，不会因包装而把幻觉固化进工具定义。
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return fn
+
+    applicable = {
+        alias: real
+        for real, aliases in _PLAN_ARG_ALIASES.items()
+        if real in sig.parameters
+        for alias in aliases
+        if alias not in sig.parameters
+    }
+    if not applicable:
+        return fn
+
+    def _fix(kwargs: dict[str, Any]) -> dict[str, Any]:
+        for alias, real in applicable.items():
+            if alias not in kwargs:
+                continue
+            if real not in kwargs:
+                kwargs[real] = kwargs.pop(alias)
+                logger.info(
+                    "plan tool %s: mapped hallucinated arg %r -> %r",
+                    getattr(fn, "__name__", "?"),
+                    alias,
+                    real,
+                )
+            else:
+                # 真名已给出：别名是冗余幻觉，必须丢弃，否则原函数会因
+                # unexpected keyword argument 直接报错。
+                kwargs.pop(alias)
+                logger.info(
+                    "plan tool %s: dropped redundant arg %r (real arg %r present)",
+                    getattr(fn, "__name__", "?"),
+                    alias,
+                    real,
+                )
+        return kwargs
+
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def _aw(*args: Any, **kwargs: Any) -> Any:
+            return await fn(*args, **_fix(kwargs))
+
+        _aw.__signature__ = sig
+        return _aw
+
+    @functools.wraps(fn)
+    def _sw(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **_fix(kwargs))
+
+    _sw.__signature__ = sig
+    return _sw
+
+
+# 计划收口后模型常再重复调一次簿记工具，agentscope 便回
+# ``Error: The current plan is None``。实测 8 次全部是这个模式（finish_plan
+# 成功后又调 finish_subtask），并非跨轮持久化断链。这类调用重试也只会再
+# 失败一次，故在调用前就拦下，返回明确的"无需重复登记"提示：既停止重试，
+# 也停止把幂等噪音记成真失败。
+_PLAN_SETTLED_HINT = (
+    "当前没有活动计划（可能已收口）。该子任务无需重复登记，"
+    "也不要重试簿记工具——直接给出最终回答即可。"
+)
+
+_IDEMPOTENT_BOOKKEEPING_TOOLS = frozenset({"finish_subtask", "update_subtask_state"})
+
+
+def _make_bookkeeping_idempotent(fn: Any, notebook: Any) -> Any:
+    """无活动计划时不执行簿记工具，直接回幂等提示。"""
+    if getattr(fn, "__name__", "") not in _IDEMPOTENT_BOOKKEEPING_TOOLS:
+        return fn
+    if not inspect.iscoroutinefunction(fn):
+        return fn
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return fn
+
+    from agentscope.message import TextBlock as _TB
+    from agentscope.tool import ToolResponse as _TR
+
+    @functools.wraps(fn)
+    async def _aw(*args: Any, **kwargs: Any) -> Any:
+        if getattr(notebook, "current_plan", None) is None:
+            logger.info(
+                "plan tool %s skipped: no active plan (idempotent no-op)",
+                getattr(fn, "__name__", "?"),
+            )
+            return _TR(
+                content=[_TB(type="text", text=_PLAN_SETTLED_HINT)],
+            )
+        return await fn(*args, **kwargs)
+
+    _aw.__signature__ = sig
+    return _aw
 
 
 async def _run_scene_evolution(
@@ -1129,6 +1356,13 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         A session restored with a plan already in place equips them at
         startup — the lazy set is never withheld from a turn that has a plan.
         """
+        tool_fns = [
+            _make_bookkeeping_idempotent(
+                _tolerate_plan_arg_aliases(fn),
+                self.plan_notebook,
+            )
+            for fn in tool_fns
+        ]
         core = [fn for fn in tool_fns if fn.__name__ in self.PLAN_CORE_TOOLS]
         lazy = [fn for fn in tool_fns if fn.__name__ not in self.PLAN_CORE_TOOLS]
 
@@ -3646,12 +3880,26 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                     result = await super()._acting(tool_call)
                 else:
                     raise
-            # Estimate output length from result
-            if result is not None:
-                try:
-                    _output_len = len(str(result))
-                except Exception:
-                    pass
+            # Estimate output length from result, and detect soft failures
+            # 2026-11-26 尺子接回源头。agentscope 的 _acting 只在
+            # finish_function 时返回内容，普通工具一律返回 None；工具结果
+            # 的唯一真源是写进 memory 的那条 ToolResultBlock。此前这里只读
+            # result，于是实测 4524 条 tool_call 里 92.9% 的 output_len=0，
+            # 软失败判定一次都没触发过——工具没撒谎，观测层瞎了。
+            try:
+                _result_text = _extract_result_text(result)
+                if not _result_text:
+                    _result_text = await _tool_result_text_from_memory(
+                        self.memory,
+                        str(tool_call.get("id") or ""),
+                    )
+                _output_len = len(_result_text)
+                _soft_code = _detect_soft_failure(_result_text)
+                if _soft_code:
+                    _success = False
+                    _error_msg = f"{_soft_code}: {_result_text[:200]}"
+            except Exception:
+                _output_len = len(str(result))
             # Store in cache for idempotent tools
             if _cache is not None and result is not None:
                 try:

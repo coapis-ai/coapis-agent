@@ -411,8 +411,12 @@ async def web_search(
         }
 
     # Build backend order
+    # 2026-11-26：指定后端只当"优先"，不当"唯一"。此前 order=[backend]，
+    # 模型传一个不可用的后端名就直接空手而归（实测 dev 里模型传 sogou →
+    # 单后端失败 → 整次搜索 0 结果，且台账此前还把它记成成功）。
+    # 真正用哪个后端会写进返回的 backend 字段，对调用方透明。
     if backend != "auto":
-        order = [backend]
+        order = [backend] + [b for b in _BACKEND_ORDER if b != backend]
     else:
         order = list(_BACKEND_ORDER)
 
@@ -441,7 +445,11 @@ async def web_search(
                     timeout=_TOTAL_TIMEOUT,
                 )
             else:
-                results = search_fn(query, max_results)
+                # 同上：同步后端走线程池，否则 timeout 不生效
+                results = await asyncio.wait_for(
+                    asyncio.to_thread(search_fn, query, max_results),
+                    timeout=_TOTAL_TIMEOUT,
+                )
             if results is not None:
                 used_backend = b
         except (asyncio.TimeoutError, Exception) as e:
@@ -453,7 +461,13 @@ async def web_search(
                 if asyncio.iscoroutinefunction(fn):
                     r = await asyncio.wait_for(fn(query, max_results), timeout=_TIMEOUT)
                 else:
-                    r = fn(query, max_results)
+                    # 同步后端必须丢线程池：直接在事件循环里调用会阻塞
+                    # 整个 loop，导致 asyncio.wait 的 timeout 失效、
+                    # 多后端退化为串行（实测 20s 全灭的根因）。
+                    r = await asyncio.wait_for(
+                        asyncio.to_thread(fn, query, max_results),
+                        timeout=_TIMEOUT,
+                    )
                 return b_name, r
             except (asyncio.TimeoutError, Exception) as e:
                 logger.debug("Backend %s failed: %s", b_name, e)
@@ -464,21 +478,35 @@ async def web_search(
             for b, fn in available
         }
 
+        # 逐个收割。FIRST_COMPLETED 只保证"有任务结束"，而先回来的很可能是
+        # 空手而归的后端（实测 browser 0.00s 返回 None）。旧写法拿完这一批
+        # 就 cancel 其余，把仍在正常工作的 baidu/sogou 杀掉，导致明明有结果
+        # 却报"所有后端不可用"（实测 0.00s 全灭的根因）。这里循环等到拿到
+        # 非空结果、全部结束或总超时为止。
+        pending = set(tasks.keys())
+        deadline = asyncio.get_running_loop().time() + _TOTAL_TIMEOUT
         try:
-            done, pending = await asyncio.wait(
-                tasks.keys(),
-                timeout=_TOTAL_TIMEOUT,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-        except Exception:
-            done, pending = set(), set(tasks.keys())
-
-        # 取第一个成功的结果
-        for t in done:
-            b_name, r = t.result()
-            if r is not None and results is None:
-                results = r
-                used_backend = b_name
+            while pending and results is None:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    break
+                done, pending = await asyncio.wait(
+                    pending,
+                    timeout=remaining,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in done:
+                    try:
+                        b_name, r = t.result()
+                    except (asyncio.CancelledError, Exception):
+                        continue
+                    # 空列表不算赢。此前 `r is not None` 会让第一个空手
+                    # 而归的后端直接结束竞速，把 count=0 当结果返回。
+                    if r and results is None:
+                        results = r
+                        used_backend = b_name
+        except Exception as e:  # pragma: no cover - 防御性兜底
+            logger.warning("backend race loop aborted: %s", e)
 
         # 取消剩余任务
         for t in pending:
@@ -490,7 +518,10 @@ async def web_search(
 
     if results is None:
         return {
-            "error": f"所有搜索后端不可用（{_TOTAL_TIMEOUT}s超时）。已尝试: {', '.join(order)}",
+            "error": (
+                f"所有搜索后端均无结果（总时限 {_TOTAL_TIMEOUT}s）。"
+                f"已尝试: {', '.join(order)}"
+            ),
             "query": query,
         }
 
