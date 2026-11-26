@@ -28,6 +28,7 @@ from sqlalchemy import delete, func, insert, or_, select, update
 from .db.engine import get_session_factory, init_engine
 from .db.models.user import AuditLog, User, UserPreference, UserSetting
 from .db.models.usage import PointTransaction, TokenUsage
+from .password import hash_password, verify_password
 from .user_repository import UserRepository
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -41,20 +42,12 @@ def _gen_user_id() -> str:
 
 
 def _hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
-    """Hash password.
+    """Hash password — thin forward to :mod:`coapis.foundation.password`.
 
-    New passwords use bcrypt (salt embedded in the hash, no separate salt
-    column required); the legacy SHA-256 path is kept for verifying
-    pre-existing records. Mirrors ``user_system/service.py::_hash_password``
-    — the two implementations must stay in sync.
+    Kept as a module-level name because existing callers reference it; the
+    implementation itself must not live here.
     """
-    if salt is None:
-        import bcrypt
-
-        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-        return hashed.decode("utf-8"), "$2b$"
-    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return h, salt
+    return hash_password(password, salt)
 
 
 def _normalize_id(user_id: Any) -> str:

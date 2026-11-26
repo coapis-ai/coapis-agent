@@ -35,7 +35,6 @@ import logging
 import os
 import secrets
 
-import bcrypt
 import time
 from typing import Any, Optional
 
@@ -55,47 +54,20 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Password hashing (bcrypt with SHA-256 backward compatibility)
+# Password hashing — thin re-export
 # ---------------------------------------------------------------------------
+# The single implementation lives in ``coapis.foundation.password``.  This
+# module used to carry its own copy (plus two more elsewhere), and nothing
+# tested password verification, so the copies drifted apart.  Do not
+# re-implement hashing here; import from the foundation module instead.
 
-_BCRYPT_PREFIX = "$2b$"
-
-
-def _hash_password(
-    password: str,
-    salt: Optional[str] = None,
-) -> tuple[str, str]:
-    """Hash *password* with *salt*.
-
-    New passwords use bcrypt (``salt=None``).
-    Legacy SHA-256 verification passes the original *salt*.
-    Returns ``(hash_hex_or_bcrypt, salt_hex)``.
-    """
-    if salt is None:
-        # New password → bcrypt
-        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-        return hashed.decode("utf-8"), _BCRYPT_PREFIX  # salt marker
-    # Legacy SHA-256 path (for verifying old hashes)
-    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return h, salt
-
-
-def verify_password(password: str, stored_hash: str, salt: str) -> bool:
-    """Verify *password* against a stored hash.
-
-    Supports both bcrypt (new) and SHA-256 (legacy) hashes.
-    """
-    if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
-        # bcrypt hash
-        return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
-    # Legacy SHA-256
-    h, _ = _hash_password(password, salt)
-    return hmac.compare_digest(h, stored_hash)
-
-
-def needs_rehash(stored_hash: str) -> bool:
-    """Return True if the hash should be upgraded to bcrypt."""
-    return not (stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"))
+from ..foundation.password import (  # noqa: E402
+    generate_salt,
+    hash_password as _hash_password,
+    is_bcrypt,
+    needs_rehash,
+    verify_password,
+)
 
 
 # ---------------------------------------------------------------------------

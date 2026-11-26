@@ -26,15 +26,11 @@
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
-import secrets
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-import bcrypt
 
 from ..constant import SYSTEM_DIR
 
@@ -92,25 +88,18 @@ def _save_users(data: Dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Password hashing (bcrypt with SHA-256 backward compatibility)
+# Password hashing — thin re-export
 # ---------------------------------------------------------------------------
+# Single implementation lives in ``coapis.foundation.password``.  This module
+# used to carry its own copy; do not re-implement hashing here.
 
-def _hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
-    """Hash password. New passwords use bcrypt; legacy SHA-256 for verification."""
-    if salt is None:
-        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-        return hashed.decode("utf-8"), "$2b$"  # salt marker
-    # Legacy SHA-256 path
-    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return h, salt
-
-
-def verify_password(password: str, stored_hash: str, salt: str) -> bool:
-    """Verify password against stored hash (supports bcrypt and SHA-256)."""
-    if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
-        return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
-    h, _ = _hash_password(password, salt)
-    return secrets.compare_digest(h, stored_hash)
+from ..foundation.password import (  # noqa: E402
+    generate_salt,
+    hash_password as _hash_password,
+    is_bcrypt,
+    needs_rehash,
+    verify_password,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +308,19 @@ def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
 
     if not verify_password(password, user_creds.get("password_hash", ""), user_creds.get("salt", "")):
         return None
+
+    # 存量 SHA-256 摘要在登录成功后惰性升级为 bcrypt：无需强制改密、无需停机
+    # 迁移，用户下次登录即自动归一。bcrypt 摘要自带盐，故写回只需
+    # password_hash —— 企业版 PG 仓储的更新白名单里没有 salt，不依赖它。
+    # 升级失败绝不阻断本次登录。
+    stored_hash = user_creds.get("password_hash", "")
+    if needs_rehash(stored_hash):
+        try:
+            new_hash, _ = _hash_password(password)
+            _repo().update_user(username, {"password_hash": new_hash})
+            logger.info("用户 %s 的口令摘要已升级为 bcrypt", username)
+        except Exception:
+            logger.warning("口令摘要升级为 bcrypt 失败（不影响本次登录）", exc_info=True)
 
     # Update last login
     _repo().update_user(username, {"last_login_at": time.time()})

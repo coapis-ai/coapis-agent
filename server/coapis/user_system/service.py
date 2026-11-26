@@ -25,10 +25,7 @@ Simplified: no user levels, no points system.
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
-import secrets
 import time
 from typing import Any, Dict, List, Optional
 
@@ -42,35 +39,18 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Password hashing (salted SHA-256, no external deps)
+# Password hashing — thin re-export
 # ---------------------------------------------------------------------------
+# Single implementation lives in ``coapis.foundation.password``.  This module
+# used to carry its own copy; do not re-implement hashing here.
 
-def _hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
-    """Hash password.
-
-    New passwords use bcrypt (salt embedded in the hash, no separate salt
-    column required); the legacy SHA-256 path is kept only for verifying
-    old records. Mirrors ``app/user_store.py::_hash_password`` — the two
-    implementations must stay in sync.
-    """
-    if salt is None:
-        import bcrypt
-        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-        return hashed.decode("utf-8"), "$2b$"
-    # Legacy SHA-256 path (compat with pre-existing records)
-    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return h, salt
-
-
-def verify_password(password: str, stored_hash: str, salt: str) -> bool:
-    """Verify password against stored hash. Supports both bcrypt and SHA-256."""
-    if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
-        import bcrypt
-        return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
-    # Legacy SHA-256
-    h, _ = _hash_password(password, salt)
-    return hmac.compare_digest(h, stored_hash)
-
+from ..foundation.password import (  # noqa: E402
+    generate_salt,
+    hash_password as _hash_password,
+    is_bcrypt,
+    needs_rehash,
+    verify_password,
+)
 
 # Alias for backward compatibility
 _verify_password = verify_password
@@ -286,9 +266,19 @@ def authenticate(username: str, password: str) -> Optional[UserResponse]:
         return None
 
     stored_hash = row["password_hash"]
-    salt = row["salt"]
+    salt = row.get("salt")
     if not verify_password(password, stored_hash, salt):
         return None
+
+    # 存量 SHA-256 摘要在登录成功后惰性升级为 bcrypt（见 foundation.password）。
+    # 写回只需 password_hash；升级失败不阻断本次登录。
+    if needs_rehash(stored_hash):
+        try:
+            new_hash, _ = _hash_password(password)
+            db.update_user(username, {"password_hash": new_hash})
+            logger.info("用户 %s 的口令摘要已升级为 bcrypt", username)
+        except Exception:
+            logger.warning("口令摘要升级为 bcrypt 失败（不影响本次登录）", exc_info=True)
 
     db.update_user(username, {"last_login_at": time.time()})
 
