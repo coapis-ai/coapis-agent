@@ -64,8 +64,13 @@ class TokenUsage(BaseRow):
     latency_ms: Mapped[Optional[int]] = mapped_column(Integer)
     stream_interrupted: Mapped[Optional[bool]] = mapped_column(Boolean)
 
+    # 调用来源（0030）：哪条链路烧的 token。旧行 NULL = 诚实缺项，
+    # 读面只按相等值过滤，未知不等于零。
+    source: Mapped[Optional[str]] = mapped_column(Text)
+
     __table_args__ = (
         Index("idx_token_usage_user", "user_id"),
         Index("idx_token_usage_created", "created_at"),
         Index("idx_token_usage_scope", "username", "session_id", "chat_id", "turn_index"),
+        Index("idx_token_usage_source", "source", "created_at"),
     )

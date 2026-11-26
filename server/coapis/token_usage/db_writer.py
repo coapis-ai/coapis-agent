@@ -60,6 +60,7 @@ def _db_insert(
     turn_index: int | None = None,
     latency_ms: int | None = None,
     stream_interrupted: bool | None = None,
+    source: str | None = None,
 ) -> None:
     from sqlalchemy import text
     engine = _engine()
@@ -73,9 +74,9 @@ def _db_insert(
                 "INSERT INTO token_usage "
                 "(user_id, username, agent_id, model, input_tokens, output_tokens, "
                 " total_tokens, cost_cents, created_at, provider_id, session_id, "
-                " chat_id, turn_index, latency_ms, stream_interrupted) "
+                " chat_id, turn_index, latency_ms, stream_interrupted, source) "
                 "VALUES (:uid, :uname, :aid, :model, :in_t, :out_t, :total, :cost, :ts, "
-                " :pid, :sid, :cid, :tidx, :lat, :intr)"
+                " :pid, :sid, :cid, :tidx, :lat, :intr, :source)"
             ),
             {
                 "uid": str(user_id) if user_id is not None else None,
@@ -93,6 +94,7 @@ def _db_insert(
                 "tidx": turn_index,
                 "lat": latency_ms,
                 "intr": (1 if stream_interrupted else 0) if stream_interrupted is not None else None,
+                "source": (str(source)[:32] if source else None),
             },
         )
 
@@ -113,6 +115,7 @@ def save_token_usage(
     turn_index: int | None = None,
     latency_ms: int | None = None,
     stream_interrupted: bool | None = None,
+    source: str | None = None,
 ) -> None:
     """每次 LLM 调用后记录明细（model_wrapper._record_usage_to_db 调用）。
 
@@ -124,6 +127,9 @@ def save_token_usage(
     逐轮明细列（provider_id/session_id/chat_id/turn_index/latency_ms/
     stream_interrupted，0026 迁移）：新调用点带上；旧调用点缺项落 NULL——
     诚实缺项，不写假 0。
+
+    source（0030 迁移）：调用来源链路。凡烧 token 的链路都必须带；缺了
+    这刀，"总共用了多少"能对上、"哪条链路用的"永远对不上。
     """
     try:
         engine = _engine()
@@ -134,6 +140,7 @@ def save_token_usage(
                 provider_id=provider_id, session_id=session_id, chat_id=chat_id,
                 turn_index=turn_index, latency_ms=latency_ms,
                 stream_interrupted=stream_interrupted,
+                source=source,
             )
         else:
             _file_append(
@@ -157,6 +164,7 @@ def record_token_usage(
     created_at: float | None = None,
     username: str | None = None,
     total_tokens: int | None = None,
+    source: str | None = None,
 ) -> None:
     """记录一条 token 用量明细（兼容旧签名）。"""
     save_token_usage(
@@ -169,6 +177,7 @@ def record_token_usage(
         cost_cents=cost_cents,
         username=username,
         created_at=created_at,
+        source=source,
     )
 
 

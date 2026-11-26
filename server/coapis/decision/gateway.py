@@ -406,6 +406,48 @@ class JudgeGateway:
             kwargs[key] = value
         return kwargs
 
+    def _meter_llm_call(
+        self,
+        *,
+        ids: dict,
+        provider_id: str,
+        model_id: str,
+        input_tokens: int,
+        output_tokens: int,
+        latency_ms: int | None = None,
+    ) -> None:
+        """把决策模型的一次调用记进用量台账（fire-and-forget）。
+
+        为什么不在 ``TokenRecordingModelWrapper`` 里顺手搞定：那条路径要求
+        从 ContextVar 取到 user_id，取不到就**整条跳过记账**；决策模型常在
+        后台链路里跑，上下文未必带得上，于是「包了包装器」等于没包。这里
+        的 ``ids`` 是调用方已经算好的归属，直接显式传，不赌上下文。
+
+        成本走 ``recorder.compute_cost_cents`` 那把唯一尺子，与聊天主链同
+        一口径——否则同一笔调用在两张表里又是两个数。
+        """
+        try:
+            from ..token_usage.recorder import (
+                SOURCE_DECISION,
+                record_llm_usage,
+            )
+
+            record_llm_usage(
+                model=model_id,
+                source=SOURCE_DECISION,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                user_id=ids.get("user_id"),
+                agent_id=ids.get("agent_id"),
+                chat_id=ids.get("chat_id"),
+                session_id=ids.get("session_id"),
+                turn_index=ids.get("turn"),
+                provider_id=provider_id or None,
+                latency_ms=latency_ms,
+            )
+        except Exception as exc:  # noqa: BLE001 - 记账失败绝不影响决策结果
+            logger.debug("decision gateway: 计量入账失败: %s", exc)
+
     async def _invoke_healed(
         self,
         provider: Any,
@@ -920,6 +962,18 @@ class JudgeGateway:
                     asyncio.shield(call_task),
                     timeout=soft_s,
                 )
+                # 决策模型烧的 token 必须进用量台账。此前这条链路直调裸模型
+                # 对象，实测 69 次真判、67457 tokens 只落在 decision_events，
+                # 用量台账 0 条——「总共用了多少」和「决策模型用了多少」两张
+                # 表永远对不上。用户拍板：只要调用模型就计量，免费收费一律。
+                self._meter_llm_call(
+                    ids=ids,
+                    provider_id=str(getattr(provider, "provider_id", "") or ""),
+                    model_id=str(model_id),
+                    input_tokens=tin,
+                    output_tokens=tout,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                )
             except asyncio.TimeoutError:
                 # 后台补判：跑完照常写台账/进缓存；主链立刻降级先走。
                 bg = asyncio.create_task(
@@ -931,6 +985,7 @@ class JudgeGateway:
                         ckey=ckey,
                         describe=describe,
                         ids=ids,
+                        provider_id=str(getattr(provider, "provider_id", "") or ""),
                         started_at=started,
                         hard_s=hard_s,
                         on_late_verdict=on_late_verdict,
@@ -1031,7 +1086,8 @@ class JudgeGateway:
         ckey: str,
         describe: Any,
         ids: dict,
-        started_at: float,
+        provider_id: str = "",
+        started_at: float = 0.0,
         hard_s: float = 0.0,
         on_late_verdict: Optional[Callable[[Any], Any]] = None,
     ) -> None:
@@ -1100,6 +1156,16 @@ class JudgeGateway:
                 **ids,
             )
             return
+        # 后台补判必须计量：主链软超时那条路不计量，tokens 只在这条路上拿得到。
+        # 漏掉它 = 本地判官（2.5-15s、软阈值 2s）的多数调用不进台账。
+        self._meter_llm_call(
+            ids=ids,
+            provider_id=provider_id,
+            model_id=str(model_id),
+            input_tokens=tin,
+            output_tokens=tout,
+            latency_ms=int((time.perf_counter() - started_at) * 1000),
+        )
         value = None
         if text:
             try:

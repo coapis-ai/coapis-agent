@@ -240,7 +240,41 @@ class AgentCore:
                 api_key=api_key,
                 timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0),
             )
+            # 装计量钩子（2026-11-25）：这条链路上的每次 chat.completions.create
+            # 都自动进用量台账。此前它直调裸 SDK，实测台账里一条都没有——
+            # 包括本类自己的三处调用，以及进化引擎、会话标题生成借用
+            # ``agent_core.client`` 的那几处。在客户端创建的咽喉点装一次，
+            # 比在九个调用点各写一遍记账可靠得多。
+            from ..token_usage.recorder import with_usage_metering
+
+            self._client = with_usage_metering(self._client, self._meter_meta)
         return self._client
+
+    def _meter_meta(self) -> dict:
+        """计量元信息：调用时才求值，让归属信息取到最新值。
+
+        取不到 user_id 不阻断记账——台账宁可留 NULL 归属，也不要整条
+        链路不入账。
+        """
+        meta = {
+            "source": "chat",
+            "model": self.model,
+            "agent_id": getattr(self, "agent_id", None),
+        }
+        try:
+            from ..config.session_context import (
+                get_current_chat_id,
+                get_current_session_id,
+                get_current_user_id,
+                get_current_username,
+            )
+            meta["user_id"] = get_current_user_id()
+            meta["username"] = get_current_username()
+            meta["session_id"] = get_current_session_id()
+            meta["chat_id"] = get_current_chat_id()
+        except Exception:  # noqa: BLE001 - 后台链路没有上下文是常态
+            pass
+        return meta
 
     async def process(
         self,

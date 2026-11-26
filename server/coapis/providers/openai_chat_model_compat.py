@@ -238,9 +238,46 @@ class _SanitizedStream:
                     self.extra_contents[tc_id] = extra
 
 
+def _compat_meter_meta() -> dict:
+    """底层 client 被直接借用时的计量元信息。
+
+    取不到归属不阻断记账——台账宁可留 NULL 归属，也不要整条链路不入账。
+    """
+    meta = {"source": "evolution"}
+    try:
+        from ..config.session_context import (
+            get_current_chat_id,
+            get_current_session_id,
+            get_current_user_id,
+            get_current_username,
+        )
+        meta["user_id"] = get_current_user_id()
+        meta["username"] = get_current_username()
+        meta["session_id"] = get_current_session_id()
+        meta["chat_id"] = get_current_chat_id()
+    except Exception:  # noqa: BLE001 - 后台链路没有上下文是常态
+        pass
+    return meta
+
+
 class OpenAIChatModelCompat(OpenAIChatModel):
     """OpenAIChatModel with robust parsing for malformed tool-call chunks
     and transparent ``extra_content`` (Gemini thought_signature) relay."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # 进化引擎这类后台链路不走 agentscope 的 ``__call__``，而是直接抓
+        # ``model.client.chat.completions.create`` 裸调 SDK——这条路绕过了记账
+        # 包装器，实测台账 0 条。在底层 client 上装一次钩子，借用时即被计量；
+        # 聊天主链走包装器，钩子看到去重标记会自动闭嘴，不会重复入账。
+        try:
+            from ..token_usage.recorder import with_usage_metering
+
+            client = getattr(self, "client", None)
+            if client is not None:
+                self.client = with_usage_metering(client, _compat_meter_meta)
+        except Exception:  # noqa: BLE001 - 装钩子失败宁可退回原 client
+            pass
 
     # pylint: disable=too-many-branches
     async def _parse_openai_stream_response(

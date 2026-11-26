@@ -29,6 +29,7 @@ import asyncio
 import logging
 import shutil
 import threading
+import time
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -282,6 +283,8 @@ async def _transcribe_whisper_api(file_path: str) -> Optional[str]:
         timeout=60,
     )
 
+    started = time.perf_counter()
+
     try:
         with open(file_path, "rb") as f:
             transcript = await client.audio.transcriptions.create(
@@ -289,6 +292,38 @@ async def _transcribe_whisper_api(file_path: str) -> Optional[str]:
                 file=f,
             )
         text = transcript.text.strip()
+        # 语音转写同样是模型调用，用量必须进统一台账（source=transcription）。
+        # 各家转写接口回传的 usage 形状不一：只给 total_tokens 时按输出计，
+        # 至少保证"这次调用花了多少"在尺子里可见。
+        try:
+            from ...token_usage.recorder import (
+                SOURCE_TRANSCRIPTION,
+                record_llm_usage,
+            )
+
+            raw_usage = getattr(transcript, "usage", None)
+            if hasattr(raw_usage, "model_dump"):
+                usage_dict = raw_usage.model_dump()
+            elif isinstance(raw_usage, dict):
+                usage_dict = raw_usage
+            else:
+                usage_dict = {}
+            tin = int(usage_dict.get("input_tokens")
+                      or usage_dict.get("prompt_tokens") or 0)
+            tout = int(usage_dict.get("output_tokens")
+                       or usage_dict.get("completion_tokens") or 0)
+            if not (tin or tout):
+                tout = int(usage_dict.get("total_tokens") or 0)
+            record_llm_usage(
+                model=str(model_name),
+                source=SOURCE_TRANSCRIPTION,
+                input_tokens=tin,
+                output_tokens=tout,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+        except Exception:  # noqa: BLE001 - 计量失败不能影响转写结果
+            # warning 而不是 debug：隐形故障比转写失败更难查。
+            logger.warning("transcription metering failed", exc_info=True)
         if text:
             logger.debug("Transcribed audio %s: %s", file_path, text[:80])
             return text

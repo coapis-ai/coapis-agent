@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from .buffer import _UsageEvent
 from .manager import get_token_usage_manager
+from .recorder import guard_wrapper_metering
 
 import logging
 
@@ -55,16 +56,28 @@ class TokenRecordingModelWrapper(ChatModelBase):
     """Wraps a ChatModelBase to record token usage on each call."""
 
     _usage_by_session: dict[str, dict[str, Any]] = {}
+
+    # 类属性兜底：任何绕过 __init__ 的构造路径（测试用 __new__、反序列化、
+    # 子类）都不该让记账因缺属性而静默失败。正常实例化时 __init__ 会覆盖。
+    _source: str = "chat"
     # 逐轮计数（B1 台账口径：一次模型调用 = 一轮，会话内从 1 起自增）
     _turn_counters: dict[str, int] = {}
 
-    def __init__(self, provider_id: str, model: ChatModelBase) -> None:
+    def __init__(
+        self,
+        provider_id: str,
+        model: ChatModelBase,
+        source: str = "chat",
+    ) -> None:
         super().__init__(
             model_name=getattr(model, "model_name", "unknown"),
             stream=getattr(model, "stream", True),
         )
         self._model = model
         self._provider_id = provider_id
+        # 调用来源（0030）：同一条包装器被聊天、决策模型、压缩等多条链路
+        # 复用时，靠这个标签区分「谁烧的」。默认 chat，保持旧调用点兼容。
+        self._source = source or "chat"
 
     def _with_stream_usage(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """流式时补 ``stream_options={"include_usage": True}``（D16）。
@@ -294,13 +307,22 @@ class TokenRecordingModelWrapper(ChatModelBase):
                 turn_index=turn_index,
                 latency_ms=latency_ms,
                 stream_interrupted=stream_interrupted,
+                source=self._source,
             )
             
         except Exception as e:
-            # Don't let database errors break the main flow
+            # Don't let database errors break the main flow —— 但**必须留痕**。
+            # 这里原本是 debug 级：生产日志根本看不见，于是「AttributeError:
+            # no attribute '_source'」这种结构性 bug 被静默吞了整整一轮，
+            # 表现却是「台账正常增长」，极难察觉。记账失败属于计量失真，
+            # 按 warning 报，宁可吵也不要装死。
             import logging
-            logging.getLogger(__name__).debug("Failed to record token usage to DB: %s", e)
+            logging.getLogger(__name__).warning(
+                "token_usage: 明细入账失败（用量已丢失，非仅性能问题）: %s",
+                e,
+            )
 
+    @guard_wrapper_metering
     async def __call__(
         self,
         messages: list[dict],
@@ -395,44 +417,31 @@ def _compute_cost_cents(
     input_tokens: int,
     output_tokens: int,
 ) -> float:
-    """成本真值：provider 模型带定价（每百万 token 单价）则计算，无定价 = 0。
+    """成本尺子：统一走 ``recorder.compute_cost_cents``。
 
-    内网/私有部署模型没有定价是**事实**——记 0 是诚实值；缺项语义由
-    逐轮列的 NULL 表达，不在 cost 上造假。
+    历史上这里有过两把尺子：本函数只认 provider 模型上的 ``pricing``
+    属性（实测内网部署全没配 → 台账 930/930 行 cost_cents 全 0），而
+    决策模型那条链路用的是 ``user_system.tokens.get_model_pricing``
+    （有效）。同一笔调用在两张表里成本对不上，就是这么来的。
+
+    现在两把合一：provider 显式定价优先，缺省回落全局定价表；两边都
+    没有定价的模型按免费处理返回 0——那是事实，不是漏算，token 照记。
     """
-    if not provider_id:
-        return 0.0
-    try:
-        from ..providers.provider_manager import ProviderManager
+    provider = None
+    if provider_id:
+        try:
+            from ..providers.provider_manager import ProviderManager
 
-        manager = ProviderManager.get_instance()
-        if manager is None:
-            return 0.0
-        provider = manager.get_provider(provider_id)
-        if provider is None:
-            return 0.0
-        models = getattr(provider, "list_models", None)
-        if not callable(models):
-            return 0.0
-        for model in models():
-            name = (
-                model.get("name")
-                if isinstance(model, dict)
-                else getattr(model, "name", None)
-            )
-            if name != model_name:
-                continue
-            pricing = (
-                model.get("pricing")
-                if isinstance(model, dict)
-                else getattr(model, "pricing", None)
-            )
-            if not isinstance(pricing, dict):
-                return 0.0
-            in_rate = float(pricing.get("input") or 0)
-            out_rate = float(pricing.get("output") or 0)
-            cents = (input_tokens * in_rate + output_tokens * out_rate) / 1_000_000 * 100
-            return round(float(cents), 4)
-    except Exception:
+            manager = ProviderManager.get_instance()
+            if manager is not None:
+                provider = manager.get_provider(provider_id)
+        except Exception:  # noqa: BLE001 - 拿不到 provider 就退回全局定价表
+            provider = None
+    try:
+        from .recorder import compute_cost_cents
+
+        return compute_cost_cents(
+            model_name, provider, input_tokens, output_tokens,
+        )
+    except Exception:  # noqa: BLE001
         return 0.0
-    return 0.0

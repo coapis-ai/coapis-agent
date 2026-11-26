@@ -22,6 +22,7 @@ Provider-specific probe logic lives in each provider class
 """
 
 import logging
+import time
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -268,12 +269,33 @@ async def _judge_probe_chat(
         headers["Authorization"] = f"Bearer {api_key}"
     # 本地模型（ollama 等）冷启动慢，探测宽限到 180s，与判官同一口径
     eff_timeout = 180.0 if is_local_base_url(api_base) else max(timeout, 30.0)
+    started = time.perf_counter()
     async with httpx.AsyncClient(timeout=eff_timeout) as client:
         resp = await client.post(
             f"{api_base}/chat/completions", json=payload, headers=headers
         )
         resp.raise_for_status()
         data = resp.json()
+    # 探测也是真金白银的模型调用：不进台账就是隐形消费。探测没有会话归属，
+    # user/agent 留空，但用量与成本必须在统一尺子里可见。
+    try:
+        from ..token_usage.recorder import (
+            SOURCE_MANAGEMENT,
+            record_llm_usage,
+        )
+
+        usage = data.get("usage") or {}
+        record_llm_usage(
+            model=str(model or ""),
+            source=SOURCE_MANAGEMENT,
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+    except Exception:  # noqa: BLE001 - 计量失败不能影响探测结论
+        # warning 而不是 debug：这条链路的失败必须可见，否则又会变成
+        # "代码在跑、台账恒为 0 行" 的隐形故障。
+        logger.warning("probe metering failed", exc_info=True)
     choices = data.get("choices") or []
     if not choices:
         return ""
