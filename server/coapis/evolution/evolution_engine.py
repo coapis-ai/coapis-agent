@@ -734,6 +734,39 @@ class EvolutionEngine:
             # Fallback: save review request for later processing
             self._save_review_request("memory", review_prompt)
 
+    def _sediment_agent_md(self, *, force: bool = False,
+                           min_interval_hours: float = 6.0) -> dict:
+        """把经验池里反复验证过的重要事项固化进本智能体的 AGENTS.md。
+
+        D3 拍板：自动写入，不等人工审批。带节流（默认 6 小时最多一次）；
+        门槛与渲染都在 :mod:`coapis.evolution.sediment`，纯函数可单测。
+        任何异常只记日志 —— 固化失败不能拖垮梦境优化或会话结束流程。
+        """
+        try:
+            from datetime import timedelta, timezone
+
+            from . import sediment
+
+            now = datetime.now(timezone.utc)
+            marker = self.data_dir / ".sediment_at"
+            if not force and marker.exists():
+                try:
+                    last = datetime.fromtimestamp(
+                        marker.stat().st_mtime, tz=timezone.utc)
+                    if (now - last) < timedelta(hours=min_interval_hours):
+                        return {"written": False, "skipped": "throttled"}
+                except OSError:
+                    pass
+
+            result = sediment.sediment(self.workspace_dir, now=now)
+            if result.get("written") or result.get("skipped") == "unchanged":
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.touch(exist_ok=True)
+            return result
+        except Exception as exc:  # noqa: BLE001 - 固化失败不外溢
+            logger.warning("重要事项固化失败（不影响主流程）: %s", exc)
+            return {"written": False, "error": str(exc)}
+
     async def _trigger_dream_optimization(self) -> None:
         """
         梦境优化：定期整理 MEMORY.md，去重、精简、合并。
@@ -742,6 +775,9 @@ class EvolutionEngine:
         不阻塞主流程。集成容量管理：备份版本、容量检查、自动淘汰。
         """
         try:
+            # 先固化重要事项进 AGENTS.md（D3 自动写入）；失败不影响梦境优化
+            self._sediment_agent_md()
+
             memory_file = self.workspace_dir / "MEMORY.md"
             if not memory_file.exists():
                 return
@@ -1064,6 +1100,12 @@ class EvolutionEngine:
                 "source_agent": exp.source_agent,
                 "source_user": exp.source_user,
             }
+            # 落盘必须自带时间戳。实测存量 1913 条经验没有任何时间字段
+            # （to_dict 不含 created_at），导致注入侧的 180 天新鲜度衰减
+            # 只能对全部经验给中性权重 —— 时间尺子等于空转。
+            if not record.get("created_at"):
+                record["created_at"] = datetime.now().isoformat()
+            record.setdefault("status", getattr(exp, "status", "approved"))
             safe_append_jsonl(exp_file, record)
             logger.info(
                 "Experience auto-approved: id=%s, confidence=%.2f, title=%s",

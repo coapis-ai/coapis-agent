@@ -3027,6 +3027,37 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             logger.debug("[MemorySearch] Search failed: %s", e)
             return []
 
+    def _build_short_term_digest(self, *, max_msgs: int = 6,
+                                 max_chars: int = 400) -> str:
+        """把本会话近期用户输入压成一行，作为短期层喂给「当前情境」。
+
+        一个会话不等于一个话题：话题一漂移，按旧话题检索来的长期记忆
+        就变成噪音。这里给注入器一个明确的"眼下在聊什么"锚点，
+        不额外调模型，纯本地拼接，失败一律返回空串。
+        """
+        try:
+            content = getattr(self.memory, "content", None) or []
+            texts: list[str] = []
+            for item in reversed(list(content)):
+                msg = item[0] if isinstance(item, (tuple, list)) else item
+                if getattr(msg, "role", "") != "user":
+                    continue
+                getter = getattr(msg, "get_text_content", None)
+                raw = getter() if callable(getter) else getattr(msg, 
+                    "content", "")
+                text = str(raw or "").strip()
+                if not text:
+                    continue
+                texts.append(" ".join(text.split()))
+                if len(texts) >= max_msgs:
+                    break
+            if not texts:
+                return ""
+            texts.reverse()
+            return " → ".join(t[:80] for t in texts)[-max_chars:]
+        except Exception:
+            return ""
+
     def _build_sys_prompt(self) -> str:
         """Build system prompt from working dir files and env context.
 
@@ -3220,11 +3251,12 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             # ── 读取已批准的进化经验 ──
             try:
                 import json as _json
-                _exp_file = (
-                    Path(os.environ.get("COAPIS_DATA_DIR", "/data"))
-                    / "evolution" / "experiences" / "approved.jsonl"
+                from ..evolution.paths import (
+                    approved_experiences_file as _appr_file,
+                    report_readable as _readable,
                 )
-                if _exp_file.exists():
+                _exp_file = _appr_file()
+                if _readable(_exp_file, "approved experiences"):
                     _experiences = []
                     for _line in _exp_file.read_text(encoding="utf-8").splitlines():
                         _line = _line.strip()
@@ -3232,70 +3264,85 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                             continue
                         try:
                             _exp = _json.loads(_line)
-                            _exp_agent = _exp.get("source_agent", "")
-                            if _exp_agent and agent_id and _exp_agent != agent_id:
-                                continue
                             _experiences.append(_exp)
                         except _json.JSONDecodeError:
                             continue
 
-                    _experiences.sort(key=lambda x: x.get("confidence", 0), reverse=True)
-                    _top_exps = _experiences[:15]
+                    # 作用域与排序统一交给 evolution.recall：全局/可泛化经验
+                    # 跨 agent 可见，其余限本 agent；排序 = 置信度 × 新鲜度
+                    # （半衰期默认 180 天，用户拍板 D1）× 重要度。
+                    from ..evolution import recall as _recall
+                    _exp_stats: dict[str, int] = {}
+                    _top_exps = _recall.rank(
+                        _experiences, agent_id=agent_id, limit=15,
+                        stats=_exp_stats,
+                    )
+                    if _exp_stats.get("merged_rows"):
+                        logger.info(
+                            "[Evolution] 经验注入同主题聚合：合并 %d 条（%d 个主题在重复）",
+                            _exp_stats["merged_rows"],
+                            _exp_stats.get("merged_clusters", 0),
+                        )
 
-                    # P5: 按查询意图过滤经验
+                    # P5: 按查询意图过滤经验 —— 问什么注入什么。
+                    # 尺子在 recall.filter_by_intent，取值必须对齐库里真有的
+                    # category（历史上比的是 code_error/operational_failure 等
+                    # 不存在的词，实测 1913 条经验 0 命中，过滤等于空转）。
                     _query = getattr(self, "_current_query", "") or ""
                     if _query and _top_exps:
-                        _query_lower = _query.lower()
-                        # 意图→经验类型映射
-                        _EXP_TYPE_MAP = {
-                            "code": ["tool_usage", "code_debugging", "code_review",
-                                     "coding", "bug_fix", "debugging"],
-                            "deploy": ["deployment", "deploy", "devops", "docker",
-                                       "nginx", "ci_cd"],
-                            "config": ["configuration", "config", "setup"],
-                            "general": ["general", "conversation", "workflow"],
-                        }
-                        # 收集匹配的经验类型
-                        _matched_types: set[str] = set()
-                        for _hint, _types in _EXP_TYPE_MAP.items():
-                            if _hint in _query_lower:
-                                _matched_types.update(_types)
-                        if _matched_types:
-                            _filtered = [
-                                e for e in _top_exps
-                                if e.get("experience_type", "") in _matched_types
-                            ]
-                            if _filtered:
-                                _top_exps = _filtered[:10]
-                                logger.info(
-                                    "[P5] Filtered experiences: %d → %d by intent %s",
-                                    len(_experiences), len(_top_exps), _matched_types,
-                                )
+                        _before_p5 = len(_top_exps)
+                        _top_exps, _matched_cats = _recall.filter_by_intent(
+                            _top_exps, _query,
+                        )
+                        if _matched_cats and len(_top_exps) != _before_p5:
+                            logger.info(
+                                "[P5] Filtered experiences: %d → %d by intent %s",
+                                _before_p5, len(_top_exps), sorted(_matched_cats),
+                            )
 
                     if _top_exps:
-                        _exp_text = "以下是从过往对话中提炼的经验教训，在回答时参考：\n"
+                        import datetime as _evo_dt
+                        _now = _evo_dt.datetime.now()
+                        _exp_text = (
+                            "以下是从过往对话中提炼的经验教训，仅供参考；"
+                            "括号里新鲜度越低说明该经验越久远，"
+                            "若与当前问题不符不要套用：\n"
+                        )
                         for _i, _exp in enumerate(_top_exps, 1):
                             _title = _exp.get("title", "")
                             _content = _exp.get("content", "")
                             _etype = _exp.get("experience_type", "")
                             if _title or _content:
-                                _exp_text += f"\n{_i}. [{_etype}] {_title}\n   {_content}\n"
+                                _exp_text += (
+                                    f"\n{_i}. [{_etype}] {_title}\n"
+                                    f"   {_content}\n"
+                                    f"   （新鲜度"
+                                    f"{_recall.freshness(_exp, now=_now):.2f}"
+                                    f"，{_recall.human_age(_exp, now=_now)}）\n"
+                                )
                         long_term_memories.append(_exp_text)
                         logger.info(
-                            "[Evolution] Injected %d approved experiences into context",
-                            len(_top_exps),
+                            "[Evolution] Injected %d experiences (scanned=%d,"
+                            " half_life=%.0fd) into context",
+                            len(_top_exps), len(_experiences),
+                            _recall.half_life_days(),
                         )
+
             except Exception as _exp_err:
-                logger.debug("[Evolution] Failed to load experiences: %s", _exp_err)
+                logger.warning(
+                    "[Evolution] loading approved experiences failed (%s): %s",
+                    locals().get("_exp_file", "?"), _exp_err,
+                )
 
             # ── 读取全局基础层经验 ──
             try:
                 import json as _json2
-                _found_file = (
-                    Path(os.environ.get("COAPIS_DATA_DIR", "/data"))
-                    / "cross_evolution" / "foundation.json"
+                from ..evolution.paths import (
+                    foundation_file as _found_fn,
+                    report_readable as _readable2,
                 )
-                if _found_file.exists():
+                _found_file = _found_fn()
+                if _readable2(_found_file, "cross-agent foundation"):
                     _found_data = _json2.loads(
                         _found_file.read_text(encoding="utf-8")
                     )
@@ -3315,7 +3362,10 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                                 len(_top_found),
                             )
             except Exception as _found_err:
-                logger.debug("[Evolution] Failed to load foundation: %s", _found_err)
+                logger.warning(
+                    "[Evolution] loading cross-agent foundation failed (%s): %s",
+                    locals().get("_found_file", "?"), _found_err,
+                )
 
             # 从 request_context 获取 role（用于记忆配额控制）
             _role = self._request_context.get("role", "")
@@ -3323,7 +3373,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
             injection = injector.build_context(
                 core_memory=core_memory,
                 long_term_memories=long_term_memories,
-                short_term_memory="",
+                short_term_memory=self._build_short_term_digest(),
                 query=getattr(self, "_current_query", "") or "",
                 role=_role,
             )
