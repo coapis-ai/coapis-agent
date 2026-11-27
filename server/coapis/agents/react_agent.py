@@ -693,6 +693,19 @@ def _tolerate_missing_subtask_fields(fn: Any) -> Any:
                 kwargs[key] = _norm(value)
         return kwargs
 
+    # 必须分协程/同步两支。真链路里 ``PlanNotebook.create_plan`` 是
+    # ``async def``：只留同步支时包裹层会把**协程对象**原样返回，toolkit
+    # 判定 ``must return a ToolResponse ... but got coroutine`` 直接打回，
+    # 计划一次都建不起来（2026-11-27 dev 真流量实锤）。本函数只补缺失
+    # 字段、不改 schema，故无需像别名层那样重写 __signature__。
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def _aw(*args: Any, **kwargs: Any) -> Any:
+            return await fn(*args, **_fix(kwargs))
+
+        return _aw
+
     @functools.wraps(fn)
     def _sw(*args: Any, **kwargs: Any) -> Any:
         return fn(*args, **_fix(kwargs))
