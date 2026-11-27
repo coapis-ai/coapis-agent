@@ -1420,8 +1420,8 @@ def init_global_cross_agent_evolution(
             _global_instance.foundation_manager = foundation_manager
         return _global_instance
 
-    from ..constant import SYSTEM_DIR
-    data_dir = SYSTEM_DIR / "evolution" / "cross_evolution"
+    from ..evolution.paths import cross_evolution_dir
+    data_dir = cross_evolution_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
 
     if config is None:

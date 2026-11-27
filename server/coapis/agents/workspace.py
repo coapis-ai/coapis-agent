@@ -859,10 +859,10 @@ class Workspace:
         # Initialize EvolutionEngine (self-improvement)
         # v0.5.1: Evolution data centralized in SYSTEM_DIR/evolution/ for all user agents.
         # Global agents keep evolution in agents/{agent_id}/evolution/.
-        from ..constant import SYSTEM_EVOLUTION_DIR
+        from ..evolution.paths import evolution_root
         if self.username and not self.is_global:
             # User agents: shared evolution in system/evolution/
-            evolution_data_dir = SYSTEM_EVOLUTION_DIR
+            evolution_data_dir = evolution_root()
             workspace_dir = self.workspace_dir
         else:
             # Global agents: per-agent evolution

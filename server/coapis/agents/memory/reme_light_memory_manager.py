@@ -394,7 +394,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                 self._ledger_search, query, max_results
             )
         except Exception as e:
-            logger.debug("Ledger search skipped: %s", e)
+            logger.warning("Ledger search skipped: %s", e)
             return file_response
         if not supplemental:
             return file_response
@@ -440,7 +440,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                     label = row.get("signal_type") or "signal"
                     hits.append((score, f"[台账-{label}] {content}"))
         except Exception as e:
-            logger.debug("Ledger timeline track failed: %s", e)
+            logger.warning("Ledger timeline track failed: %s", e)
 
         # Track 2: curated memory entries (ILIKE substring prefilter)
         try:
@@ -457,7 +457,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
                 if score > 0.05:
                     hits.append((score, f"[记忆条目] {text}"))
         except Exception as e:
-            logger.debug("Ledger memory track failed: %s", e)
+            logger.warning("Ledger memory track failed: %s", e)
 
         if not hits:
             return ""
@@ -486,7 +486,7 @@ class ReMeLightMemoryManager(BaseMemoryManager):
             )
             return ToolResponse(content=[TextBlock(type="text", text=combined)])
         except Exception as e:
-            logger.debug("Supplement merge failed, returning base: %s", e)
+            logger.warning("Supplement merge failed, returning base: %s", e)
             return base
 
     async def summarize(self, messages: list[Msg], **_kwargs) -> str:
