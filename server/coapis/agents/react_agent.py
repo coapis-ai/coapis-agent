@@ -26,6 +26,7 @@ import asyncio
 import functools
 import hashlib
 import inspect
+import re as _re
 import json
 import logging
 import os
@@ -605,6 +606,99 @@ def _tolerate_plan_arg_aliases(fn: Any) -> Any:
 
     _sw.__signature__ = sig
     return _sw
+
+
+def _tolerate_missing_subtask_fields(fn: Any) -> Any:
+    """模型写 subtask 时漏字段是常态，别把整份计划一起拒掉。
+
+    ``create_plan`` 的 subtasks、``revise_current_plan`` 的 subtask 最后都喂给
+    pydantic ``SubTask``，三个字段（name / description / expected_outcome）全
+    必填。实测（2026-11-26/27，台账 ``event=tool_call`` ``tool=create_plan``）
+    模型给的子任务常常只有 ``description``，于是同一次调用连撞 4 条
+    ``Input validation error: 'name' is required``——每次都是一整轮推理白烧，
+    用户那边就是"计划建不起来/卡住"。
+
+    这里只**补缺失**、不改写模型已给出的值，且每次补都记一行 info，方便统计
+    模型输出的缺字段率；子任务本身缺名时用描述首句当名字（计划卡一行一条，
+    太长会被前端截断）。与 :func:`_tolerate_plan_arg_aliases` 同属参数容错，
+    故也只在装饰阶段做一次。
+    """
+    from agentscope.plan import SubTask
+
+    name_attr = getattr(fn, "__name__", "") or ""
+    if name_attr not in ("create_plan", "revise_current_plan"):
+        return fn
+
+    _CUT = _re.compile(r"[，。；;,.!?！？\n\r]")
+
+    def _text(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return "" if value is None else str(value).strip()
+
+    def _clip(value: str, limit: int) -> str:
+        return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
+
+    def _fix(kwargs: dict[str, Any]) -> dict[str, Any]:
+        def _norm(raw: Any) -> Any:
+            if not isinstance(raw, dict):
+                return raw  # 已是 SubTask 实例：原样交给 pydantic
+            item = dict(raw)
+            desc = _text(item.get("description"))
+            named = _text(item.get("name"))
+            outcome = _text(item.get("expected_outcome"))
+            filled: list[str] = []
+            if not desc and named:
+                item["description"] = named
+                desc = named
+                filled.append("description")
+            if not named:
+                head = _text(_CUT.split(desc)[0]) if desc else ""
+                item["name"] = _clip(head, 40) if head else "未命名子任务"
+                named = item["name"]
+                filled.append("name")
+            if not desc:
+                item["description"] = named
+                filled.append("description")
+            if not outcome:
+                item["expected_outcome"] = (
+                    f"完成：{_clip(desc or named, 60)}" if (desc or named)
+                    else "本子任务的产出可被核对"
+                )
+                filled.append("expected_outcome")
+            if filled:
+                logger.info(
+                    "plan tool %s: 子任务缺字段 %s，已按描述补齐（模型输出不完整）",
+                    name_attr,
+                    "+".join(filled),
+                )
+            if not filled:
+                return item  # 模型给全了：原样透传，一个字节都不动
+            try:
+                # exclude_unset：只回模型真给过的字段，不把 created_at/outcome
+                # 这类合成默认值塞回参数里（revise 时会覆盖掉子任务真实状态）
+                return SubTask.model_validate(item).model_dump(
+                    exclude_unset=True,
+                )
+            except Exception:  # noqa: BLE001 - 补不上的怪值原样透传，交由原函数报错
+                return item
+
+        for key in ("subtasks", "subtask"):
+            if key not in kwargs:
+                continue
+            value = kwargs[key]
+            if isinstance(value, list):
+                kwargs[key] = [_norm(v) for v in value]
+            elif isinstance(value, dict):
+                kwargs[key] = _norm(value)
+        return kwargs
+
+    @functools.wraps(fn)
+    def _sw(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **_fix(kwargs))
+
+    return _sw
+
 
 
 # 计划收口后模型常再重复调一次簿记工具，agentscope 便回
@@ -1359,7 +1453,9 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         """
         tool_fns = [
             _make_bookkeeping_idempotent(
-                _tolerate_plan_arg_aliases(fn),
+                _tolerate_missing_subtask_fields(
+                    _tolerate_plan_arg_aliases(fn),
+                ),
                 self.plan_notebook,
             )
             for fn in tool_fns

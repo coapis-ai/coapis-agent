@@ -2117,6 +2117,8 @@ export default function ChatPage() {
     type?: string;
     kind?: string;
     name?: string;
+    /** 流式事件自带角色（后端 metadata.resources 每条都带 role）。 */
+    role?: ChatResourceItem["role"] | string;
   };
 
   const roundItems = useCallback(
@@ -2146,7 +2148,7 @@ export default function ChatPage() {
           //   3) 两者都没有 → 留空 = 角色未知，渲染层（sourceOf）不画标签。
           // 原来这里写 `|| "producer"`，是在没有任何依据的情况下硬标「产出」，
           // 于是引用件先被标成产出、台账到位后跳成引用——用户看到的归类跳变。
-          role: meta?.role ?? r.role,
+          role: meta?.role ?? (r.role as ChatResourceItem["role"]),
           ref_count: meta?.ref_count,
           status: meta?.status,
           updated_at: meta?.updated_at,

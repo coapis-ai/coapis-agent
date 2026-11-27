@@ -201,7 +201,9 @@ describe("来源尺子：产出 / 知识库 / 网页 / 引用", () => {
     // ——那正是「同一文件刷新前标产出、刷新后变引用」的源头。
     const unknown = { ...SAMPLES[1], role: undefined } as ChatResourceItem;
     expect(sourceOf(unknown)).toBeNull();
-    expect(sourceOf({ ...SAMPLES[1], role: "" } as ChatResourceItem)).toBeNull();
+    expect(
+      sourceOf({ ...SAMPLES[1], role: "" } as unknown as ChatResourceItem),
+    ).toBeNull();
   });
 
   it("台账角色未知但类型能定 → 知识库 / 网页照常标（与台账无关）", () => {
