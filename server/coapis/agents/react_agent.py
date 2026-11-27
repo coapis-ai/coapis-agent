@@ -5660,6 +5660,17 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
         # Store for _build_sys_prompt to consume
         self._pre_fetched_memories = semantic_memories
 
+        # 经验块和长期记忆块都在 _build_sys_prompt 里拼装，而它此前只在
+        # runner 的 rebuild_sys_prompt()（发生在 reply() 之前）跑过一次：
+        # 那时 _current_query 还是上一轮的值、_pre_fetched_memories 还是空的，
+        # 于是"问什么注入什么"实际对的是上一轮问题，首轮干脆不筛。
+        # 拿到本轮问题后立即重建一次，让注入内容对得上当前这一轮。
+        try:
+            self._sys_prompt = self._build_sys_prompt()
+        except Exception:
+            logger.exception(
+                "[Memory] 本轮系统提示重建失败，沿用上一版本（不阻断回答）")
+
         # ── Hook: PRE_BUILD ──
         try:
             await self._run_hook(HookPhase.PRE_BUILD, {
