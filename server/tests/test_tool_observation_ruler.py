@@ -155,3 +155,62 @@ def test_admin_tool_group_follows_runtime_ruler():
 
     # 分组名必须全部来自运行时尺子，不再出现 "other"
     assert "other" not in {_tool_group(n) for n in TOOL_GROUP_MAP}
+
+
+def test_availability_probe_flags_unconfigured_backends(monkeypatch):
+    """没配 key 的 tavily 必须判 False——否则每次搜索都白起一个必败线程，
+    还会把失败信息写成"已尝试: …,tavily"骗人。"""
+    import coapis.agents.tools.web_search as ws
+
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("TAVILY_SEARCH_API_KEY", raising=False)
+    assert ws._backend_available("tavily") is False
+    assert ws._backend_available("browser") is True
+    assert ws._backend_available("baidu") is True
+
+
+def test_unavailable_backend_is_skipped_not_raced(monkeypatch):
+    """不可用的后端不进竞速：它的实现函数一次都不该被调用。"""
+    import asyncio
+
+    import coapis.agents.tools.web_search as ws
+
+    called = []
+
+    async def _ok(query, max_results):
+        called.append("good")
+        return [{"title": "t", "content": "c", "url": "u"}]
+
+    async def _dead(query, max_results):
+        called.append("dead")
+        return []
+
+    monkeypatch.setattr(ws, "_BACKENDS", {"dead": _dead, "good": _ok})
+    monkeypatch.setattr(ws, "_BACKEND_ORDER", ["dead", "good"])
+    monkeypatch.setattr(ws, "_backend_available", lambda name: name != "dead")
+    monkeypatch.setattr(ws, "_get_cached", lambda q, b: None)
+
+    result = asyncio.run(
+        ws.web_search("唯一哨兵词", max_results=3, backend="auto"),
+    )
+    assert "dead" not in called, "不可用后端仍被起线程竞速"
+    assert result.get("backend") == "good"
+
+
+def test_all_backends_unavailable_reports_skipped_not_empty_race(monkeypatch):
+    """全不可用时要给出可操作的错误，而不是空竞速后报"全部后端失败"。"""
+    import asyncio
+
+    import coapis.agents.tools.web_search as ws
+
+    async def _never(query, max_results):
+        return []
+
+    monkeypatch.setattr(ws, "_BACKENDS", {"tavily": _never})
+    monkeypatch.setattr(ws, "_BACKEND_ORDER", ["tavily"])
+    monkeypatch.setattr(ws, "_backend_available", lambda name: False)
+    monkeypatch.setattr(ws, "_get_cached", lambda q, b: None)
+
+    result = asyncio.run(ws.web_search("唯一哨兵词", backend="auto"))
+    assert "tavily" in result.get("error", "")
+    assert "失败" not in result.get("error", "")

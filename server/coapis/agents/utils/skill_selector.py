@@ -20,6 +20,45 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+# ── 触发精度尺子（单一实现，关键词与正则共用）─────────────────────────
+# 三条规则都是实测误触发逼出来的：
+#   1) 单字关键词（如「函」）会命中「函数」这类无关词 —— 不参与匹配。
+#   2) 纯 ASCII 关键词必须按词边界命中，否则 search 会扎进 web_search.py 里。
+#   3) 触发正则里的 .* / .+ 不限距时会跨句命中（做.*汇报 命中
+#      「做完后…汇报」）—— 编译前统一收紧成有界量词。
+_MAX_PATTERN_SPAN = 16
+_UNBOUNDED_QUANT = re.compile(r"\.(?:\*|\+)")
+_KW_RE_CACHE: dict[str, re.Pattern] = {}
+
+
+def keyword_matches(kw: str, message_lower: str) -> bool:
+    """kw 是否真的命中 message_lower —— 按精度尺子，不是裸子串。"""
+    if not kw or len(kw) == 1:
+        return False
+    needle = kw.lower()
+    rx = _KW_RE_CACHE.get(needle)
+    if rx is None:
+        if needle.isascii():
+            rx = re.compile(
+                r"(?<![a-z0-9_])" + re.escape(needle) + r"(?![a-z0-9_])",
+            )
+        else:
+            rx = re.compile(re.escape(needle))
+        _KW_RE_CACHE[needle] = rx
+    return bool(rx.search(message_lower))
+
+
+def safe_pattern(pat: str) -> str:
+    """收紧触发正则：把不限距的 .* / .+ 换成有界，禁止跨句命中。"""
+
+    def _bound(m):
+        if m.group(0) == ".*":
+            return ".{0,%d}" % _MAX_PATTERN_SPAN
+        return ".{1,%d}" % _MAX_PATTERN_SPAN
+
+    return _UNBOUNDED_QUANT.sub(_bound, pat)
+
+
 class SkillSelector:
     """技能意图选择器 — 根据用户消息选择要加载的技能。"""
 
@@ -453,11 +492,11 @@ class SkillSelector:
         weights = self._kw_weight.get(skill_name, {})
         score = 0
         for kw, w in weights.items():
-            if kw in message_lower:
+            if keyword_matches(kw, message_lower):
                 score += w
         for pat in self.skill_patterns.get(skill_name, ()):
             try:
-                if re.search(pat, message, re.IGNORECASE):
+                if re.search(safe_pattern(pat), message, re.IGNORECASE):
                     score += 2
             except re.error:
                 continue

@@ -24,6 +24,7 @@ Results are cached in-memory to avoid redundant calls.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import logging
 import os
@@ -51,6 +52,35 @@ _BACKEND_ORDER = [
 ]
 _CACHE_TTL = int(os.environ.get("COAPIS_WEB_SEARCH_CACHE_TTL", "600"))
 _TIMEOUT = int(os.environ.get("COAPIS_WEB_SEARCH_TIMEOUT", "15"))
+
+# ── Backend availability ──────────────────────────────────────────────
+# 不可用的后端不进竞速：tavily 缺 API key、或 ddgs/tavily 的 SDK 没装时，
+# 每次调用都会白起一个线程，还会把失败信息写成「已尝试: …,ddgs,tavily」骗人。
+# SDK 能否导入只做一次探测（进程内缓存）；API key 每次现读，改了即生效。
+_MODULE_PROBE: dict[str, bool] = {}
+
+
+def _has_module(name: str) -> bool:
+    if name not in _MODULE_PROBE:
+        try:
+            importlib.import_module(name)
+            _MODULE_PROBE[name] = True
+        except Exception:
+            _MODULE_PROBE[name] = False
+    return _MODULE_PROBE[name]
+
+
+def _backend_available(name: str) -> bool:
+    """Cheap probe: can this backend possibly serve a request right now?"""
+    if name == "tavily":
+        return bool(
+            os.environ.get("TAVILY_API_KEY")
+            or os.environ.get("TAVILY_SEARCH_API_KEY")
+        ) and _has_module("tavily")
+    if name == "ddgs":
+        return _has_module("duckduckgo_search")
+    return True
+
 
 # ── Cache ─────────────────────────────────────────────────────────────
 
@@ -435,6 +465,30 @@ async def web_search(
             continue
         available.append((b, search_fn))
 
+    # 不可用的后端不进竞速：省线程，失败信息也不再骗人
+    usable = []
+    skipped = []
+    for b, search_fn in available:
+        if _backend_available(b):
+            usable.append((b, search_fn))
+        else:
+            skipped.append(b)
+    if skipped:
+        logger.debug(
+            "web_search: skipping unavailable backends: %s",
+            ", ".join(skipped),
+        )
+    if not usable:
+        return {
+            "error": (
+                "没有可用的搜索后端（已跳过: "
+                + ", ".join(skipped)
+                + "）。请配置 TAVILY_API_KEY 或安装 duckduckgo-search。"
+            ),
+            "query": query,
+        }
+    available = usable
+
     if len(available) == 1:
         # 只有一个 backend，直接调用（带单个超时）
         b, search_fn = available[0]
@@ -520,7 +574,7 @@ async def web_search(
         return {
             "error": (
                 f"所有搜索后端均无结果（总时限 {_TOTAL_TIMEOUT}s）。"
-                f"已尝试: {', '.join(order)}"
+                f"已尝试: {', '.join(b for b, _ in available)}"
             ),
             "query": query,
         }

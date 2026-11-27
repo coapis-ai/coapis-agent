@@ -79,6 +79,7 @@ from ..security.skill_scanner import scan_skill_directory, SkillScanError
 from .utils.usage_tracker import record_tool_call, record_skill_trigger
 from .utils.trigger_tracker import get_trigger_tracker, TriggerTracker
 from .utils.tool_result_cache import get_cache, is_idempotent
+from .utils.skill_selector import keyword_matches
 # Tool functions are now accessed via the registry system (get_registered_tools())
 # Direct imports are no longer needed — the framework auto-discovers tools.
 from .utils import process_file_and_media_blocks_in_message
@@ -2493,13 +2494,13 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 skill_dir, keywords = self._on_demand_skills[skill_name]
                 # Find which keywords matched for logging
                 msg_lower = user_message.lower()
-                matched = [kw for kw in keywords if kw in msg_lower]
+                matched = [kw for kw in keywords if keyword_matches(kw, msg_lower)]
                 try:
                     if self._scan_and_register_skill(
                         skill_name=skill_name,
                         skill_dir=skill_dir,
                         trigger_method="keyword",
-                        matched_keywords=matched or ["selector_index"],
+                        matched_keywords=matched,
                         user_message=user_message,
                         tracker=tracker,
                         ctx=ctx,
@@ -2522,7 +2523,7 @@ class CoApisAgent(ToolGuardMixin, ReActAgent):
                 if not keywords:
                     keyword_log[skill_name] = {"triggers": [], "matched": [], "result": "no_triggers"}
                     continue
-                matched = [kw for kw in keywords if kw in msg_lower]
+                matched = [kw for kw in keywords if keyword_matches(kw, msg_lower)]
                 keyword_log[skill_name] = {
                     "triggers": keywords[:10],
                     "matched": matched,
