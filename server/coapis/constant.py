@@ -501,9 +501,22 @@ EVOLUTION_EXTRACTION_SLOTS = EnvVarLoader.get_int(
 # 最坏 141s 都在为一次「可选」的经验抽取占槽，后续轮次只能
 # "deferred: all slots busy"。20s 覆盖住实测成功那次的 23s 附近的抖动，
 # 超时就退回启发式抽取 —— 经验数据少一条，问答不受影响。
+#
+# 2026-11-28 小蜜蜂拍板 20 → 120：20s 低于实测单次耗时（20~45s），抽取几乎
+# 每次都超时退回启发式，经验池因此涨得极慢 —— 这条「可选」增强实际上一直没
+# 真正跑起来。放宽的前提已实测核对，抽取不在用户流上：workspace.py:1416 调
+# 的是 schedule_session_end()（不 await），evolution_engine.py:497 用
+# asyncio.create_task 派发，provider 客户端是 AsyncOpenAI
+# （agents/core.py:228），所以抽取既不等用户流、也不让事件循环停摆；放宽只
+# 延长 EVOLUTION_EXTRACTION_SLOTS 的占用时长，问答零影响。
+# 封顶有两道闸门：抽取器自己的整轮预算 extract_round_seconds（默认 240s，
+# COAPIS_EVOLUTION_ROUND_SECONDS 可覆盖），以及引擎侧 _session_end_with_flows
+# 的 EVOLUTION_EXTRACT_ROUND_TIMEOUT_SECONDS（默认 300s）。单次最坏耗时 =
+# 本值 × llm_retries（构造默认 2，见 experience_extractor.py:158）+ 指数
+# 退避，因此调大本值后若还想让多段会话都抽到，需同步调大这两道预算。
 EVOLUTION_EXTRACT_TIMEOUT_SECONDS = EnvVarLoader.get_float(
     "COAPIS_EVOLUTION_EXTRACT_TIMEOUT_SECONDS",
-    20.0,
+    120.0,
     min_value=5.0,
     max_value=300.0,
 )
